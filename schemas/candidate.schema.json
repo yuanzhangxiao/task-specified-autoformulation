@@ -1,0 +1,409 @@
+{
+  "$defs": {
+    "ConstraintKind": {
+      "description": "Machine-readable constraint categories.",
+      "enum": [
+        "nonnegative",
+        "positive",
+        "bounded",
+        "monotone_increasing",
+        "monotone_decreasing",
+        "conservation",
+        "custom"
+      ],
+      "title": "ConstraintKind",
+      "type": "string"
+    },
+    "ConstraintSpec": {
+      "additionalProperties": false,
+      "description": "Constraint attached to a declared model symbol.",
+      "properties": {
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ConstraintKind"
+        },
+        "subject": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "kind",
+        "description"
+      ],
+      "title": "ConstraintSpec",
+      "type": "object"
+    },
+    "InitialConditionSpec": {
+      "additionalProperties": false,
+      "description": "Bounded initialization range for a modeled state.",
+      "properties": {
+        "initialization_range": {
+          "$ref": "#/$defs/ValueRange"
+        },
+        "scope": {
+          "$ref": "#/$defs/ParameterScope"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "scope",
+        "initialization_range"
+      ],
+      "title": "InitialConditionSpec",
+      "type": "object"
+    },
+    "ObservationMapping": {
+      "additionalProperties": false,
+      "description": "Mapping from model symbols to one measured target channel.",
+      "properties": {
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "unit": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "expression",
+        "unit"
+      ],
+      "title": "ObservationMapping",
+      "type": "object"
+    },
+    "ParameterScope": {
+      "description": "Sharing scope for a fitted scalar.",
+      "enum": [
+        "global",
+        "trajectory_specific"
+      ],
+      "title": "ParameterScope",
+      "type": "string"
+    },
+    "ParameterSpec": {
+      "additionalProperties": false,
+      "description": "Bounded scalar parameter and its initialization interval.",
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/ValueRange"
+        },
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "initialization_range": {
+          "$ref": "#/$defs/ValueRange"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ParameterScope"
+        },
+        "unit": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "scope",
+        "bounds",
+        "initialization_range",
+        "unit",
+        "description"
+      ],
+      "title": "ParameterSpec",
+      "type": "object"
+    },
+    "ProcessSpec": {
+      "additionalProperties": false,
+      "description": "Algebraic generated process evaluated from declared symbols.",
+      "properties": {
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "unit": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "expression",
+        "unit",
+        "description"
+      ],
+      "title": "ProcessSpec",
+      "type": "object"
+    },
+    "StateEquation": {
+      "additionalProperties": false,
+      "description": "Right-hand side for exactly one declared state.",
+      "properties": {
+        "rhs": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Rhs",
+          "type": "string"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "rhs"
+      ],
+      "title": "StateEquation",
+      "type": "object"
+    },
+    "StateKind": {
+      "description": "Whether a modeled state is measured or inferred.",
+      "enum": [
+        "observed",
+        "latent"
+      ],
+      "title": "StateKind",
+      "type": "string"
+    },
+    "StateSpec": {
+      "additionalProperties": false,
+      "description": "Observed or latent dynamic state declaration.",
+      "properties": {
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/StateKind"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "unit": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "unit",
+        "description"
+      ],
+      "title": "StateSpec",
+      "type": "object"
+    },
+    "ValueRange": {
+      "additionalProperties": false,
+      "description": "Closed finite numeric interval.",
+      "properties": {
+        "lower": {
+          "title": "Lower",
+          "type": "number"
+        },
+        "upper": {
+          "title": "Upper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper"
+      ],
+      "title": "ValueRange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Complete machine-readable proposer candidate.",
+  "properties": {
+    "candidate_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "change_summary": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Change Summary",
+      "type": "string"
+    },
+    "constraints": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ConstraintSpec"
+      },
+      "maxItems": 256,
+      "title": "Constraints",
+      "type": "array"
+    },
+    "initial_conditions": {
+      "items": {
+        "$ref": "#/$defs/InitialConditionSpec"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Initial Conditions",
+      "type": "array"
+    },
+    "observation_mappings": {
+      "items": {
+        "$ref": "#/$defs/ObservationMapping"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Observation Mappings",
+      "type": "array"
+    },
+    "parameters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ParameterSpec"
+      },
+      "maxItems": 256,
+      "title": "Parameters",
+      "type": "array"
+    },
+    "parent_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Parent Candidate Id"
+    },
+    "processes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProcessSpec"
+      },
+      "maxItems": 256,
+      "title": "Processes",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "state_equations": {
+      "items": {
+        "$ref": "#/$defs/StateEquation"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "State Equations",
+      "type": "array"
+    },
+    "states": {
+      "items": {
+        "$ref": "#/$defs/StateSpec"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "States",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "parent_candidate_id",
+    "change_summary",
+    "states",
+    "state_equations",
+    "observation_mappings",
+    "initial_conditions"
+  ],
+  "title": "CandidateModel",
+  "type": "object"
+}

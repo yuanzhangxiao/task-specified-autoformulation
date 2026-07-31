@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "ActionPriority": {
+      "description": "Priority assigned to a requested candidate edit.",
+      "enum": [
+        "required",
+        "recommended",
+        "optional"
+      ],
+      "title": "ActionPriority",
+      "type": "string"
+    },
+    "ActionableEdit": {
+      "additionalProperties": false,
+      "description": "Concrete edit the proposer can apply in a later milestone.",
+      "properties": {
+        "instruction": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "priority": {
+          "$ref": "#/$defs/ActionPriority"
+        },
+        "target": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "instruction",
+        "priority"
+      ],
+      "title": "ActionableEdit",
+      "type": "object"
+    },
+    "HardRedFlag": {
+      "additionalProperties": false,
+      "description": "Blocking or severe specification violation.",
+      "properties": {
+        "code": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "description",
+        "evidence"
+      ],
+      "title": "HardRedFlag",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Structured task-compliance assessment independent of fit metrics.",
+  "properties": {
+    "actionable_edits": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ActionableEdit"
+      },
+      "maxItems": 128,
+      "title": "Actionable Edits",
+      "type": "array"
+    },
+    "aggregate_score": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Aggregate Score",
+      "type": "number"
+    },
+    "category_scores": {
+      "maxProperties": 64,
+      "minProperties": 1,
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9_]*$": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
+      "propertyNames": {
+        "maxLength": 128,
+        "minLength": 1
+      },
+      "title": "Category Scores",
+      "type": "object"
+    },
+    "hard_red_flags": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HardRedFlag"
+      },
+      "maxItems": 64,
+      "title": "Hard Red Flags",
+      "type": "array"
+    },
+    "missing_requirements": {
+      "default": [],
+      "items": {
+        "maxLength": 10000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Missing Requirements",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "category_scores",
+    "aggregate_score"
+  ],
+  "title": "JudgeResult",
+  "type": "object"
+}

@@ -1,0 +1,439 @@
+"""Offline end-to-end judge, beam, checkpoint, and final-test integration."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from autoformalism.data import DatasetSplit, SplitName, Trajectory
+from autoformalism.expressions import ValidationContext
+from autoformalism.fitting import FitConfig
+from autoformalism.llm import MockLLMClient
+from autoformalism.pruning import PruningConfig
+from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.search import CheckpointError, SearchConfig, SearchController
+
+
+def _candidate(
+    identifier: str,
+    rhs: str,
+    parameters: tuple[tuple[str, float, float], ...],
+    parent: str | None = None,
+) -> CandidateModel:
+    return CandidateModel.model_validate(
+        {
+            "candidate_id": identifier,
+            "parent_candidate_id": parent,
+            "change_summary": "Exploratory dynamical structure.",
+            "states": [
+                {
+                    "name": "x",
+                    "kind": "observed",
+                    "unit": "unit",
+                    "description": "Observed state.",
+                }
+            ],
+            "state_equations": [{"state": "x", "rhs": rhs}],
+            "observation_mappings": [
+                {"channel": "target", "expression": "x", "unit": "unit"}
+            ],
+            "parameters": [
+                {
+                    "name": name,
+                    "scope": "global",
+                    "bounds": {"lower": lower, "upper": upper},
+                    "initialization_range": {"lower": lower, "upper": upper},
+                    "unit": "unit",
+                    "description": f"Parameter {name}.",
+                }
+                for name, lower, upper in parameters
+            ],
+            "initial_conditions": [
+                {
+                    "state": "x",
+                    "scope": "global",
+                    "initialization_range": {"lower": 0.5, "upper": 1.5},
+                }
+            ],
+        }
+    )
+
+
+def _judge(score: float = 1.0) -> JudgeResult:
+    return JudgeResult.model_validate(
+        {
+            "hard_red_flags": [],
+            "category_scores": {
+                "mechanistic_completeness": score,
+                "causality": score,
+            },
+            "aggregate_score": score,
+            "missing_requirements": [],
+            "actionable_edits": [],
+        }
+    )
+
+
+def _split(name: SplitName, identifier: str) -> DatasetSplit:
+    time = np.linspace(0.0, 2.0, 21)
+    target = np.exp(-0.6 * time)
+    trajectory = Trajectory(
+        identifier,
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {},
+    )
+    return DatasetSplit(name, (trajectory,), f"{name.value}-fingerprint")
+
+
+def _config(path: Path, iterations: int) -> SearchConfig:
+    return SearchConfig(
+        checkpoint_directory=path,
+        maximum_iterations=iterations,
+        beam_size=2,
+        stagnation_iterations=3,
+        validation_mse_target=0.0,
+        cheap_prefit_judge=True,
+        proposer_system_prompt="Propose one valid model.",
+        judge_system_prompt="Judge task compliance.",
+        fit_config=FitConfig(
+            number_of_starts=2,
+            random_seed=19,
+            maximum_function_evaluations=600,
+        ),
+        pruning_config=PruningConfig(validation_mse_tolerance=1e-7),
+    )
+
+
+def _controller(
+    client: MockLLMClient,
+    config: SearchConfig,
+    callback=None,
+    test_loader=None,
+) -> SearchController:
+    return SearchController(
+        llm_client=client,
+        context=ValidationContext(targets=("target",)),
+        training=_split(SplitName.TRAIN, "train"),
+        validation=_split(SplitName.VALIDATION, "validation"),
+        test_loader=(
+            test_loader
+            if test_loader is not None
+            else lambda: _split(SplitName.TEST, "test")
+        ),
+        config=config,
+        stage_callback=callback,
+    )
+
+
+def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
+    tmp_path: Path,
+) -> None:
+    first = _candidate("candidate_one", "-decay * x", (("decay", 0.2, 1.0),))
+    second = _candidate(
+        "candidate_two",
+        "-decay * x + offset",
+        (("decay", 0.2, 1.0), ("offset", -0.1, 0.1)),
+        parent="candidate_one",
+    )
+    client = MockLLMClient(
+        proposer_responses=[first, second],
+        judge_responses=[_judge()] * 6,
+    )
+    controller = _controller(client, _config(tmp_path / "checkpoints", 2))
+
+    result = controller.run()
+    calls_after_first_run = len(client.calls)
+    resumed = controller.run()
+
+    assert result.completed_iterations == 2
+    assert result.frozen_selection.validation_mse >= 0.0
+    assert result.final_fit.success
+    assert not result.test_metrics.failed_trajectories
+    assert resumed.frozen_selection.selection_hash == (
+        result.frozen_selection.selection_hash
+    )
+    assert len(client.calls) == calls_after_first_run
+    assert [call["role"] for call in client.calls].count("proposer") == 2
+    assert [call["role"] for call in client.calls].count("judge") == 6
+
+    second_proposal_prompt = [
+        call["user_prompt"]
+        for call in client.calls
+        if call["role"] == "proposer"
+    ][1]
+    for required in (
+        "equations",
+        "fitted_parameters",
+        "training_normalized_mse",
+        "validation_normalized_mse",
+        "judge_category_scores",
+        "numerical_failures",
+        "pruning_diagnostics",
+    ):
+        assert required in second_proposal_prompt
+    assert "test_metrics" not in second_proposal_prompt
+    assert "test_normalized_mse" not in second_proposal_prompt
+    assert second.parent_candidate_id == first.candidate_id
+
+
+def test_resume_continues_after_exact_completed_stage_without_repeat(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(
+        "resume_candidate", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    client = MockLLMClient(
+        proposer_responses=[candidate],
+        judge_responses=[_judge()] * 3,
+    )
+    config = _config(tmp_path / "resume", 1)
+
+    def interrupt(stage: str, _round: int | None) -> None:
+        if stage == "fitted":
+            raise RuntimeError("simulated interruption")
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        _controller(client, config, interrupt).run()
+    calls_at_interruption = list(client.calls)
+
+    result = _controller(client, config).run()
+
+    assert result.final_fit.success
+    assert [call["role"] for call in calls_at_interruption] == [
+        "proposer",
+        "judge",
+    ]
+    assert [call["role"] for call in client.calls].count("proposer") == 1
+    assert [call["role"] for call in client.calls].count("judge") == 3
+
+
+def test_test_loader_is_deferred_and_resume_accesses_it_once(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(
+        "deferred_test", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    client = MockLLMClient(
+        proposer_responses=[candidate],
+        judge_responses=[_judge()] * 3,
+    )
+    calls = 0
+
+    def test_loader():
+        nonlocal calls
+        calls += 1
+        return _split(SplitName.TEST, "test")
+
+    def interrupt(stage: str, _round: int | None) -> None:
+        if stage == "test_started":
+            assert calls == 0
+            raise RuntimeError("stop before test access")
+
+    config = _config(tmp_path / "deferred", 1)
+    with pytest.raises(RuntimeError, match="stop before test access"):
+        _controller(client, config, interrupt, test_loader).run()
+    assert calls == 0
+
+    result = _controller(client, config, test_loader=test_loader).run()
+    assert not result.test_metrics.failed_trajectories
+    assert calls == 1
+
+    _controller(client, config, test_loader=test_loader).run()
+    assert calls == 1
+
+
+def test_failure_after_test_access_fails_closed_without_second_access(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(
+        "test_failure", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    client = MockLLMClient(
+        proposer_responses=[candidate],
+        judge_responses=[_judge()] * 3,
+    )
+    calls = 0
+
+    def failing_loader():
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("failure after opening test")
+
+    config = _config(tmp_path / "test-failure", 1)
+    with pytest.raises(RuntimeError, match="failure after opening test"):
+        _controller(client, config, test_loader=failing_loader).run()
+    assert calls == 1
+
+    with pytest.raises(CheckpointError, match="refusing to access test again"):
+        _controller(client, config, test_loader=failing_loader).run()
+    assert calls == 1
+
+
+def test_alpha_renamed_structural_duplicate_is_rejected(
+    tmp_path: Path,
+) -> None:
+    first = _candidate("first", "-decay * x", (("decay", 0.2, 1.0),))
+    renamed = first.model_dump(mode="json")
+    renamed.update(
+        candidate_id="renamed",
+        parent_candidate_id="first",
+        states=[
+            {
+                "name": "renamed_state",
+                "kind": "observed",
+                "unit": "unit",
+                "description": "Renamed state.",
+            }
+        ],
+        state_equations=[
+            {"state": "renamed_state", "rhs": "-renamed_rate * renamed_state"}
+        ],
+        observation_mappings=[
+            {
+                "channel": "target",
+                "expression": "renamed_state",
+                "unit": "unit",
+            }
+        ],
+        parameters=[
+            {
+                "name": "renamed_rate",
+                "scope": "global",
+                "bounds": {"lower": 0.2, "upper": 1.0},
+                "initialization_range": {"lower": 0.2, "upper": 1.0},
+                "unit": "unit",
+                "description": "Renamed rate.",
+            }
+        ],
+        initial_conditions=[
+            {
+                "state": "renamed_state",
+                "scope": "global",
+                "initialization_range": {"lower": 0.5, "upper": 1.5},
+            }
+        ],
+    )
+    client = MockLLMClient(
+        proposer_responses=[first, CandidateModel.model_validate(renamed)],
+        judge_responses=[_judge()] * 3,
+    )
+    config = _config(tmp_path / "duplicates", 2)
+
+    result = _controller(client, config).run()
+    rejected = json.loads(
+        (config.checkpoint_directory / "round_0001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert result.completed_iterations == 1
+    assert rejected["error"] == "structural duplicate"
+    assert [call["role"] for call in client.calls].count("judge") == 3
+
+
+def test_nonexistent_lineage_parent_is_rejected(tmp_path: Path) -> None:
+    candidate = _candidate(
+        "bad_lineage",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+        parent="does_not_exist",
+    )
+    client = MockLLMClient(proposer_responses=[candidate])
+    config = _config(tmp_path / "lineage", 1)
+
+    with pytest.raises(RuntimeError, match="no valid fitted candidates"):
+        _controller(client, config).run()
+
+    rejected = json.loads(
+        (config.checkpoint_directory / "round_0000.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "parent" in rejected["error"]
+
+
+def test_validation_target_stops_before_remaining_budget(tmp_path: Path) -> None:
+    first = _candidate("target_stop", "-decay * x", (("decay", 0.2, 1.0),))
+    unused = _candidate(
+        "unused",
+        "-decay * x + offset",
+        (("decay", 0.2, 1.0), ("offset", -0.1, 0.1)),
+        parent="target_stop",
+    )
+    client = MockLLMClient(
+        proposer_responses=[first, unused],
+        judge_responses=[_judge()] * 3,
+    )
+    config = _config(tmp_path / "target-stop", 2).model_copy(
+        update={"validation_mse_target": 1.0}
+    )
+
+    result = _controller(client, config).run()
+
+    assert result.stopping_reason == "validation_target"
+    assert result.completed_iterations == 1
+    assert [call["role"] for call in client.calls].count("proposer") == 1
+
+
+def test_incompatible_resume_configuration_is_rejected(tmp_path: Path) -> None:
+    candidate = _candidate(
+        "fingerprint", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    client = MockLLMClient(
+        proposer_responses=[candidate],
+        judge_responses=[_judge()] * 3,
+    )
+    config = _config(tmp_path / "fingerprint", 1)
+
+    def interrupt(stage: str, _round: int | None) -> None:
+        if stage == "fitted":
+            raise RuntimeError("interrupt")
+
+    with pytest.raises(RuntimeError, match="interrupt"):
+        _controller(client, config, interrupt).run()
+
+    changed = config.model_copy(update={"beam_size": config.beam_size + 1})
+    with pytest.raises(CheckpointError, match="fingerprint"):
+        _controller(client, changed)
+
+
+def test_feedback_respects_configured_beam_size(tmp_path: Path) -> None:
+    first = _candidate("beam_one", "-decay * x", (("decay", 0.2, 1.0),))
+    second = _candidate(
+        "beam_two",
+        "-decay * x + offset",
+        (("decay", 0.2, 1.0), ("offset", -0.1, 0.1)),
+        parent="beam_one",
+    )
+    third = _candidate(
+        "beam_three",
+        "-decay * x + quadratic * x * x",
+        (("decay", 0.2, 1.0), ("quadratic", -0.1, 0.1)),
+        parent="beam_one",
+    )
+    client = MockLLMClient(
+        proposer_responses=[first, second, third],
+        judge_responses=[_judge()] * 9,
+    )
+    config = _config(tmp_path / "beam", 3).model_copy(
+        update={"beam_size": 1}
+    )
+
+    _controller(client, config).run()
+    proposer_prompts = [
+        json.loads(call["user_prompt"])
+        for call in client.calls
+        if call["role"] == "proposer"
+    ]
+
+    assert len(proposer_prompts) == 3
+    assert all(
+        len(prompt["beam_feedback"]) <= 1 for prompt in proposer_prompts
+    )

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "autoformalism"
+version = "0.1.0"
+description = "Task-specified dynamical-system discovery under partial observability"
+readme = "docs/PROJECT_CONTEXT.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy==2.3.5",
+  "openai==2.21.0",
+  "pandas==2.3.3",
+  "pydantic==2.12.5",
+  "pydantic-settings==2.12.0",
+  "python-dotenv==1.2.2",
+  "PyYAML==6.0.3",
+  "scipy==1.16.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.0.2",
+  "ruff==0.14.14",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/autoformalism"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = [".venv", "data_raw"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF"]

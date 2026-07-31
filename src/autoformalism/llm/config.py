@@ -1,0 +1,63 @@
+"""Typed LLM provider selection and client factory."""
+
+from __future__ import annotations
+
+from enum import Enum
+from pathlib import Path
+
+from pydantic import Field
+
+from autoformalism.llm.models import LLMClient
+from autoformalism.schemas.base import StrictSchema
+
+
+class LLMProvider(str, Enum):
+    """Supported paid/hosted and free/local provider choices."""
+
+    OPENAI = "openai"
+    OLLAMA = "ollama"
+
+
+class LLMConfig(StrictSchema):
+    """Provider-neutral settings; API keys are intentionally absent."""
+
+    provider: LLMProvider
+    model: str = Field(min_length=1, max_length=256)
+    cache_directory: Path
+    log_path: Path
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    initial_backoff_seconds: float = Field(default=1.0, ge=0.0)
+    max_backoff_seconds: float = Field(default=30.0, ge=0.0)
+    jitter_fraction: float = Field(default=0.25, ge=0.0, le=1.0)
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    timeout_seconds: float = Field(default=120.0, gt=0.0)
+
+
+def create_llm_client(config: LLMConfig) -> LLMClient:
+    """Construct the selected client without reading or logging API keys."""
+    retry_options = {
+        "max_attempts": config.max_attempts,
+        "initial_backoff_seconds": config.initial_backoff_seconds,
+        "max_backoff_seconds": config.max_backoff_seconds,
+        "jitter_fraction": config.jitter_fraction,
+    }
+    if config.provider is LLMProvider.OPENAI:
+        from autoformalism.llm.openai_responses import OpenAIResponsesClient
+
+        return OpenAIResponsesClient(
+            model=config.model,
+            cache_directory=config.cache_directory,
+            log_path=config.log_path,
+            **retry_options,
+        )
+    from autoformalism.llm.ollama import OllamaClient
+
+    return OllamaClient(
+        model=config.model,
+        cache_directory=config.cache_directory,
+        log_path=config.log_path,
+        base_url=config.ollama_base_url,
+        timeout_seconds=config.timeout_seconds,
+        **retry_options,
+    )
+
