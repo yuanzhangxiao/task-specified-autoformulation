@@ -212,7 +212,9 @@ def test_native_d3_iterates_without_judge_or_test_feedback(tmp_path: Path) -> No
             "parent_candidate_id": None,
             "change_summary": "Observed-state D3 proposal.",
             "states": [{"name": "x", "kind": "observed"}],
-            "state_equations": [{"state": "x", "rhs": "-0.4 * x"}],
+            "state_equations": [
+                {"state": "x", "rhs": "(exp(-0.4 * 0.05) - 1) * x"}
+            ],
             "observation_mappings": [{"channel": "x", "expression": "x"}],
             "parameters": [],
             "initial_conditions": [

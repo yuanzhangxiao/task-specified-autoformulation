@@ -242,16 +242,23 @@ def _predict_trajectory(candidate, trajectory: Trajectory, parameters, torch):
     ]
     if any(column is None for column in state_columns):
         raise NativeD3Error("trajectory is missing a declared observed state")
-    states = torch.as_tensor(np.column_stack(state_columns), dtype=torch.float64)
+    states = torch.tensor(
+        np.array(np.column_stack(state_columns), dtype=float, copy=True),
+        dtype=torch.float64,
+    )
     if len(states) < 2:
         raise NativeD3Error("native D3 requires at least two time samples")
-    time = torch.as_tensor(trajectory.time, dtype=torch.float64)
+    time = torch.tensor(
+        np.array(trajectory.time, dtype=float, copy=True), dtype=torch.float64
+    )
     environment = {
         name: states[:-1, index] for index, name in enumerate(state_names)
     }
     environment["t"] = time[:-1]
     for name, values in trajectory.external_inputs.items():
-        environment[name] = torch.as_tensor(values[:-1], dtype=torch.float64)
+        environment[name] = torch.tensor(
+            np.array(values[:-1], dtype=float, copy=True), dtype=torch.float64
+        )
     for name, value in trajectory.fixed_covariates.items():
         environment[name] = torch.full_like(time[:-1], float(value))
     environment.update(
