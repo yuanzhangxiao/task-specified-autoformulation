@@ -225,12 +225,13 @@ def _d3_system_prompt(task_prompt: str, context: ValidationContext) -> str:
         "interpretable differential model, use fitted validation feedback to refine "
         "it, and return the required structured candidate. External feature-"
         "acquisition and execution tools are disabled. Candidate submission remains "
-        "enabled through the structured response. To preserve D3's native fixed "
-        "observed-state simulator, declare exactly these observed states in this "
-        f"order: {observed_states}. "
-        "Each state must contain its derivative RHS. You may declare safe algebraic "
-        "processes and bounded global parameters, but no latent states or trajectory-"
-        "specific parameters. Use only symbols explicitly available in the task.\n\n"
+        "enabled through the structured response. The native D3 simulator has a "
+        "fixed state vector consisting of these observed channels: "
+        f"{observed_states}. Return one change equation for every listed channel. "
+        "A channel need not appear in other equations when the proposed model does "
+        "not use it. Additional named quantities may be safe algebraic features "
+        "computed from available states, inputs, covariates, and global parameters. "
+        "Use only symbols explicitly available in the task.\n\n"
         f"Benchmark task:\n{task_prompt}\n\n"
         f"Exact scored target names: {context.targets}. Additional observed dynamic "
         f"state names with supplied derivative labels: {context.auxiliaries}. "
@@ -306,7 +307,7 @@ def _checkpoint_fingerprint(
         "generations": config.d3_generations,
         "patience": config.d3_patience,
         "llm_model": config.llm_model,
-        "adapter_revision": "4-native-adam",
+        "adapter_revision": "5-native-interface-wording",
         "train": dataset.train.fingerprint,
         "validation": dataset.validation.fingerprint,
     }

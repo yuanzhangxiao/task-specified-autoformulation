@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from autoformalism.baselines.core import target_scales
-from autoformalism.baselines.d3 import run_d3_native_no_tools
+from autoformalism.baselines.d3 import _d3_system_prompt, run_d3_native_no_tools
 from autoformalism.baselines.d3_native import (
     NativeD3Error,
     fit_native_d3,
@@ -310,6 +310,20 @@ def test_native_d3_requires_all_observed_channels_as_states() -> None:
     )
     with np.testing.assert_raises(NativeD3Error):
         validate_native_candidate(target_only, ("x", "u"), ())
+
+
+def test_native_d3_prompt_describes_interface_without_latent_prohibition() -> None:
+    prompt = _d3_system_prompt(
+        "Discover the system.",
+        ValidationContext(
+            targets=("x",), auxiliaries=("u",), lagged_targets=("x",)
+        ),
+    )
+
+    assert "fixed state vector" in prompt
+    assert "need not appear in other equations" in prompt
+    assert "algebraic features" in prompt
+    assert "no latent states" not in prompt
 
 
 def test_native_d3_broadcasts_constant_state_equation() -> None:
