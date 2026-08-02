@@ -156,7 +156,9 @@ process group while preserving any checkpoints already written.
 library, unary `tanh` features, and deterministic STLSQ. It does not create
 explicit lag columns. `llm_feature_sindy` makes one cached proposer call and
 accepts only parameter-free algebraic features composed from the exact supplied
-symbol contract:
+symbol contract. The ordinary degree-two polynomial/tanh library is built over
+the supplied variables; LLM-designed features enter linearly so SINDy can select
+them without generating unrequested quadratic cross-products:
 
 ```bash
 python scripts/run_baseline.py \

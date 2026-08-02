@@ -21,6 +21,7 @@ from autoformalism.baselines.d3_native import (
 from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
 from autoformalism.baselines.pysr import _restore_feature_names, fit_pysr
 from autoformalism.baselines.runner import _select_pysr, run_baseline
+from autoformalism.baselines.sindy import library
 from autoformalism.data import (
     DatasetSplit,
     DevelopmentDataset,
@@ -126,6 +127,22 @@ def test_llm_feature_sindy_uses_one_proposer_call() -> None:
 
     assert [call["role"] for call in client.calls] == ["proposer"]
     assert result.selected_hyperparameters["proposed_feature_count"] == 1
+
+
+def test_llm_sindy_features_enter_linearly_without_cross_products() -> None:
+    values = np.arange(15, dtype=float).reshape(5, 3)
+
+    theta, terms = library(
+        values,
+        ("x", "u", "llm_feature"),
+        polynomial_feature_count=2,
+    )
+
+    assert theta.shape == (5, 9)
+    assert "llm_feature" in terms
+    assert "x * llm_feature" not in terms
+    assert "llm_feature * llm_feature" not in terms
+    assert "tanh(llm_feature)" not in terms
 
 
 def test_pysr_pareto_expression_is_selected_on_validation_rollout() -> None:

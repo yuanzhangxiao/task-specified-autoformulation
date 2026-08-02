@@ -388,6 +388,10 @@ hard wall-clock limit. The supervisor records `run_status.json` and terminates
 the worker and descendants on timeout, so Julia-backed PySR processes cannot be
 orphaned. D3 checkpoints remain resumable after termination.
 
+LLM-Feature-SINDy applies the degree-two polynomial/tanh library to supplied
+variables and appends proposed algebraic features as linear candidate terms.
+It does not recursively generate products or tanh transforms of LLM features.
+
 D3-native-no-tools models every observed dynamic channel with supplied
 derivative labels. It uses upstream D3's PyTorch Adam defaults and
 teacher-forced Euler objective. Validation selects frozen parameters and test is

@@ -87,6 +87,9 @@ def run_baseline(
             x_train,
             y_train,
             equation_feature_names,
+            polynomial_feature_count=(
+                len(names) if proposed_expressions else None
+            ),
         )
         combined = _combine(dataset.train, dataset.validation)
         combined_extras = _feature_functions(proposed_expressions, context)
@@ -107,6 +110,9 @@ def run_baseline(
             combined_names,
             context.targets,
             threshold=selected_threshold,
+            polynomial_feature_count=(
+                len(names) if proposed_expressions else None
+            ),
         ).equations
         test_metrics = evaluate_equations(
             equations,
@@ -165,11 +171,28 @@ def run_baseline(
     raise ValueError(f"method {config.method} requires its dedicated adapter")
 
 
-def _select_sindy(config, dataset, context, scales, x, y, names):
+def _select_sindy(
+    config,
+    dataset,
+    context,
+    scales,
+    x,
+    y,
+    names,
+    *,
+    polynomial_feature_count=None,
+):
     outcomes = []
     failures = []
     for threshold in config.sindy_thresholds:
-        fit = fit_sindy(x, y, names, context.targets, threshold=threshold)
+        fit = fit_sindy(
+            x,
+            y,
+            names,
+            context.targets,
+            threshold=threshold,
+            polynomial_feature_count=polynomial_feature_count,
+        )
         try:
             train = evaluate_equations(
                 fit.equations, context, dataset.train, scales,
