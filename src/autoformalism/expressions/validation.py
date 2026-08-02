@@ -208,10 +208,24 @@ def repair_protected_declarations(
         for item in candidate.constraints
         if item.kind is not ConstraintKind.BOUNDED and item.bounds is not None
     }
+    retained_declarations = (
+        declared_names - removed
+    ) | set(context.forcing_channels) | {
+        item.channel
+        for item in candidate.observation_mappings
+        if item.channel not in protected
+        and item.channel not in redundant_auxiliary_mappings
+    }
+    unknown_constraint_subjects = {
+        item.subject
+        for item in candidate.constraints
+        if item.subject not in retained_declarations
+    }
     if (
         not removed
         and not redundant_auxiliary_mappings
         and not numeric_qualitative_constraints
+        and not unknown_constraint_subjects
     ):
         return candidate, tuple(initial_repairs)
     payload = candidate.model_dump(mode="json")
@@ -239,6 +253,11 @@ def repair_protected_declarations(
         for item in payload["observation_mappings"]
         if item["channel"] not in protected
         and item["channel"] not in redundant_auxiliary_mappings
+    ]
+    payload["constraints"] = [
+        item
+        for item in payload["constraints"]
+        if item["subject"] not in unknown_constraint_subjects
     ]
     for constraint in payload["constraints"]:
         if (
@@ -268,6 +287,10 @@ def repair_protected_declarations(
     repairs.extend(
         f"removed invented numeric bounds from qualitative constraint: {name}"
         for name in sorted(numeric_qualitative_constraints)
+    )
+    repairs.extend(
+        f"removed constraint on undeclared subject: {name}"
+        for name in sorted(unknown_constraint_subjects)
     )
     return CandidateModel.model_validate(payload), tuple(repairs)
 

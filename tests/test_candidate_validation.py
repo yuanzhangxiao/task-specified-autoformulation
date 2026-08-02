@@ -316,6 +316,31 @@ def test_repair_removes_numeric_bounds_from_qualitative_state_constraints(
     )
 
 
+def test_repair_drops_constraint_on_undeclared_concept(
+    context: ValidationContext,
+) -> None:
+    payload = candidate_payload()
+    payload["constraints"].append(
+        {
+            "subject": "conceptual_mechanism",
+            "kind": "nonnegative",
+            "description": "Prose concept, not a model variable.",
+            "bounds": None,
+        }
+    )
+
+    repaired, diagnostics = repair_protected_declarations(
+        _candidate(payload), context
+    )
+    validated = CandidateValidator().validate(repaired, context)
+
+    assert {item.subject for item in repaired.constraints} == {"y"}
+    assert diagnostics == (
+        "removed constraint on undeclared subject: conceptual_mechanism",
+    )
+    assert validated.candidate == repaired
+
+
 def test_known_positive_fixed_covariate_proves_safe_division() -> None:
     payload = candidate_payload()
     payload["state_equations"][0]["rhs"] = "-decay * x + 1 / covariate"

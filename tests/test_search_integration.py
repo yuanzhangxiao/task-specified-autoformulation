@@ -455,6 +455,45 @@ def test_alpha_renamed_structural_duplicate_is_rejected(
     assert [call["role"] for call in client.calls].count("judge") == 3
 
 
+def test_structural_duplicate_is_included_in_next_bounded_feedback(
+    tmp_path: Path,
+) -> None:
+    first = _candidate("first", "-decay * x", (("decay", 0.2, 1.0),))
+    duplicate = first.model_copy(
+        update={"candidate_id": "duplicate", "parent_candidate_id": "first"}
+    )
+    distinct = _candidate(
+        "distinct",
+        "-decay * x + offset",
+        (("decay", 0.2, 1.0), ("offset", -0.1, 0.1)),
+        parent="first",
+    )
+    client = MockLLMClient(
+        proposer_responses=[first, duplicate, distinct],
+        judge_responses=[_judge()] * 6,
+    )
+    config = _config(tmp_path / "duplicate-feedback", 3).model_copy(
+        update={"beam_size": 1}
+    )
+
+    result = _controller(client, config).run()
+    proposer_prompts = [
+        json.loads(call["user_prompt"])
+        for call in client.calls
+        if call["role"] == "proposer"
+    ]
+    feedback = proposer_prompts[2]["beam_feedback"]
+
+    assert result.completed_iterations == 2
+    assert len(feedback) == 1
+    assert feedback[0]["recent_rejected_candidate"]["candidate_id"] == (
+        "duplicate"
+    )
+    assert "renaming" in feedback[0]["recent_rejected_candidate"][
+        "required_edit"
+    ]
+
+
 def test_nonexistent_lineage_parent_is_rejected(tmp_path: Path) -> None:
     candidate = _candidate(
         "bad_lineage",

@@ -87,6 +87,10 @@ ranked using causal one-step rollout error.
 Search-time pruning evaluates one conservative reduced support and refits it
 once. This avoids an exhaustive series of optimizer runs for every candidate;
 the unpruned fit remains eligible when the reduced support fails validation.
+The proposal boundary also removes unenforceable constraints attached only to
+undeclared prose concepts, records that repair, and keeps recent structural
+duplicates in bounded feedback so the proposer is told to change equations or
+dependencies rather than merely rename symbols.
 
 ### Dry run
 

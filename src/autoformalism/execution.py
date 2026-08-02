@@ -43,6 +43,9 @@ sample; current and future target values remain prohibited. Use only declared
 auxiliaries, external inputs, fixed covariates, states, processes, and parameters.
 Expressions must follow the restricted grammar. Use the beam feedback to make a
 structurally meaningful exploratory proposal; do not merely tune numeric values.
+Changing only component or parameter names is a structural duplicate and will be
+rejected. Change at least one dependency, operator, state, or algebraic mechanism
+relative to the supplied beam equations.
 Each item in `states` contains its derivative expression in `rhs`; therefore every
 declared state must have dynamics. An observed state must set `observed_channel`
 and omit `initial`; a latent state must omit `observed_channel` and provide
@@ -52,6 +55,8 @@ benchmark target to an `observed_channel` or same-named state/algebraic; do not
 emit `target_channel`. Put any qualitative or bounded constraint inside the
 declaration it governs. Use `mechanisms` to tag the task-required scientific
 mechanisms implemented by each state or algebraic.
+Every constraint must remain attached to the state or algebraic it governs. Do not
+create constraints for prose mechanism labels or other undeclared concepts.
 Do not invent numeric bounds for states or other variables. Parameter bounds are
 required; `initialization_range` is optional and defaults to the parameter bounds.
 For states, use qualitative `nonnegative` or `positive` constraints

@@ -417,6 +417,10 @@ class SearchController:
                         ),
                         "normalized_contributions": record.pruning_contributions,
                     },
+                    "structural_novelty_requirement": (
+                        "Change at least one dependency, operator, state, or "
+                        "algebraic mechanism. Renaming symbols is not novel."
+                    ),
                 }
             )
             if not self._config.use_judge:
@@ -428,6 +432,32 @@ class SearchController:
                 ):
                     feedback[-1].pop(key)
         remaining = self._config.beam_size - len(feedback)
+        if remaining <= 0 and feedback:
+            for rejected_round in range(round_index - 1, -1, -1):
+                payload = self._store.load_round(rejected_round)
+                if (
+                    payload is None
+                    or payload.get("stage") != "complete"
+                    or payload.get("valid")
+                    or not isinstance(payload.get("candidate"), dict)
+                ):
+                    continue
+                candidate = CandidateModel.model_validate(payload["candidate"])
+                error = str(payload.get("error", "candidate was rejected"))
+                feedback[0]["recent_rejected_candidate"] = {
+                    "candidate_id": candidate.candidate_id,
+                    "error": error,
+                    "equations": {
+                        item.state: item.rhs
+                        for item in candidate.state_equations
+                    },
+                    "required_edit": (
+                        "If this was a structural duplicate, renaming states or "
+                        "parameters is insufficient; change the dependency graph, "
+                        "operators, state set, or algebraic mechanisms."
+                    ),
+                }
+                break
         if remaining > 0:
             for rejected_round in range(round_index - 1, -1, -1):
                 payload = self._store.load_round(rejected_round)

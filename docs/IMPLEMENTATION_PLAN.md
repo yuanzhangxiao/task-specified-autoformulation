@@ -251,6 +251,8 @@ Acceptance tests:
 - hand-built candidate records rank in the documented order;
 - invalid candidates never enter the beam;
 - structural duplicates collapse deterministically;
+- a recent structural duplicate remains visible in bounded feedback even when
+  the active beam is full, with alpha-renaming identified as non-novel;
 - beam width and LLM/fit budgets are enforced;
 - proposal history contains train/validation summaries and judge
   feedback but no test information;

@@ -138,6 +138,11 @@ The pipeline is iterative:
 - Checkpoint after every candidate stage.
 - A per-fit wall-clock deadline returns a structured candidate failure and does
   not terminate subsequent search rounds.
+- Constraints attached to undeclared prose concepts are discarded with a
+  deterministic repair diagnostic; constraints on declared model or supplied
+  forcing symbols remain enforceable.
+- Recent structural-duplicate failures remain in bounded proposer feedback even
+  when the active beam is full. Renaming symbols alone is explicitly non-novel.
 
 ## Phase 1 technology choices
 

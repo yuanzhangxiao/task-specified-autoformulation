@@ -151,7 +151,9 @@ states/algebraics. Constraints and task-mechanism tags are component-local.
 Potentially-zero denominators produce a recorded warning and use a
 sign-preserving `1e-12` runtime guard. Unsafe logarithm and square-root
 domains remain hard validation errors because clipping them changes model
-semantics. Compilation
+semantics. Constraints whose subjects are undeclared prose concepts are
+deterministically removed and recorded before validation; this never creates a
+new model symbol or changes an equation. Compilation
 walks the validated AST directly; it never evaluates proposer text.
 
 ### LLM boundary
@@ -289,6 +291,9 @@ Beam ranking uses an explicit tuple or configured scalar over
 validation fit, judge compliance, parsimony, and numerical reliability.
 Invalid candidates cannot enter the beam. Diversity/deduplication is
 based on canonical candidate structure, not prose.
+The bounded feedback payload retains the most recent rejected candidate when the
+beam is full and explicitly states that alpha-renaming does not constitute a new
+structure.
 
 After the controller emits `FrozenSelection`, the selection artifact is
 hashed and immutable. `FinalEvaluator` then loads test exactly once,
