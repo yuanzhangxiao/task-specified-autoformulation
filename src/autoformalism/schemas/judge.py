@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 
 from autoformalism.schemas.base import (
     Identifier,
@@ -46,10 +46,28 @@ class CategoryScore(StrictSchema):
     justification: NonEmptyText = "unspecified"
 
 
-ScoreMap = Annotated[
-    dict[Identifier, CategoryScore],
-    Field(min_length=1, max_length=64),
-]
+class CategoryScores(StrictSchema):
+    """Fixed task-compliance rubric shared by every benchmark judge prompt.
+
+    A fixed object is intentional: OpenAI Structured Outputs rejects the
+    ``propertyNames`` keyword that Pydantic emits for identifier-constrained
+    dictionary keys.  Explicit fields also prevent providers from inventing,
+    omitting, or renaming scoring categories.
+    """
+
+    task_output_coverage: CategoryScore
+    mechanism_state_adequacy: CategoryScore
+    mathematical_completeness: CategoryScore
+    data_causal_consistency: CategoryScore
+    constraint_compliance: CategoryScore
+    parsimony_interpretability: CategoryScore
+
+    def __getitem__(self, name: str) -> CategoryScore:
+        """Provide read-only mapping-style access for existing consumers."""
+        value = getattr(self, name)
+        if not isinstance(value, CategoryScore):  # pragma: no cover - schema invariant
+            raise KeyError(name)
+        return value
 
 
 class JudgeResult(StrictSchema):
@@ -57,7 +75,7 @@ class JudgeResult(StrictSchema):
 
     schema_version: Literal["1"] = "1"
     hard_red_flags: tuple[HardRedFlag, ...] = Field(default=(), max_length=64)
-    category_scores: ScoreMap
+    category_scores: CategoryScores
     aggregate_score: UnitInterval
     missing_requirements: tuple[NonEmptyText, ...] = Field(
         default=(), max_length=128
@@ -81,15 +99,10 @@ class JudgeResult(StrictSchema):
             }
         return payload
 
-    @field_validator("category_scores")
-    @classmethod
-    def category_names_are_unique_after_normalization(
-        cls, value: dict[str, CategoryScore]
-    ) -> dict[str, CategoryScore]:
-        """Return an ordinary dict after strict key/value validation."""
-        return dict(value)
-
     @property
     def numeric_category_scores(self) -> dict[str, float]:
         """Return the score-only mapping used by ranking and proposer feedback."""
-        return {name: item.score for name, item in self.category_scores.items()}
+        return {
+            name: item.score
+            for name, item in self.category_scores.__dict__.items()
+        }

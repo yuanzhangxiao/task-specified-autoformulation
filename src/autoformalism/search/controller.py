@@ -307,7 +307,14 @@ class SearchController:
             return JudgeResult.model_validate(
                 {
                     "hard_red_flags": [],
-                    "category_scores": {"judge_disabled": 0.0},
+                    "category_scores": {
+                        "task_output_coverage": 0.0,
+                        "mechanism_state_adequacy": 0.0,
+                        "mathematical_completeness": 0.0,
+                        "data_causal_consistency": 0.0,
+                        "constraint_compliance": 0.0,
+                        "parsimony_interpretability": 0.0,
+                    },
                     "aggregate_score": 0.0,
                     "missing_requirements": [],
                     "actionable_edits": [],
@@ -335,10 +342,15 @@ class SearchController:
                         }
                     ],
                     "category_scores": {
-                        "judge_availability": {
-                            "score": 0.0,
-                            "justification": message,
-                        }
+                        name: {"score": 0.0, "justification": message}
+                        for name in (
+                            "task_output_coverage",
+                            "mechanism_state_adequacy",
+                            "mathematical_completeness",
+                            "data_causal_consistency",
+                            "constraint_compliance",
+                            "parsimony_interpretability",
+                        )
                     },
                     "aggregate_score": 0.0,
                     "missing_requirements": [

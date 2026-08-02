@@ -91,7 +91,10 @@ class OpenAIResponsesClient(CachedLLMClient):
     @staticmethod
     def _raw_response(response: Any) -> dict[str, object]:
         if hasattr(response, "model_dump"):
-            value = response.model_dump(mode="json")
+            try:
+                value = response.model_dump(mode="json", warnings=False)
+            except TypeError:
+                value = response.model_dump(mode="json")
             if isinstance(value, dict):
                 return value
         return {

@@ -171,10 +171,17 @@ class ProposalContext(BaseModel):
     allowed_symbols: AllowedSymbolTable
 
 class JudgeResult(BaseModel):
-    category_scores: dict[str, confloat(ge=0, le=1)]
+    category_scores: CategoryScores  # six fixed rubric fields in [0, 1]
     overall_score: confloat(ge=0, le=1)
     feedback: list[JudgeFeedback]
 ```
+
+`CategoryScores` has explicit fields for task/output coverage, mechanism/state
+adequacy, mathematical completeness, data/causal consistency, constraint
+compliance, and parsimony/interpretability. The fixed object matches every
+benchmark judge prompt, prevents invented or omitted categories, and avoids
+arbitrary-key JSON Schema features unsupported by strict hosted-provider
+structured outputs.
 
 The provider wrapper hashes model name, provider settings, schema,
 prompt, and request payload. It atomically reads/writes the response

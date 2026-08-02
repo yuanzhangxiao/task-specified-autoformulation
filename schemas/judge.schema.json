@@ -63,6 +63,40 @@
       "title": "CategoryScore",
       "type": "object"
     },
+    "CategoryScores": {
+      "additionalProperties": false,
+      "description": "Fixed task-compliance rubric shared by every benchmark judge prompt.\n\nA fixed object is intentional: OpenAI Structured Outputs rejects the\n``propertyNames`` keyword that Pydantic emits for identifier-constrained\ndictionary keys.  Explicit fields also prevent providers from inventing,\nomitting, or renaming scoring categories.",
+      "properties": {
+        "constraint_compliance": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "data_causal_consistency": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "mathematical_completeness": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "mechanism_state_adequacy": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "parsimony_interpretability": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "task_output_coverage": {
+          "$ref": "#/$defs/CategoryScore"
+        }
+      },
+      "required": [
+        "task_output_coverage",
+        "mechanism_state_adequacy",
+        "mathematical_completeness",
+        "data_causal_consistency",
+        "constraint_compliance",
+        "parsimony_interpretability"
+      ],
+      "title": "CategoryScores",
+      "type": "object"
+    },
     "HardRedFlag": {
       "additionalProperties": false,
       "description": "Blocking or severe specification violation.",
@@ -115,19 +149,7 @@
       "type": "number"
     },
     "category_scores": {
-      "maxProperties": 64,
-      "minProperties": 1,
-      "patternProperties": {
-        "^[A-Za-z][A-Za-z0-9_]*$": {
-          "$ref": "#/$defs/CategoryScore"
-        }
-      },
-      "propertyNames": {
-        "maxLength": 128,
-        "minLength": 1
-      },
-      "title": "Category Scores",
-      "type": "object"
+      "$ref": "#/$defs/CategoryScores"
     },
     "hard_red_flags": {
       "default": [],

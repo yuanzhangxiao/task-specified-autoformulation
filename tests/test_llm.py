@@ -97,7 +97,14 @@ def _judge() -> JudgeResult:
         {
             "schema_version": "1",
             "hard_red_flags": [],
-            "category_scores": {"causality": 1.0},
+            "category_scores": {
+                "task_output_coverage": 1.0,
+                "mechanism_state_adequacy": 1.0,
+                "mathematical_completeness": 1.0,
+                "data_causal_consistency": 1.0,
+                "constraint_compliance": 1.0,
+                "parsimony_interpretability": 1.0,
+            },
             "aggregate_score": 1.0,
             "missing_requirements": [],
             "actionable_edits": [],

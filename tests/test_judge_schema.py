@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 import pytest
@@ -24,9 +25,12 @@ def judge_payload() -> dict[str, Any]:
             }
         ],
         "category_scores": {
-            "causality": 0.25,
-            "task_compliance": 0.5,
-            "parsimony": 0.8,
+            "task_output_coverage": 0.5,
+            "mechanism_state_adequacy": 0.5,
+            "mathematical_completeness": 0.5,
+            "data_causal_consistency": 0.25,
+            "constraint_compliance": 0.5,
+            "parsimony_interpretability": 0.8,
         },
         "aggregate_score": 0.45,
         "missing_requirements": [
@@ -48,8 +52,8 @@ def test_judge_json_round_trip(judge_payload: dict[str, Any]) -> None:
     restored = JudgeResult.model_validate_json(result.model_dump_json())
 
     assert restored == result
-    assert restored.category_scores["causality"].score == 0.25
-    assert restored.numeric_category_scores["causality"] == 0.25
+    assert restored.category_scores["data_causal_consistency"].score == 0.25
+    assert restored.numeric_category_scores["data_causal_consistency"] == 0.25
     assert restored.actionable_edits[0].priority.value == "required"
 
 
@@ -77,13 +81,13 @@ def test_judge_rejects_invalid_or_empty_category_scores(
     judge_payload: dict[str, Any],
 ) -> None:
     invalid = copy.deepcopy(judge_payload)
-    invalid["category_scores"]["causality"] = 2.0
+    invalid["category_scores"]["data_causal_consistency"] = 2.0
     with pytest.raises(ValidationError):
         JudgeResult.model_validate(invalid)
 
     empty = copy.deepcopy(judge_payload)
     empty["category_scores"] = {}
-    with pytest.raises(ValidationError, match="at least 1"):
+    with pytest.raises(ValidationError, match="Field required"):
         JudgeResult.model_validate(empty)
 
 
@@ -98,15 +102,15 @@ def test_judge_rejects_extra_fields(judge_payload: dict[str, Any]) -> None:
 def test_judge_accepts_score_justification_objects(
     judge_payload: dict[str, Any],
 ) -> None:
-    judge_payload["category_scores"]["causality"] = {
+    judge_payload["category_scores"]["data_causal_consistency"] = {
         "score": 0.4,
         "justification": "Uses only causal history.",
     }
 
     result = JudgeResult.model_validate(judge_payload)
 
-    assert result.category_scores["causality"].score == 0.4
-    assert result.category_scores["causality"].justification == (
+    assert result.category_scores["data_causal_consistency"].score == 0.4
+    assert result.category_scores["data_causal_consistency"].justification == (
         "Uses only causal history."
     )
 
@@ -119,3 +123,21 @@ def test_hard_flag_description_defaults_to_evidence_only_contract(
     result = JudgeResult.model_validate(judge_payload)
 
     assert result.hard_red_flags[0].description == "unspecified"
+
+
+def test_judge_schema_is_openai_structured_output_compatible() -> None:
+    """The wire schema must avoid unsupported arbitrary-key map keywords."""
+    schema = JudgeResult.model_json_schema(mode="validation")
+    encoded = json.dumps(schema)
+
+    assert '"propertyNames"' not in encoded
+    category_schema = schema["$defs"]["CategoryScores"]
+    assert set(category_schema["required"]) == {
+        "task_output_coverage",
+        "mechanism_state_adequacy",
+        "mathematical_completeness",
+        "data_causal_consistency",
+        "constraint_compliance",
+        "parsimony_interpretability",
+    }
+    assert category_schema["additionalProperties"] is False

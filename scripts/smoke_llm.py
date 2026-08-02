@@ -51,6 +51,7 @@ def main() -> None:
             cache_directory=args.cache_dir,
             log_path=args.log,
             max_attempts=1,
+            proposal_target_channels=("target",),
         )
     )
     result = client.propose(
@@ -85,4 +86,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

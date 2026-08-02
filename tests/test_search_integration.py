@@ -68,8 +68,12 @@ def _judge(score: float = 1.0) -> JudgeResult:
         {
             "hard_red_flags": [],
             "category_scores": {
-                "mechanistic_completeness": score,
-                "causality": score,
+                "task_output_coverage": score,
+                "mechanism_state_adequacy": score,
+                "mathematical_completeness": score,
+                "data_causal_consistency": score,
+                "constraint_compliance": score,
+                "parsimony_interpretability": score,
             },
             "aggregate_score": score,
             "missing_requirements": [],
@@ -250,7 +254,14 @@ def test_llm_red_flags_are_advisory_and_do_not_block_fitted_candidate(
                     "evidence": "The mechanism may be too simple.",
                 }
             ],
-            "category_scores": {"mechanism": 0.2},
+            "category_scores": {
+                "task_output_coverage": 0.2,
+                "mechanism_state_adequacy": 0.2,
+                "mathematical_completeness": 0.2,
+                "data_causal_consistency": 0.2,
+                "constraint_compliance": 0.2,
+                "parsimony_interpretability": 0.2,
+            },
             "aggregate_score": 0.2,
             "missing_requirements": ["More mechanistic detail may help."],
             "actionable_edits": [],
