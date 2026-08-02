@@ -278,10 +278,15 @@ def _predict_trajectory(candidate, trajectory: Trajectory, parameters, torch):
     equations = {equation.state: equation.rhs for equation in candidate.state_equations}
     derivatives = torch.stack(
         [
-            _evaluate(
-                parser.parse(equations[name], location=f"state:{name}").tree.body,
-                environment,
-                torch,
+            torch.broadcast_to(
+                _evaluate(
+                    parser.parse(
+                        equations[name], location=f"state:{name}"
+                    ).tree.body,
+                    environment,
+                    torch,
+                ),
+                time[:-1].shape,
             )
             for name in state_names
         ],

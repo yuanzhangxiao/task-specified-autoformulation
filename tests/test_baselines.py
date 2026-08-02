@@ -15,6 +15,7 @@ from autoformalism.baselines.core import target_scales
 from autoformalism.baselines.d3 import run_d3_native_no_tools
 from autoformalism.baselines.d3_native import (
     NativeD3Error,
+    fit_native_d3,
     validate_native_candidate,
 )
 from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
@@ -309,6 +310,34 @@ def test_native_d3_requires_all_observed_channels_as_states() -> None:
     )
     with np.testing.assert_raises(NativeD3Error):
         validate_native_candidate(target_only, ("x", "u"), ())
+
+
+def test_native_d3_broadcasts_constant_state_equation() -> None:
+    pytest.importorskip("torch")
+    candidate = CandidateModel.model_validate(
+        {
+            "candidate_id": "constant_state",
+            "parent_candidate_id": None,
+            "change_summary": "Constant derivative output.",
+            "states": [{"name": "x", "kind": "observed"}],
+            "state_equations": [{"state": "x", "rhs": "0"}],
+            "observation_mappings": [{"channel": "x", "expression": "x"}],
+            "parameters": [],
+            "initial_conditions": [
+                {"state": "x", "scope": "global", "expression": "x"}
+            ],
+        }
+    )
+
+    fit = fit_native_d3(
+        candidate,
+        _dataset().train,
+        _dataset().validation,
+        targets=("x",),
+        seed=0,
+    )
+
+    assert np.isfinite(fit.validation_mse)
 
 
 def test_baseline_run_status_schema_supports_timeout() -> None:
