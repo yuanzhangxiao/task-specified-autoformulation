@@ -12,6 +12,7 @@ from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.expressions import ValidationContext
 from autoformalism.fitting import FitConfig
 from autoformalism.llm import MockLLMClient
+from autoformalism.llm.exceptions import LLMResponseError
 from autoformalism.pruning import PruningConfig
 from autoformalism.schemas import CandidateModel, JudgeResult
 from autoformalism.search import CheckpointError, SearchConfig, SearchController
@@ -181,6 +182,111 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
     assert "test_metrics" not in second_proposal_prompt
     assert "test_normalized_mse" not in second_proposal_prompt
     assert second.parent_candidate_id == first.candidate_id
+
+
+def test_prefit_rejection_is_feedback_for_next_proposal(tmp_path: Path) -> None:
+    invalid = _candidate(
+        "invalid_one",
+        "unknown_input - decay * x",
+        (("decay", 0.2, 1.0),),
+    )
+    valid = _candidate(
+        "valid_two",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+        parent="invalid_one",
+    )
+    client = MockLLMClient(
+        proposer_responses=[invalid, valid],
+        judge_responses=[_judge()] * 3,
+    )
+
+    result = _controller(client, _config(tmp_path / "recovery", 2)).run()
+
+    proposer_prompts = [
+        json.loads(call["user_prompt"])
+        for call in client.calls
+        if call["role"] == "proposer"
+    ]
+    rejection = proposer_prompts[1]["beam_feedback"][0]
+    assert result.completed_iterations == 1
+    assert rejection["candidate_id"] == "invalid_one"
+    assert rejection["eligible_parent"] is True
+    assert rejection["rejected_before_fit"] is True
+    assert "UNDEFINED_SYMBOL" in rejection["numerical_failures"][
+        "deterministic_validation"
+    ][0]
+    assert "test" not in json.dumps(rejection).lower()
+
+
+def test_no_judge_ablation_makes_no_judge_calls(tmp_path: Path) -> None:
+    candidate = _candidate(
+        "no_judge_candidate", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    client = MockLLMClient(proposer_responses=[candidate], judge_responses=[])
+    config = _config(tmp_path / "no_judge", 1).model_copy(
+        update={"use_judge": False}
+    )
+
+    result = _controller(client, config).run()
+
+    assert result.completed_iterations == 1
+    assert [call["role"] for call in client.calls] == ["proposer"]
+
+
+def test_llm_red_flags_are_advisory_and_do_not_block_fitted_candidate(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(
+        "advisory_candidate",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+    )
+    flagged = JudgeResult.model_validate(
+        {
+            "hard_red_flags": [
+                {
+                    "code": "subjective_mechanism_concern",
+                    "evidence": "The mechanism may be too simple.",
+                }
+            ],
+            "category_scores": {"mechanism": 0.2},
+            "aggregate_score": 0.2,
+            "missing_requirements": ["More mechanistic detail may help."],
+            "actionable_edits": [],
+        }
+    )
+    client = MockLLMClient(
+        proposer_responses=[candidate],
+        judge_responses=[flagged, flagged, flagged],
+    )
+
+    result = _controller(client, _config(tmp_path / "advisory", 1)).run()
+
+    assert result.completed_iterations == 1
+    assert result.final_fit.success
+
+
+def test_judge_response_failure_falls_back_and_search_continues(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(
+        "judge_failure_candidate",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+    )
+
+    class FailingJudgeClient(MockLLMClient):
+        def judge(self, *, system_prompt: str, user_prompt: str):
+            del system_prompt, user_prompt
+            raise LLMResponseError("malformed judge JSON")
+
+    client = FailingJudgeClient(proposer_responses=[candidate])
+
+    result = _controller(client, _config(tmp_path / "judge_failure", 1)).run()
+
+    assert result.completed_iterations == 1
+    assert result.final_fit.success
 
 
 def test_resume_continues_after_exact_completed_stage_without_repeat(

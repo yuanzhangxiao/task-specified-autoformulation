@@ -59,7 +59,8 @@ Acceptance tests:
   load with correct shapes, IDs, targets, auxiliaries, and inputs;
 - shuffled/missing/extra input rows, duplicate/nonmonotone times,
   inconsistent sampling, NaN/Inf, and column mismatches fail;
-- target channels cannot be requested as forcing;
+- target channels cannot be requested as contemporaneous or future forcing;
+  every benchmark may use one-slot-lagged history;
 - validation/test targets are never included in a proposer data view;
 - identical content across splits triggers the configured overlap
   guard;

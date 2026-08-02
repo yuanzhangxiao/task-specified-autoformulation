@@ -15,6 +15,7 @@ from autoformalism.expressions.validation import (
     CandidateValidator,
     ValidatedCandidate,
     ValidationContext,
+    repair_protected_declarations,
 )
 
 __all__ = [
@@ -29,5 +30,5 @@ __all__ = [
     "ValidationContext",
     "ValidationDiagnostic",
     "compile_candidate",
+    "repair_protected_declarations",
 ]
-

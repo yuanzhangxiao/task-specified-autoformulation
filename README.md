@@ -53,6 +53,8 @@ python scripts/run_experiment.py \
   --judge-model openai:YOUR_JUDGE_MODEL \
   --iteration-budget 10 \
   --beam-size 3 \
+  --llm-timeout-seconds 900 \
+  --llm-max-output-tokens 2048 \
   --output-root artifacts/runs
 ```
 
@@ -62,6 +64,18 @@ logs.
 
 For a local free model, use an Ollama identifier such as
 `ollama:gpt-oss:20b`. Proposer and judge models may use different providers.
+Local structured-output requests can take several minutes on first load.
+`--llm-timeout-seconds` defaults to 900 seconds. `--llm-max-output-tokens`
+defaults to 2048 and prevents an incomplete structured response from generating
+until the request timeout. Ollama thinking is disabled for structured calls so
+reasoning tokens cannot consume the JSON response budget.
+One-step rolling fits default to three multistarts and 400 residual evaluations
+per start. Use `--fit-starts` and `--fit-max-nfev` to increase these limits for
+final experiments after a smaller pilot succeeds.
+Candidates whose complete state vector and derivatives are observed use fast
+bounded derivative regression during parameter fitting. Candidates with any
+genuine latent state automatically use the ODE-rollout fallback. Both paths are
+ranked using causal one-step rollout error.
 
 ### Dry run
 
@@ -95,6 +109,103 @@ python scripts/run_experiment.py \
   --mock-llm
 ```
 
+## Baselines
+
+The shared baseline runner preserves trajectory boundaries, fits only on the
+training split, selects SINDy sparsity on validation one-step rollout MSE, and
+opens test exactly once after selection:
+
+```bash
+python scripts/run_baseline.py \
+  --data-root "$AUTOFORMALISM_DATA_ROOT" \
+  --benchmark-id original_b1 \
+  --tier easy \
+  --method persistence \
+  --seed 0
+
+python scripts/run_baseline.py \
+  --data-root "$AUTOFORMALISM_DATA_ROOT" \
+  --benchmark-id original_b1 \
+  --tier easy \
+  --method sindy \
+  --seed 0
+```
+
+`sindy` uses supplied training derivative labels with a degree-two polynomial
+library, unary `tanh` features, and deterministic STLSQ. It does not create
+explicit lag columns. `llm_feature_sindy` makes one cached proposer call and
+accepts only parameter-free algebraic features composed from the exact supplied
+symbol contract:
+
+```bash
+python scripts/run_baseline.py \
+  --data-root "$AUTOFORMALISM_DATA_ROOT" \
+  --benchmark-id original_b1 \
+  --tier easy \
+  --method llm_feature_sindy \
+  --model openai:MODEL_NAME
+```
+
+PySR is optional because it installs a Julia-backed runtime:
+
+```bash
+pip install -e '.[pysr]'
+python scripts/run_baseline.py \
+  --data-root "$AUTOFORMALISM_DATA_ROOT" \
+  --benchmark-id original_b1 \
+  --tier easy \
+  --method pysr \
+  --pysr-iterations 40 \
+  --maximum-expression-size 30
+```
+
+The no-judge Autoformalism ablation uses the ordinary experiment CLI. It makes
+no judge calls, returns no judge feedback to the proposer, and ranks with
+validation fit, simplicity, and deterministic diagnostics:
+
+```bash
+python scripts/run_experiment.py [ordinary arguments] --no-judge
+```
+
+The upstream D3 repository is an application tied to its own Hydra environments,
+executes LLM-generated Python, and exposes test data during candidate fitting.
+The default `d3_no_tools` implementation therefore preserves D3's iterative
+propose-fit-reflect workflow while replacing executable code with this project's
+restricted candidate schema. It disables external feature-acquisition tools,
+uses the fixed observed-state skeleton, checkpoints every generation, selects on
+validation, and opens test once after selection:
+
+```bash
+python scripts/run_baseline.py \
+  --data-root "$AUTOFORMALISM_DATA_ROOT" \
+  --benchmark-id original_b1 \
+  --tier easy \
+  --method d3_no_tools \
+  --model openai:MODEL_NAME \
+  --d3-generations 20
+```
+
+This is a security- and leakage-safe D3 adaptation, not byte-for-byte execution
+of the upstream repository. The audited upstream reference is pinned to commit
+`ee86212dfd5935bb0c9626eaa0570223ff7ecf1c`. For audit or compatibility experiments,
+`d3_no_tools` also supports a versioned external bridge contract.
+`--d3-command` receives `REQUEST_JSON RESPONSE_JSON`; the request has the task
+prompt, train/validation trajectories and derivatives,
+`external_tools_enabled: false`, and `candidate_submission_enabled: true`, but
+no test data. The bridge must write
+`{"equations": {"TARGET": "RHS"}}`. The equations are then parsed safely and
+evaluated by this repository. This keeps upstream D3 code and dependencies in a
+separate environment:
+
+```bash
+python scripts/run_baseline.py \
+  --data-root "$AUTOFORMALISM_DATA_ROOT" \
+  --benchmark-id original_b1 \
+  --tier easy \
+  --method d3_no_tools \
+  --d3-command /path/to/d3-environment/bin/python /path/to/d3_bridge.py
+```
+
 ## Resume
 
 Experiment directories are deterministic:
@@ -112,6 +223,8 @@ python scripts/resume_experiment.py \
   --judge-model openai:YOUR_JUDGE_MODEL \
   --iteration-budget 10 \
   --beam-size 3 \
+  --llm-timeout-seconds 900 \
+  --llm-max-output-tokens 2048 \
   --output-root artifacts/runs
 ```
 

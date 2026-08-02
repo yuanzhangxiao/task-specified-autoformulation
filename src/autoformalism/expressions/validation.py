@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Annotated
@@ -23,7 +26,7 @@ from autoformalism.expressions.parser import (
     RestrictedParser,
 )
 from autoformalism.schemas import CandidateModel, ConstraintKind, ParameterScope
-from autoformalism.schemas.base import Identifier, StrictSchema
+from autoformalism.schemas.base import FiniteFloat, Identifier, StrictSchema
 
 IdentifierTuple = Annotated[tuple[Identifier, ...], Field(default=())]
 
@@ -32,11 +35,15 @@ class ValidationContext(StrictSchema):
     """Benchmark channels available to candidate expressions."""
 
     targets: IdentifierTuple
+    lagged_targets: IdentifierTuple = ()
     auxiliaries: IdentifierTuple = ()
     external_inputs: IdentifierTuple = ()
     fixed_covariates: IdentifierTuple = ()
     unavailable_observed_channels: IdentifierTuple = ()
     time_symbol: Identifier = "t"
+    forcing_bounds: Mapping[Identifier, tuple[FiniteFloat, FiniteFloat]] = Field(
+        default_factory=dict
+    )
 
     @model_validator(mode="after")
     def channel_sets_are_disjoint(self) -> ValidationContext:
@@ -64,13 +71,30 @@ class ValidationContext(StrictSchema):
                     )
         if not self.targets:
             raise ValueError("at least one target is required")
+        unknown_lagged = set(self.lagged_targets) - set(self.targets)
+        if unknown_lagged:
+            raise ValueError(
+                f"lagged targets are not target channels: {sorted(unknown_lagged)}"
+            )
+        unknown_bounds = set(self.forcing_bounds) - self.forcing_channels
+        if unknown_bounds:
+            raise ValueError(
+                "forcing bounds reference unavailable channels: "
+                f"{sorted(unknown_bounds)}"
+            )
+        for name, (lower, upper) in self.forcing_bounds.items():
+            if lower > upper:
+                raise ValueError(f"forcing bounds are reversed for {name}")
         return self
 
     @property
     def forcing_channels(self) -> frozenset[str]:
         """Return channels that may be supplied over the prediction horizon."""
         return frozenset(
-            self.auxiliaries + self.external_inputs + self.fixed_covariates
+            self.auxiliaries
+            + self.external_inputs
+            + self.fixed_covariates
+            + self.lagged_targets
         )
 
 
@@ -83,8 +107,169 @@ class ValidatedCandidate:
     process_expressions: MappingProxyType[str, ParsedExpression]
     equation_expressions: MappingProxyType[str, ParsedExpression]
     observation_expressions: MappingProxyType[str, ParsedExpression]
+    initial_condition_expressions: MappingProxyType[str, ParsedExpression]
+    causal_derivative_initials: MappingProxyType[str, str]
     process_order: tuple[str, ...]
     forcing_symbols: frozenset[str]
+    warnings: tuple[ValidationDiagnostic, ...] = ()
+
+
+def repair_protected_declarations(
+    candidate: CandidateModel,
+    context: ValidationContext,
+) -> tuple[CandidateModel, tuple[str, ...]]:
+    """Apply lossless repairs at the benchmark/runtime boundary."""
+    identifier_pattern = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+    declared_names = {
+        *(item.name for item in candidate.states),
+        *(item.name for item in candidate.processes),
+        *(item.name for item in candidate.parameters),
+    }
+    referenced_names = {
+        symbol
+        for expression in (
+            *(item.rhs for item in candidate.state_equations),
+            *(item.expression for item in candidate.processes),
+            *(item.expression for item in candidate.observation_mappings),
+        )
+        for symbol in identifier_pattern.findall(expression)
+    }
+    lag_aliases = {
+        f"{target}_prev": target
+        for target in context.lagged_targets
+        if f"{target}_prev" in referenced_names
+        and f"{target}_prev" not in declared_names
+    }
+    initial_repairs: list[str] = []
+    if lag_aliases:
+        payload = candidate.model_dump(mode="json")
+        payload["processes"].extend(
+            {"name": alias, "expression": target}
+            for alias, target in sorted(lag_aliases.items())
+        )
+        candidate = CandidateModel.model_validate(payload)
+        initial_repairs.extend(
+            f"mapped causal lag alias {alias} to interval-boundary {target}"
+            for alias, target in sorted(lag_aliases.items())
+        )
+    protected = set(context.external_inputs) | set(context.fixed_covariates)
+    equation_states = {item.state for item in candidate.state_equations}
+    undifferentiated_auxiliaries = {
+        item.name
+        for item in candidate.states
+        if item.name in context.auxiliaries and item.name not in equation_states
+    }
+    removed_states = {
+        item.name for item in candidate.states if item.name in protected
+    } | undifferentiated_auxiliaries
+    removed_processes = {
+        item.name for item in candidate.processes if item.name in protected
+    }
+    process_by_name = {item.name: item for item in candidate.processes}
+    reachable_processes: set[str] = set()
+    pending = {
+        symbol
+        for expression in (
+            *(item.rhs for item in candidate.state_equations),
+            *(item.expression for item in candidate.observation_mappings),
+        )
+        for symbol in identifier_pattern.findall(expression)
+        if symbol in process_by_name
+    }
+    while pending:
+        name = pending.pop()
+        if name in reachable_processes:
+            continue
+        reachable_processes.add(name)
+        pending.update(
+            symbol
+            for symbol in identifier_pattern.findall(
+                process_by_name[name].expression
+            )
+            if symbol in process_by_name and symbol not in reachable_processes
+        )
+    unused_processes = set(process_by_name) - reachable_processes
+    removed_processes |= unused_processes
+    removed_parameters = {
+        item.name for item in candidate.parameters if item.name in protected
+    }
+    removed = removed_states | removed_processes | removed_parameters
+    modeled_auxiliaries = set(context.auxiliaries) & {
+        item.name for item in candidate.states if item.name not in removed_states
+    }
+    redundant_auxiliary_mappings = {
+        item.channel
+        for item in candidate.observation_mappings
+        if item.channel in context.auxiliaries
+        and item.channel not in modeled_auxiliaries
+    }
+    numeric_qualitative_constraints = {
+        item.subject
+        for item in candidate.constraints
+        if item.kind is not ConstraintKind.BOUNDED and item.bounds is not None
+    }
+    if (
+        not removed
+        and not redundant_auxiliary_mappings
+        and not numeric_qualitative_constraints
+    ):
+        return candidate, tuple(initial_repairs)
+    payload = candidate.model_dump(mode="json")
+    payload["states"] = [
+        item for item in payload["states"] if item["name"] not in removed_states
+    ]
+    payload["processes"] = [
+        item for item in payload["processes"] if item["name"] not in removed_processes
+    ]
+    payload["parameters"] = [
+        item for item in payload["parameters"] if item["name"] not in removed_parameters
+    ]
+    payload["state_equations"] = [
+        item
+        for item in payload["state_equations"]
+        if item["state"] not in removed_states
+    ]
+    payload["initial_conditions"] = [
+        item
+        for item in payload["initial_conditions"]
+        if item["state"] not in removed_states
+    ]
+    payload["observation_mappings"] = [
+        item
+        for item in payload["observation_mappings"]
+        if item["channel"] not in protected
+        and item["channel"] not in redundant_auxiliary_mappings
+    ]
+    for constraint in payload["constraints"]:
+        if (
+            constraint["kind"] != ConstraintKind.BOUNDED.value
+            and constraint["bounds"] is not None
+        ):
+            constraint["bounds"] = None
+    repairs = list(initial_repairs)
+    repairs.extend(
+        f"used supplied forcing instead of modeled declaration: {name}"
+        for name in sorted(
+            removed - undifferentiated_auxiliaries - unused_processes
+        )
+    )
+    repairs.extend(
+        f"used supplied auxiliary because no derivative was declared: {name}"
+        for name in sorted(undifferentiated_auxiliaries)
+    )
+    repairs.extend(
+        f"removed unreferenced algebraic process: {name}"
+        for name in sorted(unused_processes - protected)
+    )
+    repairs.extend(
+        f"removed redundant supplied-auxiliary observation mapping: {name}"
+        for name in sorted(redundant_auxiliary_mappings)
+    )
+    repairs.extend(
+        f"removed invented numeric bounds from qualitative constraint: {name}"
+        for name in sorted(numeric_qualitative_constraints)
+    )
+    return CandidateModel.model_validate(payload), tuple(repairs)
 
 
 class CandidateValidator:
@@ -104,18 +289,28 @@ class CandidateValidator:
         process_names = {item.name for item in candidate.processes}
         parameter_names = {item.name for item in candidate.parameters}
         forcing_names = set(context.forcing_channels)
+        auxiliary_names = set(context.auxiliaries)
+        protected_forcing_names = set(context.external_inputs) | set(
+            context.fixed_covariates
+        )
         reserved = set(APPROVED_FUNCTION_ARITY) | {context.time_symbol}
 
         self._validate_declaration_collisions(
             state_names,
             process_names,
             parameter_names,
-            forcing_names,
+            auxiliary_names,
+            protected_forcing_names,
             reserved,
             diagnostics,
         )
         self._validate_parameter_scopes(candidate, diagnostics)
         self._validate_state_equation_closure(candidate, diagnostics)
+        self._validate_constraint_subjects(
+            candidate,
+            state_names | process_names | parameter_names | forcing_names,
+            diagnostics,
+        )
         self._validate_constraint_consistency(candidate, diagnostics)
         self._validate_observation_channels(candidate, context, diagnostics)
 
@@ -148,6 +343,83 @@ class CandidateValidator:
             )
             if parsed is not None:
                 observation_expressions[observation.channel] = parsed
+
+        initial_condition_expressions: dict[str, ParsedExpression] = {}
+        observed_states = self._identity_observed_states(candidate, context)
+        initial_states = {item.state for item in candidate.initial_conditions}
+        causal_derivative_initials: dict[str, str] = {}
+        for state in sorted(state_names - initial_states):
+            base = state.removesuffix("_rate") if state.endswith("_rate") else ""
+            if context.lagged_targets and base in observed_states:
+                causal_derivative_initials[state] = base
+            else:
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "MISSING_INITIAL_CONDITION",
+                        f"initial_condition:{state}",
+                        "dynamic state requires an initialization rule",
+                    )
+                )
+        for state in sorted(initial_states - state_names):
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "UNKNOWN_INITIAL_CONDITION_STATE",
+                    f"initial_condition:{state}",
+                    "initialization target is not a declared state",
+                )
+            )
+        for initial in candidate.initial_conditions:
+            if (
+                initial.fixed_value is None
+                and initial.expression is None
+                and initial.initialization_range is None
+            ):
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "MISSING_INITIALIZATION_MODE",
+                        f"initial_condition:{initial.state}",
+                        "dynamic state initialization requires a fixed value, "
+                        "causal expression, or supported fitted range",
+                    )
+                )
+            if initial.expression is None:
+                continue
+            parsed = self._parse(
+                initial.expression,
+                f"initial_condition:{initial.state}",
+                diagnostics,
+            )
+            if parsed is None:
+                continue
+            initial_condition_expressions[initial.state] = parsed
+            allowed_initial_symbols = forcing_names | {context.time_symbol}
+            if initial.state in observed_states:
+                allowed_initial_symbols.add(initial.state)
+            unknown = parsed.symbols - allowed_initial_symbols
+            for symbol in sorted(unknown):
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "INVALID_INITIALIZATION_SYMBOL",
+                        f"initial_condition:{initial.state}",
+                        "initialization expressions may use only known initial "
+                        f"observations, inputs, covariates, and time: {symbol}",
+                    )
+                )
+
+        if context.lagged_targets:
+            for initial in candidate.initial_conditions:
+                if (
+                    initial.state not in observed_states
+                    and initial.initialization_range is not None
+                ):
+                    diagnostics.append(
+                        ValidationDiagnostic(
+                            "LATENT_INITIALIZATION_NOT_CAUSAL",
+                            f"initial_condition:{initial.state}",
+                            "latent state requires fixed_value or an analytic "
+                            "expression of known initial variables",
+                        )
+                    )
 
         all_expressions = (
             tuple(
@@ -199,17 +471,24 @@ class CandidateValidator:
                 process_expressions,
                 equation_expressions,
                 observation_expressions,
+                initial_condition_expressions,
                 process_order,
                 diagnostics,
             )
 
+        warnings = tuple(
+            item for item in diagnostics if item.code == "DOMAIN_DIVISION_ZERO"
+        )
+        diagnostics[:] = [
+            item for item in diagnostics if item.code != "DOMAIN_DIVISION_ZERO"
+        ]
         if diagnostics:
             raise ModelValidationError(tuple(diagnostics))
         forcing_symbols = frozenset(
             symbol
             for _, expression in all_expressions
             for symbol in expression.symbols
-            if symbol in forcing_names
+            if symbol in forcing_names and symbol not in state_names
         )
         return ValidatedCandidate(
             candidate=candidate,
@@ -217,8 +496,22 @@ class CandidateValidator:
             process_expressions=MappingProxyType(process_expressions),
             equation_expressions=MappingProxyType(equation_expressions),
             observation_expressions=MappingProxyType(observation_expressions),
+            initial_condition_expressions=MappingProxyType(
+                initial_condition_expressions
+            ),
+            causal_derivative_initials=MappingProxyType(
+                causal_derivative_initials
+            ),
             process_order=process_order,
             forcing_symbols=forcing_symbols,
+            warnings=tuple(
+                ValidationDiagnostic(
+                    "DOMAIN_DIVISION_GUARDED",
+                    item.location,
+                    f"{item.message}; runtime uses a sign-preserving epsilon guard",
+                )
+                for item in warnings
+            ),
         )
 
     def _parse(
@@ -234,16 +527,54 @@ class CandidateValidator:
             return None
 
     @staticmethod
+    def _validate_constraint_subjects(
+        candidate: CandidateModel,
+        declared_names: set[str],
+        diagnostics: list[ValidationDiagnostic],
+    ) -> None:
+        """Allow context-declared forcing and reject genuinely unknown subjects."""
+        allowed = declared_names | {
+            mapping.channel for mapping in candidate.observation_mappings
+        }
+        for constraint in candidate.constraints:
+            if constraint.subject not in allowed:
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "UNKNOWN_CONSTRAINT_SUBJECT",
+                        f"constraint:{constraint.subject}",
+                        "constraint subject is not a declared model or forcing symbol",
+                    )
+                )
+
+    @staticmethod
     def _validate_declaration_collisions(
         state_names: set[str],
         process_names: set[str],
         parameter_names: set[str],
-        forcing_names: set[str],
+        auxiliary_names: set[str],
+        protected_forcing_names: set[str],
         reserved: set[str],
         diagnostics: list[ValidationDiagnostic],
     ) -> None:
+        namespace_pairs = (
+            ("state/process", state_names & process_names),
+            ("state/parameter", state_names & parameter_names),
+            ("process/parameter", process_names & parameter_names),
+        )
+        for namespaces, overlap in namespace_pairs:
+            for name in sorted(overlap):
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "DECLARATION_NAME_COLLISION",
+                        f"declaration:{name}",
+                        f"symbol is declared in both {namespaces} namespaces",
+                    )
+                )
         model_names = state_names | process_names | parameter_names
-        for name in sorted(model_names & forcing_names):
+        forbidden_shadowing = (
+            (process_names | parameter_names) & auxiliary_names
+        ) | (model_names & protected_forcing_names)
+        for name in sorted(forbidden_shadowing):
             diagnostics.append(
                 ValidationDiagnostic(
                     "CHANNEL_NAME_COLLISION",
@@ -327,6 +658,11 @@ class CandidateValidator:
             item.state: item.initialization_range
             for item in candidate.initial_conditions
         }
+        fixed_initial_by_state = {
+            item.state: item.fixed_value
+            for item in candidate.initial_conditions
+            if item.fixed_value is not None
+        }
         for state_name in sorted(state_names):
             interval = CandidateValidator._state_interval(candidate, state_name)
             if interval.lower > interval.upper:
@@ -350,6 +686,17 @@ class CandidateValidator:
                         "initialization range violates state constraints",
                     )
                 )
+            fixed_initial = fixed_initial_by_state.get(state_name)
+            if fixed_initial is not None and not (
+                interval.lower <= fixed_initial <= interval.upper
+            ):
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "INITIAL_CONSTRAINT_CONFLICT",
+                        f"initial_condition:{state_name}",
+                        "fixed initial value violates state constraints",
+                    )
+                )
 
         for constraint in candidate.constraints:
             parameter = parameter_by_name.get(constraint.subject)
@@ -362,8 +709,8 @@ class CandidateValidator:
                 conflict = lower < 0.0
             elif constraint.kind is ConstraintKind.POSITIVE:
                 conflict = lower <= 0.0
-            elif constraint.kind is ConstraintKind.BOUNDED and constraint.bounds:
-                conflict = (
+            if constraint.bounds:
+                conflict = conflict or (
                     lower < constraint.bounds.lower
                     or upper > constraint.bounds.upper
                 )
@@ -384,6 +731,9 @@ class CandidateValidator:
     ) -> None:
         mapped = {item.channel for item in candidate.observation_mappings}
         expected = set(context.targets)
+        modeled_auxiliaries = set(context.auxiliaries) & {
+            state.name for state in candidate.states
+        }
         for channel in sorted(expected - mapped):
             diagnostics.append(
                 ValidationDiagnostic(
@@ -392,7 +742,7 @@ class CandidateValidator:
                     "target has no observation mapping",
                 )
             )
-        for channel in sorted(mapped - expected):
+        for channel in sorted(mapped - expected - modeled_auxiliaries):
             diagnostics.append(
                 ValidationDiagnostic(
                     "UNEXPECTED_OBSERVATION_MAPPING",
@@ -400,6 +750,32 @@ class CandidateValidator:
                     "mapping channel is not a target",
                 )
             )
+
+    @staticmethod
+    def _identity_observed_states(
+        candidate: CandidateModel,
+        context: ValidationContext,
+    ) -> set[str]:
+        """Return states directly tied to available measured channels."""
+        available = set(context.targets) | set(context.auxiliaries)
+        observed = {
+            state.name for state in candidate.states if state.name in available
+        }
+        for mapping in candidate.observation_mappings:
+            try:
+                parsed = RestrictedParser().parse(
+                    mapping.expression,
+                    location=f"observation:{mapping.channel}",
+                )
+            except ModelValidationError:
+                continue
+            if (
+                mapping.channel in available
+                and isinstance(parsed.tree.body, ast.Name)
+                and parsed.tree.body.id in {state.name for state in candidate.states}
+            ):
+                observed.add(parsed.tree.body.id)
+        return observed
 
     @staticmethod
     def _validate_symbols(
@@ -496,12 +872,20 @@ class CandidateValidator:
         processes: dict[str, ParsedExpression],
         equations: dict[str, ParsedExpression],
         observations: dict[str, ParsedExpression],
+        initial_conditions: dict[str, ParsedExpression],
         process_order: tuple[str, ...],
         diagnostics: list[ValidationDiagnostic],
     ) -> None:
         intervals: dict[str, Interval] = {
             context.time_symbol: Interval(-float("inf"), float("inf")),
-            **dict.fromkeys(context.forcing_channels, UNKNOWN_INTERVAL),
+            **{
+                name: (
+                    Interval(*context.forcing_bounds[name])
+                    if name in context.forcing_bounds
+                    else UNKNOWN_INTERVAL
+                )
+                for name in context.forcing_channels
+            },
             **{
                 parameter.name: Interval(
                     parameter.bounds.lower, parameter.bounds.upper
@@ -534,6 +918,13 @@ class CandidateValidator:
                 location=f"observation:{name}",
                 diagnostics=diagnostics,
             )
+        for name, expression in initial_conditions.items():
+            analyze_interval(
+                expression.tree,
+                intervals,
+                location=f"initial_condition:{name}",
+                diagnostics=diagnostics,
+            )
 
     @staticmethod
     def _state_interval(candidate: CandidateModel, state_name: str) -> Interval:
@@ -552,5 +943,10 @@ class CandidateValidator:
                 interval = Interval(
                     max(float.fromhex("0x0.0000000000001p-1022"), interval.lower),
                     interval.upper,
+                )
+            if constraint.bounds:
+                interval = Interval(
+                    max(constraint.bounds.lower, interval.lower),
+                    min(constraint.bounds.upper, interval.upper),
                 )
         return interval

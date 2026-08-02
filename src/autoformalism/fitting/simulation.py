@@ -28,7 +28,21 @@ def simulate_trajectory(
     try:
         if len(time) < 2 or np.any(np.diff(time) <= 0.0):
             raise ValueError("simulation needs at least two increasing time points")
-        missing_initials = sorted(set(model.state_names) - set(initial_conditions))
+        resettable = set(model.observed_state_channels)
+        known_initial_values = _known_initial_values(model, trajectory)
+        derived_initials = {
+            name: model.initial_condition_value(name, known_initial_values)
+            for name in model.state_names
+            if name not in resettable
+        }
+        missing_initials = sorted(
+            name
+            for name in model.state_names
+            if name not in resettable
+            and derived_initials[name] is None
+            and name not in initial_conditions
+            and name not in model.validated.causal_derivative_initials
+        )
         extra_initials = sorted(set(initial_conditions) - set(model.state_names))
         if missing_initials or extra_initials:
             raise ValueError(
@@ -36,37 +50,66 @@ def simulate_trajectory(
                 f"extra={extra_initials}"
             )
         initial_state = np.asarray(
-            [initial_conditions[name] for name in model.state_names], dtype=float
+            [
+                _observed_state_value(model, trajectory, name, 0)
+                if name in resettable
+                else (
+                    0.0
+                    if name in model.validated.causal_derivative_initials
+                    else (
+                        derived_initials[name]
+                        if derived_initials[name] is not None
+                        else initial_conditions[name]
+                    )
+                )
+                for name in model.state_names
+            ],
+            dtype=float,
         )
         if not np.isfinite(initial_state).all():
             raise ValueError("initial conditions contain nonfinite values")
-        forcing = trajectory_forcing(model, trajectory)
-        solution = solve_ivp(
-            lambda current_time, state: model.rhs(
-                current_time, state, parameters, forcing
-            ),
-            (float(time[0]), float(time[-1])),
-            initial_state,
-            t_eval=time,
-            method=config.integration_method,
-            rtol=config.relative_tolerance,
-            atol=config.absolute_tolerance,
-        )
-        if not solution.success:
-            raise RuntimeError(f"integration failed: {solution.message}")
-        if solution.y.shape != (len(model.state_names), len(time)):
-            raise RuntimeError(f"unexpected integration shape: {solution.y.shape}")
-        if not np.isfinite(solution.y).all():
+        if model.validated.context.lagged_targets:
+            state_values = _simulate_one_step_intervals(
+                model, trajectory, parameters, initial_state, config
+            )
+        else:
+            forcing = trajectory_forcing(model, trajectory)
+            solution = solve_ivp(
+                lambda current_time, state: model.rhs(
+                    current_time, state, parameters, forcing
+                ),
+                (float(time[0]), float(time[-1])),
+                initial_state,
+                t_eval=time,
+                method=config.integration_method,
+                rtol=config.relative_tolerance,
+                atol=config.absolute_tolerance,
+            )
+            if not solution.success:
+                raise RuntimeError(f"integration failed: {solution.message}")
+            if solution.y.shape != (len(model.state_names), len(time)):
+                raise RuntimeError(
+                    f"unexpected integration shape: {solution.y.shape}"
+                )
+            state_values = solution.y
+        if not np.isfinite(state_values).all():
             raise RuntimeError("integration produced a nonfinite trajectory")
+        for index in range(state_values.shape[1]):
+            model.validate_state_constraints(state_values[:, index])
 
         predictions: dict[str, np.ndarray] = {
             channel: np.empty(len(time), dtype=float)
             for channel in model.validated.observation_expressions
         }
         for index, current_time in enumerate(time):
+            forcing = trajectory_forcing(
+                model,
+                trajectory,
+                causal_index=max(0, index - 1),
+            )
             observed = model.observe(
                 float(current_time),
-                solution.y[:, index],
+                state_values[:, index],
                 parameters,
                 forcing,
             )
@@ -74,7 +117,7 @@ def simulate_trajectory(
                 predictions[channel][index] = value
         if any(not np.isfinite(values).all() for values in predictions.values()):
             raise RuntimeError("observation mapping produced nonfinite values")
-        return SimulationResult(True, time, solution.y.copy(), predictions)
+        return SimulationResult(True, time, state_values.copy(), predictions)
     except (
         ArithmeticError,
         RuntimeError,
@@ -88,6 +131,8 @@ def simulate_trajectory(
 def trajectory_forcing(
     model: CompiledModel,
     trajectory: Trajectory,
+    *,
+    causal_index: int | None = None,
 ) -> PiecewiseLinearForcing:
     """Build the strict supplied-channel interpolator for a trajectory."""
     channels: dict[str, np.ndarray] = {}
@@ -102,10 +147,118 @@ def trajectory_forcing(
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"fixed covariate {name} must be numeric") from exc
             channels[name] = np.full(len(trajectory.time), value)
+        elif (
+            name in trajectory.targets
+            and name in model.validated.context.lagged_targets
+        ):
+            channels[name] = trajectory.targets[name]
         else:
             raise ValueError(f"trajectory is missing forcing channel {name}")
     return PiecewiseLinearForcing(
         trajectory.time,
         channels,
         allowed_channels=model.validated.forcing_symbols,
+        causal_step_channels=(
+            model.validated.forcing_symbols
+            & frozenset(model.validated.context.lagged_targets)
+        ),
+        causal_index=causal_index,
     )
+
+
+def _simulate_one_step_intervals(
+    model: CompiledModel,
+    trajectory: Trajectory,
+    parameters: Mapping[str, float],
+    initial_state: np.ndarray,
+    config: FitConfig,
+) -> np.ndarray:
+    """Integrate each slot using targets observed at that slot's start only."""
+    states = np.empty((len(model.state_names), len(trajectory.time)), dtype=float)
+    states[:, 0] = initial_state
+    for index in range(len(trajectory.time) - 1):
+        forcing = trajectory_forcing(model, trajectory, causal_index=index)
+        interval_initial = causal_interval_state(
+            model, trajectory, states[:, index], index
+        )
+        solution = solve_ivp(
+            lambda current_time, state, interval_forcing=forcing: model.rhs(
+                current_time, state, parameters, interval_forcing
+            ),
+            (float(trajectory.time[index]), float(trajectory.time[index + 1])),
+            interval_initial,
+            t_eval=[float(trajectory.time[index + 1])],
+            method=config.integration_method,
+            rtol=config.relative_tolerance,
+            atol=config.absolute_tolerance,
+        )
+        if not solution.success:
+            raise RuntimeError(f"integration failed: {solution.message}")
+        states[:, index + 1] = solution.y[:, -1]
+    return states
+
+
+def _observed_state_value(
+    model: CompiledModel,
+    trajectory: Trajectory,
+    state_name: str,
+    index: int,
+) -> float:
+    """Read one causally available value for a directly observed state."""
+    channel = model.observed_state_channels[state_name]
+    if channel in trajectory.targets:
+        return float(trajectory.targets[channel][index])
+    if channel in trajectory.auxiliaries:
+        return float(trajectory.auxiliaries[channel][index])
+    raise ValueError(
+        f"trajectory is missing observed state channel {channel} for {state_name}"
+    )
+
+
+def _known_initial_values(
+    model: CompiledModel,
+    trajectory: Trajectory,
+) -> dict[str, float]:
+    """Collect only public values available at the first prediction boundary."""
+    values = {
+        model.validated.context.time_symbol: float(trajectory.time[0]),
+        **{name: float(data[0]) for name, data in trajectory.targets.items()},
+        **{name: float(data[0]) for name, data in trajectory.auxiliaries.items()},
+        **{name: float(data[0]) for name, data in trajectory.external_inputs.items()},
+    }
+    for name, value in trajectory.fixed_covariates.items():
+        try:
+            values[name] = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"fixed covariate {name} must be numeric") from exc
+    return values
+
+
+def causal_interval_state(
+    model: CompiledModel,
+    trajectory: Trajectory,
+    propagated_state: np.ndarray,
+    index: int,
+) -> np.ndarray:
+    """Reset directly observed components and preserve every latent component."""
+    interval_state = np.asarray(propagated_state, dtype=float).copy()
+    for state_index, state_name in enumerate(model.state_names):
+        if state_name in model.observed_state_channels:
+            interval_state[state_index] = _observed_state_value(
+                model, trajectory, state_name, index
+            )
+        elif state_name in model.validated.causal_derivative_initials:
+            base_state = model.validated.causal_derivative_initials[state_name]
+            if index == 0:
+                interval_state[state_index] = 0.0
+            else:
+                current = _observed_state_value(
+                    model, trajectory, base_state, index
+                )
+                previous = _observed_state_value(
+                    model, trajectory, base_state, index - 1
+                )
+                interval_state[state_index] = (current - previous) / float(
+                    trajectory.time[index] - trajectory.time[index - 1]
+                )
+    return interval_state

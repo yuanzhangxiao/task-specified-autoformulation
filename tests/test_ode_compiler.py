@@ -122,19 +122,72 @@ def test_compiler_supports_all_approved_functions() -> None:
     assert result[1] == pytest.approx(1 + 0 + 0 + 0 + 1 + 2 + 0.5 + math.log(2))
 
 
+def test_compiler_guards_zero_denominators() -> None:
+    payload = candidate_payload()
+    payload["state_equations"][0]["rhs"] = "1 / x"
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(
+            targets=("target",),
+            auxiliaries=("aux",),
+            external_inputs=("input_u",),
+            fixed_covariates=("covariate",),
+        ),
+    )
+    forcing = PiecewiseLinearForcing(
+        [0.0, 1.0],
+        {"input_u": [0.0, 0.0], "aux": [0.0, 0.0]},
+        allowed_channels=model.validated.context.forcing_channels,
+    )
+
+    result = model.rhs(
+        0.0,
+        [0.0, 1.0],
+        {"gain": 1.0, "offset": 1.0, "decay": 1.0},
+        forcing,
+    )
+
+    assert np.isfinite(result).all()
+    assert result[0] == pytest.approx(1e12)
+
+
+def test_compiler_clamps_only_floating_point_parameter_bound_fuzz() -> None:
+    model, context = _compiled()
+    forcing = PiecewiseLinearForcing(
+        [0.0, 1.0],
+        {"aux": [1.0, 1.0], "input_u": [0.0, 0.0]},
+        allowed_channels=context.forcing_channels,
+    )
+    parameters = {
+        "gain": np.nextafter(0.1, -np.inf),
+        "offset": 1.0,
+        "decay": 0.1,
+    }
+
+    result = model.rhs(0.0, [0.0, 1.0], parameters, forcing)
+
+    assert np.isfinite(result).all()
+    parameters["gain"] = 0.09
+    with pytest.raises(RuntimeExpressionError, match="outside"):
+        model.rhs(0.0, [0.0, 1.0], parameters, forcing)
+
+
 def test_compiled_model_rejects_runtime_shape_parameters_and_missing_forcing() -> None:
     model, context = _compiled()
     forcing = PiecewiseLinearForcing(
         [0.0, 1.0],
-        {"aux": [1.0, 1.0]},
+        {"aux": [1.0, 1.0], "input_u": [0.0, 0.0]},
         allowed_channels=context.forcing_channels,
     )
     parameters = {"gain": 1.0, "offset": 2.0, "decay": 0.5}
 
     with pytest.raises(RuntimeExpressionError, match="state shape"):
         model.rhs(0.0, [1.0], parameters, forcing)
+    # RHS evaluation must permit adaptive-solver trial states. Constraints are
+    # enforced on accepted rollout states by the simulator.
+    model.rhs(0.0, [1.0, -1.0], parameters, forcing)
     with pytest.raises(RuntimeExpressionError, match="nonnegative"):
-        model.rhs(0.0, [1.0, -1.0], parameters, forcing)
+        model.validate_state_constraints([1.0, -1.0])
     with pytest.raises(RuntimeExpressionError, match="parameter mismatch"):
         model.rhs(0.0, [1.0, 1.0], {"gain": 1.0}, forcing)
     with pytest.raises(RuntimeExpressionError, match="outside"):
@@ -145,7 +198,12 @@ def test_compiled_model_rejects_runtime_shape_parameters_and_missing_forcing() -
             forcing,
         )
     with pytest.raises(RuntimeExpressionError, match="missing"):
-        model.rhs(0.0, [1.0, 1.0], parameters, forcing)
+        missing_forcing = PiecewiseLinearForcing(
+            [0.0, 1.0],
+            {"aux": [1.0, 1.0]},
+            allowed_channels=context.forcing_channels,
+        )
+        model.rhs(0.0, [1.0, 1.0], parameters, missing_forcing)
 
 
 def test_source_contains_no_dynamic_code_execution_calls() -> None:

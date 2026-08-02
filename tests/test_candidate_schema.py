@@ -126,10 +126,208 @@ def test_candidate_json_round_trip(candidate_payload: dict[str, Any]) -> None:
     assert restored.parameters[2].scope.value == "trajectory_specific"
 
 
+def test_explicit_lhs_equations_normalize_derivatives_and_processes(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["processes"] = []
+    payload["state_equations"] = []
+    payload["equations"] = [
+        {
+            "lhs": "d(target_state)/dt",
+            "rhs": "generated_flux - decay * target_state",
+        },
+        {
+            "lhs": "latent_response_rate",
+            "rhs": "input_u - latent_response / tau",
+            "derivative_of": "latent_response",
+        },
+        {"lhs": "generated_flux", "rhs": "gain * latent_response"},
+    ]
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert candidate.equations == ()
+    assert [(item.state, item.rhs) for item in candidate.state_equations] == [
+        ("target_state", "generated_flux - decay * target_state"),
+        ("latent_response", "latent_response_rate"),
+    ]
+    assert {item.name: item.expression for item in candidate.processes} == {
+        "latent_response_rate": "input_u - latent_response / tau",
+        "generated_flux": "gain * latent_response",
+    }
+    assert CandidateModel.model_validate_json(candidate.model_dump_json()) == candidate
+
+
+def test_plain_state_lhs_is_normalized_as_algebraic_not_derivative(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["state_equations"] = payload["state_equations"][1:]
+    payload["equations"] = [{"lhs": "target_state", "rhs": "generated_flux"}]
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert {item.name for item in candidate.states} == {"latent_response"}
+    assert {item.state for item in candidate.state_equations} == {"latent_response"}
+    assert {item.state for item in candidate.initial_conditions} == {
+        "latent_response"
+    }
+    assert {item.name for item in candidate.processes} == {
+        "generated_flux",
+        "target_state",
+    }
+
+
+def test_rate_name_is_algebraic_without_explicit_derivative_link(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["equations"] = [{"lhs": "unknown_rate", "rhs": "1"}]
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert {item.name for item in candidate.processes} == {
+        "generated_flux",
+        "unknown_rate",
+    }
+
+
+def test_derivative_link_requires_a_declared_state(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["equations"] = [
+        {"lhs": "unknown_rate", "rhs": "1", "derivative_of": "unknown"}
+    ]
+
+    with pytest.raises(ValidationError, match="undeclared state"):
+        CandidateModel.model_validate(payload)
+
+
+def test_derivative_link_removes_redundant_rate_state(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["states"].append(
+        {"name": "target_rate", "kind": "latent", "unit": "relative/time"}
+    )
+    payload["initial_conditions"].append(
+        {"state": "target_rate", "scope": "global", "fixed_value": 0.0}
+    )
+    payload["equations"] = [
+        {
+            "lhs": "target_rate",
+            "rhs": "generated_flux - decay * target_state",
+            "derivative_of": "target_state",
+        }
+    ]
+    payload["state_equations"] = payload["state_equations"][1:]
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert "target_rate" not in {item.name for item in candidate.states}
+    assert "target_rate" not in {
+        item.state for item in candidate.initial_conditions
+    }
+    assert {item.name for item in candidate.processes} >= {"target_rate"}
+    assert candidate.state_equations[-1].state == "target_state"
+    assert candidate.state_equations[-1].rhs == "target_rate"
+
+
+def test_explicit_derivative_rejects_conflicting_derivative_link(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["equations"] = [
+        {
+            "lhs": "d(target_state)/dt",
+            "rhs": "1",
+            "derivative_of": "latent_response",
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="conflicts"):
+        CandidateModel.model_validate(payload)
+
+
+def test_identical_algebraic_equations_are_deduplicated(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["equations"] = [
+        {"lhs": "extra_rate", "rhs": "gain * latent_response"},
+        {"lhs": "extra_rate", "rhs": "gain * latent_response"},
+    ]
+    payload["parameters"].append(
+        {
+            "name": "extra_rate",
+            "scope": "global",
+            "bounds": {"lower": 0.0, "upper": 2.0},
+            "initialization_range": {"lower": 0.0, "upper": 1.0},
+        }
+    )
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert [item.name for item in candidate.processes].count("extra_rate") == 1
+    assert "extra_rate" not in {item.name for item in candidate.parameters}
+
+
+def test_conflicting_algebraic_equations_remain_invalid(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["equations"] = [
+        {"lhs": "extra_rate", "rhs": "gain * latent_response"},
+        {"lhs": "extra_rate", "rhs": "decay * latent_response"},
+    ]
+
+    with pytest.raises(ValidationError, match="conflicting algebraic"):
+        CandidateModel.model_validate(payload)
+
+
+def test_candidate_allows_omitted_descriptive_metadata(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload.pop("change_summary")
+    for state in payload["states"]:
+        state.pop("unit")
+        state.pop("description")
+    for process in payload["processes"]:
+        process.pop("unit")
+        process.pop("description")
+    for mapping in payload["observation_mappings"]:
+        mapping.pop("unit")
+    for parameter in payload["parameters"]:
+        parameter.pop("unit")
+        parameter.pop("description")
+    for constraint in payload["constraints"]:
+        constraint.pop("description")
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert candidate.change_summary == "unspecified"
+    assert all(state.unit == "unspecified" for state in candidate.states)
+    assert all(process.description == "unspecified" for process in candidate.processes)
+    assert all(
+        mapping.unit == "unspecified" for mapping in candidate.observation_mappings
+    )
+    assert all(parameter.unit == "unspecified" for parameter in candidate.parameters)
+    assert all(
+        constraint.description == "unspecified" for constraint in candidate.constraints
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "value", "message"),
     [
-        (("parameters", 0, "bounds"), {"lower": 2.0, "upper": 2.0}, "lower"),
+        (
+            ("parameters", 0, "bounds"),
+            {"lower": 2.0, "upper": 2.0},
+            "nondegenerate",
+        ),
         (
             ("parameters", 0, "initialization_range"),
             {"lower": -1.0, "upper": 2.0},
@@ -155,14 +353,13 @@ def test_candidate_rejects_invalid_nested_values(
         CandidateModel.model_validate(payload)
 
 
-def test_candidate_rejects_duplicate_names(
+def test_candidate_defers_cross_namespace_collisions(
     candidate_payload: dict[str, Any],
 ) -> None:
     payload = copy.deepcopy(candidate_payload)
     payload["processes"][0]["name"] = "target_state"
 
-    with pytest.raises(ValidationError, match="reuse declared names"):
-        CandidateModel.model_validate(payload)
+    assert CandidateModel.model_validate(payload).processes[0].name == "target_state"
 
 
 def test_candidate_requires_equation_and_initialization_for_every_state(
@@ -170,37 +367,136 @@ def test_candidate_requires_equation_and_initialization_for_every_state(
 ) -> None:
     missing_equation = copy.deepcopy(candidate_payload)
     missing_equation["state_equations"].pop()
-    with pytest.raises(ValidationError, match="state equations must cover"):
-        CandidateModel.model_validate(missing_equation)
+    # Equation closure is contextual and therefore deferred until the
+    # deterministic validator runs after supplied-channel repair.
+    assert len(CandidateModel.model_validate(missing_equation).state_equations) == 1
 
     missing_initial = copy.deepcopy(candidate_payload)
     missing_initial["initial_conditions"].pop()
-    with pytest.raises(ValidationError, match="initial conditions must cover"):
-        CandidateModel.model_validate(missing_initial)
+    assert len(CandidateModel.model_validate(missing_initial).initial_conditions) == 1
 
 
-def test_trajectory_specific_initialization_requires_latent_state(
+def test_identity_mapped_observed_initialization_uses_measured_channel(
     candidate_payload: dict[str, Any],
 ) -> None:
     payload = copy.deepcopy(candidate_payload)
+    payload["initial_conditions"][0]["scope"] = "trajectory_specific"
+
+    candidate = CandidateModel.model_validate(payload)
+
+    initial = candidate.initial_conditions[0]
+    assert initial.scope.value == "global"
+    assert initial.expression == "measured_target"
+    assert initial.initialization_range is None
+
+
+def test_identity_mapping_overrides_incorrect_latent_label_for_initialization(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["initial_conditions"][0]["scope"] = "trajectory_specific"
+    payload["states"][0]["kind"] = "latent"
+
+    candidate = CandidateModel.model_validate(payload)
+
+    initial = candidate.initial_conditions[0]
+    assert initial.scope.value == "global"
+    assert initial.expression == "measured_target"
+
+
+def test_unmapped_observed_trajectory_initialization_remains_invalid(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["observation_mappings"][0]["expression"] = "latent_response"
     payload["initial_conditions"][0]["scope"] = "trajectory_specific"
 
     with pytest.raises(ValidationError, match="only for latent states"):
         CandidateModel.model_validate(payload)
 
 
-def test_candidate_rejects_unknown_constraint_and_extra_field(
+def test_candidate_defers_constraint_subjects_but_rejects_extra_field(
     candidate_payload: dict[str, Any],
 ) -> None:
     unknown = copy.deepcopy(candidate_payload)
     unknown["constraints"][0]["subject"] = "undeclared"
-    with pytest.raises(ValidationError, match="undeclared subjects"):
-        CandidateModel.model_validate(unknown)
+    assert CandidateModel.model_validate(unknown).constraints[0].subject == "undeclared"
 
     extra = copy.deepcopy(candidate_payload)
     extra["unexpected"] = True
     with pytest.raises(ValidationError, match="extra_forbidden"):
         CandidateModel.model_validate(extra)
+
+
+def test_nonnegative_constraint_may_also_refine_numeric_bounds(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["constraints"][0]["bounds"] = {"lower": 0.0, "upper": 100.0}
+
+    constraint = CandidateModel.model_validate(payload).constraints[0]
+
+    assert constraint.kind.value == "nonnegative"
+    assert constraint.bounds is not None
+    assert constraint.bounds.upper == 100.0
+
+
+def test_initialization_range_may_declare_fixed_value(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["initial_conditions"][1]["initialization_range"] = {
+        "lower": 0.0,
+        "upper": 0.0,
+    }
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert candidate.initial_conditions[1].initialization_range.lower == 0.0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("fixed_value", 1.25), ("expression", "0.5 * target + covariate")],
+)
+def test_initial_condition_supports_explicit_causal_modes(
+    candidate_payload: dict[str, Any], field: str, value: Any
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    initial = payload["initial_conditions"][1]
+    initial.pop("initialization_range")
+    initial[field] = value
+
+    candidate = CandidateModel.model_validate(payload)
+    restored = CandidateModel.model_validate_json(candidate.model_dump_json())
+
+    assert getattr(restored.initial_conditions[1], field) == value
+
+
+def test_null_observed_initialization_uses_identity_observation(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    observed = payload["initial_conditions"][0]
+    observed["initialization_range"] = None
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert candidate.initial_conditions[0].expression == "measured_target"
+
+
+def test_null_latent_initialization_is_deferred_to_contextual_validation(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    latent = payload["initial_conditions"][1]
+    latent["initialization_range"] = None
+
+    candidate = CandidateModel.model_validate(payload)
+
+    assert candidate.initial_conditions[1].fixed_value is None
+    assert candidate.initial_conditions[1].expression is None
+    assert candidate.initial_conditions[1].initialization_range is None
 
 
 def test_candidate_rejects_nonfinite_number(
@@ -211,4 +507,3 @@ def test_candidate_rejects_nonfinite_number(
 
     with pytest.raises(ValidationError, match="finite"):
         CandidateModel.model_validate(payload)
-

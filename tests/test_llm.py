@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -10,12 +11,43 @@ import pytest
 
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
-from autoformalism.llm.exceptions import LLMProviderError
+from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.llm.mock import MockLLMClient
 from autoformalism.llm.models import StructuredT, TokenUsage
-from autoformalism.llm.ollama import OllamaClient
+from autoformalism.llm.ollama import OllamaClient, _ollama_compatible_schema
 from autoformalism.llm.openai_responses import OpenAIResponsesClient
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import (
+    CandidateModel,
+    JudgeResult,
+    ProposerCandidateV2,
+    enrich_proposal_v2,
+)
+
+
+def _proposal() -> ProposerCandidateV2:
+    return ProposerCandidateV2.model_validate(
+        {
+            "schema_version": "2",
+            "candidate_id": "candidate_1",
+            "change_summary": "Initial candidate.",
+            "states": [
+                {
+                    "name": "x",
+                    "kind": "latent",
+                    "rhs": "-k * x",
+                    "initial": {"expression": "target"},
+                }
+            ],
+            "algebraics": [],
+            "parameters": [
+                {
+                    "name": "k",
+                    "bounds": {"lower": 0.0, "upper": 2.0},
+                    "initialization_range": {"lower": 0.1, "upper": 1.0},
+                }
+            ],
+        }
+    )
 
 
 def _candidate() -> CandidateModel:
@@ -110,7 +142,7 @@ class StubCachedClient(CachedLLMClient):
         self.provider_calls += 1
         if self.provider_calls <= self.failures:
             raise LLMProviderError("temporary failure", retryable=True)
-        parsed = _candidate() if role == "proposer" else _judge()
+        parsed = _proposal() if role == "proposer" else _judge()
         validated = response_model.model_validate(parsed.model_dump(mode="json"))
         return ProviderResponse(
             parsed=validated,
@@ -216,9 +248,38 @@ def test_retry_uses_exponential_backoff_and_jitter(tmp_path: Path) -> None:
     ]
 
 
+def test_invalid_structured_response_retries_with_repair_feedback(
+    tmp_path: Path,
+) -> None:
+    prompts: list[str] = []
+
+    class RepairClient(StubCachedClient):
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            prompts.append(kwargs["user_prompt"])
+            if len(prompts) == 1:
+                raise LLMResponseError(
+                    "duplicate declaration body_weight_kg",
+                    raw_response={"message": {"content": "invalid"}},
+                )
+            return super()._call_provider(**kwargs)
+
+    client = RepairClient(tmp_path)
+
+    result = client.propose(system_prompt="system", user_prompt="original request")
+
+    assert result.attempts == 2
+    assert prompts[0] == "original request"
+    assert "previous structured response was invalid" in prompts[1]
+    assert "duplicate declaration body_weight_kg" in prompts[1]
+    failure = json.loads(
+        (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert failure["raw_response"] == {"message": {"content": "invalid"}}
+
+
 class FakeOpenAIResponse:
     status = "completed"
-    output_parsed = _candidate()
+    output_parsed = _proposal()
     output_text = output_parsed.model_dump_json()
 
     class Usage:
@@ -258,10 +319,11 @@ def test_openai_uses_responses_parse_with_pydantic_schema(tmp_path: Path) -> Non
 
     result = client.propose(system_prompt="system", user_prompt="user")
 
-    assert result.parsed == _candidate()
+    assert result.parsed == enrich_proposal_v2(_proposal())
     assert result.usage == TokenUsage(3, 4, 7)
-    assert sdk.responses.calls[0]["text_format"] is CandidateModel
+    assert sdk.responses.calls[0]["text_format"] is ProposerCandidateV2
     assert sdk.responses.calls[0]["model"] == "test-model"
+    assert sdk.responses.calls[0]["max_output_tokens"] == 2048
     assert sdk.responses.calls[0]["input"] == [
         {"role": "developer", "content": "system"},
         {"role": "user", "content": "user"},
@@ -297,8 +359,89 @@ def test_ollama_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
     assert result.usage == TokenUsage(5, 6, 11)
     assert result.latency_ms == 7.0
     assert calls[0][0] == "http://127.0.0.1:11434/api/chat"
-    assert calls[0][1]["format"] == JudgeResult.model_json_schema(mode="validation")
+    assert calls[0][1]["format"] == _ollama_compatible_schema(
+        JudgeResult.model_json_schema(mode="validation")
+    )
     assert calls[0][1]["stream"] is False
+    assert calls[0][1]["think"] is False
+    assert calls[0][1]["options"]["num_predict"] == 2048
+
+
+def test_ollama_schema_is_compact_but_preserves_validation_structure(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def transport(
+        _url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append(body)
+        return {"message": {"content": _proposal().model_dump_json()}}
+
+    client = OllamaClient(
+        model="qwen3:8b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        transport=transport,
+    )
+    client.propose(system_prompt="system", user_prompt="user")
+
+    encoded_schema = json.dumps(calls[0]["format"])
+    schema = calls[0]["format"]
+
+    def values_for(key: str, value: object) -> list[int]:
+        if isinstance(value, dict):
+            found = [value[key]] if isinstance(value.get(key), int) else []
+            return found + [
+                item
+                for child in value.values()
+                for item in values_for(key, child)
+            ]
+        if isinstance(value, list):
+            return [item for child in value for item in values_for(key, child)]
+        return []
+
+    assert max(values_for("maxLength", schema)) <= 512
+    assert max(values_for("maxItems", schema)) <= 32
+    # A property may itself be named ``description``; schema annotations are gone.
+    assert "Complete machine-readable proposer candidate" not in encoded_schema
+    assert '"title":' not in encoded_schema
+    assert '"default":' not in encoded_schema
+    assert "minLength" in encoded_schema
+    assert '"required"' in encoded_schema
+    assert '"additionalProperties": false' in encoded_schema
+    assert '"pattern"' in encoded_schema
+    assert "states" in schema["required"]
+    assert "rhs" in schema["$defs"]["ProposedStateV2"]["required"]
+
+
+def test_ollama_http_error_includes_server_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:11434/api/chat",
+        400,
+        "Bad Request",
+        {},
+        __import__("io").BytesIO(b'{"error":"failed to parse grammar"}'),
+    )
+
+    def fail_urlopen(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+    client = OllamaClient(
+        model="qwen3:8b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        max_attempts=1,
+    )
+
+    with pytest.raises(LLMProviderError, match="failed to parse grammar"):
+        client.propose(system_prompt="system", user_prompt="user")
 
 
 def test_nonretryable_error_is_not_retried(tmp_path: Path) -> None:

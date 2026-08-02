@@ -90,6 +90,8 @@ class RestrictedParser:
             raise ModelValidationError(tuple(diagnostics)) from exc
         if not isinstance(parsed, ast.Expression):  # pragma: no cover
             raise AssertionError("expression parser returned an unexpected root")
+        parsed = _TimeIndexedSymbolNormalizer().visit(parsed)
+        ast.fix_missing_locations(parsed)
 
         nodes = list(ast.walk(parsed))
         if len(nodes) > self.max_nodes:
@@ -295,3 +297,22 @@ class RestrictedParser:
         if not children:
             return 1
         return 1 + max(RestrictedParser._depth(child) for child in children)
+
+
+class _TimeIndexedSymbolNormalizer(ast.NodeTransformer):
+    """Normalize conventional ``symbol(t)`` notation into a symbol read."""
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        """Rewrite only a direct non-function name called with exactly ``t``."""
+        node = self.generic_visit(node)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id not in APPROVED_FUNCTION_ARITY
+            and not node.keywords
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "t"
+        ):
+            return ast.copy_location(ast.Name(id=node.func.id, ctx=ast.Load()), node)
+        return node

@@ -23,6 +23,15 @@ def test_parser_accepts_approved_arithmetic_and_functions() -> None:
     assert parsed.symbols == frozenset({"x", "y", "z", "k"})
 
 
+def test_parser_normalizes_safe_time_indexed_symbol_notation() -> None:
+    parsed = RestrictedParser().parse(
+        "EGP(t) - Uii(t) + Gp(t)",
+        location="notation",
+    )
+
+    assert parsed.symbols == frozenset({"EGP", "Uii", "Gp"})
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -43,6 +52,7 @@ def test_parser_accepts_approved_arithmetic_and_functions() -> None:
         "f'{x}'",
         "(x := 1)",
         "sum(x)",
+        "unknown(other_time)",
         "round(x)",
         "exp + x",
         "min(x)",

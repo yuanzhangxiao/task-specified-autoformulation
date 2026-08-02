@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from autoformalism.execution import ExecutionArguments, execute
+import pytest
+
+from autoformalism.execution import (
+    ExecutionArguments,
+    _prediction_protocol_prompt,
+    _symbol_contract,
+    arguments_from_namespace,
+    build_experiment_parser,
+    execute,
+)
+from autoformalism.expressions import ValidationContext
 
 
 def _arguments(tmp_path: Path, *, dry_run: bool, resume: bool = False):
@@ -42,3 +52,82 @@ def test_mock_execution_and_resume_are_idempotent(tmp_path: Path) -> None:
     assert first == resumed
     assert first["status"] == "complete"
     assert first["test_failed_trajectories"] == []
+
+
+def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
+    parser = build_experiment_parser(description="test")
+
+    default = arguments_from_namespace(
+        parser.parse_args(["--mock-llm", "--dry-run"])
+    )
+    changed = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--llm-timeout-seconds",
+                "1200",
+            ]
+        )
+    )
+
+    assert default.llm_timeout_seconds == 900.0
+    assert changed.llm_timeout_seconds == 1200.0
+    assert default.llm_max_output_tokens == 2048
+
+
+def test_cli_rejects_nonpositive_timeout() -> None:
+    parser = build_experiment_parser(description="test")
+    namespace = parser.parse_args(
+        ["--mock-llm", "--dry-run", "--llm-timeout-seconds", "0"]
+    )
+
+    with pytest.raises(SystemExit, match="must be positive"):
+        arguments_from_namespace(namespace)
+
+
+def test_cli_accepts_and_validates_max_output_tokens() -> None:
+    parser = build_experiment_parser(description="test")
+    accepted = arguments_from_namespace(
+        parser.parse_args(
+            ["--mock-llm", "--dry-run", "--llm-max-output-tokens", "1024"]
+        )
+    )
+    rejected = parser.parse_args(
+        ["--mock-llm", "--dry-run", "--llm-max-output-tokens", "127"]
+    )
+
+    assert accepted.llm_max_output_tokens == 1024
+    with pytest.raises(SystemExit, match="at least 128"):
+        arguments_from_namespace(rejected)
+
+
+def test_symbol_contract_uses_exact_runtime_identifiers() -> None:
+    contract = _symbol_contract(
+        ValidationContext(
+            targets=("Gp",),
+            auxiliaries=("EGP", "Gt"),
+            external_inputs=("meal_event_g",),
+            fixed_covariates=("body_weight_kg",),
+        )
+    )
+
+    assert "Target channels (generate at each predicted slot): Gp" in contract
+    assert "Causally available one-slot-lagged targets: (none)" in contract
+    assert "Supplied auxiliary trajectories: EGP, Gt" in contract
+    assert "External input trajectories: meal_event_g" in contract
+    assert "Fixed numeric covariates: body_weight_kg" in contract
+    assert "Time symbol in expressions: t" in contract
+    assert "meal_amount" not in contract
+    assert "deliberately promoted to modeled states" in contract
+    assert "Never redeclare external inputs or fixed covariates" in contract
+
+
+def test_prediction_protocol_prompt_overrides_legacy_wording() -> None:
+    prompt = _prediction_protocol_prompt(
+        ValidationContext(targets=("Gp",), lagged_targets=("Gp",))
+    )
+
+    assert "one-step-ahead" in prompt
+    assert "strictly prior" in prompt
+    assert "supersedes" in prompt

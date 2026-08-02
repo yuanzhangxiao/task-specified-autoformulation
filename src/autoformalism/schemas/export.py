@@ -9,9 +9,12 @@ from pydantic import BaseModel
 
 from autoformalism.schemas.candidate import CandidateModel
 from autoformalism.schemas.judge import JudgeResult
+from autoformalism.schemas.proposal import ProposerCandidate, ProposerCandidateV2
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "candidate.schema.json": CandidateModel,
+    "proposer-candidate.schema.json": ProposerCandidate,
+    "proposer-candidate-v2.schema.json": ProposerCandidateV2,
     "judge.schema.json": JudgeResult,
 }
 
@@ -30,4 +33,3 @@ def export_json_schemas(output_directory: Path) -> tuple[Path, ...]:
         path.write_text(f"{payload}\n", encoding="utf-8")
         exported.append(path)
     return tuple(exported)
-

@@ -20,6 +20,9 @@ class PruningConfig(BaseModel):
     validation_mse_tolerance: float = Field(default=0.01, ge=0.0)
     contribution_epsilon: float = Field(default=1e-12, gt=0.0)
     threshold_epsilon: float = Field(default=1e-12, gt=0.0)
+    maximum_normalized_contribution: float = Field(default=0.05, gt=0.0)
+    preserve_external_input_terms: bool = True
+    require_target_dynamics: bool = True
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,8 @@ class PruningResult:
     selected_removed_terms: tuple[str, ...]
     selected_removed_parameters: tuple[str, ...]
     contribution_by_term: Mapping[str, float]
+    persistence_training_mse: float
+    persistence_validation_mse: float
 
     def __post_init__(self) -> None:
         object.__setattr__(

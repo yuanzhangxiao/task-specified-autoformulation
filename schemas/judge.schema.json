@@ -39,6 +39,30 @@
       "title": "ActionableEdit",
       "type": "object"
     },
+    "CategoryScore": {
+      "additionalProperties": false,
+      "description": "Numeric category assessment with an optional concise justification.",
+      "properties": {
+        "justification": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Justification",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "score"
+      ],
+      "title": "CategoryScore",
+      "type": "object"
+    },
     "HardRedFlag": {
       "additionalProperties": false,
       "description": "Blocking or severe specification violation.",
@@ -51,6 +75,7 @@
           "type": "string"
         },
         "description": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Description",
@@ -65,7 +90,6 @@
       },
       "required": [
         "code",
-        "description",
         "evidence"
       ],
       "title": "HardRedFlag",
@@ -95,9 +119,7 @@
       "minProperties": 1,
       "patternProperties": {
         "^[A-Za-z][A-Za-z0-9_]*$": {
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "type": "number"
+          "$ref": "#/$defs/CategoryScore"
         }
       },
       "propertyNames": {

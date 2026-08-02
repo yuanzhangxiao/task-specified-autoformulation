@@ -20,6 +20,8 @@ from autoformalism.expressions.validation import (
 )
 from autoformalism.schemas import CandidateModel, ConstraintKind
 
+SAFE_DIVISION_EPSILON = 1e-12
+
 
 class Forcing(Protocol):
     """Time-indexed supplied auxiliary/input interface."""
@@ -38,6 +40,8 @@ class PiecewiseLinearForcing:
         channels: Mapping[str, ArrayLike],
         *,
         allowed_channels: frozenset[str],
+        causal_step_channels: frozenset[str] = frozenset(),
+        causal_index: int | None = None,
     ) -> None:
         time_values = np.asarray(time, dtype=float)
         if time_values.ndim != 1 or len(time_values) == 0:
@@ -69,6 +73,14 @@ class PiecewiseLinearForcing:
         self._time.setflags(write=False)
         self._channels = numeric_channels
         self._allowed_channels = allowed_channels
+        self._causal_step_channels = causal_step_channels
+        self._causal_index = causal_index
+        if causal_step_channels - allowed_channels:
+            raise ValueError("causal step channels must be allowed forcing channels")
+        if causal_step_channels and causal_index is None:
+            raise ValueError("causal step forcing requires a causal index")
+        if causal_index is not None and not 0 <= causal_index < len(time_values):
+            raise ValueError("causal forcing index is outside the trajectory")
 
     def value(self, channel: str, time: float) -> float:
         """Interpolate a channel inside its closed time support."""
@@ -88,6 +100,9 @@ class PiecewiseLinearForcing:
                 f"forcing query {time} is outside [{lower}, {upper}]"
             )
         bounded_time = min(max(time, lower), upper)
+        if channel in self._causal_step_channels:
+            assert self._causal_index is not None
+            return float(self._channels[channel][self._causal_index])
         return float(np.interp(bounded_time, self._time, self._channels[channel]))
 
 
@@ -106,6 +121,33 @@ class CompiledModel:
     def parameter_names(self) -> tuple[str, ...]:
         """Return declared parameter order."""
         return tuple(item.name for item in self.validated.candidate.parameters)
+
+    @property
+    def observed_state_channels(self) -> Mapping[str, str]:
+        """Map resettable model states to directly observed data channels."""
+        if not self.validated.context.lagged_targets:
+            return {}
+        available = set(self.validated.context.targets) | set(
+            self.validated.context.auxiliaries
+        )
+        mapping = {
+            state: state for state in self.state_names if state in available
+        }
+        for channel, expression in self.validated.observation_expressions.items():
+            body = expression.tree.body
+            if (
+                channel in available
+                and isinstance(body, ast.Name)
+                and body.id in self.state_names
+            ):
+                existing = mapping.get(body.id)
+                if existing is not None and existing != channel:
+                    raise RuntimeExpressionError(
+                        f"state {body.id} has conflicting observed channels: "
+                        f"{existing}, {channel}"
+                    )
+                mapping[body.id] = channel
+        return mapping
 
     def rhs(
         self,
@@ -158,6 +200,29 @@ class CompiledModel:
             self._environment(time, state, parameters, forcing),
         )
 
+    def initial_condition_value(
+        self,
+        state_name: str,
+        known_initial_values: Mapping[str, float],
+    ) -> float | None:
+        """Evaluate a fixed or safely parsed analytic initialization rule."""
+        spec = next(
+            (
+                item
+                for item in self.validated.candidate.initial_conditions
+                if item.state == state_name
+            ),
+            None,
+        )
+        if spec is None:
+            return None
+        if spec.fixed_value is not None:
+            return float(spec.fixed_value)
+        expression = self.validated.initial_condition_expressions.get(state_name)
+        if expression is not None:
+            return _evaluate(expression, known_initial_values)
+        return None
+
     def _environment(
         self,
         time: float,
@@ -175,7 +240,6 @@ class CompiledModel:
             )
         if not np.isfinite(state_values).all():
             raise RuntimeExpressionError("state contains nonfinite values")
-        self._validate_state_constraints(state_values)
         expected_parameters = set(self.parameter_names)
         supplied_parameters = set(parameters)
         if supplied_parameters != expected_parameters:
@@ -191,12 +255,22 @@ class CompiledModel:
                 parameters[parameter.name],
                 f"parameter {parameter.name}",
             )
-            if not parameter.bounds.lower <= value <= parameter.bounds.upper:
+            lower = parameter.bounds.lower
+            upper = parameter.bounds.upper
+            width = upper - lower
+            scale = max(abs(lower), abs(upper), abs(value), np.finfo(float).tiny)
+            tolerance = max(
+                width * 1e-12,
+                scale * np.finfo(float).eps * 32.0,
+            )
+            if value < lower - tolerance or value > upper + tolerance:
                 raise RuntimeExpressionError(
                     f"parameter {parameter.name}={value} is outside "
-                    f"[{parameter.bounds.lower}, {parameter.bounds.upper}]"
+                    f"[{lower}, {upper}]"
                 )
-            parameter_values[parameter.name] = value
+            # SciPy finite differences can land a few ULPs outside an active
+            # bound. Admit only that numerical fuzz and evaluate at the bound.
+            parameter_values[parameter.name] = min(max(value, lower), upper)
 
         environment = {
             self.validated.context.time_symbol: float(time),
@@ -222,10 +296,17 @@ class CompiledModel:
             )
         return environment
 
-    def _validate_state_constraints(
+    def validate_state_constraints(
         self,
-        state_values: NDArray[np.float64],
+        state: ArrayLike,
     ) -> None:
+        """Check constraints on an accepted state, outside solver trial steps."""
+        state_values = np.asarray(state, dtype=float)
+        if state_values.shape != (len(self.state_names),):
+            raise RuntimeExpressionError(
+                f"state shape must be {(len(self.state_names),)}, "
+                f"got {state_values.shape}"
+            )
         values = dict(zip(self.state_names, state_values, strict=True))
         for constraint in self.validated.candidate.constraints:
             if constraint.subject not in values:
@@ -236,14 +317,20 @@ class CompiledModel:
                 invalid = value < 0.0
             elif constraint.kind is ConstraintKind.POSITIVE:
                 invalid = value <= 0.0
-            elif constraint.kind is ConstraintKind.BOUNDED and constraint.bounds:
-                invalid = not (
+            if constraint.bounds:
+                invalid = invalid or not (
                     constraint.bounds.lower <= value <= constraint.bounds.upper
                 )
             if invalid:
+                bounds = (
+                    ""
+                    if constraint.bounds is None
+                    else " with bounds "
+                    f"[{constraint.bounds.lower}, {constraint.bounds.upper}]"
+                )
                 raise RuntimeExpressionError(
                     f"state {constraint.subject}={value} violates "
-                    f"{constraint.kind.value} constraint"
+                    f"{constraint.kind.value} constraint{bounds}"
                 )
 
 
@@ -295,14 +382,23 @@ def _walk(node: ast.AST, environment: Mapping[str, float]) -> float:
         if isinstance(node.op, ast.Mult):
             return left * right
         if isinstance(node.op, ast.Div):
-            return left / right
+            return left / _guard_denominator(right)
         if isinstance(node.op, ast.Pow):
-            return left**int(right)
+            exponent = int(right)
+            base = _guard_denominator(left) if exponent < 0 else left
+            return base**exponent
         raise AssertionError("parser admitted an unsupported binary operator")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         arguments = [_walk(argument, environment) for argument in node.args]
         return _call_function(node.func.id, arguments)
     raise AssertionError(f"parser admitted unsupported node {type(node).__name__}")
+
+
+def _guard_denominator(value: float) -> float:
+    """Keep division finite near zero without changing denominator sign."""
+    if abs(value) >= SAFE_DIVISION_EPSILON:
+        return value
+    return SAFE_DIVISION_EPSILON if value >= 0.0 else -SAFE_DIVISION_EPSILON
 
 
 def _call_function(name: str, arguments: list[float]) -> float:

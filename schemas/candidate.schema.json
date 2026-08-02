@@ -30,6 +30,7 @@
           "default": null
         },
         "description": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Description",
@@ -48,18 +49,51 @@
       },
       "required": [
         "subject",
-        "kind",
-        "description"
+        "kind"
       ],
       "title": "ConstraintSpec",
       "type": "object"
     },
     "InitialConditionSpec": {
       "additionalProperties": false,
-      "description": "Bounded initialization range for a modeled state.",
+      "description": "One explicit initialization rule for a modeled state.",
       "properties": {
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expression"
+        },
+        "fixed_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixed Value"
+        },
         "initialization_range": {
-          "$ref": "#/$defs/ValueRange"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "scope": {
           "$ref": "#/$defs/ParameterScope"
@@ -74,8 +108,7 @@
       },
       "required": [
         "state",
-        "scope",
-        "initialization_range"
+        "scope"
       ],
       "title": "InitialConditionSpec",
       "type": "object"
@@ -98,6 +131,7 @@
           "type": "string"
         },
         "unit": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Unit",
@@ -106,8 +140,7 @@
       },
       "required": [
         "channel",
-        "expression",
-        "unit"
+        "expression"
       ],
       "title": "ObservationMapping",
       "type": "object"
@@ -129,6 +162,7 @@
           "$ref": "#/$defs/ValueRange"
         },
         "description": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Description",
@@ -148,6 +182,7 @@
           "$ref": "#/$defs/ParameterScope"
         },
         "unit": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Unit",
@@ -158,9 +193,7 @@
         "name",
         "scope",
         "bounds",
-        "initialization_range",
-        "unit",
-        "description"
+        "initialization_range"
       ],
       "title": "ParameterSpec",
       "type": "object"
@@ -170,6 +203,7 @@
       "description": "Algebraic generated process evaluated from declared symbols.",
       "properties": {
         "description": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Description",
@@ -181,6 +215,18 @@
           "title": "Expression",
           "type": "string"
         },
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
+        },
         "name": {
           "maxLength": 128,
           "minLength": 1,
@@ -189,6 +235,7 @@
           "type": "string"
         },
         "unit": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Unit",
@@ -197,16 +244,53 @@
       },
       "required": [
         "name",
-        "expression",
-        "unit",
-        "description"
+        "expression"
       ],
       "title": "ProcessSpec",
       "type": "object"
     },
+    "ProposedEquation": {
+      "additionalProperties": false,
+      "description": "Proposer-facing equation whose left-hand side defines its semantics.\n\n``dx/dt`` or ``d(x)/dt`` is a derivative equation. A plain identifier,\nincluding ``x_rate``, is an algebraic process unless ``derivative_of``\nexplicitly links that process to a declared dynamic state.",
+      "properties": {
+        "derivative_of": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Derivative Of"
+        },
+        "lhs": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Lhs",
+          "type": "string"
+        },
+        "rhs": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Rhs",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lhs",
+        "rhs"
+      ],
+      "title": "ProposedEquation",
+      "type": "object"
+    },
     "StateEquation": {
       "additionalProperties": false,
-      "description": "Right-hand side for exactly one declared state.",
+      "description": "Canonical derivative equation for exactly one declared state.",
       "properties": {
         "rhs": {
           "maxLength": 10000,
@@ -243,6 +327,7 @@
       "description": "Observed or latent dynamic state declaration.",
       "properties": {
         "description": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Description",
@@ -250,6 +335,18 @@
         },
         "kind": {
           "$ref": "#/$defs/StateKind"
+        },
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
         },
         "name": {
           "maxLength": 128,
@@ -259,6 +356,7 @@
           "type": "string"
         },
         "unit": {
+          "default": "unspecified",
           "maxLength": 10000,
           "minLength": 1,
           "title": "Unit",
@@ -267,9 +365,7 @@
       },
       "required": [
         "name",
-        "kind",
-        "unit",
-        "description"
+        "kind"
       ],
       "title": "StateSpec",
       "type": "object"
@@ -306,6 +402,7 @@
       "type": "string"
     },
     "change_summary": {
+      "default": "unspecified",
       "maxLength": 10000,
       "minLength": 1,
       "title": "Change Summary",
@@ -320,12 +417,22 @@
       "title": "Constraints",
       "type": "array"
     },
+    "equations": {
+      "default": [],
+      "description": "Explicit-LHS proposer equations. Derivatives use dx/dt or d(x)/dt. Plain identifiers, including x_rate, are algebraic unless linked with derivative_of. Normalized on input.",
+      "items": {
+        "$ref": "#/$defs/ProposedEquation"
+      },
+      "maxItems": 320,
+      "title": "Equations",
+      "type": "array"
+    },
     "initial_conditions": {
+      "default": [],
       "items": {
         "$ref": "#/$defs/InitialConditionSpec"
       },
       "maxItems": 64,
-      "minItems": 1,
       "title": "Initial Conditions",
       "type": "array"
     },
@@ -377,11 +484,12 @@
       "type": "string"
     },
     "state_equations": {
+      "default": [],
+      "description": "Canonical/legacy derivative equations; proposers should use equations.",
       "items": {
         "$ref": "#/$defs/StateEquation"
       },
       "maxItems": 64,
-      "minItems": 1,
       "title": "State Equations",
       "type": "array"
     },
@@ -398,11 +506,8 @@
   "required": [
     "candidate_id",
     "parent_candidate_id",
-    "change_summary",
     "states",
-    "state_equations",
-    "observation_mappings",
-    "initial_conditions"
+    "observation_mappings"
   ],
   "title": "CandidateModel",
   "type": "object"

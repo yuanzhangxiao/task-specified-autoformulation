@@ -48,7 +48,8 @@ def test_judge_json_round_trip(judge_payload: dict[str, Any]) -> None:
     restored = JudgeResult.model_validate_json(result.model_dump_json())
 
     assert restored == result
-    assert restored.category_scores["causality"] == 0.25
+    assert restored.category_scores["causality"].score == 0.25
+    assert restored.numeric_category_scores["causality"] == 0.25
     assert restored.actionable_edits[0].priority.value == "required"
 
 
@@ -93,3 +94,28 @@ def test_judge_rejects_extra_fields(judge_payload: dict[str, Any]) -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
         JudgeResult.model_validate(payload)
 
+
+def test_judge_accepts_score_justification_objects(
+    judge_payload: dict[str, Any],
+) -> None:
+    judge_payload["category_scores"]["causality"] = {
+        "score": 0.4,
+        "justification": "Uses only causal history.",
+    }
+
+    result = JudgeResult.model_validate(judge_payload)
+
+    assert result.category_scores["causality"].score == 0.4
+    assert result.category_scores["causality"].justification == (
+        "Uses only causal history."
+    )
+
+
+def test_hard_flag_description_defaults_to_evidence_only_contract(
+    judge_payload: dict[str, Any],
+) -> None:
+    del judge_payload["hard_red_flags"][0]["description"]
+
+    result = JudgeResult.model_validate(judge_payload)
+
+    assert result.hard_red_flags[0].description == "unspecified"

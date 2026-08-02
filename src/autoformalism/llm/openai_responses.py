@@ -21,6 +21,7 @@ class OpenAIResponsesClient(CachedLLMClient):
         model: str,
         cache_directory: Path,
         log_path: Path,
+        max_output_tokens: int = 2048,
         sdk_client: Any | None = None,
         **retry_options: Any,
     ) -> None:
@@ -36,6 +37,10 @@ class OpenAIResponsesClient(CachedLLMClient):
 
             sdk_client = OpenAI(max_retries=0)
         self._sdk_client = sdk_client
+        self._max_output_tokens = max_output_tokens
+
+    def _hashable_provider_options(self) -> dict[str, object]:
+        return {"max_output_tokens": self._max_output_tokens}
 
     def _call_provider(
         self,
@@ -49,6 +54,7 @@ class OpenAIResponsesClient(CachedLLMClient):
         try:
             response = self._sdk_client.responses.parse(
                 model=self._model,
+                max_output_tokens=self._max_output_tokens,
                 input=[
                     {"role": "developer", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -128,4 +134,3 @@ class OpenAIResponsesClient(CachedLLMClient):
             f"OpenAI request failed ({type(error).__name__}): {error}",
             retryable=retryable,
         ) from error
-

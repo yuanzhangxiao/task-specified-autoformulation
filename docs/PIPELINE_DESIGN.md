@@ -5,27 +5,42 @@
 Phase 1 discovers a task-sufficient continuous-time model from
 trajectory data and natural-language requirements under partial
 observability. The system jointly searches structure, latent states,
-observation mappings, and bounded continuous parameters.
+observation mappings, and bounded continuous parameters. Proposer-facing
+equations use an explicit left-hand side: `dx/dt` or `d(x)/dt` denotes a
+derivative, while every plain identifier—including `x_rate`—defines an
+algebraic process. A named process becomes a derivative only through an explicit
+`derivative_of` link to a declared state.
+Normalization converts these forms into the internal state-equation/process
+representation before deterministic validation. Numeric bounds are required for
+fitted parameters, not for states; qualitative state constraints do not require
+invented ranges.
 
 The following are architectural invariants:
 
 1. Train, validation, and test data are distinct typed objects.
 2. Proposal and iterative selection can see train results and
    validation results, but never test values or metrics.
-3. Target trajectories are never prediction-horizon inputs.
-4. Only prompt/spec-declared auxiliaries and external inputs may be
-   interpolated over the horizon.
-5. LLM output is untrusted and is parsed through schemas and a
+3. Current and future target values are never inputs. Every task is
+   one-step-ahead, so target sample i-1 may be used causally while predicting i.
+4. Only prompt/spec-declared auxiliaries and external inputs may be linearly
+   interpolated. Permitted target history uses interval-wise sample-and-hold,
+   never interpolation involving a future target sample.
+5. At each interval boundary, directly observed candidate states are reset
+   from the target/auxiliary values then available. Latent states are never
+   revealed or reset; each begins from a declared fixed value or a restricted
+   analytic expression of known initial observations/inputs/covariates, then
+   propagates from causally maintained estimates.
+6. LLM output is untrusted and is parsed through schemas and a
    restricted expression grammar; no `eval`, `exec`, arbitrary Python,
    or unrestricted lambdification is used.
-6. Global parameters are shared across trajectories. Only explicitly
-   declared latent initial conditions may be trajectory-specific.
-7. Every LLM call is content-addressed, cached, and logged.
-8. Every stage is checkpointed with enough state for deterministic
+7. Global parameters are shared across trajectories. Latent initial values
+   are fixed or computed analytically from causally known initial data.
+8. Every LLM call is content-addressed, cached, and logged.
+9. Every stage is checkpointed with enough state for deterministic
    resume.
-9. Final structure selection uses validation data. The test split is
+10. Final structure selection uses validation data. The test split is
    opened once, only after selection is frozen.
-10. Private/hidden benchmark material is never a runtime input.
+11. Private/hidden benchmark material is never a runtime input.
 
 ## Core typed interfaces
 
@@ -87,9 +102,18 @@ unavailable channels. Loading `TEST` requires a separate
 `FrozenSelection` capability, so ordinary controller code cannot
 accidentally obtain test data.
 
-### Candidate schema and expressions
+### Proposal and canonical candidate schemas
 
 ```python
+class ProposerCandidateV2(BaseModel):
+    schema_version: Literal["2"]
+    candidate_id: str
+    parent_candidate_id: str | None
+    states: list[ProposedStateV2]  # rhs, channel identity, initial, constraints
+    algebraics: list[ProposedAlgebraicV2]
+    parameters: list[ProposedParameter]
+    # Mechanism tags are embedded; target mappings are inferred from context.
+
 class CandidateModel(BaseModel):
     schema_version: Literal["1"]
     candidate_id: str
@@ -116,7 +140,18 @@ comparisons/piecewise forms explicitly supported by the grammar, and a
 small whitelist such as `exp`, `tanh`, `abs`, `min`, and `max`.
 Validation rejects unknown syntax, undefined symbols, cycles among
 algebraic processes, missing state equations, invalid bounds,
-unavailable channels, target leakage, and unsafe domains. Compilation
+unavailable channels, target leakage, and unsafe domains. Every V2 state
+embeds its derivative RHS, so deterministic enrichment creates exactly
+one canonical state equation per state. It also fills routine metadata and
+uses parameter bounds as the default optimizer initialization range.
+Observed states identify their data channel and omit initialization; latent
+states provide exactly one fixed or analytic initialization. Target mappings are
+inferred by matching benchmark targets to observed channels or same-named
+states/algebraics. Constraints and task-mechanism tags are component-local.
+Potentially-zero denominators produce a recorded warning and use a
+sign-preserving `1e-12` runtime guard. Unsafe logarithm and square-root
+domains remain hard validation errors because clipping them changes model
+semantics. Compilation
 walks the validated AST directly; it never evaluates proposer text.
 
 ### LLM boundary
@@ -148,7 +183,10 @@ Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
 raw full history. The judge sees the benchmark judge prompt and
 candidate structure, but no numerical fit metric; deterministic code
-owns fit scoring.
+owns fit scoring and all blocking validity checks. LLM category scores,
+red flags, missing requirements, and edits are advisory. They are retained
+for feedback and score tie-breaking but cannot reject a deterministically
+valid, successfully fitted candidate.
 
 ### Simulation, fitting, metrics, and pruning
 
@@ -178,12 +216,14 @@ declared auxiliary/input channels and preserves per-trajectory
 boundaries. `Simulator` uses `solve_ivp`, checks solver success,
 finite values, time coverage, and configured state constraints.
 
-`Fitter` constructs one bounded vector containing global parameters
-and explicitly allowed per-trajectory latent initial conditions. It
-runs deterministic seeded multistart `least_squares`; failed starts
-remain diagnostics rather than disappearing. Training residuals drive
-optimization. Validation is evaluated after each fitted start for
-selection among starts and later beam ranking, never used as a forcing.
+`Fitter` constructs one bounded vector containing global parameters only. If
+every candidate state maps directly to an observed target/auxiliary with a
+training derivative label, it fits normalized RHS derivative residuals using
+deterministic bounded multistart `least_squares` without ODE integration.
+Candidates containing genuine latent states fall back to rollout residuals.
+Failed starts remain diagnostics rather than disappearing. Regardless of the
+fitting backend, training and validation rankings use causal one-step rollout
+metrics; validation never tunes the parameters.
 
 `MetricEvaluator` computes per-channel normalized MSE using
 train-derived normalization scales, then aggregates with an explicit
@@ -192,10 +232,15 @@ Zero/near-zero scales use a documented floor. No code in this service
 can load test data during iteration.
 
 `TermPruner` operates on whole AST terms. It measures normalized
-trajectory contribution, proposes one deterministic removal at a time,
-refits, and accepts/rejects using validation impact plus validity and
-simulation checks. Raw coefficient magnitude is never the pruning
-criterion.
+trajectory contribution at interval boundaries and interiors, proposes
+low-contribution removals only up to a configured maximum threshold, refits,
+and accepts/rejects using validation impact plus validity and simulation
+checks. Terms containing declared external inputs are preserved because sparse
+events can have important interval effects despite zero sampled-boundary RMS.
+Every target-producing dependency retains nonzero dynamics. The one-step
+persistence MSE is reported separately as a baseline and is never represented
+as a fully pruned discovered model. Raw coefficient magnitude is never the
+pruning criterion.
 
 ### Controller, persistence, and final evaluation
 
@@ -241,7 +286,8 @@ AUTOFORMALISM_DATA_ROOT
   -> normalized TierSpec + public prompts
   -> validated train/validation DatasetSplit objects
   -> proposer request/cache/log
-  -> CandidateModel schema
+  -> compact ProposerCandidate schema
+  -> deterministic enrichment to CandidateModel
   -> deterministic semantic + expression validation
   -> CompiledModel
   -> bounded multistart fit on train

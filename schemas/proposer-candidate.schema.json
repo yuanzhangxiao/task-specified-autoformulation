@@ -1,0 +1,348 @@
+{
+  "$defs": {
+    "ConstraintKind": {
+      "description": "Machine-readable constraint categories.",
+      "enum": [
+        "nonnegative",
+        "positive",
+        "bounded",
+        "monotone_increasing",
+        "monotone_decreasing",
+        "conservation",
+        "custom"
+      ],
+      "title": "ConstraintKind",
+      "type": "string"
+    },
+    "EmbeddedConstraint": {
+      "additionalProperties": false,
+      "description": "Constraint embedded in the declaration of the symbol it governs.",
+      "properties": {
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ConstraintKind"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "EmbeddedConstraint",
+      "type": "object"
+    },
+    "ParameterScope": {
+      "description": "Sharing scope for a fitted scalar.",
+      "enum": [
+        "global",
+        "trajectory_specific"
+      ],
+      "title": "ParameterScope",
+      "type": "string"
+    },
+    "ProposedObservation": {
+      "additionalProperties": false,
+      "description": "Prediction mapping for a measured target channel.",
+      "properties": {
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "expression"
+      ],
+      "title": "ProposedObservation",
+      "type": "object"
+    },
+    "ProposedParameter": {
+      "additionalProperties": false,
+      "description": "A bounded fitted parameter with defaults for routine metadata.",
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/ValueRange"
+        },
+        "initialization_range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ParameterScope",
+          "default": "global"
+        }
+      },
+      "required": [
+        "name",
+        "bounds"
+      ],
+      "title": "ProposedParameter",
+      "type": "object"
+    },
+    "ProposedProcess": {
+      "additionalProperties": false,
+      "description": "A named algebraic expression.",
+      "properties": {
+        "constraints": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EmbeddedConstraint"
+          },
+          "maxItems": 16,
+          "title": "Constraints",
+          "type": "array"
+        },
+        "expression": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "expression"
+      ],
+      "title": "ProposedProcess",
+      "type": "object"
+    },
+    "ProposedState": {
+      "additionalProperties": false,
+      "description": "A dynamic state with its equation and constraints embedded.",
+      "properties": {
+        "constraints": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EmbeddedConstraint"
+          },
+          "maxItems": 16,
+          "title": "Constraints",
+          "type": "array"
+        },
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "initial_expression": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Expression"
+        },
+        "initial_scope": {
+          "$ref": "#/$defs/ParameterScope",
+          "default": "global"
+        },
+        "initial_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Value"
+        },
+        "kind": {
+          "$ref": "#/$defs/StateKind"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "rhs": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Rhs",
+          "type": "string"
+        },
+        "unit": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "rhs"
+      ],
+      "title": "ProposedState",
+      "type": "object"
+    },
+    "StateKind": {
+      "description": "Whether a modeled state is measured or inferred.",
+      "enum": [
+        "observed",
+        "latent"
+      ],
+      "title": "StateKind",
+      "type": "string"
+    },
+    "ValueRange": {
+      "additionalProperties": false,
+      "description": "Closed finite numeric interval.",
+      "properties": {
+        "lower": {
+          "title": "Lower",
+          "type": "number"
+        },
+        "upper": {
+          "title": "Upper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper"
+      ],
+      "title": "ValueRange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Small LLM-facing model contract; canonical details are derived locally.",
+  "properties": {
+    "candidate_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "change_summary": {
+      "default": "unspecified",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Change Summary",
+      "type": "string"
+    },
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/ProposedObservation"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Observations",
+      "type": "array"
+    },
+    "parameters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProposedParameter"
+      },
+      "maxItems": 256,
+      "title": "Parameters",
+      "type": "array"
+    },
+    "parent_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Candidate Id"
+    },
+    "processes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProposedProcess"
+      },
+      "maxItems": 256,
+      "title": "Processes",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "states": {
+      "items": {
+        "$ref": "#/$defs/ProposedState"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "States",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "states",
+    "observations"
+  ],
+  "title": "ProposerCandidate",
+  "type": "object"
+}

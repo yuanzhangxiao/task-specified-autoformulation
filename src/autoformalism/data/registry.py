@@ -47,10 +47,11 @@ _SPECS = (
         manifest_relative_path=Path("benchmark1_original_dalla_man/manifest.json"),
         tier_roles=_b1_roles("Gp"),
         time_column="time",
-        external_inputs=("meal_event_g", "meal_schedule"),
+        external_inputs=("meal_event_g",),
         fixed_covariates=("body_weight_kg",),
         input_filename_template="metadata_{split}.csv",
         sampling_interval=1.0,
+        one_step_target_history=True,
     ),
     BenchmarkSpec(
         benchmark_id="perturbed_b1",
@@ -60,10 +61,11 @@ _SPECS = (
         ),
         tier_roles=_b1_roles("Gp"),
         time_column="time",
-        external_inputs=("meal_event_g", "meal_schedule"),
+        external_inputs=("meal_event_g",),
         fixed_covariates=("body_weight_kg",),
         input_filename_template="metadata_{split}.csv",
         sampling_interval=1.0,
+        one_step_target_history=True,
     ),
     BenchmarkSpec(
         benchmark_id="obfuscated_original_case01",
@@ -81,6 +83,7 @@ _SPECS = (
         fixed_covariates=("c01",),
         input_filename_template="input_{split}.csv",
         sampling_interval=1.0,
+        one_step_target_history=True,
     ),
     BenchmarkSpec(
         benchmark_id="obfuscated_perturbed_case01",
@@ -98,6 +101,7 @@ _SPECS = (
         fixed_covariates=("c01",),
         input_filename_template="input_{split}.csv",
         sampling_interval=1.0,
+        one_step_target_history=True,
     ),
     BenchmarkSpec(
         benchmark_id="benchmark5",
@@ -148,4 +152,3 @@ class BenchmarkRegistry:
             raise BenchmarkNotFoundError(
                 f"unknown benchmark {benchmark_id!r}; supported: {supported}"
             ) from exc
-

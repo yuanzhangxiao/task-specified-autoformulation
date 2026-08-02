@@ -73,6 +73,7 @@ class BenchmarkSpec(BaseModel):
     tier_directory_template: str = "{tier}"
     sampling_interval: float = Field(gt=0.0)
     clean_observations_available: bool = True
+    one_step_target_history: bool = True
 
     @model_validator(mode="after")
     def all_roles_are_disjoint(self) -> BenchmarkSpec:

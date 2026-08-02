@@ -7,10 +7,10 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import least_squares
+from scipy.optimize import OptimizeResult, least_squares
 
 from autoformalism.data import DatasetSplit, TrainingScaler, Trajectory
-from autoformalism.expressions import CompiledModel
+from autoformalism.expressions import CompiledModel, RuntimeExpressionError
 from autoformalism.fitting.models import (
     EvaluationMetrics,
     FailureCounter,
@@ -18,8 +18,8 @@ from autoformalism.fitting.models import (
     FitResult,
     OptimizationDiagnostic,
 )
-from autoformalism.fitting.simulation import simulate_trajectory
-from autoformalism.schemas import ParameterScope
+from autoformalism.fitting.simulation import simulate_trajectory, trajectory_forcing
+from autoformalism.schemas import InitialConditionSpec, ParameterScope
 
 
 @dataclass(frozen=True)
@@ -59,14 +59,23 @@ def fit_candidate(
     starts = _starts(variables, settings.number_of_starts, rng)
     residual_size = _residual_size(training, model)
     outcomes: list[tuple[object, FailureCounter]] = []
+    derivative_backend = _can_use_derivative_regression(model, training)
 
     def decode(values: NDArray[np.float64]) -> _Decoded:
         return _decode_training(model, training, variables, values)
 
     for start in starts:
         counter = FailureCounter()
-        result = least_squares(
-            _residual_function(
+        residual = (
+            _derivative_residual_function(
+                model,
+                training.trajectories,
+                decode,
+                settings,
+                counter,
+            )
+            if derivative_backend
+            else _residual_function(
                 model,
                 training.trajectories,
                 decode,
@@ -74,11 +83,25 @@ def fit_candidate(
                 settings,
                 counter,
                 residual_size,
-            ),
-            start,
-            bounds=(lower, upper),
-            max_nfev=settings.maximum_function_evaluations,
+            )
         )
+        if len(variables):
+            result = least_squares(
+                residual,
+                start,
+                bounds=(lower, upper),
+                max_nfev=settings.maximum_function_evaluations,
+            )
+        else:
+            values = residual(start)
+            result = OptimizeResult(
+                x=start,
+                success=True,
+                status=1,
+                message="no free parameters",
+                cost=float(0.5 * np.dot(values, values)),
+                nfev=1,
+            )
         outcomes.append((result, counter))
 
     best_index = min(
@@ -88,7 +111,18 @@ def fit_candidate(
     best = outcomes[best_index][0]
     decoded = decode(best.x)
     diagnostics = tuple(
-        _diagnostic(index, result, counter, variables, settings)
+        _diagnostic(
+            index,
+            result,
+            counter,
+            variables,
+            settings,
+            backend=(
+                "derivative_regression"
+                if derivative_backend
+                else "rollout_least_squares"
+            ),
+        )
         for index, (result, counter) in enumerate(outcomes)
     )
     train_metrics = _evaluate(
@@ -117,11 +151,25 @@ def fit_candidate(
         target_scales,
         settings,
     )
+    evaluation_budget_reached = int(best.status) == 0
     succeeded = bool(
-        bool(best.success)
+        (bool(best.success) or evaluation_budget_reached)
+        and np.isfinite(float(best.cost))
+        and np.isfinite(best.x).all()
         and not train_metrics.failed_trajectories
+        and not validation_metrics.failed_trajectories
         and np.isfinite(train_metrics.normalized_mse)
+        and np.isfinite(validation_metrics.normalized_mse)
     )
+    if succeeded and evaluation_budget_reached:
+        message = (
+            "optimizer evaluation budget reached before convergence; "
+            "finite fitted candidate retained"
+        )
+    elif succeeded:
+        message = None
+    else:
+        message = "best fit contains numerical failures or invalid optimizer state"
     return FitResult(
         success=succeeded,
         global_parameters=decoded.parameters,
@@ -133,7 +181,7 @@ def fit_candidate(
         diagnostics=diagnostics,
         best_start_index=best_index,
         target_scales=target_scales,
-        message=None if succeeded else "best fit contains numerical failures",
+        message=message,
     )
 
 
@@ -177,6 +225,8 @@ def _midpoint_trajectory_initials(
     model: CompiledModel,
     split: DatasetSplit,
 ) -> Mapping[str, Mapping[str, float]]:
+    if model.validated.context.lagged_targets:
+        return {trajectory.trajectory_id: {} for trajectory in split.trajectories}
     local = {
         item.state: (
             item.initialization_range.lower + item.initialization_range.upper
@@ -184,6 +234,7 @@ def _midpoint_trajectory_initials(
         / 2.0
         for item in model.validated.candidate.initial_conditions
         if item.scope is ParameterScope.TRAJECTORY_SPECIFIC
+        and item.state not in model.observed_state_channels
     }
     return {
         trajectory.trajectory_id: dict(local) for trajectory in split.trajectories
@@ -245,10 +296,18 @@ def _training_variables(
     initials = {
         item.state: item for item in model.validated.candidate.initial_conditions
     }
+    if model.validated.context.lagged_targets:
+        return tuple(result)
     for state in model.state_names:
+        if state in model.observed_state_channels:
+            continue
         initial = initials[state]
         value_range = initial.initialization_range
-        if initial.scope is ParameterScope.GLOBAL:
+        assert value_range is not None
+        if (
+            initial.scope is ParameterScope.GLOBAL
+            and value_range.lower < value_range.upper
+        ):
             result.append(
                 _Variable(
                     f"initial:{state}",
@@ -260,9 +319,14 @@ def _training_variables(
             )
     for trajectory in split.trajectories:
         for state in model.state_names:
+            if state in model.observed_state_channels:
+                continue
             initial = initials[state]
             if initial.scope is ParameterScope.TRAJECTORY_SPECIFIC:
                 value_range = initial.initialization_range
+                assert value_range is not None
+                if value_range.lower == value_range.upper:
+                    continue
                 result.append(
                     _Variable(
                         f"initial:{trajectory.trajectory_id}:{state}",
@@ -297,19 +361,37 @@ def _decode_training(
         parameter.name: float(named[f"parameter:{parameter.name}"])
         for parameter in model.validated.candidate.parameters
     }
+    if model.validated.context.lagged_targets:
+        return _Decoded(
+            parameters,
+            {},
+            {trajectory.trajectory_id: {} for trajectory in split.trajectories},
+        )
     initials = {
         item.state: item for item in model.validated.candidate.initial_conditions
     }
     global_initials = {
-        state: float(named[f"initial:{state}"])
+        state: (
+            initials[state].initialization_range.lower
+            if initials[state].initialization_range.lower
+            == initials[state].initialization_range.upper
+            else float(named[f"initial:{state}"])
+        )
         for state in model.state_names
         if initials[state].scope is ParameterScope.GLOBAL
+        and state not in model.observed_state_channels
     }
     trajectory_initials = {
         trajectory.trajectory_id: {
-            state: float(named[f"initial:{trajectory.trajectory_id}:{state}"])
+            state: (
+                initials[state].initialization_range.lower
+                if initials[state].initialization_range.lower
+                == initials[state].initialization_range.upper
+                else float(named[f"initial:{trajectory.trajectory_id}:{state}"])
+            )
             for state in model.state_names
             if initials[state].scope is ParameterScope.TRAJECTORY_SPECIFIC
+            and state not in model.observed_state_channels
         }
         for trajectory in split.trajectories
     }
@@ -337,11 +419,15 @@ def _residual_function(
                 model, trajectory, decoded.parameters, initial, config
             )
             if not simulation.success:
-                failures.count += 1
+                failures.record(simulation.message)
                 return np.full(residual_size, config.failure_penalty)
             for channel in model.validated.context.targets:
+                start = 1 if model.validated.context.lagged_targets else 0
                 pieces.append(
-                    (simulation.predictions[channel] - trajectory.targets[channel])
+                    (
+                        simulation.predictions[channel][start:]
+                        - trajectory.targets[channel][start:]
+                    )
                     / scales[channel]
                 )
         return np.concatenate(pieces)
@@ -349,9 +435,109 @@ def _residual_function(
     return residual
 
 
+def _can_use_derivative_regression(
+    model: CompiledModel,
+    training: DatasetSplit,
+) -> bool:
+    """Return whether every state and derivative is directly observed."""
+    observed = model.observed_state_channels
+    if set(observed) != set(model.state_names):
+        return False
+    return all(
+        all(channel in trajectory.derivatives for channel in observed.values())
+        for trajectory in training.trajectories
+    )
+
+
+def _derivative_residual_function(
+    model: CompiledModel,
+    trajectories: Sequence[Trajectory],
+    decode: Callable[[NDArray[np.float64]], _Decoded],
+    config: FitConfig,
+    failures: FailureCounter,
+) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
+    """Build a training-only RHS regression residual without ODE integration."""
+    observed = model.observed_state_channels
+    scales = {
+        state: max(
+            float(
+                np.std(
+                    np.concatenate(
+                        [
+                            trajectory.derivatives[channel]
+                            for trajectory in trajectories
+                        ]
+                    )
+                )
+            ),
+            1e-8,
+        )
+        for state, channel in observed.items()
+    }
+    skipped = 1 if model.validated.context.lagged_targets else 0
+    residual_size = sum(
+        (trajectory.number_of_rows - skipped) * len(model.state_names)
+        for trajectory in trajectories
+    )
+
+    def residual(values: NDArray[np.float64]) -> NDArray[np.float64]:
+        decoded = decode(values)
+        pieces: list[float] = []
+        try:
+            for trajectory in trajectories:
+                for index in range(skipped, trajectory.number_of_rows):
+                    forcing = trajectory_forcing(
+                        model,
+                        trajectory,
+                        causal_index=max(0, index - 1),
+                    )
+                    state = np.asarray(
+                        [
+                            (
+                                trajectory.targets[channel][index]
+                                if channel in trajectory.targets
+                                else trajectory.auxiliaries[channel][index]
+                            )
+                            for channel in (
+                                observed[name] for name in model.state_names
+                            )
+                        ],
+                        dtype=float,
+                    )
+                    predicted = model.rhs(
+                        float(trajectory.time[index]),
+                        state,
+                        decoded.parameters,
+                        forcing,
+                    )
+                    for state_index, state_name in enumerate(model.state_names):
+                        channel = observed[state_name]
+                        pieces.append(
+                            (
+                                float(predicted[state_index])
+                                - float(trajectory.derivatives[channel][index])
+                            )
+                            / scales[state_name]
+                        )
+        except (
+            ArithmeticError,
+            RuntimeError,
+            RuntimeExpressionError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            failures.record(str(exc))
+            return np.full(residual_size, config.failure_penalty)
+        return np.asarray(pieces, dtype=float)
+
+    return residual
+
+
 def _residual_size(split: DatasetSplit, model: CompiledModel) -> int:
+    skipped = 1 if model.validated.context.lagged_targets else 0
     return sum(
-        trajectory.number_of_rows * len(model.validated.context.targets)
+        (trajectory.number_of_rows - skipped)
+        * len(model.validated.context.targets)
         for trajectory in split.trajectories
     )
 
@@ -362,6 +548,8 @@ def _diagnostic(
     failures: FailureCounter,
     variables: Sequence[_Variable],
     config: FitConfig,
+    *,
+    backend: str = "rollout_least_squares",
 ) -> OptimizationDiagnostic:
     lower_hits: list[str] = []
     upper_hits: list[str] = []
@@ -380,6 +568,8 @@ def _diagnostic(
         cost=float(result.cost),
         function_evaluations=int(result.nfev),
         integration_failures=failures.count,
+        backend=backend,
+        integration_failure_messages=tuple(failures.messages),
         parameters_at_lower_bound=tuple(lower_hits),
         parameters_at_upper_bound=tuple(upper_hits),
     )
@@ -393,11 +583,50 @@ def _fit_validation_initials(
     scales: Mapping[str, float],
     config: FitConfig,
 ) -> Mapping[str, Mapping[str, float]]:
+    """Initialize held-out latent states without fitting held-out targets."""
+    if model.validated.context.lagged_targets:
+        return {
+            trajectory.trajectory_id: {} for trajectory in validation.trajectories
+        }
     local_specs = [
         item
         for item in model.validated.candidate.initial_conditions
         if item.scope is ParameterScope.TRAJECTORY_SPECIFIC
+        and item.state not in model.observed_state_channels
     ]
+    if not model.validated.context.lagged_targets:
+        return _fit_open_loop_validation_initials(
+            model,
+            validation,
+            parameters,
+            global_initials,
+            scales,
+            config,
+            local_specs,
+        )
+    midpoint_values = {
+        item.state: (
+            item.initialization_range.lower + item.initialization_range.upper
+        )
+        / 2.0
+        for item in local_specs
+    }
+    return {
+        trajectory.trajectory_id: dict(midpoint_values)
+        for trajectory in validation.trajectories
+    }
+
+
+def _fit_open_loop_validation_initials(
+    model: CompiledModel,
+    validation: DatasetSplit,
+    parameters: Mapping[str, float],
+    global_initials: Mapping[str, float],
+    scales: Mapping[str, float],
+    config: FitConfig,
+    local_specs: Sequence[InitialConditionSpec],
+) -> Mapping[str, Mapping[str, float]]:
+    """Retain legacy open-loop behavior for isolated numerical unit tests."""
     if not local_specs:
         return {trajectory.trajectory_id: {} for trajectory in validation.trajectories}
     result: dict[str, Mapping[str, float]] = {}
@@ -491,12 +720,18 @@ def _evaluate(
             failed.append(trajectory.trajectory_id)
             for channel in squared:
                 squared[channel].append(
-                    np.full(trajectory.number_of_rows, config.failure_penalty**2)
+                    np.full(
+                        trajectory.number_of_rows
+                        - (1 if model.validated.context.lagged_targets else 0),
+                        config.failure_penalty**2,
+                    )
                 )
             continue
         for channel in squared:
+            start = 1 if model.validated.context.lagged_targets else 0
             normalized = (
-                simulation.predictions[channel] - trajectory.targets[channel]
+                simulation.predictions[channel][start:]
+                - trajectory.targets[channel][start:]
             ) / scales[channel]
             squared[channel].append(normalized**2)
     per_target = {

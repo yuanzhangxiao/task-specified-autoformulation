@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from autoformalism.data import DatasetSplit, SplitName
-from autoformalism.expressions import ModelValidationError, compile_candidate
+from autoformalism.expressions import (
+    ModelValidationError,
+    compile_candidate,
+    repair_protected_declarations,
+)
 from autoformalism.fitting import (
     EvaluationMetrics,
     FitResult,
@@ -20,6 +24,7 @@ from autoformalism.fitting import (
     fit_candidate,
 )
 from autoformalism.llm import LLMClient
+from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.pruning import prune_candidate
 from autoformalism.schemas import CandidateModel, JudgeResult
 from autoformalism.search.checkpoints import CheckpointStore
@@ -117,7 +122,7 @@ class SearchController:
             return _record_from_dict(payload["record"]) if payload["valid"] else None
 
         if stage == "new":
-            feedback = self._proposer_feedback(beam)
+            feedback = self._proposer_feedback(beam, round_index)
             proposal = self._client.propose(
                 system_prompt=self._config.proposer_system_prompt,
                 user_prompt=json.dumps(
@@ -129,6 +134,13 @@ class SearchController:
                     sort_keys=True,
                 ),
             ).parsed
+            raw_proposal = proposal
+            proposal, repairs = repair_protected_declarations(
+                raw_proposal, self._context
+            )
+            if repairs:
+                payload["raw_candidate"] = raw_proposal.model_dump(mode="json")
+                payload["deterministic_repairs"] = list(repairs)
             payload["candidate"] = proposal.model_dump(mode="json")
             stage = self._save_stage(round_index, payload, "proposed")
         candidate = CandidateModel.model_validate(payload["candidate"])
@@ -142,13 +154,16 @@ class SearchController:
                     item.pruned_candidate.candidate_id,
                 )
             }
+            permitted_parents.update(
+                self._rejected_candidate_ids(round_index)
+            )
             if (
                 candidate.parent_candidate_id is not None
                 and candidate.parent_candidate_id not in permitted_parents
             ):
                 payload.update(
                     valid=False,
-                    error="candidate parent is not present in the active beam",
+                    error="candidate parent is not present in the active lineage",
                     stage="complete",
                 )
                 self._store.save_round(round_index, payload)
@@ -165,6 +180,15 @@ class SearchController:
                 self._store.save_round(round_index, payload)
                 self._callback("complete", round_index)
                 return None
+            if compiled.validated.warnings:
+                payload["validation_warnings"] = [
+                    {
+                        "code": item.code,
+                        "location": item.location,
+                        "message": item.message,
+                    }
+                    for item in compiled.validated.warnings
+                ]
             structural_hash = _structural_hash(candidate)
             if any(
                 structural_hash
@@ -189,15 +213,6 @@ class SearchController:
         if stage == "validated" and self._config.cheap_prefit_judge:
             prefit = self._judge(candidate, "pre_fit")
             payload["prefit_judge"] = prefit.model_dump(mode="json")
-            if prefit.hard_red_flags:
-                payload.update(
-                    valid=False,
-                    error="pre-fit judge reported hard red flags",
-                    stage="complete",
-                )
-                self._store.save_round(round_index, payload)
-                self._callback("complete", round_index)
-                return None
             stage = self._save_stage(round_index, payload, "prefit_judged")
         if stage == "validated":
             stage = "prefit_judged"
@@ -246,6 +261,8 @@ class SearchController:
                 "removed_terms": list(pruning.selected_removed_terms),
                 "removed_parameters": list(pruning.selected_removed_parameters),
                 "contributions": dict(pruning.contribution_by_term),
+                "persistence_training_mse": pruning.persistence_training_mse,
+                "persistence_validation_mse": pruning.persistence_validation_mse,
                 "rejected_supports": sum(
                     not item.accepted for item in pruning.candidates
                 ),
@@ -261,15 +278,6 @@ class SearchController:
         postpruning = JudgeResult.model_validate(payload["postpruning_judge"])
 
         if stage == "postpruning_judged":
-            if postpruning.hard_red_flags:
-                payload.update(
-                    valid=False,
-                    error="post-pruning judge reported hard red flags",
-                    stage="complete",
-                )
-                self._store.save_round(round_index, payload)
-                self._callback("complete", round_index)
-                return None
             record = CandidateRecord(
                 round_index=round_index,
                 candidate=candidate,
@@ -295,19 +303,56 @@ class SearchController:
         raise RuntimeError(f"unsupported checkpoint stage: {stage}")
 
     def _judge(self, candidate: CandidateModel, stage: str) -> JudgeResult:
-        return self._client.judge(
-            system_prompt=self._config.judge_system_prompt,
-            user_prompt=json.dumps(
+        if not self._config.use_judge:
+            return JudgeResult.model_validate(
                 {
-                    "stage": stage,
-                    "candidate": candidate.model_dump(mode="json"),
-                },
-                sort_keys=True,
-            ),
-        ).parsed
+                    "hard_red_flags": [],
+                    "category_scores": {"judge_disabled": 0.0},
+                    "aggregate_score": 0.0,
+                    "missing_requirements": [],
+                    "actionable_edits": [],
+                }
+            )
+        try:
+            return self._client.judge(
+                system_prompt=self._config.judge_system_prompt,
+                user_prompt=json.dumps(
+                    {
+                        "stage": stage,
+                        "candidate": candidate.model_dump(mode="json"),
+                    },
+                    sort_keys=True,
+                ),
+            ).parsed
+        except (LLMProviderError, LLMResponseError) as exc:
+            message = f"{type(exc).__name__}: {str(exc)[:1000]}"
+            return JudgeResult.model_validate(
+                {
+                    "hard_red_flags": [
+                        {
+                            "code": "judge_unavailable",
+                            "evidence": message,
+                        }
+                    ],
+                    "category_scores": {
+                        "judge_availability": {
+                            "score": 0.0,
+                            "justification": message,
+                        }
+                    },
+                    "aggregate_score": 0.0,
+                    "missing_requirements": [
+                        "Judge feedback was unavailable; deterministic and "
+                        "numerical checks remain authoritative."
+                    ],
+                    "actionable_edits": [],
+                }
+            )
 
     def _proposer_feedback(
-        self, beam: Sequence[CandidateRecord]
+        self,
+        beam: Sequence[CandidateRecord],
+        round_index: int,
     ) -> list[dict[str, Any]]:
         feedback: list[dict[str, Any]] = []
         for record in beam:
@@ -315,6 +360,7 @@ class SearchController:
             feedback.append(
                 {
                     "candidate_id": record.pruned_candidate.candidate_id,
+                    "eligible_parent": True,
                     "lineage_parent": record.parent_candidate_id,
                     "equations": {
                         item.state: item.rhs
@@ -328,8 +374,19 @@ class SearchController:
                         fit.validation_metrics.normalized_mse
                     ),
                     "judge_category_scores": dict(
-                        record.postpruning_judge.category_scores
+                        record.postpruning_judge.numeric_category_scores
                     ),
+                    "judge_advisory_red_flags": [
+                        item.model_dump(mode="json")
+                        for item in record.postpruning_judge.hard_red_flags
+                    ],
+                    "judge_missing_requirements": list(
+                        record.postpruning_judge.missing_requirements
+                    ),
+                    "judge_actionable_edits": [
+                        item.model_dump(mode="json")
+                        for item in record.postpruning_judge.actionable_edits
+                    ],
                     "numerical_failures": {
                         "training_trajectories": list(
                             fit.training_metrics.failed_trajectories
@@ -350,7 +407,108 @@ class SearchController:
                     },
                 }
             )
+            if not self._config.use_judge:
+                for key in (
+                    "judge_category_scores",
+                    "judge_advisory_red_flags",
+                    "judge_missing_requirements",
+                    "judge_actionable_edits",
+                ):
+                    feedback[-1].pop(key)
+        remaining = self._config.beam_size - len(feedback)
+        if remaining > 0:
+            for rejected_round in range(round_index - 1, -1, -1):
+                payload = self._store.load_round(rejected_round)
+                if (
+                    payload is None
+                    or payload.get("stage") != "complete"
+                    or payload.get("valid")
+                    or not isinstance(payload.get("candidate"), dict)
+                ):
+                    continue
+                candidate = CandidateModel.model_validate(payload["candidate"])
+                error = str(payload.get("error", "candidate was rejected"))
+                rejected_fit = (
+                    _fit_from_dict(payload["fit"])
+                    if isinstance(payload.get("fit"), dict)
+                    else None
+                )
+                failure_messages = (
+                    sorted(
+                        {
+                            message
+                            for diagnostic in rejected_fit.diagnostics
+                            for message in diagnostic.integration_failure_messages
+                        }
+                    )
+                    if rejected_fit is not None
+                    else []
+                )
+                feedback.append(
+                    {
+                        "candidate_id": candidate.candidate_id,
+                        "eligible_parent": True,
+                        "lineage_parent": candidate.parent_candidate_id,
+                        "equations": {
+                            item.state: item.rhs
+                            for item in candidate.state_equations
+                        },
+                        "fitted_parameters": (
+                            dict(rejected_fit.global_parameters)
+                            if rejected_fit is not None
+                            else {}
+                        ),
+                        "training_normalized_mse": (
+                            rejected_fit.training_metrics.normalized_mse
+                            if rejected_fit is not None
+                            else None
+                        ),
+                        "validation_normalized_mse": (
+                            rejected_fit.validation_metrics.normalized_mse
+                            if rejected_fit is not None
+                            else None
+                        ),
+                        "judge_category_scores": {},
+                        "numerical_failures": {
+                            (
+                                "deterministic_validation"
+                                if rejected_fit is None
+                                else "rejection"
+                            ): [error],
+                            "integration_messages": failure_messages,
+                            "optimizer_integration_failures": (
+                                sum(
+                                    item.integration_failures
+                                    for item in rejected_fit.diagnostics
+                                )
+                                if rejected_fit is not None
+                                else 0
+                            ),
+                        },
+                        "pruning_diagnostics": {},
+                        "rejected_before_fit": rejected_fit is None,
+                    }
+                )
+                remaining -= 1
+                if remaining == 0:
+                    break
         return feedback
+
+    def _rejected_candidate_ids(self, round_index: int) -> set[str]:
+        """Return checkpointed rejected candidates that may be refined."""
+        identifiers: set[str] = set()
+        for previous_round in range(round_index):
+            payload = self._store.load_round(previous_round)
+            if (
+                payload is None
+                or payload.get("stage") != "complete"
+                or payload.get("valid")
+                or not isinstance(payload.get("candidate"), dict)
+            ):
+                continue
+            candidate = CandidateModel.model_validate(payload["candidate"])
+            identifiers.add(candidate.candidate_id)
+        return identifiers
 
     def _completed_records(self) -> list[CandidateRecord]:
         records: list[CandidateRecord] = []
@@ -708,6 +866,9 @@ def _fit_from_dict(payload: Mapping[str, Any]) -> FitResult:
                     ),
                     "parameters_at_upper_bound": tuple(
                         item["parameters_at_upper_bound"]
+                    ),
+                    "integration_failure_messages": tuple(
+                        item.get("integration_failure_messages", ())
                     ),
                 }
             )

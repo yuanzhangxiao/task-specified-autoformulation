@@ -26,7 +26,12 @@ from autoformalism.llm.models import (
     StructuredT,
     TokenUsage,
 )
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import (
+    CandidateModel,
+    JudgeResult,
+    ProposerCandidateV2,
+    enrich_proposal_v2,
+)
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,7 @@ class CachedLLMClient(ABC):
         initial_backoff_seconds: float = 1.0,
         max_backoff_seconds: float = 30.0,
         jitter_fraction: float = 0.25,
+        proposal_target_channels: tuple[str, ...] = (),
         sleep: Callable[[float], None] = time.sleep,
         random_value: Callable[[], float] = random.random,
     ) -> None:
@@ -74,6 +80,7 @@ class CachedLLMClient(ABC):
         self._jitter_fraction = jitter_fraction
         self._sleep = sleep
         self._random_value = random_value
+        self._proposal_target_channels = proposal_target_channels
 
     def propose(
         self,
@@ -82,11 +89,23 @@ class CachedLLMClient(ABC):
         user_prompt: str,
     ) -> LLMCallResult[CandidateModel]:
         """Request or restore a strict proposer candidate."""
-        return self._structured_call(
+        compact = self._structured_call(
             role="proposer",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=CandidateModel,
+            response_model=ProposerCandidateV2,
+        )
+        return LLMCallResult(
+            request_hash=compact.request_hash,
+            parsed=enrich_proposal_v2(
+                compact.parsed,
+                self._proposal_target_channels,
+            ),
+            raw_response=compact.raw_response,
+            cache_hit=compact.cache_hit,
+            attempts=compact.attempts,
+            latency_ms=compact.latency_ms,
+            usage=compact.usage,
         )
 
     def judge(
@@ -135,20 +154,29 @@ class CachedLLMClient(ABC):
 
         started = time.perf_counter()
         attempts = 0
+        attempt_user_prompt = user_prompt
         while attempts < self._max_attempts:
             attempts += 1
             try:
                 provider_response = self._call_provider(
                     role=role,
                     system_prompt=system_prompt,
-                    user_prompt=user_prompt,
+                    user_prompt=attempt_user_prompt,
                     response_model=response_model,
                 )
                 break
-            except LLMProviderError as exc:
+            except (LLMProviderError, LLMResponseError) as exc:
                 self._log_failure(role, request_hash, attempts, exc)
                 if not exc.retryable or attempts >= self._max_attempts:
                     raise
+                if isinstance(exc, LLMResponseError):
+                    attempt_user_prompt = (
+                        f"{user_prompt}\n\n"
+                        "The previous structured response was invalid. Correct the "
+                        "response and return one complete object matching the schema. "
+                        "Do not repeat this validation error:\n"
+                        f"{str(exc)[:2000]}"
+                    )
                 self._sleep(self._backoff(attempts))
         else:  # pragma: no cover - loop exits by success or exception
             raise AssertionError("retry loop terminated unexpectedly")
@@ -193,6 +221,7 @@ class CachedLLMClient(ABC):
             "user_prompt": user_prompt,
             "response_schema": response_model.model_json_schema(mode="validation"),
             "provider_options": self._hashable_provider_options(),
+            "proposal_target_channels": self._proposal_target_channels,
         }
         canonical = json.dumps(
             request,
@@ -323,7 +352,7 @@ class CachedLLMClient(ABC):
         role: str,
         request_hash: str,
         attempt: int,
-        error: LLMProviderError,
+        error: LLMProviderError | LLMResponseError,
     ) -> None:
         self._append_log(
             {
@@ -336,6 +365,7 @@ class CachedLLMClient(ABC):
                 "retryable": error.retryable,
                 "error_type": type(error).__name__,
                 "error": str(error),
+                "raw_response": getattr(error, "raw_response", None),
             }
         )
 

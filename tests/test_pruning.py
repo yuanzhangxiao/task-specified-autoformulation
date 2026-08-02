@@ -115,11 +115,8 @@ def test_prunes_complete_negligible_term_and_its_exclusive_parameter() -> None:
     assert [item.name for item in result.selected_candidate.parameters] == ["decay"]
     assert result.selected_candidate.state_equations[0].rhs == "-decay * x"
     assert result.selected_fit.validation_metrics.normalized_mse < 1e-8
-    assert any(
-        not candidate.accepted
-        and candidate.rejection_reason == "validation MSE exceeds configured tolerance"
-        for candidate in result.candidates
-    )
+    assert all(candidate.retained_term_ids for candidate in result.candidates)
+    assert result.persistence_validation_mse >= 0.0
 
 
 def test_raw_coefficient_magnitude_does_not_measure_term_contribution() -> None:
@@ -215,3 +212,48 @@ def test_parameters_inside_nonlinear_term_are_pruned_as_one_unit() -> None:
         if candidate.removed_term_ids
     }
     assert removed_parameter_sets <= {("rate", "shape")}
+
+
+def test_pruning_never_removes_external_input_or_all_target_dynamics() -> None:
+    time = np.linspace(0.0, 2.0, 21)
+    pulse = np.zeros_like(time)
+    target = np.ones_like(time)
+    model = compile_candidate(
+        _candidate(
+            "gain * pulse + offset",
+            (("gain", 0.1, 2.0), ("offset", -0.1, 0.1)),
+        ),
+        ValidationContext(targets=("target",), external_inputs=("pulse",)),
+    )
+    data = _trajectory("trajectory", time, target, {"pulse": pulse})
+
+    result = prune_candidate(
+        model,
+        _split(SplitName.TRAIN, data),
+        _split(SplitName.VALIDATION, data),
+        fit_config=_fit_config(21),
+    )
+
+    assert "equation:x:term:0" not in result.selected_removed_terms
+    assert result.selected_candidate.state_equations[0].rhs != "0"
+    assert all(candidate.retained_term_ids for candidate in result.candidates)
+
+
+def test_threshold_generation_is_capped() -> None:
+    time = np.linspace(0.0, 1.0, 21)
+    target = np.exp(-0.5 * time)
+    model = compile_candidate(
+        _candidate("-decay * x", (("decay", 0.1, 1.0),)),
+        ValidationContext(targets=("target",)),
+    )
+    data = _trajectory("trajectory", time, target)
+    result = prune_candidate(
+        model,
+        _split(SplitName.TRAIN, data),
+        _split(SplitName.VALIDATION, data),
+        fit_config=_fit_config(22),
+        pruning_config=PruningConfig(maximum_normalized_contribution=0.01),
+    )
+
+    assert all(threshold <= 0.01 for threshold in result.thresholds)
+    assert not result.selected_removed_terms

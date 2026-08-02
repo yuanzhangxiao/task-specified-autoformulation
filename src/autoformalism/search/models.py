@@ -24,6 +24,7 @@ class SearchConfig(BaseModel):
     stagnation_iterations: int = Field(default=3, ge=1)
     validation_mse_target: float = Field(default=0.0, ge=0.0)
     cheap_prefit_judge: bool = False
+    use_judge: bool = True
     proposer_system_prompt: str
     judge_system_prompt: str
     fit_config: FitConfig = FitConfig()

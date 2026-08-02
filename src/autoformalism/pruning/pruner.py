@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,6 +19,7 @@ from autoformalism.expressions import (
 )
 from autoformalism.fitting import FitConfig, FitResult, fit_candidate
 from autoformalism.fitting.simulation import (
+    causal_interval_state,
     simulate_trajectory,
     trajectory_forcing,
 )
@@ -66,7 +67,11 @@ def prune_candidate(
         settings.contribution_epsilon,
         fitting,
     )
-    thresholds = _thresholds(contributions, settings.threshold_epsilon)
+    thresholds = _thresholds(
+        contributions,
+        settings.threshold_epsilon,
+        settings.maximum_normalized_contribution,
+    )
     baseline_ids = tuple(item.term_id for item in terms)
     results: list[PruningCandidateResult] = [
         PruningCandidateResult(
@@ -85,12 +90,25 @@ def prune_candidate(
         contribution.term_id: contribution.normalized_rms
         for contribution in contributions
     }
+    protected_terms = _protected_terms(model, terms, settings)
+    protected_locations = _target_producing_locations(model) | _mechanism_locations(
+        model
+    )
     for threshold in thresholds:
         retained = tuple(
             item.term_id
             for item in terms
             if contribution_map[item.term_id] >= threshold
+            or item.term_id in protected_terms
         )
+        if settings.require_target_dynamics and any(
+            not any(
+                term.term_id in retained and term.location == location
+                for term in terms
+            )
+            for location in protected_locations
+        ):
+            continue
         if retained in seen_supports:
             continue
         seen_supports.add(retained)
@@ -124,6 +142,10 @@ def prune_candidate(
     )
     assert selected.candidate is not None
     assert selected.fit_result is not None
+    persistence_training_mse = _persistence_mse(training, baseline.target_scales)
+    persistence_validation_mse = _persistence_mse(
+        validation, baseline.target_scales
+    )
     return PruningResult(
         unpruned_candidate=model.validated.candidate,
         unpruned_fit=baseline,
@@ -136,7 +158,79 @@ def prune_candidate(
         selected_removed_terms=selected.removed_term_ids,
         selected_removed_parameters=selected.removed_parameters,
         contribution_by_term=contribution_map,
+        persistence_training_mse=persistence_training_mse,
+        persistence_validation_mse=persistence_validation_mse,
     )
+
+
+def _protected_terms(
+    model: CompiledModel,
+    terms: Sequence[_Term],
+    settings: PruningConfig,
+) -> frozenset[str]:
+    """Keep task inputs from disappearing solely because they are sparse."""
+    if not settings.preserve_external_input_terms:
+        return frozenset()
+    external = set(model.validated.context.external_inputs)
+    return frozenset(
+        term.term_id for term in terms if external & set(term.parsed.symbols)
+    )
+
+
+def _target_producing_locations(model: CompiledModel) -> frozenset[str]:
+    """Return dynamic/process locations needed by target observations."""
+    processes = model.validated.process_expressions
+    states = model.validated.equation_expressions
+    pending: list[str] = []
+    for channel in model.validated.context.targets:
+        expression = model.validated.observation_expressions.get(channel)
+        if expression is not None:
+            pending.extend(expression.symbols)
+    locations: set[str] = set()
+    visited: set[str] = set()
+    while pending:
+        symbol = pending.pop()
+        if symbol in visited:
+            continue
+        visited.add(symbol)
+        if symbol in states:
+            locations.add(f"equation:{symbol}")
+            pending.extend(states[symbol].symbols)
+        elif symbol in processes:
+            locations.add(f"process:{symbol}")
+            pending.extend(processes[symbol].symbols)
+    return frozenset(locations)
+
+
+def _mechanism_locations(model: CompiledModel) -> frozenset[str]:
+    """Keep at least one term in every task-mechanism component."""
+    candidate = model.validated.candidate
+    state_locations = {
+        f"equation:{state.name}" for state in candidate.states if state.mechanisms
+    }
+    process_locations = {
+        f"process:{process.name}"
+        for process in candidate.processes
+        if process.mechanisms
+    }
+    return frozenset(state_locations | process_locations)
+
+
+def _persistence_mse(
+    split: DatasetSplit, target_scales: Mapping[str, float]
+) -> float:
+    """Compute the causal one-step persistence baseline using train scales."""
+    scales = dict(target_scales)  # FitResult exposes an immutable mapping.
+    residuals: list[np.ndarray] = []
+    for trajectory in split.trajectories:
+        for target, scale in scales.items():
+            values = np.asarray(trajectory.targets[target], dtype=float)
+            if len(values) > 1:
+                residuals.append((values[1:] - values[:-1]) / float(scale))
+    if not residuals:
+        raise ValueError("persistence baseline needs at least two target samples")
+    joined = np.concatenate(residuals)
+    return float(np.mean(joined**2))
 
 
 def _extract_terms(model: CompiledModel) -> tuple[_Term, ...]:
@@ -216,7 +310,6 @@ def _measure_contributions(
                 f"cannot measure terms on trajectory {trajectory.trajectory_id}: "
                 f"{simulation.message}"
             )
-        forcing = trajectory_forcing(model, trajectory)
         full_expressions = {
             **{
                 f"process:{name}": expression
@@ -227,28 +320,45 @@ def _measure_contributions(
                 for name, expression in model.validated.equation_expressions.items()
             },
         }
-        for index, time in enumerate(trajectory.time):
-            state = simulation.states[:, index]
-            for location, location_terms in terms_by_location.items():
-                totals[location].append(
-                    model.evaluate_expression(
-                        full_expressions[location],
-                        float(time),
-                        state,
-                        fit.global_parameters,
-                        forcing,
-                    )
-                )
-                for term in location_terms:
-                    values[term.term_id].append(
+        for index in range(len(trajectory.time) - 1):
+            start_time = float(trajectory.time[index])
+            end_time = float(trajectory.time[index + 1])
+            forcing = trajectory_forcing(model, trajectory, causal_index=index)
+            start_state = causal_interval_state(
+                model, trajectory, simulation.states[:, index], index
+            )
+            end_state = simulation.states[:, index + 1]
+            # Include interval interiors so sparse inputs are not declared
+            # irrelevant merely because they vanish at sampled boundaries.
+            samples = (
+                (start_time, start_state),
+                (
+                    0.5 * (start_time + end_time),
+                    0.5 * (start_state + end_state),
+                ),
+                (end_time, end_state),
+            )
+            for time, state in samples:
+                for location, location_terms in terms_by_location.items():
+                    totals[location].append(
                         model.evaluate_expression(
-                            term.parsed,
-                            float(time),
+                            full_expressions[location],
+                            time,
                             state,
                             fit.global_parameters,
                             forcing,
                         )
                     )
+                    for term in location_terms:
+                        values[term.term_id].append(
+                            model.evaluate_expression(
+                                term.parsed,
+                                time,
+                                state,
+                                fit.global_parameters,
+                                forcing,
+                            )
+                        )
 
     result: list[TermContribution] = []
     for term in terms:
@@ -276,13 +386,18 @@ def _rms(values: Sequence[float]) -> float:
 def _thresholds(
     contributions: Sequence[TermContribution],
     epsilon: float,
+    maximum: float,
 ) -> tuple[float, ...]:
     return tuple(
         sorted(
             {
-                contribution.normalized_rms
-                + max(epsilon, abs(contribution.normalized_rms) * epsilon)
+                threshold
                 for contribution in contributions
+                for threshold in (
+                    contribution.normalized_rms
+                    + max(epsilon, abs(contribution.normalized_rms) * epsilon),
+                )
+                if threshold <= maximum
             }
         )
     )

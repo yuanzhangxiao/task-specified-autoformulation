@@ -74,6 +74,8 @@ class OptimizationDiagnostic:
     cost: float
     function_evaluations: int
     integration_failures: int
+    backend: str = "rollout_least_squares"
+    integration_failure_messages: tuple[str, ...] = ()
     parameters_at_lower_bound: tuple[str, ...] = ()
     parameters_at_upper_bound: tuple[str, ...] = ()
 
@@ -119,3 +121,11 @@ class FailureCounter:
     """Mutable internal counter shared by one optimizer residual function."""
 
     count: int = field(default=0)
+    messages: list[str] = field(default_factory=list)
+
+    def record(self, message: str | None) -> None:
+        """Record a failure count and a bounded set of representative causes."""
+        self.count += 1
+        rendered = message or "simulation failed without a diagnostic"
+        if rendered not in self.messages and len(self.messages) < 5:
+            self.messages.append(rendered)

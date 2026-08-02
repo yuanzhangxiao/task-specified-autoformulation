@@ -54,6 +54,11 @@ Manifest: `benchmark1_original_dalla_man/manifest.json` (suite-level).
 External inputs: `meal_event_g` and its alternate scaling
 `meal_event_mg`, with `meal_schedule`; `body_weight_kg` is a fixed
 trajectory covariate. Time is `time`. Sampling is 1.0 minute.
+The runtime registry selects the numeric `meal_event_g` representation as the
+single canonical intervention input. Its nonzero timestamp and value encode
+meal timing and amount. The alternate numeric scaling and JSON
+`meal_schedule` remain present in the source metadata but are not independent
+runtime inputs.
 
 For each row, the prompt paths are
 `<root>/<ID>/<tier>/{proposer_prompt.txt,judge_prompt.txt}` and the

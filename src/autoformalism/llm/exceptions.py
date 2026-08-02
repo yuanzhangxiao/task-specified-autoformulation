@@ -16,7 +16,17 @@ class LLMProviderError(LLMError):
 class LLMResponseError(LLMError):
     """A response could not be validated against the required schema."""
 
+    retryable = True
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_response: object | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
+
 
 class LLMCacheError(LLMError):
     """A cache entry is malformed or cannot be persisted."""
-
