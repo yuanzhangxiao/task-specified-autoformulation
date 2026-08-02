@@ -20,6 +20,12 @@ from autoformalism.expressions.validation import (
 )
 from autoformalism.schemas import CandidateModel, ConstraintKind
 
+# ODE solvers can cross an invariant boundary by a few units of floating-point
+# roundoff even when the analytic trajectory remains exactly on that boundary.
+# This tolerance is deliberately absolute and small so it cannot hide a
+# scientifically meaningful negative state on any benchmark scale.
+STATE_CONSTRAINT_ATOL = 1e-12
+
 SAFE_DIVISION_EPSILON = 1e-12
 
 
@@ -314,12 +320,14 @@ class CompiledModel:
             value = float(values[constraint.subject])
             invalid = False
             if constraint.kind is ConstraintKind.NONNEGATIVE:
-                invalid = value < 0.0
+                invalid = value < -STATE_CONSTRAINT_ATOL
             elif constraint.kind is ConstraintKind.POSITIVE:
                 invalid = value <= 0.0
             if constraint.bounds:
                 invalid = invalid or not (
-                    constraint.bounds.lower <= value <= constraint.bounds.upper
+                    constraint.bounds.lower - STATE_CONSTRAINT_ATOL
+                    <= value
+                    <= constraint.bounds.upper + STATE_CONSTRAINT_ATOL
                 )
             if invalid:
                 bounds = (

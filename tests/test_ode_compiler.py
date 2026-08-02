@@ -188,6 +188,12 @@ def test_compiled_model_rejects_runtime_shape_parameters_and_missing_forcing() -
     model.rhs(0.0, [1.0, -1.0], parameters, forcing)
     with pytest.raises(RuntimeExpressionError, match="nonnegative"):
         model.validate_state_constraints([1.0, -1.0])
+
+    # Numerical integration may place an analytically zero state infinitesimally
+    # below zero. Roundoff is accepted, while material violations still fail.
+    model.validate_state_constraints([1.0, -1e-13])
+    with pytest.raises(RuntimeExpressionError, match="nonnegative"):
+        model.validate_state_constraints([1.0, -1e-9])
     with pytest.raises(RuntimeExpressionError, match="parameter mismatch"):
         model.rhs(0.0, [1.0, 1.0], {"gain": 1.0}, forcing)
     with pytest.raises(RuntimeExpressionError, match="outside"):
