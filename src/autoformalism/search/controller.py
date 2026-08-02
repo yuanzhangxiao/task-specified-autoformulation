@@ -572,8 +572,17 @@ class SearchController:
                 compiled,
                 combined,
                 self._validation,
-                self._config.fit_config,
+                self._config.final_fit_config,
+                initial_global_parameters=selected.pruned_fit.global_parameters,
             )
+            if not final_fit.success and _fit_timed_out(final_fit):
+                final_fit = fit_candidate(
+                    compiled,
+                    combined,
+                    self._validation,
+                    self._config.fit_config,
+                    initial_global_parameters=selected.pruned_fit.global_parameters,
+                )
             if not final_fit.success:
                 raise RuntimeError("train-plus-validation final refit failed")
             existing["final_fit"] = _fit_to_dict(final_fit)
@@ -598,7 +607,7 @@ class SearchController:
                 global_parameters=final_fit.global_parameters,
                 global_initial_conditions=final_fit.global_initial_conditions,
                 target_scales=final_fit.target_scales,
-                config=self._config.fit_config,
+                config=self._config.final_fit_config,
                 fit_trajectory_initial_conditions=False,
             )
             existing["test_initials"] = {
@@ -619,7 +628,6 @@ class SearchController:
             stopping_reason=existing["stopping_reason"],
             completed_iterations=int(existing["completed_iterations"]),
         )
-
     def _save_stage(
         self,
         round_index: int,
@@ -646,6 +654,11 @@ class SearchController:
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
         ).hexdigest()
+
+
+def _fit_timed_out(fit: FitResult) -> bool:
+    """Identify a recoverable wall-clock exhaustion from fit diagnostics."""
+    return any(diagnostic.status == -2 for diagnostic in fit.diagnostics)
 
 
 def _implementation_fingerprint() -> str:

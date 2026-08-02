@@ -88,11 +88,15 @@ The pipeline is iterative:
    - parameters inside exp, tanh, rational, and other expressions;
    - global parameters used by analytic latent-initialization expressions.
 
-5. The model is simulated over complete trajectories.
+5. During iterative screening, the model is simulated with deterministic
+   fixed-step RK4 updates at the observed sampling intervals. The frozen final
+   structure is refitted and evaluated with adaptive `solve_ivp`.
 
 6. Normalized training and validation MSEs are computed.
 
-7. Terms are pruned using normalized contribution and validation impact.
+7. Terms are pruned using normalized contribution and validation impact. Search
+   rounds refit at most one conservative reduced support; exhaustive support
+   sweeps are reserved for explicit follow-up analysis.
 
 8. A judge LLM evaluates task/specification compliance and returns
    structured category scores in [0,1] plus advisory red flags and edits.
@@ -101,7 +105,8 @@ The pipeline is iterative:
 9. A beam-search controller chooses candidates for refinement.
 
 10. The final structure is selected using validation data. Test data
-    are evaluated only once after final selection.
+    are evaluated only once after final selection. The train-plus-validation
+    final refit is warm-started from the selected search fit.
 
 ## Important implementation decisions
 
@@ -131,6 +136,8 @@ The pipeline is iterative:
 - Never expose test error to the iterative proposer.
 - Cache every LLM request and response.
 - Checkpoint after every candidate stage.
+- A per-fit wall-clock deadline returns a structured candidate failure and does
+  not terminate subsequent search rounds.
 
 ## Phase 1 technology choices
 

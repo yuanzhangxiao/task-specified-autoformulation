@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,6 +24,7 @@ class PruningConfig(BaseModel):
     maximum_normalized_contribution: float = Field(default=0.05, gt=0.0)
     preserve_external_input_terms: bool = True
     require_target_dynamics: bool = True
+    support_strategy: Literal["single_support", "all_supports"] = "single_support"
 
 
 @dataclass(frozen=True)

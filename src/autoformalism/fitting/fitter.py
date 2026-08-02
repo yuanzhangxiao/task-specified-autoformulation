@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from time import monotonic
 
 import numpy as np
 from numpy.typing import NDArray
@@ -43,9 +44,16 @@ def fit_candidate(
     training: DatasetSplit,
     validation: DatasetSplit,
     config: FitConfig | None = None,
+    *,
+    initial_global_parameters: Mapping[str, float] | None = None,
 ) -> FitResult:
     """Fit global quantities on train, then evaluate train and validation."""
     settings = config or FitConfig()
+    deadline = (
+        None
+        if settings.maximum_wall_time_seconds is None
+        else monotonic() + settings.maximum_wall_time_seconds
+    )
     _validate_splits(model, training, validation)
     scaler = TrainingScaler().fit(training)
     target_scales = {
@@ -56,7 +64,12 @@ def fit_candidate(
     lower = np.asarray([item.lower for item in variables])
     upper = np.asarray([item.upper for item in variables])
     rng = np.random.default_rng(settings.random_seed)
-    starts = _starts(variables, settings.number_of_starts, rng)
+    starts = _starts(
+        variables,
+        settings.number_of_starts,
+        rng,
+        preferred_parameters=initial_global_parameters,
+    )
     residual_size = _residual_size(training, model)
     outcomes: list[tuple[object, FailureCounter]] = []
     derivative_backend = _can_use_derivative_regression(model, training)
@@ -73,6 +86,7 @@ def fit_candidate(
                 decode,
                 settings,
                 counter,
+                deadline,
             )
             if derivative_backend
             else _residual_function(
@@ -83,26 +97,40 @@ def fit_candidate(
                 settings,
                 counter,
                 residual_size,
+                deadline,
             )
         )
-        if len(variables):
-            result = least_squares(
-                residual,
-                start,
-                bounds=(lower, upper),
-                max_nfev=settings.maximum_function_evaluations,
-            )
-        else:
-            values = residual(start)
+        try:
+            if len(variables):
+                result = least_squares(
+                    residual,
+                    start,
+                    bounds=(lower, upper),
+                    max_nfev=settings.maximum_function_evaluations,
+                )
+            else:
+                values = residual(start)
+                result = OptimizeResult(
+                    x=start,
+                    success=True,
+                    status=1,
+                    message="no free parameters",
+                    cost=float(0.5 * np.dot(values, values)),
+                    nfev=1,
+                )
+        except TimeoutError as exc:
+            counter.record(str(exc))
             result = OptimizeResult(
                 x=start,
-                success=True,
-                status=1,
-                message="no free parameters",
-                cost=float(0.5 * np.dot(values, values)),
-                nfev=1,
+                success=False,
+                status=-2,
+                message=str(exc),
+                cost=0.5 * residual_size * settings.failure_penalty**2,
+                nfev=0,
             )
         outcomes.append((result, counter))
+        if int(result.status) == -2:
+            break
 
     best_index = min(
         range(len(outcomes)),
@@ -125,6 +153,17 @@ def fit_candidate(
         )
         for index, (result, counter) in enumerate(outcomes)
     )
+    if int(best.status) == -2:
+        return _timeout_fit_result(
+            model,
+            training,
+            validation,
+            decoded,
+            diagnostics,
+            best_index,
+            target_scales,
+            settings.failure_penalty,
+        )
     train_metrics = _evaluate(
         model,
         training,
@@ -343,10 +382,37 @@ def _starts(
     variables: Sequence[_Variable],
     count: int,
     rng: np.random.Generator,
+    *,
+    preferred_parameters: Mapping[str, float] | None = None,
 ) -> tuple[NDArray[np.float64], ...]:
     lower = np.asarray([item.start_lower for item in variables])
     upper = np.asarray([item.start_upper for item in variables])
     midpoint = (lower + upper) / 2.0
+    if preferred_parameters is not None:
+        declared = {
+            item.name.removeprefix("parameter:")
+            for item in variables
+            if item.name.startswith("parameter:")
+        }
+        unknown = sorted(set(preferred_parameters) - declared)
+        if unknown:
+            raise ValueError(f"warm start contains unknown parameters: {unknown}")
+        midpoint = midpoint.copy()
+        for index, variable in enumerate(variables):
+            if not variable.name.startswith("parameter:"):
+                continue
+            name = variable.name.removeprefix("parameter:")
+            if name not in preferred_parameters:
+                continue
+            value = float(preferred_parameters[name])
+            if not np.isfinite(value):
+                raise ValueError(f"warm-start parameter {name} must be finite")
+            if value < variable.lower or value > variable.upper:
+                raise ValueError(
+                    f"warm-start parameter {name}={value} is outside "
+                    f"[{variable.lower}, {variable.upper}]"
+                )
+            midpoint[index] = value
     return (midpoint, *(rng.uniform(lower, upper) for _ in range(count - 1)))
 
 
@@ -406,8 +472,10 @@ def _residual_function(
     config: FitConfig,
     failures: FailureCounter,
     residual_size: int,
+    deadline: float | None,
 ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
     def residual(values: NDArray[np.float64]) -> NDArray[np.float64]:
+        _check_deadline(deadline)
         decoded = decode(values)
         pieces: list[np.ndarray] = []
         for trajectory in trajectories:
@@ -416,7 +484,12 @@ def _residual_function(
                 **decoded.trajectory_initials.get(trajectory.trajectory_id, {}),
             }
             simulation = simulate_trajectory(
-                model, trajectory, decoded.parameters, initial, config
+                model,
+                trajectory,
+                decoded.parameters,
+                initial,
+                config,
+                deadline=deadline,
             )
             if not simulation.success:
                 failures.record(simulation.message)
@@ -455,6 +528,7 @@ def _derivative_residual_function(
     decode: Callable[[NDArray[np.float64]], _Decoded],
     config: FitConfig,
     failures: FailureCounter,
+    deadline: float | None,
 ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
     """Build a training-only RHS regression residual without ODE integration."""
     observed = model.observed_state_channels
@@ -481,11 +555,13 @@ def _derivative_residual_function(
     )
 
     def residual(values: NDArray[np.float64]) -> NDArray[np.float64]:
+        _check_deadline(deadline)
         decoded = decode(values)
         pieces: list[float] = []
         try:
             for trajectory in trajectories:
                 for index in range(skipped, trajectory.number_of_rows):
+                    _check_deadline(deadline)
                     forcing = trajectory_forcing(
                         model,
                         trajectory,
@@ -531,6 +607,49 @@ def _derivative_residual_function(
         return np.asarray(pieces, dtype=float)
 
     return residual
+
+
+def _check_deadline(deadline: float | None) -> None:
+    if deadline is not None and monotonic() >= deadline:
+        raise TimeoutError("fitting wall-clock limit reached")
+
+
+def _timeout_fit_result(
+    model: CompiledModel,
+    training: DatasetSplit,
+    validation: DatasetSplit,
+    decoded: _Decoded,
+    diagnostics: tuple[OptimizationDiagnostic, ...],
+    best_index: int,
+    target_scales: Mapping[str, float],
+    failure_penalty: float,
+) -> FitResult:
+    """Return a checkpointable candidate failure instead of raising on timeout."""
+    penalty_mse = failure_penalty**2
+    per_target = dict.fromkeys(model.validated.context.targets, penalty_mse)
+    return FitResult(
+        success=False,
+        global_parameters=decoded.parameters,
+        global_initial_conditions=decoded.global_initials,
+        training_trajectory_initial_conditions=decoded.trajectory_initials,
+        validation_trajectory_initial_conditions={
+            trajectory.trajectory_id: {} for trajectory in validation.trajectories
+        },
+        training_metrics=EvaluationMetrics(
+            penalty_mse,
+            per_target,
+            tuple(trajectory.trajectory_id for trajectory in training.trajectories),
+        ),
+        validation_metrics=EvaluationMetrics(
+            penalty_mse,
+            per_target,
+            tuple(trajectory.trajectory_id for trajectory in validation.trajectories),
+        ),
+        diagnostics=diagnostics,
+        best_start_index=best_index,
+        target_scales=target_scales,
+        message="fitting wall-clock limit reached; candidate rejected",
+    )
 
 
 def _residual_size(split: DatasetSplit, model: CompiledModel) -> int:

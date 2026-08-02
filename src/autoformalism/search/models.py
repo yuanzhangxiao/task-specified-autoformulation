@@ -28,6 +28,7 @@ class SearchConfig(BaseModel):
     proposer_system_prompt: str
     judge_system_prompt: str
     fit_config: FitConfig = FitConfig()
+    final_fit_config: FitConfig = FitConfig()
     pruning_config: PruningConfig = PruningConfig()
 
 

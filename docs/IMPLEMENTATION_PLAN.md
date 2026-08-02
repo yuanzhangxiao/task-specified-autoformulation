@@ -119,9 +119,9 @@ Acceptance tests:
 
 ## M6 — Forcing interpolation and simulation
 
-Implement per-trajectory piecewise-linear forcing and a `solve_ivp`
-simulator with explicit tolerances, evaluation grids, constraints,
-limits, and diagnostics.
+Implement per-trajectory piecewise-linear forcing, a fixed-step RK4 screening
+simulator, and a `solve_ivp` final-evaluation simulator with explicit
+tolerances, evaluation grids, constraints, limits, and diagnostics.
 
 Acceptance tests:
 
@@ -155,7 +155,9 @@ Acceptance tests:
 Implement seeded parameter initialization, bounded SciPy
 `least_squares`, global parameters, allowed per-trajectory latent
 initials, failed-start diagnostics, and deterministic best-start
-selection.
+selection. Enforce a monotonic wall-clock deadline that closes only the affected
+candidate. Warm-start the frozen train-plus-validation refit from the selected
+search parameters and give it a separately configured numerical budget.
 
 Acceptance tests:
 
@@ -225,8 +227,9 @@ Acceptance tests:
 ## M12 — Whole-term pruning
 
 Implement AST term enumeration, normalized contribution diagnostics,
-one-term removal, semantic revalidation, refitting, validation-impact
-measurement, and deterministic accept/reject policy.
+conservative support selection, semantic revalidation, one search-time refit,
+validation-impact measurement, and deterministic accept/reject policy. Retain
+an explicit exhaustive-support mode for follow-up analysis.
 
 Acceptance tests:
 

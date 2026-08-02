@@ -117,6 +117,7 @@ def test_prunes_complete_negligible_term_and_its_exclusive_parameter() -> None:
     assert result.selected_fit.validation_metrics.normalized_mse < 1e-8
     assert all(candidate.retained_term_ids for candidate in result.candidates)
     assert result.persistence_validation_mse >= 0.0
+    assert len(result.candidates) <= 2
 
 
 def test_raw_coefficient_magnitude_does_not_measure_term_contribution() -> None:

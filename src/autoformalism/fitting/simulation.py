@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from time import monotonic
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -22,6 +23,8 @@ def simulate_trajectory(
     parameters: Mapping[str, float],
     initial_conditions: Mapping[str, float],
     config: FitConfig,
+    *,
+    deadline: float | None = None,
 ) -> SimulationResult:
     """Roll out a compiled ODE, converting numerical exceptions into failures."""
     time = np.asarray(trajectory.time, dtype=float).copy()
@@ -68,15 +71,25 @@ def simulate_trajectory(
         )
         if not np.isfinite(initial_state).all():
             raise ValueError("initial conditions contain nonfinite values")
+        _check_deadline(deadline)
         if model.validated.context.lagged_targets:
             state_values = _simulate_one_step_intervals(
-                model, trajectory, parameters, initial_state, config
+                model, trajectory, parameters, initial_state, config, deadline
+            )
+        elif config.integration_backend == "fixed_rk4":
+            state_values = _simulate_fixed_intervals(
+                model, trajectory, parameters, initial_state, config, deadline
             )
         else:
             forcing = trajectory_forcing(model, trajectory)
             solution = solve_ivp(
-                lambda current_time, state: model.rhs(
-                    current_time, state, parameters, forcing
+                lambda current_time, state: _deadline_rhs(
+                    model,
+                    current_time,
+                    state,
+                    parameters,
+                    forcing,
+                    deadline,
                 ),
                 (float(time[0]), float(time[-1])),
                 initial_state,
@@ -172,30 +185,120 @@ def _simulate_one_step_intervals(
     parameters: Mapping[str, float],
     initial_state: np.ndarray,
     config: FitConfig,
+    deadline: float | None,
 ) -> np.ndarray:
     """Integrate each slot using targets observed at that slot's start only."""
     states = np.empty((len(model.state_names), len(trajectory.time)), dtype=float)
     states[:, 0] = initial_state
     for index in range(len(trajectory.time) - 1):
+        _check_deadline(deadline)
         forcing = trajectory_forcing(model, trajectory, causal_index=index)
         interval_initial = causal_interval_state(
             model, trajectory, states[:, index], index
         )
-        solution = solve_ivp(
-            lambda current_time, state, interval_forcing=forcing: model.rhs(
-                current_time, state, parameters, interval_forcing
-            ),
-            (float(trajectory.time[index]), float(trajectory.time[index + 1])),
-            interval_initial,
-            t_eval=[float(trajectory.time[index + 1])],
-            method=config.integration_method,
-            rtol=config.relative_tolerance,
-            atol=config.absolute_tolerance,
-        )
-        if not solution.success:
-            raise RuntimeError(f"integration failed: {solution.message}")
-        states[:, index + 1] = solution.y[:, -1]
+        start = float(trajectory.time[index])
+        end = float(trajectory.time[index + 1])
+        if config.integration_backend == "fixed_rk4":
+            states[:, index + 1] = _fixed_rk4_interval(
+                model,
+                start,
+                end,
+                interval_initial,
+                parameters,
+                forcing,
+                config.fixed_step_substeps,
+                deadline,
+            )
+        else:
+            solution = solve_ivp(
+                lambda current_time, state, interval_forcing=forcing: (
+                    _deadline_rhs(
+                        model,
+                        current_time,
+                        state,
+                        parameters,
+                        interval_forcing,
+                        deadline,
+                    )
+                ),
+                (start, end),
+                interval_initial,
+                t_eval=[end],
+                method=config.integration_method,
+                rtol=config.relative_tolerance,
+                atol=config.absolute_tolerance,
+            )
+            if not solution.success:
+                raise RuntimeError(f"integration failed: {solution.message}")
+            states[:, index + 1] = solution.y[:, -1]
     return states
+
+
+def _simulate_fixed_intervals(
+    model: CompiledModel,
+    trajectory: Trajectory,
+    parameters: Mapping[str, float],
+    initial_state: np.ndarray,
+    config: FitConfig,
+    deadline: float | None,
+) -> np.ndarray:
+    """Integrate an open-loop trajectory with fixed RK4 measurement steps."""
+    states = np.empty((len(model.state_names), len(trajectory.time)), dtype=float)
+    states[:, 0] = initial_state
+    forcing = trajectory_forcing(model, trajectory)
+    for index in range(len(trajectory.time) - 1):
+        states[:, index + 1] = _fixed_rk4_interval(
+            model,
+            float(trajectory.time[index]),
+            float(trajectory.time[index + 1]),
+            states[:, index],
+            parameters,
+            forcing,
+            config.fixed_step_substeps,
+            deadline,
+        )
+    return states
+
+
+def _fixed_rk4_interval(
+    model: CompiledModel,
+    start: float,
+    end: float,
+    initial_state: np.ndarray,
+    parameters: Mapping[str, float],
+    forcing: PiecewiseLinearForcing,
+    substeps: int,
+    deadline: float | None,
+) -> np.ndarray:
+    """Advance one sampling interval with deterministic fixed-step RK4."""
+    state = np.asarray(initial_state, dtype=float).copy()
+    step = (end - start) / substeps
+    for index in range(substeps):
+        _check_deadline(deadline)
+        time = start + index * step
+        k1 = model.rhs(time, state, parameters, forcing)
+        k2 = model.rhs(time + step / 2.0, state + step * k1 / 2.0, parameters, forcing)
+        k3 = model.rhs(time + step / 2.0, state + step * k2 / 2.0, parameters, forcing)
+        k4 = model.rhs(time + step, state + step * k3, parameters, forcing)
+        state = state + step * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
+    return state
+
+
+def _deadline_rhs(
+    model: CompiledModel,
+    time: float,
+    state: np.ndarray,
+    parameters: Mapping[str, float],
+    forcing: PiecewiseLinearForcing,
+    deadline: float | None,
+) -> np.ndarray:
+    _check_deadline(deadline)
+    return model.rhs(time, state, parameters, forcing)
+
+
+def _check_deadline(deadline: float | None) -> None:
+    if deadline is not None and monotonic() >= deadline:
+        raise TimeoutError("fitting wall-clock limit reached")
 
 
 def _observed_state_value(

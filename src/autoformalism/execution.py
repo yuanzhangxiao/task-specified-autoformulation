@@ -101,8 +101,11 @@ class ExecutionArguments:
     use_clean_observations: bool
     llm_timeout_seconds: float = 900.0
     llm_max_output_tokens: int = 2048
-    fit_starts: int = 3
-    fit_max_nfev: int = 400
+    fit_starts: int = 1
+    fit_max_nfev: int = 50
+    fit_timeout_seconds: float = 300.0
+    final_fit_max_nfev: int = 150
+    final_fit_timeout_seconds: float = 300.0
     use_judge: bool = True
 
 
@@ -164,14 +167,35 @@ def build_experiment_parser(
     parser.add_argument(
         "--fit-starts",
         type=int,
-        default=3,
+        default=1,
         help="number of deterministic bounded least-squares starts",
     )
     parser.add_argument(
         "--fit-max-nfev",
         type=int,
-        default=400,
+        default=50,
         help="maximum residual evaluations per fitting start",
+    )
+    parser.add_argument(
+        "--fit-timeout-seconds",
+        type=float,
+        default=300.0,
+        help=(
+            "wall-clock limit for one candidate fit; timeout rejects only "
+            "that candidate"
+        ),
+    )
+    parser.add_argument(
+        "--final-fit-max-nfev",
+        type=int,
+        default=150,
+        help="maximum residual evaluations for the warm-started final refit",
+    )
+    parser.add_argument(
+        "--final-fit-timeout-seconds",
+        type=float,
+        default=300.0,
+        help="wall-clock limit for the adaptive final refit",
     )
     parser.add_argument("--output-root", type=Path, default=Path("artifacts/runs"))
     parser.add_argument(
@@ -200,10 +224,16 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--llm-timeout-seconds must be positive")
     if namespace.llm_max_output_tokens < 128:
         raise SystemExit("--llm-max-output-tokens must be at least 128")
-    if namespace.fit_starts < 2:
-        raise SystemExit("--fit-starts must be at least 2")
+    if namespace.fit_starts < 1:
+        raise SystemExit("--fit-starts must be at least 1")
     if namespace.fit_max_nfev < 1:
         raise SystemExit("--fit-max-nfev must be at least 1")
+    if namespace.fit_timeout_seconds <= 0:
+        raise SystemExit("--fit-timeout-seconds must be positive")
+    if namespace.final_fit_max_nfev < 1:
+        raise SystemExit("--final-fit-max-nfev must be at least 1")
+    if namespace.final_fit_timeout_seconds <= 0:
+        raise SystemExit("--final-fit-timeout-seconds must be positive")
     if (
         not namespace.mock_llm
         and not namespace.dry_run
@@ -228,6 +258,9 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         llm_max_output_tokens=namespace.llm_max_output_tokens,
         fit_starts=namespace.fit_starts,
         fit_max_nfev=namespace.fit_max_nfev,
+        fit_timeout_seconds=namespace.fit_timeout_seconds,
+        final_fit_max_nfev=namespace.final_fit_max_nfev,
+        final_fit_timeout_seconds=namespace.final_fit_timeout_seconds,
         use_judge=not namespace.no_judge,
     )
 
@@ -254,6 +287,11 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "llm_max_output_tokens": arguments.llm_max_output_tokens,
         "fit_starts": arguments.fit_starts,
         "fit_max_nfev": arguments.fit_max_nfev,
+        "fit_timeout_seconds": arguments.fit_timeout_seconds,
+        "final_fit_max_nfev": arguments.final_fit_max_nfev,
+        "final_fit_timeout_seconds": arguments.final_fit_timeout_seconds,
+        "screening_integrator": "fixed_rk4",
+        "final_integrator": "solve_ivp",
         "proposer_model": arguments.proposer_model,
         "judge_model": arguments.judge_model,
         "mock_llm": arguments.mock_llm,
@@ -304,7 +342,16 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         fit_config=FitConfig(
             number_of_starts=arguments.fit_starts,
             random_seed=arguments.seed,
+            integration_backend="fixed_rk4",
             maximum_function_evaluations=arguments.fit_max_nfev,
+            maximum_wall_time_seconds=arguments.fit_timeout_seconds,
+        ),
+        final_fit_config=FitConfig(
+            number_of_starts=arguments.fit_starts,
+            random_seed=arguments.seed,
+            integration_backend="solve_ivp",
+            maximum_function_evaluations=arguments.final_fit_max_nfev,
+            maximum_wall_time_seconds=arguments.final_fit_timeout_seconds,
         ),
         pruning_config=PruningConfig(),
     )

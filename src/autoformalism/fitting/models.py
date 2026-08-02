@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,12 +17,15 @@ class FitConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    number_of_starts: int = Field(default=8, ge=1)
+    number_of_starts: int = Field(default=1, ge=1)
     random_seed: int = 0
+    integration_backend: Literal["fixed_rk4", "solve_ivp"] = "solve_ivp"
     integration_method: str = "RK45"
+    fixed_step_substeps: int = Field(default=1, ge=1)
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
     absolute_tolerance: float = Field(default=1e-9, gt=0.0)
-    maximum_function_evaluations: int = Field(default=2_000, ge=1)
+    maximum_function_evaluations: int = Field(default=50, ge=1)
+    maximum_wall_time_seconds: float | None = Field(default=None, gt=0.0)
     failure_penalty: float = Field(default=1e6, gt=0.0)
     bound_tolerance: float = Field(default=1e-5, gt=0.0)
 

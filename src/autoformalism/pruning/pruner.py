@@ -125,6 +125,8 @@ def prune_candidate(
                 settings.validation_mse_tolerance,
             )
         )
+        if settings.support_strategy == "single_support":
+            break
 
     eligible = [
         result

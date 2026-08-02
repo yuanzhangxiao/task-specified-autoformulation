@@ -336,6 +336,39 @@ def test_finite_fit_at_evaluation_budget_remains_eligible() -> None:
     assert "budget reached" in (fit.message or "")
 
 
+def test_parameter_warm_start_is_used_for_first_optimizer_start() -> None:
+    candidate = _candidate({"x": "-decay * x"}, "x", (("decay", 0.1, 1.0),))
+    model = compile_candidate(candidate, ValidationContext(targets=("target",)))
+    time = np.linspace(0.0, 1.0, 11)
+    trajectory = _trajectory("warm-start", time, np.exp(-0.4 * time))
+
+    fit = fit_candidate(
+        model,
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+        FitConfig(number_of_starts=1, maximum_function_evaluations=1),
+        initial_global_parameters={"decay": 0.4},
+    )
+
+    assert fit.success
+    assert fit.global_parameters["decay"] == pytest.approx(0.4)
+
+
+def test_parameter_warm_start_rejects_unknown_names() -> None:
+    candidate = _candidate({"x": "-decay * x"}, "x", (("decay", 0.1, 1.0),))
+    model = compile_candidate(candidate, ValidationContext(targets=("target",)))
+    time = np.linspace(0.0, 1.0, 5)
+    trajectory = _trajectory("unknown-warm-start", time, np.exp(-0.4 * time))
+
+    with pytest.raises(ValueError, match="unknown parameters"):
+        fit_candidate(
+            model,
+            _split(SplitName.TRAIN, (trajectory,)),
+            _split(SplitName.VALIDATION, (trajectory,)),
+            initial_global_parameters={"invented": 1.0},
+        )
+
+
 def test_lagged_target_forcing_is_strictly_one_step_causal() -> None:
     candidate = _candidate({"x": "target"}, "x", ())
     context = ValidationContext(
@@ -388,6 +421,56 @@ def test_one_step_reset_observed_state_but_propagates_latent_state() -> None:
     assert result.states is not None
     assert result.states[0] == pytest.approx([1.0, 2.0, 3.0])
     assert result.states[1] == pytest.approx([10.0, 11.5, 22.5])
+
+
+def test_fixed_rk4_advances_one_step_without_adaptive_solver() -> None:
+    candidate = _candidate({"x": "1"}, "x", ())
+    model = compile_candidate(
+        candidate,
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    trajectory = _trajectory(
+        "fixed-rk4",
+        np.asarray([0.0, 0.5, 1.0]),
+        np.asarray([2.0, 2.5, 3.0]),
+    )
+
+    result = simulate_trajectory(
+        model,
+        trajectory,
+        {},
+        {},
+        FitConfig(integration_backend="fixed_rk4"),
+    )
+
+    assert result.success
+    assert result.states is not None
+    assert result.states[0] == pytest.approx([2.0, 2.5, 3.0])
+
+
+def test_fit_timeout_is_a_recoverable_failed_result() -> None:
+    time = np.linspace(0.0, 1.0, 11)
+    target = np.exp(-0.4 * time)
+    model = compile_candidate(
+        _candidate({"x": "-decay * x"}, "x", (("decay", 0.1, 1.0),)),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    trajectory = _trajectory("timeout", time, target)
+
+    fit = fit_candidate(
+        model,
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+        FitConfig(
+            integration_backend="fixed_rk4",
+            maximum_wall_time_seconds=1e-12,
+        ),
+    )
+
+    assert not fit.success
+    assert fit.diagnostics[0].status == -2
+    assert "wall-clock limit" in (fit.message or "")
+    assert np.isfinite(fit.training_metrics.normalized_mse)
 
 
 def test_one_step_causally_initializes_observed_channel_rate_state() -> None:

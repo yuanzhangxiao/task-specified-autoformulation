@@ -220,14 +220,22 @@ class Fitter(Protocol):
 
 The forcing adapter supplies piecewise-linear interpolation only for
 declared auxiliary/input channels and preserves per-trajectory
-boundaries. `Simulator` uses `solve_ivp`, checks solver success,
-finite values, time coverage, and configured state constraints.
+boundaries. Iterative screening uses deterministic fixed-step classical RK4 at
+measurement intervals, avoiding one adaptive solver launch per prediction
+slot. Final refitting and frozen test evaluation use `solve_ivp`. Both backends
+check finite values, time coverage, and configured state constraints.
 
 `Fitter` constructs one bounded vector containing global parameters only. If
 every candidate state maps directly to an observed target/auxiliary with a
 training derivative label, it fits normalized RHS derivative residuals using
 deterministic bounded multistart `least_squares` without ODE integration.
 Candidates containing genuine latent states fall back to rollout residuals.
+Search defaults to one bounded start and 50 residual evaluations. A monotonic
+wall-clock deadline is checked inside fixed steps and adaptive RHS calls; expiry
+returns a checkpointable failed fit instead of raising through the controller.
+The frozen train-plus-validation refit uses the selected search parameters as
+its first bounded optimizer point, adaptive `solve_ivp`, one start, 150 residual
+evaluations, and a separate 300-second deadline by default.
 Failed starts remain diagnostics rather than disappearing. Regardless of the
 fitting backend, training and validation rankings use causal one-step rollout
 metrics; validation never tunes the parameters.
@@ -240,9 +248,12 @@ can load test data during iteration.
 
 `TermPruner` operates on whole AST terms. It measures normalized
 trajectory contribution at interval boundaries and interiors, proposes
-low-contribution removals only up to a configured maximum threshold, refits,
-and accepts/rejects using validation impact plus validity and simulation
-checks. Terms containing declared external inputs are preserved because sparse
+low-contribution removals only up to a configured maximum threshold, and in
+search mode evaluates and refits only the first conservative distinct reduced
+support. It accepts/rejects that support using validation impact plus validity
+and simulation checks; the unpruned fit remains eligible. An explicit
+all-supports mode remains available for final diagnostic analysis. Terms
+containing declared external inputs are preserved because sparse
 events can have important interval effects despite zero sampled-boundary RMS.
 Every target-producing dependency retains nonzero dynamics. The one-step
 persistence MSE is reported separately as a baseline and is never represented

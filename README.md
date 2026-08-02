@@ -69,13 +69,24 @@ Local structured-output requests can take several minutes on first load.
 defaults to 2048 and prevents an incomplete structured response from generating
 until the request timeout. Ollama thinking is disabled for structured calls so
 reasoning tokens cannot consume the JSON response budget.
-One-step rolling fits default to three multistarts and 400 residual evaluations
-per start. Use `--fit-starts` and `--fit-max-nfev` to increase these limits for
-final experiments after a smaller pilot succeeds.
+One-step search fits default to one start, 50 residual evaluations, a
+300-second per-candidate wall-clock limit, and fixed-step RK4 integration.
+Configure these limits with `--fit-starts`, `--fit-max-nfev`, and
+`--fit-timeout-seconds`. A timeout rejects and checkpoints only the affected
+candidate; later search rounds continue. After validation selection, the frozen
+structure is warm-started from its selected fitted parameters and refitted with
+adaptive `solve_ivp`, one start, 150 evaluations, and a 300-second limit. The
+last two limits are configurable with `--final-fit-max-nfev` and
+`--final-fit-timeout-seconds`. If that adaptive refit times out, the controller
+deterministically falls back to the fixed-step refit rather than losing the
+completed search.
 Candidates whose complete state vector and derivatives are observed use fast
 bounded derivative regression during parameter fitting. Candidates with any
 genuine latent state automatically use the ODE-rollout fallback. Both paths are
 ranked using causal one-step rollout error.
+Search-time pruning evaluates one conservative reduced support and refits it
+once. This avoids an exhaustive series of optimizer runs for every candidate;
+the unpruned fit remains eligible when the reduced support fails validation.
 
 ### Dry run
 

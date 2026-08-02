@@ -74,6 +74,11 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.llm_timeout_seconds == 900.0
     assert changed.llm_timeout_seconds == 1200.0
     assert default.llm_max_output_tokens == 2048
+    assert default.fit_starts == 1
+    assert default.fit_max_nfev == 50
+    assert default.fit_timeout_seconds == 300.0
+    assert default.final_fit_max_nfev == 150
+    assert default.final_fit_timeout_seconds == 300.0
 
 
 def test_cli_rejects_nonpositive_timeout() -> None:
