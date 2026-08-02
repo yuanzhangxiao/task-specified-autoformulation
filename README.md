@@ -146,6 +146,12 @@ python scripts/run_baseline.py \
   --seed 0
 ```
 
+Every baseline CLI run is supervised by a separate process and has a hard
+wall-clock limit (30 minutes by default). Configure it with
+`--wall-timeout-seconds`. The runner writes `run_status.json` with
+`complete`, `failed`, or `timed_out`; a timeout terminates the complete child
+process group while preserving any checkpoints already written.
+
 `sindy` uses supplied training derivative labels with a degree-two polynomial
 library, unary `tanh` features, and deterministic STLSQ. It does not create
 explicit lag columns. `llm_feature_sindy` makes one cached proposer call and
@@ -171,8 +177,12 @@ python scripts/run_baseline.py \
   --tier easy \
   --method pysr \
   --pysr-iterations 40 \
-  --maximum-expression-size 30
+  --maximum-expression-size 30 \
+  --wall-timeout-seconds 1800
 ```
+
+The same limit is passed to PySR's native timeout and is also enforced by the
+outer supervisor, which cleans up Julia child processes if the limit expires.
 
 The no-judge Autoformalism ablation uses the ordinary experiment CLI. It makes
 no judge calls, returns no judge feedback to the proposer, and ranks with
@@ -182,44 +192,42 @@ validation fit, simplicity, and deterministic diagnostics:
 python scripts/run_experiment.py [ordinary arguments] --no-judge
 ```
 
-The upstream D3 repository is an application tied to its own Hydra environments,
-executes LLM-generated Python, and exposes test data during candidate fitting.
-The default `d3_no_tools` implementation therefore preserves D3's iterative
-propose-fit-reflect workflow while replacing executable code with this project's
-restricted candidate schema. It disables external feature-acquisition tools,
-uses the fixed observed-state skeleton, checkpoints every generation, selects on
-validation, and opens test once after selection:
+`d3_native_no_tools` preserves D3's iterative propose-fit-reflect workflow,
+native PyTorch Adam optimizer, and teacher-forced forward-Euler state update.
+It models every dynamic channel observed in the selected tier for which the
+benchmark supplies derivative labels. External feature-acquisition tools are
+disabled, every generation is checkpointed, validation selects the candidate,
+and test is opened once after selection:
 
 ```bash
 python scripts/run_baseline.py \
   --data-root "$AUTOFORMALISM_DATA_ROOT" \
   --benchmark-id original_b1 \
   --tier easy \
-  --method d3_no_tools \
+  --method d3_native_no_tools \
   --model openai:MODEL_NAME \
   --d3-generations 20
 ```
 
-This is a security- and leakage-safe D3 adaptation, not byte-for-byte execution
-of the upstream repository. The audited upstream reference is pinned to commit
-`ee86212dfd5935bb0c9626eaa0570223ff7ecf1c`. For audit or compatibility experiments,
-`d3_no_tools` also supports a versioned external bridge contract.
-`--d3-command` receives `REQUEST_JSON RESPONSE_JSON`; the request has the task
-prompt, train/validation trajectories and derivatives,
-`external_tools_enabled: false`, and `candidate_submission_enabled: true`, but
-no test data. The bridge must write
-`{"equations": {"TARGET": "RHS"}}`. The equations are then parsed safely and
-evaluated by this repository. This keeps upstream D3 code and dependencies in a
-separate environment:
+Install its optional PyTorch dependency first:
 
 ```bash
-python scripts/run_baseline.py \
-  --data-root "$AUTOFORMALISM_DATA_ROOT" \
-  --benchmark-id original_b1 \
-  --tier easy \
-  --method d3_no_tools \
-  --d3-command /path/to/d3-environment/bin/python /path/to/d3_bridge.py
+pip install -e '.[d3]'
 ```
+
+The upstream defaults are learning rate `1e-2`, 2,000 maximum epochs,
+validation every 10 epochs, and 100 non-improving validation checks before
+early stopping. The selected validation parameters are frozen for test; there
+is no Autoformalism warm start, bounded least-squares fit, RK4 screening, or
+`solve_ivp` refit. The complete baseline is protected by
+`--wall-timeout-seconds`.
+
+For security, expressions are returned through the restricted schema and
+compiled directly into differentiable PyTorch operations; arbitrary
+LLM-generated Python is never executed. Thus the proposal representation and
+leakage-safe split harness are adaptations, while the numerical fitting method
+matches upstream D3. The audited upstream reference is pinned to commit
+`ee86212dfd5935bb0c9626eaa0570223ff7ecf1c`.
 
 ## Resume
 

@@ -23,6 +23,7 @@ def fit_pysr(
     iterations: int,
     seed: int,
     maximum_expression_size: int,
+    timeout_seconds: float,
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, Any]]:
     """Run the published operator set once per supplied derivative output."""
     try:
@@ -46,6 +47,7 @@ def fit_pysr(
             parallelism="serial",
             model_selection="best",
             verbosity=0,
+            timeout_in_seconds=timeout_seconds,
         )
         model.fit(x, y[:, index], variable_names=pysr_names)
         expressions = tuple(
@@ -57,7 +59,10 @@ def fit_pysr(
         if not expressions:
             raise ValueError(f"PySR returned no equation for {target}")
         equations[target] = expressions
-        metadata[target] = {"equation_count": len(expressions)}
+        metadata[target] = {
+            "equation_count": len(expressions),
+            "timeout_seconds": timeout_seconds,
+        }
     return equations, metadata
 
 

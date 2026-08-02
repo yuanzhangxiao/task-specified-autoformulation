@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from autoformalism.baselines.core import target_scales
-from autoformalism.baselines.d3 import _project_d3_structure, run_d3_no_tools
-from autoformalism.baselines.models import BaselineConfig
-from autoformalism.baselines.pysr import _restore_feature_names
+from autoformalism.baselines.d3 import run_d3_native_no_tools
+from autoformalism.baselines.d3_native import (
+    NativeD3Error,
+    validate_native_candidate,
+)
+from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
+from autoformalism.baselines.pysr import _restore_feature_names, fit_pysr
 from autoformalism.baselines.runner import _select_pysr, run_baseline
 from autoformalism.data import (
     DatasetSplit,
@@ -156,6 +163,37 @@ def test_pysr_cli_options_are_propagated() -> None:
     assert config.maximum_expression_size == 12
 
 
+def test_pysr_receives_native_timeout(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRegressor:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.equations_ = {"sympy_format": ["-0.4*af_x0"]}
+
+        def fit(self, x, y, *, variable_names):
+            captured["variable_names"] = variable_names
+
+    monkeypatch.setitem(
+        sys.modules, "pysr", SimpleNamespace(PySRRegressor=FakeRegressor)
+    )
+
+    equations, metadata = fit_pysr(
+        np.ones((4, 1)),
+        np.ones((4, 1)),
+        ("x",),
+        ("x",),
+        iterations=2,
+        seed=0,
+        maximum_expression_size=10,
+        timeout_seconds=123.0,
+    )
+
+    assert captured["timeout_in_seconds"] == 123.0
+    assert equations == {"x": ("-0.4*x",)}
+    assert metadata["x"]["timeout_seconds"] == 123.0
+
+
 def test_pysr_restores_dataset_names_that_conflict_with_sympy() -> None:
     expression = _restore_feature_names(
         "af_x0 + af_x1**2 + tanh(af_x10)",
@@ -166,55 +204,23 @@ def test_pysr_restores_dataset_names_that_conflict_with_sympy() -> None:
     assert expression == "E + Gp**2 + tanh(body_weight_kg)"
 
 
-def test_d3_request_excludes_test_and_disables_external_tools(
-    tmp_path: Path,
-) -> None:
-    bridge = (
-        "import json,sys;"
-        "p=json.load(open(sys.argv[1]));"
-        "assert p['external_tools_enabled'] is False;"
-        "assert p['candidate_submission_enabled'] is True;"
-        "assert 'test' not in p;"
-        "json.dump({'equations':{'x':'-0.4*x'}},open(sys.argv[2],'w'))"
-    )
-    result = run_d3_no_tools(
-        BaselineConfig(method="d3_no_tools"),
-        _dataset(),
-        lambda: _split(SplitName.TEST),
-        ValidationContext(targets=("x",), lagged_targets=("x",)),
-        task_prompt="Discover x dynamics.",
-        command=(sys.executable, "-c", bridge),
-        work_directory=tmp_path,
-    )
-
-    request = json.loads((tmp_path / "d3_request.json").read_text())
-    assert request["external_tools_enabled"] is False
-    assert result.test_normalized_mse < 1e-8
-
-
-def test_safe_d3_iterates_without_judge_or_test_feedback(tmp_path: Path) -> None:
+def test_native_d3_iterates_without_judge_or_test_feedback(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
     proposal = CandidateModel.model_validate(
         {
             "candidate_id": "d3_linear",
             "parent_candidate_id": None,
             "change_summary": "Observed-state D3 proposal.",
             "states": [{"name": "x", "kind": "observed"}],
-            "state_equations": [{"state": "x", "rhs": "-k * x"}],
+            "state_equations": [{"state": "x", "rhs": "-0.4 * x"}],
             "observation_mappings": [{"channel": "x", "expression": "x"}],
-            "parameters": [
-                {
-                    "name": "k",
-                    "scope": "global",
-                    "bounds": {"lower": 0.01, "upper": 1.0},
-                    "initialization_range": {"lower": 0.1, "upper": 0.8},
-                }
-            ],
+            "parameters": [],
             "initial_conditions": [
                 {"state": "x", "scope": "global", "expression": "x"}
             ],
         }
     )
-    client = MockLLMClient(proposer_responses=[proposal, proposal])
+    client = MockLLMClient(proposer_responses=[proposal])
     test_calls = 0
 
     def load_test() -> DatasetSplit:
@@ -222,8 +228,8 @@ def test_safe_d3_iterates_without_judge_or_test_feedback(tmp_path: Path) -> None
         test_calls += 1
         return _split(SplitName.TEST)
 
-    result = run_d3_no_tools(
-        BaselineConfig(method="d3_no_tools", d3_generations=2),
+    result = run_d3_native_no_tools(
+        BaselineConfig(method="d3_native_no_tools", d3_generations=1),
         _dataset(),
         load_test,
         ValidationContext(targets=("x",), lagged_targets=("x",)),
@@ -232,14 +238,18 @@ def test_safe_d3_iterates_without_judge_or_test_feedback(tmp_path: Path) -> None
         work_directory=tmp_path,
     )
 
-    assert [call["role"] for call in client.calls] == ["proposer", "proposer"]
+    assert [call["role"] for call in client.calls] == ["proposer"]
     assert test_calls == 1
-    assert result.test_normalized_mse < 1e-8
+    assert result.test_normalized_mse < 1e-5
+    assert result.selected_hyperparameters["parameter_fitting"] == "pytorch_adam"
+    assert result.selected_hyperparameters["state_update"] == (
+        "teacher_forced_forward_euler"
+    )
     checkpoint = json.loads((tmp_path / "d3_checkpoint.json").read_text())
     assert "test" not in json.dumps(checkpoint).lower()
 
-    resumed = run_d3_no_tools(
-        BaselineConfig(method="d3_no_tools", d3_generations=2),
+    resumed = run_d3_native_no_tools(
+        BaselineConfig(method="d3_native_no_tools", d3_generations=1),
         _dataset(),
         load_test,
         ValidationContext(targets=("x",), lagged_targets=("x",)),
@@ -248,11 +258,11 @@ def test_safe_d3_iterates_without_judge_or_test_feedback(tmp_path: Path) -> None
         work_directory=tmp_path,
     )
 
-    assert [call["role"] for call in client.calls] == ["proposer", "proposer"]
+    assert [call["role"] for call in client.calls] == ["proposer"]
     assert resumed.validation_normalized_mse == result.validation_normalized_mse
 
 
-def test_d3_projects_supplied_auxiliary_states_to_forcing() -> None:
+def test_native_d3_requires_all_observed_channels_as_states() -> None:
     candidate = CandidateModel.model_validate(
         {
             "candidate_id": "overdeclared",
@@ -283,13 +293,62 @@ def test_d3_projects_supplied_auxiliary_states_to_forcing() -> None:
         }
     )
 
-    projected, repairs = _project_d3_structure(
+    validate_native_candidate(
         candidate,
-        ValidationContext(
-            targets=("x",), auxiliaries=("u",), lagged_targets=("x",)
-        ),
+        ("x", "u"),
+        (),
     )
 
-    assert [state.name for state in projected.states] == ["x"]
-    assert [parameter.name for parameter in projected.parameters] == ["k"]
-    assert "u" in repairs[0]
+    target_only = candidate.model_copy(
+        update={
+            "states": candidate.states[:1],
+            "state_equations": candidate.state_equations[:1],
+        }
+    )
+    with np.testing.assert_raises(NativeD3Error):
+        validate_native_candidate(target_only, ("x", "u"), ())
+
+
+def test_baseline_run_status_schema_supports_timeout() -> None:
+    status = BaselineRunStatus(
+        status="timed_out",
+        elapsed_wall_seconds=30.1,
+        wall_timeout_seconds=30.0,
+        error="baseline wall-clock limit reached",
+    )
+
+    assert status.status == "timed_out"
+
+
+def test_baseline_cli_hard_timeout_writes_status(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_baseline.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--data-root",
+            str(tmp_path),
+            "--benchmark-id",
+            "missing",
+            "--method",
+            "persistence",
+            "--output-root",
+            str(tmp_path / "outputs"),
+            "--wall-timeout-seconds",
+            "0.000001",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    status_path = (
+        tmp_path
+        / "outputs"
+        / "persistence"
+        / "missing_easy_seed0"
+        / "run_status.json"
+    )
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+
+    assert completed.returncode == 124
+    assert status["status"] == "timed_out"

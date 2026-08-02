@@ -380,3 +380,16 @@ and deterministic resume, followed by frozen one-time test evaluation.
 The current obfuscated-perturbed cases 02–04 are not eligible until
 their public metadata contradictions are resolved without changing
 finalized prompts unless explicitly authorized.
+
+## Baseline runtime boundary
+
+Baseline commands run inside a supervised process group with a configurable
+hard wall-clock limit. The supervisor records `run_status.json` and terminates
+the worker and descendants on timeout, so Julia-backed PySR processes cannot be
+orphaned. D3 checkpoints remain resumable after termination.
+
+D3-native-no-tools models every observed dynamic channel with supplied
+derivative labels. It uses upstream D3's PyTorch Adam defaults and
+teacher-forced Euler objective. Validation selects frozen parameters and test is
+opened exactly once; no Autoformalism refit is applied. Expressions use the
+restricted AST-to-PyTorch compiler rather than executing generated Python.

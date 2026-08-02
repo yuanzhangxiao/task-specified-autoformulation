@@ -1,32 +1,24 @@
-"""Leakage-safe D3 workflow and optional external bridge adapter."""
+"""Leakage-safe D3-native-no-tools workflow."""
 
 from __future__ import annotations
 
 import json
-import re
-import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from autoformalism.baselines.core import evaluate_equations, target_scales
+from autoformalism.baselines.d3_native import (
+    NativeD3Error,
+    evaluate_native_d3,
+    fit_native_d3,
+    validate_native_candidate,
+)
 from autoformalism.baselines.models import BaselineConfig, BaselineResult
-from autoformalism.data import (
-    DatasetSplit,
-    DevelopmentDataset,
-    SplitName,
-    Trajectory,
-)
-from autoformalism.expressions import (
-    ModelValidationError,
-    ValidationContext,
-    compile_candidate,
-    repair_protected_declarations,
-)
-from autoformalism.fitting import FitConfig, evaluate_fitted_candidate, fit_candidate
+from autoformalism.data import DatasetSplit, DevelopmentDataset
+from autoformalism.expressions import ValidationContext
 from autoformalism.llm import LLMClient
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
-from autoformalism.schemas import CandidateModel, ParameterScope, StateKind
+from autoformalism.schemas import CandidateModel
 
 D3_UPSTREAM_REVISION = "ee86212dfd5935bb0c9626eaa0570223ff7ecf1c"
 
@@ -35,31 +27,20 @@ class D3AdapterError(RuntimeError):
     """Raised when the external D3 bridge violates the exchange contract."""
 
 
-def run_d3_no_tools(
+def run_d3_native_no_tools(
     config: BaselineConfig,
     dataset: DevelopmentDataset,
     test_loader,
     context: ValidationContext,
     *,
     task_prompt: str,
-    command: Sequence[str] = (),
     work_directory: Path,
     llm_client: LLMClient | None = None,
 ) -> BaselineResult:
-    """Run safe D3 locally or delegate to an isolated compatibility bridge."""
-    if command:
-        return _run_external_bridge(
-            config,
-            dataset,
-            test_loader,
-            context,
-            task_prompt=task_prompt,
-            command=command,
-            work_directory=work_directory,
-        )
+    """Run native-fit D3 with external feature-acquisition tools disabled."""
     if llm_client is None:
-        raise D3AdapterError("D3 requires --model or --d3-command")
-    return _run_safe_d3(
+        raise D3AdapterError("D3-native-no-tools requires --model")
+    return _run_native_d3(
         config,
         dataset,
         test_loader,
@@ -69,84 +50,7 @@ def run_d3_no_tools(
         work_directory=work_directory,
     )
 
-
-def _run_external_bridge(
-    config: BaselineConfig,
-    dataset: DevelopmentDataset,
-    test_loader: Callable[[], DatasetSplit],
-    context: ValidationContext,
-    *,
-    task_prompt: str,
-    command: Sequence[str],
-    work_directory: Path,
-) -> BaselineResult:
-    """Run a version-pinned D3 compatibility process without exposing test data."""
-    work_directory.mkdir(parents=True, exist_ok=True)
-    request_path = work_directory / "d3_request.json"
-    response_path = work_directory / "d3_response.json"
-    request = {
-        "protocol_version": "1",
-        "external_tools_enabled": False,
-        "candidate_submission_enabled": True,
-        "task_prompt": task_prompt,
-        "targets": list(context.targets),
-        "auxiliaries": list(context.auxiliaries),
-        "external_inputs": list(context.external_inputs),
-        "fixed_covariates": list(context.fixed_covariates),
-        "training": _split_payload(dataset.train),
-        "validation": _split_payload(dataset.validation),
-        "seed": config.seed,
-    }
-    request_path.write_text(json.dumps(request, sort_keys=True), encoding="utf-8")
-    completed = subprocess.run(
-        [*command, str(request_path), str(response_path)],
-        cwd=work_directory,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if completed.returncode != 0:
-        raise D3AdapterError(
-            f"D3 bridge failed with code {completed.returncode}: "
-            f"{completed.stderr[-2000:]}"
-        )
-    try:
-        response = json.loads(response_path.read_text(encoding="utf-8"))
-        equations = {str(k): str(v) for k, v in response["equations"].items()}
-    except (KeyError, OSError, TypeError, json.JSONDecodeError) as exc:
-        raise D3AdapterError(f"invalid D3 response: {exc}") from exc
-    if set(equations) != set(context.targets):
-        raise D3AdapterError("D3 response must contain one equation per target")
-    scales = target_scales(dataset.train, context.targets)
-    training = evaluate_equations(
-        equations, context, dataset.train, scales, identifier="d3_train"
-    )
-    validation = evaluate_equations(
-        equations, context, dataset.validation, scales, identifier="d3_validation"
-    )
-    test = evaluate_equations(
-        equations, context, test_loader(), scales, identifier="d3_test"
-    )
-    return BaselineResult(
-        method=config.method,
-        benchmark_id=dataset.benchmark_id,
-        tier=dataset.tier,
-        seed=config.seed,
-        equations=equations,
-        selected_hyperparameters={
-            "external_tools_enabled": "false",
-            "candidate_submission_enabled": "true",
-            "adaptation": "external_bridge",
-            "upstream_revision": D3_UPSTREAM_REVISION,
-        },
-        training_normalized_mse=training.normalized_mse,
-        validation_normalized_mse=validation.normalized_mse,
-        test_normalized_mse=test.normalized_mse,
-        test_per_target_normalized_mse=dict(test.per_target_normalized_mse),
-    )
-
-
-def _run_safe_d3(
+def _run_native_d3(
     config: BaselineConfig,
     dataset: DevelopmentDataset,
     test_loader: Callable[[], DatasetSplit],
@@ -156,7 +60,7 @@ def _run_safe_d3(
     llm_client: LLMClient,
     work_directory: Path,
 ) -> BaselineResult:
-    """Adapt D3's propose-fit-reflect loop to the restricted model grammar."""
+    """Run D3's propose-fit-reflect loop with native Adam/Euler fitting."""
     work_directory.mkdir(parents=True, exist_ok=True)
     checkpoint_path = work_directory / "d3_checkpoint.json"
     checkpoint = _load_checkpoint(checkpoint_path, config, dataset)
@@ -171,7 +75,8 @@ def _run_safe_d3(
         default=float("inf"),
     )
     stagnant = int(checkpoint.get("stagnant", 0))
-    fit_config = FitConfig(random_seed=config.seed)
+    observed_channels = (*context.targets, *context.auxiliaries)
+    available_inputs = (*context.external_inputs, *context.fixed_covariates)
 
     for generation in range(start, config.d3_generations):
         feedback = _d3_feedback(records)
@@ -192,26 +97,26 @@ def _run_safe_d3(
                     sort_keys=True,
                 ),
             ).parsed
-            candidate, repairs = repair_protected_declarations(proposed, context)
-            candidate, projection_repairs = _project_d3_structure(
-                candidate, context
+            candidate = proposed
+            validate_native_candidate(
+                candidate, observed_channels, available_inputs
             )
-            repairs = (*repairs, *projection_repairs)
-            _validate_d3_structure(candidate, context)
-            compiled = compile_candidate(candidate, context)
-            fitted = fit_candidate(
-                compiled, dataset.train, dataset.validation, fit_config
+            fitted = fit_native_d3(
+                candidate,
+                dataset.train,
+                dataset.validation,
+                targets=context.targets,
+                seed=config.seed + generation,
             )
-            if not fitted.success:
-                raise D3AdapterError("numerical parameter fitting failed")
-            validation_mse = fitted.validation_metrics.normalized_mse
+            validation_mse = fitted.validation_mse
             record = {
                 "generation": generation,
                 "candidate": candidate.model_dump(mode="json"),
-                "repairs": list(repairs),
-                "parameters": dict(fitted.global_parameters),
-                "training_mse": fitted.training_metrics.normalized_mse,
+                "parameters": dict(fitted.parameters),
+                "training_mse": fitted.training_mse,
                 "validation_mse": validation_mse,
+                "epochs_completed": fitted.epochs_completed,
+                "target_scales": dict(fitted.target_scales),
                 "error": None,
             }
             if validation_mse < best_validation - 1e-12:
@@ -220,10 +125,12 @@ def _run_safe_d3(
             else:
                 stagnant += 1
         except (
+            ArithmeticError,
             D3AdapterError,
+            NativeD3Error,
             LLMProviderError,
             LLMResponseError,
-            ModelValidationError,
+            RuntimeError,
             TypeError,
             ValueError,
         ) as exc:
@@ -254,23 +161,12 @@ def _run_safe_d3(
         )
     selected = min(eligible, key=lambda item: float(item["validation_mse"]))
     candidate = CandidateModel.model_validate(selected["candidate"])
-    compiled = compile_candidate(candidate, context)
-    combined = DatasetSplit(
-        SplitName.TRAIN,
-        (*dataset.train.trajectories, *dataset.validation.trajectories),
-        f"{dataset.train.fingerprint}+{dataset.validation.fingerprint}",
-    )
-    refitted = fit_candidate(compiled, combined, dataset.validation, fit_config)
-    if not refitted.success:
-        raise D3AdapterError("D3 train-plus-validation refit failed")
-    _, test_metrics = evaluate_fitted_candidate(
-        compiled,
+    test_mse, test_per_target = evaluate_native_d3(
+        candidate,
         test_loader(),
-        global_parameters=refitted.global_parameters,
-        global_initial_conditions=refitted.global_initial_conditions,
-        target_scales=refitted.target_scales,
-        config=fit_config,
-        fit_trajectory_initial_conditions=False,
+        dict(selected["parameters"]),
+        context.targets,
+        dict(selected["target_scales"]),
     )
     equations = {
         equation.state: equation.rhs for equation in candidate.state_equations
@@ -285,98 +181,31 @@ def _run_safe_d3(
             "generations_completed": len(records),
             "selected_generation": int(selected["generation"]),
             "external_tools_enabled": "false",
-            "adaptation": "restricted_schema",
+            "adaptation": "native_adam_teacher_forced_euler",
             "upstream_revision": D3_UPSTREAM_REVISION,
             "selected_parameters": json.dumps(
-                dict(refitted.global_parameters), sort_keys=True
+                dict(selected["parameters"]), sort_keys=True
             ),
+            "parameter_fitting": "pytorch_adam",
+            "state_update": "teacher_forced_forward_euler",
+            "learning_rate": 1e-2,
+            "maximum_epochs": 2_000,
+            "validation_interval": 10,
+            "early_stopping_patience_checks": 100,
+            "optimizer_device": "cpu",
+            "parameter_initialization": "midpoint_of_declared_initialization_range",
+            "modeled_observed_channels": json.dumps(observed_channels),
+            "selected_epochs_completed": int(selected["epochs_completed"]),
         },
         training_normalized_mse=float(selected["training_mse"]),
         validation_normalized_mse=float(selected["validation_mse"]),
-        test_normalized_mse=test_metrics.normalized_mse,
-        test_per_target_normalized_mse=dict(
-            test_metrics.per_target_normalized_mse
-        ),
-    )
-
-
-def _validate_d3_structure(
-    candidate: CandidateModel, context: ValidationContext
-) -> None:
-    """Keep D3 on its fixed observed-state skeleton and global parameters."""
-    states = {item.name for item in candidate.states}
-    if states != set(context.targets):
-        raise D3AdapterError(
-            "D3 candidate states must be exactly the observed target channels"
-        )
-    if any(item.kind is not StateKind.OBSERVED for item in candidate.states):
-        raise D3AdapterError("D3 candidate states must all be observed")
-    if any(
-        item.scope is not ParameterScope.GLOBAL for item in candidate.parameters
-    ):
-        raise D3AdapterError("D3 parameters must be global")
-
-
-def _project_d3_structure(
-    candidate: CandidateModel, context: ValidationContext
-) -> tuple[CandidateModel, tuple[str, ...]]:
-    """Project over-declared supplied trajectories onto D3's fixed state skeleton."""
-    target_set = set(context.targets)
-    removed_states = [
-        item.name for item in candidate.states if item.name not in target_set
-    ]
-    if not removed_states:
-        return candidate, ()
-    supplied = {
-        *context.auxiliaries,
-        *context.external_inputs,
-        *context.fixed_covariates,
-    }
-    unsupported = sorted(set(removed_states) - supplied)
-    if unsupported:
-        raise D3AdapterError(
-            "D3 proposed non-target states that are not supplied channels: "
-            f"{unsupported}"
-        )
-    payload = candidate.model_dump(mode="json")
-    payload["states"] = [
-        item for item in payload["states"] if item["name"] in target_set
-    ]
-    payload["state_equations"] = [
-        item for item in payload["state_equations"] if item["state"] in target_set
-    ]
-    payload["initial_conditions"] = [
-        item for item in payload["initial_conditions"] if item["state"] in target_set
-    ]
-    payload["observation_mappings"] = [
-        item
-        for item in payload["observation_mappings"]
-        if item["channel"] in target_set
-    ]
-    expression_text = " ".join(
-        [item["rhs"] for item in payload["state_equations"]]
-        + [item["expression"] for item in payload["processes"]]
-        + [item["expression"] for item in payload["observation_mappings"]]
-    )
-    used = set(re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", expression_text))
-    payload["parameters"] = [
-        item for item in payload["parameters"] if item["name"] in used
-    ]
-    declared = {
-        *(item["name"] for item in payload["states"]),
-        *(item["name"] for item in payload["processes"]),
-        *(item["name"] for item in payload["parameters"]),
-    }
-    payload["constraints"] = [
-        item for item in payload["constraints"] if item["subject"] in declared
-    ]
-    return CandidateModel.model_validate(payload), (
-        "treated supplied channels declared as states as exogenous trajectories: "
-        + ", ".join(sorted(removed_states)),
+        test_normalized_mse=test_mse,
+        test_per_target_normalized_mse=test_per_target,
     )
 
 
 def _d3_system_prompt(task_prompt: str, context: ValidationContext) -> str:
+    observed_states = (*context.targets, *context.auxiliaries)
     available = tuple(
         dict.fromkeys(
             (
@@ -396,22 +225,25 @@ def _d3_system_prompt(task_prompt: str, context: ValidationContext) -> str:
         "interpretable differential model, use fitted validation feedback to refine "
         "it, and return the required structured candidate. External feature-"
         "acquisition and execution tools are disabled. Candidate submission remains "
-        "enabled through the structured response. To preserve D3's fixed simulator "
-        f"state skeleton, declare exactly these observed states: {context.targets}. "
+        "enabled through the structured response. To preserve D3's native fixed "
+        "observed-state simulator, declare exactly these observed states in this "
+        f"order: {observed_states}. "
         "Each state must contain its derivative RHS. You may declare safe algebraic "
         "processes and bounded global parameters, but no latent states or trajectory-"
         "specific parameters. Use only symbols explicitly available in the task.\n\n"
         f"Benchmark task:\n{task_prompt}\n\n"
-        f"Exact target state names: {context.targets}. Exact supplied auxiliary "
-        f"trajectory names: {context.auxiliaries}. Exact external input names: "
+        f"Exact scored target names: {context.targets}. Additional observed dynamic "
+        f"state names with supplied derivative labels: {context.auxiliaries}. "
+        f"Exact external input names: "
         f"{context.external_inputs}. Exact fixed covariate names: "
         f"{context.fixed_covariates}. The complete allowed data-symbol list is: "
         f"{available}. Do not invent aliases for these names. In particular, these "
         f"meal aliases are unavailable in this tier and must not appear: "
-        f"{unavailable_meal_aliases}. Supplied auxiliaries are RHS inputs, not extra "
-        "states. For an observed state, set observed_channel equal to its name and "
-        "omit initial. If uncertain, return a simple target equation using only the "
-        "listed supplied symbols and bounded global parameters."
+        f"{unavailable_meal_aliases}. Give one state equation for every listed "
+        "observed state. Observation mappings need only cover scored targets. "
+        "Parameters must be global. Initial values are teacher-forced from measured "
+        "states and are not fitted. If uncertain, return simple equations using only "
+        "the listed symbols and global parameters."
     )
 
 
@@ -474,32 +306,10 @@ def _checkpoint_fingerprint(
         "generations": config.d3_generations,
         "patience": config.d3_patience,
         "llm_model": config.llm_model,
-        "adapter_revision": "3",
+        "adapter_revision": "4-native-adam",
         "train": dataset.train.fingerprint,
         "validation": dataset.validation.fingerprint,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
-
-
-def _split_payload(split: DatasetSplit) -> list[dict[str, object]]:
-    return [_trajectory_payload(item) for item in split.trajectories]
-
-
-def _trajectory_payload(item: Trajectory) -> dict[str, object]:
-    return {
-        "trajectory_id": item.trajectory_id,
-        "time": item.time.tolist(),
-        "targets": {key: value.tolist() for key, value in item.targets.items()},
-        "auxiliaries": {
-            key: value.tolist() for key, value in item.auxiliaries.items()
-        },
-        "external_inputs": {
-            key: value.tolist() for key, value in item.external_inputs.items()
-        },
-        "fixed_covariates": dict(item.fixed_covariates),
-        "derivatives": {
-            key: value.tolist() for key, value in item.derivatives.items()
-        },
-    }

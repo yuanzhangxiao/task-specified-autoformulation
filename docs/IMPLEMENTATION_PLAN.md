@@ -293,6 +293,21 @@ Acceptance tests:
 - artifact inspection finds no raw dataset, private/hidden path,
   secret, or unbounded API response.
 
+## Baseline runtime controls
+
+Run each baseline in a supervised process group with a configurable hard
+wall-clock deadline. Record completion, failure, or timeout in a small status
+artifact. Pass the deadline through to PySR and terminate its Julia descendants
+on expiry. Run D3 with native Adam, teacher-forced Euler updates, all eligible
+observed states, validation early stopping, and frozen test parameters.
+
+Acceptance tests:
+
+- a forced timeout exits with a distinct status and writes `timed_out`;
+- PySR receives its native timeout configuration;
+- D3 result metadata identifies Adam/Euler settings and modeled channels;
+- timeout cleanup does not delete D3 checkpoints or affect other runs.
+
 ## Phase 1 completion gate
 
 Phase 1 is complete only when:

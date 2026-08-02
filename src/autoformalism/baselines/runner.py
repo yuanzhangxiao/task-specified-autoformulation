@@ -137,6 +137,7 @@ def run_baseline(
             iterations=config.pysr_iterations,
             seed=config.seed,
             maximum_expression_size=config.maximum_expression_size,
+            timeout_seconds=config.wall_timeout_seconds / len(context.targets),
         )
         equations = _select_pysr(candidates, dataset, context, scales)
         train_metrics = evaluate_equations(
