@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from autoformalism.baselines import runner as baseline_runner
 from autoformalism.baselines.core import target_scales
 from autoformalism.baselines.d3 import _d3_system_prompt, run_d3_native_no_tools
 from autoformalism.baselines.d3_native import (
@@ -20,7 +21,7 @@ from autoformalism.baselines.d3_native import (
 )
 from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
 from autoformalism.baselines.pysr import _restore_feature_names, fit_pysr
-from autoformalism.baselines.runner import _select_pysr, run_baseline
+from autoformalism.baselines.runner import _select_pysr, _select_sindy, run_baseline
 from autoformalism.baselines.sindy import library
 from autoformalism.data import (
     DatasetSplit,
@@ -30,6 +31,7 @@ from autoformalism.data import (
 )
 from autoformalism.data.models import TierRoles
 from autoformalism.expressions import ValidationContext
+from autoformalism.fitting import EvaluationMetrics
 from autoformalism.llm import MockLLMClient
 from autoformalism.schemas import CandidateModel
 from scripts.run_baseline import build_parser
@@ -97,6 +99,34 @@ def test_sindy_recovers_derivative_and_evaluates_test_once() -> None:
     assert calls == 1
     assert "x" in result.equations["x"]
     assert result.test_normalized_mse < 1e-8
+
+
+def test_sindy_rejects_penalized_failed_rollouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        baseline_runner,
+        "fit_sindy",
+        lambda *_args, **_kwargs: SimpleNamespace(equations={"x": "x * x"}),
+    )
+    monkeypatch.setattr(
+        baseline_runner,
+        "evaluate_equations",
+        lambda *_args, **_kwargs: EvaluationMetrics(
+            1e12, {"x": 1e12}, ("unstable",)
+        ),
+    )
+
+    with pytest.raises(ValueError, match="rollout failed for unstable"):
+        _select_sindy(
+            BaselineConfig(method="sindy", sindy_thresholds=(1e-3,)),
+            _dataset(),
+            ValidationContext(targets=("x",), lagged_targets=("x",)),
+            {"x": 1.0},
+            np.ones((2, 1)),
+            np.ones((2, 1)),
+            ("x",),
+        )
 
 
 def test_llm_feature_sindy_uses_one_proposer_call() -> None:

@@ -204,6 +204,13 @@ def _select_sindy(
                 fit.equations, context, dataset.validation, scales,
                 identifier=f"sindy_validation_{threshold}",
             )
+            if train.failed_trajectories or validation.failed_trajectories:
+                failed = (*train.failed_trajectories, *validation.failed_trajectories)
+                failures.append(
+                    f"threshold {threshold}: rollout failed for "
+                    + ", ".join(dict.fromkeys(failed))
+                )
+                continue
         except (
             ArithmeticError,
             ModelValidationError,
