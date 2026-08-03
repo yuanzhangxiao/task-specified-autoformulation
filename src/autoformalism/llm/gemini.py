@@ -11,6 +11,14 @@ from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.llm.models import StructuredT, TokenUsage
 
+_UNSUPPORTED_SCHEMA_KEYWORDS = {
+    "const",
+    "default",
+    "maxLength",
+    "minLength",
+    "pattern",
+}
+
 
 class GeminiClient(CachedLLMClient):
     """Structured client using the official Google Gen AI SDK."""
@@ -65,8 +73,8 @@ class GeminiClient(CachedLLMClient):
                     "system_instruction": system_prompt,
                     "max_output_tokens": self._max_output_tokens,
                     "response_mime_type": "application/json",
-                    "response_json_schema": response_model.model_json_schema(
-                        mode="validation"
+                    "response_json_schema": _gemini_compatible_schema(
+                        response_model.model_json_schema(mode="validation")
                     ),
                 },
             )
@@ -123,3 +131,20 @@ class GeminiClient(CachedLLMClient):
             f"Gemini request failed ({type(error).__name__}): {error}",
             retryable=retryable,
         ) from error
+
+
+def _gemini_compatible_schema(value: object) -> object:
+    """Remove JSON Schema keywords unsupported by Gemini structured output.
+
+    The complete Pydantic model still validates every response locally, so this
+    provider compatibility projection does not weaken the trusted boundary.
+    """
+    if isinstance(value, dict):
+        return {
+            key: _gemini_compatible_schema(item)
+            for key, item in value.items()
+            if key not in _UNSUPPORTED_SCHEMA_KEYWORDS
+        }
+    if isinstance(value, list):
+        return [_gemini_compatible_schema(item) for item in value]
+    return value

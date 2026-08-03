@@ -12,7 +12,7 @@ import pytest
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
-from autoformalism.llm.gemini import GeminiClient
+from autoformalism.llm.gemini import GeminiClient, _gemini_compatible_schema
 from autoformalism.llm.mock import MockLLMClient
 from autoformalism.llm.models import StructuredT, TokenUsage
 from autoformalism.llm.ollama import OllamaClient, _ollama_compatible_schema
@@ -389,9 +389,36 @@ def test_gemini_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
     assert config["system_instruction"] == "system"
     assert config["max_output_tokens"] == 2048
     assert config["response_mime_type"] == "application/json"
-    assert config["response_json_schema"] == (
+    assert config["response_json_schema"] == _gemini_compatible_schema(
         ProposerCandidateV2.model_json_schema(mode="validation")
     )
+
+
+def test_gemini_schema_removes_only_unsupported_validation_keywords() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "pattern": "^[a-z]+$",
+                "minLength": 1,
+                "maxLength": 20,
+                "default": "x",
+                "description": "A name.",
+            },
+            "version": {"type": "string", "const": "2"},
+        },
+        "required": ["name", "version"],
+        "additionalProperties": False,
+    }
+
+    compact = _gemini_compatible_schema(schema)
+
+    encoded = json.dumps(compact)
+    for keyword in ("pattern", "minLength", "maxLength", "default", "const"):
+        assert f'"{keyword}"' not in encoded
+    assert compact["additionalProperties"] is False
+    assert compact["properties"]["name"]["description"] == "A name."
 
 
 def test_ollama_sends_json_schema_and_parses_response(tmp_path: Path) -> None:

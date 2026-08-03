@@ -18,7 +18,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly authorize one real proposer request",
     )
-    parser.add_argument("--provider", choices=("openai", "ollama"), default="openai")
+    parser.add_argument(
+        "--provider", choices=("openai", "gemini", "ollama"), default="openai"
+    )
     parser.add_argument("--model", help="provider model identifier")
     parser.add_argument("--prompt-file", type=Path)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/llm_cache"))
