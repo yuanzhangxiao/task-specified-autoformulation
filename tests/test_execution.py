@@ -8,6 +8,7 @@ import pytest
 
 from autoformalism.execution import (
     ExecutionArguments,
+    _numeric_declared_channels,
     _prediction_protocol_prompt,
     _symbol_contract,
     arguments_from_namespace,
@@ -126,6 +127,17 @@ def test_symbol_contract_uses_exact_runtime_identifiers() -> None:
     assert "meal_amount" not in contract
     assert "deliberately promoted to modeled states" in contract
     assert "Never redeclare external inputs or fixed covariates" in contract
+
+
+def test_numeric_declared_channels_omit_structured_metadata() -> None:
+    bounds = {"numeric_input": (0.0, 1.0), "numeric_covariate": (3.0, 3.0)}
+
+    assert _numeric_declared_channels(
+        ("numeric_input", "input_schedule"), bounds
+    ) == ("numeric_input",)
+    assert _numeric_declared_channels(
+        ("numeric_covariate", "meal_schedule"), bounds
+    ) == ("numeric_covariate",)
 
 
 def test_prediction_protocol_prompt_overrides_legacy_wording() -> None:

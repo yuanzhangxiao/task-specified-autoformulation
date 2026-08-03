@@ -7,6 +7,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from autoformalism.baselines.d3_native import (
     NativeD3Error,
     evaluate_native_d3,
@@ -15,7 +17,7 @@ from autoformalism.baselines.d3_native import (
 )
 from autoformalism.baselines.models import BaselineConfig, BaselineResult
 from autoformalism.data import DatasetSplit, DevelopmentDataset
-from autoformalism.expressions import ValidationContext
+from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.llm import LLMClient
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.schemas import CandidateModel
@@ -76,13 +78,15 @@ def _run_native_d3(
     )
     stagnant = int(checkpoint.get("stagnant", 0))
     observed_channels = (*context.targets, *context.auxiliaries)
-    available_inputs = (*context.external_inputs, *context.fixed_covariates)
+    available_inputs = _numeric_available_inputs(dataset, context)
 
     for generation in range(start, config.d3_generations):
         feedback = _d3_feedback(records)
         try:
             proposed = llm_client.propose(
-                system_prompt=_d3_system_prompt(task_prompt, context),
+                system_prompt=_d3_system_prompt(
+                    task_prompt, context, available_inputs=available_inputs
+                ),
                 user_prompt=json.dumps(
                     {
                         "generation": generation,
@@ -130,6 +134,7 @@ def _run_native_d3(
             NativeD3Error,
             LLMProviderError,
             LLMResponseError,
+            ModelValidationError,
             RuntimeError,
             TypeError,
             ValueError,
@@ -204,15 +209,30 @@ def _run_native_d3(
     )
 
 
-def _d3_system_prompt(task_prompt: str, context: ValidationContext) -> str:
+def _d3_system_prompt(
+    task_prompt: str,
+    context: ValidationContext,
+    *,
+    available_inputs: tuple[str, ...] | None = None,
+) -> str:
     observed_states = (*context.targets, *context.auxiliaries)
+    scalar_inputs = (
+        (*context.external_inputs, *context.fixed_covariates)
+        if available_inputs is None
+        else available_inputs
+    )
+    scalar_fixed_covariates = tuple(
+        name for name in scalar_inputs if name not in context.external_inputs
+    )
+    scalar_external_inputs = tuple(
+        name for name in scalar_inputs if name in context.external_inputs
+    )
     available = tuple(
         dict.fromkeys(
             (
                 *context.targets,
                 *context.auxiliaries,
-                *context.external_inputs,
-                *context.fixed_covariates,
+                *scalar_inputs,
                 context.time_symbol,
             )
         )
@@ -235,9 +255,9 @@ def _d3_system_prompt(task_prompt: str, context: ValidationContext) -> str:
         f"Benchmark task:\n{task_prompt}\n\n"
         f"Exact scored target names: {context.targets}. Additional observed dynamic "
         f"state names with supplied derivative labels: {context.auxiliaries}. "
-        f"Exact external input names: "
-        f"{context.external_inputs}. Exact fixed covariate names: "
-        f"{context.fixed_covariates}. The complete allowed data-symbol list is: "
+        f"Exact numeric external input names: "
+        f"{scalar_external_inputs}. Exact scalar fixed covariate names: "
+        f"{scalar_fixed_covariates}. The complete allowed data-symbol list is: "
         f"{available}. Do not invent aliases for these names. In particular, these "
         f"meal aliases are unavailable in this tier and must not appear: "
         f"{unavailable_meal_aliases}. Give one state equation for every listed "
@@ -246,6 +266,36 @@ def _d3_system_prompt(task_prompt: str, context: ValidationContext) -> str:
         "states and are not fitted. If uncertain, return simple equations using only "
         "the listed symbols and global parameters."
     )
+
+
+def _numeric_available_inputs(
+    dataset: DevelopmentDataset, context: ValidationContext
+) -> tuple[str, ...]:
+    """Return external/fixed inputs usable numerically by native D3."""
+    trajectories = (*dataset.train.trajectories, *dataset.validation.trajectories)
+    numeric: list[str] = []
+    for name in (*context.external_inputs, *context.fixed_covariates):
+        valid = True
+        for trajectory in trajectories:
+            raw_value: object
+            if name in trajectory.external_inputs:
+                raw_value = trajectory.external_inputs[name]
+            elif name in trajectory.fixed_covariates:
+                raw_value = trajectory.fixed_covariates[name]
+            else:
+                valid = False
+                break
+            try:
+                values = np.asarray(raw_value, dtype=float).reshape(-1)
+            except (TypeError, ValueError):
+                valid = False
+                break
+            if not len(values) or not np.isfinite(values).all():
+                valid = False
+                break
+        if valid:
+            numeric.append(name)
+    return tuple(numeric)
 
 
 def _d3_feedback(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:

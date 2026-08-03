@@ -11,9 +11,15 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from autoformalism.baselines import d3 as d3_runner
 from autoformalism.baselines import runner as baseline_runner
 from autoformalism.baselines.core import target_scales
-from autoformalism.baselines.d3 import _d3_system_prompt, run_d3_native_no_tools
+from autoformalism.baselines.d3 import (
+    D3AdapterError,
+    _d3_system_prompt,
+    _numeric_available_inputs,
+    run_d3_native_no_tools,
+)
 from autoformalism.baselines.d3_native import (
     NativeD3Error,
     fit_native_d3,
@@ -30,7 +36,7 @@ from autoformalism.data import (
     Trajectory,
 )
 from autoformalism.data.models import TierRoles
-from autoformalism.expressions import ValidationContext
+from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.fitting import EvaluationMetrics
 from autoformalism.llm import MockLLMClient
 from autoformalism.schemas import CandidateModel
@@ -441,6 +447,99 @@ def test_native_d3_prompt_describes_interface_without_latent_prohibition() -> No
     assert "need not appear in other equations" in prompt
     assert "algebraic features" in prompt
     assert "no latent states" not in prompt
+
+
+def test_native_d3_omits_structured_fixed_covariates_from_scalar_inputs() -> None:
+    dataset = _dataset()
+
+    def add_covariates(split: DatasetSplit) -> DatasetSplit:
+        trajectory = split.trajectories[0]
+        updated = Trajectory(
+            trajectory_id=trajectory.trajectory_id,
+            time=trajectory.time,
+            targets=trajectory.targets,
+            auxiliaries=trajectory.auxiliaries,
+            external_inputs={
+                "numeric_input": np.ones_like(trajectory.time),
+                "input_schedule": np.asarray(
+                    ['[{"time": 0.0, "amount": 90.0}]'] * len(trajectory.time)
+                ),
+            },
+            fixed_covariates={
+                "numeric_covariate": 3.0,
+                "meal_schedule": '[{"time": 0.0, "amount": 90.0}]',
+            },
+            derivatives=trajectory.derivatives,
+        )
+        return DatasetSplit(split.name, (updated,), split.fingerprint)
+
+    scheduled = DevelopmentDataset(
+        dataset.benchmark_id,
+        dataset.tier,
+        dataset.roles,
+        add_covariates(dataset.train),
+        add_covariates(dataset.validation),
+    )
+    context = ValidationContext(
+        targets=("x",),
+        external_inputs=("numeric_input", "input_schedule"),
+        fixed_covariates=("numeric_covariate", "meal_schedule"),
+        lagged_targets=("x",),
+    )
+
+    numeric = _numeric_available_inputs(scheduled, context)
+    prompt = _d3_system_prompt(
+        "Discover the system.", context, available_inputs=numeric
+    )
+
+    assert numeric == ("numeric_input", "numeric_covariate")
+    assert "Exact scalar fixed covariate names: ('numeric_covariate',)" in prompt
+    assert "meal_schedule" not in prompt
+    assert "input_schedule" not in prompt
+
+
+def test_native_d3_treats_model_validation_as_generation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proposal = CandidateModel.model_validate(
+        {
+            "candidate_id": "invalid_syntax",
+            "parent_candidate_id": None,
+            "change_summary": "Invalid generation.",
+            "states": [{"name": "x", "kind": "observed"}],
+            "state_equations": [{"state": "x", "rhs": "x"}],
+            "observation_mappings": [{"channel": "x", "expression": "x"}],
+            "parameters": [],
+            "initial_conditions": [
+                {"state": "x", "scope": "global", "expression": "x"}
+            ],
+        }
+    )
+    client = MockLLMClient(proposer_responses=[proposal, proposal])
+    monkeypatch.setattr(
+        d3_runner,
+        "validate_native_candidate",
+        lambda *_args: (_ for _ in ()).throw(ModelValidationError(())),
+    )
+
+    with pytest.raises(D3AdapterError, match="no valid fitted candidates"):
+        run_d3_native_no_tools(
+            BaselineConfig(method="d3_native_no_tools", d3_generations=2),
+            _dataset(),
+            lambda: _split(SplitName.TEST),
+            ValidationContext(targets=("x",), lagged_targets=("x",)),
+            task_prompt="Discover x dynamics.",
+            llm_client=client,
+            work_directory=tmp_path,
+        )
+
+    checkpoint = json.loads((tmp_path / "d3_checkpoint.json").read_text())
+    assert len(checkpoint["records"]) == 2
+    assert all(
+        item["error"].startswith("ModelValidationError")
+        for item in checkpoint["records"]
+    )
 
 
 def test_native_d3_broadcasts_constant_state_equation() -> None:

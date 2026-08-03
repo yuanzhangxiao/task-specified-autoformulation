@@ -256,11 +256,22 @@ def _predict_trajectory(candidate, trajectory: Trajectory, parameters, torch):
     }
     environment["t"] = time[:-1]
     for name, values in trajectory.external_inputs.items():
+        try:
+            numeric_values = np.array(values[:-1], dtype=float, copy=True)
+        except (TypeError, ValueError):
+            continue
+        if not np.all(np.isfinite(numeric_values)):
+            continue
         environment[name] = torch.tensor(
-            np.array(values[:-1], dtype=float, copy=True), dtype=torch.float64
+            numeric_values, dtype=torch.float64
         )
     for name, value in trajectory.fixed_covariates.items():
-        environment[name] = torch.full_like(time[:-1], float(value))
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(numeric_value):
+            environment[name] = torch.full_like(time[:-1], numeric_value)
     environment.update(
         {
             name: value

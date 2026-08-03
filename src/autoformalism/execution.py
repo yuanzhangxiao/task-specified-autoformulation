@@ -426,18 +426,30 @@ def _context(
     if arguments.benchmark_id == "synthetic":
         return ValidationContext(targets=("target",))
     spec = BenchmarkRegistry().get(arguments.benchmark_id)
+    forcing_bounds = _development_forcing_bounds(
+        dataset, include_targets=spec.one_step_target_history
+    )
     return ValidationContext(
         targets=dataset.roles.targets,
         auxiliaries=dataset.roles.auxiliaries,
-        external_inputs=spec.external_inputs,
-        fixed_covariates=spec.fixed_covariates,
+        external_inputs=_numeric_declared_channels(
+            spec.external_inputs, forcing_bounds
+        ),
+        fixed_covariates=_numeric_declared_channels(
+            spec.fixed_covariates, forcing_bounds
+        ),
         lagged_targets=(
             dataset.roles.targets if spec.one_step_target_history else ()
         ),
-        forcing_bounds=_development_forcing_bounds(
-            dataset, include_targets=spec.one_step_target_history
-        ),
+        forcing_bounds=forcing_bounds,
     )
+
+
+def _numeric_declared_channels(
+    names: tuple[str, ...], bounds: dict[str, tuple[float, float]]
+) -> tuple[str, ...]:
+    """Keep only declared channels with numeric development-data envelopes."""
+    return tuple(name for name in names if name in bounds)
 
 
 def _development_forcing_bounds(
