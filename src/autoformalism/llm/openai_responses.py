@@ -116,6 +116,10 @@ class OpenAIResponsesClient(CachedLLMClient):
 
     @staticmethod
     def _raise_normalized_error(error: Exception) -> None:
+        if isinstance(error, ValidationError):
+            raise LLMResponseError(
+                f"OpenAI structured output failed validation: {error}"
+            ) from error
         try:
             from openai import (
                 APIConnectionError,

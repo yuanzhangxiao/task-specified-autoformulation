@@ -342,6 +342,42 @@ def test_openai_uses_responses_parse_with_pydantic_schema(tmp_path: Path) -> Non
     ]
 
 
+def test_openai_retries_sdk_pydantic_validation_failure(tmp_path: Path) -> None:
+    sdk = FakeSDK()
+    original_parse = sdk.responses.parse
+    calls = 0
+
+    def fail_once(**kwargs: object) -> FakeOpenAIResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            ProposerCandidateV2.model_validate({"schema_version": "2"})
+        return original_parse(**kwargs)
+
+    sdk.responses.parse = fail_once  # type: ignore[method-assign]
+    client = OpenAIResponsesClient(
+        model="test-model",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        sdk_client=sdk,
+        max_attempts=2,
+        sleep=lambda _seconds: None,
+    )
+
+    result = client.propose(system_prompt="system", user_prompt="user")
+
+    assert result.attempts == 2
+    assert calls == 2
+    repair_input = sdk.responses.calls[0]["input"]
+    assert isinstance(repair_input, list)
+    assert "previous structured response was invalid" in repair_input[1]["content"]
+    failure = json.loads(
+        (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert failure["error_type"] == "LLMResponseError"
+    assert failure["retryable"] is True
+
+
 class FakeGeminiResponse:
     text = _proposal().model_dump_json()
 
