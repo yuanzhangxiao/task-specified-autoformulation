@@ -73,9 +73,7 @@ class GeminiClient(CachedLLMClient):
                     "system_instruction": system_prompt,
                     "max_output_tokens": self._max_output_tokens,
                     "response_mime_type": "application/json",
-                    "response_json_schema": _gemini_compatible_schema(
-                        response_model.model_json_schema(mode="validation")
-                    ),
+                    "response_json_schema": _gemini_provider_schema(response_model),
                 },
             )
         except Exception as exc:
@@ -148,3 +146,142 @@ def _gemini_compatible_schema(value: object) -> object:
     if isinstance(value, list):
         return [_gemini_compatible_schema(item) for item in value]
     return value
+
+
+def _gemini_provider_schema(response_model: type[StructuredT]) -> object:
+    """Return a low-complexity Gemini schema for the two production contracts."""
+    if response_model.__name__ == "ProposerCandidateV2":
+        return _compact_proposer_schema()
+    if response_model.__name__ == "JudgeResult":
+        return _compact_judge_schema()
+    return _gemini_compatible_schema(
+        response_model.model_json_schema(mode="validation")
+    )
+
+
+def _nullable(schema: dict[str, object]) -> dict[str, object]:
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _compact_proposer_schema() -> dict[str, object]:
+    text = {"type": "string"}
+    number = {"type": "number"}
+    string_list = {"type": "array", "items": text}
+    value_range = {
+        "type": "object",
+        "properties": {"lower": number, "upper": number},
+        "required": ["lower", "upper"],
+        "additionalProperties": False,
+    }
+    initial = {
+        "type": "object",
+        "properties": {
+            "fixed_value": _nullable(number),
+            "expression": _nullable(text),
+        },
+        "additionalProperties": False,
+    }
+    state = {
+        "type": "object",
+        "properties": {
+            "name": text,
+            "kind": {"type": "string", "enum": ["observed", "latent"]},
+            "rhs": text,
+            "observed_channel": _nullable(text),
+            "initial": _nullable(initial),
+            "mechanisms": string_list,
+        },
+        "required": ["name", "kind", "rhs"],
+        "additionalProperties": False,
+    }
+    algebraic = {
+        "type": "object",
+        "properties": {
+            "name": text,
+            "expression": text,
+            "mechanisms": string_list,
+        },
+        "required": ["name", "expression"],
+        "additionalProperties": False,
+    }
+    parameter = {
+        "type": "object",
+        "properties": {
+            "name": text,
+            "bounds": value_range,
+            "initialization_range": _nullable(value_range),
+            "scope": {"type": "string", "enum": ["global"]},
+        },
+        "required": ["name", "bounds"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "schema_version": {"type": "string", "enum": ["2"]},
+            "candidate_id": text,
+            "parent_candidate_id": _nullable(text),
+            "change_summary": text,
+            "states": {"type": "array", "items": state, "minItems": 1},
+            "algebraics": {"type": "array", "items": algebraic},
+            "parameters": {"type": "array", "items": parameter},
+        },
+        "required": ["candidate_id", "states"],
+        "additionalProperties": False,
+    }
+
+
+def _compact_judge_schema() -> dict[str, object]:
+    text = {"type": "string"}
+    score = {"type": "number", "minimum": 0.0, "maximum": 1.0}
+    category = {
+        "type": "object",
+        "properties": {"score": score, "justification": text},
+        "required": ["score"],
+        "additionalProperties": False,
+    }
+    categories = (
+        "task_output_coverage",
+        "mechanism_state_adequacy",
+        "mathematical_completeness",
+        "data_causal_consistency",
+        "constraint_compliance",
+        "parsimony_interpretability",
+    )
+    red_flag = {
+        "type": "object",
+        "properties": {"code": text, "description": text, "evidence": text},
+        "required": ["code", "evidence"],
+        "additionalProperties": False,
+    }
+    edit = {
+        "type": "object",
+        "properties": {
+            "target": text,
+            "instruction": text,
+            "priority": {
+                "type": "string",
+                "enum": ["required", "recommended", "optional"],
+            },
+        },
+        "required": ["target", "instruction", "priority"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "schema_version": {"type": "string", "enum": ["1"]},
+            "hard_red_flags": {"type": "array", "items": red_flag},
+            "category_scores": {
+                "type": "object",
+                "properties": dict.fromkeys(categories, category),
+                "required": list(categories),
+                "additionalProperties": False,
+            },
+            "aggregate_score": score,
+            "missing_requirements": {"type": "array", "items": text},
+            "actionable_edits": {"type": "array", "items": edit},
+        },
+        "required": ["category_scores", "aggregate_score"],
+        "additionalProperties": False,
+    }

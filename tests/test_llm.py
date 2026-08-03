@@ -12,7 +12,11 @@ import pytest
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
-from autoformalism.llm.gemini import GeminiClient, _gemini_compatible_schema
+from autoformalism.llm.gemini import (
+    GeminiClient,
+    _gemini_compatible_schema,
+    _gemini_provider_schema,
+)
 from autoformalism.llm.mock import MockLLMClient
 from autoformalism.llm.models import StructuredT, TokenUsage
 from autoformalism.llm.ollama import OllamaClient, _ollama_compatible_schema
@@ -389,9 +393,19 @@ def test_gemini_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
     assert config["system_instruction"] == "system"
     assert config["max_output_tokens"] == 2048
     assert config["response_mime_type"] == "application/json"
-    assert config["response_json_schema"] == _gemini_compatible_schema(
-        ProposerCandidateV2.model_json_schema(mode="validation")
+    assert config["response_json_schema"] == _gemini_provider_schema(
+        ProposerCandidateV2
     )
+
+
+def test_gemini_production_schemas_are_flat_and_locally_compatible() -> None:
+    for model in (ProposerCandidateV2, JudgeResult):
+        schema = _gemini_provider_schema(model)
+        encoded = json.dumps(schema)
+        assert "$defs" not in encoded
+        assert "$ref" not in encoded
+        assert "pattern" not in encoded
+        assert schema["additionalProperties"] is False
 
 
 def test_gemini_schema_removes_only_unsupported_validation_keywords() -> None:
