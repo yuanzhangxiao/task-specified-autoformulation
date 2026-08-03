@@ -327,17 +327,28 @@ def _known_initial_values(
         model.validated.context.time_symbol: float(trajectory.time[0]),
         **{name: float(data[0]) for name, data in trajectory.targets.items()},
         **{name: float(data[0]) for name, data in trajectory.auxiliaries.items()},
-        **{name: float(data[0]) for name, data in trajectory.external_inputs.items()},
     }
+    for name, data in trajectory.external_inputs.items():
+        try:
+            value = float(data[0])
+        except (TypeError, ValueError):
+            # Structured event schedules are public task metadata, not scalar
+            # initialization symbols.  Their numeric forcing representations,
+            # when present, are exposed under separate declared channel names.
+            continue
+        if np.isfinite(value):
+            values[name] = value
     for name, value in trajectory.fixed_covariates.items():
         try:
-            values[name] = float(value)
+            numeric_value = float(value)
         except (TypeError, ValueError):
             # Structured metadata (for example, a JSON event schedule) can be
             # public task context without being a scalar model input.  Omit it
             # from the numeric initialization environment; an expression that
             # actually references it will then fail closed as a missing symbol.
             continue
+        if np.isfinite(numeric_value):
+            values[name] = numeric_value
     return values
 
 

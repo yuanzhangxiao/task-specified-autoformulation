@@ -448,6 +448,40 @@ def test_fixed_rk4_advances_one_step_without_adaptive_solver() -> None:
     assert result.states[0] == pytest.approx([2.0, 2.5, 3.0])
 
 
+def test_simulation_ignores_structured_external_initialization_metadata() -> None:
+    candidate = _candidate({"x": "1"}, "x", ())
+    model = compile_candidate(
+        candidate,
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    time = np.asarray([0.0, 0.5, 1.0])
+    trajectory = Trajectory(
+        trajectory_id="structured-metadata",
+        time=time,
+        targets={"target": np.asarray([2.0, 2.5, 3.0])},
+        auxiliaries={},
+        external_inputs={
+            "input_schedule": np.asarray(
+                ['[{"time_min": 0.0, "grams": 90.0}]'] * len(time)
+            )
+        },
+        fixed_covariates={},
+        derivatives={},
+    )
+
+    result = simulate_trajectory(
+        model,
+        trajectory,
+        {},
+        {},
+        FitConfig(integration_backend="fixed_rk4"),
+    )
+
+    assert result.success
+    assert result.states is not None
+    assert result.states[0] == pytest.approx([2.0, 2.5, 3.0])
+
+
 def test_fit_timeout_is_a_recoverable_failed_result() -> None:
     time = np.linspace(0.0, 1.0, 11)
     target = np.exp(-0.4 * time)
