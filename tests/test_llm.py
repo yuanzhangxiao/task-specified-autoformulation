@@ -12,6 +12,7 @@ import pytest
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
+from autoformalism.llm.gemini import GeminiClient
 from autoformalism.llm.mock import MockLLMClient
 from autoformalism.llm.models import StructuredT, TokenUsage
 from autoformalism.llm.ollama import OllamaClient, _ollama_compatible_schema
@@ -337,6 +338,62 @@ def test_openai_uses_responses_parse_with_pydantic_schema(tmp_path: Path) -> Non
     ]
 
 
+class FakeGeminiResponse:
+    text = _proposal().model_dump_json()
+
+    class UsageMetadata:
+        prompt_token_count = 5
+        candidates_token_count = 6
+        total_token_count = 11
+
+    usage_metadata = UsageMetadata()
+
+    def model_dump(self, *, mode: str, warnings: bool) -> dict[str, object]:
+        assert mode == "json"
+        assert warnings is False
+        return {"text": self.text}
+
+
+class FakeGeminiModels:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def generate_content(self, **kwargs: object) -> FakeGeminiResponse:
+        self.calls.append(kwargs)
+        return FakeGeminiResponse()
+
+
+class FakeGeminiSDK:
+    def __init__(self) -> None:
+        self.models = FakeGeminiModels()
+
+
+def test_gemini_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
+    sdk = FakeGeminiSDK()
+    client = GeminiClient(
+        model="gemini-3.6-flash",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        sdk_client=sdk,
+    )
+
+    result = client.propose(system_prompt="system", user_prompt="user")
+
+    assert result.parsed == enrich_proposal_v2(_proposal())
+    assert result.usage == TokenUsage(5, 6, 11)
+    call = sdk.models.calls[0]
+    assert call["model"] == "gemini-3.6-flash"
+    assert call["contents"] == "user"
+    config = call["config"]
+    assert isinstance(config, dict)
+    assert config["system_instruction"] == "system"
+    assert config["max_output_tokens"] == 2048
+    assert config["response_mime_type"] == "application/json"
+    assert config["response_json_schema"] == (
+        ProposerCandidateV2.model_json_schema(mode="validation")
+    )
+
+
 def test_ollama_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
     calls: list[tuple[str, dict[str, object], float]] = []
 
@@ -484,6 +541,25 @@ def test_failure_log_redacts_environment_api_key(
     logged = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
     assert secret not in logged
     assert "Bearer [REDACTED]" in logged
+
+
+def test_failure_log_redacts_gemini_api_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "gemini-test-never-log-this"
+    monkeypatch.setenv("GEMINI_API_KEY", secret)
+    client = StubCachedClient(tmp_path)
+
+    def fail(**_kwargs: object) -> ProviderResponse[Any]:
+        raise LLMProviderError(f"API key: {secret}", retryable=False)
+
+    client._call_provider = fail  # type: ignore[method-assign]
+    with pytest.raises(LLMProviderError):
+        client.propose(system_prompt="system", user_prompt="user")
+
+    logged = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert secret not in logged
 
 
 def test_config_selects_free_local_ollama_without_api_key(tmp_path: Path) -> None:

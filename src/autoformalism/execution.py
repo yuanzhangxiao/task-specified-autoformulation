@@ -576,7 +576,8 @@ def _parse_model(value: str) -> tuple[LLMProvider, str]:
         provider = LLMProvider(provider_name)
     except ValueError as exc:
         raise SystemExit(
-            f"unsupported model provider {provider_name!r}; use openai or ollama"
+            f"unsupported model provider {provider_name!r}; "
+            "use openai, gemini, or ollama"
         ) from exc
     if not model:
         raise SystemExit("model identifier cannot be empty")

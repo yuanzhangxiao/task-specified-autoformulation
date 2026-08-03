@@ -15,6 +15,7 @@ class LLMProvider(str, Enum):
     """Supported paid/hosted and free/local provider choices."""
 
     OPENAI = "openai"
+    GEMINI = "gemini"
     OLLAMA = "ollama"
 
 
@@ -51,6 +52,17 @@ def create_llm_client(config: LLMConfig) -> LLMClient:
             model=config.model,
             cache_directory=config.cache_directory,
             log_path=config.log_path,
+            max_output_tokens=config.max_output_tokens,
+            **retry_options,
+        )
+    if config.provider is LLMProvider.GEMINI:
+        from autoformalism.llm.gemini import GeminiClient
+
+        return GeminiClient(
+            model=config.model,
+            cache_directory=config.cache_directory,
+            log_path=config.log_path,
+            timeout_seconds=config.timeout_seconds,
             max_output_tokens=config.max_output_tokens,
             **retry_options,
         )

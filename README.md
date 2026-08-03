@@ -40,8 +40,8 @@ python scripts/inspect_dataset.py --list
 
 ## Run an experiment
 
-Model arguments use `provider:model`. Supported providers are `openai` and
-`ollama`; a model without a provider prefix defaults to OpenAI.
+Model arguments use `provider:model`. Supported providers are `openai`,
+`gemini`, and `ollama`; a model without a provider prefix defaults to OpenAI.
 
 ```bash
 python scripts/run_experiment.py \
@@ -61,6 +61,19 @@ python scripts/run_experiment.py \
 The OpenAI client reads `OPENAI_API_KEY` from the environment through the
 official SDK. The key is not written to configuration, checkpoints, caches, or
 logs.
+
+For Gemini, install `pip install -e '.[gemini]'`, set `GEMINI_API_KEY`, and use
+an identifier such as `gemini:gemini-3.6-flash`. Proposer and judge models may
+come from different providers, for example an OpenAI proposer with a Gemini
+judge. Gemini calls use JSON-schema structured output and are cached and logged
+under the same rules as other providers.
+
+The preregistered family study uses `original_b1/hard` and `benchmark6/hard`,
+five seeds, and the GPT→Gemini, Gemini→GPT, and Gemini→Gemini cells. Run it with
+`python scripts/run_family_study.py --data-root "$AUTOFORMALISM_DATA_ROOT"
+--output-root artifacts/family-study-v1`. The GPT→GPT cell is intentionally
+omitted because it is reused from the main Autoformalism experiment. The runner
+skips completed runs and resumes partial checkpoints.
 
 For a local free model, use an Ollama identifier such as
 `ollama:gpt-oss:20b`. Proposer and judge models may use different providers.

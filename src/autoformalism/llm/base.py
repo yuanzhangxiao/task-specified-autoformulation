@@ -396,6 +396,7 @@ class CachedLLMClient(ABC):
             redacted = value
             for variable in (
                 "OPENAI_API_KEY",
+                "GEMINI_API_KEY",
                 "OLLAMA_API_KEY",
                 "HF_TOKEN",
                 "HUGGING_FACE_HUB_TOKEN",
