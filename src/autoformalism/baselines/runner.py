@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 
 from autoformalism.baselines.core import (
     evaluate_equations,
-    feature_names,
+    numeric_feature_names,
     persistence_metrics,
     regression_table,
     target_scales,
@@ -49,15 +49,16 @@ def run_baseline(
             test_metrics,
         )
 
-    names = feature_names(context)
+    names = numeric_feature_names(dataset.train, context)
     extra_train: Mapping[str, Callable[[Trajectory, int], float]] = {}
     extra_validation: Mapping[str, Callable[[Trajectory, int], float]] = {}
     proposed_expressions: dict[str, str] = {}
+    rejected_feature_count = 0
     if config.method == "llm_feature_sindy":
         if llm_client is None:
             raise ValueError("llm_feature_sindy requires one configured LLM client")
-        proposed_expressions = _propose_features(
-            llm_client, proposer_prompt, context
+        proposed_expressions, rejected_feature_count = _propose_features(
+            llm_client, proposer_prompt, context, names
         )
         extra_train = _feature_functions(proposed_expressions, context)
         extra_validation = extra_train
@@ -128,6 +129,7 @@ def run_baseline(
             {
                 "threshold": selected_threshold,
                 "proposed_feature_count": len(proposed_expressions),
+                "rejected_proposed_feature_count": rejected_feature_count,
             },
             train_mse,
             validation_mse,
@@ -268,10 +270,12 @@ def _combine(train: DatasetSplit, validation: DatasetSplit) -> DatasetSplit:
 
 
 def _propose_features(
-    client: LLMClient, task_prompt: str, context: ValidationContext
-) -> dict[str, str]:
-    allowed = (*context.targets, *context.auxiliaries, *context.external_inputs,
-               *context.fixed_covariates, context.time_symbol)
+    client: LLMClient,
+    task_prompt: str,
+    context: ValidationContext,
+    numeric_names: tuple[str, ...],
+) -> tuple[dict[str, str], int]:
+    allowed = (*numeric_names, context.time_symbol)
     prompt = (
         f"{task_prompt}\n\nPropose one ProposerCandidateV2 using exactly the "
         f"observed target states {context.targets}, each with rhs `0`. Put 1 to 4 "
@@ -289,8 +293,17 @@ def _propose_features(
     allowed_set = set(allowed)
     features: dict[str, str] = {}
     seen_expressions: set[str] = set()
+    rejected = 0
     for process in candidate.processes:
-        parsed = parser.parse(process.expression, location=f"feature:{process.name}")
+        try:
+            parsed = parser.parse(
+                process.expression, location=f"feature:{process.name}"
+            )
+        except ModelValidationError:
+            # LLM-designed features are optional.  Reject malformed features
+            # individually and retain the ordinary SINDy library.
+            rejected += 1
+            continue
         canonical = "".join(process.expression.split())
         if (
             set(parsed.symbols) <= allowed_set
@@ -299,9 +312,9 @@ def _propose_features(
         ):
             features[process.name] = process.expression
             seen_expressions.add(canonical)
-    if not features:
-        raise ValueError("LLM did not propose any independently computable features")
-    return features
+        else:
+            rejected += 1
+    return features, rejected
 
 
 def _feature_functions(expressions, context):
@@ -315,7 +328,8 @@ def _feature_functions(expressions, context):
         def evaluate(trajectory, index):
             environment = {
                 name: _channel_value(trajectory, name, index)
-                for name in feature_names(context)
+                for name in expression.symbols
+                if name != context.time_symbol
             }
             environment[context.time_symbol] = float(trajectory.time[index])
             return float(_evaluate(expression, environment))

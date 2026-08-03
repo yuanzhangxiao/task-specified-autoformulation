@@ -127,6 +127,7 @@ def test_llm_feature_sindy_uses_one_proposer_call() -> None:
 
     assert [call["role"] for call in client.calls] == ["proposer"]
     assert result.selected_hyperparameters["proposed_feature_count"] == 1
+    assert result.selected_hyperparameters["rejected_proposed_feature_count"] == 0
 
 
 def test_llm_sindy_features_enter_linearly_without_cross_products() -> None:
@@ -143,6 +144,75 @@ def test_llm_sindy_features_enter_linearly_without_cross_products() -> None:
     assert "x * llm_feature" not in terms
     assert "llm_feature * llm_feature" not in terms
     assert "tanh(llm_feature)" not in terms
+
+
+def test_llm_feature_sindy_ignores_invalid_optional_features() -> None:
+    proposal = CandidateModel.model_validate(
+        {
+            "candidate_id": "invalid_features",
+            "parent_candidate_id": None,
+            "change_summary": "Feature uses unsupported exponent syntax.",
+            "states": [{"name": "x", "kind": "observed"}],
+            "processes": [{"name": "bad_square", "expression": "x ^ 2"}],
+            "state_equations": [{"state": "x", "rhs": "0"}],
+            "observation_mappings": [{"channel": "x", "expression": "x"}],
+            "parameters": [],
+            "initial_conditions": [
+                {"state": "x", "scope": "global", "expression": "x"}
+            ],
+        }
+    )
+    result = run_baseline(
+        BaselineConfig(method="llm_feature_sindy", sindy_thresholds=(1e-3,)),
+        _dataset(),
+        lambda: _split(SplitName.TEST),
+        ValidationContext(targets=("x",), lagged_targets=("x",)),
+        llm_client=MockLLMClient(proposer_responses=[proposal]),
+        proposer_prompt="Discover the dynamics.",
+    )
+
+    assert result.selected_hyperparameters["proposed_feature_count"] == 0
+    assert result.selected_hyperparameters["rejected_proposed_feature_count"] == 1
+    assert result.test_normalized_mse < 1e-8
+
+
+def test_sindy_omits_structured_fixed_covariates() -> None:
+    dataset = _dataset()
+    schedule = '[{"time": 0.0, "amount": 90.0}]'
+
+    def with_schedule(split: DatasetSplit) -> DatasetSplit:
+        trajectory = split.trajectories[0]
+        updated = Trajectory(
+            trajectory_id=trajectory.trajectory_id,
+            time=trajectory.time,
+            targets=trajectory.targets,
+            auxiliaries=trajectory.auxiliaries,
+            external_inputs=trajectory.external_inputs,
+            fixed_covariates={"meal_schedule": schedule},
+            derivatives=trajectory.derivatives,
+        )
+        return DatasetSplit(split.name, (updated,), split.fingerprint)
+
+    scheduled = DevelopmentDataset(
+        dataset.benchmark_id,
+        dataset.tier,
+        TierRoles(targets=("x",)),
+        with_schedule(dataset.train),
+        with_schedule(dataset.validation),
+    )
+    result = run_baseline(
+        BaselineConfig(method="sindy", sindy_thresholds=(1e-3,)),
+        scheduled,
+        lambda: with_schedule(_split(SplitName.TEST)),
+        ValidationContext(
+            targets=("x",),
+            fixed_covariates=("meal_schedule",),
+            lagged_targets=("x",),
+        ),
+    )
+
+    assert "meal_schedule" not in result.equations["x"]
+    assert result.test_normalized_mse < 1e-8
 
 
 def test_pysr_pareto_expression_is_selected_on_validation_rollout() -> None:

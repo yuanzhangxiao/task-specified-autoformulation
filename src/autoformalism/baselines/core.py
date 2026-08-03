@@ -24,6 +24,30 @@ def feature_names(context: ValidationContext) -> tuple[str, ...]:
     )
 
 
+def numeric_feature_names(
+    split: DatasetSplit, context: ValidationContext
+) -> tuple[str, ...]:
+    """Return regression features that are numeric on every trajectory.
+
+    Manifests may expose structured fixed covariates, such as a JSON meal
+    schedule, for task context.  Derivative-regression baselines cannot use
+    those objects as scalar columns, so they are omitted rather than coerced.
+    """
+    names = feature_names(context)
+    numeric: list[str] = []
+    for name in names:
+        try:
+            values = [
+                _channel_value(trajectory, name, 0)
+                for trajectory in split.trajectories
+            ]
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(np.asarray(values, dtype=float)).all():
+            numeric.append(name)
+    return tuple(numeric)
+
+
 def regression_table(
     split: DatasetSplit,
     names: Sequence[str],

@@ -332,8 +332,12 @@ def _known_initial_values(
     for name, value in trajectory.fixed_covariates.items():
         try:
             values[name] = float(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"fixed covariate {name} must be numeric") from exc
+        except (TypeError, ValueError):
+            # Structured metadata (for example, a JSON event schedule) can be
+            # public task context without being a scalar model input.  Omit it
+            # from the numeric initialization environment; an expression that
+            # actually references it will then fail closed as a missing symbol.
+            continue
     return values
 
 
