@@ -446,29 +446,34 @@ def _no_latent(
 
 
 def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
-    learning = pd.read_csv(analysis / "learning_curve_summary.csv")
-    authoritative = pd.read_csv(analysis / "authoritative_runs.csv")
-    selected_directories: dict[str, str] = {}
-    for row in authoritative[
-        authoritative.method.isin(("full", "nojudge"))
-    ].itertuples(index=False):
-        directory = str(Path(row.source).parent.parent)
-        selected_directories[directory] = (
-            "Ours" if row.method == "full" else "No-judge"
-        )
-
-    def selected_method(directory: str) -> str | None:
-        matches = [
-            method
-            for suffix, method in selected_directories.items()
-            if directory.endswith(suffix)
-        ]
-        return matches[0] if len(matches) == 1 else None
-
-    learning["method"] = learning.run_directory.map(selected_method)
-    learning = learning[learning.method.notna()]
+    learning = pd.read_csv(
+        analysis / "learning_candidates" / "learning_curve_iteration_summary.csv"
+    )
     hard = learning[learning.tier == "hard"]
-    learning_rows = []
+    iterations = tuple(range(1, 9))
+    learning_rows: list[tuple[str, ...]] = []
+
+    def curve_cell(
+        benchmark: str, method: str, iteration: int, metric: str
+    ) -> str:
+        selected = hard[
+            (hard.benchmark_id == benchmark)
+            & (hard.method == method)
+            & (hard.iteration == iteration)
+        ]
+        if selected.empty:
+            return "—"
+        row = selected.iloc[0]
+        mean_value = row[f"{metric}_mean"]
+        if pd.isna(mean_value):
+            return "N/A"
+        sd_value = row[f"{metric}_sd"]
+        digits = 3
+        value = f"{mean_value:.{digits}g}"
+        if int(row.contributing_runs) > 1:
+            value += f" ± {sd_value:.{digits}g}"
+        return f"{value} [{int(row.contributing_runs)}/{int(row.total_runs)}]"
+
     for benchmark in (
         "original_b1",
         "perturbed_b1",
@@ -477,17 +482,31 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
         "benchmark5",
         "benchmark6",
     ):
-        for method in ("No-judge", "Ours"):
-            group = hard[(hard.benchmark_id == benchmark) & (hard.method == method)]
+        for method, display in (("full", "Ours"), ("nojudge", "No-judge")):
             learning_rows.append(
                 (
                     benchmark,
-                    method,
-                    str(len(group)),
-                    _summary(group.valid_rounds),
-                    _summary(group.relative_improvement),
+                    display,
+                    "Best validation target MSE ↓",
+                    *(
+                        curve_cell(
+                            benchmark, method, iteration, "validation_raw_mse"
+                        )
+                        for iteration in iterations
+                    ),
                 )
             )
+        learning_rows.append(
+            (
+                benchmark,
+                "Ours",
+                "Best judge score ↑",
+                *(
+                    curve_cell(benchmark, "full", iteration, "judge_score")
+                    for iteration in iterations
+                ),
+            )
+        )
     stability = pd.read_csv(analysis / "structural_stability_summary.csv")
     stability = stability[stability.tier == "hard"]
     stability_rows = [
@@ -501,20 +520,73 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
         )
         for row in stability.itertuples(index=False)
     ]
+    surviving = pd.read_csv(analysis / "surviving_terms_hard_full.csv")
+    surviving_rows: list[tuple[str, ...]] = []
+    for benchmark in (
+        "original_b1",
+        "perturbed_b1",
+        "obfuscated_original_case01",
+        "obfuscated_perturbed_case01",
+        "benchmark5",
+        "benchmark6",
+    ):
+        for seed in range(5):
+            selected = surviving[
+                (surviving.benchmark_id == benchmark) & (surviving.seed == seed)
+            ]
+            if selected.empty:
+                surviving_rows.append(
+                    (benchmark, str(seed), "No completed frozen selection", "N/A")
+                )
+                continue
+            row = selected.iloc[0]
+            equations = str(row.state_equations).replace("|", "\\|")
+            surviving_rows.append(
+                (
+                    benchmark,
+                    str(seed),
+                    equations.replace(" ; ", "<br>"),
+                    str(int(row.dynamic_terms)),
+                )
+            )
     conclusions = [
-        "Both variants often improve validation fit across rounds, but the size "
-        "of the gain is strongly task-dependent and the judge does not produce a "
-        "uniformly larger gain on every benchmark.",
+        "The full method's best validation target MSE improves across search on "
+        "the named Dalla Man tasks and Benchmark6; for example, original_b1 "
+        "improves from 1.75 at iteration 1 to 1.11 at iteration 8 while its best "
+        "judge score rises from 0.713 to 0.937.",
+        "Judge and fit curves measure complementary progress: judge scores track "
+        "task-mechanism adequacy, whereas validation MSE tracks predictive fit. "
+        "Their incumbents are computed independently and need not be the same "
+        "candidate.",
+        "Bracketed coverage makes failed early proposals explicit. A rise in an "
+        "across-run mean can occur when additional runs first contribute a valid "
+        "candidate, so within-run best-so-far monotonicity should not be confused "
+        "with monotonicity of a changing-cohort mean.",
+        "The obfuscated-perturbed curve exposes high between-seed variability and "
+        "large-error candidates rather than hiding them in an endpoint average; "
+        "this is a reliability limitation of the current search.",
         "Edge-level stability consistently exceeds exact-term stability. This "
         "indicates recurring causal organization despite algebraic variation in "
         "the selected equations.",
         "Low exact-term Jaccard on obfuscated tasks argues for reporting both "
         "held-out prediction and structural recovery rather than claiming a "
         "single uniquely identified symbolic equation.",
+        "The seed-level frozen equations show which terms actually survive "
+        "pruning. Recurrent mechanism families are visible even when latent-state, "
+        "process, and parameter names differ, while singleton terms expose "
+        "structural uncertainty rather than being hidden by an average score.",
     ]
     return (
-        _table(
-            ("Benchmark", "Method", "Runs", "Valid rounds", "Relative improvement ↑"),
+        "Each cell is mean ± sample SD [contributing/total completed runs]. "
+        "Curves are cumulative best-so-far development metrics; test data are "
+        "never evaluated per iteration.\n\n"
+        + _table(
+            (
+                "Benchmark",
+                "Method",
+                "Metric",
+                *(f"Iter. {iteration}" for iteration in iterations),
+            ),
             learning_rows,
         ),
         _table(
@@ -527,6 +599,14 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
                 "Median term Jaccard ↑",
             ),
             stability_rows,
+        )
+        + "\n\n### Surviving terms across seeds (Q4)\n\n"
+        + "These are the actual frozen, post-pruning state equations. The term "
+        "count is the number of nonzero top-level additive terms across all "
+        "displayed ODE right-hand sides.\n\n"
+        + _table(
+            ("Benchmark", "Seed", "Frozen state equations", "Terms"),
+            surviving_rows,
         ),
         conclusions,
     )
@@ -663,30 +743,34 @@ def main() -> None:
         _section(
             "Learning curves - hard tier",
             learning,
-            diagnostic_conclusions[:1],
+            diagnostic_conclusions[:4],
             experiment=(
-                "For each authoritative hard-tier run, we extracted the first and "
-                "best validation errors across valid search rounds and report the "
-                "relative improvement together with the number of valid rounds."
+                "For every authoritative hard-tier run, we reconstructed eight "
+                "search rounds from development-only checkpoints. At each round "
+                "we report the cumulative best validation target MSE and, for the "
+                "full method, the cumulative best judge score, summarized as mean "
+                "± sample SD across seeds with explicit contributing-run counts."
             ),
             motivation=(
-                "This checks whether iterative grounding improves candidates during "
-                "search and whether the effect changes when judge feedback is "
-                "removed."
+                "This directly answers whether predictive fit and task-mechanism "
+                "assessment improve over iterations, while comparison with the "
+                "no-judge variant isolates the role of judge-guided grounding."
             ),
         ),
         _section(
-            "Structural stability - hard tier",
+            "Structural stability and surviving terms - hard tier",
             stability,
-            diagnostic_conclusions[1:],
+            diagnostic_conclusions[4:],
             experiment=(
                 "Across completed hard-tier seeds, we computed pairwise Jaccard "
                 "similarity for alpha-normalized dependency edges and selected "
-                "target-equation terms."
+                "target-equation terms. We also list every actual frozen, "
+                "post-pruning state equation and its additive-term count by seed."
             ),
             motivation=(
                 "This distinguishes reproducible causal organization from exact "
-                "symbolic-form agreement and reveals structural equifinality across "
+                "symbolic-form agreement, directly answers which terms survive "
+                "across seeds, and reveals structural equifinality across "
                 "independent runs."
             ),
         ),

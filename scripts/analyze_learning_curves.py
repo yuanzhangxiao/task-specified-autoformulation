@@ -6,6 +6,7 @@ import argparse
 import csv
 from collections import defaultdict
 from pathlib import Path
+from statistics import mean, stdev
 
 from autoformalism.rebuttal.artifacts import CandidateArtifact
 
@@ -14,6 +15,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-pool", type=Path, required=True)
     parser.add_argument("--mechanism-metrics", type=Path)
+    parser.add_argument(
+        "--target-scales",
+        type=Path,
+        help="CSV with benchmark, tier, and target_scale columns.",
+    )
     parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
     metrics = _read_metrics(args.mechanism_metrics)
@@ -75,6 +81,12 @@ def main() -> None:
     args.output_root.mkdir(parents=True, exist_ok=True)
     _write(args.output_root / "learning_curves.csv", rows)
     _write(args.output_root / "pareto_fit_mechanism.csv", pareto)
+    if args.target_scales is not None:
+        scales = _read_target_scales(args.target_scales)
+        _write(
+            args.output_root / "learning_curve_iteration_summary.csv",
+            _iteration_summary(records, scales),
+        )
 
 
 def _read_metrics(path: Path | None) -> dict[str, dict[str, str]]:
@@ -82,6 +94,89 @@ def _read_metrics(path: Path | None) -> dict[str, dict[str, str]]:
         return {}
     with path.open(encoding="utf-8", newline="") as handle:
         return {row["artifact_id"]: row for row in csv.DictReader(handle)}
+
+
+def _read_target_scales(path: Path) -> dict[tuple[str, str], float]:
+    """Read one target normalization scale for each benchmark-tier cell."""
+    values: dict[tuple[str, str], set[float]] = defaultdict(set)
+    with path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            if not row.get("target_scale"):
+                continue
+            benchmark = row.get("benchmark") or row.get("benchmark_id")
+            if benchmark is None:
+                raise ValueError("target-scale CSV lacks a benchmark column")
+            values[(benchmark, row["tier"])].add(float(row["target_scale"]))
+    ambiguous = {key: item for key, item in values.items() if len(item) != 1}
+    if ambiguous:
+        raise ValueError(f"expected one target scale per cell: {ambiguous}")
+    return {key: next(iter(item)) for key, item in values.items()}
+
+
+def _iteration_summary(
+    records: list[CandidateArtifact],
+    target_scales: dict[tuple[str, str], float],
+    *,
+    iterations: int = 8,
+) -> list[dict[str, object]]:
+    """Aggregate cumulative development curves across independent runs."""
+    by_run: dict[
+        tuple[str, str, str, int, str], list[CandidateArtifact]
+    ] = defaultdict(list)
+    for item in records:
+        method = "full" if item.use_judge else "nojudge"
+        by_run[
+            (method, item.benchmark_id, item.tier, item.seed, item.run_directory)
+        ].append(item)
+
+    group_sizes: dict[tuple[str, str, str], int] = defaultdict(int)
+    curves: dict[
+        tuple[str, str, str, int], dict[str, list[float]]
+    ] = defaultdict(lambda: defaultdict(list))
+    for (method, benchmark, tier, _seed, _directory), values in by_run.items():
+        group_sizes[(method, benchmark, tier)] += 1
+        scale = target_scales[(benchmark, tier)]
+        ordered = sorted(values, key=lambda item: item.round_index)
+        for iteration in range(iterations):
+            available = [item for item in ordered if item.round_index <= iteration]
+            if not available:
+                continue
+            best_mse = min(item.validation_mse for item in available)
+            bucket = curves[(method, benchmark, tier, iteration)]
+            bucket["validation_nmse"].append(best_mse)
+            bucket["validation_raw_mse"].append(best_mse * scale**2)
+            scores = [
+                float(item.judge_score)
+                for item in available
+                if item.judge_score is not None
+            ]
+            if scores:
+                bucket["judge_score"].append(max(scores))
+
+    output: list[dict[str, object]] = []
+    for (method, benchmark, tier, iteration), metrics in sorted(curves.items()):
+        raw = metrics["validation_raw_mse"]
+        normalized = metrics["validation_nmse"]
+        judges = metrics["judge_score"]
+        output.append(
+            {
+                "benchmark_id": benchmark,
+                "tier": tier,
+                "method": method,
+                "iteration": iteration + 1,
+                "contributing_runs": len(raw),
+                "total_runs": group_sizes[(method, benchmark, tier)],
+                "validation_raw_mse_mean": mean(raw),
+                "validation_raw_mse_sd": stdev(raw) if len(raw) > 1 else 0.0,
+                "validation_nmse_mean": mean(normalized),
+                "validation_nmse_sd": (
+                    stdev(normalized) if len(normalized) > 1 else 0.0
+                ),
+                "judge_score_mean": mean(judges) if judges else None,
+                "judge_score_sd": stdev(judges) if len(judges) > 1 else 0.0,
+            }
+        )
+    return output
 
 
 def _write(path: Path, rows: list[dict[str, object]]) -> None:

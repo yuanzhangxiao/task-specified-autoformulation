@@ -15,6 +15,8 @@ from autoformalism.rebuttal.mechanisms import (
 from autoformalism.rebuttal.objectives import compare_ratio_and_weighted_sum
 from autoformalism.rebuttal.structure import pairwise_similarities
 from autoformalism.schemas import CandidateModel
+from scripts.analyze_learning_curves import _iteration_summary
+from scripts.analyze_surviving_terms import summarize_candidate
 
 
 def _candidate(identifier: str = "candidate") -> CandidateModel:
@@ -79,6 +81,35 @@ def test_ratio_and_weighted_sum_comparison_is_development_only() -> None:
     assert result.candidate_count == 2
     assert result.ratio_selected_artifact_id == "a"
     assert result.lambda_value == 0.015
+
+
+def test_iteration_summary_tracks_best_so_far_fit_and_judge() -> None:
+    first = _artifact("first", 0.2, 0.4)
+    second = _artifact("second", 0.1, 0.3).model_copy(
+        update={"round_index": 1, "run_directory": first.run_directory}
+    )
+    third = _artifact("third", 0.15, 0.9).model_copy(
+        update={"round_index": 2, "run_directory": first.run_directory}
+    )
+
+    rows = _iteration_summary(
+        [first, second, third], {("synthetic", "hard"): 2.0}, iterations=3
+    )
+
+    assert [row["validation_raw_mse_mean"] for row in rows] == pytest.approx(
+        [0.8, 0.4, 0.4]
+    )
+    assert [row["judge_score_mean"] for row in rows] == pytest.approx(
+        [0.4, 0.4, 0.9]
+    )
+
+
+def test_surviving_term_summary_uses_frozen_state_equations() -> None:
+    summary = summarize_candidate(_candidate())
+
+    assert summary["target_equations"] == "d(target)/dt = memory - target"
+    assert summary["dynamic_terms"] == 4
+    assert "d(memory)/dt = input_u - memory" in summary["state_equations"]
 
 
 def test_mechanism_coverage_requires_driver_memory_and_target_path() -> None:
