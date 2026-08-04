@@ -177,8 +177,9 @@ def _baseline(
         "The perturbed and mechanism-focused settings separate trajectory fit "
         "from mechanistic recovery: low observed error alone does not imply that "
         "the correct latent organization was recovered.",
-        "The no-latent rows remain deliberately marked pending until all twelve "
-        "frozen runs are consolidated; no conclusion is inferred from partial runs.",
+        "Removing latent states reduces structural validity and worsens target MSE "
+        "on three of four tasks; Benchmark6 is a counterexample where the simpler "
+        "no-latent model predicts better with equal structural validity.",
     ]
     return _table(
         (
@@ -351,25 +352,31 @@ def _no_latent(
         no_latent = _optional_csv(no_latent_root / "no_latent_runs.csv")
     rows = []
     for benchmark in BENCHMARKS:
+        ablated = no_latent[no_latent.benchmark == benchmark]
+        matched_seeds = set(ablated.seed.astype(int))
         full = runs[
             (runs.benchmark == benchmark)
             & (runs.tier == "hard")
             & (runs.method == "full")
+            & (runs.seed.isin(matched_seeds))
         ]
         full_structure = structure[
             (structure.benchmark == benchmark)
             & (structure.tier == "hard")
             & (structure.method == "full")
+            & (structure.seed.isin(matched_seeds))
         ]
         full_hidden = hidden[
             (hidden.benchmark == benchmark)
             & (hidden.tier == "hard")
             & (hidden.method == "full")
+            & (hidden.seed.isin(matched_seeds))
         ]
         full_complexity = complexity[
             (complexity.benchmark == benchmark)
             & (complexity.tier == "hard")
             & (complexity.method == "full")
+            & (complexity.seed.isin(matched_seeds))
         ]
         target_scale = _target_scale(complexity, benchmark, "hard")
         rows.append(
@@ -380,10 +387,9 @@ def _no_latent(
                 _summary(full_structure.structural_validity),
                 _summary(full_hidden.hidden_mse),
                 _summary(full_complexity.dynamic_terms),
-                f"{len(full)}/5",
+                f"{len(full)}/3",
             )
         )
-        ablated = no_latent[no_latent.benchmark == benchmark]
         rows.append(
             (
                 benchmark,
@@ -404,11 +410,13 @@ def _no_latent(
             )
         )
     conclusions = [
-        "The no-latent comparison is pre-specified on four hard-tier tasks and "
-        "three seeds per task.",
-        "Its structural, hidden-dynamics, and complexity conclusions remain "
-        "withheld until the final run is consolidated and all candidates are "
-        "evaluated by the same post-selection pipeline as the full method.",
+        "Persistent latent states improve target MSE and structural validity on "
+        "original_b1, perturbed_b1, and Benchmark5 under matched seeds.",
+        "Benchmark6 is the important counterexample: the no-latent model has "
+        "lower target MSE and equal structural validity, so latent-state benefits "
+        "are task-dependent rather than universal.",
+        "The no-latent models use fewer terms on the first three tasks and cannot "
+        "be assigned hidden-trajectory MSE by construction.",
     ]
     return _table(
         (
@@ -511,9 +519,21 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
     )
 
 
-def _section(title: str, table: str, conclusions: list[str]) -> str:
+def _section(
+    title: str,
+    table: str,
+    conclusions: list[str],
+    *,
+    experiment: str,
+    motivation: str,
+) -> str:
     bullets = "\n".join(f"- {item}" for item in conclusions)
-    return f"## {title}\n\n{table}\n\n### Rebuttal conclusion\n\n{bullets}"
+    return (
+        f"## {title}\n\n"
+        f"**Experiment.** {experiment}\n\n"
+        f"**Motivation.** {motivation}\n\n"
+        f"{table}\n\n### Rebuttal conclusion\n\n{bullets}"
+    )
 
 
 def main() -> None:
@@ -551,24 +571,111 @@ def main() -> None:
             "Baseline and ablation study - representative hard tasks",
             baseline,
             baseline_conclusions,
+            experiment=(
+                "We evaluated LLM-feature-SINDy, no-judge Autoformalism, "
+                "Autoformalism with persistent latent states forbidden, and the "
+                "full method on four hard-tier tasks. All methods used the same "
+                "registered data splits and target evaluation; stochastic entries "
+                "are summarized across their completed seeds."
+            ),
+            motivation=(
+                "The table isolates the contributions of LLM-designed features, "
+                "iterative search, judge feedback, and persistent latent states "
+                "without crowding the comparison with classical baselines."
+            ),
         ),
-        _section("LLM-family study", family, family_conclusions),
+        _section(
+            "LLM-family study",
+            family,
+            family_conclusions,
+            experiment=(
+                "We crossed GPT and Gemini as proposer and judge on original_b1 "
+                "and Benchmark6 hard, using identical prompts, search budgets, "
+                "fitting settings, and five seeds for each of the four pairings."
+            ),
+            motivation=(
+                "This tests whether performance depends on one model family or "
+                "persists when proposer and judge roles are reassigned across "
+                "independent LLM families."
+            ),
+        ),
         _section(
             "Ratio versus weighted-sum objective",
             objective,
             objective_conclusions,
+            experiment=(
+                "For each of 18 benchmark-tier candidate pools, we ranked the same "
+                "frozen candidates with a ratio objective and with weighted-sum "
+                "objectives at seven predefined complexity multipliers. We compared "
+                "the rankings using Spearman, Kendall, top-1 agreement, and top-5 "
+                "overlap."
+            ),
+            motivation=(
+                "This directly evaluates whether the two selection objectives make "
+                "materially different choices, independently of proposal-generation "
+                "or fitting randomness."
+            ),
         ),
-        _section("Adversarial-judge stress test", adversarial, adversarial_conclusions),
+        _section(
+            "Adversarial-judge stress test",
+            adversarial,
+            adversarial_conclusions,
+            experiment=(
+                "We constructed 28 schema-valid valid/adversarial pairs spanning "
+                "four hard tasks and seven controlled mechanism mutations. GPT and "
+                "Gemini judge each candidate independently in three repetitions, "
+                "for 336 blinded calls in total."
+            ),
+            motivation=(
+                "This tests whether judge scores reward mechanistic correctness or "
+                "can be fooled by fluent but causally defective candidates."
+            ),
+        ),
         _section(
             "Persistent-latent-state ablation",
             no_latent,
             no_latent_conclusions,
+            experiment=(
+                "We reran the full search with persistent latent states forbidden "
+                "on four hard-tier tasks for seeds 0-2, then compared against the "
+                "full method on the same seeds using target MSE, deterministic "
+                "structural validity, hidden MSE where defined, and term count."
+            ),
+            motivation=(
+                "This isolates whether persistent internal state is necessary for "
+                "predictive and structural recovery, rather than assuming that a "
+                "larger latent model is always preferable."
+            ),
         ),
-        _section("Learning curves — hard tier", learning, diagnostic_conclusions[:1]),
+        _section(
+            "Learning curves - hard tier",
+            learning,
+            diagnostic_conclusions[:1],
+            experiment=(
+                "For each authoritative hard-tier run, we extracted the first and "
+                "best validation errors across valid search rounds and report the "
+                "relative improvement together with the number of valid rounds."
+            ),
+            motivation=(
+                "This checks whether iterative grounding improves candidates during "
+                "search and whether the effect changes when judge feedback is "
+                "removed."
+            ),
+        ),
         _section(
             "Structural stability - hard tier",
             stability,
             diagnostic_conclusions[1:],
+            experiment=(
+                "Across completed hard-tier seeds, we computed pairwise Jaccard "
+                "similarity for alpha-normalized dependency edges and selected "
+                "target-equation terms."
+            ),
+            motivation=(
+                "This distinguishes reproducible causal organization from exact "
+                "symbolic-form agreement and reveals structural equifinality across "
+                "independent runs."
+            ),
         ),
     ]
     args.output.parent.mkdir(parents=True, exist_ok=True)
