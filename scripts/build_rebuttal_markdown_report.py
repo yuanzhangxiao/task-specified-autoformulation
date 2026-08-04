@@ -66,6 +66,21 @@ def _optional_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path) if path.is_file() else pd.DataFrame()
 
 
+def _target_scale(complexity: pd.DataFrame, benchmark: str, tier: str) -> float:
+    values = complexity[
+        (complexity.benchmark == benchmark) & (complexity.tier == tier)
+    ].target_scale.dropna().unique()
+    if len(values) != 1:
+        raise ValueError(
+            f"expected one target scale for {benchmark}/{tier}; got {values}"
+        )
+    return float(values[0])
+
+
+def _raw_mse(normalized: pd.Series, target_scale: float) -> pd.Series:
+    return pd.to_numeric(normalized, errors="coerce") * target_scale**2
+
+
 def _baseline(
     analysis: Path, no_latent_root: Path | None
 ) -> tuple[str, list[str]]:
@@ -88,6 +103,7 @@ def _baseline(
         no_latent = _optional_csv(no_latent_root / "no_latent_runs.csv")
     rows: list[tuple[str, ...]] = []
     for benchmark in BENCHMARKS:
+        target_scale = _target_scale(complexity, benchmark, "hard")
         for method in METHODS:
             if method == "no_latent":
                 subset = no_latent[no_latent.benchmark == benchmark]
@@ -96,8 +112,12 @@ def _baseline(
                         benchmark,
                         DISPLAY[method],
                         _summary(
-                            subset.get(
-                                "no_latent_test_nmse", pd.Series(dtype=float)
+                            _raw_mse(
+                                subset.get(
+                                    "no_latent_test_nmse",
+                                    pd.Series(dtype=float),
+                                ),
+                                target_scale,
                             )
                         ),
                         "Pending",
@@ -132,7 +152,7 @@ def _baseline(
                 (
                     benchmark,
                     DISPLAY[method],
-                    _summary(subset.test_mse),
+                    _summary(complexity_group.one_step_raw_mse),
                     _summary(structural.structural_validity)
                     if mechanism_applicable
                     else "N/A",
@@ -157,7 +177,7 @@ def _baseline(
         (
             "Benchmark",
             "Method",
-            "Target NMSE ↓",
+            "Target MSE ↓",
             "Structural validity ↑",
             "Hidden NMSE ↓",
             "Terms ↓",
@@ -169,6 +189,9 @@ def _baseline(
 
 def _family(analysis: Path) -> tuple[str, list[str]]:
     runs = pd.read_csv(analysis / "authoritative_runs.csv")
+    complexity = pd.read_csv(
+        analysis / "protocol_audit_all" / "observed_mse_and_terms.csv"
+    )
     family = runs[runs.method.str.contains("_proposer__", regex=False, na=False)]
     rows = []
     for benchmark in ("original_b1", "benchmark6"):
@@ -180,12 +203,13 @@ def _family(analysis: Path) -> tuple[str, list[str]]:
         ):
             method = f"{proposer}_proposer__{judge}_judge"
             group = family[(family.method == method) & (family.benchmark == benchmark)]
+            target_scale = _target_scale(complexity, benchmark, "hard")
             rows.append(
                 (
                     benchmark,
                     proposer.upper(),
                     judge.upper(),
-                    _summary(group.test_mse),
+                    _summary(_raw_mse(group.test_mse, target_scale)),
                     _summary(group.structural_validity),
                     _summary(group.judge_score),
                     f"{len(group)}/5",
@@ -196,18 +220,18 @@ def _family(analysis: Path) -> tuple[str, list[str]]:
         "Gemini participate in competitive proposer-judge combinations.",
         "All eight benchmark-by-family cells completed all five seeds, so the "
         "comparison is not conditioned on selectively successful runs.",
-        "On Benchmark6, Gemini/Gemini has the lowest target NMSE while GPT/GPT "
+        "On Benchmark6, Gemini/Gemini has the lowest target MSE while GPT/GPT "
         "has higher structural validity, illustrating a prediction-structure "
         "trade-off rather than a universally dominant pairing.",
         "Judge scores are not interchangeable across judge families; they should "
-        "be read together with held-out NMSE, structural validity, and completion.",
+        "be read together with held-out MSE, structural validity, and completion.",
     ]
     return _table(
         (
             "Benchmark",
             "Proposer",
             "Judge",
-            "Target NMSE ↓",
+            "Target MSE ↓",
             "Structural validity ↑",
             "Judge score ↑",
             "Complete",
@@ -335,11 +359,12 @@ def _no_latent(
             & (complexity.tier == "hard")
             & (complexity.method == "full")
         ]
+        target_scale = _target_scale(complexity, benchmark, "hard")
         rows.append(
             (
                 benchmark,
                 "Ours",
-                _summary(full.test_mse),
+                _summary(full_complexity.one_step_raw_mse),
                 _summary(full_structure.structural_validity),
                 _summary(full_hidden.hidden_mse),
                 _summary(full_complexity.dynamic_terms),
@@ -351,7 +376,9 @@ def _no_latent(
             (
                 benchmark,
                 "No-latent",
-                _summary(ablated.no_latent_test_nmse),
+                _summary(
+                    _raw_mse(ablated.no_latent_test_nmse, target_scale)
+                ),
                 "Pending",
                 "Pending",
                 "Pending",
@@ -369,7 +396,7 @@ def _no_latent(
         (
             "Benchmark",
             "Method",
-            "Target NMSE ↓",
+            "Target MSE ↓",
             "Structural validity ↑",
             "Hidden NMSE ↓",
             "Terms ↓",
@@ -494,7 +521,10 @@ def main() -> None:
     sections = [
         "# Rebuttal tables and conclusions",
         "",
-        "Values are mean ± sample SD across completed stochastic seeds. "
+        "Target MSE is the unnormalized test-set mean squared error under the "
+        "registered evaluation protocol. Hidden NMSE remains normalized because "
+        "it compares affine-aligned latent coordinates with different physical "
+        "scales. Values are mean ± sample SD across completed stochastic seeds. "
         "Deterministic methods are reported as a single value. N/A denotes a "
         "metric that is not defined for the method; Pending denotes a running "
         "experiment.",
