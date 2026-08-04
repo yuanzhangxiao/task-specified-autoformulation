@@ -423,6 +423,53 @@ def test_one_step_reset_observed_state_but_propagates_latent_state() -> None:
     assert result.states[1] == pytest.approx([10.0, 11.5, 22.5])
 
 
+def test_free_rollout_does_not_reset_observed_state() -> None:
+    candidate = _candidate({"x": "1"}, "x", ())
+    model = compile_candidate(
+        candidate,
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    trajectory = _trajectory(
+        "free", np.asarray([0.0, 1.0, 2.0]), np.asarray([10.0, 20.0, 30.0])
+    )
+
+    result = simulate_trajectory(
+        model,
+        trajectory,
+        {},
+        {},
+        FitConfig(),
+        reset_observed_states=False,
+    )
+
+    assert result.success
+    assert result.states is not None
+    assert result.states[0] == pytest.approx([10.0, 11.0, 12.0])
+
+
+def test_free_rollout_rejects_measured_target_forcing() -> None:
+    candidate = _candidate({"x": "target"}, "x", ())
+    model = compile_candidate(
+        candidate,
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    trajectory = _trajectory(
+        "leaking", np.asarray([0.0, 1.0]), np.asarray([1.0, 2.0])
+    )
+
+    result = simulate_trajectory(
+        model,
+        trajectory,
+        {},
+        {"x": 0.0},
+        FitConfig(),
+        reset_observed_states=False,
+    )
+
+    assert not result.success
+    assert "cannot use measured target forcing" in (result.message or "")
+
+
 def test_fixed_rk4_advances_one_step_without_adaptive_solver() -> None:
     candidate = _candidate({"x": "1"}, "x", ())
     model = compile_candidate(

@@ -104,6 +104,102 @@ def test_mechanism_coverage_requires_driver_memory_and_target_path() -> None:
     assert result.manual_review_required is False
 
 
+def test_mechanism_tags_ignore_case_and_separator_variation() -> None:
+    candidate = _candidate().model_copy(
+        update={
+            "states": (
+                _candidate().states[0].model_copy(
+                    update={"mechanisms": ("Input-Memory",)}
+                ),
+                _candidate().states[1],
+            )
+        }
+    )
+    spec = MechanismEvaluationSpec.model_validate(
+        {
+            "benchmark_id": "synthetic",
+            "tier": "hard",
+            "required_mechanisms": [
+                {
+                    "id": "input_memory",
+                    "required_drivers": ["input_u"],
+                    "required_targets": ["target"],
+                    "requires_dynamic_memory": True,
+                }
+            ],
+        }
+    )
+
+    assert evaluate_mechanisms(candidate, spec).structural_validity == 1.0
+
+
+def test_dynamic_memory_does_not_count_observed_target_state() -> None:
+    payload = _candidate().model_dump(mode="json")
+    payload["states"] = [
+        state for state in payload["states"] if state["name"] == "target"
+    ]
+    payload["states"][0]["mechanisms"] = ["input_memory"]
+    payload["state_equations"] = [
+        {"state": "target", "rhs": "input_u - target"}
+    ]
+    payload["initial_conditions"] = [
+        initial
+        for initial in payload["initial_conditions"]
+        if initial["state"] == "target"
+    ]
+    spec = MechanismEvaluationSpec.model_validate(
+        {
+            "benchmark_id": "synthetic",
+            "tier": "hard",
+            "required_mechanisms": [
+                {
+                    "id": "input_memory",
+                    "required_drivers": ["input_u"],
+                    "required_targets": ["target"],
+                    "requires_dynamic_memory": True,
+                }
+            ],
+        }
+    )
+
+    result = evaluate_mechanisms(CandidateModel.model_validate(payload), spec)
+
+    assert result.mechanism_coverage == 1.0
+    assert result.structural_validity == pytest.approx(2 / 3)
+
+
+def test_process_inheriting_latent_state_counts_as_dynamic_memory() -> None:
+    payload = _candidate().model_dump(mode="json")
+    payload["states"][0]["mechanisms"] = []
+    payload["processes"] = [
+        {
+            "name": "memory_effect",
+            "expression": "memory",
+            "mechanisms": ["input_memory"],
+        }
+    ]
+    payload["state_equations"][1]["rhs"] = "memory_effect - target"
+    spec = MechanismEvaluationSpec.model_validate(
+        {
+            "benchmark_id": "synthetic",
+            "tier": "hard",
+            "required_mechanisms": [
+                {
+                    "id": "input_memory",
+                    "required_drivers": ["input_u"],
+                    "required_targets": ["target"],
+                    "requires_dynamic_memory": True,
+                }
+            ],
+        }
+    )
+
+    result = evaluate_mechanisms(CandidateModel.model_validate(payload), spec)
+
+    assert result.mechanism_coverage == 1.0
+    assert result.structural_validity == 1.0
+
+
 def test_hidden_metric_is_invariant_to_positive_affine_coordinate() -> None:
     train_reference = np.asarray([0.0, 1.0, 2.0, 3.0])
     test_reference = np.asarray([4.0, 5.0])

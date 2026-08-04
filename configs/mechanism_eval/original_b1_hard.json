@@ -7,6 +7,11 @@
       "tag_aliases": [
         "meal_timing_and_amount_to_Gp",
         "meal_timing_and_amount_to_observed_Gp",
+        "meal_timing_and_amount_to_plasma_glucose",
+        "meal_timing_and_amount_to_plasma_glucose_mass",
+        "causal_meal_timing_and_amount_to_Gp",
+        "causal_meal_timing_and_amount_to_plasma_glucose",
+        "causal_meal_timing_and_amount_to_plasma_glucose_mass",
         "causal_meal_absorption",
         "causal_meal_delay"
       ],

@@ -4,7 +4,15 @@
   "required_mechanisms": [
     {
       "id": "direct_u02_contribution",
-      "tag_aliases": ["u02_to_v02", "direct_input_to_target"],
+      "tag_aliases": [
+        "u02_to_v02",
+        "direct_input_to_target",
+        "direct_u02_to_v02",
+        "direct_u02_effect",
+        "u02_direct_contribution",
+        "u02_direct_pathway",
+        "direct_u02"
+      ],
       "required_drivers": ["u02"],
       "required_targets": ["v02"],
       "must_be_generated": true,
@@ -14,7 +22,19 @@
     },
     {
       "id": "u01_internal_transformation",
-      "tag_aliases": ["u01_pathway", "u01_internal_state_to_v02"],
+      "tag_aliases": [
+        "u01_pathway",
+        "u01_internal_state_to_v02",
+        "u01_transformation_to_v02",
+        "u01_transformation_pathway",
+        "u01_joint_transformation",
+        "u01_joint_transformation_to_v02",
+        "u01_transformation",
+        "u01_causal_transformation_pathway",
+        "u01_transformation_joint_process",
+        "u01_joint_transformation_pathway",
+        "u01_to_internal_transformation_quantity"
+      ],
       "required_drivers": ["u01"],
       "required_targets": ["v02"],
       "must_be_generated": true,
@@ -24,7 +44,14 @@
     },
     {
       "id": "u03_exchange_pathway",
-      "tag_aliases": ["u03_exchange", "u03_internal_state_to_v02"],
+      "tag_aliases": [
+        "u03_exchange",
+        "u03_internal_state_to_v02",
+        "u03_exchange_with_v02",
+        "u03_exchange_to_v02",
+        "u03_causal_exchange_pathway",
+        "u03_driven_exchange_with_v02"
+      ],
       "required_drivers": ["u03"],
       "required_targets": ["v02"],
       "must_be_generated": true,

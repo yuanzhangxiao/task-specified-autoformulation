@@ -25,8 +25,14 @@ def simulate_trajectory(
     config: FitConfig,
     *,
     deadline: float | None = None,
+    reset_observed_states: bool | None = None,
 ) -> SimulationResult:
-    """Roll out a compiled ODE, converting numerical exceptions into failures."""
+    """Roll out a compiled ODE, converting numerical exceptions into failures.
+
+    ``reset_observed_states=False`` is an evaluation-only free-rollout mode. It
+    is rejected when a measured target is used as an exogenous forcing symbol,
+    because that would reveal the held-out trajectory during rollout.
+    """
     time = np.asarray(trajectory.time, dtype=float).copy()
     try:
         if len(time) < 2 or np.any(np.diff(time) <= 0.0):
@@ -72,7 +78,21 @@ def simulate_trajectory(
         if not np.isfinite(initial_state).all():
             raise ValueError("initial conditions contain nonfinite values")
         _check_deadline(deadline)
-        if model.validated.context.lagged_targets:
+        use_resets = (
+            bool(model.validated.context.lagged_targets)
+            if reset_observed_states is None
+            else reset_observed_states
+        )
+        leaked_targets = (
+            model.validated.forcing_symbols
+            & frozenset(model.validated.context.lagged_targets)
+        )
+        if not use_resets and leaked_targets:
+            raise ValueError(
+                "free rollout cannot use measured target forcing: "
+                f"{sorted(leaked_targets)}"
+            )
+        if use_resets:
             state_values = _simulate_one_step_intervals(
                 model, trajectory, parameters, initial_state, config, deadline
             )

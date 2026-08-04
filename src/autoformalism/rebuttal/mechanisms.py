@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict, deque
 from typing import Literal
 
@@ -63,19 +64,24 @@ def evaluate_mechanisms(
     """Evaluate explicit tagged claims against the expression dependency graph."""
     graph = _dependency_graph(candidate)
     reverse = _reverse_graph(graph)
-    state_names = {item.name for item in candidate.states}
+    latent_state_names = {
+        item.name for item in candidate.states if item.kind.value == "latent"
+    }
     tags: dict[str, set[str]] = defaultdict(set)
     for state in candidate.states:
         for tag in state.mechanisms:
-            tags[tag].add(state.name)
+            tags[_normalize_tag(tag)].add(state.name)
     for process in candidate.processes:
         for tag in process.mechanisms:
-            tags[tag].add(process.name)
+            tags[_normalize_tag(tag)].add(process.name)
 
     predicates: list[PredicateResult] = []
     covered: list[str] = []
     for requirement in spec.required_mechanisms:
-        accepted_tags = (requirement.id, *requirement.tag_aliases)
+        accepted_tags = tuple(
+            _normalize_tag(tag)
+            for tag in (requirement.id, *requirement.tag_aliases)
+        )
         claims = set().union(*(tags.get(tag, set()) for tag in accepted_tags))
         target_nodes = {f"target:{name}" for name in requirement.required_targets}
         connected_claims = {
@@ -114,15 +120,21 @@ def evaluate_mechanisms(
                 )
             )
         if requirement.requires_dynamic_memory:
-            dynamic = any(claim in state_names for claim in connected_claims)
+            dynamic_components = {
+                claim
+                for claim in connected_claims
+                if claim in latent_state_names
+                or bool(_ancestors(reverse, claim) & latent_state_names)
+            }
+            dynamic = bool(dynamic_components)
             predicates.append(
                 PredicateResult(
                     mechanism_id=requirement.id,
                     predicate="dynamic_memory",
                     status="satisfied" if dynamic else "failed",
                     evidence=(
-                        "dynamic tagged components: "
-                        f"{sorted(connected_claims & state_names)}"
+                        "tagged components with latent-state memory: "
+                        f"{sorted(dynamic_components)}"
                     ),
                 )
             )
@@ -204,3 +216,8 @@ def _ancestors(reverse: dict[str, set[str]], node: str) -> set[str]:
             visited.add(item)
             pending.append(item)
     return visited
+
+
+def _normalize_tag(tag: str) -> str:
+    """Normalize superficial case/separator variation without semantic matching."""
+    return re.sub(r"[^a-z0-9]+", "_", tag.casefold()).strip("_")

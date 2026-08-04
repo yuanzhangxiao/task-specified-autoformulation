@@ -6,8 +6,16 @@
       "id": "pulse_response",
       "tag_aliases": [
         "pulse_timing_and_magnitude_to_v009",
+        "causal_pulse_timing_and_magnitude_to_v009",
         "causal_pulse_response",
-        "pulse_memory"
+        "pulse_memory",
+        "causal_pulse_memory",
+        "transient_pulse_memory",
+        "causal_pulse_timing_and_magnitude_memory",
+        "causal_pulse_timing_and_magnitude_response",
+        "causal_pulse_timing_and_magnitude_effect",
+        "causal_pulse_filter",
+        "pulse_timing_response"
       ],
       "required_drivers": ["u01"],
       "required_targets": ["v009"],

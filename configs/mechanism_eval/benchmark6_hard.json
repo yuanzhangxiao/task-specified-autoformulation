@@ -4,7 +4,21 @@
   "required_mechanisms": [
     {
       "id": "command_response",
-      "tag_aliases": ["u01_to_v02", "causal_command_response", "device_response"],
+      "tag_aliases": [
+        "u01_to_v02",
+        "causal_command_response",
+        "device_response",
+        "causal_primary_response",
+        "causal_command_to_primary_response",
+        "causal_internal_mechanism_for_v02",
+        "primary_response_generation",
+        "causal_target_generation",
+        "primary_target_response",
+        "causal_primary_response_generation",
+        "causal_command_to_v02_response",
+        "causal_command_to_target_relaxation",
+        "command_driven_primary_response"
+      ],
       "required_drivers": ["u01"],
       "required_targets": ["v02"],
       "must_be_generated": true,

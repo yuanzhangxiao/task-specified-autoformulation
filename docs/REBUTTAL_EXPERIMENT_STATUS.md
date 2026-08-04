@@ -32,22 +32,25 @@
 - Explicit safe adversarial mutation recipes, repeated judge execution, and
   paired metrics: `scripts/run_adversarial_judge.py` and
   `scripts/analyze_adversarial_judge.py`.
+- Deterministic construction and validation of 28 adversarial pairs across
+  four hard-tier contexts: `scripts/build_adversarial_pairs.py`.
+- Resumable, shardable adversarial scoring and lossless shard merging:
+  `scripts/run_adversarial_judge.py` and
+  `scripts/merge_adversarial_scores.py`.
+- Compact baseline/ablation, LLM-family, objective, learning-curve, and
+  structural-stability tables: `scripts/build_rebuttal_secondary_tables.py`.
+- Frozen-structure derivative-fast-path versus generic-rollout fitting
+  comparison: `scripts/run_fitting_fast_path_ablation.py`.
 - Opt-in `--disable-derivative-fit-fast-path` fitting ablation.
 
 ## Pending experiment artifacts
 
-- Consolidate distributed full, NoJudge, and family checkpoints into an input
-  directory for candidate-pool indexing.
-- Audit actual mechanism tags in the indexed pool and extend public tag aliases
-  where proposers used equivalent noncanonical labels.
-- Run the 12 no-persistent-latent hard-tier experiments: four representative
-  benchmarks by seeds 0--2.
-- Author and deterministically validate 28 adversarial pairs: seven mutations
-  in each of four representative hard contexts.
-- Export aligned candidate/reference hidden values from the sealed evaluation
-  data. Raw private trajectories must not be copied into ordinary artifacts.
-- Run fixed-candidate fitting ablations only for candidates confirmed eligible
-  for derivative regression.
+- Score the 28 validated adversarial pairs with GPT and Gemini, three repeats
+  per valid/adversarial candidate (336 calls total), then merge and analyze the
+  four independent shards.
+- Complete the one missing no-persistent-latent run
+  (`benchmark6`, hard, seed 2) and consolidate all 12 runs.
+- Finish the frozen-candidate fitting ablation and summarize accuracy/runtime.
 
 ## Expected output locations
 
@@ -69,5 +72,7 @@
   instead of being guessed by the deterministic evaluator.
 - Plot rendering is intentionally separated from metric extraction; the CSV
   outputs are the authoritative analysis artifacts.
-- Adversarial pair recipes require benchmark-specific component choices. The
-  framework does not invent mutations automatically from prose.
+- The deterministic structural predicates detect graph/mechanism failures but
+  intentionally do not substitute for the independent LLM judge stress test.
+- Live adversarial scoring requires API credentials and is therefore executed
+  on the credentialed experiment machines rather than during local analysis.
