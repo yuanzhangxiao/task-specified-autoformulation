@@ -301,9 +301,13 @@ def _adversarial(root: Path | None) -> tuple[str, list[str]]:
             "is verified."
         ]
     else:
+        judge_names = {
+            "openai:gpt-5.6-terra": "GPT",
+            "gemini:gemini-3.6-flash": "Gemini",
+        }
         rows = [
             (
-                str(row.judge),
+                judge_names.get(str(row.judge), str(row.judge)),
                 f"{row.paired_preference_accuracy:.3f}",
                 f"{row.auroc:.3f}",
                 f"{row.mean_score_margin:.3f}",
@@ -313,9 +317,18 @@ def _adversarial(root: Path | None) -> tuple[str, list[str]]:
             for row in summary.itertuples(index=False)
         ]
         conclusions = [
-            "Paired preference and AUROC quantify whether the judge distinguishes "
-            "valid mechanisms from controlled, schema-valid adversarial changes; "
-            "repeat SD measures stochastic scoring variability."
+            "Both judges distinguish valid mechanisms from controlled adversarial "
+            "variants well, with AUROC 0.899 for both model families.",
+            "GPT has higher strict paired-preference accuracy (0.905 versus 0.821) "
+            "and a larger mean margin, whereas Gemini has a lower false-preference "
+            "rate (0.012 versus 0.083); Gemini's remaining comparisons are mostly "
+            "ties rather than reversals.",
+            "Repeated-call variability is low for both judges (mean SD 0.025 for "
+            "GPT and 0.017 for Gemini), indicating that the result is not driven "
+            "by unstable decoding noise.",
+            "Narrative-equation mismatch is the principal failure mode for both "
+            "judges, while wrong causal direction, wrong driver, and disconnected "
+            "named mechanisms are detected reliably.",
         ]
     return _table(
         (
