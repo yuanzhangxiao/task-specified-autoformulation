@@ -15,9 +15,6 @@ BENCHMARKS = (
     "benchmark6",
 )
 METHODS = (
-    "sindy",
-    "pysr",
-    "d3_native_no_tools",
     "llm_feature_sindy",
     "nojudge",
     "no_latent",
@@ -97,7 +94,13 @@ def _baseline(
         analysis / "protocol_audit_all" / "observed_mse_and_terms.csv"
     )
     no_latent = pd.DataFrame(
-        columns=("benchmark", "seed", "no_latent_test_nmse")
+        columns=(
+            "benchmark",
+            "seed",
+            "no_latent_test_nmse",
+            "structural_validity",
+            "dynamic_terms",
+        )
     )
     if no_latent_root is not None:
         no_latent = _optional_csv(no_latent_root / "no_latent_runs.csv")
@@ -119,11 +122,16 @@ def _baseline(
                                 ),
                                 target_scale,
                             )
-                        ),
-                        "Pending",
-                        "Pending",
-                        "Pending",
-                        f"{len(subset)}/{EXPECTED[method]}",
+                        )
+                        if len(subset)
+                        else "Pending",
+                        _summary(subset.structural_validity)
+                        if len(subset)
+                        else "Pending",
+                        "N/A",
+                        _summary(subset.dynamic_terms)
+                        if len(subset)
+                        else "Pending",
                     )
                 )
                 continue
@@ -160,7 +168,6 @@ def _baseline(
                     if mechanism_applicable
                     else "N/A",
                     _summary(complexity_group.dynamic_terms),
-                    f"{len(subset)}/{EXPECTED[method]}",
                 )
             )
     conclusions = [
@@ -181,7 +188,6 @@ def _baseline(
             "Structural validity ↑",
             "Hidden NMSE ↓",
             "Terms ↓",
-            "Complete",
         ),
         rows,
     ), conclusions
@@ -333,7 +339,13 @@ def _no_latent(
         analysis / "protocol_audit_all" / "observed_mse_and_terms.csv"
     )
     no_latent = pd.DataFrame(
-        columns=("benchmark", "seed", "no_latent_test_nmse")
+        columns=(
+            "benchmark",
+            "seed",
+            "no_latent_test_nmse",
+            "structural_validity",
+            "dynamic_terms",
+        )
     )
     if no_latent_root is not None:
         no_latent = _optional_csv(no_latent_root / "no_latent_runs.csv")
@@ -378,10 +390,16 @@ def _no_latent(
                 "No-latent",
                 _summary(
                     _raw_mse(ablated.no_latent_test_nmse, target_scale)
-                ),
-                "Pending",
-                "Pending",
-                "Pending",
+                )
+                if len(ablated)
+                else "Pending",
+                _summary(ablated.structural_validity)
+                if len(ablated)
+                else "Pending",
+                "N/A",
+                _summary(ablated.dynamic_terms)
+                if len(ablated)
+                else "Pending",
                 f"{len(ablated)}/3",
             )
         )
