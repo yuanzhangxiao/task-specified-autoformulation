@@ -521,6 +521,37 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
         for row in stability.itertuples(index=False)
     ]
     surviving = pd.read_csv(analysis / "surviving_terms_hard_full.csv")
+    motifs = {
+        "original_b1": (
+            "Meal input → gastric/intestinal transit → glucose appearance; "
+            "most seeds also retain glucose clearance."
+        ),
+        "perturbed_b1": (
+            "Two-stage meal transport/absorption plus return toward basal glucose; "
+            "one seed uses saturating gastric emptying."
+        ),
+        "obfuscated_original_case01": (
+            "Pulse-driven dynamic memory followed by storage inflow and "
+            "loss/return."
+        ),
+        "obfuscated_perturbed_case01": (
+            "Pulse response feeding a storage balance, but several seeds retain "
+            "only part of this pathway."
+        ),
+        "benchmark5": (
+            "Direct u02 transformation with exchange, supported by filtered u01 "
+            "and u03 dynamics."
+        ),
+        "benchmark6": "A compact command-response/relaxation target equation.",
+    }
+    interpretations = {
+        "original_b1": "Stable mechanism; exact terms and names vary.",
+        "perturbed_b1": "Stable mechanism with moderate algebraic variation.",
+        "obfuscated_original_case01": "Stable motif, but little exact-term overlap.",
+        "obfuscated_perturbed_case01": "Least stable; pathway completeness varies.",
+        "benchmark5": "Transformation/exchange recur; one seed is missing.",
+        "benchmark6": "Consistently sparse; exact response form varies.",
+    }
     surviving_rows: list[tuple[str, ...]] = []
     for benchmark in (
         "original_b1",
@@ -530,25 +561,24 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
         "benchmark5",
         "benchmark6",
     ):
-        for seed in range(5):
-            selected = surviving[
-                (surviving.benchmark_id == benchmark) & (surviving.seed == seed)
-            ]
-            if selected.empty:
-                surviving_rows.append(
-                    (benchmark, str(seed), "No completed frozen selection", "N/A")
-                )
-                continue
-            row = selected.iloc[0]
-            equations = str(row.state_equations).replace("|", "\\|")
-            surviving_rows.append(
-                (
-                    benchmark,
-                    str(seed),
-                    equations.replace(" ; ", "<br>"),
-                    str(int(row.dynamic_terms)),
-                )
+        selected = surviving[surviving.benchmark_id == benchmark]
+        counts = {
+            int(row.seed): int(row.dynamic_terms)
+            for row in selected.itertuples(index=False)
+        }
+        count_text = "; ".join(
+            f"s{seed}={counts[seed]}" if seed in counts else f"s{seed}=missing"
+            for seed in range(5)
+        )
+        surviving_rows.append(
+            (
+                benchmark,
+                f"{len(counts)}/5",
+                count_text,
+                motifs[benchmark],
+                interpretations[benchmark],
             )
+        )
     conclusions = [
         "The full method's best validation target MSE improves across search on "
         "the named Dalla Man tasks and Benchmark6; for example, original_b1 "
@@ -565,16 +595,11 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
         "The obfuscated-perturbed curve exposes high between-seed variability and "
         "large-error candidates rather than hiding them in an endpoint average; "
         "this is a reliability limitation of the current search.",
-        "Edge-level stability consistently exceeds exact-term stability. This "
-        "indicates recurring causal organization despite algebraic variation in "
-        "the selected equations.",
-        "Low exact-term Jaccard on obfuscated tasks argues for reporting both "
-        "held-out prediction and structural recovery rather than claiming a "
-        "single uniquely identified symbolic equation.",
-        "The seed-level frozen equations show which terms actually survive "
-        "pruning. Recurrent mechanism families are visible even when latent-state, "
-        "process, and parameter names differ, while singleton terms expose "
-        "structural uncertainty rather than being hidden by an average score.",
+        "The same high-level mechanisms recur more consistently than identical "
+        "symbolic terms because seeds use different latent-state and process names.",
+        "Original and perturbed Dalla Man retain the clearest common mechanism; "
+        "obfuscated-perturbed is least stable and remains a structural-reliability "
+        "limitation.",
     ]
     return (
         "Each cell is mean ± sample SD [contributing/total completed runs]. "
@@ -601,11 +626,17 @@ def _learning_stability(analysis: Path) -> tuple[str, str, list[str]]:
             stability_rows,
         )
         + "\n\n### Surviving terms across seeds (Q4)\n\n"
-        + "These are the actual frozen, post-pruning state equations. The term "
-        "count is the number of nonzero top-level additive terms across all "
-        "displayed ODE right-hand sides.\n\n"
+        + "Term counts use the frozen, post-pruning ODEs. Exact equations remain "
+        "available in `surviving_terms_hard_full.csv`; this compact table reports "
+        "the recurring dynamical motif in plain language.\n\n"
         + _table(
-            ("Benchmark", "Seed", "Frozen state equations", "Terms"),
+            (
+                "Benchmark",
+                "Completed",
+                "Terms by seed",
+                "Recurring surviving dynamics",
+                "Interpretation",
+            ),
             surviving_rows,
         ),
         conclusions,
@@ -764,8 +795,9 @@ def main() -> None:
             experiment=(
                 "Across completed hard-tier seeds, we computed pairwise Jaccard "
                 "similarity for alpha-normalized dependency edges and selected "
-                "target-equation terms. We also list every actual frozen, "
-                "post-pruning state equation and its additive-term count by seed."
+                "target-equation terms. We then summarize the additive-term counts "
+                "and recurring dynamical motif of the actual frozen, post-pruning "
+                "models across seeds."
             ),
             motivation=(
                 "This distinguishes reproducible causal organization from exact "
