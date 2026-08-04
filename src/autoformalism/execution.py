@@ -112,6 +112,8 @@ class ExecutionArguments:
     final_fit_max_nfev: int = 150
     final_fit_timeout_seconds: float = 300.0
     use_judge: bool = True
+    forbid_latent_states: bool = False
+    use_derivative_fit_fast_path: bool = True
 
 
 class _RoleClient:
@@ -216,6 +218,19 @@ def build_experiment_parser(
         action="store_true",
         help="disable judge calls and feedback for the no-judge ablation",
     )
+    parser.add_argument(
+        "--forbid-latent-states",
+        action="store_true",
+        help=(
+            "forbid unobserved dynamic states while retaining algebraic "
+            "processes and the ordinary iterative search pipeline"
+        ),
+    )
+    parser.add_argument(
+        "--disable-derivative-fit-fast-path",
+        action="store_true",
+        help="force generic rollout fitting even when derivative regression applies",
+    )
     return parser
 
 
@@ -267,6 +282,10 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         final_fit_max_nfev=namespace.final_fit_max_nfev,
         final_fit_timeout_seconds=namespace.final_fit_timeout_seconds,
         use_judge=not namespace.no_judge,
+        forbid_latent_states=namespace.forbid_latent_states,
+        use_derivative_fit_fast_path=(
+            not namespace.disable_derivative_fit_fast_path
+        ),
     )
 
 
@@ -301,6 +320,8 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "judge_model": arguments.judge_model,
         "mock_llm": arguments.mock_llm,
         "use_judge": arguments.use_judge,
+        "forbid_latent_states": arguments.forbid_latent_states,
+        "use_derivative_fit_fast_path": arguments.use_derivative_fit_fast_path,
         "experiment_directory": str(experiment_directory),
         "split_fingerprints": {
             "train": dataset.train.fingerprint,
@@ -336,6 +357,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
             f"{proposer_prompt}\n\n{protocol_prompt}\n\n{symbol_contract}\n\n"
             f"Controller requirements:\n{_CONTROLLER_PROMPT}"
+            f"{_latent_ablation_prompt(arguments)}"
         ),
         judge_system_prompt=(
             f"Configured judge model: {arguments.judge_model or 'mock'}\n\n"
@@ -350,6 +372,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             integration_backend="fixed_rk4",
             maximum_function_evaluations=arguments.fit_max_nfev,
             maximum_wall_time_seconds=arguments.fit_timeout_seconds,
+            allow_derivative_regression=arguments.use_derivative_fit_fast_path,
         ),
         final_fit_config=FitConfig(
             number_of_starts=arguments.fit_starts,
@@ -357,6 +380,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             integration_backend="solve_ivp",
             maximum_function_evaluations=arguments.final_fit_max_nfev,
             maximum_wall_time_seconds=arguments.final_fit_timeout_seconds,
+            allow_derivative_regression=arguments.use_derivative_fit_fast_path,
         ),
         pruning_config=PruningConfig(),
     )
@@ -442,6 +466,20 @@ def _context(
             dataset.roles.targets if spec.one_step_target_history else ()
         ),
         forcing_bounds=forcing_bounds,
+        forbid_latent_states=arguments.forbid_latent_states,
+    )
+
+
+def _latent_ablation_prompt(arguments: ExecutionArguments) -> str:
+    """Render the opt-in no-persistent-latent-dynamics restriction."""
+    if not arguments.forbid_latent_states:
+        return ""
+    return (
+        "\n\nAblation restriction: do not declare latent dynamic states. Every "
+        "dynamic state must map to a benchmark target or a supplied auxiliary "
+        "channel. Algebraic generated processes and permitted lagged targets "
+        "remain allowed. External inputs and fixed covariates remain supplied "
+        "forcing and must not be redeclared."
     )
 
 

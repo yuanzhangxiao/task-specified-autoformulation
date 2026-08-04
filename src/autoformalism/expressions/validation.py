@@ -40,6 +40,7 @@ class ValidationContext(StrictSchema):
     external_inputs: IdentifierTuple = ()
     fixed_covariates: IdentifierTuple = ()
     unavailable_observed_channels: IdentifierTuple = ()
+    forbid_latent_states: bool = False
     time_symbol: Identifier = "t"
     forcing_bounds: Mapping[Identifier, tuple[FiniteFloat, FiniteFloat]] = Field(
         default_factory=dict
@@ -328,6 +329,17 @@ class CandidateValidator:
             diagnostics,
         )
         self._validate_parameter_scopes(candidate, diagnostics)
+        if context.forbid_latent_states:
+            for state in candidate.states:
+                if state.kind.value == "latent":
+                    diagnostics.append(
+                        ValidationDiagnostic(
+                            "LATENT_STATE_FORBIDDEN",
+                            f"state:{state.name}",
+                            "this ablation permits only dynamic states mapped to "
+                            "observed target or supplied auxiliary channels",
+                        )
+                    )
         self._validate_state_equation_closure(candidate, diagnostics)
         self._validate_constraint_subjects(
             candidate,
@@ -369,6 +381,17 @@ class CandidateValidator:
 
         initial_condition_expressions: dict[str, ParsedExpression] = {}
         observed_states = self._identity_observed_states(candidate, context)
+        if context.forbid_latent_states:
+            for state in candidate.states:
+                if state.name not in observed_states:
+                    diagnostics.append(
+                        ValidationDiagnostic(
+                            "UNOBSERVED_DYNAMIC_STATE_FORBIDDEN",
+                            f"state:{state.name}",
+                            "no-latent ablation states must map directly to a "
+                            "target or supplied auxiliary channel",
+                        )
+                    )
         initial_states = {item.state for item in candidate.initial_conditions}
         causal_derivative_initials: dict[str, str] = {}
         for state in sorted(state_names - initial_states):

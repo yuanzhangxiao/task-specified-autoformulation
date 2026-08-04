@@ -8,6 +8,7 @@ import pytest
 
 from autoformalism.execution import (
     ExecutionArguments,
+    _latent_ablation_prompt,
     _numeric_declared_channels,
     _prediction_protocol_prompt,
     _symbol_contract,
@@ -80,6 +81,37 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.fit_timeout_seconds == 300.0
     assert default.final_fit_max_nfev == 150
     assert default.final_fit_timeout_seconds == 300.0
+    assert default.forbid_latent_states is False
+    assert default.use_derivative_fit_fast_path is True
+
+
+def test_cli_accepts_forbid_latent_states() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            ["--mock-llm", "--dry-run", "--forbid-latent-states"]
+        )
+    )
+
+    assert arguments.forbid_latent_states is True
+    assert "do not declare latent dynamic states" in _latent_ablation_prompt(
+        arguments
+    )
+
+
+def test_cli_can_disable_derivative_fit_fast_path() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--disable-derivative-fit-fast-path",
+            ]
+        )
+    )
+
+    assert arguments.use_derivative_fit_fast_path is False
 
 
 def test_cli_rejects_nonpositive_timeout() -> None:

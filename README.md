@@ -296,6 +296,15 @@ Each run stores:
 Test metrics are created only after validation selection is frozen and are
 never inserted into proposer or judge feedback.
 
+## Rebuttal analyses and ablations
+
+Post-selection rebuttal analyses are implemented as separate scripts so the
+ordinary experiment path remains unchanged. See
+`docs/REBUTTAL_EXPERIMENT_STATUS.md` for the experiment matrix, current status,
+and output locations. The no-persistent-latent ablation is enabled with
+`--forbid-latent-states`; the generic-rollout fitting ablation is enabled with
+`--disable-derivative-fit-fast-path`.
+
 ## Colab
 
 [notebooks/run_autoformalism_colab.ipynb](notebooks/run_autoformalism_colab.ipynb)

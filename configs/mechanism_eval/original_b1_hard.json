@@ -1,0 +1,21 @@
+{
+  "benchmark_id": "original_b1",
+  "tier": "hard",
+  "required_mechanisms": [
+    {
+      "id": "meal_appearance",
+      "tag_aliases": [
+        "meal_timing_and_amount_to_Gp",
+        "meal_timing_and_amount_to_observed_Gp",
+        "causal_meal_absorption",
+        "causal_meal_delay"
+      ],
+      "required_drivers": ["meal_event_g"],
+      "required_targets": ["Gp"],
+      "must_be_generated": true,
+      "requires_dynamic_memory": true,
+      "required_sign": "unspecified",
+      "forbid_current_future_target_input": true
+    }
+  ]
+}

@@ -72,7 +72,9 @@ def fit_candidate(
     )
     residual_size = _residual_size(training, model)
     outcomes: list[tuple[object, FailureCounter]] = []
-    derivative_backend = _can_use_derivative_regression(model, training)
+    derivative_backend = settings.allow_derivative_regression and (
+        _can_use_derivative_regression(model, training)
+    )
 
     def decode(values: NDArray[np.float64]) -> _Decoded:
         return _decode_training(model, training, variables, values)

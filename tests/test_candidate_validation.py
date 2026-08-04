@@ -143,6 +143,31 @@ def test_valid_candidate_has_deterministic_process_order(
     assert validated.forcing_symbols == frozenset({"aux", "input_u"})
 
 
+def test_no_latent_ablation_rejects_latent_dynamic_state(
+    context: ValidationContext,
+) -> None:
+    restricted = context.model_copy(update={"forbid_latent_states": True})
+
+    with pytest.raises(ModelValidationError) as raised:
+        CandidateValidator().validate(_candidate(), restricted)
+
+    assert "LATENT_STATE_FORBIDDEN" in _codes(raised.value)
+
+
+def test_no_latent_ablation_rejects_unmapped_observed_state(
+    context: ValidationContext,
+) -> None:
+    payload = candidate_payload()
+    payload["states"][0]["kind"] = "observed"
+    payload["initial_conditions"][0]["scope"] = "global"
+    restricted = context.model_copy(update={"forbid_latent_states": True})
+
+    with pytest.raises(ModelValidationError) as raised:
+        CandidateValidator().validate(_candidate(payload), restricted)
+
+    assert "UNOBSERVED_DYNAMIC_STATE_FORBIDDEN" in _codes(raised.value)
+
+
 def test_supplied_auxiliary_may_be_promoted_to_modeled_state(
     context: ValidationContext,
 ) -> None:

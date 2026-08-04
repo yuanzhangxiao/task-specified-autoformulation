@@ -575,6 +575,36 @@ def test_one_step_fit_does_not_optimize_observed_state_initial_value() -> None:
     )
 
 
+def test_derivative_fast_path_can_be_disabled() -> None:
+    time = np.linspace(0.0, 2.0, 21)
+    target = 1.7 * np.exp(-0.6 * time)
+    model = compile_candidate(
+        _candidate({"x": "-decay * x"}, "x", (("decay", 0.1, 1.0),)),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    trajectory = Trajectory(
+        "train",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {"target": -0.6 * target},
+    )
+
+    fit = fit_candidate(
+        model,
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+        _config().model_copy(update={"allow_derivative_regression": False}),
+    )
+
+    assert fit.success
+    assert {item.backend for item in fit.diagnostics} == {
+        "rollout_least_squares"
+    }
+
+
 def test_rejects_trajectory_specific_model_parameter() -> None:
     payload = _candidate({"x": "-decay * x"}, "x", (("decay", 0.1, 1.0),))
     changed = payload.model_dump(mode="json")

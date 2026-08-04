@@ -20,6 +20,7 @@ class FitConfig(BaseModel):
     number_of_starts: int = Field(default=1, ge=1)
     random_seed: int = 0
     integration_backend: Literal["fixed_rk4", "solve_ivp"] = "solve_ivp"
+    allow_derivative_regression: bool = True
     integration_method: str = "RK45"
     fixed_step_substeps: int = Field(default=1, ge=1)
     relative_tolerance: float = Field(default=1e-7, gt=0.0)

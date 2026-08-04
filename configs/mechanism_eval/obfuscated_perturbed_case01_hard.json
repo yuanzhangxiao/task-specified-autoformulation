@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "obfuscated_perturbed_case01",
+  "tier": "hard",
+  "required_mechanisms": [
+    {
+      "id": "pulse_response",
+      "tag_aliases": [
+        "pulse_timing_and_magnitude_to_v015",
+        "causal_pulse_response",
+        "pulse_memory"
+      ],
+      "required_drivers": ["u01"],
+      "required_targets": ["v015"],
+      "must_be_generated": true,
+      "requires_dynamic_memory": true,
+      "required_sign": "unspecified",
+      "forbid_current_future_target_input": true
+    }
+  ]
+}

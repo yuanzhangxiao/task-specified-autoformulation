@@ -1,0 +1,16 @@
+{
+  "benchmark_id": "benchmark6",
+  "tier": "hard",
+  "required_mechanisms": [
+    {
+      "id": "command_response",
+      "tag_aliases": ["u01_to_v02", "causal_command_response", "device_response"],
+      "required_drivers": ["u01"],
+      "required_targets": ["v02"],
+      "must_be_generated": true,
+      "requires_dynamic_memory": true,
+      "required_sign": "unspecified",
+      "forbid_current_future_target_input": true
+    }
+  ]
+}
