@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
-from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
+from autoformalism.llm.config import (
+    LLMConfig,
+    LLMProvider,
+    OllamaThinking,
+    create_llm_client,
+)
 from autoformalism.llm.exceptions import (
     LLMCacheMissError,
     LLMProviderError,
@@ -551,8 +556,71 @@ def test_ollama_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
         JudgeResult.model_json_schema(mode="validation")
     )
     assert calls[0][1]["stream"] is False
-    assert calls[0][1]["think"] is False
+    assert calls[0][1]["think"] == "low"
     assert calls[0][1]["options"]["num_predict"] == 2048
+
+
+def test_ollama_auto_disables_thinking_for_non_gpt_oss(tmp_path: Path) -> None:
+    calls: list[dict[str, object]] = []
+
+    def transport(
+        _url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append(body)
+        return {"message": {"content": _judge().model_dump_json()}}
+
+    client = OllamaClient(
+        model="qwen3:8b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        transport=transport,
+    )
+
+    client.judge(system_prompt="system", user_prompt="user")
+
+    assert calls[0]["think"] is False
+
+
+def test_ollama_rejects_disabling_gpt_oss_thinking(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="GPT-OSS models require"):
+        OllamaClient(
+            model="gpt-oss:20b",
+            cache_directory=tmp_path / "cache",
+            log_path=tmp_path / "events.jsonl",
+            thinking=OllamaThinking.OFF,
+        )
+
+
+def test_ollama_empty_content_reports_metadata_without_parsing_thinking(
+    tmp_path: Path,
+) -> None:
+    thinking_candidate = _proposal().model_dump_json()
+    raw_response = {
+        "done": True,
+        "done_reason": "stop",
+        "eval_count": 357,
+        "message": {"content": "", "thinking": thinking_candidate},
+    }
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        max_attempts=1,
+        transport=lambda _url, _body, _timeout: raw_response,
+    )
+
+    with pytest.raises(
+        LLMResponseError,
+        match=(
+            r"empty message.content .*done_reason='stop'.*eval_count=357.*"
+            r"thinking_present=True"
+        ),
+    ) as caught:
+        client.propose(system_prompt="system", user_prompt="user")
+
+    assert caught.value.raw_response is raw_response
 
 
 def test_ollama_schema_is_compact_but_preserves_validation_structure(

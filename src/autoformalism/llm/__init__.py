@@ -1,7 +1,12 @@
 """Provider-neutral structured LLM clients."""
 
 from autoformalism.llm.base import CachedLLMClient
-from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
+from autoformalism.llm.config import (
+    LLMConfig,
+    LLMProvider,
+    OllamaThinking,
+    create_llm_client,
+)
 from autoformalism.llm.gemini import GeminiClient
 from autoformalism.llm.mock import MockLLMClient
 from autoformalism.llm.models import LLMCallResult, LLMClient, TokenUsage
@@ -17,6 +22,7 @@ __all__ = [
     "LLMProvider",
     "MockLLMClient",
     "OllamaClient",
+    "OllamaThinking",
     "OpenAIResponsesClient",
     "TokenUsage",
     "create_llm_client",

@@ -19,6 +19,16 @@ class LLMProvider(str, Enum):
     OLLAMA = "ollama"
 
 
+class OllamaThinking(str, Enum):
+    """Supported Ollama thinking controls with a model-aware default."""
+
+    AUTO = "auto"
+    OFF = "off"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class LLMConfig(StrictSchema):
     """Provider-neutral settings; API keys are intentionally absent."""
 
@@ -31,6 +41,7 @@ class LLMConfig(StrictSchema):
     max_backoff_seconds: float = Field(default=30.0, ge=0.0)
     jitter_fraction: float = Field(default=0.25, ge=0.0, le=1.0)
     ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_thinking: OllamaThinking = OllamaThinking.AUTO
     timeout_seconds: float = Field(default=120.0, gt=0.0)
     max_output_tokens: int = Field(default=2048, ge=128, le=32768)
     proposal_target_channels: tuple[str, ...] = ()
@@ -75,6 +86,7 @@ def create_llm_client(config: LLMConfig) -> LLMClient:
         cache_directory=config.cache_directory,
         log_path=config.log_path,
         base_url=config.ollama_base_url,
+        thinking=config.ollama_thinking,
         timeout_seconds=config.timeout_seconds,
         max_output_tokens=config.max_output_tokens,
         **retry_options,

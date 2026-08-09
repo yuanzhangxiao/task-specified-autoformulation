@@ -17,6 +17,7 @@ from autoformalism.execution import (
     execute,
 )
 from autoformalism.expressions import ValidationContext
+from autoformalism.llm import OllamaThinking
 
 
 def _arguments(
@@ -102,6 +103,7 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.llm_cache_root is None
     assert default.development_only is False
     assert default.ollama_base_url == "http://127.0.0.1:11434"
+    assert default.ollama_thinking is OllamaThinking.AUTO
 
 
 def test_cli_accepts_development_only_mode() -> None:
@@ -127,6 +129,17 @@ def test_cli_accepts_custom_ollama_endpoint() -> None:
     )
 
     assert arguments.ollama_base_url == "http://127.0.0.1:23456"
+
+
+def test_cli_accepts_explicit_ollama_thinking_level() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            ["--mock-llm", "--dry-run", "--ollama-thinking", "medium"]
+        )
+    )
+
+    assert arguments.ollama_thinking is OllamaThinking.MEDIUM
 
 
 def test_cli_accepts_shared_cache_only_mode(tmp_path: Path) -> None:

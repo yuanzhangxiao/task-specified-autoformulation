@@ -30,6 +30,7 @@ from autoformalism.llm import (
     LLMConfig,
     LLMProvider,
     MockLLMClient,
+    OllamaThinking,
     create_llm_client,
 )
 from autoformalism.pruning import PruningConfig
@@ -119,6 +120,7 @@ class ExecutionArguments:
     llm_cache_root: Path | None = None
     development_only: bool = False
     ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_thinking: OllamaThinking = OllamaThinking.AUTO
 
 
 class _RoleClient:
@@ -238,6 +240,15 @@ def build_experiment_parser(
         default=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
         help="Ollama HTTP endpoint; allows collision-free local GPU workers",
     )
+    parser.add_argument(
+        "--ollama-thinking",
+        choices=tuple(item.value for item in OllamaThinking),
+        default=OllamaThinking.AUTO.value,
+        help=(
+            "Ollama reasoning control; auto uses low for GPT-OSS and off for "
+            "other models"
+        ),
+    )
     parser.add_argument("--clean", action="store_true")
     parser.add_argument(
         "--no-judge",
@@ -318,6 +329,7 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         ),
         development_only=namespace.development_only,
         ollama_base_url=namespace.ollama_base_url,
+        ollama_thinking=OllamaThinking(namespace.ollama_thinking),
     )
 
 
@@ -366,6 +378,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         ),
         "development_only": arguments.development_only,
         "ollama_base_url": arguments.ollama_base_url,
+        "ollama_thinking": arguments.ollama_thinking.value,
         "use_judge": arguments.use_judge,
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
@@ -671,6 +684,7 @@ def _make_client(
             proposal_target_channels=dataset.roles.targets,
             cache_only=arguments.llm_cache_only,
             ollama_base_url=arguments.ollama_base_url,
+            ollama_thinking=arguments.ollama_thinking,
         )
     )
     judge = create_llm_client(
@@ -683,6 +697,7 @@ def _make_client(
             max_output_tokens=arguments.llm_max_output_tokens,
             cache_only=arguments.llm_cache_only,
             ollama_base_url=arguments.ollama_base_url,
+            ollama_thinking=arguments.ollama_thinking,
         )
     )
     return _RoleClient(proposer, judge)

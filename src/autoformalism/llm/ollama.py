@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
+from autoformalism.llm.config import OllamaThinking
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.llm.models import StructuredT, TokenUsage
 
@@ -30,6 +31,7 @@ class OllamaClient(CachedLLMClient):
         timeout_seconds: float = 120.0,
         max_output_tokens: int = 2048,
         temperature: float = 0.0,
+        thinking: OllamaThinking = OllamaThinking.AUTO,
         transport: OllamaTransport | None = None,
         **retry_options: Any,
     ) -> None:
@@ -50,6 +52,7 @@ class OllamaClient(CachedLLMClient):
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
         self._temperature = temperature
+        self._thinking = _resolve_thinking(model, thinking)
         self._transport = transport or self._http_transport
 
     def _hashable_provider_options(self) -> dict[str, object]:
@@ -57,7 +60,7 @@ class OllamaClient(CachedLLMClient):
             "base_url": self._base_url,
             "temperature": self._temperature,
             "max_output_tokens": self._max_output_tokens,
-            "thinking": False,
+            "thinking": self._thinking,
             "schema_compatibility": "bounded-compact-provider-schema-v4",
         }
 
@@ -77,7 +80,7 @@ class OllamaClient(CachedLLMClient):
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
-            "think": False,
+            "think": self._thinking,
             "format": _ollama_compatible_schema(
                 response_model.model_json_schema(mode="validation")
             ),
@@ -104,8 +107,20 @@ class OllamaClient(CachedLLMClient):
         message = raw_response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise LLMResponseError("Ollama response has no message.content string")
+        content = message["content"]
+        if not content.strip():
+            thinking = message.get("thinking")
+            thinking_characters = len(thinking) if isinstance(thinking, str) else 0
+            raise LLMResponseError(
+                "Ollama returned empty message.content "
+                f"(done_reason={raw_response.get('done_reason')!r}, "
+                f"eval_count={raw_response.get('eval_count')!r}, "
+                f"thinking_present={bool(thinking_characters)}, "
+                f"thinking_characters={thinking_characters})",
+                raw_response=raw_response,
+            )
         try:
-            parsed = self._parse_json(message["content"], response_model)
+            parsed = self._parse_json(content, response_model)
         except LLMResponseError as exc:
             exc.raw_response = raw_response
             raise
@@ -160,6 +175,24 @@ class OllamaClient(CachedLLMClient):
         if not isinstance(payload, dict):
             raise LLMResponseError("Ollama response must be a JSON object")
         return payload
+
+
+def _resolve_thinking(
+    model: str,
+    thinking: OllamaThinking,
+) -> bool | str:
+    """Resolve the API value without attempting to disable GPT-OSS reasoning."""
+    model_name = model.rsplit("/", 1)[-1].lower()
+    requires_thinking = model_name.startswith("gpt-oss")
+    if thinking is OllamaThinking.AUTO:
+        return "low" if requires_thinking else False
+    if thinking is OllamaThinking.OFF:
+        if requires_thinking:
+            raise ValueError(
+                "GPT-OSS models require Ollama thinking level low, medium, or high"
+            )
+        return False
+    return thinking.value
 
 
 _OLLAMA_OMITTED_SCHEMA_KEYWORDS = {
