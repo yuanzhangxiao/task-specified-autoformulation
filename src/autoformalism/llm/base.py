@@ -97,6 +97,10 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ProposerCandidateV2,
+            validate_parsed=lambda proposal: enrich_proposal_v2(
+                proposal,
+                self._proposal_target_channels,
+            ),
         )
         return LLMCallResult(
             request_hash=compact.request_hash,
@@ -132,6 +136,7 @@ class CachedLLMClient(ABC):
         system_prompt: str,
         user_prompt: str,
         response_model: type[StructuredT],
+        validate_parsed: Callable[[StructuredT], object] | None = None,
     ) -> LLMCallResult[StructuredT]:
         if not system_prompt.strip() or not user_prompt.strip():
             raise ValueError("system_prompt and user_prompt must not be empty")
@@ -182,6 +187,14 @@ class CachedLLMClient(ABC):
                     user_prompt=attempt_user_prompt,
                     response_model=response_model,
                 )
+                if validate_parsed is not None:
+                    try:
+                        validate_parsed(provider_response.parsed)
+                    except ValueError as exc:
+                        raise LLMResponseError(
+                            f"response failed post-schema validation: {exc}",
+                            raw_response=provider_response.raw_response,
+                        ) from exc
                 break
             except (LLMProviderError, LLMResponseError) as exc:
                 self._log_failure(role, request_hash, attempts, exc)

@@ -137,6 +137,7 @@ class StubCachedClient(CachedLLMClient):
         sleep: Any = lambda _delay: None,
         random_value: Any = lambda: 0.0,
         cache_only: bool = False,
+        proposal_target_channels: tuple[str, ...] = (),
     ) -> None:
         super().__init__(
             provider_name="stub",
@@ -149,6 +150,7 @@ class StubCachedClient(CachedLLMClient):
             sleep=sleep,
             random_value=random_value,
             cache_only=cache_only,
+            proposal_target_channels=proposal_target_channels,
         )
         self.failures = failures
         self.provider_calls = 0
@@ -339,6 +341,49 @@ def test_invalid_structured_response_retries_with_repair_feedback(
         (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]
     )
     assert failure["raw_response"] == {"message": {"content": "invalid"}}
+
+
+def test_invalid_proposal_enrichment_retries_with_repair_feedback(
+    tmp_path: Path,
+) -> None:
+    prompts: list[str] = []
+
+    class RepairClient(StubCachedClient):
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            prompts.append(kwargs["user_prompt"])
+            proposal = _proposal()
+            if len(prompts) > 1:
+                payload = proposal.model_dump(mode="json")
+                payload["algebraics"] = [
+                    {
+                        "name": "target",
+                        "expression": "x",
+                        "constraints": [],
+                        "mechanisms": [],
+                    }
+                ]
+                proposal = ProposerCandidateV2.model_validate(payload)
+            return ProviderResponse(
+                parsed=proposal,
+                raw_response={"message": {"content": proposal.model_dump_json()}},
+            )
+
+    client = RepairClient(tmp_path, proposal_target_channels=("target",))
+
+    result = client.propose(system_prompt="system", user_prompt="original request")
+
+    assert result.attempts == 2
+    assert result.parsed.observation_mappings[0].channel == "target"
+    assert "previous structured response was invalid" in prompts[1]
+    assert "target target must match exactly one" in prompts[1]
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["event"] for event in events] == [
+        "llm_failure",
+        "llm_response",
+    ]
 
 
 class FakeOpenAIResponse:
