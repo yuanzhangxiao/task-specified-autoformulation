@@ -20,7 +20,7 @@ set -euo pipefail
 : "${AF_OLLAMA_IMAGE:?set AF_OLLAMA_IMAGE to a pinned Ollama SIF image}"
 : "${AF_OLLAMA_MODELS:?set AF_OLLAMA_MODELS to the persistent model directory}"
 : "${AF_LOCAL_MODEL:=gpt-oss:20b}"
-: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-pilot-v2}"
+: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-pilot-v4}"
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS=1
@@ -76,7 +76,7 @@ apptainer exec --nv \
   --ollama-thinking low \
   --development-only \
   --no-judge \
-  --iteration-budget 2 \
+  --iteration-budget 6 \
   --beam-size 2 \
   --llm-timeout-seconds 900 \
   --llm-max-output-tokens 4096 \
