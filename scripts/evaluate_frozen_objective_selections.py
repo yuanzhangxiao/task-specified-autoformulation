@@ -34,9 +34,7 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--max-nfev", type=int, default=150)
     args = parser.parse_args()
-    selections = json.loads(
-        args.frozen_selection_manifest.read_text(encoding="utf-8")
-    )
+    selections = json.loads(args.frozen_selection_manifest.read_text(encoding="utf-8"))
     if not isinstance(selections, list):
         raise SystemExit("frozen selection manifest must contain a JSON list")
     pool = {
@@ -49,8 +47,7 @@ def main() -> None:
     missing = selected_ids - set(pool)
     if missing:
         raise SystemExit(
-            "selection manifest references unknown artifacts: "
-            f"{sorted(missing)}"
+            f"selection manifest references unknown artifacts: {sorted(missing)}"
         )
     args.output_root.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -61,9 +58,20 @@ def main() -> None:
             rows.append(json.loads(result_path.read_text(encoding="utf-8")))
             continue
         result_path.parent.mkdir(parents=True, exist_ok=True)
-        row = _evaluate(
-            args, artifact, result_path.parent / "test_access.claim"
-        )
+        try:
+            row = _evaluate(args, artifact, result_path.parent / "test_access.claim")
+        except Exception as exc:
+            row = {
+                "artifact_id": artifact.artifact_id,
+                "benchmark_id": artifact.benchmark_id,
+                "tier": artifact.tier,
+                "seed": artifact.seed,
+                "validation_mse": artifact.validation_mse,
+                "test_mse": None,
+                "term_count": artifact.term_count,
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {str(exc)[:2000]}",
+            }
         result_path.write_text(
             json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -71,10 +79,22 @@ def main() -> None:
     with (args.output_root / "frozen_test_metrics.csv").open(
         "w", encoding="utf-8", newline=""
     ) as handle:
-        fields = tuple(rows[0]) if rows else ("artifact_id", "test_mse")
+        scalar_rows = [
+            {
+                key: value
+                for key, value in row.items()
+                if not isinstance(value, (dict, list))
+            }
+            for row in rows
+        ]
+        fields = (
+            tuple(sorted({key for row in scalar_rows for key in row}))
+            if rows
+            else ("artifact_id", "test_mse")
+        )
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(scalar_rows)
 
 
 def _evaluate(
@@ -144,7 +164,7 @@ def _evaluate(
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write(artifact.artifact_id)
     test = loader.load_test(data_config)
-    _, test_metrics = evaluate_fitted_candidate(
+    test_initials, test_metrics = evaluate_fitted_candidate(
         compiled,
         test,
         global_parameters=fitted.global_parameters,
@@ -160,6 +180,21 @@ def _evaluate(
         "seed": artifact.seed,
         "validation_mse": artifact.validation_mse,
         "test_mse": test_metrics.normalized_mse,
+        "term_count": artifact.term_count,
+        "status": "complete",
+        "error": None,
+        "stage": "complete",
+        "frozen": {"candidate": artifact.candidate.model_dump(mode="json")},
+        "final_fit": {
+            "global_parameters": dict(fitted.global_parameters),
+            "global_initial_conditions": dict(fitted.global_initial_conditions),
+            "training_trajectory_initial_conditions": {
+                key: dict(value)
+                for key, value in fitted.training_trajectory_initial_conditions.items()
+            },
+            "target_scales": dict(fitted.target_scales),
+        },
+        "test_initials": {key: dict(value) for key, value in test_initials.items()},
     }
 
 

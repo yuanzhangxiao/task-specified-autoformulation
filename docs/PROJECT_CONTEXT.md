@@ -24,7 +24,13 @@ The repository contains:
 5. Benchmark 5: an obfuscated three-state nonlinear process.
 6. Benchmark 6: a procedurally generated alien-device system.
 
-Each benchmark may have easy, medium, and hard observability tiers.
+The historical Phase 1 benchmarks may have easy, medium, and hard observability
+tiers. The redesigned Phase-B suite instead has two mechanism/data difficulty
+tiers for every family. Semantic controls are separate: named/obfuscated for
+Dalla Man and CSTR, and functional/opaque for the alien device. The 40 Phase-B
+cells are registered through a distinct tidy-split layout. Their materialized
+public tables are external release artifacts and are produced only by the
+audited release command.
 
 ## Prompt conventions
 

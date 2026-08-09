@@ -25,8 +25,11 @@ from autoformalism.llm import LLMConfig, create_llm_client
 def build_parser() -> argparse.ArgumentParser:
     """Build the baseline CLI parser for execution and argument tests."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-root", type=Path, default=Path(os.environ.get(
-        "AUTOFORMALISM_DATA_ROOT", "data_raw")))
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=Path(os.environ.get("AUTOFORMALISM_DATA_ROOT", "data_raw")),
+    )
     parser.add_argument("--benchmark-id", default="original_b1")
     parser.add_argument("--tier", choices=("easy", "medium", "hard"), default="easy")
     parser.add_argument(
@@ -42,6 +45,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model")
+    parser.add_argument(
+        "--llm-cache-only",
+        action="store_true",
+        help="fail closed on an LLM cache miss without contacting a provider",
+    )
+    parser.add_argument(
+        "--llm-cache-root",
+        type=Path,
+        help="shared flat cache directory for cache-only baseline replay",
+    )
     parser.add_argument("--output-root", type=Path, default=Path("artifacts/baselines"))
     parser.add_argument(
         "--pysr-iterations",
@@ -168,17 +181,26 @@ def _execute_baseline(
         if not args.model:
             parser.error("--model is required for d3_native_no_tools")
         provider, model = _parse_model(args.model)
-        client = create_llm_client(LLMConfig(
-            provider=provider,
-            model=model,
-            cache_directory=output / "llm_cache",
-            log_path=output / "llm_events.jsonl",
-            proposal_target_channels=dataset.roles.targets,
-            timeout_seconds=900.0,
-        ))
+        cache_directory = args.llm_cache_root or output / "llm_cache"
+        client = create_llm_client(
+            LLMConfig(
+                provider=provider,
+                model=model,
+                cache_directory=cache_directory,
+                log_path=output / "llm_events.jsonl",
+                proposal_target_channels=dataset.roles.targets,
+                timeout_seconds=900.0,
+                cache_only=args.llm_cache_only,
+            )
+        )
         result = run_d3_native_no_tools(
-            config, dataset, lambda: loader.load_test(data_config), context,
-            task_prompt=prompt, work_directory=output, llm_client=client,
+            config,
+            dataset,
+            lambda: loader.load_test(data_config),
+            context,
+            task_prompt=prompt,
+            work_directory=output,
+            llm_client=client,
         )
     else:
         client = None
@@ -186,17 +208,25 @@ def _execute_baseline(
             if not args.model:
                 parser.error("--model is required for llm_feature_sindy")
             provider, model = _parse_model(args.model)
-            client = create_llm_client(LLMConfig(
-                provider=provider,
-                model=model,
-                cache_directory=output / "llm_cache",
-                log_path=output / "llm_events.jsonl",
-                proposal_target_channels=dataset.roles.targets,
-                timeout_seconds=900.0,
-            ))
+            cache_directory = args.llm_cache_root or output / "llm_cache"
+            client = create_llm_client(
+                LLMConfig(
+                    provider=provider,
+                    model=model,
+                    cache_directory=cache_directory,
+                    log_path=output / "llm_events.jsonl",
+                    proposal_target_channels=dataset.roles.targets,
+                    timeout_seconds=900.0,
+                    cache_only=args.llm_cache_only,
+                )
+            )
         result = run_baseline(
-            config, dataset, lambda: loader.load_test(data_config), context,
-            llm_client=client, proposer_prompt=prompt,
+            config,
+            dataset,
+            lambda: loader.load_test(data_config),
+            context,
+            llm_client=client,
+            proposer_prompt=prompt,
         )
     return result
 
@@ -247,8 +277,10 @@ def _terminate_process_group(process: subprocess.Popen) -> None:
 
 
 def _output_directory(args: argparse.Namespace) -> Path:
-    return args.output_root.resolve() / args.method / (
-        f"{args.benchmark_id}_{args.tier}_seed{args.seed}"
+    return (
+        args.output_root.resolve()
+        / args.method
+        / (f"{args.benchmark_id}_{args.tier}_seed{args.seed}")
     )
 
 

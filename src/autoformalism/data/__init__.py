@@ -7,6 +7,7 @@ from autoformalism.data.models import (
     ChannelRole,
     DatasetSplit,
     DevelopmentDataset,
+    FrozenTestAccess,
     SplitName,
     Trajectory,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "ChannelRole",
     "DatasetSplit",
     "DevelopmentDataset",
+    "FrozenTestAccess",
     "SplitName",
     "TrainingScaler",
     "Trajectory",

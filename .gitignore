@@ -8,3 +8,6 @@ __pycache__/
 artifacts/
 data_raw/
 outputs/
+/phase_b_*/
+/public_suite_audit.json
+/work/

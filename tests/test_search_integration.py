@@ -130,7 +130,7 @@ def _controller(
         test_loader=(
             test_loader
             if test_loader is not None
-            else lambda: _split(SplitName.TEST, "test")
+            else lambda _frozen: _split(SplitName.TEST, "test")
         ),
         config=config,
         stage_callback=callback,
@@ -343,7 +343,7 @@ def test_test_loader_is_deferred_and_resume_accesses_it_once(
     )
     calls = 0
 
-    def test_loader():
+    def test_loader(_frozen):
         nonlocal calls
         calls += 1
         return _split(SplitName.TEST, "test")
@@ -378,7 +378,7 @@ def test_failure_after_test_access_fails_closed_without_second_access(
     )
     calls = 0
 
-    def failing_loader():
+    def failing_loader(_frozen):
         nonlocal calls
         calls += 1
         raise RuntimeError("failure after opening test")

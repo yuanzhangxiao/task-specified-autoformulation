@@ -98,8 +98,9 @@ accepts only a normalized `TierSpec`, checks it against public
 manifest/prompt declarations, and fails closed. `load_split(spec,
 split)` performs keyed or verified positional joins, validates monotone
 time and finite numeric data, checks the sampling interval, and rejects
-unavailable channels. Loading `TEST` requires a separate
-`FrozenSelection` capability, so ordinary controller code cannot
+unavailable channels. Loading Phase-B `TEST` requires `FrozenTestAccess` tied
+to the registered cell, tier, and validation-frozen selection hash. Eager
+all-split loading is rejected for Phase B, so ordinary development code cannot
 accidentally obtain test data.
 
 ### Proposal and canonical candidate schemas

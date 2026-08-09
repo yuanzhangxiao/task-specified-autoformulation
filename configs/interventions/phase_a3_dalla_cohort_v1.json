@@ -1,0 +1,50 @@
+{
+  "schema_version": "1",
+  "cohort_id": "phase_a3_dalla_hard_frozen_models_v1",
+  "tier": "hard",
+  "methods": {
+    "Full": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "original_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm3-results/artifacts/main-gpt-terra-v2/original_b1_hard_seed{seed}/checkpoints/final.json"],
+        "perturbed_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm3-results/artifacts/main-gpt-terra-v2/perturbed_b1_hard_seed{seed}/checkpoints/final.json"],
+        "obfuscated_original_case01": ["artifacts/rebuttal/consolidated_inputs/vm/vm3-results/artifacts/main-gpt-terra-v3-v17/obfuscated_original_case01_hard_seed{seed}/checkpoints/final.json"],
+        "obfuscated_perturbed_case01": ["artifacts/rebuttal/consolidated_inputs/vm/vm3-results/artifacts/main-gpt-terra-v3-v17/obfuscated_perturbed_case01_hard_seed{seed}/checkpoints/final.json"]
+      }
+    },
+    "No-judge": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "original_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm4-results/artifacts/noj-gpt-terra-v1/original_b1_hard_seed{seed}/checkpoints/final.json"],
+        "perturbed_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm4-results/artifacts/noj-gpt-terra-v1/perturbed_b1_hard_seed{seed}/checkpoints/final.json"],
+        "obfuscated_original_case01": ["artifacts/rebuttal/consolidated_inputs/hpc/artifacts/noj-gpt-terra-obfuscated-original-v18-final/obfuscated_original_case01_hard_seed{seed}/checkpoints/final.json"],
+        "obfuscated_perturbed_case01": ["artifacts/rebuttal/consolidated_inputs/vm/vm4-results/artifacts/noj-gpt-terra-v1/obfuscated_perturbed_case01_hard_seed{seed}/checkpoints/final.json"]
+      }
+    },
+    "No-latent": {
+      "expected_seeds": [0, 1, 2],
+      "patterns": {
+        "original_b1": ["artifacts/rebuttal/consolidated_inputs/no-latent-complete/artifacts/rebuttal/no_latent/original_b1/original_b1_hard_seed{seed}/checkpoints/final.json"],
+        "perturbed_b1": ["artifacts/rebuttal/consolidated_inputs/no-latent-complete/artifacts/rebuttal/no_latent/perturbed_b1/perturbed_b1_hard_seed{seed}/checkpoints/final.json"]
+      }
+    },
+    "D3": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "original_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-retries-v18/d3_native_no_tools/original_b1_hard_seed{seed}/result.json", "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-production-v1/d3_native_no_tools/original_b1_hard_seed{seed}/result.json"],
+        "perturbed_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-retries-v18/d3_native_no_tools/perturbed_b1_hard_seed{seed}/result.json", "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-production-v1/d3_native_no_tools/perturbed_b1_hard_seed{seed}/result.json"],
+        "obfuscated_original_case01": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-retries-v18/d3_native_no_tools/obfuscated_original_case01_hard_seed{seed}/result.json"],
+        "obfuscated_perturbed_case01": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-retries-v18/d3_native_no_tools/obfuscated_perturbed_case01_hard_seed{seed}/result.json", "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-production-v1/d3_native_no_tools/obfuscated_perturbed_case01_hard_seed{seed}/result.json"]
+      }
+    },
+    "LLM-feature-SINDy": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "original_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/batch2-llm-v1/llm_feature_sindy/original_b1_hard_seed{seed}/result.json"],
+        "perturbed_b1": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/batch2-llm-v1/llm_feature_sindy/perturbed_b1_hard_seed{seed}/result.json"],
+        "obfuscated_original_case01": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/batch2-llm-v1/llm_feature_sindy/obfuscated_original_case01_hard_seed{seed}/result.json"],
+        "obfuscated_perturbed_case01": ["artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/batch2-llm-v1/llm_feature_sindy/obfuscated_perturbed_case01_hard_seed{seed}/result.json"]
+      }
+    }
+  }
+}

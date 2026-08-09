@@ -48,7 +48,7 @@ class SearchController:
         context: Any,
         training: DatasetSplit,
         validation: DatasetSplit,
-        test_loader: Callable[[], DatasetSplit],
+        test_loader: Callable[[FrozenSelection], DatasetSplit],
         config: SearchConfig,
         stage_callback: StageCallback | None = None,
     ) -> None:
@@ -628,7 +628,7 @@ class SearchController:
 
         if existing["stage"] == "test_started":
             self._store.claim_test_access()
-            test = self._test_loader()
+            test = self._test_loader(frozen)
             if test.name is not SplitName.TEST:
                 raise ValueError("deferred test loader returned a non-test split")
             local_initials, test_metrics = evaluate_fitted_candidate(

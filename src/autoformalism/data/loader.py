@@ -21,6 +21,7 @@ from autoformalism.data.models import (
     BenchmarkSpec,
     DatasetSplit,
     DevelopmentDataset,
+    FrozenTestAccess,
     SplitName,
     SplitPaths,
     TierRoles,
@@ -38,6 +39,11 @@ class BenchmarkLoader:
     def load(self, config: DataConfig) -> BenchmarkDataset:
         """Load and validate all three splits for a configured tier."""
         spec = self._registry.get(config.benchmark_id)
+        if spec.data_layout == "tidy_split_file":
+            raise ChannelRoleError(
+                "Phase-B test data cannot be opened by load(); use "
+                "load_development() and FrozenTestAccess"
+            )
         roles = self._roles(spec, config.tier)
         self._validate_root_paths(config.root, spec)
         self._validate_manifest(config.root, spec, config.tier, roles)
@@ -98,9 +104,26 @@ class BenchmarkLoader:
             ),
         )
 
-    def load_test(self, config: DataConfig) -> DatasetSplit:
+    def load_test(
+        self,
+        config: DataConfig,
+        *,
+        access: FrozenTestAccess | None = None,
+    ) -> DatasetSplit:
         """Load the test split for a previously frozen selection."""
         spec = self._registry.get(config.benchmark_id)
+        if spec.data_layout == "tidy_split_file":
+            if access is None:
+                raise ChannelRoleError(
+                    "Phase-B test loading requires FrozenTestAccess"
+                )
+            if (access.benchmark_id, access.tier) != (
+                config.benchmark_id,
+                config.tier,
+            ):
+                raise ChannelRoleError(
+                    "test access grant does not match the configured benchmark"
+                )
         roles = self._roles(spec, config.tier)
         self._validate_root_paths(config.root, spec)
         self._validate_manifest(config.root, spec, config.tier, roles)
@@ -169,6 +192,14 @@ class BenchmarkLoader:
                 f"{spec.benchmark_id} has no clean observation files"
             )
         benchmark_root = self._resolve_under(root, spec.relative_root)
+        if spec.data_layout == "tidy_split_file":
+            split_name = "validation" if split is SplitName.VALIDATION else split.value
+            assert spec.split_filename_template is not None
+            path = benchmark_root / spec.split_filename_template.format(
+                split=split_name
+            )
+            require_file(path)
+            return SplitPaths(path, path, path)
         tier_directory = benchmark_root / spec.tier_directory_template.format(tier=tier)
         clean_suffix = "_clean" if use_clean else ""
         observations = tier_directory / f"X_{split.value}{clean_suffix}.csv"
@@ -206,6 +237,58 @@ class BenchmarkLoader:
         roles: TierRoles,
     ) -> None:
         manifest = load_json(self._resolve_under(root, spec.manifest_relative_path))
+        if spec.data_layout == "tidy_split_file":
+            if manifest.get("schema_version") != "phase_b_public_release_v1":
+                raise ChannelRoleError("Phase-B manifest is not a frozen release")
+            if manifest.get("status") != "production_registered":
+                raise ChannelRoleError("Phase-B package is not production registered")
+            if manifest.get("test_sealed") is not True:
+                raise ChannelRoleError("Phase-B production test split is not sealed")
+            if manifest.get("benchmark_id") != spec.benchmark_id:
+                raise ChannelRoleError(
+                    f"manifest benchmark ID does not match {spec.benchmark_id}"
+                )
+            if manifest.get("tier") != tier:
+                raise ChannelRoleError(
+                    f"manifest tier does not match {spec.benchmark_id}/{tier}"
+                )
+            channels = manifest.get("channels")
+            if not isinstance(channels, list):
+                raise ChannelRoleError("tidy manifest has no channel declarations")
+            declared_roles = {
+                str(item.get("public_name")): str(item.get("role"))
+                for item in channels
+                if isinstance(item, dict)
+            }
+            expected_roles = {
+                **dict.fromkeys(roles.targets, "target"),
+                **dict.fromkeys(roles.auxiliaries, "auxiliary"),
+                **dict.fromkeys(spec.external_inputs, "external_input"),
+            }
+            if declared_roles != expected_roles:
+                raise ChannelRoleError(
+                    f"manifest roles for {spec.benchmark_id}/{tier} do not match "
+                    "the registry"
+                )
+            split_hashes = manifest.get("splits")
+            if not isinstance(split_hashes, dict) or set(split_hashes) != {
+                "train",
+                "validation",
+                "test",
+            }:
+                raise ChannelRoleError(
+                    "Phase-B release must declare all three split fingerprints"
+                )
+            benchmark_root = self._resolve_under(root, spec.relative_root)
+            for split_name, expected_hash in split_hashes.items():
+                split_path = benchmark_root / f"{split_name}.csv"
+                require_file(split_path)
+                actual_hash = hashlib.sha256(split_path.read_bytes()).hexdigest()
+                if actual_hash != expected_hash:
+                    raise DataAlignmentError(
+                        f"Phase-B split fingerprint mismatch: {split_path}"
+                    )
+            return
         declared: list[str] | None = None
         tiers = manifest.get("tiers")
         if isinstance(tiers, dict) and tier in tiers:
@@ -216,7 +299,16 @@ class BenchmarkLoader:
                 declared = tier_entry.get("observed_columns")
         masks = manifest.get("benchmark_masks")
         if declared is None and isinstance(masks, dict):
-            benchmark_masks = masks.get("B1_meal_appearance", masks)
+            matching_keys = [
+                key
+                for key in masks
+                if isinstance(key, str) and key in spec.relative_root.parts
+            ]
+            benchmark_masks = (
+                masks[matching_keys[0]]
+                if len(matching_keys) == 1
+                else masks.get("B1_meal_appearance", masks)
+            )
             if isinstance(benchmark_masks, dict):
                 declared = benchmark_masks.get(tier)
         expected = list(roles.targets + roles.auxiliaries)
@@ -233,6 +325,8 @@ class BenchmarkLoader:
         split: SplitName,
         paths: SplitPaths,
     ) -> DatasetSplit:
+        if spec.data_layout == "tidy_split_file":
+            return self._load_tidy_split(spec, roles, split, paths.observations)
         observed_columns = roles.targets + roles.auxiliaries
         observations = load_csv(paths.observations, observed_columns)
         derivative_columns = tuple(f"d{name}_dt" for name in observed_columns)
@@ -276,6 +370,97 @@ class BenchmarkLoader:
         )
         fingerprint = self._fingerprint(paths)
         return DatasetSplit(split, trajectories, fingerprint)
+
+    def _load_tidy_split(
+        self,
+        spec: BenchmarkSpec,
+        roles: TierRoles,
+        split: SplitName,
+        path: Path,
+    ) -> DatasetSplit:
+        """Load one canonical Phase-B table and derive numerical derivatives."""
+
+        expected = (
+            spec.trajectory_id_column,
+            spec.time_column,
+            *roles.targets,
+            *roles.auxiliaries,
+            *spec.external_inputs,
+        )
+        required = tuple(name for name in expected if name is not None)
+        frame = load_csv(path, required)
+        extras = sorted(set(frame.columns) - set(required))
+        if extras:
+            raise ChannelRoleError(
+                f"{path} contains columns without declared public roles: {extras}"
+            )
+        numeric_columns = (
+            spec.time_column,
+            *roles.targets,
+            *roles.auxiliaries,
+            *spec.external_inputs,
+        )
+        self._validate_numeric(frame[list(numeric_columns)], path)
+        groups = self._group_indices(frame, spec.trajectory_id_column, split)
+        trajectories = tuple(
+            self._make_tidy_trajectory(
+                spec, roles, trajectory_id, index, frame, path
+            )
+            for trajectory_id, index in groups
+        )
+        return DatasetSplit(split, trajectories, self._fingerprint_file(path))
+
+    def _make_tidy_trajectory(
+        self,
+        spec: BenchmarkSpec,
+        roles: TierRoles,
+        trajectory_id: str,
+        index: np.ndarray,
+        frame: pd.DataFrame,
+        path: Path,
+    ) -> Trajectory:
+        selected = frame.iloc[index]
+        time = self._numeric_array(selected[spec.time_column], path, spec.time_column)
+        if len(time) < 2:
+            raise DataAlignmentError(
+                f"trajectory {trajectory_id} requires at least two samples"
+            )
+        differences = np.diff(time)
+        if np.any(differences <= 0):
+            raise DataAlignmentError(
+                f"time is not strictly increasing for {trajectory_id}"
+            )
+        if not np.allclose(
+            differences,
+            spec.sampling_interval,
+            rtol=1e-7,
+            atol=max(1e-10, spec.sampling_interval * 1e-9),
+        ):
+            raise DataAlignmentError(
+                f"sampling interval differs from {spec.sampling_interval} "
+                f"for {trajectory_id}"
+            )
+        observed = roles.targets + roles.auxiliaries
+        observed_values = {
+            name: selected[name].to_numpy(dtype=float, copy=True)
+            for name in observed
+        }
+        derivatives = {
+            name: np.gradient(values, time, edge_order=2 if len(time) >= 3 else 1)
+            for name, values in observed_values.items()
+        }
+        return Trajectory(
+            trajectory_id=trajectory_id,
+            time=time,
+            targets={name: observed_values[name] for name in roles.targets},
+            auxiliaries={name: observed_values[name] for name in roles.auxiliaries},
+            external_inputs={
+                name: selected[name].to_numpy(dtype=float, copy=True)
+                for name in spec.external_inputs
+            },
+            fixed_covariates={},
+            derivatives=derivatives,
+        )
 
     @staticmethod
     def _validate_exact_observation_columns(
@@ -427,4 +612,13 @@ class BenchmarkLoader:
             with path.open("rb") as handle:
                 for block in iter(lambda: handle.read(1024 * 1024), b""):
                     digest.update(block)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _fingerprint_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        digest.update(path.name.encode())
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
         return digest.hexdigest()

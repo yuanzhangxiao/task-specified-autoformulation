@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from autoformalism.schemas import CandidateModel
 
@@ -30,6 +30,7 @@ class CandidateArtifact(BaseModel):
     candidate: CandidateModel
     validation_mse: float
     training_mse: float
+    fitted_global_parameters: dict[str, float] = Field(default_factory=dict)
     judge_score: float | None
     judge_category_scores: dict[str, float]
     state_count: int
@@ -38,6 +39,33 @@ class CandidateArtifact(BaseModel):
     parameter_count: int
     term_count: int
     use_judge: bool
+
+
+def candidate_warm_start_parameters(
+    artifact: CandidateArtifact,
+) -> dict[str, float]:
+    """Return portable fitted parameters, with legacy checkpoint fallback."""
+    names = {item.name for item in artifact.candidate.parameters}
+    embedded = {
+        name: float(value)
+        for name, value in artifact.fitted_global_parameters.items()
+        if name in names
+    }
+    if embedded:
+        return embedded
+    path = Path(artifact.source_checkpoint)
+    if not path.is_file():
+        return {}
+    payload = _read_json(path)
+    fit = payload.get("pruned_fit")
+    if not isinstance(fit, dict) and isinstance(payload.get("record"), dict):
+        fit = payload["record"].get("pruned_fit")
+    raw = fit.get("global_parameters", {}) if isinstance(fit, dict) else {}
+    return {
+        str(name): float(value)
+        for name, value in raw.items()
+        if name in names and isinstance(value, int | float)
+    }
 
 
 def index_artifacts(roots: tuple[Path, ...]) -> tuple[CandidateArtifact, ...]:
@@ -106,6 +134,11 @@ def index_artifacts(roots: tuple[Path, ...]) -> tuple[CandidateArtifact, ...]:
                     candidate=candidate,
                     validation_mse=validation,
                     training_mse=training,
+                    fitted_global_parameters={
+                        str(name): float(value)
+                        for name, value in fit.get("global_parameters", {}).items()
+                        if isinstance(value, int | float)
+                    },
                     judge_score=judge_score,
                     judge_category_scores=categories,
                     state_count=len(candidate.states),

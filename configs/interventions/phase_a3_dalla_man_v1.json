@@ -1,0 +1,51 @@
+{
+  "schema_version": "template-1",
+  "suite_id": "phase_a3_private_dalla_man_interventions_v1",
+  "frozen_before_evaluation": true,
+  "uses_private_reference": true,
+  "available_to_proposal_fit_or_selection": false,
+  "benchmark_ids": [
+    "original_b1",
+    "perturbed_b1",
+    "obfuscated_original_case01",
+    "obfuscated_perturbed_case01"
+  ],
+  "case_templates": [
+    {
+      "case_id": "multiple_meal_extrapolation",
+      "shift_types": ["unseen_input_magnitude", "multiple_events", "longer_horizon"],
+      "protocol": {"meals": [{"time": 0.0, "grams": 150.0}, {"time": 90.0, "grams": 45.0}, {"time": 180.0, "grams": 30.0}]},
+      "duration": 360.0,
+      "dt": 1.0,
+      "initial_state": [172.58334024789002, 130.40672324079256, 0.0, 0.0, 0.0, 1.2793906732148301, 4.565404612840288, 3.0986842105263177, 0.0, 25.5878134642966, 25.5878134642966, 0.0]
+    },
+    {
+      "case_id": "delayed_meal_shifted_initial",
+      "shift_types": ["unseen_timing", "initial_condition", "longer_horizon"],
+      "protocol": {"meals": [{"time": 60.0, "grams": 120.0}]},
+      "duration": 420.0,
+      "dt": 1.0,
+      "initial_state": [187.58334024789002, 120.40672324079256, 0.0, 0.0, 0.0, 1.2793906732148301, 4.565404612840288, 3.0986842105263177, 0.0, 25.5878134642966, 25.5878134642966, 0.0]
+    },
+    {
+      "case_id": "parameter_shift_sparse",
+      "shift_types": ["simulator_parameter", "fixed_covariate", "sparser_observation_grid"],
+      "protocol": {"meals": [{"time": 0.0, "grams": 135.0}]},
+      "duration": 300.0,
+      "dt": 1.0,
+      "initial_state": [172.58334024789002, 130.40672324079256, 0.0, 0.0, 0.0, 1.2793906732148301, 4.565404612840288, 3.0986842105263177, 0.0, 25.5878134642966, 25.5878134642966, 0.0],
+      "parameter_multipliers": {"BW": 1.15, "kabs": 0.8, "kgri": 1.2},
+      "observation_stride": 5
+    },
+    {
+      "case_id": "noisy_dense",
+      "shift_types": ["measurement_noise", "denser_observation_grid"],
+      "protocol": {"meals": [{"time": 0.0, "grams": 120.0}]},
+      "duration": 300.0,
+      "dt": 0.5,
+      "initial_state": [172.58334024789002, 130.40672324079256, 0.0, 0.0, 0.0, 1.2793906732148301, 4.565404612840288, 3.0986842105263177, 0.0, 25.5878134642966, 25.5878134642966, 0.0],
+      "noise_fraction": 0.05,
+      "noise_seed": 4101
+    }
+  ]
+}

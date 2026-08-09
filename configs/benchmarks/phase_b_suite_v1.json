@@ -1,0 +1,115 @@
+{
+  "suite_version": "phase_b_v1",
+  "status": "design_frozen_data_pending",
+  "families": [
+    {
+      "family": "dalla_man",
+      "tasks": ["T1", "T2", "T3", "T4"],
+      "dynamics_conditions": ["canonical", "perturbed"],
+      "semantic_variants": ["named", "obfuscated"],
+      "tiers": [
+        {
+          "name": "easy",
+          "difficulty_basis": "mechanism_and_observability",
+          "description_mode": "inherit_semantic_variant",
+          "mechanism_burden": "focused",
+          "trajectory_regime": "shared_excitation",
+          "description": "A focused task requirement with richer task-relevant observations, evaluated on the same intervention schedules as hard."
+        },
+        {
+          "name": "hard",
+          "difficulty_basis": "mechanism_and_observability",
+          "description_mode": "inherit_semantic_variant",
+          "mechanism_burden": "coupled",
+          "trajectory_regime": "shared_excitation",
+          "description": "More coupled task-required mechanisms must be recovered from fewer observed channels under the same intervention schedules as easy; the design must pass practical-identifiability gates."
+        }
+      ],
+      "paired_numeric_data_across_semantic_variants": true,
+      "paired_numeric_data_across_tiers": false,
+      "paired_input_protocols_across_tiers": true,
+      "identifiability_requirement": "equivalence_class",
+      "primary_claim": "Measure task-specified recovery, adaptation to perturbed dynamics, and dependence on semantic priors across progressively richer glucose-insulin tasks.",
+      "hidden_evaluation": "subspace"
+    },
+    {
+      "family": "cstr",
+      "tasks": ["controlled_reactor_mechanism"],
+      "dynamics_conditions": ["not_applicable"],
+      "semantic_variants": ["named", "obfuscated"],
+      "tiers": [
+        {
+          "name": "easy",
+          "difficulty_basis": "mechanism_and_observability",
+          "description_mode": "inherit_semantic_variant",
+          "mechanism_burden": "focused",
+          "trajectory_regime": "shared_excitation",
+          "description": "Recover a focused controlled-process mechanism from richer task-relevant observations under the shared intervention design."
+        },
+        {
+          "name": "hard",
+          "difficulty_basis": "mechanism_and_observability",
+          "description_mode": "inherit_semantic_variant",
+          "mechanism_burden": "coupled",
+          "trajectory_regime": "shared_excitation",
+          "description": "Recover coupled reaction, exchange, and control effects from fewer observed channels under the same intervention design as easy."
+        }
+      ],
+      "paired_numeric_data_across_semantic_variants": true,
+      "paired_numeric_data_across_tiers": false,
+      "paired_input_protocols_across_tiers": true,
+      "identifiability_requirement": "equivalence_class",
+      "primary_claim": "Test task-specified discovery in a non-biomedical ODE family while separating difficulty from semantic obfuscation.",
+      "hidden_evaluation": "subspace"
+    },
+    {
+      "family": "alien_device",
+      "tasks": ["unknown_device_mechanism"],
+      "dynamics_conditions": ["not_applicable"],
+      "semantic_variants": ["functional", "opaque"],
+      "tiers": [
+        {
+          "name": "easy",
+          "difficulty_basis": "mechanism_and_observability",
+          "description_mode": "inherit_semantic_variant",
+          "mechanism_burden": "focused",
+          "trajectory_regime": "shared_excitation",
+          "description": "Recover a focused input-memory-to-output mechanism from richer auxiliary telemetry under the shared intervention design."
+        },
+        {
+          "name": "hard",
+          "difficulty_basis": "mechanism_and_observability",
+          "description_mode": "inherit_semantic_variant",
+          "mechanism_burden": "coupled",
+          "trajectory_regime": "shared_excitation",
+          "description": "Recover coupled persistent, nonlinear-feedback, and output-generation mechanisms from target-only telemetry under the same intervention design as easy."
+        }
+      ],
+      "paired_numeric_data_across_semantic_variants": true,
+      "paired_numeric_data_across_tiers": false,
+      "paired_input_protocols_across_tiers": true,
+      "identifiability_requirement": "equivalence_class",
+      "primary_claim": "Test task-specified discovery in a procedurally generated system and separately measure the value of functional task information without a model-retrieval confound.",
+      "hidden_evaluation": "equivalence"
+    }
+  ],
+  "evaluation": {
+    "primary_metrics": [
+      "unseen_condition_free_rollout_mse",
+      "rolling_origin_k_step_ahead_mse",
+      "task_structural_validity",
+      "intervention_response_error",
+      "completion_rate"
+    ],
+    "diagnostic_metrics": [
+      "one_step_mse",
+      "hidden_subspace_or_equivalence_recovery",
+      "nonzero_additive_terms",
+      "integration_failure_rate"
+    ],
+    "dalla_rollout_horizons_minutes": [5, 15, 30, 60, 120],
+    "generic_rollout_horizon_fractions": [0.05, 0.1, 0.25, 0.5, 1.0],
+    "selection_uses_validation_only": true,
+    "private_references_evaluation_only": true
+  }
+}

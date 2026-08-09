@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -71,6 +71,10 @@ class BenchmarkSpec(BaseModel):
     fixed_covariates: tuple[str, ...] = ()
     input_filename_template: str
     tier_directory_template: str = "{tier}"
+    data_layout: Literal["legacy_split_files", "tidy_split_file"] = (
+        "legacy_split_files"
+    )
+    split_filename_template: str | None = None
     sampling_interval: float = Field(gt=0.0)
     clean_observations_available: bool = True
     one_step_target_history: bool = True
@@ -85,6 +89,10 @@ class BenchmarkSpec(BaseModel):
             overlap = (set(roles.targets) | set(roles.auxiliaries)) & side_roles
             if overlap:
                 raise ValueError(f"{tier} observed/input role overlap: {overlap}")
+        if self.data_layout == "tidy_split_file" and not self.split_filename_template:
+            raise ValueError("tidy split layout requires split_filename_template")
+        if self.data_layout == "legacy_split_files" and self.split_filename_template:
+            raise ValueError("legacy split layout cannot set split_filename_template")
         return self
 
 
@@ -191,3 +199,16 @@ class DevelopmentDataset:
             raise ChannelRoleError("development validation split has the wrong name")
         if self.train.fingerprint == self.validation.fingerprint:
             raise ChannelRoleError("development splits have identical fingerprints")
+
+
+@dataclass(frozen=True)
+class FrozenTestAccess:
+    """Explicit authorization to open one frozen benchmark test split."""
+
+    benchmark_id: str
+    tier: str
+    selection_hash: str
+
+    def __post_init__(self) -> None:
+        if not self.benchmark_id or not self.tier or not self.selection_hash:
+            raise ValueError("test access grant fields must be nonempty")

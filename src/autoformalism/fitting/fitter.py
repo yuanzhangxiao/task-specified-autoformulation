@@ -276,6 +276,7 @@ def _midpoint_trajectory_initials(
         for item in model.validated.candidate.initial_conditions
         if item.scope is ParameterScope.TRAJECTORY_SPECIFIC
         and item.state not in model.observed_state_channels
+        and item.initialization_range is not None
     }
     return {
         trajectory.trajectory_id: dict(local) for trajectory in split.trajectories
@@ -344,7 +345,10 @@ def _training_variables(
             continue
         initial = initials[state]
         value_range = initial.initialization_range
-        assert value_range is not None
+        if value_range is None:
+            # Fixed and analytic initializers are evaluated by the simulator;
+            # only explicit ranges introduce optimization variables.
+            continue
         if (
             initial.scope is ParameterScope.GLOBAL
             and value_range.lower < value_range.upper
@@ -365,7 +369,8 @@ def _training_variables(
             initial = initials[state]
             if initial.scope is ParameterScope.TRAJECTORY_SPECIFIC:
                 value_range = initial.initialization_range
-                assert value_range is not None
+                if value_range is None:
+                    continue
                 if value_range.lower == value_range.upper:
                     continue
                 result.append(
@@ -440,26 +445,26 @@ def _decode_training(
     }
     global_initials = {
         state: (
-            initials[state].initialization_range.lower
-            if initials[state].initialization_range.lower
-            == initials[state].initialization_range.upper
+            value_range.lower
+            if value_range.lower == value_range.upper
             else float(named[f"initial:{state}"])
         )
         for state in model.state_names
         if initials[state].scope is ParameterScope.GLOBAL
         and state not in model.observed_state_channels
+        and (value_range := initials[state].initialization_range) is not None
     }
     trajectory_initials = {
         trajectory.trajectory_id: {
             state: (
-                initials[state].initialization_range.lower
-                if initials[state].initialization_range.lower
-                == initials[state].initialization_range.upper
+                value_range.lower
+                if value_range.lower == value_range.upper
                 else float(named[f"initial:{trajectory.trajectory_id}:{state}"])
             )
             for state in model.state_names
             if initials[state].scope is ParameterScope.TRAJECTORY_SPECIFIC
             and state not in model.observed_state_channels
+            and (value_range := initials[state].initialization_range) is not None
         }
         for trajectory in split.trajectories
     }
@@ -714,6 +719,7 @@ def _fit_validation_initials(
         for item in model.validated.candidate.initial_conditions
         if item.scope is ParameterScope.TRAJECTORY_SPECIFIC
         and item.state not in model.observed_state_channels
+        and item.initialization_range is not None
     ]
     if not model.validated.context.lagged_targets:
         return _fit_open_loop_validation_initials(

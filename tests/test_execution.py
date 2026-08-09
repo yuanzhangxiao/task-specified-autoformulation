@@ -59,9 +59,7 @@ def test_mock_execution_and_resume_are_idempotent(tmp_path: Path) -> None:
 def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     parser = build_experiment_parser(description="test")
 
-    default = arguments_from_namespace(
-        parser.parse_args(["--mock-llm", "--dry-run"])
-    )
+    default = arguments_from_namespace(parser.parse_args(["--mock-llm", "--dry-run"]))
     changed = arguments_from_namespace(
         parser.parse_args(
             [
@@ -83,20 +81,37 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.final_fit_timeout_seconds == 300.0
     assert default.forbid_latent_states is False
     assert default.use_derivative_fit_fast_path is True
+    assert default.llm_cache_only is False
+    assert default.llm_cache_root is None
+
+
+def test_cli_accepts_shared_cache_only_mode(tmp_path: Path) -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--dry-run",
+                "--proposer-model",
+                "openai:example",
+                "--llm-cache-only",
+                "--llm-cache-root",
+                str(tmp_path / "resolved"),
+            ]
+        )
+    )
+
+    assert arguments.llm_cache_only is True
+    assert arguments.llm_cache_root == (tmp_path / "resolved").resolve()
 
 
 def test_cli_accepts_forbid_latent_states() -> None:
     parser = build_experiment_parser(description="test")
     arguments = arguments_from_namespace(
-        parser.parse_args(
-            ["--mock-llm", "--dry-run", "--forbid-latent-states"]
-        )
+        parser.parse_args(["--mock-llm", "--dry-run", "--forbid-latent-states"])
     )
 
     assert arguments.forbid_latent_states is True
-    assert "do not declare latent dynamic states" in _latent_ablation_prompt(
-        arguments
-    )
+    assert "do not declare latent dynamic states" in _latent_ablation_prompt(arguments)
 
 
 def test_cli_can_disable_derivative_fit_fast_path() -> None:
@@ -164,9 +179,9 @@ def test_symbol_contract_uses_exact_runtime_identifiers() -> None:
 def test_numeric_declared_channels_omit_structured_metadata() -> None:
     bounds = {"numeric_input": (0.0, 1.0), "numeric_covariate": (3.0, 3.0)}
 
-    assert _numeric_declared_channels(
-        ("numeric_input", "input_schedule"), bounds
-    ) == ("numeric_input",)
+    assert _numeric_declared_channels(("numeric_input", "input_schedule"), bounds) == (
+        "numeric_input",
+    )
     assert _numeric_declared_channels(
         ("numeric_covariate", "meal_schedule"), bounds
     ) == ("numeric_covariate",)

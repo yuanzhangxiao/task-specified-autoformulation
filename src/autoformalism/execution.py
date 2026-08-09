@@ -19,6 +19,7 @@ from autoformalism.data import (
     BenchmarkRegistry,
     DatasetSplit,
     DevelopmentDataset,
+    FrozenTestAccess,
     SplitName,
     Trajectory,
 )
@@ -114,6 +115,8 @@ class ExecutionArguments:
     use_judge: bool = True
     forbid_latent_states: bool = False
     use_derivative_fit_fast_path: bool = True
+    llm_cache_only: bool = False
+    llm_cache_root: Path | None = None
 
 
 class _RoleClient:
@@ -145,9 +148,7 @@ def build_experiment_parser(
         default=Path(os.environ.get("AUTOFORMALISM_DATA_ROOT", "data_raw")),
     )
     parser.add_argument("--benchmark-id", default="original_b1")
-    parser.add_argument(
-        "--tier", choices=("easy", "medium", "hard"), default="easy"
-    )
+    parser.add_argument("--tier", choices=("easy", "medium", "hard"), default="easy")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--proposer-model",
@@ -212,6 +213,16 @@ def build_experiment_parser(
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--mock-llm", action="store_true")
+    parser.add_argument(
+        "--llm-cache-only",
+        action="store_true",
+        help="fail closed on any LLM cache miss; never contact a provider",
+    )
+    parser.add_argument(
+        "--llm-cache-root",
+        type=Path,
+        help="shared flat cache directory used by proposer and judge",
+    )
     parser.add_argument("--clean", action="store_true")
     parser.add_argument(
         "--no-judge",
@@ -283,8 +294,12 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         final_fit_timeout_seconds=namespace.final_fit_timeout_seconds,
         use_judge=not namespace.no_judge,
         forbid_latent_states=namespace.forbid_latent_states,
-        use_derivative_fit_fast_path=(
-            not namespace.disable_derivative_fit_fast_path
+        use_derivative_fit_fast_path=(not namespace.disable_derivative_fit_fast_path),
+        llm_cache_only=namespace.llm_cache_only,
+        llm_cache_root=(
+            None
+            if namespace.llm_cache_root is None
+            else namespace.llm_cache_root.expanduser().resolve()
         ),
     )
 
@@ -292,6 +307,15 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
 def execute(arguments: ExecutionArguments) -> dict[str, Any]:
     """Validate inputs, optionally dry-run, then execute or resume one run."""
     dataset, test_loader, proposer_prompt, judge_prompt = _load_inputs(arguments)
+    benchmark_spec = (
+        None
+        if arguments.benchmark_id == "synthetic"
+        else BenchmarkRegistry().get(arguments.benchmark_id)
+    )
+    use_derivative_fit_fast_path = arguments.use_derivative_fit_fast_path and (
+        benchmark_spec is None
+        or benchmark_spec.data_layout == "legacy_split_files"
+    )
     experiment_directory = _experiment_directory(arguments)
     checkpoint_directory = experiment_directory / "checkpoints"
     plan = {
@@ -319,9 +343,13 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "proposer_model": arguments.proposer_model,
         "judge_model": arguments.judge_model,
         "mock_llm": arguments.mock_llm,
+        "llm_cache_only": arguments.llm_cache_only,
+        "llm_cache_root": (
+            None if arguments.llm_cache_root is None else str(arguments.llm_cache_root)
+        ),
         "use_judge": arguments.use_judge,
         "forbid_latent_states": arguments.forbid_latent_states,
-        "use_derivative_fit_fast_path": arguments.use_derivative_fit_fast_path,
+        "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
         "experiment_directory": str(experiment_directory),
         "split_fingerprints": {
             "train": dataset.train.fingerprint,
@@ -337,9 +365,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             f"cannot resume; checkpoint does not exist: {checkpoint_directory}"
         )
     if not arguments.resume and run_metadata.exists():
-        raise SystemExit(
-            f"run already exists at {experiment_directory}; pass --resume"
-        )
+        raise SystemExit(f"run already exists at {experiment_directory}; pass --resume")
     experiment_directory.mkdir(parents=True, exist_ok=True)
     client = _make_client(arguments, dataset, experiment_directory)
     context = _context(arguments, dataset)
@@ -372,7 +398,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             integration_backend="fixed_rk4",
             maximum_function_evaluations=arguments.fit_max_nfev,
             maximum_wall_time_seconds=arguments.fit_timeout_seconds,
-            allow_derivative_regression=arguments.use_derivative_fit_fast_path,
+            allow_derivative_regression=use_derivative_fit_fast_path,
         ),
         final_fit_config=FitConfig(
             number_of_starts=arguments.fit_starts,
@@ -380,7 +406,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             integration_backend="solve_ivp",
             maximum_function_evaluations=arguments.final_fit_max_nfev,
             maximum_wall_time_seconds=arguments.final_fit_timeout_seconds,
-            allow_derivative_regression=arguments.use_derivative_fit_fast_path,
+            allow_derivative_regression=use_derivative_fit_fast_path,
         ),
         pruning_config=PruningConfig(),
     )
@@ -406,13 +432,18 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
 
 def _load_inputs(
     arguments: ExecutionArguments,
-) -> tuple[DevelopmentDataset, Callable[[], DatasetSplit], str, str]:
+) -> tuple[
+    DevelopmentDataset,
+    Callable[[Any], DatasetSplit],
+    str,
+    str,
+]:
     if arguments.benchmark_id == "synthetic":
         if not arguments.data_root.is_dir():
             raise SystemExit(f"data root is not a directory: {arguments.data_root}")
         return (
             _synthetic_development_dataset(),
-            _synthetic_test_split,
+            lambda _frozen: _synthetic_test_split(),
             "Generate a one-state continuous-time decay model for target.",
             "Require a closed causal state equation and target observation mapping.",
         )
@@ -427,7 +458,11 @@ def _load_inputs(
     dataset = loader.load_development(data_config)
     loader.validate_test_paths(data_config)
     spec = registry.get(arguments.benchmark_id)
-    prompt_root = (arguments.data_root / spec.relative_root / arguments.tier).resolve()
+    prompt_root = (arguments.data_root / spec.relative_root).resolve()
+    if spec.data_layout == "legacy_split_files":
+        prompt_root = (
+            prompt_root / spec.tier_directory_template.format(tier=arguments.tier)
+        ).resolve()
     proposer_path = prompt_root / "proposer_prompt.txt"
     judge_path = prompt_root / "judge_prompt.txt"
     for path in (proposer_path, judge_path):
@@ -437,7 +472,14 @@ def _load_inputs(
             raise SystemExit(f"benchmark prompt escapes data root: {path}")
     return (
         dataset,
-        lambda: loader.load_test(data_config),
+        lambda frozen: loader.load_test(
+            data_config,
+            access=FrozenTestAccess(
+                benchmark_id=data_config.benchmark_id,
+                tier=data_config.tier,
+                selection_hash=frozen.selection_hash,
+            ),
+        ),
         proposer_path.read_text(encoding="utf-8"),
         judge_path.read_text(encoding="utf-8"),
     )
@@ -462,9 +504,7 @@ def _context(
         fixed_covariates=_numeric_declared_channels(
             spec.fixed_covariates, forcing_bounds
         ),
-        lagged_targets=(
-            dataset.roles.targets if spec.one_step_target_history else ()
-        ),
+        lagged_targets=(dataset.roles.targets if spec.one_step_target_history else ()),
         forcing_bounds=forcing_bounds,
         forbid_latent_states=arguments.forbid_latent_states,
     )
@@ -593,26 +633,34 @@ def _make_client(
     assert arguments.judge_model is not None
     proposer_provider, proposer_model = _parse_model(arguments.proposer_model)
     judge_provider, judge_model = _parse_model(arguments.judge_model)
-    cache_root = experiment_directory / "llm_cache"
+    cache_root = arguments.llm_cache_root or experiment_directory / "llm_cache"
+    proposer_cache = (
+        cache_root if arguments.llm_cache_root is not None else cache_root / "proposer"
+    )
+    judge_cache = (
+        cache_root if arguments.llm_cache_root is not None else cache_root / "judge"
+    )
     proposer = create_llm_client(
         LLMConfig(
             provider=proposer_provider,
             model=proposer_model,
-            cache_directory=cache_root / "proposer",
+            cache_directory=proposer_cache,
             log_path=experiment_directory / "proposer_events.jsonl",
             timeout_seconds=arguments.llm_timeout_seconds,
             max_output_tokens=arguments.llm_max_output_tokens,
             proposal_target_channels=dataset.roles.targets,
+            cache_only=arguments.llm_cache_only,
         )
     )
     judge = create_llm_client(
         LLMConfig(
             provider=judge_provider,
             model=judge_model,
-            cache_directory=cache_root / "judge",
+            cache_directory=judge_cache,
             log_path=experiment_directory / "judge_events.jsonl",
             timeout_seconds=arguments.llm_timeout_seconds,
             max_output_tokens=arguments.llm_max_output_tokens,
+            cache_only=arguments.llm_cache_only,
         )
     )
     return _RoleClient(proposer, judge)
@@ -670,9 +718,7 @@ def _synthetic_development_dataset() -> DevelopmentDataset:
         tier="easy",
         roles=TierRoles(targets=("target",)),
         train=_synthetic_split(SplitName.TRAIN, "train", 2.0),
-        validation=_synthetic_split(
-            SplitName.VALIDATION, "validation", 2.5
-        ),
+        validation=_synthetic_split(SplitName.VALIDATION, "validation", 2.5),
     )
 
 
@@ -791,12 +837,8 @@ def _result_summary(
         "stopping_reason": result.stopping_reason,
         "completed_iterations": result.completed_iterations,
         "selection_hash": result.frozen_selection.selection_hash,
-        "selected_candidate": result.frozen_selection.candidate.model_dump(
-            mode="json"
-        ),
-        "selection_validation_normalized_mse": (
-            result.frozen_selection.validation_mse
-        ),
+        "selected_candidate": result.frozen_selection.candidate.model_dump(mode="json"),
+        "selection_validation_normalized_mse": (result.frozen_selection.validation_mse),
         "final_global_parameters": dict(result.final_fit.global_parameters),
         "final_training_normalized_mse": (
             result.final_fit.training_metrics.normalized_mse

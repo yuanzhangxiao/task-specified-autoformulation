@@ -32,7 +32,7 @@ class OpenAIResponsesClient(CachedLLMClient):
             log_path=log_path,
             **retry_options,
         )
-        if sdk_client is None:
+        if sdk_client is None and not self._cache_only:
             from openai import OpenAI
 
             sdk_client = OpenAI(max_retries=0)

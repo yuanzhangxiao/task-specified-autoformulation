@@ -135,6 +135,21 @@ def test_sindy_rejects_penalized_failed_rollouts(
         )
 
 
+def test_baseline_result_rejects_failed_final_test_rollout() -> None:
+    metrics = EvaluationMetrics(1e12, {"x": 1e12}, ("test_000",))
+
+    with pytest.raises(ValueError, match="final test rollout failed for test_000"):
+        baseline_runner._result(
+            BaselineConfig(method="sindy"),
+            _dataset(),
+            {"x": "0"},
+            {"threshold": 1.0},
+            0.1,
+            0.2,
+            metrics,
+        )
+
+
 def test_llm_feature_sindy_uses_one_proposer_call() -> None:
     proposal = CandidateModel.model_validate(
         {

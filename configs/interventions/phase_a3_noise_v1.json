@@ -1,0 +1,75 @@
+{
+  "schema_version": "1",
+  "suite_id": "phase_a3_private_noise_sweep_v1",
+  "frozen_before_evaluation": true,
+  "uses_private_reference": true,
+  "available_to_proposal_fit_or_selection": false,
+  "cases": [
+    {
+      "case_id": "b5_noise_01",
+      "benchmark_id": "benchmark5",
+      "shift_types": ["measurement_noise", "denser_observation_grid"],
+      "protocol": {"kind": "chirp", "start": 2.0, "amplitude": [0.2, 7.0, 10.0], "omega0": [0.1, 0.16, 0.13], "chirp_rate": [0.04, 0.03, 0.035], "phase": [0.0, 0.5, 1.0]},
+      "duration": 30.0,
+      "dt": 0.05,
+      "initial_state": [0.26193232096817415, 365.13129525446493, 347.56564762723247],
+      "noise_fraction": 0.01,
+      "noise_seed": 3101
+    },
+    {
+      "case_id": "b5_noise_10",
+      "benchmark_id": "benchmark5",
+      "shift_types": ["measurement_noise", "denser_observation_grid"],
+      "protocol": {"kind": "chirp", "start": 2.0, "amplitude": [0.2, 7.0, 10.0], "omega0": [0.1, 0.16, 0.13], "chirp_rate": [0.04, 0.03, 0.035], "phase": [0.0, 0.5, 1.0]},
+      "duration": 30.0,
+      "dt": 0.05,
+      "initial_state": [0.26193232096817415, 365.13129525446493, 347.56564762723247],
+      "noise_fraction": 0.10,
+      "noise_seed": 3101
+    },
+    {
+      "case_id": "b5_noise_20",
+      "benchmark_id": "benchmark5",
+      "shift_types": ["measurement_noise", "denser_observation_grid"],
+      "protocol": {"kind": "chirp", "start": 2.0, "amplitude": [0.2, 7.0, 10.0], "omega0": [0.1, 0.16, 0.13], "chirp_rate": [0.04, 0.03, 0.035], "phase": [0.0, 0.5, 1.0]},
+      "duration": 30.0,
+      "dt": 0.05,
+      "initial_state": [0.26193232096817415, 365.13129525446493, 347.56564762723247],
+      "noise_fraction": 0.20,
+      "noise_seed": 3101
+    },
+    {
+      "case_id": "b6_noise_01",
+      "benchmark_id": "benchmark6",
+      "shift_types": ["measurement_noise", "denser_observation_grid"],
+      "protocol": {"kind": "chirp", "start": 2.0, "amplitude": 1.2, "omega0": 0.12, "chirp_rate": 0.05, "phase": 0.3},
+      "duration": 60.0,
+      "dt": 0.05,
+      "initial_state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "noise_fraction": 0.01,
+      "noise_seed": 6101
+    },
+    {
+      "case_id": "b6_noise_10",
+      "benchmark_id": "benchmark6",
+      "shift_types": ["measurement_noise", "denser_observation_grid"],
+      "protocol": {"kind": "chirp", "start": 2.0, "amplitude": 1.2, "omega0": 0.12, "chirp_rate": 0.05, "phase": 0.3},
+      "duration": 60.0,
+      "dt": 0.05,
+      "initial_state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "noise_fraction": 0.10,
+      "noise_seed": 6101
+    },
+    {
+      "case_id": "b6_noise_20",
+      "benchmark_id": "benchmark6",
+      "shift_types": ["measurement_noise", "denser_observation_grid"],
+      "protocol": {"kind": "chirp", "start": 2.0, "amplitude": 1.2, "omega0": 0.12, "chirp_rate": 0.05, "phase": 0.3},
+      "duration": 60.0,
+      "dt": 0.05,
+      "initial_state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "noise_fraction": 0.20,
+      "noise_seed": 6101
+    }
+  ]
+}

@@ -346,6 +346,9 @@ def _feature_functions(expressions, context):
 
 def _result(config, dataset, equations, hyperparameters, train_mse,
             validation_mse, test_metrics):
+    if test_metrics.failed_trajectories:
+        failed = ", ".join(test_metrics.failed_trajectories)
+        raise ValueError(f"final test rollout failed for {failed}")
     return BaselineResult(
         method=config.method,
         benchmark_id=dataset.benchmark_id,

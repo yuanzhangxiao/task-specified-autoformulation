@@ -18,6 +18,7 @@ from pydantic import BaseModel, ValidationError
 
 from autoformalism.llm.exceptions import (
     LLMCacheError,
+    LLMCacheMissError,
     LLMProviderError,
     LLMResponseError,
 )
@@ -59,6 +60,7 @@ class CachedLLMClient(ABC):
         max_backoff_seconds: float = 30.0,
         jitter_fraction: float = 0.25,
         proposal_target_channels: tuple[str, ...] = (),
+        cache_only: bool = False,
         sleep: Callable[[float], None] = time.sleep,
         random_value: Callable[[], float] = random.random,
     ) -> None:
@@ -81,6 +83,7 @@ class CachedLLMClient(ABC):
         self._sleep = sleep
         self._random_value = random_value
         self._proposal_target_channels = proposal_target_channels
+        self._cache_only = cache_only
 
     def propose(
         self,
@@ -151,6 +154,21 @@ class CachedLLMClient(ABC):
             )
             self._log_success(role, result)
             return result
+        if self._cache_only:
+            self._append_log(
+                {
+                    "event": "llm_cache_miss",
+                    "provider": self._provider_name,
+                    "model": self._model,
+                    "role": role,
+                    "request_hash": request_hash,
+                    "cache_path": str(self._cache_path(request_hash)),
+                }
+            )
+            raise LLMCacheMissError(
+                "cache-only LLM request was not found: "
+                f"{request_hash} ({self._cache_path(request_hash)})"
+            )
 
         started = time.perf_counter()
         attempts = 0

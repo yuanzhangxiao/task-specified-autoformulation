@@ -172,6 +172,40 @@ def test_fixed_initial_condition_is_not_sent_to_optimizer() -> None:
     )
 
 
+def test_open_loop_fit_accepts_fixed_latent_initial_condition() -> None:
+    time = np.linspace(0.0, 2.0, 21)
+    target = 2.0 + time
+    payload = _candidate(
+        {"x": "z", "z": "0"},
+        "x",
+        (),
+        latent_local_state="z",
+    ).model_dump(mode="json")
+    latent_initial = next(
+        item for item in payload["initial_conditions"] if item["state"] == "z"
+    )
+    latent_initial["scope"] = "global"
+    latent_initial["initialization_range"] = None
+    latent_initial["fixed_value"] = 1.0
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",)),
+    )
+    train = _split(SplitName.TRAIN, (_trajectory("train-1", time, target),))
+    validation = _split(
+        SplitName.VALIDATION,
+        (_trajectory("val-1", time, target),),
+    )
+
+    result = fit_candidate(model, train, validation, _config())
+
+    assert result.success
+    assert "z" not in result.global_initial_conditions
+    assert result.global_initial_conditions["x"] == pytest.approx(2.0)
+    assert result.training_metrics.normalized_mse < 1e-10
+    assert result.validation_metrics.normalized_mse < 1e-10
+
+
 def test_recovers_nonlinear_exponential_internal_parameter() -> None:
     time = np.linspace(0.0, 2.0, 41)
     rate, exponent, initial = 0.35, 0.65, 1.4

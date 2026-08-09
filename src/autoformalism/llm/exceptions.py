@@ -30,3 +30,7 @@ class LLMResponseError(LLMError):
 
 class LLMCacheError(LLMError):
     """A cache entry is malformed or cannot be persisted."""
+
+
+class LLMCacheMissError(LLMCacheError):
+    """A cache-only client could not find the requested response."""

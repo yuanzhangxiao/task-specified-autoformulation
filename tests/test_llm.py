@@ -11,7 +11,11 @@ import pytest
 
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
-from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
+from autoformalism.llm.exceptions import (
+    LLMCacheMissError,
+    LLMProviderError,
+    LLMResponseError,
+)
 from autoformalism.llm.gemini import (
     GeminiClient,
     _gemini_compatible_schema,
@@ -127,6 +131,7 @@ class StubCachedClient(CachedLLMClient):
         failures: int = 0,
         sleep: Any = lambda _delay: None,
         random_value: Any = lambda: 0.0,
+        cache_only: bool = False,
     ) -> None:
         super().__init__(
             provider_name="stub",
@@ -138,6 +143,7 @@ class StubCachedClient(CachedLLMClient):
             jitter_fraction=0.5,
             sleep=sleep,
             random_value=random_value,
+            cache_only=cache_only,
         )
         self.failures = failures
         self.provider_calls = 0
@@ -231,9 +237,50 @@ def test_disk_cache_avoids_second_provider_call_and_logs_raw_parsed(
         "total_tokens": 30,
     }
     assert events[0]["latency_ms"] == 12.5
-    assert "SECRET_SHOULD_NOT_BE_LOGGED" not in (
-        tmp_path / "events.jsonl"
-    ).read_text(encoding="utf-8")
+    assert "SECRET_SHOULD_NOT_BE_LOGGED" not in (tmp_path / "events.jsonl").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_cache_only_client_hits_cache_without_provider_call(tmp_path: Path) -> None:
+    populated = StubCachedClient(tmp_path)
+    expected = populated.propose(system_prompt="system", user_prompt="user")
+    replay = StubCachedClient(tmp_path, cache_only=True)
+
+    restored = replay.propose(system_prompt="system", user_prompt="user")
+
+    assert restored.parsed == expected.parsed
+    assert restored.cache_hit is True
+    assert replay.provider_calls == 0
+
+
+def test_cache_only_client_fails_closed_on_miss(tmp_path: Path) -> None:
+    client = StubCachedClient(tmp_path, cache_only=True)
+
+    with pytest.raises(LLMCacheMissError, match="cache-only LLM request"):
+        client.propose(system_prompt="system", user_prompt="missing")
+
+    assert client.provider_calls == 0
+    event = json.loads((tmp_path / "events.jsonl").read_text(encoding="utf-8"))
+    assert event["event"] == "llm_cache_miss"
+
+
+def test_cache_only_factory_does_not_require_provider_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    client = create_llm_client(
+        LLMConfig(
+            provider=LLMProvider.OPENAI,
+            model="offline-model",
+            cache_directory=tmp_path / "cache",
+            log_path=tmp_path / "events.jsonl",
+            cache_only=True,
+        )
+    )
+
+    assert isinstance(client, OpenAIResponsesClient)
 
 
 def test_retry_uses_exponential_backoff_and_jitter(tmp_path: Path) -> None:
@@ -536,9 +583,7 @@ def test_ollama_schema_is_compact_but_preserves_validation_structure(
         if isinstance(value, dict):
             found = [value[key]] if isinstance(value.get(key), int) else []
             return found + [
-                item
-                for child in value.values()
-                for item in values_for(key, child)
+                item for child in value.values() for item in values_for(key, child)
             ]
         if isinstance(value, list):
             return [item for child in value for item in values_for(key, child)]

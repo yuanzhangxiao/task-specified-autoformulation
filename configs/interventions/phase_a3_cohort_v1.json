@@ -1,0 +1,67 @@
+{
+  "schema_version": "1",
+  "cohort_id": "phase_a3_hard_frozen_models_v1",
+  "tier": "hard",
+  "methods": {
+    "Full": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "benchmark5": [
+          "artifacts/rebuttal/benchmark5_hard_seed1_recovery_test_v1/result.json",
+          "artifacts/rebuttal/consolidated_inputs/vm/vm3-results/artifacts/main-gpt-terra-benchmark5-v18-retry2/benchmark5_hard_seed{seed}/checkpoints/final.json",
+          "artifacts/rebuttal/consolidated_inputs/vm/vm3-results/artifacts/main-gpt-terra-benchmark5-v18/benchmark5_hard_seed{seed}/checkpoints/final.json"
+        ],
+        "benchmark6": [
+          "artifacts/rebuttal/consolidated_inputs/hpc/artifacts/hpc-v18-main-late/benchmark6_hard_seed{seed}/checkpoints/final.json",
+          "artifacts/rebuttal/consolidated_inputs/vm/vm4-results/artifacts/main-gpt-terra-benchmark6-v18-retry/benchmark6_hard_seed{seed}/checkpoints/final.json"
+        ]
+      }
+    },
+    "No-judge": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "benchmark5": [
+          "artifacts/rebuttal/consolidated_inputs/vm/vm4-results/artifacts/noj-gpt-terra-v1/benchmark5_hard_seed{seed}/checkpoints/final.json"
+        ],
+        "benchmark6": [
+          "artifacts/rebuttal/consolidated_inputs/vm/vm4-results/artifacts/noj-gpt-terra-v18-retries/benchmark6_hard_seed{seed}/checkpoints/final.json"
+        ]
+      }
+    },
+    "No-latent": {
+      "expected_seeds": [0, 1, 2],
+      "patterns": {
+        "benchmark5": [
+          "artifacts/rebuttal/consolidated_inputs/no-latent-complete/artifacts/rebuttal/no_latent/benchmark5/benchmark5_hard_seed{seed}/checkpoints/final.json"
+        ],
+        "benchmark6": [
+          "artifacts/rebuttal/consolidated_inputs/no-latent-complete/artifacts/rebuttal/no_latent/benchmark6-retry/benchmark6_hard_seed{seed}/checkpoints/final.json",
+          "artifacts/rebuttal/consolidated_inputs/no-latent-complete/artifacts/rebuttal/no_latent/benchmark6/benchmark6_hard_seed{seed}/checkpoints/final.json"
+        ]
+      }
+    },
+    "D3": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "benchmark5": [
+          "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-production-v1/d3_native_no_tools/benchmark5_hard_seed{seed}/result.json"
+        ],
+        "benchmark6": [
+          "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-retries-v18/d3_native_no_tools/benchmark6_hard_seed{seed}/result.json",
+          "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/d3-native-production-v1/d3_native_no_tools/benchmark6_hard_seed{seed}/result.json"
+        ]
+      }
+    },
+    "LLM-feature-SINDy": {
+      "expected_seeds": [0, 1, 2, 3, 4],
+      "patterns": {
+        "benchmark5": [
+          "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/batch2-llm-v1/llm_feature_sindy/benchmark5_hard_seed{seed}/result.json"
+        ],
+        "benchmark6": [
+          "artifacts/rebuttal/consolidated_inputs/vm/vm2-results/artifacts/baselines/batch2-llm-v1/llm_feature_sindy/benchmark6_hard_seed{seed}/result.json"
+        ]
+      }
+    }
+  }
+}
