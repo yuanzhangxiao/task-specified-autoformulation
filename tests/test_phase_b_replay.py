@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from autoformalism.rebuttal.artifacts import candidate_warm_start_parameters
+from scripts.merge_phase_b_replay_shards import _read_complete_shards
 from scripts.replay_phase_b_frozen_candidates import (
     _better_result,
 )
@@ -68,3 +69,58 @@ def test_refinement_cannot_replace_a_better_valid_screening_result() -> None:
     assert _better_result(screening, failed) is screening
     assert _better_result(screening, worse) is screening
     assert _better_result(screening, better) is better
+
+
+def test_complete_shards_merge_in_deterministic_artifact_order(tmp_path: Path) -> None:
+    selected = [SimpleNamespace(artifact_id="b"), SimpleNamespace(artifact_id="a")]
+    for index, artifact_id in enumerate(("a", "b")):
+        root = tmp_path / f"shard-{index:03d}"
+        (root / "results").mkdir(parents=True)
+        (root / "results" / f"{artifact_id}.json").write_text(
+            json.dumps({"artifact_id": artifact_id, "success": True}),
+            encoding="utf-8",
+        )
+        (root / "shard_manifest.json").write_text(
+            json.dumps(
+                {
+                    "stage": "screen_complete",
+                    "shard_count": 2,
+                    "shard_index": index,
+                    "assigned_artifact_ids": [artifact_id],
+                    "completed_artifact_ids": [artifact_id],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    artifact_ids = [
+        row["artifact_id"] for row in _read_complete_shards(tmp_path, selected)
+    ]
+    assert artifact_ids == [
+        "a",
+        "b",
+    ]
+
+
+def test_shard_merge_rejects_incomplete_declared_coverage(tmp_path: Path) -> None:
+    root = tmp_path / "shard-000"
+    (root / "results").mkdir(parents=True)
+    (root / "shard_manifest.json").write_text(
+        json.dumps(
+            {
+                "stage": "screen_complete",
+                "shard_count": 1,
+                "shard_index": 0,
+                "assigned_artifact_ids": ["a"],
+                "completed_artifact_ids": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        _read_complete_shards(tmp_path, [SimpleNamespace(artifact_id="a")])
+    except SystemExit as exc:
+        assert "missing results" in str(exc)
+    else:
+        raise AssertionError("incomplete shard unexpectedly merged")

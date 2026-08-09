@@ -135,6 +135,36 @@ sacct -X -S today --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS
 find "$AF_OUTPUT_ROOT" -name replay_manifest.json -type f | wc -l
 ```
 
+For low wall-clock latency, use the sharded pilot workflow. It screens ten
+deterministically assigned candidate shards per cell, then starts one merge and
+refinement task per cell only after every screening task succeeds:
+
+```bash
+export AF_OUTPUT_ROOT="$WORK/phase_b/replay-sharded-v1"
+screen_job=$(sbatch --parsable \
+  --account=CPU_ACCOUNT --partition=cpu --export=ALL \
+  scripts/hpc/phase_b_replay_sharded_array.slurm)
+merge_job=$(sbatch --parsable --dependency="afterok:${screen_job}" \
+  --account=CPU_ACCOUNT --partition=cpu --export=ALL \
+  scripts/hpc/phase_b_replay_merge_array.slurm)
+printf 'screen_job=%s merge_job=%s\n' "$screen_job" "$merge_job"
+```
+
+The screening array contains 40 single-core tasks: four pilot cells times ten
+shards. The merge array contains four single-core tasks. A merge fails closed
+if a shard is absent, incomplete, duplicated, or covers an unexpected artifact.
+The merged result remains development-only and records no LLM or test-data use.
+
+```bash
+squeue -j "$screen_job,$merge_job"
+sacct -X -j "$screen_job,$merge_job" \
+  --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS
+find "$AF_OUTPUT_ROOT/final" -name replay_manifest.json -type f | sort
+```
+
+Validate that the four sharded selections match the corresponding unsharded
+pilot before expanding the cell map to the complete 40-cell suite.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

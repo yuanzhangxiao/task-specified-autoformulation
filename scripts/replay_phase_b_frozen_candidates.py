@@ -34,6 +34,9 @@ def main() -> None:
     parser.add_argument("--refine-top-k", type=int, default=0)
     parser.add_argument("--refine-max-nfev", type=int, default=25)
     parser.add_argument("--refine-timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--shard-index", type=int)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--screen-only", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     if (
@@ -41,49 +44,32 @@ def main() -> None:
         or args.max_nfev < 1
         or args.refine_top_k < 0
         or args.refine_max_nfev < 1
+        or args.shard_count < 1
     ):
         raise SystemExit("candidate and fitting budgets must be positive")
+    if args.shard_index is not None and not 0 <= args.shard_index < args.shard_count:
+        raise SystemExit("shard index must be in [0, shard count)")
+    if args.shard_count > 1 and args.shard_index is None:
+        raise SystemExit("shard index is required when shard count exceeds one")
+    if args.shard_count > 1 and not args.screen_only:
+        raise SystemExit("multi-shard execution must use --screen-only")
     if args.timeout_seconds <= 0 or args.refine_timeout_seconds <= 0:
         raise SystemExit("timeout must be positive")
     args.output_root.mkdir(parents=True, exist_ok=True)
 
     artifacts = _load_pool(args.candidate_pool)
-    source = [
-        item
-        for item in artifacts
-        if item.benchmark_id == args.source_benchmark and item.tier == args.tier
-    ]
-    if not source:
-        raise SystemExit("candidate pool contains no matching source artifacts")
     development, context = _development_context(args)
-    eligibility = []
-    eligible: dict[str, CandidateArtifact] = {}
-    for artifact in sorted(source, key=lambda item: item.artifact_id):
-        try:
-            compile_candidate(artifact.candidate, context)
-        except Exception as exc:
-            eligibility.append(
-                _eligibility_row(artifact, False, f"{type(exc).__name__}: {exc}")
-            )
-            continue
-        eligibility.append(_eligibility_row(artifact, True, None))
-        previous = eligible.get(artifact.structural_hash)
-        if previous is None or (
-            artifact.validation_mse,
-            artifact.artifact_id,
-        ) < (previous.validation_mse, previous.artifact_id):
-            eligible[artifact.structural_hash] = artifact
+    source, eligibility, eligible, selected = _prepare_candidates(
+        args, artifacts, context
+    )
     _write_jsonl(args.output_root / "eligibility.jsonl", eligibility)
-
-    selected = sorted(
-        eligible.values(),
-        key=lambda item: (item.validation_mse, item.artifact_id),
-    )[: args.maximum_candidates]
     if not selected:
         raise SystemExit("no exact-contract candidate is eligible for replay")
+    shard_index = args.shard_index or 0
+    assigned = selected[shard_index :: args.shard_count]
     results_root = args.output_root / "results"
     results_root.mkdir(exist_ok=True)
-    for index, artifact in enumerate(selected, start=1):
+    for index, artifact in enumerate(assigned, start=1):
         path = results_root / f"{artifact.artifact_id}.json"
         if path.is_file():
             continue
@@ -98,7 +84,7 @@ def main() -> None:
         )
         _write_json(path, row)
         print(
-            f"replay {index}/{len(selected)} {artifact.candidate.candidate_id} "
+            f"replay {index}/{len(assigned)} {artifact.candidate.candidate_id} "
             f"success={row['success']} val={row['validation_nmse']}",
             flush=True,
         )
@@ -107,6 +93,26 @@ def main() -> None:
         json.loads(path.read_text(encoding="utf-8"))
         for path in sorted(results_root.glob("*.json"))
     ]
+    if args.screen_only:
+        _write_json(
+            args.output_root / "shard_manifest.json",
+            {
+                "schema_version": "phase_b_frozen_replay_shard_v1",
+                "stage": "screen_complete",
+                "uses_llm_calls": False,
+                "uses_test_data": False,
+                "source_benchmark": args.source_benchmark,
+                "destination_benchmark": args.destination_benchmark,
+                "tier": args.tier,
+                "shard_index": shard_index,
+                "shard_count": args.shard_count,
+                "global_selected_structures": len(selected),
+                "assigned_artifact_ids": [item.artifact_id for item in assigned],
+                "completed_artifact_ids": sorted(item["artifact_id"] for item in rows),
+                "successful_replays": sum(bool(item["success"]) for item in rows),
+            },
+        )
+        return
     refined_rows = _refine_screening_winners(
         args,
         rows,
@@ -125,7 +131,32 @@ def main() -> None:
         key=lambda item: (item["validation_nmse"], item["artifact_id"]),
         default=None,
     )
-    manifest = {
+    manifest = _build_manifest(
+        args=args,
+        source=source,
+        eligibility=eligibility,
+        eligible=eligible,
+        rows=rows,
+        refined_rows=refined_rows,
+        winner=winner,
+    )
+    _write_json(args.output_root / "replay_manifest.json", manifest)
+    _write_report(args.output_root / "replay_report.md", manifest, eligibility)
+    if winner is None:
+        raise SystemExit("no frozen structure passed Phase-B rollout refitting")
+
+
+def _build_manifest(
+    *,
+    args,
+    source: list[CandidateArtifact],
+    eligibility: list[dict[str, Any]],
+    eligible: dict[str, CandidateArtifact],
+    rows: list[dict[str, Any]],
+    refined_rows: list[dict[str, Any]],
+    winner: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
         "schema_version": "phase_b_frozen_replay_v1",
         "stage": "development_selection_frozen" if winner else "no_valid_fit",
         "source_benchmark": args.source_benchmark,
@@ -150,13 +181,41 @@ def main() -> None:
         "unique_eligible_structures": len(eligible),
         "replayed_structures": len(rows),
         "refined_structures": len(refined_rows),
-        "successful_replays": len(successful),
+        "successful_replays": sum(bool(item["success"]) for item in rows),
         "selected": winner,
     }
-    _write_json(args.output_root / "replay_manifest.json", manifest)
-    _write_report(args.output_root / "replay_report.md", manifest, eligibility)
-    if winner is None:
-        raise SystemExit("no frozen structure passed Phase-B rollout refitting")
+
+
+def _prepare_candidates(args, artifacts, context):
+    source = [
+        item
+        for item in artifacts
+        if item.benchmark_id == args.source_benchmark and item.tier == args.tier
+    ]
+    if not source:
+        raise SystemExit("candidate pool contains no matching source artifacts")
+    eligibility = []
+    eligible: dict[str, CandidateArtifact] = {}
+    for artifact in sorted(source, key=lambda item: item.artifact_id):
+        try:
+            compile_candidate(artifact.candidate, context)
+        except Exception as exc:
+            eligibility.append(
+                _eligibility_row(artifact, False, f"{type(exc).__name__}: {exc}")
+            )
+            continue
+        eligibility.append(_eligibility_row(artifact, True, None))
+        previous = eligible.get(artifact.structural_hash)
+        if previous is None or (
+            artifact.validation_mse,
+            artifact.artifact_id,
+        ) < (previous.validation_mse, previous.artifact_id):
+            eligible[artifact.structural_hash] = artifact
+    selected = sorted(
+        eligible.values(),
+        key=lambda item: (item.validation_mse, item.artifact_id),
+    )[: args.maximum_candidates]
+    return source, eligibility, eligible, selected
 
 
 def _development_context(args: argparse.Namespace):
