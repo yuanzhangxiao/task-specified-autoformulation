@@ -25,6 +25,7 @@ class SearchConfig(BaseModel):
     validation_mse_target: float = Field(default=0.0, ge=0.0)
     cheap_prefit_judge: bool = False
     use_judge: bool = True
+    evaluate_test: bool = True
     proposer_system_prompt: str
     judge_system_prompt: str
     fit_config: FitConfig = FitConfig()
@@ -66,8 +67,8 @@ class FinalEvaluation:
 
     frozen_selection: FrozenSelection
     final_fit: FitResult
-    test_metrics: EvaluationMetrics
-    test_trajectory_initial_conditions: dict[str, dict[str, float]]
+    test_metrics: EvaluationMetrics | None
+    test_trajectory_initial_conditions: dict[str, dict[str, float]] | None
     stopping_reason: Literal[
         "iteration_budget", "stagnation", "validation_target"
     ]

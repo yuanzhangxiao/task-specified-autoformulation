@@ -419,6 +419,32 @@ calibration produced valid screens in all 20 attempts; refinement improved two
 cells and was safely rejected in two. The full 247-structure screen is queued
 for isolated CPU jobs rather than an oversubscribed laptop run.
 
+**Sharded replay status (2026-08-09): passed.** Ten deterministic CPU shards per
+cell reproduced the unsharded candidate identity and validation NMSE exactly in
+all four reusable cells. Screening fell to 2--5 minutes per shard and the full
+screen-plus-refinement dependency chain took about 12 minutes of active wall
+time. The complete 40-cell compatibility audit found exact reusable structures
+in only these four named T1 cells (74, 85, 45, and 43); the other 36 redesigned
+cells require new candidate generation. Do not map T1 structures onto T2--T4 or
+renamed non-Dalla-Man contracts merely to fill the matrix.
+
+The frozen low-cost generation preflight is therefore:
+
+1. generate eight proposals per cell with an open-weight local proposer (320
+   local calls total) and no generation-stage judge;
+2. retain every deterministically valid structure in a portable pool and use
+   the validated CPU-sharded replay for fitting and development selection;
+3. request at most four hosted proposer rescue calls only for cells with no
+   valid local candidate or a prespecified development-threshold failure;
+4. judge only the validation finalists in a later, separately budgeted stage;
+5. keep all hosted rescue calls conditional, cache-addressed, and recorded in
+   the generation manifest.
+
+This plan has a worst-case cap of 160 hosted rescue calls, but its intended paid
+call count is much lower because local generation is evaluated first. Generate
+the exact machine-readable preflight with
+`scripts/plan_phase_b_candidate_generation.py`.
+
 - Judge only deterministically valid top-k candidates.
 - Invoke the judge only after stagnation or for finalists.
 - Stop after validation and structural thresholds are satisfied.

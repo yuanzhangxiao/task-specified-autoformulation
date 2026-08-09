@@ -68,7 +68,7 @@ class SearchController:
         )
 
     def run(self) -> FinalEvaluation:
-        """Resume or execute search, freeze validation selection, and test once."""
+        """Run search, freeze validation selection, and optionally test once."""
         completed = self._completed_records()
         start_round = self._completed_round_count()
         best_seen = min(
@@ -620,6 +620,20 @@ class SearchController:
             self._store.save_final(existing)
             self._callback("refitted", None)
         final_fit = _fit_from_dict(existing["final_fit"])
+
+        if not self._config.evaluate_test:
+            if existing["stage"] == "refitted":
+                existing["stage"] = "development_complete"
+                self._store.save_final(existing)
+                self._callback("development_complete", None)
+            return FinalEvaluation(
+                frozen_selection=frozen,
+                final_fit=final_fit,
+                test_metrics=None,
+                test_trajectory_initial_conditions=None,
+                stopping_reason=existing["stopping_reason"],
+                completed_iterations=int(existing["completed_iterations"]),
+            )
 
         if existing["stage"] == "refitted":
             existing["stage"] = "test_started"

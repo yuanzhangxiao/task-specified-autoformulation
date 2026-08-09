@@ -188,6 +188,32 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
     assert second.parent_candidate_id == first.candidate_id
 
 
+def test_development_only_search_never_calls_test_loader(tmp_path: Path) -> None:
+    candidate = _candidate(
+        "development_candidate", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    client = MockLLMClient(
+        proposer_responses=[candidate],
+        judge_responses=[_judge()] * 3,
+    )
+    config = _config(tmp_path / "development", 1).model_copy(
+        update={"evaluate_test": False}
+    )
+
+    def forbidden_test_loader(_frozen):
+        raise AssertionError("development-only search opened test data")
+
+    result = _controller(
+        client, config, test_loader=forbidden_test_loader
+    ).run()
+
+    assert result.test_metrics is None
+    assert result.test_trajectory_initial_conditions is None
+    final = json.loads((tmp_path / "development" / "final.json").read_text())
+    assert final["stage"] == "development_complete"
+    assert "test_metrics" not in final
+
+
 def test_prefit_rejection_is_feedback_for_next_proposal(tmp_path: Path) -> None:
     invalid = _candidate(
         "invalid_one",

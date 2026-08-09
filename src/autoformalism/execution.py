@@ -117,6 +117,8 @@ class ExecutionArguments:
     use_derivative_fit_fast_path: bool = True
     llm_cache_only: bool = False
     llm_cache_root: Path | None = None
+    development_only: bool = False
+    ollama_base_url: str = "http://127.0.0.1:11434"
 
 
 class _RoleClient:
@@ -214,6 +216,14 @@ def build_experiment_parser(
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--mock-llm", action="store_true")
     parser.add_argument(
+        "--development-only",
+        action="store_true",
+        help=(
+            "stop after validation selection and train-plus-validation refit; "
+            "never open or evaluate the test split"
+        ),
+    )
+    parser.add_argument(
         "--llm-cache-only",
         action="store_true",
         help="fail closed on any LLM cache miss; never contact a provider",
@@ -222,6 +232,11 @@ def build_experiment_parser(
         "--llm-cache-root",
         type=Path,
         help="shared flat cache directory used by proposer and judge",
+    )
+    parser.add_argument(
+        "--ollama-base-url",
+        default=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+        help="Ollama HTTP endpoint; allows collision-free local GPU workers",
     )
     parser.add_argument("--clean", action="store_true")
     parser.add_argument(
@@ -301,6 +316,8 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
             if namespace.llm_cache_root is None
             else namespace.llm_cache_root.expanduser().resolve()
         ),
+        development_only=namespace.development_only,
+        ollama_base_url=namespace.ollama_base_url,
     )
 
 
@@ -347,6 +364,8 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "llm_cache_root": (
             None if arguments.llm_cache_root is None else str(arguments.llm_cache_root)
         ),
+        "development_only": arguments.development_only,
+        "ollama_base_url": arguments.ollama_base_url,
         "use_judge": arguments.use_judge,
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
@@ -379,6 +398,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         validation_mse_target=0.0,
         cheap_prefit_judge=False,
         use_judge=arguments.use_judge,
+        evaluate_test=not arguments.development_only,
         proposer_system_prompt=(
             f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
             f"{proposer_prompt}\n\n{protocol_prompt}\n\n{symbol_contract}\n\n"
@@ -650,6 +670,7 @@ def _make_client(
             max_output_tokens=arguments.llm_max_output_tokens,
             proposal_target_channels=dataset.roles.targets,
             cache_only=arguments.llm_cache_only,
+            ollama_base_url=arguments.ollama_base_url,
         )
     )
     judge = create_llm_client(
@@ -661,6 +682,7 @@ def _make_client(
             timeout_seconds=arguments.llm_timeout_seconds,
             max_output_tokens=arguments.llm_max_output_tokens,
             cache_only=arguments.llm_cache_only,
+            ollama_base_url=arguments.ollama_base_url,
         )
     )
     return _RoleClient(proposer, judge)
@@ -829,8 +851,13 @@ def _result_summary(
     arguments: ExecutionArguments,
     result: FinalEvaluation,
 ) -> dict[str, Any]:
-    return {
+    summary = {
         "status": "complete",
+        "evaluation_stage": (
+            "development_selection_frozen"
+            if arguments.development_only
+            else "test_evaluated"
+        ),
         "benchmark_id": arguments.benchmark_id,
         "tier": arguments.tier,
         "seed": arguments.seed,
@@ -843,9 +870,17 @@ def _result_summary(
         "final_training_normalized_mse": (
             result.final_fit.training_metrics.normalized_mse
         ),
-        "test_normalized_mse": result.test_metrics.normalized_mse,
-        "test_per_target_normalized_mse": dict(
-            result.test_metrics.per_target_normalized_mse
-        ),
-        "test_failed_trajectories": list(result.test_metrics.failed_trajectories),
     }
+    if result.test_metrics is not None:
+        summary.update(
+            {
+                "test_normalized_mse": result.test_metrics.normalized_mse,
+                "test_per_target_normalized_mse": dict(
+                    result.test_metrics.per_target_normalized_mse
+                ),
+                "test_failed_trajectories": list(
+                    result.test_metrics.failed_trajectories
+                ),
+            }
+        )
+    return summary

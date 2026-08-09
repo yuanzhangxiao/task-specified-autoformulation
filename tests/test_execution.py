@@ -19,7 +19,13 @@ from autoformalism.execution import (
 from autoformalism.expressions import ValidationContext
 
 
-def _arguments(tmp_path: Path, *, dry_run: bool, resume: bool = False):
+def _arguments(
+    tmp_path: Path,
+    *,
+    dry_run: bool,
+    resume: bool = False,
+    development_only: bool = False,
+):
     return ExecutionArguments(
         data_root=tmp_path,
         benchmark_id="synthetic",
@@ -34,6 +40,7 @@ def _arguments(tmp_path: Path, *, dry_run: bool, resume: bool = False):
         dry_run=dry_run,
         mock_llm=True,
         use_clean_observations=False,
+        development_only=development_only,
     )
 
 
@@ -54,6 +61,16 @@ def test_mock_execution_and_resume_are_idempotent(tmp_path: Path) -> None:
     assert first == resumed
     assert first["status"] == "complete"
     assert first["test_failed_trajectories"] == []
+
+
+def test_mock_development_only_execution_omits_test_metrics(tmp_path: Path) -> None:
+    result = execute(
+        _arguments(tmp_path, dry_run=False, development_only=True)
+    )
+
+    assert result["status"] == "complete"
+    assert result["evaluation_stage"] == "development_selection_frozen"
+    assert not any(key.startswith("test_") for key in result)
 
 
 def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
@@ -83,6 +100,33 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.use_derivative_fit_fast_path is True
     assert default.llm_cache_only is False
     assert default.llm_cache_root is None
+    assert default.development_only is False
+    assert default.ollama_base_url == "http://127.0.0.1:11434"
+
+
+def test_cli_accepts_development_only_mode() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(["--mock-llm", "--dry-run", "--development-only"])
+    )
+
+    assert arguments.development_only is True
+
+
+def test_cli_accepts_custom_ollama_endpoint() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--ollama-base-url",
+                "http://127.0.0.1:23456",
+            ]
+        )
+    )
+
+    assert arguments.ollama_base_url == "http://127.0.0.1:23456"
 
 
 def test_cli_accepts_shared_cache_only_mode(tmp_path: Path) -> None:

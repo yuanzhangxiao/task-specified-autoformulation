@@ -165,6 +165,80 @@ find "$AF_OUTPUT_ROOT/final" -name replay_manifest.json -type f | sort
 Validate that the four sharded selections match the corresponding unsharded
 pilot before expanding the cell map to the complete 40-cell suite.
 
+### Delta local-proposer pilot
+
+First create the development-only compatibility and call-budget manifest on a
+CPU login node. This command makes no LLM calls and does not open test data:
+
+```bash
+python scripts/plan_phase_b_candidate_generation.py \
+  --public-data-root "$AF_PUBLIC_DATA_ROOT" \
+  --candidate-pool "$AF_CANDIDATE_POOL" \
+  --output "$AF_PROJECT/phase_b/inputs/candidate-generation-plan-v1.json"
+```
+
+The frozen v1 audit has 4 cells with exact reusable structures and 36 cells
+that require generation. Its first-pass budget is 8 local proposer calls per
+cell (320 total), no generation-stage judge calls, and at most 4 conditional
+hosted rescue calls per cell. The hosted cap is not a reservation or a required
+number of calls.
+
+Delta supports Apptainer and NVIDIA GPU passthrough with `--nv`. Pull the Ollama
+container once into project storage, record its checksum, and store model blobs
+outside home:
+
+```bash
+mkdir -p "$AF_PROJECT/containers" "$AF_PROJECT/ollama-models" \
+  "$AF_WORK/apptainer-cache"
+export APPTAINER_CACHEDIR="$AF_WORK/apptainer-cache"
+apptainer pull "$AF_PROJECT/containers/ollama.sif" docker://ollama/ollama:latest
+sha256sum "$AF_PROJECT/containers/ollama.sif" \
+  > "$AF_PROJECT/containers/ollama.sif.sha256"
+```
+
+Populate the model directory in a short A40 interactive allocation before the
+pilot. Use a nondefault port so independent jobs never share an Ollama server:
+
+```bash
+srun --account=bibo-delta-gpu --partition=gpuA40x4-interactive \
+  --nodes=1 --ntasks=1 --cpus-per-task=8 --mem=64g \
+  --gpus-per-node=1 --time=00:45:00 --pty bash
+
+export OLLAMA_HOST=127.0.0.1:21434
+export OLLAMA_MODELS=/projects/bibo/$USER/ollama-models
+apptainer exec --nv \
+  --bind "/projects/bibo/$USER:/projects/bibo/$USER" \
+  --env "OLLAMA_HOST=$OLLAMA_HOST" --env "OLLAMA_MODELS=$OLLAMA_MODELS" \
+  /projects/bibo/$USER/containers/ollama.sif ollama serve \
+  > /tmp/ollama-model-pull.log 2>&1 &
+ollama_pid=$!
+sleep 10
+apptainer exec --nv \
+  --bind "/projects/bibo/$USER:/projects/bibo/$USER" \
+  --env "OLLAMA_HOST=$OLLAMA_HOST" --env "OLLAMA_MODELS=$OLLAMA_MODELS" \
+  /projects/bibo/$USER/containers/ollama.sif ollama pull gpt-oss:20b
+kill "$ollama_pid"
+exit
+```
+
+Then submit one two-proposal, no-judge, development-only pilot:
+
+```bash
+export AF_OLLAMA_IMAGE="$AF_PROJECT/containers/ollama.sif"
+export AF_OLLAMA_MODELS="$AF_PROJECT/ollama-models"
+export AF_LOCAL_MODEL="gpt-oss:20b"
+export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-pilot-v1"
+mkdir -p logs "$AF_OUTPUT_ROOT"
+sbatch --account=bibo-delta-gpu --partition=gpuA40x4 --export=ALL \
+  scripts/hpc/phase_b_local_generation_pilot.slurm
+```
+
+The pilot targets named canonical T2 easy, a cell with no exact reusable
+structure. Acceptance requires at least one deterministically valid fitted
+candidate, a final checkpoint at `development_complete`, no test metrics, zero
+judge events, and two or fewer proposer provider calls. Do not launch all 40
+cells until this structured-output and fitting pilot passes.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA
