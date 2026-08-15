@@ -326,6 +326,51 @@ def test_judge_response_failure_falls_back_and_search_continues(
     assert result.final_fit.success
 
 
+def test_proposer_response_failure_checkpoints_round_and_search_continues(
+    tmp_path: Path,
+) -> None:
+    first = _candidate(
+        "first_valid", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    third = _candidate(
+        "third_valid",
+        "-decay * x + offset",
+        (("decay", 0.2, 1.0), ("offset", -0.1, 0.1)),
+        parent="first_valid",
+    )
+
+    class FailingSecondProposalClient(MockLLMClient):
+        proposal_calls = 0
+
+        def propose(self, *, system_prompt: str, user_prompt: str):
+            self.proposal_calls += 1
+            if self.proposal_calls == 2:
+                raise LLMResponseError("missing required target mapping")
+            return super().propose(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+
+    client = FailingSecondProposalClient(
+        proposer_responses=[first, third],
+        judge_responses=[_judge()] * 6,
+    )
+    checkpoint_directory = tmp_path / "proposer_failure"
+
+    result = _controller(client, _config(checkpoint_directory, 3)).run()
+
+    assert result.completed_iterations == 2
+    assert result.final_fit.success
+    failed_round = json.loads(
+        (checkpoint_directory / "round_0001.json").read_text()
+    )
+    assert failed_round["stage"] == "complete"
+    assert failed_round["valid"] is False
+    assert failed_round["error"] == (
+        "LLMResponseError: missing required target mapping"
+    )
+
+
 def test_resume_continues_after_exact_completed_stage_without_repeat(
     tmp_path: Path,
 ) -> None:

@@ -123,17 +123,27 @@ class SearchController:
 
         if stage == "new":
             feedback = self._proposer_feedback(beam, round_index)
-            proposal = self._client.propose(
-                system_prompt=self._config.proposer_system_prompt,
-                user_prompt=json.dumps(
-                    {
-                        "round": round_index,
-                        "proposal_mode": "exploratory",
-                        "beam_feedback": feedback,
-                    },
-                    sort_keys=True,
-                ),
-            ).parsed
+            try:
+                proposal = self._client.propose(
+                    system_prompt=self._config.proposer_system_prompt,
+                    user_prompt=json.dumps(
+                        {
+                            "round": round_index,
+                            "proposal_mode": "exploratory",
+                            "beam_feedback": feedback,
+                        },
+                        sort_keys=True,
+                    ),
+                ).parsed
+            except (LLMProviderError, LLMResponseError) as exc:
+                payload.update(
+                    valid=False,
+                    error=f"{type(exc).__name__}: {str(exc)[:1000]}",
+                    stage="complete",
+                )
+                self._store.save_round(round_index, payload)
+                self._callback("complete", round_index)
+                return None
             raw_proposal = proposal
             proposal, repairs = repair_protected_declarations(
                 raw_proposal, self._context

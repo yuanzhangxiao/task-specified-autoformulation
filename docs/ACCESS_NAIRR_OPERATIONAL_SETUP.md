@@ -227,7 +227,7 @@ Then submit one six-proposal, no-judge, development-only pilot:
 export AF_OLLAMA_IMAGE="$AF_PROJECT/containers/ollama.sif"
 export AF_OLLAMA_MODELS="$AF_PROJECT/ollama-models"
 export AF_LOCAL_MODEL="gpt-oss:20b"
-export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-pilot-v5"
+export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-pilot-v6"
 mkdir -p logs "$AF_OUTPUT_ROOT"
 sbatch --account=bibo-delta-gpu --partition=gpuA40x4 --export=ALL \
   scripts/hpc/phase_b_local_generation_pilot.slurm
