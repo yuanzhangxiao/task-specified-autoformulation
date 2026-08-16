@@ -137,8 +137,12 @@ class CompiledModel(Protocol):
 
 Expressions are tokenized and parsed into an internal AST. Allowed
 nodes are numeric literals, declared symbols, arithmetic operators,
-comparisons/piecewise forms explicitly supported by the grammar, and a
-small whitelist such as `exp`, `tanh`, `abs`, `min`, and `max`.
+comparisons/piecewise forms explicitly supported by the grammar, and an
+extensible registry of safe mathematical functions. The registry is an execution
+capability boundary, not a claim that the current function set exhausts the
+scientifically meaningful analytical forms. Unsupported named functions must be
+lowered to registered mathematical primitives; they can never invoke proposer
+code, imports, attributes, callbacks, or arbitrary Python.
 Validation rejects unknown syntax, undefined symbols, cycles among
 algebraic processes, missing state equations, invalid bounds,
 unavailable channels, target leakage, and unsafe domains. Every V2 state
@@ -149,6 +153,15 @@ Observed states identify their data channel and omit initialization; latent
 states provide exactly one fixed or analytic initialization. Target mappings are
 inferred by matching benchmark targets to observed channels or same-named
 states/algebraics. Constraints and task-mechanism tags are component-local.
+Constraint provenance and enforcement are runtime-owned. Constraints originating
+in proposer output are labeled `proposer` and treated as soft, editable scientific
+hypotheses: fitting receives a smooth violation penalty and train/validation
+artifacts report normalized maximum, mean, and frequency of violation. Constraints
+from an explicit benchmark/domain contract may be labeled `benchmark` and `hard`;
+the proposer cannot grant itself that authority or remove such a constraint.
+Runtime finiteness and expression-domain safety remain hard independently of any
+proposer declaration. Legacy canonical artifacts without provenance retain hard
+behavior for checkpoint compatibility.
 Potentially-zero denominators produce a recorded warning and use a
 sign-preserving `1e-12` runtime guard. Unsafe logarithm and square-root
 domains remain hard validation errors because clipping them changes model
@@ -189,6 +202,15 @@ structured outputs.
 The provider wrapper hashes model name, provider settings, schema,
 prompt, and request payload. It atomically reads/writes the response
 cache and appends JSONL request/result events with secrets excluded.
+One logical proposer round may contain multiple bounded provider attempts for
+repairable response-contract errors. Logical calls, provider attempts, and repair
+attempts are counted separately. Repair prompts are constructed only from typed,
+bounded diagnostics derived from the public prompt, runtime symbol contract,
+response schema, and the proposer's own response. They never include reference
+equations, private benchmark metadata, test information, or simulator-derived
+ground truth. Numerical fit, scientific plausibility, mechanism adequacy, and
+structural novelty failures end the logical proposal round and enter ordinary
+search feedback rather than contract repair.
 Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
 raw full history. The judge sees the benchmark judge prompt and

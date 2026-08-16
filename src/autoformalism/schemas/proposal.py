@@ -14,7 +14,9 @@ from autoformalism.schemas.base import (
 )
 from autoformalism.schemas.candidate import (
     CandidateModel,
+    ConstraintEnforcement,
     ConstraintKind,
+    ConstraintSource,
     ConstraintSpec,
     InitialConditionSpec,
     ObservationMapping,
@@ -188,6 +190,8 @@ def enrich_proposal(proposal: ProposerCandidate) -> CandidateModel:
                 kind=constraint.kind,
                 bounds=constraint.bounds,
                 description=constraint.description,
+                source=ConstraintSource.PROPOSER,
+                enforcement=ConstraintEnforcement.SOFT,
             )
             for declaration in (*proposal.states, *proposal.processes)
             for constraint in declaration.constraints
@@ -382,6 +386,8 @@ def enrich_proposal_v2(
                 kind=constraint.kind,
                 bounds=constraint.bounds,
                 description=constraint.description,
+                source=ConstraintSource.PROPOSER,
+                enforcement=ConstraintEnforcement.SOFT,
             )
             for declaration in declarations
             for constraint in declaration.constraints

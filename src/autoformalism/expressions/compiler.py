@@ -18,7 +18,11 @@ from autoformalism.expressions.validation import (
     ValidatedCandidate,
     ValidationContext,
 )
-from autoformalism.schemas import CandidateModel, ConstraintKind
+from autoformalism.schemas import (
+    CandidateModel,
+    ConstraintEnforcement,
+    ConstraintKind,
+)
 
 # ODE solvers can cross an invariant boundary by a few units of floating-point
 # roundoff even when the analytic trajectory remains exactly on that boundary.
@@ -315,6 +319,8 @@ class CompiledModel:
             )
         values = dict(zip(self.state_names, state_values, strict=True))
         for constraint in self.validated.candidate.constraints:
+            if constraint.enforcement is not ConstraintEnforcement.HARD:
+                continue
             if constraint.subject not in values:
                 continue
             value = float(values[constraint.subject])

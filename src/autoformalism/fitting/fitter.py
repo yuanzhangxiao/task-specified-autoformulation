@@ -20,7 +20,13 @@ from autoformalism.fitting.models import (
     OptimizationDiagnostic,
 )
 from autoformalism.fitting.simulation import simulate_trajectory, trajectory_forcing
-from autoformalism.schemas import InitialConditionSpec, ParameterScope
+from autoformalism.schemas import (
+    ConstraintEnforcement,
+    ConstraintKind,
+    ConstraintSpec,
+    InitialConditionSpec,
+    ParameterScope,
+)
 
 
 @dataclass(frozen=True)
@@ -510,6 +516,12 @@ def _residual_function(
                     )
                     / scales[channel]
                 )
+            assert simulation.states is not None
+            soft = _soft_constraint_residuals(model, simulation.states)
+            if soft.size:
+                pieces.append(
+                    np.sqrt(config.soft_constraint_penalty_weight) * soft
+                )
         return np.concatenate(pieces)
 
     return residual
@@ -659,11 +671,73 @@ def _timeout_fit_result(
     )
 
 
+def _supported_soft_state_constraints(
+    model: CompiledModel,
+) -> tuple[ConstraintSpec, ...]:
+    """Return soft pointwise state constraints supported by the fitter."""
+    return tuple(
+        constraint
+        for constraint in model.validated.candidate.constraints
+        if constraint.enforcement is ConstraintEnforcement.SOFT
+        and constraint.subject in model.state_names
+        and constraint.kind
+        in {
+            ConstraintKind.NONNEGATIVE,
+            ConstraintKind.POSITIVE,
+            ConstraintKind.BOUNDED,
+        }
+    )
+
+
+def _soft_constraint_series(
+    model: CompiledModel,
+    states: NDArray[np.float64],
+) -> dict[str, NDArray[np.float64]]:
+    """Return normalized nonnegative violation magnitudes by constraint."""
+    by_state = {
+        name: states[index]
+        for index, name in enumerate(model.state_names)
+    }
+    series: dict[str, NDArray[np.float64]] = {}
+    for index, constraint in enumerate(_supported_soft_state_constraints(model)):
+        values = by_state[constraint.subject]
+        scale = max(1.0, float(np.sqrt(np.mean(values**2))))
+        if constraint.kind is ConstraintKind.NONNEGATIVE:
+            violation = np.maximum(-values, 0.0)
+        elif constraint.kind is ConstraintKind.POSITIVE:
+            violation = np.maximum(1e-12 - values, 0.0)
+        else:
+            assert constraint.bounds is not None
+            violation = np.maximum(constraint.bounds.lower - values, 0.0)
+            violation += np.maximum(values - constraint.bounds.upper, 0.0)
+        key = f"{index}:{constraint.subject}:{constraint.kind.value}"
+        series[key] = violation / scale
+    return series
+
+
+def _soft_constraint_residuals(
+    model: CompiledModel,
+    states: NDArray[np.float64] | None,
+) -> NDArray[np.float64]:
+    """Flatten soft-constraint penalties into a fixed-size residual block."""
+    if states is None:
+        return np.empty(0, dtype=float)
+    series = _soft_constraint_series(model, states)
+    if not series:
+        return np.empty(0, dtype=float)
+    return np.concatenate(list(series.values()))
+
+
 def _residual_size(split: DatasetSplit, model: CompiledModel) -> int:
     skipped = 1 if model.validated.context.lagged_targets else 0
-    return sum(
+    target_residuals = sum(
         (trajectory.number_of_rows - skipped)
         * len(model.validated.context.targets)
+        for trajectory in split.trajectories
+    )
+    soft_constraints = len(_supported_soft_state_constraints(model))
+    return target_residuals + sum(
+        trajectory.number_of_rows * soft_constraints
         for trajectory in split.trajectories
     )
 
@@ -832,6 +906,7 @@ def _evaluate(
         channel: [] for channel in model.validated.context.targets
     }
     failed: list[str] = []
+    soft_violations: dict[str, list[np.ndarray]] = {}
     for trajectory in split.trajectories:
         simulation = simulate_trajectory(
             model,
@@ -861,6 +936,11 @@ def _evaluate(
                 - trajectory.targets[channel][start:]
             ) / scales[channel]
             squared[channel].append(normalized**2)
+        assert simulation.states is not None
+        for key, values in _soft_constraint_series(
+            model, simulation.states
+        ).items():
+            soft_violations.setdefault(key, []).append(values)
     per_target = {
         channel: float(np.mean(np.concatenate(values)))
         for channel, values in squared.items()
@@ -868,4 +948,18 @@ def _evaluate(
     aggregate = float(
         np.mean(np.concatenate([np.concatenate(values) for values in squared.values()]))
     )
-    return EvaluationMetrics(aggregate, per_target, tuple(failed))
+    violation_summary = {
+        key: {
+            "maximum_normalized_violation": float(np.max(combined)),
+            "mean_normalized_violation": float(np.mean(combined)),
+            "violating_fraction": float(np.mean(combined > 0.0)),
+        }
+        for key, pieces in soft_violations.items()
+        if (combined := np.concatenate(pieces)).size
+    }
+    return EvaluationMetrics(
+        aggregate,
+        per_target,
+        tuple(failed),
+        violation_summary,
+    )

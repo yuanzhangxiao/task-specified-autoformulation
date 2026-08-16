@@ -227,7 +227,7 @@ Then submit one twelve-proposal, no-judge, development-only pilot:
 export AF_OLLAMA_IMAGE="$AF_PROJECT/containers/ollama.sif"
 export AF_OLLAMA_MODELS="$AF_PROJECT/ollama-models"
 export AF_LOCAL_MODEL="gpt-oss:20b"
-export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-pilot-v7"
+export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-pilot-v8"
 mkdir -p logs "$AF_OUTPUT_ROOT"
 sbatch --account=bibo-delta-gpu --partition=gpuA40x4 --export=ALL \
   scripts/hpc/phase_b_local_generation_pilot.slurm
@@ -236,7 +236,9 @@ sbatch --account=bibo-delta-gpu --partition=gpuA40x4 --export=ALL \
 The pilot targets named canonical T2 easy, a cell with no exact reusable
 structure. Acceptance requires at least one deterministically valid fitted
 candidate, a final checkpoint at `development_complete`, no test metrics, zero
-judge events, and twelve or fewer proposer provider calls. Do not launch all 40
+judge events, and twelve logical proposer rounds. Provider attempts and repair
+attempts are reported separately and may exceed twelve because each logical round
+has a bounded contract-repair budget. Do not launch all 40
 cells until this structured-output and fitting pilot passes.
 
 ## ACES: first login and identity check

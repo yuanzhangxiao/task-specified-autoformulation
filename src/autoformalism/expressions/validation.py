@@ -132,6 +132,11 @@ def repair_protected_declarations(
             *(item.rhs for item in candidate.state_equations),
             *(item.expression for item in candidate.processes),
             *(item.expression for item in candidate.observation_mappings),
+            *(
+                item.expression
+                for item in candidate.initial_conditions
+                if item.expression is not None
+            ),
         )
         for symbol in identifier_pattern.findall(expression)
     }
@@ -191,9 +196,37 @@ def repair_protected_declarations(
         )
     unused_processes = set(process_by_name) - reachable_processes
     removed_processes |= unused_processes
+    retained_expressions = (
+        *(
+            item.rhs
+            for item in candidate.state_equations
+            if item.state not in removed_states
+        ),
+        *(
+            item.expression
+            for item in candidate.processes
+            if item.name not in removed_processes
+        ),
+        *(item.expression for item in candidate.observation_mappings),
+        *(
+            item.expression
+            for item in candidate.initial_conditions
+            if item.state not in removed_states and item.expression is not None
+        ),
+    )
+    used_parameter_names = {
+        symbol
+        for expression in retained_expressions
+        for symbol in identifier_pattern.findall(expression)
+    }
+    unused_parameters = {
+        item.name
+        for item in candidate.parameters
+        if item.name not in used_parameter_names
+    }
     removed_parameters = {
         item.name for item in candidate.parameters if item.name in protected
-    }
+    } | unused_parameters
     removed = removed_states | removed_processes | removed_parameters
     modeled_auxiliaries = set(context.auxiliaries) & {
         item.name for item in candidate.states if item.name not in removed_states
@@ -270,7 +303,10 @@ def repair_protected_declarations(
     repairs.extend(
         f"used supplied forcing instead of modeled declaration: {name}"
         for name in sorted(
-            removed - undifferentiated_auxiliaries - unused_processes
+            removed
+            - undifferentiated_auxiliaries
+            - unused_processes
+            - unused_parameters
         )
     )
     repairs.extend(
@@ -280,6 +316,10 @@ def repair_protected_declarations(
     repairs.extend(
         f"removed unreferenced algebraic process: {name}"
         for name in sorted(unused_processes - protected)
+    )
+    repairs.extend(
+        f"removed unused parameter declaration: {name}"
+        for name in sorted(unused_parameters - protected)
     )
     repairs.extend(
         f"removed redundant supplied-auxiliary observation mapping: {name}"

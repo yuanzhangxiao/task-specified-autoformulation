@@ -117,6 +117,8 @@ def test_v2_round_trip_and_enrichment() -> None:
     assert initials["Gp"].expression == "Gp"
     assert initials["meal_effect"].fixed_value == 0.0
     assert candidate.constraints[0].subject == "Gp"
+    assert candidate.constraints[0].source.value == "proposer"
+    assert candidate.constraints[0].enforcement.value == "soft"
     assert candidate.states[0].mechanisms == ("glucose_balance",)
     assert candidate.states[1].mechanisms == ("meal_appearance",)
 

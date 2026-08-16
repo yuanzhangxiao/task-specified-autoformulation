@@ -881,6 +881,10 @@ def _metrics_to_dict(metrics: EvaluationMetrics) -> dict[str, Any]:
         "normalized_mse": metrics.normalized_mse,
         "per_target_normalized_mse": dict(metrics.per_target_normalized_mse),
         "failed_trajectories": list(metrics.failed_trajectories),
+        "soft_constraint_violations": {
+            key: dict(value)
+            for key, value in metrics.soft_constraint_violations.items()
+        },
     }
 
 
@@ -892,6 +896,12 @@ def _metrics_from_dict(payload: Mapping[str, Any]) -> EvaluationMetrics:
             for key, value in payload["per_target_normalized_mse"].items()
         },
         tuple(payload["failed_trajectories"]),
+        {
+            key: {metric: float(value) for metric, value in summary.items()}
+            for key, summary in payload.get(
+                "soft_constraint_violations", {}
+            ).items()
+        },
     )
 
 

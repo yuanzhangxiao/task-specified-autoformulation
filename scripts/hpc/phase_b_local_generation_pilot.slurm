@@ -20,7 +20,7 @@ set -euo pipefail
 : "${AF_OLLAMA_IMAGE:?set AF_OLLAMA_IMAGE to a pinned Ollama SIF image}"
 : "${AF_OLLAMA_MODELS:?set AF_OLLAMA_MODELS to the persistent model directory}"
 : "${AF_LOCAL_MODEL:=gpt-oss:20b}"
-: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-pilot-v7}"
+: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-pilot-v8}"
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS=1

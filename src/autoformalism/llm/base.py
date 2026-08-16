@@ -21,6 +21,7 @@ from autoformalism.llm.exceptions import (
     LLMCacheMissError,
     LLMProviderError,
     LLMResponseError,
+    RepairDiagnosticCode,
 )
 from autoformalism.llm.models import (
     LLMCallResult,
@@ -194,6 +195,9 @@ class CachedLLMClient(ABC):
                         raise LLMResponseError(
                             f"response failed post-schema validation: {exc}",
                             raw_response=provider_response.raw_response,
+                            diagnostic_code=(
+                                RepairDiagnosticCode.POST_SCHEMA_VALIDATION
+                            ),
                         ) from exc
                 break
             except (LLMProviderError, LLMResponseError) as exc:
@@ -203,10 +207,7 @@ class CachedLLMClient(ABC):
                 if isinstance(exc, LLMResponseError):
                     attempt_user_prompt = (
                         f"{user_prompt}\n\n"
-                        "The previous structured response was invalid. Correct the "
-                        "response and return one complete object matching the schema. "
-                        "Do not repeat this validation error:\n"
-                        f"{str(exc)[:2000]}"
+                        f"{exc.repair_prompt()}"
                     )
                 self._sleep(self._backoff(attempts))
         else:  # pragma: no cover - loop exits by success or exception
@@ -363,6 +364,9 @@ class CachedLLMClient(ABC):
                 "request_hash": result.request_hash,
                 "cache_hit": result.cache_hit,
                 "attempts": result.attempts,
+                "logical_calls": result.logical_calls,
+                "provider_attempts": result.provider_attempts,
+                "repair_attempts": result.repair_attempts,
                 "latency_ms": result.latency_ms,
                 "usage": (
                     None
@@ -394,8 +398,13 @@ class CachedLLMClient(ABC):
                 "request_hash": request_hash,
                 "attempt": attempt,
                 "retryable": error.retryable,
+                "failure_category": error.category.value,
                 "error_type": type(error).__name__,
                 "error": str(error),
+                "repair_diagnostics": [
+                    {"code": item.code.value, "message": item.message}
+                    for item in getattr(error, "repair_diagnostics", ())
+                ],
                 "raw_response": getattr(error, "raw_response", None),
             }
         )

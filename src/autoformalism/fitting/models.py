@@ -29,6 +29,7 @@ class FitConfig(BaseModel):
     maximum_wall_time_seconds: float | None = Field(default=None, gt=0.0)
     failure_penalty: float = Field(default=1e6, gt=0.0)
     bound_tolerance: float = Field(default=1e-5, gt=0.0)
+    soft_constraint_penalty_weight: float = Field(default=1.0, ge=0.0)
 
 
 @dataclass(frozen=True)
@@ -59,12 +60,25 @@ class EvaluationMetrics:
     normalized_mse: float
     per_target_normalized_mse: Mapping[str, float]
     failed_trajectories: tuple[str, ...] = ()
+    soft_constraint_violations: Mapping[str, Mapping[str, float]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
             "per_target_normalized_mse",
             MappingProxyType(dict(self.per_target_normalized_mse)),
+        )
+        object.__setattr__(
+            self,
+            "soft_constraint_violations",
+            MappingProxyType(
+                {
+                    key: MappingProxyType(dict(value))
+                    for key, value in self.soft_constraint_violations.items()
+                }
+            ),
         )
 
 

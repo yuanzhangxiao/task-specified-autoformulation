@@ -42,6 +42,23 @@ class ConstraintKind(str, Enum):
     CUSTOM = "custom"
 
 
+class ConstraintSource(str, Enum):
+    """Runtime-owned provenance for a constraint declaration."""
+
+    UNSPECIFIED = "unspecified"
+    PROPOSER = "proposer"
+    BENCHMARK = "benchmark"
+    RUNTIME = "runtime"
+    DETERMINISTIC = "deterministic"
+
+
+class ConstraintEnforcement(str, Enum):
+    """Whether violation blocks execution or contributes soft evidence."""
+
+    HARD = "hard"
+    SOFT = "soft"
+
+
 class ValueRange(StrictSchema):
     """Closed finite numeric interval."""
 
@@ -160,6 +177,8 @@ class ConstraintSpec(StrictSchema):
     kind: ConstraintKind
     description: NonEmptyText = "unspecified"
     bounds: ValueRange | None = None
+    source: ConstraintSource = ConstraintSource.UNSPECIFIED
+    enforcement: ConstraintEnforcement = ConstraintEnforcement.HARD
 
     @model_validator(mode="after")
     def bounds_match_kind(self) -> ConstraintSpec:

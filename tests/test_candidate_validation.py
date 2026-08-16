@@ -293,6 +293,65 @@ def test_repair_removes_unreferenced_process_but_keeps_dependencies(
     )
 
 
+def test_repair_removes_unused_parameter_without_changing_expressions(
+    context: ValidationContext,
+) -> None:
+    payload = candidate_payload()
+    payload["parameters"].append(
+        {
+            "name": "unused_gain",
+            "scope": "global",
+            "bounds": {"lower": 0.0, "upper": 2.0},
+            "initialization_range": {"lower": 0.1, "upper": 1.0},
+        }
+    )
+    original_equations = copy.deepcopy(payload["state_equations"])
+    original_processes = copy.deepcopy(payload["processes"])
+
+    repaired, diagnostics = repair_protected_declarations(
+        _candidate(payload), context
+    )
+
+    assert {item.name for item in repaired.parameters} == {
+        "gain",
+        "offset",
+        "decay",
+    }
+    assert repaired.model_dump(mode="json")["state_equations"] == original_equations
+    assert [item.expression for item in repaired.processes] == [
+        item["expression"] for item in original_processes
+    ]
+    assert diagnostics == (
+        "removed unused parameter declaration: unused_gain",
+    )
+
+
+def test_repair_retains_parameter_used_only_by_initial_expression(
+    context: ValidationContext,
+) -> None:
+    payload = candidate_payload()
+    payload["parameters"].append(
+        {
+            "name": "initial_scale",
+            "scope": "global",
+            "bounds": {"lower": 0.0, "upper": 2.0},
+            "initialization_range": {"lower": 0.1, "upper": 1.0},
+        }
+    )
+    payload["initial_conditions"][0] = {
+        "state": "x",
+        "scope": "global",
+        "expression": "initial_scale * covariate",
+    }
+
+    repaired, diagnostics = repair_protected_declarations(
+        _candidate(payload), context
+    )
+
+    assert "initial_scale" in {item.name for item in repaired.parameters}
+    assert "removed unused parameter declaration: initial_scale" not in diagnostics
+
+
 def test_repair_maps_declared_lagged_target_alias() -> None:
     payload = candidate_payload()
     payload["state_equations"][1]["rhs"] = "target_prev - decay * y"
@@ -314,6 +373,8 @@ def test_repair_maps_declared_lagged_target_alias() -> None:
     assert diagnostics == (
         "mapped causal lag alias target_prev to interval-boundary target",
         "removed unreferenced algebraic process: flux",
+        "removed unused parameter declaration: gain",
+        "removed unused parameter declaration: offset",
     )
 
 

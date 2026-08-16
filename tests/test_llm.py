@@ -20,6 +20,7 @@ from autoformalism.llm.exceptions import (
     LLMCacheMissError,
     LLMProviderError,
     LLMResponseError,
+    RepairDiagnosticCode,
 )
 from autoformalism.llm.gemini import (
     GeminiClient,
@@ -302,6 +303,9 @@ def test_retry_uses_exponential_backoff_and_jitter(tmp_path: Path) -> None:
     result = client.propose(system_prompt="system", user_prompt="user")
 
     assert result.attempts == 3
+    assert result.logical_calls == 1
+    assert result.provider_attempts == 3
+    assert result.repair_attempts == 2
     assert delays == [1.25, 2.5]
     events = [
         json.loads(line)
@@ -335,12 +339,19 @@ def test_invalid_structured_response_retries_with_repair_feedback(
 
     assert result.attempts == 2
     assert prompts[0] == "original request"
-    assert "previous structured response was invalid" in prompts[1]
+    assert "Repair only the executable response contract" in prompts[1]
     assert "duplicate declaration body_weight_kg" in prompts[1]
     failure = json.loads(
         (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]
     )
     assert failure["raw_response"] == {"message": {"content": "invalid"}}
+    assert failure["failure_category"] == "repairable_contract"
+    assert failure["repair_diagnostics"] == [
+        {
+            "code": "response_validation",
+            "message": "duplicate declaration body_weight_kg",
+        }
+    ]
 
 
 def test_invalid_proposal_enrichment_retries_with_repair_feedback(
@@ -374,8 +385,14 @@ def test_invalid_proposal_enrichment_retries_with_repair_feedback(
 
     assert result.attempts == 2
     assert result.parsed.observation_mappings[0].channel == "target"
-    assert "previous structured response was invalid" in prompts[1]
+    assert "Repair only the executable response contract" in prompts[1]
     assert "target target must match exactly one" in prompts[1]
+    assert (
+        RepairDiagnosticCode.POST_SCHEMA_VALIDATION.value
+        in json.loads(
+            (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        )["repair_diagnostics"][0]["code"]
+    )
     events = [
         json.loads(line)
         for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()
@@ -467,7 +484,9 @@ def test_openai_retries_sdk_pydantic_validation_failure(tmp_path: Path) -> None:
     assert calls == 2
     repair_input = sdk.responses.calls[0]["input"]
     assert isinstance(repair_input, list)
-    assert "previous structured response was invalid" in repair_input[1]["content"]
+    assert "Repair only the executable response contract" in repair_input[1][
+        "content"
+    ]
     failure = json.loads(
         (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]
     )

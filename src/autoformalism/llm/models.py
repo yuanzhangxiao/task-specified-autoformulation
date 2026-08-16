@@ -33,6 +33,21 @@ class LLMCallResult(Generic[StructuredT]):
     latency_ms: float | None
     usage: TokenUsage | None
 
+    @property
+    def logical_calls(self) -> int:
+        """One validated client operation, independent of repair attempts."""
+        return 1
+
+    @property
+    def provider_attempts(self) -> int:
+        """Actual provider generations; cache hits require no provider attempt."""
+        return self.attempts
+
+    @property
+    def repair_attempts(self) -> int:
+        """Provider generations after the initial logical-call attempt."""
+        return max(0, self.attempts - 1)
+
 
 class LLMClient(Protocol):
     """Provider-neutral proposer and judge interface."""
@@ -54,4 +69,3 @@ class LLMClient(Protocol):
     ) -> LLMCallResult[JudgeResult]:
         """Request one assessment conforming to ``JudgeResult``."""
         ...
-

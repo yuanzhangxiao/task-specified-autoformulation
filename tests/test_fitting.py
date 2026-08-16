@@ -707,6 +707,55 @@ def test_rejects_trajectory_specific_model_parameter() -> None:
         fit_candidate(model, train, validation)
 
 
+def test_proposer_soft_constraint_penalizes_and_reports_without_rejection() -> None:
+    payload = _candidate({"x": "-1"}, "x", ()).model_dump(mode="json")
+    payload["constraints"] = [
+        {
+            "subject": "x",
+            "kind": "nonnegative",
+            "source": "proposer",
+            "enforcement": "soft",
+        }
+    ]
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",)),
+    )
+    time = np.asarray([0.0, 1.0, 2.0])
+    split = _split(
+        SplitName.TRAIN,
+        (_trajectory("train", time, np.asarray([1.0, 0.0, 0.0])),),
+    )
+    validation = _split(
+        SplitName.VALIDATION,
+        (_trajectory("validation", time, np.asarray([1.0, 0.0, 0.0])),),
+    )
+
+    simulation = simulate_trajectory(
+        model,
+        split.trajectories[0],
+        {},
+        {"x": 1.0},
+        FitConfig(),
+    )
+    fit = fit_candidate(
+        model,
+        split,
+        validation,
+        FitConfig(maximum_function_evaluations=5),
+    )
+
+    assert simulation.success
+    assert simulation.states is not None
+    assert simulation.states[0, -1] < 0.0
+    assert fit.success
+    violation = next(
+        iter(fit.training_metrics.soft_constraint_violations.values())
+    )
+    assert violation["maximum_normalized_violation"] > 0.0
+    assert violation["violating_fraction"] > 0.0
+
+
 def test_target_free_evaluation_uses_midpoint_latent_initial() -> None:
     model = compile_candidate(
         _candidate(

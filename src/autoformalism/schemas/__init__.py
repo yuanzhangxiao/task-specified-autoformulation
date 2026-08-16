@@ -2,7 +2,9 @@
 
 from autoformalism.schemas.candidate import (
     CandidateModel,
+    ConstraintEnforcement,
     ConstraintKind,
+    ConstraintSource,
     ConstraintSpec,
     InitialConditionSpec,
     ObservationMapping,
@@ -43,7 +45,9 @@ __all__ = [
     "ActionableEdit",
     "CandidateModel",
     "CategoryScore",
+    "ConstraintEnforcement",
     "ConstraintKind",
+    "ConstraintSource",
     "ConstraintSpec",
     "EmbeddedConstraint",
     "HardRedFlag",

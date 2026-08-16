@@ -59,6 +59,11 @@ declaration it governs. Use `mechanisms` to tag the task-required scientific
 mechanisms implemented by each state or algebraic.
 Every constraint must remain attached to the state or algebraic it governs. Do not
 create constraints for prose mechanism labels or other undeclared concepts.
+Every declared parameter must appear in at least one state RHS, algebraic, or
+initialization expression; omit declarations that are not used. Refer to modeled
+states and parameters as bare symbols such as `I`, not as calls such as `I(t)`.
+Named function calls must have explicit safe mathematical runtime support; never
+use a function call as an undeclared mechanism or as a substitute for a state.
 Do not invent numeric bounds for states or other variables. Parameter bounds are
 required; `initialization_range` is optional and defaults to the parameter bounds.
 For states, use qualitative `nonnegative` or `positive` constraints
@@ -66,6 +71,10 @@ without `bounds`; use a `bounded` constraint only when the benchmark supplies th
 numeric range explicitly.
 Division by a quantity whose range includes zero is permitted and guarded with a
 small sign-preserving epsilon at runtime. Unsafe log and sqrt domains are rejected.
+For balance equations, give production and input terms source signs and
+utilization, elimination, and outflow terms sink signs. Check the RHS behavior at
+any declared state boundary; do not rely on parameter fitting to reverse a fixed
+structural sign.
 Natural-language concepts in the benchmark prompt are descriptions, not expression
 identifiers. Every expression symbol must exactly match a name in the runtime
 symbol contract below or a state, process, or parameter declared in this proposal.

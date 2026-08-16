@@ -1,5 +1,14 @@
 {
   "$defs": {
+    "ConstraintEnforcement": {
+      "description": "Whether violation blocks execution or contributes soft evidence.",
+      "enum": [
+        "hard",
+        "soft"
+      ],
+      "title": "ConstraintEnforcement",
+      "type": "string"
+    },
     "ConstraintKind": {
       "description": "Machine-readable constraint categories.",
       "enum": [
@@ -12,6 +21,18 @@
         "custom"
       ],
       "title": "ConstraintKind",
+      "type": "string"
+    },
+    "ConstraintSource": {
+      "description": "Runtime-owned provenance for a constraint declaration.",
+      "enum": [
+        "unspecified",
+        "proposer",
+        "benchmark",
+        "runtime",
+        "deterministic"
+      ],
+      "title": "ConstraintSource",
       "type": "string"
     },
     "ConstraintSpec": {
@@ -36,8 +57,16 @@
           "title": "Description",
           "type": "string"
         },
+        "enforcement": {
+          "$ref": "#/$defs/ConstraintEnforcement",
+          "default": "hard"
+        },
         "kind": {
           "$ref": "#/$defs/ConstraintKind"
+        },
+        "source": {
+          "$ref": "#/$defs/ConstraintSource",
+          "default": "unspecified"
         },
         "subject": {
           "maxLength": 128,
