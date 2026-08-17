@@ -241,6 +241,24 @@ attempts are reported separately and may exceed twelve because each logical roun
 has a bounded contract-repair budget. Do not launch all 40
 cells until this structured-output and fitting pilot passes.
 
+After the single-seed pilot passes, run a five-seed diagnostic on the same
+development-only cell before expanding to the full suite. Each array element
+uses its array index as the experiment seed and retains the twelve-round
+logical proposal budget:
+
+```bash
+export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-diagnostic-v1"
+mkdir -p logs "$AF_OUTPUT_ROOT"
+sbatch --account=bibo-delta-gpu --partition=gpuA40x4 --array=0-4 \
+  --export=ALL scripts/hpc/phase_b_local_generation_pilot.slurm
+```
+
+The five seeds share the pinned Ollama model directory but create distinct run
+directories and LLM caches under `AF_OUTPUT_ROOT`. Compare valid-fit rate, best
+validation normalized MSE, selected structural family, repair accounting, and
+soft-constraint violations. This diagnostic remains development-only, performs
+no judge calls, and does not open test data.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

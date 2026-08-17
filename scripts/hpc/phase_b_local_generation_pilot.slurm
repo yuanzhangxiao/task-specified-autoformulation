@@ -21,6 +21,7 @@ set -euo pipefail
 : "${AF_OLLAMA_MODELS:?set AF_OLLAMA_MODELS to the persistent model directory}"
 : "${AF_LOCAL_MODEL:=gpt-oss:20b}"
 : "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-pilot-v8}"
+: "${AF_SEED:=${SLURM_ARRAY_TASK_ID:-0}}"
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS=1
@@ -69,7 +70,7 @@ apptainer exec --nv \
   --data-root "${AF_PUBLIC_DATA_ROOT}" \
   --benchmark-id phase_b_dalla_man_t2_canonical_named_easy \
   --tier easy \
-  --seed 0 \
+  --seed "${AF_SEED}" \
   --proposer-model "ollama:${AF_LOCAL_MODEL}" \
   --judge-model "ollama:${AF_LOCAL_MODEL}" \
   --ollama-base-url "${endpoint}" \
