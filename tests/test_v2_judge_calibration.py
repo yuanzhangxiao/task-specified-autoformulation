@@ -60,8 +60,8 @@ def test_v2_mutations_are_distinct_and_runtime_valid() -> None:
     mutations = _mutations(baseline)
 
     assert {name for name, _ in mutations} == {
-        "wrong_meal_source_sign",
-        "duplicated_meal_source",
+        "reversed_gp_dynamics",
+        "duplicated_gp_balance",
         "disconnected_claimed_mechanism",
         "unjustified_one_sided_accumulator",
     }
@@ -73,17 +73,17 @@ def test_v2_mutations_are_distinct_and_runtime_valid() -> None:
 def test_v2_mutations_encode_the_claimed_scientific_defects() -> None:
     mutations = dict(_mutations(_baseline()))
 
-    wrong_rhs = next(
+    reversed_rhs = next(
         item.rhs
-        for item in mutations["wrong_meal_source_sign"].state_equations
+        for item in mutations["reversed_gp_dynamics"].state_equations
         if item.state == "Gp"
     )
     duplicate_rhs = next(
         item.rhs
-        for item in mutations["duplicated_meal_source"].state_equations
+        for item in mutations["duplicated_gp_balance"].state_equations
         if item.state == "Gp"
     )
-    assert "-meal_event_g" in wrong_rhs
+    assert reversed_rhs.startswith("-(")
     assert duplicate_rhs.count("meal_event_g") == 2
     assert any(
         item.name.startswith("claimed_meal_pathway")
@@ -118,7 +118,7 @@ def test_analysis_accepts_baseline_mutated_labels(
             writer.writerow(
                 {
                     "pair_id": "pair_1",
-                    "mutation_type": "wrong_meal_source_sign",
+                    "mutation_type": "reversed_gp_dynamics",
                     "known_label": "baseline",
                     "judge_model": "ollama:gpt-oss:20b",
                     "repetition": repetition,
@@ -129,7 +129,7 @@ def test_analysis_accepts_baseline_mutated_labels(
             writer.writerow(
                 {
                     "pair_id": "pair_1",
-                    "mutation_type": "wrong_meal_source_sign",
+                    "mutation_type": "reversed_gp_dynamics",
                     "known_label": "mutated",
                     "judge_model": "ollama:gpt-oss:20b",
                     "repetition": repetition,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import copy
 import hashlib
 import json
@@ -27,28 +26,6 @@ def _component(payload: dict, name: str) -> tuple[dict, str]:
     raise ValueError(f"candidate has no component named {name}")
 
 
-def _names(expression: str) -> set[str]:
-    return {
-        node.id
-        for node in ast.walk(ast.parse(expression, mode="eval"))
-        if isinstance(node, ast.Name)
-    }
-
-
-def _negate_symbol(expression: str, symbol: str) -> str:
-    class Negate(ast.NodeTransformer):
-        def visit_Name(self, node: ast.Name) -> ast.expr:
-            if node.id != symbol:
-                return node
-            return ast.copy_location(
-                ast.UnaryOp(op=ast.USub(), operand=ast.Name(id=symbol, ctx=node.ctx)),
-                node,
-            )
-
-    changed = Negate().visit(ast.parse(expression, mode="eval"))
-    return ast.unparse(ast.fix_missing_locations(changed))
-
-
 def _unique_name(payload: dict, stem: str) -> str:
     occupied = {
         *(item["name"] for item in payload["states"]),
@@ -67,19 +44,17 @@ def _mutations(candidate: CandidateModel) -> list[tuple[str, CandidateModel]]:
     base = candidate.model_dump(mode="json")
     glucose, expression_key = _component(base, "Gp")
     glucose_expression = glucose[expression_key]
-    if "meal_event_g" not in _names(glucose_expression):
-        raise ValueError("selected candidate has no meal_event_g pathway to perturb")
     mutations: list[tuple[str, dict]] = []
 
-    wrong_sign = copy.deepcopy(base)
-    row, key = _component(wrong_sign, "Gp")
-    row[key] = _negate_symbol(row[key], "meal_event_g")
-    mutations.append(("wrong_meal_source_sign", wrong_sign))
+    reversed_balance = copy.deepcopy(base)
+    row, key = _component(reversed_balance, "Gp")
+    row[key] = f"-({row[key]})"
+    mutations.append(("reversed_gp_dynamics", reversed_balance))
 
-    duplicated_source = copy.deepcopy(base)
-    row, key = _component(duplicated_source, "Gp")
-    row[key] = f"({row[key]}) + meal_event_g"
-    mutations.append(("duplicated_meal_source", duplicated_source))
+    duplicated_balance = copy.deepcopy(base)
+    row, key = _component(duplicated_balance, "Gp")
+    row[key] = f"({row[key]}) + ({glucose_expression})"
+    mutations.append(("duplicated_gp_balance", duplicated_balance))
 
     disconnected = copy.deepcopy(base)
     disconnected["processes"].append(

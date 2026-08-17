@@ -15,8 +15,9 @@ models are runtime-valid but are not assumed to be scientifically correct.
 
 Each of the five selected candidates receives four deterministic-valid changes:
 
-1. reverse the public meal-input sign in the `Gp` balance;
-2. duplicate the public meal source in the `Gp` balance;
+1. reverse the complete proposed `Gp` dynamics, swapping all claimed sources
+   and sinks;
+2. duplicate the complete proposed `Gp` balance, double-counting every flux;
 3. add a plausibly named but disconnected meal mechanism; and
 4. add an unjustified one-sided latent accumulator.
 
