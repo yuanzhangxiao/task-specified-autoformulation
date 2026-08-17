@@ -33,8 +33,8 @@ from autoformalism.llm.ollama import OllamaClient, _ollama_compatible_schema
 from autoformalism.llm.openai_responses import OpenAIResponsesClient
 from autoformalism.schemas import (
     CandidateModel,
-    JudgeResult,
     ProposerCandidateV2,
+    ScientificJudgeResult,
     enrich_proposal_v2,
 )
 
@@ -107,20 +107,19 @@ def _candidate() -> CandidateModel:
     )
 
 
-def _judge() -> JudgeResult:
-    return JudgeResult.model_validate(
+def _judge() -> ScientificJudgeResult:
+    return ScientificJudgeResult.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "hard_red_flags": [],
             "category_scores": {
-                "task_output_coverage": 1.0,
-                "mechanism_state_adequacy": 1.0,
-                "mathematical_completeness": 1.0,
-                "data_causal_consistency": 1.0,
-                "constraint_compliance": 1.0,
-                "parsimony_interpretability": 1.0,
+                "mechanistic_coherence": 1.0,
+                "source_sink_balance_semantics": 1.0,
+                "dynamic_plausibility": 1.0,
+                "mechanism_coupling_task_sufficiency": 1.0,
+                "nonredundancy_accounting": 1.0,
+                "latent_state_complexity_justification": 1.0,
             },
-            "aggregate_score": 1.0,
             "missing_requirements": [],
             "actionable_edits": [],
         }
@@ -551,7 +550,7 @@ def test_gemini_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
 
 
 def test_gemini_production_schemas_are_flat_and_locally_compatible() -> None:
-    for model in (ProposerCandidateV2, JudgeResult):
+    for model in (ProposerCandidateV2, ScientificJudgeResult):
         schema = _gemini_provider_schema(model)
         encoded = json.dumps(schema)
         assert "$defs" not in encoded
@@ -619,7 +618,7 @@ def test_ollama_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
     assert result.latency_ms == 7.0
     assert calls[0][0] == "http://127.0.0.1:11434/api/chat"
     assert calls[0][1]["format"] == _ollama_compatible_schema(
-        JudgeResult.model_json_schema(mode="validation")
+        ScientificJudgeResult.model_json_schema(mode="validation")
     )
     assert calls[0][1]["stream"] is False
     assert calls[0][1]["think"] == "low"

@@ -30,8 +30,8 @@ from autoformalism.llm.models import (
 )
 from autoformalism.schemas import (
     CandidateModel,
-    JudgeResult,
     ProposerCandidateV2,
+    ScientificJudgeResult,
     enrich_proposal_v2,
 )
 
@@ -121,13 +121,13 @@ class CachedLLMClient(ABC):
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> LLMCallResult[JudgeResult]:
-        """Request or restore a strict judge result."""
+    ) -> LLMCallResult[ScientificJudgeResult]:
+        """Request or restore a strict scientific v2 judge result."""
         return self._structured_call(
             role="judge",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=JudgeResult,
+            response_model=ScientificJudgeResult,
         )
 
     def _structured_call(

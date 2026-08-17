@@ -9,7 +9,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from autoformalism.schemas import JudgeResult
+from autoformalism.schemas import (
+    JudgeResult,
+    ScientificJudgeResult,
+    parse_judge_assessment,
+)
 
 
 @pytest.fixture
@@ -141,3 +145,68 @@ def test_judge_schema_is_openai_structured_output_compatible() -> None:
         "parsimony_interpretability",
     }
     assert category_schema["additionalProperties"] is False
+
+
+@pytest.fixture
+def scientific_judge_payload() -> dict[str, Any]:
+    """Return a complete scientific-only v2 response."""
+    return {
+        "schema_version": "2",
+        "hard_red_flags": [],
+        "category_scores": {
+            "mechanistic_coherence": 0.9,
+            "source_sink_balance_semantics": 0.8,
+            "dynamic_plausibility": 0.7,
+            "mechanism_coupling_task_sufficiency": 0.6,
+            "nonredundancy_accounting": 0.5,
+            "latent_state_complexity_justification": 0.4,
+        },
+        "missing_requirements": [],
+        "actionable_edits": [],
+    }
+
+
+def test_scientific_judge_round_trip_and_runtime_aggregate(
+    scientific_judge_payload: dict[str, Any],
+) -> None:
+    result = ScientificJudgeResult.model_validate(scientific_judge_payload)
+    restored = ScientificJudgeResult.model_validate_json(result.model_dump_json())
+
+    assert restored == result
+    assert restored.aggregate_score == pytest.approx(0.69)
+    assert "aggregate_score" not in restored.model_dump()
+
+
+def test_scientific_judge_rejects_provider_aggregate(
+    scientific_judge_payload: dict[str, Any],
+) -> None:
+    scientific_judge_payload["aggregate_score"] = 1.0
+
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ScientificJudgeResult.model_validate(scientific_judge_payload)
+
+
+def test_scientific_judge_schema_has_only_scientific_categories() -> None:
+    schema = ScientificJudgeResult.model_json_schema(mode="validation")
+    categories = schema["$defs"]["ScientificCategoryScores"]
+
+    assert set(categories["required"]) == {
+        "mechanistic_coherence",
+        "source_sink_balance_semantics",
+        "dynamic_plausibility",
+        "mechanism_coupling_task_sufficiency",
+        "nonredundancy_accounting",
+        "latent_state_complexity_justification",
+    }
+    assert "aggregate_score" not in schema["properties"]
+    assert categories["additionalProperties"] is False
+
+
+def test_checkpoint_parser_accepts_v1_and_v2(
+    judge_payload: dict[str, Any],
+    scientific_judge_payload: dict[str, Any],
+) -> None:
+    assert isinstance(parse_judge_assessment(judge_payload), JudgeResult)
+    assert isinstance(
+        parse_judge_assessment(scientific_judge_payload), ScientificJudgeResult
+    )

@@ -1,0 +1,180 @@
+{
+  "$defs": {
+    "ActionPriority": {
+      "description": "Priority assigned to a requested candidate edit.",
+      "enum": [
+        "required",
+        "recommended",
+        "optional"
+      ],
+      "title": "ActionPriority",
+      "type": "string"
+    },
+    "ActionableEdit": {
+      "additionalProperties": false,
+      "description": "Concrete edit the proposer can apply in a later milestone.",
+      "properties": {
+        "instruction": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "priority": {
+          "$ref": "#/$defs/ActionPriority"
+        },
+        "target": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "instruction",
+        "priority"
+      ],
+      "title": "ActionableEdit",
+      "type": "object"
+    },
+    "CategoryScore": {
+      "additionalProperties": false,
+      "description": "Numeric category assessment with an optional concise justification.",
+      "properties": {
+        "justification": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Justification",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "score"
+      ],
+      "title": "CategoryScore",
+      "type": "object"
+    },
+    "HardRedFlag": {
+      "additionalProperties": false,
+      "description": "Blocking or severe specification violation.",
+      "properties": {
+        "code": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "evidence"
+      ],
+      "title": "HardRedFlag",
+      "type": "object"
+    },
+    "ScientificCategoryScores": {
+      "additionalProperties": false,
+      "description": "Prospective v2 categories restricted to scientific semantics.",
+      "properties": {
+        "dynamic_plausibility": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "latent_state_complexity_justification": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "mechanism_coupling_task_sufficiency": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "mechanistic_coherence": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "nonredundancy_accounting": {
+          "$ref": "#/$defs/CategoryScore"
+        },
+        "source_sink_balance_semantics": {
+          "$ref": "#/$defs/CategoryScore"
+        }
+      },
+      "required": [
+        "mechanistic_coherence",
+        "source_sink_balance_semantics",
+        "dynamic_plausibility",
+        "mechanism_coupling_task_sufficiency",
+        "nonredundancy_accounting",
+        "latent_state_complexity_justification"
+      ],
+      "title": "ScientificCategoryScores",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Scientific-only v2 judge assessment independent of fit metrics.",
+  "properties": {
+    "actionable_edits": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ActionableEdit"
+      },
+      "maxItems": 128,
+      "title": "Actionable Edits",
+      "type": "array"
+    },
+    "category_scores": {
+      "$ref": "#/$defs/ScientificCategoryScores"
+    },
+    "hard_red_flags": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HardRedFlag"
+      },
+      "maxItems": 64,
+      "title": "Hard Red Flags",
+      "type": "array"
+    },
+    "missing_requirements": {
+      "default": [],
+      "items": {
+        "maxLength": 10000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Missing Requirements",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "2",
+      "default": "2",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "category_scores"
+  ],
+  "title": "ScientificJudgeResult",
+  "type": "object"
+}

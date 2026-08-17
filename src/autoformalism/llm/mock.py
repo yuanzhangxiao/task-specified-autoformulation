@@ -7,7 +7,7 @@ from collections import deque
 from typing import Any
 
 from autoformalism.llm.models import LLMCallResult
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 
 
 class MockLLMClient:
@@ -17,7 +17,7 @@ class MockLLMClient:
         self,
         *,
         proposer_responses: list[CandidateModel | dict[str, Any]] | None = None,
-        judge_responses: list[JudgeResult | dict[str, Any]] | None = None,
+        judge_responses: list[ScientificJudgeResult | dict[str, Any]] | None = None,
     ) -> None:
         self._proposer_responses = deque(proposer_responses or [])
         self._judge_responses = deque(judge_responses or [])
@@ -47,7 +47,7 @@ class MockLLMClient:
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> LLMCallResult[JudgeResult]:
+    ) -> LLMCallResult[ScientificJudgeResult]:
         """Return the next validated judge response."""
         if not self._judge_responses:
             raise AssertionError("no mock judge response remains")
@@ -58,7 +58,9 @@ class MockLLMClient:
                 "user_prompt": user_prompt,
             }
         )
-        parsed = JudgeResult.model_validate(self._judge_responses.popleft())
+        parsed = ScientificJudgeResult.model_validate(
+            self._judge_responses.popleft()
+        )
         return self._result("judge", system_prompt, user_prompt, parsed)
 
     @staticmethod
@@ -66,7 +68,7 @@ class MockLLMClient:
         role: str,
         system_prompt: str,
         user_prompt: str,
-        parsed: CandidateModel | JudgeResult,
+        parsed: CandidateModel | ScientificJudgeResult,
     ) -> LLMCallResult[Any]:
         content = "\0".join((role, system_prompt, user_prompt))
         request_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -80,4 +82,3 @@ class MockLLMClient:
             latency_ms=0.0,
             usage=None,
         )
-

@@ -104,9 +104,12 @@ The pipeline is iterative:
    rounds refit at most one conservative reduced support; exhaustive support
    sweeps are reserved for explicit follow-up analysis.
 
-8. A judge LLM evaluates task/specification compliance and returns
-   structured category scores in [0,1] plus advisory red flags and edits.
-   Only deterministic or numerical checks may block a candidate.
+8. A judge LLM evaluates scientific semantics and returns structured category
+   scores in [0,1] plus advisory red flags and edits. The runtime supplies its
+   deterministic validity checks as certified facts, so the judge does not
+   rescore syntax, closure, symbol availability, mappings, causal channel
+   access, parameter bounds, or expression executability. Only deterministic
+   or numerical checks may block a candidate.
 
 9. A beam-search controller chooses candidates for refinement.
 
@@ -126,7 +129,9 @@ The pipeline is iterative:
   prose feedback.
 - Never use Python eval on LLM-generated expressions.
 - Use a restricted AST parser and explicit function whitelist.
-- The judge evaluates task compliance, not trajectory fit.
+- The prospective v2 judge evaluates scientific coherence, balance semantics,
+  dynamic plausibility, mechanism coupling, nonredundancy, and justified
+  complexity—not trajectory fit or deterministic validity.
 - Judge red flags are advisory and never override deterministic validation.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.

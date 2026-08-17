@@ -26,7 +26,12 @@ from autoformalism.fitting import (
 from autoformalism.llm import LLMClient
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.pruning import prune_candidate
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import (
+    CandidateModel,
+    JudgeAssessment,
+    ScientificJudgeResult,
+    parse_judge_assessment,
+)
 from autoformalism.search.checkpoints import CheckpointStore
 from autoformalism.search.models import (
     CandidateRecord,
@@ -36,6 +41,26 @@ from autoformalism.search.models import (
 )
 
 StageCallback = Callable[[str, int | None], None]
+
+_SCIENTIFIC_JUDGE_CATEGORIES = (
+    "mechanistic_coherence",
+    "source_sink_balance_semantics",
+    "dynamic_plausibility",
+    "mechanism_coupling_task_sufficiency",
+    "nonredundancy_accounting",
+    "latent_state_complexity_justification",
+)
+
+_DETERMINISTIC_CERTIFICATIONS = (
+    "response schema is valid",
+    "every state has exactly one governing equation",
+    "every expression symbol is declared or supplied",
+    "target mappings exist",
+    "algebraic definitions are acyclic",
+    "only causally available public channels are used",
+    "parameter declarations and bounds are valid",
+    "restricted expressions are executable",
+)
 
 
 class SearchController:
@@ -252,7 +277,7 @@ class SearchController:
             postfit = self._judge(candidate, "post_fit")
             payload["postfit_judge"] = postfit.model_dump(mode="json")
             stage = self._save_stage(round_index, payload, "postfit_judged")
-        postfit = JudgeResult.model_validate(payload["postfit_judge"])
+        postfit = parse_judge_assessment(payload["postfit_judge"])
 
         if stage == "postfit_judged":
             pruning = prune_candidate(
@@ -285,7 +310,7 @@ class SearchController:
             postpruning = self._judge(pruned_candidate, "post_pruning")
             payload["postpruning_judge"] = postpruning.model_dump(mode="json")
             stage = self._save_stage(round_index, payload, "postpruning_judged")
-        postpruning = JudgeResult.model_validate(payload["postpruning_judge"])
+        postpruning = parse_judge_assessment(payload["postpruning_judge"])
 
         if stage == "postpruning_judged":
             record = CandidateRecord(
@@ -312,20 +337,14 @@ class SearchController:
             return record
         raise RuntimeError(f"unsupported checkpoint stage: {stage}")
 
-    def _judge(self, candidate: CandidateModel, stage: str) -> JudgeResult:
+    def _judge(self, candidate: CandidateModel, stage: str) -> JudgeAssessment:
         if not self._config.use_judge:
-            return JudgeResult.model_validate(
+            return ScientificJudgeResult.model_validate(
                 {
                     "hard_red_flags": [],
-                    "category_scores": {
-                        "task_output_coverage": 0.0,
-                        "mechanism_state_adequacy": 0.0,
-                        "mathematical_completeness": 0.0,
-                        "data_causal_consistency": 0.0,
-                        "constraint_compliance": 0.0,
-                        "parsimony_interpretability": 0.0,
-                    },
-                    "aggregate_score": 0.0,
+                    "category_scores": dict.fromkeys(
+                        _SCIENTIFIC_JUDGE_CATEGORIES, 0.0
+                    ),
                     "missing_requirements": [],
                     "actionable_edits": [],
                 }
@@ -336,6 +355,9 @@ class SearchController:
                 user_prompt=json.dumps(
                     {
                         "stage": stage,
+                        "deterministic_certifications": list(
+                            _DETERMINISTIC_CERTIFICATIONS
+                        ),
                         "candidate": candidate.model_dump(mode="json"),
                     },
                     sort_keys=True,
@@ -343,7 +365,7 @@ class SearchController:
             ).parsed
         except (LLMProviderError, LLMResponseError) as exc:
             message = f"{type(exc).__name__}: {str(exc)[:1000]}"
-            return JudgeResult.model_validate(
+            return ScientificJudgeResult.model_validate(
                 {
                     "hard_red_flags": [
                         {
@@ -353,16 +375,8 @@ class SearchController:
                     ],
                     "category_scores": {
                         name: {"score": 0.0, "justification": message}
-                        for name in (
-                            "task_output_coverage",
-                            "mechanism_state_adequacy",
-                            "mathematical_completeness",
-                            "data_causal_consistency",
-                            "constraint_compliance",
-                            "parsimony_interpretability",
-                        )
+                        for name in _SCIENTIFIC_JUDGE_CATEGORIES
                     },
-                    "aggregate_score": 0.0,
                     "missing_requirements": [
                         "Judge feedback was unavailable; deterministic and "
                         "numerical checks remain authoritative."
@@ -993,10 +1007,10 @@ def _record_from_dict(payload: Mapping[str, Any]) -> CandidateRecord:
         parent_candidate_id=payload["parent_candidate_id"],
         structural_hash=payload["structural_hash"],
         fit=_fit_from_dict(payload["fit"]),
-        postfit_judge=JudgeResult.model_validate(payload["postfit_judge"]),
+        postfit_judge=parse_judge_assessment(payload["postfit_judge"]),
         pruned_candidate=CandidateModel.model_validate(payload["pruned_candidate"]),
         pruned_fit=_fit_from_dict(payload["pruned_fit"]),
-        postpruning_judge=JudgeResult.model_validate(
+        postpruning_judge=parse_judge_assessment(
             payload["postpruning_judge"]
         ),
         pruning_removed_terms=tuple(payload["pruning_removed_terms"]),

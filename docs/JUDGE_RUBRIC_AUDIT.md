@@ -40,23 +40,30 @@ For the zero-call frozen-pool study, the historical aggregate score is retained
 unchanged. Reweighting its cached categories is allowed as a sensitivity
 analysis, but changing category definitions would require new judge calls.
 
-## Recommended prospective rubric
+## Implemented prospective v2 rubric
 
-Do not edit finalized benchmark prompts for retrospective experiments. For a
-future tagged method version:
+New judge calls use schema version 2. Historical version-1 prompt text and
+checkpoint payloads remain supported for retrospective experiments, while a
+runtime amendment explicitly supersedes the old categories for prospective
+calls. The v2 implementation:
 
-1. move all implemented syntax, closure, availability, causality, mapping, and
+1. moves all implemented syntax, closure, availability, causality, mapping, and
    explicit constraint checks exclusively into the deterministic feasibility
    layer;
-2. expose those check results to the judge as facts, not questions;
-3. ask the judge only about mechanistic coherence, plausibility of latent-state
-   roles, unsupported scientific shortcuts, and justification of complexity;
-4. return category scores separately and calibrate them against blinded expert
-   ratings and adversarial pairs;
-5. keep private reference mechanisms and hidden trajectories outside the
-   prompt;
-6. avoid double-counting parsimony if an explicit deterministic complexity
-   penalty is used.
+2. exposes those check results to the judge as certified facts, not questions;
+3. asks the judge only about mechanistic coherence, source/sink balance
+   semantics, dynamic plausibility, mechanism coupling and task sufficiency,
+   nonredundancy/accounting, and latent-state complexity justification;
+4. returns category scores separately and computes the weighted aggregate in
+   deterministic runtime code, so the LLM cannot choose or manipulate it;
+5. keeps private reference mechanisms, hidden trajectories, fit metrics, and
+   test information outside the prompt; and
+6. keeps all scientific red flags advisory.
+
+The six v2 weights are 0.20, 0.20, 0.20, 0.20, 0.10, and 0.10 in the order
+listed above. The resulting score still requires calibration against blinded
+expert ratings and adversarial pairs, and should not be combined with an
+explicit complexity penalty without checking for double counting.
 
 The prospective judge must be evaluated as a measurement instrument: category
 reliability, family sensitivity, adversarial preference accuracy, expert

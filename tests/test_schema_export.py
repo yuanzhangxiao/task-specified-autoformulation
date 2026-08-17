@@ -8,6 +8,7 @@ from autoformalism.schemas import (
     JudgeResult,
     ProposerCandidate,
     ProposerCandidateV2,
+    ScientificJudgeResult,
     export_json_schemas,
 )
 
@@ -23,6 +24,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "judge.schema.json",
         "proposer-candidate.schema.json",
         "proposer-candidate-v2.schema.json",
+        "scientific-judge-v2.schema.json",
     }
     assert {path.name: path.read_bytes() for path in second_paths} == first_contents
 
@@ -32,16 +34,23 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     proposer_v2_schema = json.loads(
         first_contents["proposer-candidate-v2.schema.json"]
     )
+    scientific_judge_schema = json.loads(
+        first_contents["scientific-judge-v2.schema.json"]
+    )
     assert candidate_schema == CandidateModel.model_json_schema(mode="validation")
     assert judge_schema == JudgeResult.model_json_schema(mode="validation")
     assert proposer_schema == ProposerCandidate.model_json_schema(mode="validation")
     assert proposer_v2_schema == ProposerCandidateV2.model_json_schema(
         mode="validation"
     )
+    assert scientific_judge_schema == ScientificJudgeResult.model_json_schema(
+        mode="validation"
+    )
     assert candidate_schema["additionalProperties"] is False
     assert judge_schema["additionalProperties"] is False
     assert proposer_schema["additionalProperties"] is False
     assert proposer_v2_schema["additionalProperties"] is False
+    assert scientific_judge_schema["additionalProperties"] is False
 
 
 def test_checked_in_schemas_match_models() -> None:
@@ -53,6 +62,11 @@ def test_checked_in_schemas_match_models() -> None:
     assert json.loads(
         (schema_directory / "judge.schema.json").read_text(encoding="utf-8")
     ) == JudgeResult.model_json_schema(mode="validation")
+    assert json.loads(
+        (schema_directory / "scientific-judge-v2.schema.json").read_text(
+            encoding="utf-8"
+        )
+    ) == ScientificJudgeResult.model_json_schema(mode="validation")
     assert json.loads(
         (schema_directory / "proposer-candidate.schema.json").read_text(
             encoding="utf-8"

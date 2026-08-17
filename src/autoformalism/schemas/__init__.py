@@ -23,7 +23,10 @@ from autoformalism.schemas.judge import (
     ActionPriority,
     CategoryScore,
     HardRedFlag,
+    JudgeAssessment,
     JudgeResult,
+    ScientificJudgeResult,
+    parse_judge_assessment,
 )
 from autoformalism.schemas.proposal import (
     EmbeddedConstraint,
@@ -52,6 +55,7 @@ __all__ = [
     "EmbeddedConstraint",
     "HardRedFlag",
     "InitialConditionSpec",
+    "JudgeAssessment",
     "JudgeResult",
     "ObservationMapping",
     "ParameterScope",
@@ -67,6 +71,7 @@ __all__ = [
     "ProposedStateV2",
     "ProposerCandidate",
     "ProposerCandidateV2",
+    "ScientificJudgeResult",
     "StateEquation",
     "StateKind",
     "StateSpec",
@@ -74,4 +79,5 @@ __all__ = [
     "enrich_proposal",
     "enrich_proposal_v2",
     "export_json_schemas",
+    "parse_judge_assessment",
 ]

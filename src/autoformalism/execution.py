@@ -34,7 +34,7 @@ from autoformalism.llm import (
     create_llm_client,
 )
 from autoformalism.pruning import PruningConfig
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 from autoformalism.search import FinalEvaluation, SearchConfig, SearchController
 
 _CONTROLLER_PROMPT = """
@@ -81,6 +81,11 @@ symbol contract below or a state, process, or parameter declared in this proposa
 """.strip()
 
 _JUDGE_CONTROLLER_PROMPT = """
+This runtime uses the prospective scientific judge rubric, schema version 2.
+Any earlier version-1 category names, weights, validity caps, or response example
+in the benchmark judge prompt are historical and superseded by the response
+schema and instructions below.
+
 The candidate is the canonical runtime model, not the smaller proposer schema.
 Read dynamics from `state_equations`, target outputs from `observation_mappings`,
 instantaneous definitions from `processes`, and initialization rules from
@@ -88,13 +93,23 @@ instantaneous definitions from `processes`, and initialization rules from
 lagged targets, and time are defined by the exact runtime symbol contract and do
 not require governing equations.
 
-Before this call, deterministic validation has already certified that every state
-has an equation, every expression symbol is declared or supplied, target mappings
-exist, algebraic definitions are acyclic, and the causal data-access protocol is
-respected. Do not contradict those certified facts. Evaluate scientific mechanism
-coverage, plausibility, parsimony, and interpretability. Red flags are advisory
-feedback only; provide exact equation-level evidence for each one. Return category
-scores and an aggregate score even when red flags are present.
+The request contains a list of deterministic certifications. Treat those facts as
+authoritative and do not rescore syntax, closure, symbol availability, mappings,
+causal channel access, parameter bounds, or runtime executability. Evaluate only:
+mechanistic coherence; source/sink and balance semantics; dynamic plausibility;
+mechanism coupling and task sufficiency; nonredundancy and accounting; and the
+scientific justification of latent states and complexity.
+
+Look specifically for fixed sign mistakes, duplicated fluxes, disconnected
+task-critical mechanisms, one-signed accumulators without scientific
+justification, missing relaxation or feedback, conflicting representations of
+one mechanism, and latent states without a necessary interpretable role. Assess
+dimensional plausibility only when the supplied units are informative; otherwise
+state that unit evidence is insufficient. Do not infer fit quality, hidden
+trajectories, reference equations, or private benchmark facts. Red flags are
+advisory and must cite exact candidate equations or dependencies. The runtime
+computes the weighted aggregate deterministically; return only category scores,
+red flags, missing scientific requirements, and actionable scientific edits.
 """.strip()
 
 
@@ -901,19 +916,18 @@ def _initial_range(values: np.ndarray) -> dict[str, float]:
     return {"lower": lower - padding, "upper": upper + padding}
 
 
-def _mock_judge() -> JudgeResult:
-    return JudgeResult.model_validate(
+def _mock_judge() -> ScientificJudgeResult:
+    return ScientificJudgeResult.model_validate(
         {
             "hard_red_flags": [],
             "category_scores": {
-                "task_output_coverage": 1.0,
-                "mechanism_state_adequacy": 1.0,
-                "mathematical_completeness": 1.0,
-                "data_causal_consistency": 1.0,
-                "constraint_compliance": 1.0,
-                "parsimony_interpretability": 1.0,
+                "mechanistic_coherence": 1.0,
+                "source_sink_balance_semantics": 1.0,
+                "dynamic_plausibility": 1.0,
+                "mechanism_coupling_task_sufficiency": 1.0,
+                "nonredundancy_accounting": 1.0,
+                "latent_state_complexity_justification": 1.0,
             },
-            "aggregate_score": 1.0,
             "missing_requirements": [],
             "actionable_edits": [],
         }

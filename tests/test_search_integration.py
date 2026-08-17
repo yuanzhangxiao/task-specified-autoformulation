@@ -14,7 +14,7 @@ from autoformalism.fitting import FitConfig
 from autoformalism.llm import MockLLMClient
 from autoformalism.llm.exceptions import LLMResponseError
 from autoformalism.pruning import PruningConfig
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 from autoformalism.search import CheckpointError, SearchConfig, SearchController
 
 
@@ -63,19 +63,19 @@ def _candidate(
     )
 
 
-def _judge(score: float = 1.0) -> JudgeResult:
-    return JudgeResult.model_validate(
+def _judge(score: float = 1.0) -> ScientificJudgeResult:
+    return ScientificJudgeResult.model_validate(
         {
+            "schema_version": "2",
             "hard_red_flags": [],
             "category_scores": {
-                "task_output_coverage": score,
-                "mechanism_state_adequacy": score,
-                "mathematical_completeness": score,
-                "data_causal_consistency": score,
-                "constraint_compliance": score,
-                "parsimony_interpretability": score,
+                "mechanistic_coherence": score,
+                "source_sink_balance_semantics": score,
+                "dynamic_plausibility": score,
+                "mechanism_coupling_task_sufficiency": score,
+                "nonredundancy_accounting": score,
+                "latent_state_complexity_justification": score,
             },
-            "aggregate_score": score,
             "missing_requirements": [],
             "actionable_edits": [],
         }
@@ -167,6 +167,28 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
     assert len(client.calls) == calls_after_first_run
     assert [call["role"] for call in client.calls].count("proposer") == 2
     assert [call["role"] for call in client.calls].count("judge") == 6
+
+    judge_request = json.loads(
+        next(
+            call["user_prompt"]
+            for call in client.calls
+            if call["role"] == "judge"
+        )
+    )
+    assert judge_request["deterministic_certifications"] == [
+        "response schema is valid",
+        "every state has exactly one governing equation",
+        "every expression symbol is declared or supplied",
+        "target mappings exist",
+        "algebraic definitions are acyclic",
+        "only causally available public channels are used",
+        "parameter declarations and bounds are valid",
+        "restricted expressions are executable",
+    ]
+    assert judge_request["candidate"]["candidate_id"] == "candidate_one"
+    assert "fit" not in judge_request
+    assert "validation" not in judge_request
+    assert "test" not in judge_request
 
     second_proposal_prompt = [
         call["user_prompt"]
@@ -272,8 +294,9 @@ def test_llm_red_flags_are_advisory_and_do_not_block_fitted_candidate(
         "-decay * x",
         (("decay", 0.2, 1.0),),
     )
-    flagged = JudgeResult.model_validate(
+    flagged = ScientificJudgeResult.model_validate(
         {
+            "schema_version": "2",
             "hard_red_flags": [
                 {
                     "code": "subjective_mechanism_concern",
@@ -281,14 +304,13 @@ def test_llm_red_flags_are_advisory_and_do_not_block_fitted_candidate(
                 }
             ],
             "category_scores": {
-                "task_output_coverage": 0.2,
-                "mechanism_state_adequacy": 0.2,
-                "mathematical_completeness": 0.2,
-                "data_causal_consistency": 0.2,
-                "constraint_compliance": 0.2,
-                "parsimony_interpretability": 0.2,
+                "mechanistic_coherence": 0.2,
+                "source_sink_balance_semantics": 0.2,
+                "dynamic_plausibility": 0.2,
+                "mechanism_coupling_task_sufficiency": 0.2,
+                "nonredundancy_accounting": 0.2,
+                "latent_state_complexity_justification": 0.2,
             },
-            "aggregate_score": 0.2,
             "missing_requirements": ["More mechanistic detail may help."],
             "actionable_edits": [],
         }

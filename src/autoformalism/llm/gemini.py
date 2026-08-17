@@ -152,8 +152,8 @@ def _gemini_provider_schema(response_model: type[StructuredT]) -> object:
     """Return a low-complexity Gemini schema for the two production contracts."""
     if response_model.__name__ == "ProposerCandidateV2":
         return _compact_proposer_schema()
-    if response_model.__name__ == "JudgeResult":
-        return _compact_judge_schema()
+    if response_model.__name__ == "ScientificJudgeResult":
+        return _compact_scientific_judge_schema()
     return _gemini_compatible_schema(
         response_model.model_json_schema(mode="validation")
     )
@@ -231,7 +231,7 @@ def _compact_proposer_schema() -> dict[str, object]:
     }
 
 
-def _compact_judge_schema() -> dict[str, object]:
+def _compact_scientific_judge_schema() -> dict[str, object]:
     text = {"type": "string"}
     score = {"type": "number", "minimum": 0.0, "maximum": 1.0}
     category = {
@@ -241,12 +241,12 @@ def _compact_judge_schema() -> dict[str, object]:
         "additionalProperties": False,
     }
     categories = (
-        "task_output_coverage",
-        "mechanism_state_adequacy",
-        "mathematical_completeness",
-        "data_causal_consistency",
-        "constraint_compliance",
-        "parsimony_interpretability",
+        "mechanistic_coherence",
+        "source_sink_balance_semantics",
+        "dynamic_plausibility",
+        "mechanism_coupling_task_sufficiency",
+        "nonredundancy_accounting",
+        "latent_state_complexity_justification",
     )
     red_flag = {
         "type": "object",
@@ -270,7 +270,7 @@ def _compact_judge_schema() -> dict[str, object]:
     return {
         "type": "object",
         "properties": {
-            "schema_version": {"type": "string", "enum": ["1"]},
+            "schema_version": {"type": "string", "enum": ["2"]},
             "hard_red_flags": {"type": "array", "items": red_flag},
             "category_scores": {
                 "type": "object",
@@ -278,10 +278,9 @@ def _compact_judge_schema() -> dict[str, object]:
                 "required": list(categories),
                 "additionalProperties": False,
             },
-            "aggregate_score": score,
             "missing_requirements": {"type": "array", "items": text},
             "actionable_edits": {"type": "array", "items": edit},
         },
-        "required": ["category_scores", "aggregate_score"],
+        "required": ["category_scores"],
         "additionalProperties": False,
     }

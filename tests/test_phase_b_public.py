@@ -20,7 +20,7 @@ from autoformalism.benchmarks import (
 from autoformalism.config import DataConfig
 from autoformalism.data import BenchmarkLoader, FrozenTestAccess, SplitName
 from autoformalism.data.exceptions import ChannelRoleError, DataAlignmentError
-from autoformalism.schemas import JudgeResult
+from autoformalism.schemas import ScientificJudgeResult
 
 DATA_ROOT = Path("data_raw")
 
@@ -67,7 +67,7 @@ def test_all_cells_share_one_judge_prompt() -> None:
         r"Return strict JSON with exactly this shape:\n(\{.*?\n\})", prompt, re.S
     )
     assert match is not None
-    JudgeResult.model_validate_json(match.group(1))
+    ScientificJudgeResult.model_validate_json(match.group(1))
 
 
 def test_named_t1_uses_natural_task_language_and_units() -> None:

@@ -186,18 +186,21 @@ class ProposalContext(BaseModel):
     selected_history: list[CandidateSummary]
     allowed_symbols: AllowedSymbolTable
 
-class JudgeResult(BaseModel):
-    category_scores: CategoryScores  # six fixed rubric fields in [0, 1]
-    overall_score: confloat(ge=0, le=1)
+class ScientificJudgeResult(BaseModel):
+    schema_version: Literal["2"]
+    category_scores: ScientificCategoryScores
+    # aggregate_score is computed by the runtime, not emitted by the LLM
     feedback: list[JudgeFeedback]
 ```
 
-`CategoryScores` has explicit fields for task/output coverage, mechanism/state
-adequacy, mathematical completeness, data/causal consistency, constraint
-compliance, and parsimony/interpretability. The fixed object matches every
-benchmark judge prompt, prevents invented or omitted categories, and avoids
-arbitrary-key JSON Schema features unsupported by strict hosted-provider
-structured outputs.
+`ScientificCategoryScores` has explicit fields for mechanistic coherence,
+source/sink balance semantics, dynamic plausibility, mechanism coupling and
+task sufficiency, nonredundancy/accounting, and latent-state complexity
+justification. The runtime computes the weighted aggregate from those fields.
+The fixed object prevents invented or omitted categories and avoids arbitrary-key
+JSON Schema features unsupported by strict hosted-provider structured outputs.
+Historical schema-v1 judge results remain loadable for checkpoint compatibility,
+but no new calls request the overlapping task-compliance rubric.
 
 The provider wrapper hashes model name, provider settings, schema,
 prompt, and request payload. It atomically reads/writes the response
@@ -213,9 +216,10 @@ structural novelty failures end the logical proposal round and enter ordinary
 search feedback rather than contract repair.
 Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
-raw full history. The judge sees the benchmark judge prompt and
-candidate structure, but no numerical fit metric; deterministic code
-owns fit scoring and all blocking validity checks. LLM category scores,
+raw full history. The judge sees the benchmark judge prompt, certified
+deterministic validity facts, and candidate structure, but no numerical fit
+metric; deterministic code owns fit scoring and all blocking validity checks.
+The judge is asked only for scientific semantic assessment. LLM category scores,
 red flags, missing requirements, and edits are advisory. They are retained
 for feedback and score tie-breaking but cannot reject a deterministically
 valid, successfully fitted candidate.

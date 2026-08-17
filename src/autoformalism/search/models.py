@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from autoformalism.fitting import EvaluationMetrics, FitConfig, FitResult
 from autoformalism.pruning import PruningConfig
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import CandidateModel, JudgeAssessment
 
 
 class SearchConfig(BaseModel):
@@ -42,10 +42,10 @@ class CandidateRecord:
     parent_candidate_id: str | None
     structural_hash: str
     fit: FitResult
-    postfit_judge: JudgeResult
+    postfit_judge: JudgeAssessment
     pruned_candidate: CandidateModel
     pruned_fit: FitResult
-    postpruning_judge: JudgeResult
+    postpruning_judge: JudgeAssessment
     pruning_removed_terms: tuple[str, ...]
     pruning_removed_parameters: tuple[str, ...]
     pruning_contributions: dict[str, float]

@@ -7,7 +7,7 @@ from typing import Generic, Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from autoformalism.schemas import CandidateModel, JudgeResult
+from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 
 StructuredT = TypeVar("StructuredT", bound=BaseModel)
 
@@ -66,6 +66,6 @@ class LLMClient(Protocol):
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> LLMCallResult[JudgeResult]:
-        """Request one assessment conforming to ``JudgeResult``."""
+    ) -> LLMCallResult[ScientificJudgeResult]:
+        """Request one assessment conforming to the scientific v2 schema."""
         ...
