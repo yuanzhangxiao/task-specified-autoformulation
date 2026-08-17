@@ -262,6 +262,12 @@ structural family, repair accounting, and soft-constraint violations. This
 diagnostic remains development-only, performs no judge calls, and does not open
 test data.
 
+On Delta, the Slurm script derives the standard project, work, checkout,
+virtual-environment, public-data, container, and model paths from
+`SLURM_JOB_USER`. Login-shell exports are optional overrides, not required job
+inputs, so a disconnected or expired login session does not affect an already
+submitted job.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

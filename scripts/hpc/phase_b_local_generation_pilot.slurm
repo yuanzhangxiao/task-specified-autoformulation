@@ -12,13 +12,15 @@
 
 set -euo pipefail
 
-: "${AF_PROJECT:?set AF_PROJECT to persistent project storage}"
-: "${AF_WORK:?set AF_WORK to active work storage}"
-: "${AF_REPO_ROOT:?set AF_REPO_ROOT to the repository checkout}"
-: "${AF_PYTHON:?set AF_PYTHON to the project virtual-environment Python}"
-: "${AF_PUBLIC_DATA_ROOT:?set AF_PUBLIC_DATA_ROOT to the released suite root}"
-: "${AF_OLLAMA_IMAGE:?set AF_OLLAMA_IMAGE to a pinned Ollama SIF image}"
-: "${AF_OLLAMA_MODELS:?set AF_OLLAMA_MODELS to the persistent model directory}"
+readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
+: "${af_user:?cannot determine the Slurm user name}"
+: "${AF_PROJECT:=/projects/bibo/${af_user}}"
+: "${AF_WORK:=/work/hdd/bibo/${af_user}}"
+: "${AF_REPO_ROOT:=${AF_PROJECT}/repos/autoformalism-v21}"
+: "${AF_PYTHON:=${AF_PROJECT}/venvs/autoformalism-v21/bin/python}"
+: "${AF_PUBLIC_DATA_ROOT:=${AF_PROJECT}/phase_b/inputs/public}"
+: "${AF_OLLAMA_IMAGE:=${AF_PROJECT}/containers/ollama.sif}"
+: "${AF_OLLAMA_MODELS:=${AF_PROJECT}/ollama-models}"
 : "${AF_LOCAL_MODEL:=gpt-oss:20b}"
 : "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-diagnostic-v2}"
 : "${AF_SEED:=${SLURM_ARRAY_TASK_ID:-0}}"
