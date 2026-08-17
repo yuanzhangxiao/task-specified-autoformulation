@@ -314,8 +314,11 @@ states/seeds, configuration, code/config/data/prompt fingerprints,
 parent IDs, cache keys, fit results, diagnostics, and controller beam.
 Resume verifies fingerprints and skips only complete matching stages.
 
-Beam ranking uses an explicit tuple or configured scalar over
-validation fit, judge compliance, parsimony, and numerical reliability.
+Beam ranking uses either the historical validation-first tuple or the configured
+normalized weighted scalar
+`z(log(validation_nmse)) + lambda_judge * z(-log(judge_score + epsilon))`.
+Normalization uses only the current development candidate pool. The frozen
+selection records both normalized components and the resulting objective.
 Invalid candidates cannot enter the beam. Diversity/deduplication is
 based on canonical candidate structure, not prose.
 The bounded feedback payload retains the most recent rejected candidate when the

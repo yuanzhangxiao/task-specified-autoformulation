@@ -65,14 +65,16 @@ signs, dynamic memory, mechanism identities, hidden trajectories, and private
 intervention responses. This is a scientific evaluation endpoint and must
 never influence search or model selection.
 
-## Selection objectives under study
+## Selection objectives
 
 All objective components are development-only. Lower values are preferred.
 
-1. **Validation only:** causal validation NMSE, judge score as a deterministic
-   tie-break only. This is the production behavior.
+1. **Validation only:** causal validation NMSE, with judge score as a
+   deterministic tie-break. This remains the default for historical
+   reproducibility.
 2. **Normalized weighted sum:** robustly standardized log validation NMSE,
-   negative-log judge penalty, and log post-pruning term count.
+   plus a weighted negative-log judge penalty. This is available to the online
+   beam and final selector as `normalized_weighted_sum`.
 3. **Pareto compromise:** discard candidates dominated simultaneously in
    validation NMSE, judge penalty, and term count, then choose a normalized
    compromise on the frontier.
@@ -84,17 +86,19 @@ The normalized weighted objective is
 
 ```text
 z(log(validation_nmse))
-  + lambda_judge * z(-log(judge_score + 0.05))
-  + lambda_sparse * z(log(1 + additive_term_count)).
+  + lambda_judge * z(-log(judge_score + epsilon)).
 ```
 
 Here `z` uses the within-run median and interquartile range, with the observed
 range and then one as deterministic zero-spread fallbacks. This removes units
 without using information from another split.
 
-Pruning and sparsity-aware selection remain distinct. Pruning removes weak
-terms within a candidate using fixed development-only rules. The sparsity term
-compares the post-pruning complexities of different candidates.
+The runtime records the policy, raw judge score, normalized components, and
+final scalar objective in the frozen selection. `validation_only` records the
+same diagnostics but ranks on raw validation NMSE. Weighted selection requires
+the judge to be enabled. Pruning remains distinct and no additional complexity
+penalty is included in this first prospective online objective, avoiding double
+counting with the judge's complexity-justification category.
 
 ## Hyperparameter discipline
 

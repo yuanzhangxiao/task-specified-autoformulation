@@ -262,6 +262,25 @@ structural family, repair accounting, and soft-constraint violations. This
 diagnostic remains development-only, performs no judge calls, and does not open
 test data.
 
+For the prospective scientific-judge weighted-objective pilot, use a new output
+root and export the complete configuration into the submitted jobs. Judge calls
+increase runtime, so request two hours:
+
+```bash
+export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-weighted-v1"
+export AF_ENABLE_JUDGE=true
+export AF_SELECTION_POLICY=normalized_weighted_sum
+export AF_JUDGE_WEIGHT=0.25
+mkdir -p logs "$AF_OUTPUT_ROOT"
+sbatch --account=bibo-delta-gpu --partition=gpuA40x4 --time=02:00:00 \
+  --array=0-4 --export=ALL \
+  scripts/hpc/phase_b_local_generation_pilot.slurm
+```
+
+The job script validates that weighted selection cannot accidentally run with
+the judge disabled. The frozen selection and summary record the policy, weight,
+raw judge score, normalized fit and judge components, and combined objective.
+
 On Delta, the Slurm script derives the standard project, work, checkout,
 virtual-environment, public-data, container, and model paths from
 `SLURM_JOB_USER`. Login-shell exports are optional overrides, not required job

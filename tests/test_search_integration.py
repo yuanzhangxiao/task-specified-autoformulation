@@ -16,6 +16,7 @@ from autoformalism.llm.exceptions import LLMResponseError
 from autoformalism.pruning import PruningConfig
 from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 from autoformalism.search import CheckpointError, SearchConfig, SearchController
+from autoformalism.search.controller import _beam
 
 
 def _candidate(
@@ -208,6 +209,37 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
     assert "test_metrics" not in second_proposal_prompt
     assert "test_normalized_mse" not in second_proposal_prompt
     assert second.parent_candidate_id == first.candidate_id
+
+
+def test_weighted_selection_can_trade_validation_fit_for_scientific_score(
+    tmp_path: Path,
+) -> None:
+    best_fit = _candidate("best_fit", "-0.6 * x", ())
+    better_science = _candidate(
+        "better_science", "-0.55 * x", (), parent="best_fit"
+    )
+    client = MockLLMClient(
+        proposer_responses=[best_fit, better_science],
+        judge_responses=[_judge(0.1)] * 3 + [_judge(0.9)] * 3,
+    )
+    validation_config = _config(tmp_path / "weighted", 2).model_copy(
+        update={"stagnation_iterations": 3}
+    )
+    controller = _controller(client, validation_config)
+    controller.run()
+    records = controller._completed_records()
+
+    validation_selected = _beam(records, 1, validation_config)[0]
+    weighted_config = validation_config.model_copy(
+        update={
+            "selection_policy": "normalized_weighted_sum",
+            "judge_weight": 2.0,
+        }
+    )
+    weighted_selected = _beam(records, 1, weighted_config)[0]
+
+    assert validation_selected.candidate.candidate_id == "best_fit"
+    assert weighted_selected.candidate.candidate_id == "better_science"
 
 
 def test_development_only_search_never_calls_test_loader(tmp_path: Path) -> None:

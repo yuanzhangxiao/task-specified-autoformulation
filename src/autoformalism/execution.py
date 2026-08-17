@@ -148,6 +148,9 @@ class ExecutionArguments:
     ollama_temperature: float = 0.0
     ollama_seed: int | None = None
     stagnation_iterations: int | None = None
+    selection_policy: str = "validation_only"
+    judge_weight: float = 0.25
+    judge_score_epsilon: float = 0.05
 
 
 class _RoleClient:
@@ -191,6 +194,27 @@ def build_experiment_parser(
     )
     parser.add_argument("--iteration-budget", type=int, default=5)
     parser.add_argument("--beam-size", type=int, default=2)
+    parser.add_argument(
+        "--selection-policy",
+        choices=("validation_only", "normalized_weighted_sum"),
+        default="validation_only",
+        help=(
+            "candidate ranking policy; weighted selection combines robustly "
+            "normalized log validation NMSE and negative-log judge score"
+        ),
+    )
+    parser.add_argument(
+        "--judge-weight",
+        type=float,
+        default=0.25,
+        help="nonnegative judge-penalty weight for normalized weighted selection",
+    )
+    parser.add_argument(
+        "--judge-score-epsilon",
+        type=float,
+        default=0.05,
+        help="positive guard added inside the negative-log judge penalty",
+    )
     parser.add_argument(
         "--llm-timeout-seconds",
         type=float,
@@ -323,6 +347,12 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--iteration-budget must be at least 1")
     if namespace.beam_size < 1:
         raise SystemExit("--beam-size must be at least 1")
+    if namespace.judge_weight < 0.0:
+        raise SystemExit("--judge-weight must be nonnegative")
+    if namespace.judge_score_epsilon <= 0.0:
+        raise SystemExit("--judge-score-epsilon must be positive")
+    if namespace.selection_policy == "normalized_weighted_sum" and namespace.no_judge:
+        raise SystemExit("--selection-policy normalized_weighted_sum requires judge")
     if namespace.llm_timeout_seconds <= 0:
         raise SystemExit("--llm-timeout-seconds must be positive")
     if namespace.llm_max_output_tokens < 128:
@@ -388,6 +418,9 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         ollama_temperature=namespace.ollama_temperature,
         ollama_seed=namespace.ollama_seed,
         stagnation_iterations=namespace.stagnation_iterations,
+        selection_policy=namespace.selection_policy,
+        judge_weight=namespace.judge_weight,
+        judge_score_epsilon=namespace.judge_score_epsilon,
     )
 
 
@@ -418,6 +451,9 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         ),
         "iteration_budget": arguments.iteration_budget,
         "beam_size": arguments.beam_size,
+        "selection_policy": arguments.selection_policy,
+        "judge_weight": arguments.judge_weight,
+        "judge_score_epsilon": arguments.judge_score_epsilon,
         "llm_timeout_seconds": arguments.llm_timeout_seconds,
         "llm_max_output_tokens": arguments.llm_max_output_tokens,
         "fit_starts": arguments.fit_starts,
@@ -480,6 +516,9 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         validation_mse_target=0.0,
         cheap_prefit_judge=False,
         use_judge=arguments.use_judge,
+        selection_policy=arguments.selection_policy,
+        judge_weight=arguments.judge_weight,
+        judge_score_epsilon=arguments.judge_score_epsilon,
         evaluate_test=not arguments.development_only,
         proposer_system_prompt=(
             f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
@@ -953,6 +992,15 @@ def _result_summary(
         "selection_hash": result.frozen_selection.selection_hash,
         "selected_candidate": result.frozen_selection.candidate.model_dump(mode="json"),
         "selection_validation_normalized_mse": (result.frozen_selection.validation_mse),
+        "selection_policy": result.frozen_selection.selection_policy,
+        "selection_objective": result.frozen_selection.selection_objective,
+        "selection_normalized_log_validation": (
+            result.frozen_selection.normalized_log_validation
+        ),
+        "selection_normalized_judge_penalty": (
+            result.frozen_selection.normalized_judge_penalty
+        ),
+        "selection_judge_score": result.frozen_selection.judge_score,
         "final_global_parameters": dict(result.final_fit.global_parameters),
         "final_training_normalized_mse": (
             result.final_fit.training_metrics.normalized_mse

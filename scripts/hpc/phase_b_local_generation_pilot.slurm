@@ -24,6 +24,19 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_LOCAL_MODEL:=gpt-oss:20b}"
 : "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-diagnostic-v2}"
 : "${AF_SEED:=${SLURM_ARRAY_TASK_ID:-0}}"
+: "${AF_SELECTION_POLICY:=validation_only}"
+: "${AF_JUDGE_WEIGHT:=0.25}"
+: "${AF_ENABLE_JUDGE:=false}"
+
+judge_arguments=(--no-judge)
+if [[ "${AF_ENABLE_JUDGE}" == true ]]; then
+  judge_arguments=()
+fi
+if [[ "${AF_SELECTION_POLICY}" == normalized_weighted_sum ]] \
+  && [[ "${AF_ENABLE_JUDGE}" != true ]]; then
+  echo "normalized_weighted_sum requires AF_ENABLE_JUDGE=true" >&2
+  exit 2
+fi
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS=1
@@ -80,7 +93,9 @@ apptainer exec --nv \
   --ollama-temperature 0.2 \
   --ollama-seed "${AF_SEED}" \
   --development-only \
-  --no-judge \
+  "${judge_arguments[@]}" \
+  --selection-policy "${AF_SELECTION_POLICY}" \
+  --judge-weight "${AF_JUDGE_WEIGHT}" \
   --iteration-budget 12 \
   --stagnation-iterations 12 \
   --beam-size 2 \

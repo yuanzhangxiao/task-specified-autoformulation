@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from autoformalism.fitting import EvaluationMetrics, FitConfig, FitResult
 from autoformalism.pruning import PruningConfig
 from autoformalism.schemas import CandidateModel, JudgeAssessment
+
+SelectionPolicy = Literal["validation_only", "normalized_weighted_sum"]
 
 
 class SearchConfig(BaseModel):
@@ -25,12 +27,22 @@ class SearchConfig(BaseModel):
     validation_mse_target: float = Field(default=0.0, ge=0.0)
     cheap_prefit_judge: bool = False
     use_judge: bool = True
+    selection_policy: SelectionPolicy = "validation_only"
+    judge_weight: float = Field(default=0.25, ge=0.0)
+    judge_score_epsilon: float = Field(default=0.05, gt=0.0)
     evaluate_test: bool = True
     proposer_system_prompt: str
     judge_system_prompt: str
     fit_config: FitConfig = FitConfig()
     final_fit_config: FitConfig = FitConfig()
     pruning_config: PruningConfig = PruningConfig()
+
+    @model_validator(mode="after")
+    def require_judge_for_weighted_selection(self) -> SearchConfig:
+        """Reject a judge-weighted policy when judge calls are disabled."""
+        if self.selection_policy == "normalized_weighted_sum" and not self.use_judge:
+            raise ValueError("normalized_weighted_sum requires use_judge=True")
+        return self
 
 
 @dataclass(frozen=True)
@@ -59,6 +71,11 @@ class FrozenSelection:
     candidate: CandidateModel
     validation_mse: float
     round_index: int
+    selection_policy: SelectionPolicy
+    selection_objective: float
+    normalized_log_validation: float
+    normalized_judge_penalty: float
+    judge_score: float
 
 
 @dataclass(frozen=True)

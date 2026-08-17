@@ -107,6 +107,41 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.ollama_temperature == 0.0
     assert default.ollama_seed is None
     assert default.stagnation_iterations is None
+    assert default.selection_policy == "validation_only"
+    assert default.judge_weight == 0.25
+    assert default.judge_score_epsilon == 0.05
+
+
+def test_cli_accepts_weighted_selection_and_rejects_no_judge() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--selection-policy",
+                "normalized_weighted_sum",
+                "--judge-weight",
+                "0.5",
+            ]
+        )
+    )
+
+    assert arguments.selection_policy == "normalized_weighted_sum"
+    assert arguments.judge_weight == 0.5
+
+    with pytest.raises(SystemExit, match="requires judge"):
+        arguments_from_namespace(
+            parser.parse_args(
+                [
+                    "--mock-llm",
+                    "--dry-run",
+                    "--selection-policy",
+                    "normalized_weighted_sum",
+                    "--no-judge",
+                ]
+            )
+        )
 
 
 def test_cli_accepts_development_only_mode() -> None:

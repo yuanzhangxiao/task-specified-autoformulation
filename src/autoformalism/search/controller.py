@@ -10,6 +10,8 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from autoformalism.data import DatasetSplit, SplitName
 from autoformalism.expressions import (
     ModelValidationError,
@@ -100,7 +102,7 @@ class SearchController:
             (item.pruned_fit.validation_metrics.normalized_mse for item in completed),
             default=float("inf"),
         )
-        stagnant = _trailing_stagnation(completed)
+        stagnant = _trailing_stagnation(completed, self._config)
         stopping_reason = "iteration_budget"
 
         if best_seen <= self._config.validation_mse_target:
@@ -111,13 +113,18 @@ class SearchController:
             return self._finalize(completed, stopping_reason)
 
         for round_index in range(start_round, self._config.maximum_iterations):
-            beam = _beam(completed, self._config.beam_size)
+            beam = _beam(completed, self._config.beam_size, self._config)
+            previous_selection = beam[0].structural_hash if beam else None
             record = self._run_round(round_index, beam, completed)
             if record is not None:
                 completed.append(record)
                 current = record.pruned_fit.validation_metrics.normalized_mse
                 if current < best_seen - 1e-12:
                     best_seen = current
+                current_selection = _beam(completed, 1, self._config)[
+                    0
+                ].structural_hash
+                if current_selection != previous_selection:
                     stagnant = 0
                 else:
                     stagnant += 1
@@ -601,12 +608,20 @@ class SearchController:
         stopping_reason: str,
     ) -> FinalEvaluation:
         existing = self._store.load_final()
-        selected = _beam(completed, 1)[0]
+        selected = _beam(completed, 1, self._config)[0]
+        objective = _selection_objectives(_unique_records(completed), self._config)[
+            selected.structural_hash
+        ]
         frozen = FrozenSelection(
             selection_hash=selected.structural_hash,
             candidate=selected.pruned_candidate,
             validation_mse=selected.pruned_fit.validation_metrics.normalized_mse,
             round_index=selected.round_index,
+            selection_policy=self._config.selection_policy,
+            selection_objective=objective[0],
+            normalized_log_validation=objective[1],
+            normalized_judge_penalty=objective[2],
+            judge_score=selected.postpruning_judge.aggregate_score,
         )
         if existing is None:
             existing = {
@@ -828,17 +843,30 @@ def _canonical_expression(source: str, names: Mapping[str, str]) -> str:
 
 
 def _beam(
-    records: Sequence[CandidateRecord], size: int
+    records: Sequence[CandidateRecord], size: int, config: SearchConfig
 ) -> list[CandidateRecord]:
+    candidates = _unique_records(records)
+    objectives = _selection_objectives(candidates, config)
+    return sorted(
+        candidates,
+        key=lambda record: (
+            objectives[record.structural_hash][0],
+            *_validation_rank(record),
+        ),
+    )[:size]
+
+
+def _unique_records(records: Sequence[CandidateRecord]) -> list[CandidateRecord]:
+    """Keep one deterministic representative of each structural hash."""
     unique: dict[str, CandidateRecord] = {}
     for record in records:
         existing = unique.get(record.structural_hash)
-        if existing is None or _rank(record) < _rank(existing):
+        if existing is None or _validation_rank(record) < _validation_rank(existing):
             unique[record.structural_hash] = record
-    return sorted(unique.values(), key=_rank)[:size]
+    return list(unique.values())
 
 
-def _rank(record: CandidateRecord) -> tuple[float, float, int, str]:
+def _validation_rank(record: CandidateRecord) -> tuple[float, float, int, str]:
     return (
         record.pruned_fit.validation_metrics.normalized_mse,
         -record.postpruning_judge.aggregate_score,
@@ -850,17 +878,62 @@ def _rank(record: CandidateRecord) -> tuple[float, float, int, str]:
     )
 
 
+def _selection_objectives(
+    records: Sequence[CandidateRecord], config: SearchConfig
+) -> dict[str, tuple[float, float, float]]:
+    """Return objective, normalized fit, and normalized judge cost by hash."""
+    if not records:
+        return {}
+    losses = np.asarray(
+        [record.pruned_fit.validation_metrics.normalized_mse for record in records],
+        dtype=float,
+    )
+    scores = np.asarray(
+        [record.postpruning_judge.aggregate_score for record in records],
+        dtype=float,
+    )
+    loss_z = _robust_standardize(np.log(np.maximum(losses, np.finfo(float).tiny)))
+    judge_z = _robust_standardize(-np.log(scores + config.judge_score_epsilon))
+    if config.selection_policy == "validation_only":
+        objectives = losses
+    else:
+        objectives = loss_z + config.judge_weight * judge_z
+    return {
+        record.structural_hash: (
+            float(objectives[index]),
+            float(loss_z[index]),
+            float(judge_z[index]),
+        )
+        for index, record in enumerate(records)
+    }
+
+
+def _robust_standardize(values: np.ndarray) -> np.ndarray:
+    """Median/IQR standardize with deterministic zero-spread fallbacks."""
+    median = float(np.median(values))
+    scale = float(np.percentile(values, 75) - np.percentile(values, 25))
+    if scale <= np.finfo(float).eps:
+        scale = float(np.ptp(values))
+    if scale <= np.finfo(float).eps:
+        scale = 1.0
+    return (values - median) / scale
+
+
 def _additive_sources(source: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in source.replace("-", "+-").split("+"))
 
 
-def _trailing_stagnation(records: Sequence[CandidateRecord]) -> int:
-    best = float("inf")
+def _trailing_stagnation(
+    records: Sequence[CandidateRecord], config: SearchConfig
+) -> int:
+    selected_hash: str | None = None
     stagnant = 0
+    prefix: list[CandidateRecord] = []
     for record in records:
-        value = record.pruned_fit.validation_metrics.normalized_mse
-        if value < best - 1e-12:
-            best = value
+        prefix.append(record)
+        current_hash = _beam(prefix, 1, config)[0].structural_hash
+        if current_hash != selected_hash:
+            selected_hash = current_hash
             stagnant = 0
         else:
             stagnant += 1
@@ -1025,6 +1098,11 @@ def _frozen_to_dict(frozen: FrozenSelection) -> dict[str, Any]:
         "candidate": frozen.candidate.model_dump(mode="json"),
         "validation_mse": frozen.validation_mse,
         "round_index": frozen.round_index,
+        "selection_policy": frozen.selection_policy,
+        "selection_objective": frozen.selection_objective,
+        "normalized_log_validation": frozen.normalized_log_validation,
+        "normalized_judge_penalty": frozen.normalized_judge_penalty,
+        "judge_score": frozen.judge_score,
     }
 
 
@@ -1034,4 +1112,15 @@ def _frozen_from_dict(payload: Mapping[str, Any]) -> FrozenSelection:
         candidate=CandidateModel.model_validate(payload["candidate"]),
         validation_mse=float(payload["validation_mse"]),
         round_index=int(payload["round_index"]),
+        selection_policy=payload.get("selection_policy", "validation_only"),
+        selection_objective=float(
+            payload.get("selection_objective", payload["validation_mse"])
+        ),
+        normalized_log_validation=float(
+            payload.get("normalized_log_validation", 0.0)
+        ),
+        normalized_judge_penalty=float(
+            payload.get("normalized_judge_penalty", 0.0)
+        ),
+        judge_score=float(payload.get("judge_score", 0.0)),
     )
