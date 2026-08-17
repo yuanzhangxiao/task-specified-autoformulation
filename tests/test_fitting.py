@@ -15,6 +15,7 @@ from autoformalism.fitting import (
     fit_candidate,
     simulate_trajectory,
 )
+from autoformalism.fitting import fitter as fitter_module
 from autoformalism.schemas import CandidateModel
 
 
@@ -754,6 +755,36 @@ def test_proposer_soft_constraint_penalizes_and_reports_without_rejection() -> N
     )
     assert violation["maximum_normalized_violation"] > 0.0
     assert violation["violating_fraction"] > 0.0
+
+
+def test_extreme_finite_values_produce_bounded_finite_penalties() -> None:
+    payload = _candidate({"x": "0"}, "x", ()).model_dump(mode="json")
+    payload["constraints"] = [
+        {
+            "subject": "x",
+            "kind": "nonnegative",
+            "source": "proposer",
+            "enforcement": "soft",
+        }
+    ]
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",)),
+    )
+
+    penalties = fitter_module._soft_constraint_residuals(
+        model, np.asarray([[-1e200, 1e200]], dtype=float)
+    )
+    residuals = fitter_module._bounded_normalized_residual(
+        np.asarray([1e308]),
+        np.asarray([-1e308]),
+        1e-8,
+        1e6,
+    )
+
+    assert np.all(np.isfinite(penalties))
+    assert np.all(np.isfinite(residuals))
+    assert residuals.tolist() == [1e6]
 
 
 def test_target_free_evaluation_uses_midpoint_latent_initial() -> None:

@@ -510,11 +510,12 @@ def _residual_function(
             for channel in model.validated.context.targets:
                 start = 1 if model.validated.context.lagged_targets else 0
                 pieces.append(
-                    (
-                        simulation.predictions[channel][start:]
-                        - trajectory.targets[channel][start:]
+                    _bounded_normalized_residual(
+                        simulation.predictions[channel][start:],
+                        trajectory.targets[channel][start:],
+                        scales[channel],
+                        config.failure_penalty,
                     )
-                    / scales[channel]
                 )
             assert simulation.states is not None
             soft = _soft_constraint_residuals(model, simulation.states)
@@ -623,7 +624,9 @@ def _derivative_residual_function(
         ) as exc:
             failures.record(str(exc))
             return np.full(residual_size, config.failure_penalty)
-        return np.asarray(pieces, dtype=float)
+        return _bounded_residuals(
+            np.asarray(pieces, dtype=float), config.failure_penalty
+        )
 
     return residual
 
@@ -631,6 +634,31 @@ def _derivative_residual_function(
 def _check_deadline(deadline: float | None) -> None:
     if deadline is not None and monotonic() >= deadline:
         raise TimeoutError("fitting wall-clock limit reached")
+
+
+def _bounded_normalized_residual(
+    predicted: NDArray[np.float64],
+    observed: NDArray[np.float64],
+    scale: float,
+    limit: float,
+) -> NDArray[np.float64]:
+    """Return finite normalized residuals bounded for stable least squares."""
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        residual = (predicted - observed) / scale
+    return _bounded_residuals(residual, limit)
+
+
+def _bounded_residuals(
+    residual: NDArray[np.float64], limit: float
+) -> NDArray[np.float64]:
+    """Replace nonfinite residuals and clip magnitudes before squaring."""
+    finite = np.nan_to_num(
+        residual,
+        nan=limit,
+        posinf=limit,
+        neginf=-limit,
+    )
+    return np.clip(finite, -limit, limit)
 
 
 def _timeout_fit_result(
@@ -701,7 +729,13 @@ def _soft_constraint_series(
     series: dict[str, NDArray[np.float64]] = {}
     for index, constraint in enumerate(_supported_soft_state_constraints(model)):
         values = by_state[constraint.subject]
-        scale = max(1.0, float(np.sqrt(np.mean(values**2))))
+        maximum = float(np.max(np.abs(values)))
+        rms = (
+            0.0
+            if maximum == 0.0
+            else maximum * float(np.sqrt(np.mean((values / maximum) ** 2)))
+        )
+        scale = max(1.0, rms)
         if constraint.kind is ConstraintKind.NONNEGATIVE:
             violation = np.maximum(-values, 0.0)
         elif constraint.kind is ConstraintKind.POSITIVE:
