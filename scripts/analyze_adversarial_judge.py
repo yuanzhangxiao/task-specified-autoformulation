@@ -22,6 +22,9 @@ def main() -> None:
         by_model[row["judge_model"]].append(row)
     metrics = {}
     for model, values in sorted(by_model.items()):
+        labels = {row["known_label"] for row in values}
+        positive_label = "valid" if "valid" in labels else "baseline"
+        negative_label = "adversarial" if "adversarial" in labels else "mutated"
         paired: dict[tuple[str, int], dict[str, float]] = defaultdict(dict)
         pair_mutations: dict[str, str] = {}
         paired_categories: dict[
@@ -42,33 +45,36 @@ def main() -> None:
             }
             repeated[(row["pair_id"], row["known_label"])].append(score)
         margins = [
-            item["valid"] - item["adversarial"]
+            item[positive_label] - item[negative_label]
             for item in paired.values()
-            if {"valid", "adversarial"} <= item.keys()
+            if {positive_label, negative_label} <= item.keys()
         ]
         valid_scores = [
             float(row["aggregate_score"])
             for row in values
-            if row["known_label"] == "valid"
+            if row["known_label"] == positive_label
         ]
         adversarial_scores = [
             float(row["aggregate_score"])
             for row in values
-            if row["known_label"] == "adversarial"
+            if row["known_label"] == negative_label
         ]
         category_margins: dict[str, list[float]] = defaultdict(list)
         for item in paired_categories.values():
-            if {"valid", "adversarial"} > item.keys():
+            if {positive_label, negative_label} > item.keys():
                 continue
-            for category in item["valid"].keys() & item["adversarial"].keys():
+            for category in (
+                item[positive_label].keys() & item[negative_label].keys()
+            ):
                 category_margins[category].append(
-                    item["valid"][category] - item["adversarial"][category]
+                    item[positive_label][category]
+                    - item[negative_label][category]
                 )
         by_mutation: dict[str, list[float]] = defaultdict(list)
         for (pair_id, _), item in paired.items():
-            if {"valid", "adversarial"} <= item.keys():
+            if {positive_label, negative_label} <= item.keys():
                 by_mutation[pair_mutations[pair_id]].append(
-                    item["valid"] - item["adversarial"]
+                    item[positive_label] - item[negative_label]
                 )
         metrics[model] = {
             "paired_comparison_count": len(margins),
@@ -90,8 +96,19 @@ def main() -> None:
             "mean_score_margin": mean(margins) if margins else None,
             "median_score_margin": median(margins) if margins else None,
             "auroc": _auroc(valid_scores, adversarial_scores),
+            "repeat_icc_1_1": _icc_one_one(list(repeated.values())),
             "mean_repeated_call_std": mean(
                 pstdev(scores) for scores in repeated.values()
+            ),
+            "baseline_score_at_least_0_95_rate": (
+                sum(score >= 0.95 for score in valid_scores) / len(valid_scores)
+            ),
+            "mutated_score_at_least_0_95_rate": (
+                sum(score >= 0.95 for score in adversarial_scores)
+                / len(adversarial_scores)
+            ),
+            "baseline_score_at_most_0_20_rate": (
+                sum(score <= 0.20 for score in valid_scores) / len(valid_scores)
             ),
             "mean_category_score_margins": {
                 category: mean(category_values)
@@ -118,11 +135,11 @@ def main() -> None:
 
 def _write_summary(path: Path, metrics: dict) -> None:
     lines = [
-        "# Adversarial judge stress test",
+        "# Matched-pair judge stress test",
         "",
         "| Judge | Paired accuracy ↑ | False preference ↓ | AUROC ↑ | "
-        "Mean margin ↑ | Median margin ↑ | Repeat SD ↓ |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "Mean margin ↑ | Median margin ↑ | Repeat ICC ↑ | Repeat SD ↓ |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for model, values in metrics.items():
         lines.append(
@@ -135,6 +152,7 @@ def _write_summary(path: Path, metrics: dict) -> None:
                     _format(values["auroc"]),
                     _format(values["mean_score_margin"]),
                     _format(values["median_score_margin"]),
+                    _format(values["repeat_icc_1_1"]),
                     _format(values["mean_repeated_call_std"]),
                 )
             )
@@ -153,6 +171,27 @@ def _auroc(positive: list[float], negative: list[float]) -> float | None:
     wins = sum(left > right for left in positive for right in negative)
     ties = sum(left == right for left in positive for right in negative)
     return (wins + 0.5 * ties) / (len(positive) * len(negative))
+
+
+def _icc_one_one(groups: list[list[float]]) -> float | None:
+    """Return one-way random-effects single-measure repeat ICC."""
+    if len(groups) < 2 or not groups or len(groups[0]) < 2:
+        return None
+    repeat_count = len(groups[0])
+    if any(len(group) != repeat_count for group in groups):
+        return None
+    row_means = [mean(group) for group in groups]
+    grand_mean = mean(value for group in groups for value in group)
+    between = repeat_count * sum(
+        (row_mean - grand_mean) ** 2 for row_mean in row_means
+    ) / (len(groups) - 1)
+    within = sum(
+        (value - row_mean) ** 2
+        for group, row_mean in zip(groups, row_means, strict=True)
+        for value in group
+    ) / (len(groups) * (repeat_count - 1))
+    denominator = between + (repeat_count - 1) * within
+    return None if denominator == 0.0 else (between - within) / denominator
 
 
 if __name__ == "__main__":

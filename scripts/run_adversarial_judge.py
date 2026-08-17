@@ -16,8 +16,14 @@ from autoformalism.execution import (
     _prediction_protocol_prompt,
     _symbol_contract,
 )
-from autoformalism.llm import LLMConfig, LLMProvider, create_llm_client
+from autoformalism.llm import (
+    LLMConfig,
+    LLMProvider,
+    OllamaThinking,
+    create_llm_client,
+)
 from autoformalism.rebuttal.adversarial import AdversarialPair
+from autoformalism.search.controller import _DETERMINISTIC_CERTIFICATIONS
 
 FIELDS = (
     "pair_id",
@@ -29,6 +35,10 @@ FIELDS = (
     "repetition",
     "aggregate_score",
     "category_scores",
+    "category_justifications",
+    "hard_red_flags",
+    "missing_requirements",
+    "actionable_edits",
     "request_hash",
 )
 
@@ -59,7 +69,9 @@ def _judge_prompt(data_root: Path, pair: AdversarialPair, model: str) -> str:
     )
     context = _context(arguments, development)
     spec = registry.get(pair.benchmark_id)
-    root = data_root / spec.relative_root / pair.tier
+    root = data_root / spec.relative_root
+    if spec.data_layout == "legacy_split_files":
+        root /= spec.tier_directory_template.format(tier=pair.tier)
     proposer = (root / "proposer_prompt.txt").read_text(encoding="utf-8")
     judge = (root / "judge_prompt.txt").read_text(encoding="utf-8")
     return (
@@ -102,15 +114,33 @@ def main() -> None:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--judge-models", nargs="+", required=True)
     parser.add_argument("--repetitions", type=int, default=3)
+    parser.add_argument(
+        "--baseline-label",
+        choices=("valid", "baseline"),
+        default="valid",
+        help="label unmutated candidates as historical valid or prospective baseline",
+    )
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=900.0)
     parser.add_argument("--max-output-tokens", type=int, default=4096)
+    parser.add_argument("--ollama-base-url", default="http://127.0.0.1:11434")
+    parser.add_argument(
+        "--ollama-thinking",
+        choices=tuple(item.value for item in OllamaThinking),
+        default=OllamaThinking.AUTO.value,
+    )
+    parser.add_argument("--ollama-temperature", type=float, default=0.0)
+    parser.add_argument("--ollama-seed-base", type=int)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
     args = parser.parse_args()
     if args.repetitions < 1:
         raise SystemExit("--repetitions must be positive")
+    if not 0.0 <= args.ollama_temperature <= 2.0:
+        raise SystemExit("--ollama-temperature must be in [0, 2]")
+    if args.ollama_seed_base is not None and args.ollama_seed_base < 0:
+        raise SystemExit("--ollama-seed-base must be nonnegative")
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         raise SystemExit("shard index must be in [0, shard count)")
     pairs = tuple(
@@ -142,35 +172,58 @@ def main() -> None:
     for model_spec in args.judge_models:
         provider_name, model = model_spec.split(":", 1)
         provider = LLMProvider(provider_name)
-        client = create_llm_client(
-            LLMConfig(
-                provider=provider,
-                model=model,
-                cache_directory=args.output_root / "cache" / provider.value / model,
-                log_path=args.output_root / f"{provider.value}_{model}_events.jsonl",
-                timeout_seconds=args.timeout_seconds,
-                max_output_tokens=args.max_output_tokens,
+        clients = tuple(
+            create_llm_client(
+                LLMConfig(
+                    provider=provider,
+                    model=model,
+                    cache_directory=(
+                        args.output_root
+                        / "cache"
+                        / provider.value
+                        / model
+                        / f"repetition_{repetition}"
+                    ),
+                    log_path=(
+                        args.output_root
+                        / f"{provider.value}_{model}_events.jsonl"
+                    ),
+                    ollama_base_url=args.ollama_base_url,
+                    ollama_thinking=OllamaThinking(args.ollama_thinking),
+                    ollama_temperature=args.ollama_temperature,
+                    ollama_seed=(
+                        None
+                        if args.ollama_seed_base is None
+                        else args.ollama_seed_base + repetition
+                    ),
+                    timeout_seconds=args.timeout_seconds,
+                    max_output_tokens=args.max_output_tokens,
+                )
             )
+            for repetition in range(args.repetitions)
         )
         for pair in pairs:
             system_prompt = _judge_prompt(
                 args.data_root.resolve(), pair, model_spec
             )
             for label, candidate in (
-                ("valid", pair.valid_candidate),
-                ("adversarial", pair.adversarial_candidate),
+                (args.baseline_label, pair.valid_candidate),
+                (
+                    "adversarial" if args.baseline_label == "valid" else "mutated",
+                    pair.adversarial_candidate,
+                ),
             ):
                 for repetition in range(args.repetitions):
                     key = (pair.pair_id, label, model_spec, repetition)
                     if key in completed:
                         continue
-                    # The nonce creates independent cached calls. The known label
-                    # is retained only in the local output row, never in prompts.
                     request = {
-                        "evaluation_replicate": repetition,
+                        "deterministic_certifications": list(
+                            _DETERMINISTIC_CERTIFICATIONS
+                        ),
                         "candidate": candidate.model_dump(mode="json"),
                     }
-                    result = client.judge(
+                    result = clients[repetition].judge(
                         system_prompt=system_prompt,
                         user_prompt=json.dumps(request, sort_keys=True),
                     )
@@ -187,6 +240,32 @@ def main() -> None:
                             "aggregate_score": result.parsed.aggregate_score,
                             "category_scores": json.dumps(
                                 result.parsed.numeric_category_scores,
+                                sort_keys=True,
+                            ),
+                            "category_justifications": json.dumps(
+                                {
+                                    name: item.justification
+                                    for name, item in (
+                                        result.parsed.category_scores.__dict__.items()
+                                    )
+                                },
+                                sort_keys=True,
+                            ),
+                            "hard_red_flags": json.dumps(
+                                [
+                                    item.model_dump(mode="json")
+                                    for item in result.parsed.hard_red_flags
+                                ],
+                                sort_keys=True,
+                            ),
+                            "missing_requirements": json.dumps(
+                                list(result.parsed.missing_requirements)
+                            ),
+                            "actionable_edits": json.dumps(
+                                [
+                                    item.model_dump(mode="json")
+                                    for item in result.parsed.actionable_edits
+                                ],
                                 sort_keys=True,
                             ),
                             "request_hash": result.request_hash,
