@@ -7,8 +7,8 @@
 #SBATCH --mem=64G
 #SBATCH --gpus-per-node=1
 #SBATCH --requeue
-#SBATCH --output=logs/phase-b-local-pilot-%j.out
-#SBATCH --error=logs/phase-b-local-pilot-%j.err
+#SBATCH --output=logs/phase-b-local-pilot-%A_%a.out
+#SBATCH --error=logs/phase-b-local-pilot-%A_%a.err
 
 set -euo pipefail
 
