@@ -42,6 +42,8 @@ class LLMConfig(StrictSchema):
     jitter_fraction: float = Field(default=0.25, ge=0.0, le=1.0)
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_thinking: OllamaThinking = OllamaThinking.AUTO
+    ollama_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    ollama_seed: int | None = Field(default=None, ge=0)
     timeout_seconds: float = Field(default=120.0, gt=0.0)
     max_output_tokens: int = Field(default=2048, ge=128, le=32768)
     proposal_target_channels: tuple[str, ...] = ()
@@ -87,6 +89,8 @@ def create_llm_client(config: LLMConfig) -> LLMClient:
         log_path=config.log_path,
         base_url=config.ollama_base_url,
         thinking=config.ollama_thinking,
+        temperature=config.ollama_temperature,
+        seed=config.ollama_seed,
         timeout_seconds=config.timeout_seconds,
         max_output_tokens=config.max_output_tokens,
         **retry_options,

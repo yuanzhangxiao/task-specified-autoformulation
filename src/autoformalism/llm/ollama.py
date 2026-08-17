@@ -31,6 +31,7 @@ class OllamaClient(CachedLLMClient):
         timeout_seconds: float = 120.0,
         max_output_tokens: int = 2048,
         temperature: float = 0.0,
+        seed: int | None = None,
         thinking: OllamaThinking = OllamaThinking.AUTO,
         transport: OllamaTransport | None = None,
         **retry_options: Any,
@@ -41,6 +42,10 @@ class OllamaClient(CachedLLMClient):
             raise ValueError("timeout_seconds must be positive")
         if max_output_tokens < 128:
             raise ValueError("max_output_tokens must be at least 128")
+        if not 0.0 <= temperature <= 2.0:
+            raise ValueError("temperature must be between 0 and 2")
+        if seed is not None and seed < 0:
+            raise ValueError("seed must be nonnegative")
         super().__init__(
             provider_name="ollama",
             model=model,
@@ -52,6 +57,7 @@ class OllamaClient(CachedLLMClient):
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
         self._temperature = temperature
+        self._seed = seed
         self._thinking = _resolve_thinking(model, thinking)
         self._transport = transport or self._http_transport
 
@@ -59,6 +65,7 @@ class OllamaClient(CachedLLMClient):
         return {
             "base_url": self._base_url,
             "temperature": self._temperature,
+            "seed": self._seed,
             "max_output_tokens": self._max_output_tokens,
             "thinking": self._thinking,
             "schema_compatibility": "bounded-compact-provider-schema-v4",
@@ -73,6 +80,12 @@ class OllamaClient(CachedLLMClient):
         response_model: type[StructuredT],
     ) -> ProviderResponse[StructuredT]:
         del role
+        options: dict[str, object] = {
+            "temperature": self._temperature,
+            "num_predict": self._max_output_tokens,
+        }
+        if self._seed is not None:
+            options["seed"] = self._seed
         body: dict[str, object] = {
             "model": self._model,
             "messages": [
@@ -84,10 +97,7 @@ class OllamaClient(CachedLLMClient):
             "format": _ollama_compatible_schema(
                 response_model.model_json_schema(mode="validation")
             ),
-            "options": {
-                "temperature": self._temperature,
-                "num_predict": self._max_output_tokens,
-            },
+            "options": options,
         }
         started = time.perf_counter()
         try:

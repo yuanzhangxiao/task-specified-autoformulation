@@ -247,17 +247,20 @@ uses its array index as the experiment seed and retains the twelve-round
 logical proposal budget:
 
 ```bash
-export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-diagnostic-v1"
+export AF_OUTPUT_ROOT="$AF_WORK/phase_b/local-generation-diagnostic-v2"
 mkdir -p logs "$AF_OUTPUT_ROOT"
 sbatch --account=bibo-delta-gpu --partition=gpuA40x4 --array=0-4 \
   --export=ALL scripts/hpc/phase_b_local_generation_pilot.slurm
 ```
 
 The five seeds share the pinned Ollama model directory but create distinct run
-directories and LLM caches under `AF_OUTPUT_ROOT`. Compare valid-fit rate, best
-validation normalized MSE, selected structural family, repair accounting, and
-soft-constraint violations. This diagnostic remains development-only, performs
-no judge calls, and does not open test data.
+directories and LLM caches under `AF_OUTPUT_ROOT`. Each array index is also
+passed to Ollama as a recorded sampling seed with temperature 0.2. Stagnation
+patience equals the twelve-round budget so every seed can use its full proposal
+allowance. Compare valid-fit rate, best validation normalized MSE, selected
+structural family, repair accounting, and soft-constraint violations. This
+diagnostic remains development-only, performs no judge calls, and does not open
+test data.
 
 ## ACES: first login and identity check
 

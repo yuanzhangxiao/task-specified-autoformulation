@@ -104,6 +104,9 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.development_only is False
     assert default.ollama_base_url == "http://127.0.0.1:11434"
     assert default.ollama_thinking is OllamaThinking.AUTO
+    assert default.ollama_temperature == 0.0
+    assert default.ollama_seed is None
+    assert default.stagnation_iterations is None
 
 
 def test_cli_accepts_development_only_mode() -> None:
@@ -140,6 +143,28 @@ def test_cli_accepts_explicit_ollama_thinking_level() -> None:
     )
 
     assert arguments.ollama_thinking is OllamaThinking.MEDIUM
+
+
+def test_cli_accepts_ollama_sampling_and_stagnation_controls() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--ollama-temperature",
+                "0.2",
+                "--ollama-seed",
+                "4",
+                "--stagnation-iterations",
+                "12",
+            ]
+        )
+    )
+
+    assert arguments.ollama_temperature == 0.2
+    assert arguments.ollama_seed == 4
+    assert arguments.stagnation_iterations == 12
 
 
 def test_cli_accepts_shared_cache_only_mode(tmp_path: Path) -> None:

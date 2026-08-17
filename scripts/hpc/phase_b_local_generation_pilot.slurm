@@ -20,7 +20,7 @@ set -euo pipefail
 : "${AF_OLLAMA_IMAGE:?set AF_OLLAMA_IMAGE to a pinned Ollama SIF image}"
 : "${AF_OLLAMA_MODELS:?set AF_OLLAMA_MODELS to the persistent model directory}"
 : "${AF_LOCAL_MODEL:=gpt-oss:20b}"
-: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-pilot-v8}"
+: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/local-generation-diagnostic-v2}"
 : "${AF_SEED:=${SLURM_ARRAY_TASK_ID:-0}}"
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
@@ -75,9 +75,12 @@ apptainer exec --nv \
   --judge-model "ollama:${AF_LOCAL_MODEL}" \
   --ollama-base-url "${endpoint}" \
   --ollama-thinking low \
+  --ollama-temperature 0.2 \
+  --ollama-seed "${AF_SEED}" \
   --development-only \
   --no-judge \
   --iteration-budget 12 \
+  --stagnation-iterations 12 \
   --beam-size 2 \
   --llm-timeout-seconds 900 \
   --llm-max-output-tokens 4096 \

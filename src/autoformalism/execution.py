@@ -130,6 +130,9 @@ class ExecutionArguments:
     development_only: bool = False
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_thinking: OllamaThinking = OllamaThinking.AUTO
+    ollama_temperature: float = 0.0
+    ollama_seed: int | None = None
+    stagnation_iterations: int | None = None
 
 
 class _RoleClient:
@@ -258,6 +261,25 @@ def build_experiment_parser(
             "other models"
         ),
     )
+    parser.add_argument(
+        "--ollama-temperature",
+        type=float,
+        default=0.0,
+        help="Ollama sampling temperature in [0, 2]",
+    )
+    parser.add_argument(
+        "--ollama-seed",
+        type=int,
+        help="nonnegative Ollama sampling seed; omitted by default",
+    )
+    parser.add_argument(
+        "--stagnation-iterations",
+        type=int,
+        help=(
+            "consecutive fitted rounds without improvement before stopping; "
+            "defaults to the existing budget-dependent policy"
+        ),
+    )
     parser.add_argument("--clean", action="store_true")
     parser.add_argument(
         "--no-judge",
@@ -290,6 +312,15 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--llm-timeout-seconds must be positive")
     if namespace.llm_max_output_tokens < 128:
         raise SystemExit("--llm-max-output-tokens must be at least 128")
+    if not 0.0 <= namespace.ollama_temperature <= 2.0:
+        raise SystemExit("--ollama-temperature must be between 0 and 2")
+    if namespace.ollama_seed is not None and namespace.ollama_seed < 0:
+        raise SystemExit("--ollama-seed must be nonnegative")
+    if (
+        namespace.stagnation_iterations is not None
+        and namespace.stagnation_iterations < 1
+    ):
+        raise SystemExit("--stagnation-iterations must be at least 1")
     if namespace.fit_starts < 1:
         raise SystemExit("--fit-starts must be at least 1")
     if namespace.fit_max_nfev < 1:
@@ -339,6 +370,9 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         development_only=namespace.development_only,
         ollama_base_url=namespace.ollama_base_url,
         ollama_thinking=OllamaThinking(namespace.ollama_thinking),
+        ollama_temperature=namespace.ollama_temperature,
+        ollama_seed=namespace.ollama_seed,
+        stagnation_iterations=namespace.stagnation_iterations,
     )
 
 
@@ -388,6 +422,13 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "development_only": arguments.development_only,
         "ollama_base_url": arguments.ollama_base_url,
         "ollama_thinking": arguments.ollama_thinking.value,
+        "ollama_temperature": arguments.ollama_temperature,
+        "ollama_seed": arguments.ollama_seed,
+        "stagnation_iterations": (
+            arguments.stagnation_iterations
+            if arguments.stagnation_iterations is not None
+            else max(2, min(5, arguments.iteration_budget))
+        ),
         "use_judge": arguments.use_judge,
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
@@ -416,7 +457,11 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         checkpoint_directory=checkpoint_directory,
         maximum_iterations=arguments.iteration_budget,
         beam_size=arguments.beam_size,
-        stagnation_iterations=max(2, min(5, arguments.iteration_budget)),
+        stagnation_iterations=(
+            arguments.stagnation_iterations
+            if arguments.stagnation_iterations is not None
+            else max(2, min(5, arguments.iteration_budget))
+        ),
         validation_mse_target=0.0,
         cheap_prefit_judge=False,
         use_judge=arguments.use_judge,
@@ -694,6 +739,8 @@ def _make_client(
             cache_only=arguments.llm_cache_only,
             ollama_base_url=arguments.ollama_base_url,
             ollama_thinking=arguments.ollama_thinking,
+            ollama_temperature=arguments.ollama_temperature,
+            ollama_seed=arguments.ollama_seed,
         )
     )
     judge = create_llm_client(
@@ -707,6 +754,8 @@ def _make_client(
             cache_only=arguments.llm_cache_only,
             ollama_base_url=arguments.ollama_base_url,
             ollama_thinking=arguments.ollama_thinking,
+            ollama_temperature=arguments.ollama_temperature,
+            ollama_seed=arguments.ollama_seed,
         )
     )
     return _RoleClient(proposer, judge)

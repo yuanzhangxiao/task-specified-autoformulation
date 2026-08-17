@@ -607,6 +607,8 @@ def test_ollama_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
         model="gpt-oss:20b",
         cache_directory=tmp_path / "cache",
         log_path=tmp_path / "events.jsonl",
+        temperature=0.2,
+        seed=17,
         transport=transport,
     )
 
@@ -622,6 +624,33 @@ def test_ollama_sends_json_schema_and_parses_response(tmp_path: Path) -> None:
     assert calls[0][1]["stream"] is False
     assert calls[0][1]["think"] == "low"
     assert calls[0][1]["options"]["num_predict"] == 2048
+    assert calls[0][1]["options"]["temperature"] == 0.2
+    assert calls[0][1]["options"]["seed"] == 17
+
+
+def test_ollama_sampling_options_change_request_hash(tmp_path: Path) -> None:
+    common = {
+        "model": "gpt-oss:20b",
+        "cache_directory": tmp_path / "cache",
+        "log_path": tmp_path / "events.jsonl",
+    }
+    first = OllamaClient(**common, temperature=0.2, seed=1)
+    second = OllamaClient(**common, temperature=0.2, seed=2)
+
+    first_hash = first.request_hash(
+        role="proposer",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=ProposerCandidateV2,
+    )
+    second_hash = second.request_hash(
+        role="proposer",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=ProposerCandidateV2,
+    )
+
+    assert first_hash != second_hash
 
 
 def test_ollama_auto_disables_thinking_for_non_gpt_oss(tmp_path: Path) -> None:
