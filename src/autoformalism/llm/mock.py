@@ -7,7 +7,11 @@ from collections import deque
 from typing import Any
 
 from autoformalism.llm.models import LLMCallResult
-from autoformalism.schemas import CandidateModel, ScientificJudgeResult
+from autoformalism.schemas import (
+    CandidateModel,
+    ComparativeJudgeResult,
+    ScientificJudgeResult,
+)
 
 
 class MockLLMClient:
@@ -18,9 +22,13 @@ class MockLLMClient:
         *,
         proposer_responses: list[CandidateModel | dict[str, Any]] | None = None,
         judge_responses: list[ScientificJudgeResult | dict[str, Any]] | None = None,
+        comparative_responses: list[
+            ComparativeJudgeResult | dict[str, Any]
+        ] | None = None,
     ) -> None:
         self._proposer_responses = deque(proposer_responses or [])
         self._judge_responses = deque(judge_responses or [])
+        self._comparative_responses = deque(comparative_responses or [])
         self.calls: list[dict[str, str]] = []
 
     def propose(
@@ -63,12 +71,35 @@ class MockLLMClient:
         )
         return self._result("judge", system_prompt, user_prompt, parsed)
 
+    def compare(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> LLMCallResult[ComparativeJudgeResult]:
+        """Return the next validated comparative response."""
+        if not self._comparative_responses:
+            raise AssertionError("no mock comparative response remains")
+        self.calls.append(
+            {
+                "role": "comparative_judge",
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+        )
+        parsed = ComparativeJudgeResult.model_validate(
+            self._comparative_responses.popleft()
+        )
+        return self._result(
+            "comparative_judge", system_prompt, user_prompt, parsed
+        )
+
     @staticmethod
     def _result(
         role: str,
         system_prompt: str,
         user_prompt: str,
-        parsed: CandidateModel | ScientificJudgeResult,
+        parsed: CandidateModel | ScientificJudgeResult | ComparativeJudgeResult,
     ) -> LLMCallResult[Any]:
         content = "\0".join((role, system_prompt, user_prompt))
         request_hash = hashlib.sha256(content.encode()).hexdigest()

@@ -8,7 +8,11 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from autoformalism.schemas.candidate import CandidateModel
-from autoformalism.schemas.judge import JudgeResult, ScientificJudgeResult
+from autoformalism.schemas.judge import (
+    ComparativeJudgeResult,
+    JudgeResult,
+    ScientificJudgeResult,
+)
 from autoformalism.schemas.proposal import ProposerCandidate, ProposerCandidateV2
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
@@ -17,6 +21,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "proposer-candidate-v2.schema.json": ProposerCandidateV2,
     "judge.schema.json": JudgeResult,
     "scientific-judge-v2.schema.json": ScientificJudgeResult,
+    "comparative-judge-v1.schema.json": ComparativeJudgeResult,
 }
 
 

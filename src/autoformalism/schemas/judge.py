@@ -174,6 +174,81 @@ class ScientificJudgeResult(StrictSchema):
         }
 
 
+class ComparativeVerdict(str, Enum):
+    """One blinded comparative answer with explicit abstention options."""
+
+    CANDIDATE_A = "candidate_a"
+    CANDIDATE_B = "candidate_b"
+    TIE = "tie"
+    INDETERMINATE = "indeterminate"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ComparativeAnswer(StrictSchema):
+    """Verdict and candidate-grounded evidence for one atomic question."""
+
+    verdict: ComparativeVerdict
+    evidence: NonEmptyText
+
+
+class AtomicComparativeAnswers(StrictSchema):
+    """Fixed atomic scientific questions used only by judge calibration."""
+
+    claimed_mechanisms_represented: ComparativeAnswer
+    task_inputs_connected_to_targets: ComparativeAnswer
+    claimed_processes_connected_to_balances: ComparativeAnswer
+    source_terms_have_consistent_signs: ComparativeAnswer
+    sink_terms_have_consistent_signs: ComparativeAnswer
+    fluxes_not_duplicated: ComparativeAnswer
+    components_not_disconnected: ComparativeAnswer
+    mechanisms_not_conflicting: ComparativeAnswer
+    latent_states_have_incoming_pathways: ComparativeAnswer
+    latent_states_have_outgoing_influence: ComparativeAnswer
+    latent_accumulators_have_relaxation_or_justification: ComparativeAnswer
+    claimed_decay_opposes_accumulated_quantity: ComparativeAnswer
+    claimed_delay_has_drive_and_relaxation: ComparativeAnswer
+    claimed_saturation_is_structurally_bounded: ComparativeAnswer
+
+
+class ComparativeJudgeResult(StrictSchema):
+    """Blinded pairwise scientific assessment for calibration experiments."""
+
+    schema_version: Literal["comparative-1"] = "comparative-1"
+    answers: AtomicComparativeAnswers
+
+    @property
+    def numeric_preference(self) -> float | None:
+        """Average atomic A preference, excluding indeterminate answers."""
+        values = [
+            {
+                ComparativeVerdict.CANDIDATE_A: 1.0,
+                ComparativeVerdict.CANDIDATE_B: 0.0,
+                ComparativeVerdict.TIE: 0.5,
+            }.get(answer.verdict)
+            for answer in self.answers.__dict__.values()
+        ]
+        determined = [value for value in values if value is not None]
+        return sum(determined) / len(determined) if determined else None
+
+    @property
+    def indeterminate_rate(self) -> float:
+        """Fraction of atomic questions on which the judge abstained."""
+        answers = tuple(self.answers.__dict__.values())
+        return sum(
+            answer.verdict is ComparativeVerdict.INDETERMINATE
+            for answer in answers
+        ) / len(answers)
+
+    @property
+    def not_applicable_rate(self) -> float:
+        """Fraction of atomic questions irrelevant to both candidates."""
+        answers = tuple(self.answers.__dict__.values())
+        return sum(
+            answer.verdict is ComparativeVerdict.NOT_APPLICABLE
+            for answer in answers
+        ) / len(answers)
+
+
 JudgeAssessment: TypeAlias = JudgeResult | ScientificJudgeResult
 
 

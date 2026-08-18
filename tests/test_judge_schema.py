@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from autoformalism.schemas import (
+    ComparativeJudgeResult,
     JudgeResult,
     ScientificJudgeResult,
     parse_judge_assessment,
@@ -210,3 +211,61 @@ def test_checkpoint_parser_accepts_v1_and_v2(
     assert isinstance(
         parse_judge_assessment(scientific_judge_payload), ScientificJudgeResult
     )
+
+
+def _comparative_payload(verdict: str = "candidate_a") -> dict[str, Any]:
+    answer = {"verdict": verdict, "evidence": "A cited equation differs."}
+    return {
+        "schema_version": "comparative-1",
+        "answers": {
+            "claimed_mechanisms_represented": answer,
+            "task_inputs_connected_to_targets": answer,
+            "claimed_processes_connected_to_balances": answer,
+            "source_terms_have_consistent_signs": answer,
+            "sink_terms_have_consistent_signs": answer,
+            "fluxes_not_duplicated": answer,
+            "components_not_disconnected": answer,
+            "mechanisms_not_conflicting": answer,
+            "latent_states_have_incoming_pathways": answer,
+            "latent_states_have_outgoing_influence": answer,
+            "latent_accumulators_have_relaxation_or_justification": answer,
+            "claimed_decay_opposes_accumulated_quantity": answer,
+            "claimed_delay_has_drive_and_relaxation": answer,
+            "claimed_saturation_is_structurally_bounded": answer,
+        },
+    }
+
+
+def test_comparative_judge_computes_atomic_preference_and_uncertainty() -> None:
+    payload = _comparative_payload()
+    payload["answers"]["fluxes_not_duplicated"] = {
+        "verdict": "candidate_b",
+        "evidence": "B avoids a duplicated term.",
+    }
+    payload["answers"]["latent_states_have_incoming_pathways"] = {
+        "verdict": "tie",
+        "evidence": "Neither candidate adds a latent state.",
+    }
+    payload["answers"]["components_not_disconnected"] = {
+        "verdict": "indeterminate",
+        "evidence": "The public task does not distinguish these roles.",
+    }
+
+    payload["answers"]["claimed_delay_has_drive_and_relaxation"] = {
+        "verdict": "not_applicable",
+        "evidence": "Neither candidate claims a delay state.",
+    }
+    result = ComparativeJudgeResult.model_validate(payload)
+
+    assert result.numeric_preference == pytest.approx(10.5 / 12.0)
+    assert result.indeterminate_rate == pytest.approx(1.0 / 14.0)
+    assert result.not_applicable_rate == pytest.approx(1.0 / 14.0)
+    assert "numeric_preference" not in result.model_dump()
+
+
+def test_comparative_judge_requires_every_atomic_question() -> None:
+    payload = _comparative_payload()
+    del payload["answers"]["fluxes_not_duplicated"]
+
+    with pytest.raises(ValidationError, match="Field required"):
+        ComparativeJudgeResult.model_validate(payload)

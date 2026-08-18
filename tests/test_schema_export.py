@@ -21,6 +21,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert first_paths == second_paths
     assert {path.name for path in first_paths} == {
         "candidate.schema.json",
+        "comparative-judge-v1.schema.json",
         "judge.schema.json",
         "proposer-candidate.schema.json",
         "proposer-candidate-v2.schema.json",

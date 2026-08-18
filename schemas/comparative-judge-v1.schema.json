@@ -1,0 +1,121 @@
+{
+  "$defs": {
+    "AtomicComparativeAnswers": {
+      "additionalProperties": false,
+      "description": "Fixed atomic scientific questions used only by judge calibration.",
+      "properties": {
+        "claimed_decay_opposes_accumulated_quantity": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "claimed_delay_has_drive_and_relaxation": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "claimed_mechanisms_represented": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "claimed_processes_connected_to_balances": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "claimed_saturation_is_structurally_bounded": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "components_not_disconnected": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "fluxes_not_duplicated": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "latent_accumulators_have_relaxation_or_justification": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "latent_states_have_incoming_pathways": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "latent_states_have_outgoing_influence": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "mechanisms_not_conflicting": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "sink_terms_have_consistent_signs": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "source_terms_have_consistent_signs": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        },
+        "task_inputs_connected_to_targets": {
+          "$ref": "#/$defs/ComparativeAnswer"
+        }
+      },
+      "required": [
+        "claimed_mechanisms_represented",
+        "task_inputs_connected_to_targets",
+        "claimed_processes_connected_to_balances",
+        "source_terms_have_consistent_signs",
+        "sink_terms_have_consistent_signs",
+        "fluxes_not_duplicated",
+        "components_not_disconnected",
+        "mechanisms_not_conflicting",
+        "latent_states_have_incoming_pathways",
+        "latent_states_have_outgoing_influence",
+        "latent_accumulators_have_relaxation_or_justification",
+        "claimed_decay_opposes_accumulated_quantity",
+        "claimed_delay_has_drive_and_relaxation",
+        "claimed_saturation_is_structurally_bounded"
+      ],
+      "title": "AtomicComparativeAnswers",
+      "type": "object"
+    },
+    "ComparativeAnswer": {
+      "additionalProperties": false,
+      "description": "Verdict and candidate-grounded evidence for one atomic question.",
+      "properties": {
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/ComparativeVerdict"
+        }
+      },
+      "required": [
+        "verdict",
+        "evidence"
+      ],
+      "title": "ComparativeAnswer",
+      "type": "object"
+    },
+    "ComparativeVerdict": {
+      "description": "One blinded comparative answer with explicit abstention options.",
+      "enum": [
+        "candidate_a",
+        "candidate_b",
+        "tie",
+        "indeterminate",
+        "not_applicable"
+      ],
+      "title": "ComparativeVerdict",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Blinded pairwise scientific assessment for calibration experiments.",
+  "properties": {
+    "answers": {
+      "$ref": "#/$defs/AtomicComparativeAnswers"
+    },
+    "schema_version": {
+      "const": "comparative-1",
+      "default": "comparative-1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "answers"
+  ],
+  "title": "ComparativeJudgeResult",
+  "type": "object"
+}

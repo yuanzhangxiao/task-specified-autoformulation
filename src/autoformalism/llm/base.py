@@ -30,6 +30,7 @@ from autoformalism.llm.models import (
 )
 from autoformalism.schemas import (
     CandidateModel,
+    ComparativeJudgeResult,
     ProposerCandidateV2,
     ScientificJudgeResult,
     enrich_proposal_v2,
@@ -128,6 +129,20 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ScientificJudgeResult,
+        )
+
+    def compare(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> LLMCallResult[ComparativeJudgeResult]:
+        """Request a strict blinded comparative calibration result."""
+        return self._structured_call(
+            role="comparative_judge",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=ComparativeJudgeResult,
         )
 
     def _structured_call(

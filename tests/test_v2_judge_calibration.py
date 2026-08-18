@@ -10,6 +10,7 @@ import pytest
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.schemas import CandidateModel
 from scripts.analyze_adversarial_judge import main as analyze_main
+from scripts.analyze_comparative_judge import main as analyze_comparative_main
 from scripts.build_v2_judge_calibration_pairs import _mutations
 from scripts.run_adversarial_judge import _select_shard
 
@@ -182,3 +183,87 @@ def test_contiguous_shards_keep_each_baseline_mutation_block_together() -> None:
         (12, 13, 14, 15),
         (16, 17, 18, 19),
     ]
+
+
+def test_comparative_analysis_normalizes_order_and_aggregates_pairs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    scores = tmp_path / "comparative.csv"
+    fields = (
+        "pair_id",
+        "mutation_type",
+        "judge_model",
+        "repetition",
+        "order",
+        "baseline_position",
+        "baseline_preference",
+        "indeterminate_rate",
+        "not_applicable_rate",
+        "answers",
+    )
+    answers_a = json.dumps(
+        {
+            "fluxes_not_duplicated": {
+                "verdict": "candidate_a",
+                "evidence": "A counts the flux once.",
+            }
+        }
+    )
+    answers_b = json.dumps(
+        {
+            "fluxes_not_duplicated": {
+                "verdict": "candidate_b",
+                "evidence": "B counts the flux once.",
+            }
+        }
+    )
+    with scores.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for repetition in range(2):
+            writer.writerow(
+                {
+                    "pair_id": "pair_1",
+                    "mutation_type": "duplicated_gp_flux",
+                    "judge_model": "ollama:gpt-oss:120b",
+                    "repetition": repetition,
+                    "order": "baseline_a",
+                    "baseline_position": "A",
+                    "baseline_preference": 1.0,
+                    "indeterminate_rate": 0.0,
+                    "not_applicable_rate": 0.0,
+                    "answers": answers_a,
+                }
+            )
+            writer.writerow(
+                {
+                    "pair_id": "pair_1",
+                    "mutation_type": "duplicated_gp_flux",
+                    "judge_model": "ollama:gpt-oss:120b",
+                    "repetition": repetition,
+                    "order": "baseline_b",
+                    "baseline_position": "B",
+                    "baseline_preference": 1.0,
+                    "indeterminate_rate": 0.0,
+                    "not_applicable_rate": 0.0,
+                    "answers": answers_b,
+                }
+            )
+    output = tmp_path / "metrics.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["analyze", "--scores", str(scores), "--output", str(output)],
+    )
+
+    analyze_comparative_main()
+
+    metrics = json.loads(output.read_text(encoding="utf-8"))[
+        "ollama:gpt-oss:120b"
+    ]
+    assert metrics["atomic_preference_accuracy"] == 1.0
+    assert metrics["pair_aggregated_accuracy"] == 1.0
+    assert metrics["order_consistency_rate"] == 1.0
+    assert metrics["by_question"]["fluxes_not_duplicated"][
+        "baseline_preference_accuracy"
+    ] == 1.0
