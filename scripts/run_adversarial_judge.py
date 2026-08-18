@@ -108,6 +108,25 @@ def _append(path: Path, row: dict[str, object]) -> None:
         writer.writerow(row)
 
 
+def _select_shard(
+    pairs: tuple[AdversarialPair, ...],
+    *,
+    shard_index: int,
+    shard_count: int,
+    strategy: str,
+) -> tuple[AdversarialPair, ...]:
+    """Select a deterministic round-robin or contiguous pair shard."""
+    if strategy == "contiguous":
+        start = len(pairs) * shard_index // shard_count
+        stop = len(pairs) * (shard_index + 1) // shard_count
+        return pairs[start:stop]
+    return tuple(
+        pair
+        for index, pair in enumerate(pairs)
+        if index % shard_count == shard_index
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pairs", type=Path, required=True)
@@ -134,6 +153,11 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument(
+        "--shard-strategy",
+        choices=("round_robin", "contiguous"),
+        default="round_robin",
+    )
     args = parser.parse_args()
     if args.repetitions < 1:
         raise SystemExit("--repetitions must be positive")
@@ -148,10 +172,11 @@ def main() -> None:
         for line in args.pairs.read_text(encoding="utf-8").splitlines()
         if line.strip()
     )
-    pairs = tuple(
-        pair
-        for index, pair in enumerate(pairs)
-        if index % args.shard_count == args.shard_index
+    pairs = _select_shard(
+        pairs,
+        shard_index=args.shard_index,
+        shard_count=args.shard_count,
+        strategy=args.shard_strategy,
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
     score_path = args.output_root / "adversarial_judge_scores.csv"

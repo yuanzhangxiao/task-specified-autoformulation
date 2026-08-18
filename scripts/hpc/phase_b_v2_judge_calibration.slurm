@@ -84,4 +84,5 @@ fi
   --ollama-temperature 0.2 \
   --ollama-seed-base "${AF_JUDGE_SEED_BASE}" \
   --shard-index "${shard_index}" \
-  --shard-count "${AF_SHARD_COUNT}"
+  --shard-count "${AF_SHARD_COUNT}" \
+  --shard-strategy contiguous

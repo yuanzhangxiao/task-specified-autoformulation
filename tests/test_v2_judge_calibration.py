@@ -11,6 +11,7 @@ from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.schemas import CandidateModel
 from scripts.analyze_adversarial_judge import main as analyze_main
 from scripts.build_v2_judge_calibration_pairs import _mutations
+from scripts.run_adversarial_judge import _select_shard
 
 
 def _baseline() -> CandidateModel:
@@ -60,30 +61,36 @@ def test_v2_mutations_are_distinct_and_runtime_valid() -> None:
     mutations = _mutations(baseline)
 
     assert {name for name, _ in mutations} == {
-        "reversed_gp_dynamics",
-        "duplicated_gp_balance",
+        "wrong_meal_sink",
+        "duplicated_gp_flux",
         "disconnected_claimed_mechanism",
         "unjustified_one_sided_accumulator",
     }
     for _, candidate in mutations:
         compile_candidate(candidate, context)
         assert candidate.candidate_id != baseline.candidate_id
+        assert "wrong" not in candidate.candidate_id
+        assert "duplicated" not in candidate.candidate_id
+        assert candidate.parent_candidate_id is None
+        assert candidate.change_summary == (
+            "Candidate submitted for scientific assessment."
+        )
 
 
 def test_v2_mutations_encode_the_claimed_scientific_defects() -> None:
     mutations = dict(_mutations(_baseline()))
 
-    reversed_rhs = next(
+    wrong_sink_rhs = next(
         item.rhs
-        for item in mutations["reversed_gp_dynamics"].state_equations
+        for item in mutations["wrong_meal_sink"].state_equations
         if item.state == "Gp"
     )
     duplicate_rhs = next(
         item.rhs
-        for item in mutations["duplicated_gp_balance"].state_equations
+        for item in mutations["duplicated_gp_flux"].state_equations
         if item.state == "Gp"
     )
-    assert reversed_rhs.startswith("-(")
+    assert "- abs(meal_event_g)" in wrong_sink_rhs
     assert duplicate_rhs.count("meal_event_g") == 2
     assert any(
         item.name.startswith("claimed_meal_pathway")
@@ -118,7 +125,7 @@ def test_analysis_accepts_baseline_mutated_labels(
             writer.writerow(
                 {
                     "pair_id": "pair_1",
-                    "mutation_type": "reversed_gp_dynamics",
+                    "mutation_type": "wrong_meal_sink",
                     "known_label": "baseline",
                     "judge_model": "ollama:gpt-oss:20b",
                     "repetition": repetition,
@@ -129,7 +136,7 @@ def test_analysis_accepts_baseline_mutated_labels(
             writer.writerow(
                 {
                     "pair_id": "pair_1",
-                    "mutation_type": "reversed_gp_dynamics",
+                    "mutation_type": "wrong_meal_sink",
                     "known_label": "mutated",
                     "judge_model": "ollama:gpt-oss:20b",
                     "repetition": repetition,
@@ -153,3 +160,25 @@ def test_analysis_accepts_baseline_mutated_labels(
     assert model["paired_preference_accuracy"] == 1.0
     assert model["mean_score_margin"] == pytest.approx(0.6)
     assert model["repeat_icc_1_1"] == 1.0
+
+
+def test_contiguous_shards_keep_each_baseline_mutation_block_together() -> None:
+    pairs = tuple(range(20))
+
+    shards = [
+        _select_shard(
+            pairs,
+            shard_index=index,
+            shard_count=5,
+            strategy="contiguous",
+        )
+        for index in range(5)
+    ]
+
+    assert shards == [
+        (0, 1, 2, 3),
+        (4, 5, 6, 7),
+        (8, 9, 10, 11),
+        (12, 13, 14, 15),
+        (16, 17, 18, 19),
+    ]

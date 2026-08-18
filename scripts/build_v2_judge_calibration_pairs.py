@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import hashlib
 import json
@@ -40,29 +41,57 @@ def _unique_name(payload: dict, stem: str) -> str:
     return f"{stem}_{suffix}"
 
 
+def _additive_terms(expression: str) -> tuple[str, ...]:
+    """Return signed top-level additive terms without evaluating text."""
+    def visit(node: ast.expr, sign: int = 1) -> list[ast.expr]:
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return [*visit(node.left, sign), *visit(node.right, sign)]
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub):
+            return [*visit(node.left, sign), *visit(node.right, -sign)]
+        if sign < 0:
+            node = ast.UnaryOp(op=ast.USub(), operand=node)
+        return [node]
+
+    parsed = ast.parse(expression, mode="eval")
+    return tuple(
+        ast.unparse(ast.fix_missing_locations(node))
+        for node in visit(parsed.body)
+    )
+
+
+def _blind_candidate(candidate: CandidateModel, token: str) -> CandidateModel:
+    """Remove identifiers and summaries that could reveal pair membership."""
+    payload = candidate.model_dump(mode="json")
+    payload["candidate_id"] = f"calibration_{token}"
+    payload["parent_candidate_id"] = None
+    payload["change_summary"] = "Candidate submitted for scientific assessment."
+    return CandidateModel.model_validate(payload)
+
+
 def _mutations(candidate: CandidateModel) -> list[tuple[str, CandidateModel]]:
     base = candidate.model_dump(mode="json")
     glucose, expression_key = _component(base, "Gp")
     glucose_expression = glucose[expression_key]
     mutations: list[tuple[str, dict]] = []
 
-    reversed_balance = copy.deepcopy(base)
-    row, key = _component(reversed_balance, "Gp")
-    row[key] = f"-({row[key]})"
-    mutations.append(("reversed_gp_dynamics", reversed_balance))
+    wrong_sink = copy.deepcopy(base)
+    row, key = _component(wrong_sink, "Gp")
+    row[key] = f"({row[key]}) - abs(meal_event_g)"
+    mutations.append(("wrong_meal_sink", wrong_sink))
 
-    duplicated_balance = copy.deepcopy(base)
-    row, key = _component(duplicated_balance, "Gp")
-    row[key] = f"({row[key]}) + ({glucose_expression})"
-    mutations.append(("duplicated_gp_balance", duplicated_balance))
+    duplicated_flux = copy.deepcopy(base)
+    row, key = _component(duplicated_flux, "Gp")
+    duplicated_term = _additive_terms(glucose_expression)[0]
+    row[key] = f"({row[key]}) + ({duplicated_term})"
+    mutations.append(("duplicated_gp_flux", duplicated_flux))
 
     disconnected = copy.deepcopy(base)
     disconnected["processes"].append(
         {
             "name": _unique_name(disconnected, "claimed_meal_pathway"),
             "expression": "meal_event_g",
-            "mechanisms": ["ClaimedMealPathway"],
-            "description": "Claimed scientific mechanism disconnected from outputs.",
+            "mechanisms": ["MealPathway"],
+            "description": "Additional candidate meal mechanism.",
             "unit": "unspecified",
         }
     )
@@ -74,8 +103,8 @@ def _mutations(candidate: CandidateModel) -> list[tuple[str, CandidateModel]]:
         {
             "name": state_name,
             "kind": "latent",
-            "mechanisms": ["UnjustifiedAccumulator"],
-            "description": "Additional one-signed accumulator without task role.",
+            "mechanisms": ["AuxiliaryAccumulation"],
+            "description": "Additional candidate accumulation state.",
             "unit": "unspecified",
         }
     )
@@ -89,10 +118,15 @@ def _mutations(candidate: CandidateModel) -> list[tuple[str, CandidateModel]]:
 
     output = []
     for mutation_type, payload in mutations:
-        payload["candidate_id"] = f"{candidate.candidate_id}_{mutation_type}"
-        payload["parent_candidate_id"] = candidate.candidate_id
-        payload["change_summary"] = "Controlled calibration mutation."
-        output.append((mutation_type, CandidateModel.model_validate(payload)))
+        token = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        output.append(
+            (
+                mutation_type,
+                _blind_candidate(CandidateModel.model_validate(payload), token),
+            )
+        )
     return output
 
 
@@ -133,7 +167,11 @@ def build_pairs(runs_root: Path, data_root: Path) -> tuple[AdversarialPair, ...]
             (benchmark_id, tier),
             _validation_context(data_root, benchmark_id, tier),
         )
-        baseline = CandidateModel.model_validate(summary["selected_candidate"])
+        raw_baseline = CandidateModel.model_validate(summary["selected_candidate"])
+        baseline_token = hashlib.sha256(
+            json.dumps(raw_baseline.model_dump(mode="json"), sort_keys=True).encode()
+        ).hexdigest()[:16]
+        baseline = _blind_candidate(raw_baseline, baseline_token)
         compile_candidate(baseline, context)
         for mutation_type, mutated in _mutations(baseline):
             compile_candidate(mutated, context)
