@@ -116,3 +116,20 @@ submission, confirm model access with a minimal authorized API request. Official
 OpenAI documentation should be consulted for the exact model identifier
 available to the account; the runner intentionally accepts any
 `provider:model` specification.
+
+When no hosted API credential is available, a larger model from the same local
+family provides a capacity-controlled comparison. Download it once into the
+persistent shared Ollama store; never let array tasks pull the model
+concurrently:
+
+```bash
+sbatch --account=bibo-delta-gpu --partition=gpuA40x4 \
+  --export=ALL,AF_LOCAL_MODEL=gpt-oss:120b \
+  scripts/hpc/ollama_pull_model.slurm
+```
+
+After the download succeeds, run a one-shard, one-repetition smoke comparison
+with four A40 GPUs. Then use all five shards and five repetitions only after
+model loading and structured output are confirmed. The local calibration
+launcher accepts `AF_LOCAL_MODEL`; command-line resource requests can override
+its one-GPU default for the 120B model.
