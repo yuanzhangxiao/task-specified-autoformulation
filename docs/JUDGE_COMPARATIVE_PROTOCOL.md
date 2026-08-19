@@ -77,5 +77,25 @@ The executable prompt is `ATOMIC_COMPARATIVE_PROMPT` in
 The experiment reports per-call and repetition-aggregated preference accuracy,
 false preference and tie rates, atomic indeterminacy, A/B order consistency,
 repeat ICC and standard deviation, and question- and mutation-specific results.
+It also reports mutation-by-question cross-tabs so irrelevant checklist items do
+not obscure the detection rate of the question targeted by each mutation.
+Shard execution is protected by an exclusive file lock. The merger fails on
+conflicting duplicate outcomes by default and supports an explicit, audited
+first-record policy for recovery of already duplicated append-only artifacts.
 The protocol should remain outside search until it demonstrates adequate
 accuracy, order invariance, and repeatability on blinded calibration pairs.
+
+## Candidate paper-appendix evidence
+
+The first 20B structure-only study on 20 frozen baseline/mutation pairs produced
+0.785 per-comparison preference accuracy, 0.035 false preference, 1.000 accuracy
+after aggregation across five repetitions and both candidate orders, and 0.039
+mean repeated-call standard deviation. The preceding independent continuous-score
+protocol produced 0.530 paired accuracy, 0.440 false preference, and 0.248 mean
+repeated-call standard deviation on the same frozen pair design. These results
+are promising evidence for pairwise atomic judging, but remain provisional until
+the duplicate-execution correction, complete-case reliability analysis, order
+sensitivity, per-mutation results, and a same-protocol 120B comparison are all
+reported together. In particular, strict A/B order consistency was only 0.690,
+so the appendix must describe order reversal and aggregation as part of the
+measurement protocol rather than presenting a single-order score.

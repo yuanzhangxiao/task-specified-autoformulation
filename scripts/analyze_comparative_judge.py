@@ -92,6 +92,9 @@ def main() -> None:
         reverse_pairs: dict[tuple[str, int], dict[str, str]] = defaultdict(dict)
         by_mutation: dict[str, list[str]] = defaultdict(list)
         atomic: dict[str, list[str]] = defaultdict(list)
+        atomic_by_mutation: dict[str, dict[str, list[str]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
         for row, preference, direction in zip(
             values, preferences, directions, strict=True
         ):
@@ -103,11 +106,11 @@ def main() -> None:
             ] = direction
             by_mutation[row["mutation_type"]].append(direction)
             for name, answer in json.loads(row["answers"]).items():
-                atomic[name].append(
-                    _baseline_atomic_verdict(
-                        answer["verdict"], row["baseline_position"]
-                    )
+                outcome = _baseline_atomic_verdict(
+                    answer["verdict"], row["baseline_position"]
                 )
+                atomic[name].append(outcome)
+                atomic_by_mutation[row["mutation_type"]][name].append(outcome)
         order_consistency = [
             item["baseline_a"] == item["baseline_b"]
             for item in reverse_pairs.values()
@@ -117,6 +120,14 @@ def main() -> None:
             _direction(mean(pair_values))
             for pair_values in pair_aggregates.values()
             if pair_values
+        ]
+        expected_repetitions = max(
+            (len(group) for group in repeated.values()), default=0
+        )
+        complete_repeat_groups = [
+            group
+            for group in repeated.values()
+            if len(group) == expected_repetitions
         ]
         metrics[model] = {
             "comparison_count": len(values),
@@ -149,7 +160,12 @@ def main() -> None:
             "pair_aggregated_false_preference_rate": _rate(
                 aggregate_directions, "mutated"
             ),
-            "repeat_icc_1_1": _icc_one_one(list(repeated.values())),
+            "repeat_expected_count": expected_repetitions,
+            "repeat_complete_group_count": len(complete_repeat_groups),
+            "repeat_incomplete_group_count": (
+                len(repeated) - len(complete_repeat_groups)
+            ),
+            "repeat_icc_1_1": _icc_one_one(complete_repeat_groups),
             "mean_repeated_call_std": (
                 mean(pstdev(group) for group in repeated.values())
                 if repeated
@@ -175,6 +191,25 @@ def main() -> None:
                     "not_applicable_rate": _rate(outcomes, "not_applicable"),
                 }
                 for mutation, outcomes in sorted(by_mutation.items())
+            },
+            "by_mutation_and_question": {
+                mutation: {
+                    name: {
+                        "baseline_preference_accuracy": _rate(
+                            outcomes, "baseline"
+                        ),
+                        "false_preference_rate": _rate(outcomes, "mutated"),
+                        "tie_rate": _rate(outcomes, "tie"),
+                        "indeterminate_rate": _rate(outcomes, "indeterminate"),
+                        "not_applicable_rate": _rate(
+                            outcomes, "not_applicable"
+                        ),
+                    }
+                    for name, outcomes in sorted(question_outcomes.items())
+                }
+                for mutation, question_outcomes in sorted(
+                    atomic_by_mutation.items()
+                )
             },
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)

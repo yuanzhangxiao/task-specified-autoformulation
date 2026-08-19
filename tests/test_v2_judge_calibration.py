@@ -12,6 +12,7 @@ from autoformalism.schemas import CandidateModel
 from scripts.analyze_adversarial_judge import main as analyze_main
 from scripts.analyze_comparative_judge import main as analyze_comparative_main
 from scripts.build_v2_judge_calibration_pairs import _mutations
+from scripts.merge_comparative_scores import main as merge_comparative_main
 from scripts.run_adversarial_judge import _select_shard
 
 
@@ -267,3 +268,52 @@ def test_comparative_analysis_normalizes_order_and_aggregates_pairs(
     assert metrics["by_question"]["fluxes_not_duplicated"][
         "baseline_preference_accuracy"
     ] == 1.0
+
+
+def test_comparative_merge_requires_explicit_conflict_policy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    shard = tmp_path / "shard.csv"
+    fields = (
+        "pair_id",
+        "judge_model",
+        "repetition",
+        "order",
+        "baseline_preference",
+    )
+    with shard.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for preference in (0.75, 0.25):
+            writer.writerow(
+                {
+                    "pair_id": "pair_1",
+                    "judge_model": "ollama:test",
+                    "repetition": 0,
+                    "order": "baseline_a",
+                    "baseline_preference": preference,
+                }
+            )
+    output = tmp_path / "merged.csv"
+    base_args = [
+        "merge",
+        "--inputs",
+        str(shard),
+        "--output",
+        str(output),
+        "--expected",
+        "1",
+    ]
+    monkeypatch.setattr(sys, "argv", base_args)
+    with pytest.raises(SystemExit, match="conflicting duplicate"):
+        merge_comparative_main()
+
+    monkeypatch.setattr(
+        sys, "argv", [*base_args, "--duplicate-policy", "first"]
+    )
+    merge_comparative_main()
+
+    with output.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert float(rows[0]["baseline_preference"]) == 0.75

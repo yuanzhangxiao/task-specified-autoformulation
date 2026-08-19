@@ -70,7 +70,8 @@ if [[ "${ready}" != true ]]; then
   exit 1
 fi
 
-"${AF_PYTHON}" scripts/run_comparative_judge.py \
+flock --exclusive "${shard_root}/comparative_judge.lock" \
+  "${AF_PYTHON}" scripts/run_comparative_judge.py \
   --pairs "${AF_CALIBRATION_PAIRS}" \
   --data-root "${AF_PUBLIC_DATA_ROOT}" \
   --judge-models "ollama:${AF_LOCAL_MODEL}" \
