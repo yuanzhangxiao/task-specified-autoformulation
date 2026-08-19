@@ -99,3 +99,21 @@ sensitivity, per-mutation results, and a same-protocol 120B comparison are all
 reported together. In particular, strict A/B order consistency was only 0.690,
 so the appendix must describe order reversal and aggregation as part of the
 measurement protocol rather than presenting a single-order score.
+
+## Next-protocol reachability amendment
+
+The exact `disconnected_claimed_mechanism` stress mutation appends an algebraic
+meal process that no state equation, output mapping, or other process references.
+The production controller already removes such wholly unreferenced algebraic
+processes through `repair_protected_declarations` before validation, fitting, or
+judging. Its judge-only detection rate must therefore be reported as an
+out-of-pipeline stress diagnostic, not as a production failure rate.
+
+For subtler retained structures, the comparative runner supports an optional
+`--include-reachability-facts` amendment. It computes, symmetrically for A and B,
+whether every submitted state and process has a directed expression-graph path
+to each requested target. The facts contain no fit data or hidden reference
+model and make no scientific verdict. The judge remains responsible only for
+interpreting whether a certified disconnection matters under the public task.
+This option is disabled by default so reachability assistance can be evaluated
+as a separate protocol intervention.

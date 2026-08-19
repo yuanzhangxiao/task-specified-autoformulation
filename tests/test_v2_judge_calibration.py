@@ -14,6 +14,7 @@ from scripts.analyze_comparative_judge import main as analyze_comparative_main
 from scripts.build_v2_judge_calibration_pairs import _mutations
 from scripts.merge_comparative_scores import main as merge_comparative_main
 from scripts.run_adversarial_judge import _select_shard
+from scripts.run_comparative_judge import _reachability_facts
 
 
 def _baseline() -> CandidateModel:
@@ -102,6 +103,24 @@ def test_v2_mutations_encode_the_claimed_scientific_defects() -> None:
         item.name.startswith("unjustified_accumulator")
         for item in mutations["unjustified_one_sided_accumulator"].states
     )
+
+
+def test_reachability_facts_expose_disconnected_process_without_a_verdict() -> None:
+    disconnected = dict(_mutations(_baseline()))[
+        "disconnected_claimed_mechanism"
+    ]
+
+    facts = _reachability_facts(disconnected)["components"]
+
+    disconnected_name = next(
+        name for name in facts if name.startswith("claimed_meal_pathway")
+    )
+    assert facts[disconnected_name] == {
+        "component_kind": "process",
+        "reaches_requested_target": False,
+        "reachable_targets": [],
+    }
+    assert facts["U"]["reaches_requested_target"] is True
 
 
 def test_analysis_accepts_baseline_mutated_labels(
@@ -265,6 +284,10 @@ def test_comparative_analysis_normalizes_order_and_aggregates_pairs(
     assert metrics["atomic_preference_accuracy"] == 1.0
     assert metrics["pair_aggregated_accuracy"] == 1.0
     assert metrics["order_consistency_rate"] == 1.0
+    assert metrics["order_exact_reversal_rate"] == 0.0
+    assert metrics["order_transition_counts"] == {
+        "baseline_a:baseline|baseline_b:baseline": 2
+    }
     assert metrics["by_question"]["fluxes_not_duplicated"][
         "baseline_preference_accuracy"
     ] == 1.0

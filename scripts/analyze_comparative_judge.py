@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import mean, pstdev
 
@@ -116,6 +116,16 @@ def main() -> None:
             for item in reverse_pairs.values()
             if {"baseline_a", "baseline_b"} <= item.keys()
         ]
+        order_transitions = Counter(
+            (item["baseline_a"], item["baseline_b"])
+            for item in reverse_pairs.values()
+            if {"baseline_a", "baseline_b"} <= item.keys()
+        )
+        exact_reversals = sum(
+            count
+            for (forward, reverse), count in order_transitions.items()
+            if {forward, reverse} == {"baseline", "mutated"}
+        )
         aggregate_directions = [
             _direction(mean(pair_values))
             for pair_values in pair_aggregates.values()
@@ -154,6 +164,15 @@ def main() -> None:
                 if order_consistency
                 else None
             ),
+            "order_exact_reversal_rate": (
+                exact_reversals / len(order_consistency)
+                if order_consistency
+                else None
+            ),
+            "order_transition_counts": {
+                f"baseline_a:{forward}|baseline_b:{reverse}": count
+                for (forward, reverse), count in sorted(order_transitions.items())
+            },
             "pair_aggregated_accuracy": _rate(
                 aggregate_directions, "baseline"
             ),

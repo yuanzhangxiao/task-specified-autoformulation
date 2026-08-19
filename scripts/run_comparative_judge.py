@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections import defaultdict
 from pathlib import Path
 
 from autoformalism.config import DataConfig
@@ -15,6 +16,7 @@ from autoformalism.execution import (
     _prediction_protocol_prompt,
     _symbol_contract,
 )
+from autoformalism.expressions import RestrictedParser
 from autoformalism.llm import (
     LLMConfig,
     LLMProvider,
@@ -22,6 +24,7 @@ from autoformalism.llm import (
     create_llm_client,
 )
 from autoformalism.rebuttal.adversarial import AdversarialPair
+from autoformalism.schemas import CandidateModel
 from autoformalism.search.controller import _DETERMINISTIC_CERTIFICATIONS
 
 ATOMIC_COMPARATIVE_PROMPT = """You are a blinded comparative scientific judge.
@@ -79,11 +82,19 @@ Atomic questions:
     said to saturate?
 
 Return strict JSON with schema_version "comparative-1" and an "answers" object.
-The answers object must contain exactly the eight question identifiers above.
+The answers object must contain exactly the fourteen question identifiers above.
 Each value must have keys "verdict" and "evidence". Do not emit a numeric score,
 overall winner, edit proposal, or any additional keys. The runtime computes the
 mean preference from the atomic answers and records uncertainty and applicability
 separately.
+"""
+
+REACHABILITY_AMENDMENT = """The request also includes symmetric deterministic
+reachability facts for both candidates. These facts report only directed paths
+in the submitted expression graphs. Treat them as certified graph facts, not as
+scientific verdicts. A component without a path to a requested target is
+structurally disconnected from that target; decide from the public task whether
+that disconnection is scientifically consequential. Do not infer fit quality.
 """
 
 FIELDS = (
@@ -123,7 +134,13 @@ def _select_shard(
     )
 
 
-def _system_prompt(data_root: Path, pair: AdversarialPair, model: str) -> str:
+def _system_prompt(
+    data_root: Path,
+    pair: AdversarialPair,
+    model: str,
+    *,
+    include_reachability_facts: bool = False,
+) -> str:
     registry = BenchmarkRegistry()
     development = BenchmarkLoader(registry).load_development(
         DataConfig(root=data_root, benchmark_id=pair.benchmark_id, tier=pair.tier)
@@ -149,13 +166,63 @@ def _system_prompt(data_root: Path, pair: AdversarialPair, model: str) -> str:
     if spec.data_layout == "legacy_split_files":
         root /= spec.tier_directory_template.format(tier=pair.tier)
     proposer = (root / "proposer_prompt.txt").read_text(encoding="utf-8")
-    return (
+    prompt = (
         f"Configured judge model: {model}\n\n"
         f"Scientific task:\n{proposer}\n\n"
         f"{_prediction_protocol_prompt(context)}\n\n"
         f"{_symbol_contract(context)}\n\n"
         f"Comparative judge protocol:\n{ATOMIC_COMPARATIVE_PROMPT}"
     )
+    if include_reachability_facts:
+        prompt += f"\nReachability amendment:\n{REACHABILITY_AMENDMENT}"
+    return prompt
+
+
+def _reachability_facts(candidate: CandidateModel) -> dict[str, object]:
+    """Return target reachability without interpreting scientific importance."""
+    parser = RestrictedParser()
+    graph: dict[str, set[str]] = defaultdict(set)
+    for process in candidate.processes:
+        parsed = parser.parse(
+            process.expression, location=f"process:{process.name}"
+        )
+        for symbol in parsed.symbols:
+            graph[symbol].add(process.name)
+    for equation in candidate.state_equations:
+        parsed = parser.parse(equation.rhs, location=f"equation:{equation.state}")
+        for symbol in parsed.symbols:
+            graph[symbol].add(equation.state)
+    for mapping in candidate.observation_mappings:
+        parsed = parser.parse(
+            mapping.expression, location=f"observation:{mapping.channel}"
+        )
+        for symbol in parsed.symbols:
+            graph[symbol].add(f"target:{mapping.channel}")
+    target_nodes = {
+        f"target:{mapping.channel}" for mapping in candidate.observation_mappings
+    }
+    components = {
+        **{state.name: "state" for state in candidate.states},
+        **{process.name: "process" for process in candidate.processes},
+    }
+    facts: dict[str, object] = {}
+    for name, kind in sorted(components.items()):
+        pending = [name]
+        visited = {name}
+        reached: set[str] = set()
+        while pending:
+            current = pending.pop()
+            reached.update(graph.get(current, set()) & target_nodes)
+            for destination in graph.get(current, set()) - visited:
+                visited.add(destination)
+                pending.append(destination)
+        reachable_targets = sorted(item.removeprefix("target:") for item in reached)
+        facts[name] = {
+            "component_kind": kind,
+            "reaches_requested_target": bool(reachable_targets),
+            "reachable_targets": reachable_targets,
+        }
+    return {"components": facts}
 
 
 def _completed(path: Path) -> set[tuple[str, str, int, str]]:
@@ -206,6 +273,11 @@ def main() -> None:
     parser.add_argument("--ollama-temperature", type=float, default=0.0)
     parser.add_argument("--ollama-seed-base", type=int)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--include-reachability-facts",
+        action="store_true",
+        help="enable the next-protocol symmetric graph-reachability amendment",
+    )
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument(
@@ -240,7 +312,10 @@ def main() -> None:
     if args.dry_run:
         prompts = {
             (pair.benchmark_id, pair.tier): _system_prompt(
-                args.data_root.resolve(), pair, args.judge_models[0]
+                args.data_root.resolve(),
+                pair,
+                args.judge_models[0],
+                include_reachability_facts=args.include_reachability_facts,
             )
             for pair in pairs
         }
@@ -283,7 +358,12 @@ def main() -> None:
             for repetition in range(args.repetitions)
         )
         for pair in pairs:
-            system_prompt = _system_prompt(args.data_root.resolve(), pair, model_spec)
+            system_prompt = _system_prompt(
+                args.data_root.resolve(),
+                pair,
+                model_spec,
+                include_reachability_facts=args.include_reachability_facts,
+            )
             orientations = (
                 ("baseline_a", "A", pair.valid_candidate, pair.adversarial_candidate),
                 ("baseline_b", "B", pair.adversarial_candidate, pair.valid_candidate),
@@ -300,6 +380,11 @@ def main() -> None:
                         "candidate_a": candidate_a.model_dump(mode="json"),
                         "candidate_b": candidate_b.model_dump(mode="json"),
                     }
+                    if args.include_reachability_facts:
+                        request["deterministic_reachability_facts"] = {
+                            "candidate_a": _reachability_facts(candidate_a),
+                            "candidate_b": _reachability_facts(candidate_b),
+                        }
                     result = clients[repetition].compare(
                         system_prompt=system_prompt,
                         user_prompt=json.dumps(request, sort_keys=True),
