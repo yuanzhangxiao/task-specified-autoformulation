@@ -264,6 +264,14 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=900.0)
     parser.add_argument("--max-output-tokens", type=int, default=4096)
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=10,
+        choices=range(1, 11),
+        metavar="{1..10}",
+        help="provider attempts allowed for one scored comparison",
+    )
     parser.add_argument("--ollama-base-url", default="http://127.0.0.1:11434")
     parser.add_argument(
         "--ollama-thinking",
@@ -343,6 +351,7 @@ def main() -> None:
                         args.output_root
                         / f"{provider.value}_{model}_events.jsonl"
                     ),
+                    max_attempts=args.max_attempts,
                     ollama_base_url=args.ollama_base_url,
                     ollama_thinking=OllamaThinking(args.ollama_thinking),
                     ollama_temperature=args.ollama_temperature,

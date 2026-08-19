@@ -82,6 +82,9 @@ not obscure the detection rate of the question targeted by each mutation.
 Shard execution is protected by an exclusive file lock. The merger fails on
 conflicting duplicate outcomes by default and supports an explicit, audited
 first-record policy for recovery of already duplicated append-only artifacts.
+Calibration calls allow up to ten provider attempts for transient empty or
+malformed structured responses. Failed attempts are logged but never counted as
+judge observations; only the first validated structured response is scored.
 The protocol should remain outside search until it demonstrates adequate
 accuracy, order invariance, and repeatability on blinded calibration pairs.
 
