@@ -90,18 +90,26 @@ accuracy, order invariance, and repeatability on blinded calibration pairs.
 
 ## Candidate paper-appendix evidence
 
-The first 20B structure-only study on 20 frozen baseline/mutation pairs produced
-0.785 per-comparison preference accuracy, 0.035 false preference, 1.000 accuracy
-after aggregation across five repetitions and both candidate orders, and 0.039
-mean repeated-call standard deviation. The preceding independent continuous-score
-protocol produced 0.530 paired accuracy, 0.440 false preference, and 0.248 mean
-repeated-call standard deviation on the same frozen pair design. These results
-are promising evidence for pairwise atomic judging, but remain provisional until
-the duplicate-execution correction, complete-case reliability analysis, order
-sensitivity, per-mutation results, and a same-protocol 120B comparison are all
-reported together. In particular, strict A/B order consistency was only 0.690,
-so the appendix must describe order reversal and aggregation as part of the
-measurement protocol rather than presenting a single-order score.
+The corrected 20B structure-only study contains 200 unique comparisons from 20
+frozen baseline/mutation pairs, five repetitions, and both candidate orders,
+with no discarded or conflicting duplicates. It produced 0.785 per-comparison
+preference accuracy, 0.055 false preference, 1.000 pair-aggregated accuracy,
+0.000 pair-aggregated false preference, and 0.043 mean repeated-call standard
+deviation. The preceding independent continuous-score protocol produced 0.530
+paired accuracy, 0.440 false preference, and 0.248 mean repeated-call standard
+deviation on the same frozen pair design.
+
+Targeted-question detection was 0.980 for duplicated flux, 0.960 for an
+unjustified one-sided accumulator, 0.780 for a disconnected component, and
+0.720 for the source-sign consequence of a wrong meal sink. Equal averaging
+over all questions also introduced off-target errors, and the judge never used
+`not_applicable`. Strict A/B order consistency was 0.710, direct order reversal
+was 0.090, and repeat ICC(1,1) was 0.053. The appendix must therefore describe
+order reversal and repetition aggregation as part of the measurement protocol,
+report both aggregate gains and single-call limitations, and avoid presenting
+the 1.000 pair-aggregated result as perfect judge reliability. A same-protocol
+120B comparison remains necessary to separate protocol limitations from model
+capability.
 
 ## Next-protocol reachability amendment
 
