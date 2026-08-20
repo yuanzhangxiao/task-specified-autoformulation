@@ -129,6 +129,8 @@ def main() -> None:
     metrics = {}
     for model, model_rows in sorted(by_model.items()):
         overall_correct: list[bool] = []
+        runtime_correct: list[bool] = []
+        runtime_pair_correct: list[bool] = []
         absolute_correct: list[bool] = []
         absolute_pair_correct: list[bool] = []
         comparative_correct: list[bool] = []
@@ -145,31 +147,41 @@ def main() -> None:
             if expected_overall != ExpectedPairPreference.UNLABELED.value:
                 overall_correct.append(row["baseline_preference"] == expected_overall)
             baseline_position = row["baseline_position"]
-            absolute_rows = [
-                *json.loads(row["deterministic_assessments"]),
-                *json.loads(row["absolute_assessments"]),
-            ]
+            actual_runtime = _normalized_absolute(
+                json.loads(row["deterministic_assessments"]), baseline_position
+            )
             actual_absolute = _normalized_absolute(
-                absolute_rows, baseline_position
+                json.loads(row["absolute_assessments"]), baseline_position
             )
             for item in gold.absolute_labels:
                 key = (item.criterion.value, item.subject_id)
-                if key not in actual_absolute:
+                is_runtime = item.label_source == "deterministic_runtime"
+                actual = actual_runtime if is_runtime else actual_absolute
+                if key not in actual:
                     continue
-                actual_baseline, actual_mutated = actual_absolute[key]
+                actual_baseline, actual_mutated = actual[key]
                 item_results = []
                 if item.baseline is not ExpectedVerdict.UNLABELED:
                     correct = actual_baseline == item.baseline.value
-                    absolute_correct.append(correct)
-                    absolute_by_criterion[item.criterion.value].append(correct)
+                    target = runtime_correct if is_runtime else absolute_correct
+                    target.append(correct)
+                    if not is_runtime:
+                        absolute_by_criterion[item.criterion.value].append(correct)
                     item_results.append(correct)
                 if item.mutated is not ExpectedVerdict.UNLABELED:
                     correct = actual_mutated == item.mutated.value
-                    absolute_correct.append(correct)
-                    absolute_by_criterion[item.criterion.value].append(correct)
+                    target = runtime_correct if is_runtime else absolute_correct
+                    target.append(correct)
+                    if not is_runtime:
+                        absolute_by_criterion[item.criterion.value].append(correct)
                     item_results.append(correct)
                 if len(item_results) == 2:
-                    absolute_pair_correct.append(all(item_results))
+                    target_pairs = (
+                        runtime_pair_correct
+                        if is_runtime
+                        else absolute_pair_correct
+                    )
+                    target_pairs.append(all(item_results))
             actual_relative = _normalized_relative(
                 json.loads(row["comparative_assessments"]), baseline_position
             )
@@ -234,16 +246,23 @@ def main() -> None:
             if labels[pair_id].overall_preference
             is not ExpectedPairPreference.UNLABELED
         }
-        reviewed_absolute = sum(
+        scored_absolute = sum(
             item.baseline is not ExpectedVerdict.UNLABELED
-            or item.mutated is not ExpectedVerdict.UNLABELED
+            for label in labels.values()
+            for item in label.absolute_labels
+            if item.label_source != "deterministic_runtime"
+        ) + sum(
+            item.mutated is not ExpectedVerdict.UNLABELED
+            for label in labels.values()
+            for item in label.absolute_labels
+            if item.label_source != "deterministic_runtime"
+        )
+        possible_absolute = 2 * sum(
+            item.label_source != "deterministic_runtime"
             for label in labels.values()
             for item in label.absolute_labels
         )
-        total_absolute = sum(
-            len(label.absolute_labels) for label in labels.values()
-        )
-        reviewed_comparative = sum(
+        scored_comparative = sum(
             item.preference is not ExpectedPairPreference.UNLABELED
             for label in labels.values()
             for item in label.comparative_labels
@@ -262,6 +281,8 @@ def main() -> None:
             "pair_aggregated_accuracy_ci95": _bootstrap_accuracy_ci(
                 pair_accuracy
             ),
+            "runtime_certification_accuracy": _rate(runtime_correct),
+            "runtime_pair_exact_accuracy": _rate(runtime_pair_correct),
             "absolute_verdict_accuracy": _rate(absolute_correct),
             "absolute_pair_exact_accuracy": _rate(absolute_pair_correct),
             "comparative_question_accuracy": _rate(comparative_correct),
@@ -279,11 +300,19 @@ def main() -> None:
                 if repeated
                 else None
             ),
-            "reviewed_absolute_label_fraction": (
-                reviewed_absolute / total_absolute if total_absolute else None
+            "gold_label_scope": "runtime_and_mutation_contract_only",
+            "expert_review_used": False,
+            "scored_absolute_verdict_count": scored_absolute,
+            "possible_absolute_verdict_count": possible_absolute,
+            "scored_absolute_label_fraction": (
+                scored_absolute / possible_absolute
+                if possible_absolute
+                else None
             ),
-            "reviewed_comparative_label_fraction": (
-                reviewed_comparative / total_comparative
+            "scored_comparative_label_count": scored_comparative,
+            "possible_comparative_label_count": total_comparative,
+            "scored_comparative_label_fraction": (
+                scored_comparative / total_comparative
                 if total_comparative
                 else None
             ),
@@ -312,10 +341,14 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
     lines = [
         "# Hybrid scientific judge calibration",
         "",
+        "Gold labels are restricted to deterministic runtime facts and explicit "
+        "mutation contracts; no domain-expert review is used. Untargeted questions "
+        "are excluded from question-level accuracy.",
+        "",
         "| Judge | Combined | Absolute only | Comparative only | Pair aggregate | "
-        "Atomic absolute | Pair absolute | Comparative questions | Order consistency | "
-        "Repeat ICC | Repeat SD |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "Runtime integrity | LLM semantic absolute | Pair semantic absolute | "
+        "Comparative questions | Order consistency | Repeat ICC | Repeat SD |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for model, raw in metrics.items():
         values = raw
@@ -329,6 +362,7 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
                     _format(values["absolute_only_preference_accuracy"]),
                     _format(values["relative_only_preference_accuracy"]),
                     _format(values["pair_aggregated_accuracy"]),
+                    _format(values["runtime_certification_accuracy"]),
                     _format(values["absolute_verdict_accuracy"]),
                     _format(values["absolute_pair_exact_accuracy"]),
                     _format(values["comparative_question_accuracy"]),

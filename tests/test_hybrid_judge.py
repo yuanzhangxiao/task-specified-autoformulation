@@ -22,12 +22,17 @@ from autoformalism.judging import (
 )
 from autoformalism.llm import MockLLMClient
 from autoformalism.rebuttal.adversarial import AdversarialPair
-from autoformalism.rebuttal.hybrid_labels import ExpectedVerdict
+from autoformalism.rebuttal.hybrid_labels import (
+    ExpectedPairPreference,
+    ExpectedVerdict,
+    mutation_label_contract,
+)
 from autoformalism.schemas import (
     AbsoluteCriterion,
     CandidateModel,
     HybridJudgeResult,
     ProposerClaim,
+    RelativeCriterion,
     RequirementRegistry,
     ScientificRequirement,
 )
@@ -297,12 +302,12 @@ def test_direct_comparison_is_a_separate_configurable_residual() -> None:
     assert with_relative.preferred == "candidate_b"
 
 
-def test_label_template_certifies_runtime_and_leaves_semantics_for_review() -> None:
+def test_label_template_combines_runtime_and_mutation_contract_labels() -> None:
     pair = AdversarialPair(
         pair_id="pair_1",
         benchmark_id="phase_b_test",
         tier="easy",
-        mutation_type="disconnected",
+        mutation_type="retained_disconnected_claimed_mechanism",
         valid_candidate=_candidate(),
         adversarial_candidate=_candidate(disconnected_claim=True),
     )
@@ -324,21 +329,67 @@ def test_label_template_certifies_runtime_and_leaves_semantics_for_review() -> N
     assert runtime[AbsoluteCriterion.CLAIMED_COMPONENTS_REACH_TARGETS].mutated is (
         ExpectedVerdict.FAIL
     )
-    assert any(
-        item.baseline is ExpectedVerdict.UNLABELED
+    assert labels.schema_version == "hybrid-labels-2"
+    assert all(
+        "domain_expert" not in item.label_source
         for item in labels.absolute_labels
-        if item.label_source == "domain_expert_pending"
+    )
+    relative = {item.criterion: item for item in labels.comparative_labels}
+    assert relative[
+        RelativeCriterion.PARSIMONY_WHILE_TASK_SUFFICIENT
+    ].preference is ExpectedPairPreference.BASELINE
+    assert relative[
+        RelativeCriterion.MECHANISTIC_INTERPRETABILITY
+    ].preference is ExpectedPairPreference.UNLABELED
+
+
+@pytest.mark.parametrize(
+    ("mutation_type", "absolute_criterion", "comparative_count"),
+    (
+        ("wrong_meal_sink", AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, 1),
+        (
+            "duplicated_gp_flux",
+            AbsoluteCriterion.SEMANTIC_FLUXES_NOT_DUPLICATED,
+            2,
+        ),
+        (
+            "unjustified_one_sided_accumulator",
+            AbsoluteCriterion.LATENT_ACCUMULATORS_JUSTIFIED,
+            2,
+        ),
+        ("retained_disconnected_claimed_mechanism", None, 2),
+    ),
+)
+def test_mutation_contracts_label_only_guaranteed_questions(
+    mutation_type: str,
+    absolute_criterion: AbsoluteCriterion | None,
+    comparative_count: int,
+) -> None:
+    contract = mutation_label_contract(mutation_type)
+
+    assert contract.overall_preference is ExpectedPairPreference.BASELINE
+    assert len(contract.comparative) == comparative_count
+    assert (
+        contract.absolute[0].criterion if contract.absolute else None
+    ) is absolute_criterion
+    assert all(
+        item.mutated is ExpectedVerdict.FAIL for item in contract.absolute
     )
 
 
-def test_hybrid_analysis_uses_reviewed_question_labels(
+def test_unknown_mutation_has_no_inferred_scientific_labels() -> None:
+    with pytest.raises(ValueError, match="no certified hybrid-label contract"):
+        mutation_label_contract("new_unreviewed_mutation")
+
+
+def test_hybrid_analysis_uses_certified_question_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pair = AdversarialPair(
         pair_id="pair_1",
         benchmark_id="phase_b_test",
         tier="easy",
-        mutation_type="disconnected",
+        mutation_type="wrong_meal_sink",
         valid_candidate=_candidate(),
         adversarial_candidate=_candidate(disconnected_claim=True),
     )
@@ -349,7 +400,9 @@ def test_hybrid_analysis_uses_reviewed_question_labels(
     )
     labels_path = tmp_path / "labels.jsonl"
     labels_path.write_text(labels.model_dump_json() + "\n", encoding="utf-8")
-    result = HybridJudgeResult.model_validate(_hybrid_payload())
+    result = HybridJudgeResult.model_validate(
+        _hybrid_payload(candidate_b="fail", relative="candidate_a")
+    )
     deterministic = deterministic_pair_assessments(
         pair.valid_candidate,
         pair.adversarial_candidate,
@@ -422,8 +475,11 @@ def test_hybrid_analysis_uses_reviewed_question_labels(
 
     metrics = json.loads(output.read_text(encoding="utf-8"))["ollama:test"]
     assert metrics["combined_preference_accuracy"] == 1.0
+    assert metrics["runtime_certification_accuracy"] == 1.0
     assert metrics["absolute_verdict_accuracy"] == 1.0
-    assert metrics["reviewed_absolute_label_fraction"] < 1.0
+    assert metrics["gold_label_scope"] == "runtime_and_mutation_contract_only"
+    assert metrics["expert_review_used"] is False
+    assert metrics["scored_absolute_label_fraction"] < 1.0
 
 
 def test_canonicalization_turns_unreferenced_stress_pair_into_tie() -> None:

@@ -1,4 +1,4 @@
-"""Build human-review templates for hybrid judge question-level labels."""
+"""Build certified mutation-contract labels for hybrid judge calibration."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from autoformalism.rebuttal.hybrid_labels import (
     ExpectedVerdict,
     HybridCalibrationLabels,
     expected_from_runtime,
+    mutation_label_contract,
 )
 from autoformalism.schemas import RelativeCriterion
 
@@ -68,7 +69,7 @@ def build_label_template(
     task_inputs: tuple[str, ...],
     validation_context: ValidationContext | None = None,
 ) -> HybridCalibrationLabels:
-    """Create certified labels and explicit placeholders for expert review."""
+    """Create runtime and mutation-contract labels without expert inference."""
     requirements = extract_public_requirements(public_prompt)
     baseline = pair.valid_candidate
     mutated = pair.adversarial_candidate
@@ -91,26 +92,32 @@ def build_label_template(
         )
         for item in deterministic
     ]
-    absolute.extend(
-        ExpectedAbsoluteLabel(
+    semantic = {
+        (criterion, subject): ExpectedAbsoluteLabel(
             criterion=criterion,
             subject_id=subject,
             baseline=ExpectedVerdict.UNLABELED,
             mutated=ExpectedVerdict.UNLABELED,
-            rationale="REVIEW REQUIRED against the public task and equations.",
-            label_source="domain_expert_pending",
+            rationale=(
+                "Not targeted by this controlled mutation; excluded from "
+                "question-level accuracy."
+            ),
+            label_source="not_scored_by_mutation_contract",
         )
         for criterion, subject in semantic_absolute_units(requirements)
-    )
-    comparative = tuple(
-        ExpectedComparativeLabel(
+    }
+    comparative = {
+        criterion: ExpectedComparativeLabel(
             criterion=criterion,
             preference=ExpectedPairPreference.UNLABELED,
-            rationale="REVIEW REQUIRED using only the public task and candidates.",
-            label_source="domain_expert_pending",
+            rationale=(
+                "Not implied by this controlled mutation; excluded from "
+                "question-level accuracy."
+            ),
+            label_source="not_scored_by_mutation_contract",
         )
         for criterion in RelativeCriterion
-    )
+    }
     baseline_structure = baseline.model_dump(
         mode="json",
         exclude={"candidate_id", "parent_candidate_id", "change_summary"},
@@ -119,15 +126,52 @@ def build_label_template(
         mode="json",
         exclude={"candidate_id", "parent_candidate_id", "change_summary"},
     )
+    structures_equal = baseline_structure == mutated_structure
+    overall = ExpectedPairPreference.TIE
+    if structures_equal:
+        comparative = {
+            criterion: ExpectedComparativeLabel(
+                criterion=criterion,
+                preference=ExpectedPairPreference.TIE,
+                rationale=(
+                    "Behavior-preserving canonicalization makes the submitted "
+                    "scientific structures identical."
+                ),
+                label_source="canonical_structure_identity",
+            )
+            for criterion in RelativeCriterion
+        }
+    else:
+        contract = mutation_label_contract(pair.mutation_type)
+        overall = contract.overall_preference
+        for item in contract.absolute:
+            key = (item.criterion, item.subject_id)
+            if key not in semantic:
+                raise ValueError(
+                    "mutation contract requests an unavailable semantic unit: "
+                    f"{item.criterion.value}/{item.subject_id}"
+                )
+            semantic[key] = ExpectedAbsoluteLabel(
+                criterion=item.criterion,
+                subject_id=item.subject_id,
+                baseline=item.baseline,
+                mutated=item.mutated,
+                rationale=item.rationale,
+                label_source=f"mutation_contract:{pair.mutation_type}",
+            )
+        for item in contract.comparative:
+            comparative[item.criterion] = ExpectedComparativeLabel(
+                criterion=item.criterion,
+                preference=item.preference,
+                rationale=item.rationale,
+                label_source=f"mutation_contract:{pair.mutation_type}",
+            )
+    absolute.extend(semantic.values())
     return HybridCalibrationLabels(
         pair_id=pair.pair_id,
-        overall_preference=(
-            ExpectedPairPreference.TIE
-            if baseline_structure == mutated_structure
-            else ExpectedPairPreference.BASELINE
-        ),
+        overall_preference=overall,
         absolute_labels=tuple(absolute),
-        comparative_labels=comparative,
+        comparative_labels=tuple(comparative.values()),
     )
 
 
@@ -164,19 +208,24 @@ def main() -> None:
         "".join(f"{item.model_dump_json()}\n" for item in labels),
         encoding="utf-8",
     )
-    pending = sum(
-        item.baseline is ExpectedVerdict.UNLABELED
-        or item.mutated is ExpectedVerdict.UNLABELED
+    scored_absolute_sides = sum(
+        item.baseline is not ExpectedVerdict.UNLABELED
         for label in labels
         for item in label.absolute_labels
     ) + sum(
-        item.preference is ExpectedPairPreference.UNLABELED
+        item.mutated is not ExpectedVerdict.UNLABELED
+        for label in labels
+        for item in label.absolute_labels
+    )
+    scored_comparative = sum(
+        item.preference is not ExpectedPairPreference.UNLABELED
         for label in labels
         for item in label.comparative_labels
     )
     print(
         f"wrote {len(labels)} label templates to {args.output}; "
-        f"expert_review_items={pending}"
+        f"scored_absolute_sides={scored_absolute_sides}; "
+        f"scored_comparative={scored_comparative}; expert_review_items=0"
     )
 
 

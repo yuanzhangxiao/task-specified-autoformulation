@@ -117,25 +117,40 @@ held-out evaluation. They are not production defaults.
 
 ## Question-level truth
 
-`build_hybrid_judge_label_template.py` creates one label record per pair.
-Deterministic items are filled from the canonical graph. Semantic absolute and
-direct comparative labels are `unlabeled` until a domain expert reviews the
-public prompt and both blinded candidates. Mutation names are not used to
-fabricate semantic answers. Each reviewed label contains a rationale and label
-source.
+`build_hybrid_judge_label_template.py` creates one versioned label record per
+pair without requiring domain-expert review at this protocol-engineering stage.
+Deterministic items are filled from the canonical graph. Each controlled
+mutation type has an explicit, typed contract containing only the semantic and
+comparative consequences guaranteed by its construction. For example, a
+duplicated-flux mutation certifies failure of the no-duplication predicate, but
+does not claim to establish whether an unrelated saturation law is appropriate.
+
+Questions not certified by either the runtime or that mutation's contract stay
+`unlabeled` with source `not_scored_by_mutation_contract`. They remain in the
+judge request for protocol diagnostics but are excluded from question-level
+accuracy. Canonically identical candidates receive comparative ties. Unknown
+mutation types fail label generation instead of inheriting guessed labels.
+Every scored label includes its exact runtime or mutation-contract provenance
+and rationale. Gold labels, mutation types, and baseline identities are never
+sent to the judge.
 
 The analyzer reports:
 
-- absolute verdict accuracy;
-- exact paired absolute accuracy;
+- deterministic runtime consistency as an integrity check, never as LLM
+  accuracy;
+- mutation-targeted LLM absolute verdict accuracy;
+- exact paired semantic accuracy when both sides are contract-labeled;
 - direct comparative question accuracy;
 - absolute-only, comparative-only, and combined preference accuracy;
 - pair-aggregated accuracy;
 - order consistency;
-- reviewed-label coverage and criterion-specific results.
+- certified-label coverage and criterion-specific results.
 
 An overall baseline/mutation preference is insufficient for atomic evaluation:
-a globally degraded candidate may genuinely improve one narrow predicate.
+a globally degraded candidate may genuinely improve one narrow predicate. This
+calibration therefore reports both the broad pair-level test and the narrower
+certified atomic subset. It does not claim full domain-expert validation of every
+scientific rubric question.
 
 ## Reproducibility and safety
 
