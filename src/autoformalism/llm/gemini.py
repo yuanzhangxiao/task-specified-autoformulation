@@ -8,7 +8,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
-from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
+from autoformalism.llm.exceptions import (
+    LLMProviderError,
+    LLMResponseError,
+    RepairDiagnosticCode,
+)
 from autoformalism.llm.models import StructuredT, TokenUsage
 
 _UNSUPPORTED_SCHEMA_KEYWORDS = {
@@ -64,8 +68,9 @@ class GeminiClient(CachedLLMClient):
         user_prompt: str,
         response_model: type[StructuredT],
         attempt_number: int,
+        repair_diagnostic_codes: tuple[RepairDiagnosticCode, ...],
     ) -> ProviderResponse[StructuredT]:
-        del role, attempt_number
+        del role, attempt_number, repair_diagnostic_codes
         try:
             response = self._sdk_client.models.generate_content(
                 model=self._model,

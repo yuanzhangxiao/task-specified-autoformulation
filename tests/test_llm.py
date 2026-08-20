@@ -164,8 +164,9 @@ class StubCachedClient(CachedLLMClient):
         user_prompt: str,
         response_model: type[StructuredT],
         attempt_number: int,
+        repair_diagnostic_codes: tuple[RepairDiagnosticCode, ...],
     ) -> ProviderResponse[StructuredT]:
-        del system_prompt, user_prompt
+        del system_prompt, user_prompt, repair_diagnostic_codes
         self.provider_calls += 1
         self.provider_attempt_numbers.append(attempt_number)
         if self.provider_calls <= self.failures:
@@ -717,6 +718,9 @@ def test_ollama_empty_content_reports_metadata_without_parsing_thinking(
         client.propose(system_prompt="system", user_prompt="user")
 
     assert caught.value.raw_response is raw_response
+    assert caught.value.repair_diagnostics[0].code is (
+        RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
+    )
 
 
 def test_ollama_repair_attempts_use_deterministic_fallback_seeds(
@@ -752,9 +756,13 @@ def test_ollama_repair_attempts_use_deterministic_fallback_seeds(
 
     assert result.attempts == 2
     assert [call["options"]["seed"] for call in calls] == [17, 18]
+    assert calls[0]["format"] != "json"
+    assert calls[1]["format"] == "json"
+    assert "final response content" in calls[1]["messages"][1]["content"]
     assert result.raw_response["_autoformalism_retry"] == {
         "attempt_number": 2,
         "sampling_seed": 18,
+        "format_mode": "json",
     }
 
 

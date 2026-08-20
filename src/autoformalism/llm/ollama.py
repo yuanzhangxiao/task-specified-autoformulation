@@ -12,7 +12,11 @@ from typing import Any
 
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import OllamaThinking
-from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
+from autoformalism.llm.exceptions import (
+    LLMProviderError,
+    LLMResponseError,
+    RepairDiagnosticCode,
+)
 from autoformalism.llm.models import StructuredT, TokenUsage
 
 OllamaTransport = Callable[[str, dict[str, object], float], dict[str, object]]
@@ -79,6 +83,7 @@ class OllamaClient(CachedLLMClient):
         user_prompt: str,
         response_model: type[StructuredT],
         attempt_number: int,
+        repair_diagnostic_codes: tuple[RepairDiagnosticCode, ...],
     ) -> ProviderResponse[StructuredT]:
         del role
         options: dict[str, object] = {
@@ -89,6 +94,10 @@ class OllamaClient(CachedLLMClient):
         if self._seed is not None:
             attempt_seed = self._seed + attempt_number - 1
             options["seed"] = attempt_seed
+        use_json_fallback = (
+            RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
+            in repair_diagnostic_codes
+        )
         body: dict[str, object] = {
             "model": self._model,
             "messages": [
@@ -97,8 +106,12 @@ class OllamaClient(CachedLLMClient):
             ],
             "stream": False,
             "think": self._thinking,
-            "format": _ollama_compatible_schema(
-                response_model.model_json_schema(mode="validation")
+            "format": (
+                "json"
+                if use_json_fallback
+                else _ollama_compatible_schema(
+                    response_model.model_json_schema(mode="validation")
+                )
             ),
             "options": options,
         }
@@ -119,6 +132,7 @@ class OllamaClient(CachedLLMClient):
         raw_response["_autoformalism_retry"] = {
             "attempt_number": attempt_number,
             "sampling_seed": attempt_seed,
+            "format_mode": "json" if use_json_fallback else "json_schema",
         }
         latency_ms = (time.perf_counter() - started) * 1000.0
         message = raw_response.get("message")
@@ -135,6 +149,7 @@ class OllamaClient(CachedLLMClient):
                 f"thinking_present={bool(thinking_characters)}, "
                 f"thinking_characters={thinking_characters})",
                 raw_response=raw_response,
+                diagnostic_code=RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT,
             )
         try:
             parsed = self._parse_json(content, response_model)

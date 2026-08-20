@@ -167,6 +167,13 @@ same seed while preserving the original seed for every ordinary successful call.
 The actual attempt number and sampling seed are stored with the raw response;
 all attempts still count as one logical judge call.
 
+If Ollama returns reasoning but leaves `message.content` empty, subsequent repair
+attempts use provider JSON mode instead of schema-constrained decoding and receive
+an explicit final-content instruction. The same Pydantic schema and expected-unit
+post-validation remain mandatory locally, so this recovery changes only the
+provider emission channel and does not weaken the trusted boundary or infer an
+answer from hidden reasoning.
+
 The initial experiment retains five repetitions in both orders. Existing output
 supports offline ablations of absolute-only, comparative-only, and combined
 decisions before any production integration.

@@ -19,6 +19,7 @@ class RepairDiagnosticCode(str, Enum):
 
     RESPONSE_VALIDATION = "response_validation"
     POST_SCHEMA_VALIDATION = "post_schema_validation"
+    EMPTY_PROVIDER_CONTENT = "empty_provider_content"
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,19 @@ class LLMResponseError(LLMError):
             f"- [{item.code.value}] {item.message}"
             for item in self.repair_diagnostics
         )
+        finalization = ""
+        if any(
+            item.code is RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
+            for item in self.repair_diagnostics
+        ):
+            finalization = (
+                "The previous provider response completed its reasoning but left "
+                "the final response content empty. Emit the complete JSON object "
+                "in the final response content; do not leave it only in thinking. "
+            )
         return (
+            finalization
+            +
             "Repair only the executable response contract. Preserve the scientific "
             "hypothesis except where a listed contract correction requires a local "
             "notation or declaration change. Return one complete corrected object.\n"

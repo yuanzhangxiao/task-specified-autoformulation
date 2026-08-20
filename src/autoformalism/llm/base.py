@@ -214,6 +214,7 @@ class CachedLLMClient(ABC):
         started = time.perf_counter()
         attempts = 0
         attempt_user_prompt = user_prompt
+        repair_diagnostic_codes: tuple[RepairDiagnosticCode, ...] = ()
         while attempts < self._max_attempts:
             attempts += 1
             try:
@@ -223,6 +224,7 @@ class CachedLLMClient(ABC):
                     user_prompt=attempt_user_prompt,
                     response_model=response_model,
                     attempt_number=attempts,
+                    repair_diagnostic_codes=repair_diagnostic_codes,
                 )
                 if validate_parsed is not None:
                     try:
@@ -241,6 +243,9 @@ class CachedLLMClient(ABC):
                 if not exc.retryable or attempts >= self._max_attempts:
                     raise
                 if isinstance(exc, LLMResponseError):
+                    repair_diagnostic_codes += tuple(
+                        item.code for item in exc.repair_diagnostics
+                    )
                     attempt_user_prompt = (
                         f"{user_prompt}\n\n"
                         f"{exc.repair_prompt()}"
@@ -511,5 +516,6 @@ class CachedLLMClient(ABC):
         user_prompt: str,
         response_model: type[StructuredT],
         attempt_number: int,
+        repair_diagnostic_codes: tuple[RepairDiagnosticCode, ...],
     ) -> ProviderResponse[StructuredT]:
         """Make one provider attempt and return a normalized response."""
