@@ -94,31 +94,43 @@ class OllamaClient(CachedLLMClient):
         if self._seed is not None:
             attempt_seed = self._seed + attempt_number - 1
             options["seed"] = attempt_seed
-        use_json_fallback = (
+        use_openai_fallback = (
             RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
             in repair_diagnostic_codes
         )
-        body: dict[str, object] = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "stream": False,
-            "think": self._thinking,
-            "format": (
-                "json"
-                if use_json_fallback
-                else _ollama_compatible_schema(
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        if use_openai_fallback:
+            endpoint = f"{self._base_url}/v1/chat/completions"
+            body: dict[str, object] = {
+                "model": self._model,
+                "messages": messages,
+                "stream": False,
+                "reasoning_effort": "none",
+                "response_format": {"type": "json_object"},
+                "temperature": self._temperature,
+                "max_tokens": self._max_output_tokens,
+            }
+            if attempt_seed is not None:
+                body["seed"] = attempt_seed
+        else:
+            endpoint = f"{self._base_url}/api/chat"
+            body = {
+                "model": self._model,
+                "messages": messages,
+                "stream": False,
+                "think": self._thinking,
+                "format": _ollama_compatible_schema(
                     response_model.model_json_schema(mode="validation")
-                )
-            ),
-            "options": options,
-        }
+                ),
+                "options": options,
+            }
         started = time.perf_counter()
         try:
             raw_response = self._transport(
-                f"{self._base_url}/api/chat",
+                endpoint,
                 body,
                 self._timeout_seconds,
             )
@@ -132,20 +144,52 @@ class OllamaClient(CachedLLMClient):
         raw_response["_autoformalism_retry"] = {
             "attempt_number": attempt_number,
             "sampling_seed": attempt_seed,
-            "format_mode": "json" if use_json_fallback else "json_schema",
+            "format_mode": (
+                "openai_json_no_reasoning"
+                if use_openai_fallback
+                else "native_json_schema"
+            ),
         }
         latency_ms = (time.perf_counter() - started) * 1000.0
-        message = raw_response.get("message")
+        message: object = raw_response.get("message")
+        done_reason = raw_response.get("done_reason")
+        prompt_tokens = self._optional_int(raw_response.get("prompt_eval_count"))
+        output_tokens = self._optional_int(raw_response.get("eval_count"))
+        if use_openai_fallback:
+            choices = raw_response.get("choices")
+            choice = (
+                choices[0]
+                if isinstance(choices, list)
+                and choices
+                and isinstance(choices[0], dict)
+                else None
+            )
+            message = choice.get("message") if isinstance(choice, dict) else None
+            done_reason = (
+                choice.get("finish_reason") if isinstance(choice, dict) else None
+            )
+            usage_payload = raw_response.get("usage")
+            if isinstance(usage_payload, dict):
+                prompt_tokens = self._optional_int(
+                    usage_payload.get("prompt_tokens")
+                )
+                output_tokens = self._optional_int(
+                    usage_payload.get("completion_tokens")
+                )
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise LLMResponseError("Ollama response has no message.content string")
         content = message["content"]
         if not content.strip():
-            thinking = message.get("thinking")
+            thinking = (
+                message.get("thinking")
+                or message.get("reasoning_content")
+                or message.get("reasoning")
+            )
             thinking_characters = len(thinking) if isinstance(thinking, str) else 0
             raise LLMResponseError(
                 "Ollama returned empty message.content "
-                f"(done_reason={raw_response.get('done_reason')!r}, "
-                f"eval_count={raw_response.get('eval_count')!r}, "
+                f"(done_reason={done_reason!r}, "
+                f"eval_count={output_tokens!r}, "
                 f"thinking_present={bool(thinking_characters)}, "
                 f"thinking_characters={thinking_characters})",
                 raw_response=raw_response,
@@ -159,8 +203,6 @@ class OllamaClient(CachedLLMClient):
         provider_duration = raw_response.get("total_duration")
         if isinstance(provider_duration, int | float):
             latency_ms = float(provider_duration) / 1_000_000.0
-        prompt_tokens = self._optional_int(raw_response.get("prompt_eval_count"))
-        output_tokens = self._optional_int(raw_response.get("eval_count"))
         usage = None
         if prompt_tokens is not None or output_tokens is not None:
             total = (

@@ -726,21 +726,29 @@ def test_ollama_empty_content_reports_metadata_without_parsing_thinking(
 def test_ollama_repair_attempts_use_deterministic_fallback_seeds(
     tmp_path: Path,
 ) -> None:
-    calls: list[dict[str, object]] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     def transport(
-        _url: str,
+        url: str,
         body: dict[str, object],
         _timeout: float,
     ) -> dict[str, object]:
-        calls.append(body)
+        calls.append((url, body))
         if len(calls) == 1:
             return {
                 "done": True,
                 "done_reason": "stop",
                 "message": {"content": "", "thinking": "No final answer."},
             }
-        return {"message": {"content": _judge().model_dump_json()}}
+        return {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": _judge().model_dump_json()},
+                }
+            ],
+            "usage": {"prompt_tokens": 8, "completion_tokens": 13},
+        }
 
     client = OllamaClient(
         model="gpt-oss:20b",
@@ -755,14 +763,18 @@ def test_ollama_repair_attempts_use_deterministic_fallback_seeds(
     result = client.judge(system_prompt="system", user_prompt="user")
 
     assert result.attempts == 2
-    assert [call["options"]["seed"] for call in calls] == [17, 18]
-    assert calls[0]["format"] != "json"
-    assert calls[1]["format"] == "json"
-    assert "final response content" in calls[1]["messages"][1]["content"]
+    assert calls[0][0].endswith("/api/chat")
+    assert calls[1][0].endswith("/v1/chat/completions")
+    assert calls[0][1]["options"]["seed"] == 17
+    assert calls[1][1]["seed"] == 18
+    assert calls[1][1]["reasoning_effort"] == "none"
+    assert calls[1][1]["response_format"] == {"type": "json_object"}
+    assert "final response content" in calls[1][1]["messages"][1]["content"]
+    assert result.usage == TokenUsage(8, 13, 21)
     assert result.raw_response["_autoformalism_retry"] == {
         "attempt_number": 2,
         "sampling_seed": 18,
-        "format_mode": "json",
+        "format_mode": "openai_json_no_reasoning",
     }
 
 

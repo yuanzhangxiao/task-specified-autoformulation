@@ -218,9 +218,10 @@ For seeded Ollama requests, the first provider attempt uses the configured seed
 and bounded repair attempts use deterministic consecutive fallback seeds. The
 successful attempt seed is retained in raw-response provenance.
 An Ollama response that contains reasoning but no final content receives a
-contract-only finalization instruction and retries in JSON mode; the full local
-schema and post-schema validators still gate the result. Reasoning text is never
-parsed as the final response.
+contract-only finalization instruction and retries through Ollama's
+OpenAI-compatible JSON endpoint with reasoning disabled; the full local schema
+and post-schema validators still gate the result. Reasoning text is never parsed
+as the final response.
 Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
 raw full history. The judge sees the benchmark judge prompt, certified
