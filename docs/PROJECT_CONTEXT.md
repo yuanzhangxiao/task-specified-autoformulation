@@ -133,6 +133,10 @@ The pipeline is iterative:
   dynamic plausibility, mechanism coupling, nonredundancy, and justified
   complexity—not trajectory fit or deterministic validity.
 - Judge red flags are advisory and never override deterministic validation.
+- The prospective hybrid judge separates public task requirements, proposer
+  claims, deterministic graph facts, absolute semantic predicates, and direct
+  comparative residuals. It remains calibration-only until question-level
+  held-out evaluation is complete.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

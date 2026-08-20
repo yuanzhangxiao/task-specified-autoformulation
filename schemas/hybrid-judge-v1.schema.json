@@ -1,0 +1,167 @@
+{
+  "$defs": {
+    "AbsoluteCriterion": {
+      "description": "Stable atomic predicates used by the hybrid calibration protocol.",
+      "enum": [
+        "required_mechanism_represented",
+        "required_mechanism_connected",
+        "task_inputs_reach_targets",
+        "claimed_components_reach_targets",
+        "source_roles_consistent",
+        "sink_roles_consistent",
+        "semantic_fluxes_not_duplicated",
+        "mechanism_claims_not_conflicting",
+        "latent_states_have_incoming_pathways",
+        "latent_states_reach_targets",
+        "latent_accumulators_justified",
+        "claimed_delays_meaningful",
+        "claimed_saturations_appropriate",
+        "proposer_claims_supported"
+      ],
+      "title": "AbsoluteCriterion",
+      "type": "string"
+    },
+    "AbsoluteVerdict": {
+      "description": "Candidate-specific truth value for one atomic scientific predicate.",
+      "enum": [
+        "pass",
+        "fail",
+        "indeterminate",
+        "not_applicable"
+      ],
+      "title": "AbsoluteVerdict",
+      "type": "string"
+    },
+    "CandidateAbsoluteAssessment": {
+      "additionalProperties": false,
+      "description": "One absolute verdict with candidate-grounded evidence.",
+      "properties": {
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/AbsoluteVerdict"
+        }
+      },
+      "required": [
+        "verdict",
+        "evidence"
+      ],
+      "title": "CandidateAbsoluteAssessment",
+      "type": "object"
+    },
+    "PairedAbsoluteAssessment": {
+      "additionalProperties": false,
+      "description": "The same absolute predicate evaluated independently for A and B.",
+      "properties": {
+        "candidate_a": {
+          "$ref": "#/$defs/CandidateAbsoluteAssessment"
+        },
+        "candidate_b": {
+          "$ref": "#/$defs/CandidateAbsoluteAssessment"
+        },
+        "criterion": {
+          "$ref": "#/$defs/AbsoluteCriterion"
+        },
+        "subject_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Subject Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "criterion",
+        "subject_id",
+        "candidate_a",
+        "candidate_b"
+      ],
+      "title": "PairedAbsoluteAssessment",
+      "type": "object"
+    },
+    "RelativeAssessment": {
+      "additionalProperties": false,
+      "description": "One direct comparative answer retained separately from absolute facts.",
+      "properties": {
+        "criterion": {
+          "$ref": "#/$defs/RelativeCriterion"
+        },
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/RelativeVerdict"
+        }
+      },
+      "required": [
+        "criterion",
+        "verdict",
+        "evidence"
+      ],
+      "title": "RelativeAssessment",
+      "type": "object"
+    },
+    "RelativeCriterion": {
+      "description": "Irreducibly comparative scientific criteria.",
+      "enum": [
+        "parsimony_while_task_sufficient",
+        "fewer_unsupported_assumptions",
+        "mechanistic_interpretability"
+      ],
+      "title": "RelativeCriterion",
+      "type": "string"
+    },
+    "RelativeVerdict": {
+      "description": "Blinded pairwise verdict without an absolute truth interpretation.",
+      "enum": [
+        "candidate_a",
+        "candidate_b",
+        "tie",
+        "indeterminate"
+      ],
+      "title": "RelativeVerdict",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Paired absolute assessments plus a separate comparative residual.",
+  "properties": {
+    "absolute_assessments": {
+      "items": {
+        "$ref": "#/$defs/PairedAbsoluteAssessment"
+      },
+      "maxItems": 256,
+      "minItems": 1,
+      "title": "Absolute Assessments",
+      "type": "array"
+    },
+    "comparative_assessments": {
+      "items": {
+        "$ref": "#/$defs/RelativeAssessment"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "title": "Comparative Assessments",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "hybrid-1",
+      "default": "hybrid-1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "absolute_assessments",
+    "comparative_assessments"
+  ],
+  "title": "HybridJudgeResult",
+  "type": "object"
+}

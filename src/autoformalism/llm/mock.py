@@ -8,8 +8,10 @@ from typing import Any
 
 from autoformalism.llm.models import LLMCallResult
 from autoformalism.schemas import (
+    AbsoluteCriterion,
     CandidateModel,
     ComparativeJudgeResult,
+    HybridJudgeResult,
     ScientificJudgeResult,
 )
 
@@ -25,10 +27,12 @@ class MockLLMClient:
         comparative_responses: list[
             ComparativeJudgeResult | dict[str, Any]
         ] | None = None,
+        hybrid_responses: list[HybridJudgeResult | dict[str, Any]] | None = None,
     ) -> None:
         self._proposer_responses = deque(proposer_responses or [])
         self._judge_responses = deque(judge_responses or [])
         self._comparative_responses = deque(comparative_responses or [])
+        self._hybrid_responses = deque(hybrid_responses or [])
         self.calls: list[dict[str, str]] = []
 
     def propose(
@@ -94,12 +98,38 @@ class MockLLMClient:
             "comparative_judge", system_prompt, user_prompt, parsed
         )
 
+    def assess_hybrid(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_absolute_units: set[tuple[AbsoluteCriterion, str]],
+    ) -> LLMCallResult[HybridJudgeResult]:
+        """Return the next validated hybrid calibration response."""
+        if not self._hybrid_responses:
+            raise AssertionError("no mock hybrid response remains")
+        self.calls.append(
+            {
+                "role": "hybrid_judge",
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+        )
+        parsed = HybridJudgeResult.model_validate(self._hybrid_responses.popleft())
+        parsed.validate_expected_absolute_units(expected_absolute_units)
+        return self._result("hybrid_judge", system_prompt, user_prompt, parsed)
+
     @staticmethod
     def _result(
         role: str,
         system_prompt: str,
         user_prompt: str,
-        parsed: CandidateModel | ScientificJudgeResult | ComparativeJudgeResult,
+        parsed: (
+            CandidateModel
+            | ScientificJudgeResult
+            | ComparativeJudgeResult
+            | HybridJudgeResult
+        ),
     ) -> LLMCallResult[Any]:
         content = "\0".join((role, system_prompt, user_prompt))
         request_hash = hashlib.sha256(content.encode()).hexdigest()

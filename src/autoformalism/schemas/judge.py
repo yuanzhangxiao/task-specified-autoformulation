@@ -249,6 +249,141 @@ class ComparativeJudgeResult(StrictSchema):
         ) / len(answers)
 
 
+class AbsoluteVerdict(str, Enum):
+    """Candidate-specific truth value for one atomic scientific predicate."""
+
+    PASS = "pass"
+    FAIL = "fail"
+    INDETERMINATE = "indeterminate"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class AbsoluteCriterion(str, Enum):
+    """Stable atomic predicates used by the hybrid calibration protocol."""
+
+    REQUIRED_MECHANISM_REPRESENTED = "required_mechanism_represented"
+    REQUIRED_MECHANISM_CONNECTED = "required_mechanism_connected"
+    TASK_INPUTS_REACH_TARGETS = "task_inputs_reach_targets"
+    CLAIMED_COMPONENTS_REACH_TARGETS = "claimed_components_reach_targets"
+    SOURCE_ROLES_CONSISTENT = "source_roles_consistent"
+    SINK_ROLES_CONSISTENT = "sink_roles_consistent"
+    SEMANTIC_FLUXES_NOT_DUPLICATED = "semantic_fluxes_not_duplicated"
+    MECHANISM_CLAIMS_NOT_CONFLICTING = "mechanism_claims_not_conflicting"
+    LATENT_STATES_HAVE_INCOMING_PATHWAYS = (
+        "latent_states_have_incoming_pathways"
+    )
+    LATENT_STATES_REACH_TARGETS = "latent_states_reach_targets"
+    LATENT_ACCUMULATORS_JUSTIFIED = "latent_accumulators_justified"
+    CLAIMED_DELAYS_MEANINGFUL = "claimed_delays_meaningful"
+    CLAIMED_SATURATIONS_APPROPRIATE = "claimed_saturations_appropriate"
+    PROPOSER_CLAIMS_SUPPORTED = "proposer_claims_supported"
+
+
+class CandidateAbsoluteAssessment(StrictSchema):
+    """One absolute verdict with candidate-grounded evidence."""
+
+    verdict: AbsoluteVerdict
+    evidence: NonEmptyText
+
+
+class PairedAbsoluteAssessment(StrictSchema):
+    """The same absolute predicate evaluated independently for A and B."""
+
+    criterion: AbsoluteCriterion
+    subject_id: Identifier
+    candidate_a: CandidateAbsoluteAssessment
+    candidate_b: CandidateAbsoluteAssessment
+
+
+class RelativeCriterion(str, Enum):
+    """Irreducibly comparative scientific criteria."""
+
+    PARSIMONY_WHILE_TASK_SUFFICIENT = "parsimony_while_task_sufficient"
+    FEWER_UNSUPPORTED_ASSUMPTIONS = "fewer_unsupported_assumptions"
+    MECHANISTIC_INTERPRETABILITY = "mechanistic_interpretability"
+
+
+class RelativeVerdict(str, Enum):
+    """Blinded pairwise verdict without an absolute truth interpretation."""
+
+    CANDIDATE_A = "candidate_a"
+    CANDIDATE_B = "candidate_b"
+    TIE = "tie"
+    INDETERMINATE = "indeterminate"
+
+
+class RelativeAssessment(StrictSchema):
+    """One direct comparative answer retained separately from absolute facts."""
+
+    criterion: RelativeCriterion
+    verdict: RelativeVerdict
+    evidence: NonEmptyText
+
+
+class HybridJudgeResult(StrictSchema):
+    """Paired absolute assessments plus a separate comparative residual."""
+
+    schema_version: Literal["hybrid-1"] = "hybrid-1"
+    absolute_assessments: tuple[PairedAbsoluteAssessment, ...] = Field(
+        min_length=1, max_length=256
+    )
+    comparative_assessments: tuple[RelativeAssessment, ...] = Field(
+        min_length=len(RelativeCriterion), max_length=len(RelativeCriterion)
+    )
+
+    @model_validator(mode="after")
+    def unique_and_complete(self) -> HybridJudgeResult:
+        """Reject duplicate atomic units and missing comparative criteria."""
+        absolute_keys = [
+            (item.criterion, item.subject_id)
+            for item in self.absolute_assessments
+        ]
+        if len(absolute_keys) != len(set(absolute_keys)):
+            raise ValueError("absolute assessment keys must be unique")
+        relative = [item.criterion for item in self.comparative_assessments]
+        if len(relative) != len(set(relative)):
+            raise ValueError("comparative criteria must be unique")
+        if set(relative) != set(RelativeCriterion):
+            raise ValueError("every comparative criterion is required")
+        return self
+
+    def validate_expected_absolute_units(
+        self,
+        expected: set[tuple[AbsoluteCriterion, str]],
+    ) -> None:
+        """Require the provider to return exactly the runtime-requested units."""
+        actual = {
+            (item.criterion, item.subject_id)
+            for item in self.absolute_assessments
+        }
+        if actual != expected:
+            missing = sorted(
+                f"{criterion.value}:{subject}"
+                for criterion, subject in expected - actual
+            )
+            extra = sorted(
+                f"{criterion.value}:{subject}"
+                for criterion, subject in actual - expected
+            )
+            raise ValueError(
+                f"absolute assessment units differ; missing={missing}, extra={extra}"
+            )
+
+    @property
+    def numeric_relative_preference(self) -> float | None:
+        """Return mean A preference for determined comparative assessments."""
+        values = [
+            {
+                RelativeVerdict.CANDIDATE_A: 1.0,
+                RelativeVerdict.CANDIDATE_B: 0.0,
+                RelativeVerdict.TIE: 0.5,
+            }.get(item.verdict)
+            for item in self.comparative_assessments
+        ]
+        determined = [value for value in values if value is not None]
+        return sum(determined) / len(determined) if determined else None
+
+
 JudgeAssessment: TypeAlias = JudgeResult | ScientificJudgeResult
 
 

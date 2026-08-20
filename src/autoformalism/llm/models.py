@@ -8,8 +8,10 @@ from typing import Generic, Protocol, TypeVar
 from pydantic import BaseModel
 
 from autoformalism.schemas import (
+    AbsoluteCriterion,
     CandidateModel,
     ComparativeJudgeResult,
+    HybridJudgeResult,
     ScientificJudgeResult,
 )
 
@@ -81,4 +83,14 @@ class LLMClient(Protocol):
         user_prompt: str,
     ) -> LLMCallResult[ComparativeJudgeResult]:
         """Request one blinded comparative calibration assessment."""
+        ...
+
+    def assess_hybrid(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_absolute_units: set[tuple[AbsoluteCriterion, str]],
+    ) -> LLMCallResult[HybridJudgeResult]:
+        """Request paired absolute assessments and comparative residuals."""
         ...

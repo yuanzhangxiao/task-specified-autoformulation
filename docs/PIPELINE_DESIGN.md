@@ -224,6 +224,15 @@ red flags, missing requirements, and edits are advisory. They are retained
 for feedback and score tie-breaking but cannot reject a deterministically
 valid, successfully fitted candidate.
 
+The calibration-only hybrid judge is specified separately in
+`docs/JUDGE_HYBRID_PROTOCOL.md`. It extracts frozen requirements only from the
+public task, preserves proposer claims at lower authority, certifies graph facts
+for the canonical executable candidate, requests separate absolute A/B semantic
+predicates, and retains direct comparative judgments as a distinct residual.
+Generic conjunctive groups and all numeric aggregation are runtime-owned. This
+prospective protocol must pass held-out question-level calibration before it may
+replace the production category-score judge.
+
 ### Simulation, fitting, metrics, and pruning
 
 ```python

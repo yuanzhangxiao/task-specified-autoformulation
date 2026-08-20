@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from autoformalism.schemas.candidate import CandidateModel
 from autoformalism.schemas.judge import (
     ComparativeJudgeResult,
+    HybridJudgeResult,
     JudgeResult,
     ScientificJudgeResult,
 )
@@ -22,6 +23,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "judge.schema.json": JudgeResult,
     "scientific-judge-v2.schema.json": ScientificJudgeResult,
     "comparative-judge-v1.schema.json": ComparativeJudgeResult,
+    "hybrid-judge-v1.schema.json": HybridJudgeResult,
 }
 
 

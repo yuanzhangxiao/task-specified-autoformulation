@@ -29,8 +29,10 @@ from autoformalism.llm.models import (
     TokenUsage,
 )
 from autoformalism.schemas import (
+    AbsoluteCriterion,
     CandidateModel,
     ComparativeJudgeResult,
+    HybridJudgeResult,
     ProposerCandidateV2,
     ScientificJudgeResult,
     enrich_proposal_v2,
@@ -143,6 +145,24 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ComparativeJudgeResult,
+        )
+
+    def assess_hybrid(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_absolute_units: set[tuple[AbsoluteCriterion, str]],
+    ) -> LLMCallResult[HybridJudgeResult]:
+        """Request a strict provenance-aware hybrid calibration result."""
+        return self._structured_call(
+            role="hybrid_judge",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=HybridJudgeResult,
+            validate_parsed=lambda result: result.validate_expected_absolute_units(
+                expected_absolute_units
+            ),
         )
 
     def _structured_call(
