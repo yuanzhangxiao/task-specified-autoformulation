@@ -78,14 +78,17 @@ class OllamaClient(CachedLLMClient):
         system_prompt: str,
         user_prompt: str,
         response_model: type[StructuredT],
+        attempt_number: int,
     ) -> ProviderResponse[StructuredT]:
         del role
         options: dict[str, object] = {
             "temperature": self._temperature,
             "num_predict": self._max_output_tokens,
         }
+        attempt_seed = None
         if self._seed is not None:
-            options["seed"] = self._seed
+            attempt_seed = self._seed + attempt_number - 1
+            options["seed"] = attempt_seed
         body: dict[str, object] = {
             "model": self._model,
             "messages": [
@@ -113,6 +116,10 @@ class OllamaClient(CachedLLMClient):
                 f"Ollama request failed ({type(exc).__name__}): {exc}",
                 retryable=True,
             ) from exc
+        raw_response["_autoformalism_retry"] = {
+            "attempt_number": attempt_number,
+            "sampling_seed": attempt_seed,
+        }
         latency_ms = (time.perf_counter() - started) * 1000.0
         message = raw_response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):

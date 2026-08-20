@@ -154,6 +154,7 @@ class StubCachedClient(CachedLLMClient):
         )
         self.failures = failures
         self.provider_calls = 0
+        self.provider_attempt_numbers: list[int] = []
 
     def _call_provider(
         self,
@@ -162,9 +163,11 @@ class StubCachedClient(CachedLLMClient):
         system_prompt: str,
         user_prompt: str,
         response_model: type[StructuredT],
+        attempt_number: int,
     ) -> ProviderResponse[StructuredT]:
         del system_prompt, user_prompt
         self.provider_calls += 1
+        self.provider_attempt_numbers.append(attempt_number)
         if self.provider_calls <= self.failures:
             raise LLMProviderError("temporary failure", retryable=True)
         parsed = _proposal() if role == "proposer" else _judge()
@@ -305,6 +308,7 @@ def test_retry_uses_exponential_backoff_and_jitter(tmp_path: Path) -> None:
     assert result.logical_calls == 1
     assert result.provider_attempts == 3
     assert result.repair_attempts == 2
+    assert client.provider_attempt_numbers == [1, 2, 3]
     assert delays == [1.25, 2.5]
     events = [
         json.loads(line)
@@ -713,6 +717,45 @@ def test_ollama_empty_content_reports_metadata_without_parsing_thinking(
         client.propose(system_prompt="system", user_prompt="user")
 
     assert caught.value.raw_response is raw_response
+
+
+def test_ollama_repair_attempts_use_deterministic_fallback_seeds(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def transport(
+        _url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append(body)
+        if len(calls) == 1:
+            return {
+                "done": True,
+                "done_reason": "stop",
+                "message": {"content": "", "thinking": "No final answer."},
+            }
+        return {"message": {"content": _judge().model_dump_json()}}
+
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        max_attempts=2,
+        initial_backoff_seconds=0.0,
+        seed=17,
+        transport=transport,
+    )
+
+    result = client.judge(system_prompt="system", user_prompt="user")
+
+    assert result.attempts == 2
+    assert [call["options"]["seed"] for call in calls] == [17, 18]
+    assert result.raw_response["_autoformalism_retry"] == {
+        "attempt_number": 2,
+        "sampling_seed": 18,
+    }
 
 
 def test_ollama_schema_is_compact_but_preserves_validation_structure(

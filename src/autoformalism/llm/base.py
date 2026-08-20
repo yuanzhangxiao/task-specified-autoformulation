@@ -222,6 +222,7 @@ class CachedLLMClient(ABC):
                     system_prompt=system_prompt,
                     user_prompt=attempt_user_prompt,
                     response_model=response_model,
+                    attempt_number=attempts,
                 )
                 if validate_parsed is not None:
                     try:
@@ -509,5 +510,6 @@ class CachedLLMClient(ABC):
         system_prompt: str,
         user_prompt: str,
         response_model: type[StructuredT],
+        attempt_number: int,
     ) -> ProviderResponse[StructuredT]:
         """Make one provider attempt and return a normalized response."""

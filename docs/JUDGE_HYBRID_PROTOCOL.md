@@ -160,6 +160,13 @@ contract-only repair attempts. No repair prompt contains a scientific answer,
 fit result, hidden model, or expected label. The LLM never emits an aggregate
 score or overall winner.
 
+For seeded Ollama calls, provider attempt 1 uses the registered repetition seed.
+If that attempt fails, repair attempt `n` uses `seed + n - 1`. This deterministic
+fallback prevents an empty-content response from reproducing forever under the
+same seed while preserving the original seed for every ordinary successful call.
+The actual attempt number and sampling seed are stored with the raw response;
+all attempts still count as one logical judge call.
+
 The initial experiment retains five repetitions in both orders. Existing output
 supports offline ablations of absolute-only, comparative-only, and combined
 decisions before any production integration.

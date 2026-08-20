@@ -214,6 +214,9 @@ equations, private benchmark metadata, test information, or simulator-derived
 ground truth. Numerical fit, scientific plausibility, mechanism adequacy, and
 structural novelty failures end the logical proposal round and enter ordinary
 search feedback rather than contract repair.
+For seeded Ollama requests, the first provider attempt uses the configured seed
+and bounded repair attempts use deterministic consecutive fallback seeds. The
+successful attempt seed is retained in raw-response provenance.
 Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
 raw full history. The judge sees the benchmark judge prompt, certified

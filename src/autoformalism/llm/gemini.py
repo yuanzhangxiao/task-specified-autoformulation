@@ -63,8 +63,9 @@ class GeminiClient(CachedLLMClient):
         system_prompt: str,
         user_prompt: str,
         response_model: type[StructuredT],
+        attempt_number: int,
     ) -> ProviderResponse[StructuredT]:
-        del role
+        del role, attempt_number
         try:
             response = self._sdk_client.models.generate_content(
                 model=self._model,
