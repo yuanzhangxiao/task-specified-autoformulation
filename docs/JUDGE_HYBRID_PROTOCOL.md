@@ -169,6 +169,13 @@ accuracy conditional on a valid structured response, structured-response success
 rate, and end-to-end accuracy that counts a terminal response failure as an
 incorrect judge decision.
 
+Each shard also stores an immutable `hybrid_judge_run_manifest.json` containing
+the pair-file digest, selected pair identifiers, sharding rule, model settings,
+seeds, repetition count, and scoring configuration. Resume fails closed if the
+current configuration differs or if saved outcome keys do not belong to the
+selected shard. This prevents an expired shell environment from silently mixing
+an older calibration pair set into an existing output directory.
+
 For seeded Ollama calls, provider attempt 1 uses the registered repetition seed.
 If that attempt fails, repair attempt `n` uses `seed + n - 1`. This deterministic
 fallback prevents an empty-content response from reproducing forever under the

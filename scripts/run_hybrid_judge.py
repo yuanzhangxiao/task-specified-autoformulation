@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -149,6 +150,7 @@ FAILURE_REQUIRED_FIELDS = frozenset(
         "provider_attempt_limit",
     }
 )
+RUN_MANIFEST_SCHEMA_VERSION = "hybrid-judge-run-1"
 
 
 def _select_shard(
@@ -167,6 +169,37 @@ def _select_shard(
         pair
         for index, pair in enumerate(pairs)
         if index % shard_count == shard_index
+    )
+
+
+def _planned_keys(
+    pairs: tuple[AdversarialPair, ...],
+    *,
+    judge_models: list[str],
+    repetitions: int,
+) -> set[tuple[str, str, int, str]]:
+    """Return every logical-call key owned by one selected shard."""
+    return {
+        (pair.pair_id, model, repetition, order)
+        for pair in pairs
+        for model in judge_models
+        for repetition in range(repetitions)
+        for order in ("baseline_a", "baseline_b")
+    }
+
+
+def _ensure_run_manifest(path: Path, manifest: dict[str, object]) -> None:
+    """Create an immutable run manifest or reject incompatible resume state."""
+    if path.is_file():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if existing != manifest:
+            raise ValueError(
+                "hybrid judge resume configuration differs from the saved manifest"
+            )
+        return
+    path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -341,18 +374,41 @@ def main() -> None:
         comparative_weight=args.comparative_weight,
         tie_threshold=args.tie_threshold,
     )
-    pairs = tuple(
+    pair_bytes = args.pairs.read_bytes()
+    all_pairs = tuple(
         AdversarialPair.model_validate_json(line)
-        for line in args.pairs.read_text(encoding="utf-8").splitlines()
+        for line in pair_bytes.decode("utf-8").splitlines()
         if line.strip()
     )
     pairs = _select_shard(
-        pairs,
+        all_pairs,
         shard_index=args.shard_index,
         shard_count=args.shard_count,
         strategy=args.shard_strategy,
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "pairs_sha256": hashlib.sha256(pair_bytes).hexdigest(),
+        "pair_count": len(all_pairs),
+        "selected_pair_ids": [pair.pair_id for pair in pairs],
+        "shard_index": args.shard_index,
+        "shard_count": args.shard_count,
+        "shard_strategy": args.shard_strategy,
+        "judge_models": args.judge_models,
+        "repetitions": args.repetitions,
+        "max_attempts": args.max_attempts,
+        "max_output_tokens": args.max_output_tokens,
+        "ollama_thinking": args.ollama_thinking,
+        "ollama_temperature": args.ollama_temperature,
+        "ollama_seed_base": args.ollama_seed_base,
+        "partial_tiebreak_weight": args.partial_tiebreak_weight,
+        "comparative_weight": args.comparative_weight,
+        "tie_threshold": args.tie_threshold,
+    }
+    _ensure_run_manifest(
+        args.output_root / "hybrid_judge_run_manifest.json", manifest
+    )
     score_path = args.output_root / "hybrid_judge_scores.csv"
     failure_path = args.output_root / "hybrid_judge_failures.jsonl"
     successful = _completed(score_path)
@@ -362,8 +418,18 @@ def main() -> None:
         raise SystemExit(
             f"keys occur in both success and failure outputs: {len(overlap)}"
         )
+    planned = _planned_keys(
+        pairs,
+        judge_models=args.judge_models,
+        repetitions=args.repetitions,
+    )
     completed = successful | failed
-    expected = len(pairs) * 2 * args.repetitions * len(args.judge_models)
+    unexpected = completed - planned
+    if unexpected:
+        raise SystemExit(
+            f"saved outcomes do not belong to the selected shard: {len(unexpected)}"
+        )
+    expected = len(planned)
     contexts: dict[tuple[str, str], tuple[str, ValidationContext]] = {}
     for pair in pairs:
         key = (pair.benchmark_id, pair.tier)

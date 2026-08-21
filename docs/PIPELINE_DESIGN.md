@@ -247,6 +247,9 @@ contract-only retries, a terminal structured-response failure is stored in an
 append-only ledger and the shard continues. The analyzer reports both conditional
 scientific accuracy among valid responses and end-to-end accuracy including these
 failures; no hidden reasoning is parsed and no missing score is imputed.
+Hybrid calibration resume is additionally guarded by an immutable per-shard run
+manifest and exact planned-key validation, including the pair-file digest and
+selected pair IDs.
 
 ### Simulation, fitting, metrics, and pruning
 

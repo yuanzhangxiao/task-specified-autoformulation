@@ -43,7 +43,9 @@ from scripts.merge_hybrid_scores import main as merge_hybrid_main
 from scripts.run_hybrid_judge import (
     FAILURE_SCHEMA_VERSION,
     _append_failure,
+    _ensure_run_manifest,
     _failed,
+    _planned_keys,
 )
 
 
@@ -682,3 +684,32 @@ def test_failure_ledger_is_resumable_and_rejects_duplicate_keys(
     _append_failure(path, row)
     with pytest.raises(ValueError, match="duplicate persistent-failure key"):
         _failed(path)
+
+
+def test_hybrid_resume_manifest_and_planned_keys_reject_configuration_drift(
+    tmp_path: Path,
+) -> None:
+    pair = AdversarialPair(
+        pair_id="pair_1",
+        benchmark_id="phase_b_test",
+        tier="easy",
+        mutation_type="wrong_meal_sink",
+        valid_candidate=_candidate(),
+        adversarial_candidate=_candidate(disconnected_claim=True),
+    )
+    keys = _planned_keys(
+        (pair,), judge_models=["ollama:test"], repetitions=2
+    )
+    path = tmp_path / "manifest.json"
+    manifest = {
+        "schema_version": "hybrid-judge-run-1",
+        "pairs_sha256": "abc",
+        "selected_pair_ids": ["pair_1"],
+    }
+
+    assert len(keys) == 4
+    assert {key[3] for key in keys} == {"baseline_a", "baseline_b"}
+    _ensure_run_manifest(path, manifest)
+    _ensure_run_manifest(path, manifest)
+    with pytest.raises(ValueError, match="configuration differs"):
+        _ensure_run_manifest(path, {**manifest, "pairs_sha256": "changed"})
