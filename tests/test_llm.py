@@ -13,6 +13,7 @@ from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import (
     LLMConfig,
     LLMProvider,
+    OllamaResponseMode,
     OllamaThinking,
     create_llm_client,
 )
@@ -671,6 +672,107 @@ def test_ollama_sampling_options_change_request_hash(tmp_path: Path) -> None:
     )
 
     assert first_hash != second_hash
+
+
+def test_ollama_tool_call_transport_validates_arguments_and_ignores_thinking(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def transport(
+        _url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append(body)
+        return {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "Correct but deliberately not parsed.",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "submit_structured_response",
+                            "arguments": _judge().model_dump(mode="json"),
+                        }
+                    }
+                ],
+            },
+            "prompt_eval_count": 10,
+            "eval_count": 20,
+        }
+
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        response_mode=OllamaResponseMode.TOOL_CALL,
+        transport=transport,
+    )
+
+    result = client.judge(system_prompt="system", user_prompt="user")
+
+    assert result.parsed == _judge()
+    assert result.usage == TokenUsage(10, 20, 30)
+    assert "format" not in calls[0]
+    assert calls[0]["tools"][0]["function"]["parameters"] == (
+        _ollama_compatible_schema(
+            ScientificJudgeResult.model_json_schema(mode="validation")
+        )
+    )
+    assert "call exactly" in calls[0]["messages"][1]["content"]
+    assert result.raw_response["_autoformalism_retry"]["format_mode"] == (
+        "native_tool_call"
+    )
+
+
+def test_ollama_tool_call_transport_fails_without_required_call(
+    tmp_path: Path,
+) -> None:
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        response_mode=OllamaResponseMode.TOOL_CALL,
+        max_attempts=1,
+        transport=lambda _url, _body, _timeout: {
+            "message": {
+                "content": "",
+                "thinking": _judge().model_dump_json(),
+            }
+        },
+    )
+
+    with pytest.raises(LLMResponseError, match="exactly one structured tool call"):
+        client.judge(system_prompt="system", user_prompt="user")
+
+
+def test_ollama_response_mode_changes_request_hash(tmp_path: Path) -> None:
+    common = {
+        "model": "gpt-oss:20b",
+        "cache_directory": tmp_path / "cache",
+        "log_path": tmp_path / "events.jsonl",
+    }
+    schema_client = OllamaClient(
+        **common, response_mode=OllamaResponseMode.JSON_SCHEMA
+    )
+    tool_client = OllamaClient(**common, response_mode=OllamaResponseMode.TOOL_CALL)
+
+    schema_hash = schema_client.request_hash(
+        role="judge",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=ScientificJudgeResult,
+    )
+    tool_hash = tool_client.request_hash(
+        role="judge",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=ScientificJudgeResult,
+    )
+
+    assert schema_hash != tool_hash
 
 
 def test_ollama_auto_disables_thinking_for_non_gpt_oss(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from autoformalism.llm.base import CachedLLMClient
 from autoformalism.llm.config import (
     LLMConfig,
     LLMProvider,
+    OllamaResponseMode,
     OllamaThinking,
     create_llm_client,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "LLMProvider",
     "MockLLMClient",
     "OllamaClient",
+    "OllamaResponseMode",
     "OllamaThinking",
     "OpenAIResponsesClient",
     "TokenUsage",

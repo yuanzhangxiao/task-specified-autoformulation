@@ -30,6 +30,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_PARTIAL_WEIGHT:=0.05}"
 : "${AF_COMPARATIVE_WEIGHT:=0.25}"
 : "${AF_TIE_THRESHOLD:=0.05}"
+: "${AF_OLLAMA_RESPONSE_MODE:=json_schema}"
 
 readonly shard_index="${SLURM_ARRAY_TASK_ID:-0}"
 readonly shard_root="${AF_CALIBRATION_ROOT}/shards/shard_${shard_index}"
@@ -86,6 +87,7 @@ flock --exclusive "${shard_root}/hybrid_judge.lock" \
   --ollama-base-url "${endpoint}" \
   --ollama-thinking low \
   --ollama-temperature 0.2 \
+  --ollama-response-mode "${AF_OLLAMA_RESPONSE_MODE}" \
   --ollama-seed-base "${AF_JUDGE_SEED_BASE}" \
   --partial-tiebreak-weight "${AF_PARTIAL_WEIGHT}" \
   --comparative-weight "${AF_COMPARATIVE_WEIGHT}" \

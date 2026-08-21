@@ -250,6 +250,10 @@ failures; no hidden reasoning is parsed and no missing score is imputed.
 Hybrid calibration resume is additionally guarded by an immutable per-shard run
 manifest and exact planned-key validation, including the pair-file digest and
 selected pair IDs.
+For Ollama calibration, the response transport is a manifest-pinned ablation:
+either schema-constrained final content or a single schema-validated tool call.
+Both paths ignore hidden reasoning and retain identical scientific questions and
+runtime aggregation.
 
 ### Simulation, fitting, metrics, and pruning
 

@@ -192,6 +192,24 @@ Pydantic schema. Expected-unit post-validation remains mandatory, so this recove
 changes only the provider emission channel and does not weaken the trusted boundary
 or infer an answer from hidden reasoning.
 
+### Ollama protocol-completion transport ablation
+
+The calibration runner supports `--ollama-response-mode json_schema` (the frozen
+control) and `--ollama-response-mode tool_call` (the protocol-completion
+alternative). Tool-call mode supplies exactly one `submit_structured_response`
+function whose arguments use the same compact JSON Schema as the control. A valid
+response must contain exactly one call to that function; its arguments then pass
+the unchanged Pydantic and expected-unit validation. Ordinary message content and
+the thinking channel are never used as substitute answers.
+
+Transport mode is included in the content-addressed cache key and immutable shard
+manifest, so the two conditions require separate output roots and cannot be mixed
+during resume. This ablation changes only how the model submits its assessment:
+the blinded candidates, scientific questions, seeds, repetitions, repair limits,
+scoring, and failure accounting remain fixed. Reports compare structured-response
+success, conditional scientific accuracy, end-to-end accuracy, latency, and token
+usage before any production integration.
+
 The initial experiment retains five repetitions in both orders. Existing output
 supports offline ablations of absolute-only, comparative-only, and combined
 decisions before any production integration.

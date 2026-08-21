@@ -32,6 +32,7 @@ from autoformalism.judging import (
 from autoformalism.llm import (
     LLMConfig,
     LLMProvider,
+    OllamaResponseMode,
     OllamaThinking,
     create_llm_client,
 )
@@ -235,14 +236,24 @@ def _task_context(
 
 
 def _system_prompt(
-    public_prompt: str, context: ValidationContext, model: str
+    public_prompt: str,
+    context: ValidationContext,
+    model: str,
+    response_mode: OllamaResponseMode,
 ) -> str:
+    transport_override = ""
+    if response_mode is OllamaResponseMode.TOOL_CALL:
+        transport_override = (
+            "\n\nConfigured transport override: submit the strict JSON object as "
+            "the arguments of the single provided structured-response tool. Do "
+            "not place it in ordinary final message content."
+        )
     return (
         f"Configured judge model: {model}\n\n"
         f"Public scientific task:\n{public_prompt}\n\n"
         f"{_prediction_protocol_prompt(context)}\n\n"
         f"{_symbol_contract(context)}\n\n"
-        f"Hybrid judge protocol:\n{HYBRID_JUDGE_PROMPT}"
+        f"Hybrid judge protocol:\n{HYBRID_JUDGE_PROMPT}{transport_override}"
     )
 
 
@@ -348,6 +359,11 @@ def main() -> None:
         default=OllamaThinking.AUTO.value,
     )
     parser.add_argument("--ollama-temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--ollama-response-mode",
+        choices=tuple(item.value for item in OllamaResponseMode),
+        default=OllamaResponseMode.JSON_SCHEMA.value,
+    )
     parser.add_argument("--ollama-seed-base", type=int)
     parser.add_argument("--partial-tiebreak-weight", type=float, default=0.05)
     parser.add_argument("--comparative-weight", type=float, default=0.25)
@@ -401,6 +417,7 @@ def main() -> None:
         "max_output_tokens": args.max_output_tokens,
         "ollama_thinking": args.ollama_thinking,
         "ollama_temperature": args.ollama_temperature,
+        "ollama_response_mode": args.ollama_response_mode,
         "ollama_seed_base": args.ollama_seed_base,
         "partial_tiebreak_weight": args.partial_tiebreak_weight,
         "comparative_weight": args.comparative_weight,
@@ -470,6 +487,9 @@ def main() -> None:
                     ollama_base_url=args.ollama_base_url,
                     ollama_thinking=OllamaThinking(args.ollama_thinking),
                     ollama_temperature=args.ollama_temperature,
+                    ollama_response_mode=OllamaResponseMode(
+                        args.ollama_response_mode
+                    ),
                     ollama_seed=(
                         None
                         if args.ollama_seed_base is None
@@ -486,7 +506,12 @@ def main() -> None:
             requirements = extract_public_requirements(public_prompt)
             units = semantic_absolute_units(requirements)
             expected_units = set(units)
-            system_prompt = _system_prompt(public_prompt, context, model_spec)
+            system_prompt = _system_prompt(
+                public_prompt,
+                context,
+                model_spec,
+                OllamaResponseMode(args.ollama_response_mode),
+            )
             baseline, baseline_repairs = repair_protected_declarations(
                 pair.valid_candidate, context
             )
