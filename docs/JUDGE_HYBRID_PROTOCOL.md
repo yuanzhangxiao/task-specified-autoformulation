@@ -169,10 +169,12 @@ all attempts still count as one logical judge call.
 
 If Ollama returns reasoning but leaves `message.content` empty, subsequent repair
 attempts use Ollama's OpenAI-compatible chat endpoint with JSON mode and
-`reasoning_effort: none`, plus an explicit final-content instruction. The same
-Pydantic schema and expected-unit post-validation remain mandatory locally, so
-this recovery changes only the provider emission channel and does not weaken the
-trusted boundary or infer an answer from hidden reasoning.
+`reasoning_effort: none`, a strict `json_schema` response format, and an explicit
+final-content instruction. If that endpoint wraps the object in prose, the runtime
+accepts it only when exactly one embedded object independently satisfies the full
+Pydantic schema. Expected-unit post-validation remains mandatory, so this recovery
+changes only the provider emission channel and does not weaken the trusted boundary
+or infer an answer from hidden reasoning.
 
 The initial experiment retains five repetitions in both orders. Existing output
 supports offline ablations of absolute-only, comparative-only, and combined

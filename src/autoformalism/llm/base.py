@@ -504,6 +504,29 @@ class CachedLLMClient(ABC):
                 f"response failed {response_model.__name__} validation: {exc}"
             ) from exc
 
+    def _parse_single_embedded_json(
+        self,
+        text: str,
+        response_model: type[StructuredT],
+    ) -> StructuredT:
+        """Validate the sole schema-matching JSON object embedded in text."""
+        decoder = json.JSONDecoder()
+        matches: list[StructuredT] = []
+        for offset, character in enumerate(text):
+            if character != "{":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(text, offset)
+                matches.append(response_model.model_validate(payload))
+            except (json.JSONDecodeError, ValidationError):
+                continue
+        if len(matches) != 1:
+            raise LLMResponseError(
+                "response did not contain exactly one embedded "
+                f"{response_model.__name__} object; matches={len(matches)}"
+            )
+        return matches[0]
+
     def _hashable_provider_options(self) -> dict[str, object]:
         return {}
 

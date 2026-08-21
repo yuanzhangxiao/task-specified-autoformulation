@@ -102,6 +102,9 @@ class OllamaClient(CachedLLMClient):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        response_schema = _ollama_compatible_schema(
+            response_model.model_json_schema(mode="validation")
+        )
         if use_openai_fallback:
             endpoint = f"{self._base_url}/v1/chat/completions"
             body: dict[str, object] = {
@@ -109,7 +112,14 @@ class OllamaClient(CachedLLMClient):
                 "messages": messages,
                 "stream": False,
                 "reasoning_effort": "none",
-                "response_format": {"type": "json_object"},
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": response_model.__name__,
+                        "strict": True,
+                        "schema": response_schema,
+                    },
+                },
                 "temperature": self._temperature,
                 "max_tokens": self._max_output_tokens,
             }
@@ -122,9 +132,7 @@ class OllamaClient(CachedLLMClient):
                 "messages": messages,
                 "stream": False,
                 "think": self._thinking,
-                "format": _ollama_compatible_schema(
-                    response_model.model_json_schema(mode="validation")
-                ),
+                "format": response_schema,
                 "options": options,
             }
         started = time.perf_counter()
@@ -145,10 +153,11 @@ class OllamaClient(CachedLLMClient):
             "attempt_number": attempt_number,
             "sampling_seed": attempt_seed,
             "format_mode": (
-                "openai_json_no_reasoning"
+                "openai_json_schema_no_reasoning"
                 if use_openai_fallback
                 else "native_json_schema"
             ),
+            "embedded_json_extracted": False,
         }
         latency_ms = (time.perf_counter() - started) * 1000.0
         message: object = raw_response.get("message")
@@ -198,8 +207,17 @@ class OllamaClient(CachedLLMClient):
         try:
             parsed = self._parse_json(content, response_model)
         except LLMResponseError as exc:
-            exc.raw_response = raw_response
-            raise
+            if not use_openai_fallback:
+                exc.raw_response = raw_response
+                raise
+            try:
+                parsed = self._parse_single_embedded_json(content, response_model)
+            except LLMResponseError as embedded_error:
+                embedded_error.raw_response = raw_response
+                raise embedded_error from exc
+            raw_response["_autoformalism_retry"][
+                "embedded_json_extracted"
+            ] = True
         provider_duration = raw_response.get("total_duration")
         if isinstance(provider_duration, int | float):
             latency_ms = float(provider_duration) / 1_000_000.0

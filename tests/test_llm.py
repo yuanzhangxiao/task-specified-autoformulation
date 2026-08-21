@@ -224,6 +224,22 @@ def test_request_hash_is_stable_and_materially_sensitive(tmp_path: Path) -> None
     assert first != changed
 
 
+def test_embedded_json_repair_rejects_ambiguous_valid_objects(
+    tmp_path: Path,
+) -> None:
+    client = StubCachedClient(tmp_path)
+    encoded = _judge().model_dump_json()
+
+    parsed = client._parse_single_embedded_json(
+        f"Final object follows:\n{encoded}", ScientificJudgeResult
+    )
+    assert parsed == _judge()
+    with pytest.raises(LLMResponseError, match="matches=2"):
+        client._parse_single_embedded_json(
+            f"{encoded}\n{encoded}", ScientificJudgeResult
+        )
+
+
 def test_disk_cache_avoids_second_provider_call_and_logs_raw_parsed(
     tmp_path: Path,
 ) -> None:
@@ -744,7 +760,12 @@ def test_ollama_repair_attempts_use_deterministic_fallback_seeds(
             "choices": [
                 {
                     "finish_reason": "stop",
-                    "message": {"content": _judge().model_dump_json()},
+                    "message": {
+                        "content": (
+                            "I will now return the requested object.\n"
+                            + _judge().model_dump_json()
+                        )
+                    },
                 }
             ],
             "usage": {"prompt_tokens": 8, "completion_tokens": 13},
@@ -768,13 +789,15 @@ def test_ollama_repair_attempts_use_deterministic_fallback_seeds(
     assert calls[0][1]["options"]["seed"] == 17
     assert calls[1][1]["seed"] == 18
     assert calls[1][1]["reasoning_effort"] == "none"
-    assert calls[1][1]["response_format"] == {"type": "json_object"}
+    assert calls[1][1]["response_format"]["type"] == "json_schema"
+    assert calls[1][1]["response_format"]["json_schema"]["strict"] is True
     assert "final response content" in calls[1][1]["messages"][1]["content"]
     assert result.usage == TokenUsage(8, 13, 21)
     assert result.raw_response["_autoformalism_retry"] == {
         "attempt_number": 2,
         "sampling_seed": 18,
-        "format_mode": "openai_json_no_reasoning",
+        "format_mode": "openai_json_schema_no_reasoning",
+        "embedded_json_extracted": True,
     }
 
 
