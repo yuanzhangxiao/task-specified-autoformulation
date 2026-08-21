@@ -6,7 +6,7 @@ import argparse
 import csv
 import json
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import mean, pstdev
 
@@ -105,6 +105,7 @@ def _normalized_relative(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scores", type=Path, required=True)
+    parser.add_argument("--failures", type=Path)
     parser.add_argument("--labels", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--tie-threshold", type=float, default=0.05)
@@ -119,15 +120,48 @@ def main() -> None:
     }
     with args.scores.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
-    unknown_pairs = sorted({row["pair_id"] for row in rows} - set(labels))
+    failures = []
+    if args.failures is not None and args.failures.is_file():
+        failures = [
+            json.loads(line)
+            for line in args.failures.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    unknown_pairs = sorted(
+        ({row["pair_id"] for row in rows} | {row["pair_id"] for row in failures})
+        - set(labels)
+    )
     if unknown_pairs:
-        raise SystemExit(f"scores have no question labels: {unknown_pairs}")
+        raise SystemExit(f"outcomes have no question labels: {unknown_pairs}")
+
+    def outcome_key(row: dict[str, object]) -> tuple[str, str, int, str]:
+        return (
+            str(row["pair_id"]),
+            str(row["judge_model"]),
+            int(row["repetition"]),
+            str(row["order"]),
+        )
+
+    success_keys = {outcome_key(row) for row in rows}
+    failure_keys = [outcome_key(row) for row in failures]
+    if len(failure_keys) != len(set(failure_keys)):
+        raise SystemExit("duplicate persistent-failure keys")
+    overlap = success_keys & set(failure_keys)
+    if overlap:
+        raise SystemExit(
+            f"keys occur in both success and failure inputs: {len(overlap)}"
+        )
 
     by_model: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         by_model[row["judge_model"]].append(row)
+    failures_by_model: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in failures:
+        failures_by_model[str(row["judge_model"])].append(row)
     metrics = {}
-    for model, model_rows in sorted(by_model.items()):
+    for model in sorted(set(by_model) | set(failures_by_model)):
+        model_rows = by_model[model]
+        model_failures = failures_by_model[model]
         overall_correct: list[bool] = []
         runtime_correct: list[bool] = []
         runtime_pair_correct: list[bool] = []
@@ -272,7 +306,36 @@ def main() -> None:
         )
         metrics[model] = {
             "comparison_count": len(model_rows),
+            "successful_comparison_count": len(model_rows),
+            "failed_comparison_count": len(model_failures),
+            "attempted_comparison_count": len(model_rows) + len(model_failures),
+            "structured_response_success_rate": (
+                len(model_rows) / (len(model_rows) + len(model_failures))
+                if model_rows or model_failures
+                else None
+            ),
             "combined_preference_accuracy": _rate(overall_correct),
+            "combined_preference_accuracy_conditional_on_response": _rate(
+                overall_correct
+            ),
+            "combined_preference_accuracy_including_failures": (
+                sum(overall_correct)
+                / (
+                    len(overall_correct)
+                    + sum(
+                        labels[str(row["pair_id"])].overall_preference
+                        is not ExpectedPairPreference.UNLABELED
+                        for row in model_failures
+                    )
+                )
+                if overall_correct
+                or any(
+                    labels[str(row["pair_id"])].overall_preference
+                    is not ExpectedPairPreference.UNLABELED
+                    for row in model_failures
+                )
+                else None
+            ),
             "absolute_only_preference_accuracy": _rate(absolute_only_correct),
             "relative_only_preference_accuracy": _rate(relative_only_correct),
             "pair_aggregated_accuracy": _rate(
@@ -324,6 +387,21 @@ def main() -> None:
                 criterion: _rate(values)
                 for criterion, values in sorted(comparative_by_criterion.items())
             },
+            "failures_by_error_type": dict(
+                sorted(
+                    Counter(
+                        str(row["error_type"]) for row in model_failures
+                    ).items()
+                )
+            ),
+            "failures_by_category": dict(
+                sorted(
+                    Counter(
+                        str(row.get("failure_category") or "unknown")
+                        for row in model_failures
+                    ).items()
+                )
+            ),
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
@@ -344,11 +422,15 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
         "Gold labels are restricted to deterministic runtime facts and explicit "
         "mutation contracts; no domain-expert review is used. Untargeted questions "
         "are excluded from question-level accuracy.",
+        "Provider/schema failures are retained as outcomes. Conditional accuracy "
+        "uses valid structured responses only; end-to-end accuracy treats a failed "
+        "response as an incorrect judge decision.",
         "",
-        "| Judge | Combined | Absolute only | Comparative only | Pair aggregate | "
+        "| Judge | Response success | Combined (conditional) | Combined (end-to-end) | "
+        "Absolute only | Comparative only | Pair aggregate | "
         "Runtime integrity | LLM semantic absolute | Pair semantic absolute | "
         "Comparative questions | Order consistency | Repeat ICC | Repeat SD |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for model, raw in metrics.items():
         values = raw
@@ -358,7 +440,15 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
             + " | ".join(
                 (
                     model,
-                    _format(values["combined_preference_accuracy"]),
+                    _format(values["structured_response_success_rate"]),
+                    _format(
+                        values[
+                            "combined_preference_accuracy_conditional_on_response"
+                        ]
+                    ),
+                    _format(
+                        values["combined_preference_accuracy_including_failures"]
+                    ),
                     _format(values["absolute_only_preference_accuracy"]),
                     _format(values["relative_only_preference_accuracy"]),
                     _format(values["pair_aggregated_accuracy"]),

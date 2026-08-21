@@ -242,6 +242,12 @@ Generic conjunctive groups and all numeric aggregation are runtime-owned. This
 prospective protocol must pass held-out question-level calibration before it may
 replace the production category-score judge.
 
+Calibration provider failures are first-class outcomes. After bounded
+contract-only retries, a terminal structured-response failure is stored in an
+append-only ledger and the shard continues. The analyzer reports both conditional
+scientific accuracy among valid responses and end-to-end accuracy including these
+failures; no hidden reasoning is parsed and no missing score is imputed.
+
 ### Simulation, fitting, metrics, and pruning
 
 ```python

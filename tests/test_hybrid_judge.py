@@ -40,6 +40,11 @@ from scripts.analyze_hybrid_judge import main as analyze_hybrid_main
 from scripts.build_hybrid_judge_label_template import build_label_template
 from scripts.build_hybrid_judge_pairs import augment_pairs
 from scripts.merge_hybrid_scores import main as merge_hybrid_main
+from scripts.run_hybrid_judge import (
+    FAILURE_SCHEMA_VERSION,
+    _append_failure,
+    _failed,
+)
 
 
 def _candidate(*, disconnected_claim: bool = False) -> CandidateModel:
@@ -457,6 +462,25 @@ def test_hybrid_analysis_uses_certified_question_labels(
             }
         )
     output = tmp_path / "metrics.json"
+    failures_path = tmp_path / "failures.jsonl"
+    _append_failure(
+        failures_path,
+        {
+            "schema_version": FAILURE_SCHEMA_VERSION,
+            "pair_id": "pair_1",
+            "benchmark_id": "phase_b_test",
+            "tier": "easy",
+            "mutation_type": "wrong_meal_sink",
+            "judge_model": "ollama:test",
+            "repetition": 1,
+            "order": "baseline_b",
+            "baseline_position": "B",
+            "error_type": "LLMResponseError",
+            "error": "empty final content",
+            "failure_category": "repairable_contract",
+            "provider_attempt_limit": 10,
+        },
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -464,6 +488,8 @@ def test_hybrid_analysis_uses_certified_question_labels(
             "analyze",
             "--scores",
             str(score_path),
+            "--failures",
+            str(failures_path),
             "--labels",
             str(labels_path),
             "--output",
@@ -475,6 +501,11 @@ def test_hybrid_analysis_uses_certified_question_labels(
 
     metrics = json.loads(output.read_text(encoding="utf-8"))["ollama:test"]
     assert metrics["combined_preference_accuracy"] == 1.0
+    assert metrics["structured_response_success_rate"] == 0.5
+    assert metrics["combined_preference_accuracy_conditional_on_response"] == 1.0
+    assert metrics["combined_preference_accuracy_including_failures"] == 0.5
+    assert metrics["failed_comparison_count"] == 1
+    assert metrics["failures_by_error_type"] == {"LLMResponseError": 1}
     assert metrics["runtime_certification_accuracy"] == 1.0
     assert metrics["absolute_verdict_accuracy"] == 1.0
     assert metrics["gold_label_scope"] == "runtime_and_mutation_contract_only"
@@ -564,6 +595,26 @@ def test_hybrid_merge_requires_complete_unique_coverage(
             }
         )
     output = tmp_path / "merged.csv"
+    failure_shard = tmp_path / "failures.jsonl"
+    _append_failure(
+        failure_shard,
+        {
+            "schema_version": FAILURE_SCHEMA_VERSION,
+            "pair_id": "pair_1",
+            "benchmark_id": "phase_b_test",
+            "tier": "easy",
+            "mutation_type": "wrong_meal_sink",
+            "judge_model": "ollama:test",
+            "repetition": 0,
+            "order": "baseline_b",
+            "baseline_position": "B",
+            "error_type": "LLMResponseError",
+            "error": "empty final content",
+            "failure_category": "repairable_contract",
+            "provider_attempt_limit": 10,
+        },
+    )
+    merged_failures = tmp_path / "merged_failures.jsonl"
     monkeypatch.setattr(
         sys,
         "argv",
@@ -573,14 +624,19 @@ def test_hybrid_merge_requires_complete_unique_coverage(
             str(shard),
             "--output",
             str(output),
+            "--failure-inputs",
+            str(failure_shard),
+            "--failure-output",
+            str(merged_failures),
             "--expected",
-            "1",
+            "2",
         ],
     )
 
     merge_hybrid_main()
 
     assert output.is_file()
+    assert len(merged_failures.read_text(encoding="utf-8").splitlines()) == 1
     monkeypatch.setattr(
         sys,
         "argv",
@@ -590,9 +646,39 @@ def test_hybrid_merge_requires_complete_unique_coverage(
             str(shard),
             "--output",
             str(output),
+            "--failure-inputs",
+            str(failure_shard),
             "--expected",
-            "2",
+            "3",
         ],
     )
-    with pytest.raises(SystemExit, match="incomplete hybrid scores"):
+    with pytest.raises(SystemExit, match="incomplete hybrid outcomes"):
         merge_hybrid_main()
+
+
+def test_failure_ledger_is_resumable_and_rejects_duplicate_keys(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "failures.jsonl"
+    row = {
+        "schema_version": FAILURE_SCHEMA_VERSION,
+        "pair_id": "pair_1",
+        "benchmark_id": "phase_b_test",
+        "tier": "easy",
+        "mutation_type": "wrong_meal_sink",
+        "judge_model": "ollama:test",
+        "repetition": 2,
+        "order": "baseline_a",
+        "baseline_position": "A",
+        "error_type": "LLMResponseError",
+        "error": "empty final content",
+        "failure_category": "repairable_contract",
+        "provider_attempt_limit": 10,
+    }
+
+    _append_failure(path, row)
+
+    assert _failed(path) == {("pair_1", "ollama:test", 2, "baseline_a")}
+    _append_failure(path, row)
+    with pytest.raises(ValueError, match="duplicate persistent-failure key"):
+        _failed(path)

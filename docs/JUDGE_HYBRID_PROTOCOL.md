@@ -160,6 +160,15 @@ contract-only repair attempts. No repair prompt contains a scientific answer,
 fit result, hidden model, or expected label. The LLM never emits an aggregate
 score or overall winner.
 
+If all bounded provider attempts fail, the runner writes a versioned terminal
+record to `hybrid_judge_failures.jsonl` and continues with the next logical call.
+It does not parse hidden reasoning or impute a score. Resume treats successful
+CSV rows and terminal failure records as disjoint completed outcomes. Shard merge
+requires their union to cover the planned calls. Analysis reports scientific
+accuracy conditional on a valid structured response, structured-response success
+rate, and end-to-end accuracy that counts a terminal response failure as an
+incorrect judge decision.
+
 For seeded Ollama calls, provider attempt 1 uses the registered repetition seed.
 If that attempt fails, repair attempt `n` uses `seed + n - 1`. This deterministic
 fallback prevents an empty-content response from reproducing forever under the

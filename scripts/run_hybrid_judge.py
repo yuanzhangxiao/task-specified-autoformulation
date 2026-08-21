@@ -34,6 +34,7 @@ from autoformalism.llm import (
     OllamaThinking,
     create_llm_client,
 )
+from autoformalism.llm.exceptions import LLMError
 from autoformalism.rebuttal.adversarial import AdversarialPair
 
 HYBRID_JUDGE_PROMPT = """You are a blinded scientific judge evaluating two
@@ -130,6 +131,25 @@ FIELDS = (
     "request_hash",
 )
 
+FAILURE_SCHEMA_VERSION = "hybrid-judge-failure-1"
+FAILURE_REQUIRED_FIELDS = frozenset(
+    {
+        "schema_version",
+        "pair_id",
+        "benchmark_id",
+        "tier",
+        "mutation_type",
+        "judge_model",
+        "repetition",
+        "order",
+        "baseline_position",
+        "error_type",
+        "error",
+        "failure_category",
+        "provider_attempt_limit",
+    }
+)
+
 
 def _select_shard(
     pairs: tuple[AdversarialPair, ...],
@@ -208,6 +228,39 @@ def _completed(path: Path) -> set[tuple[str, str, int, str]]:
         }
 
 
+def _failed(path: Path) -> set[tuple[str, str, int, str]]:
+    """Return validated keys from the append-only persistent-failure ledger."""
+    if not path.is_file():
+        return set()
+    keys = set()
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        missing = FAILURE_REQUIRED_FIELDS - row.keys()
+        if missing:
+            raise ValueError(
+                f"failure ledger line {line_number} is missing {sorted(missing)}"
+            )
+        if row["schema_version"] != FAILURE_SCHEMA_VERSION:
+            raise ValueError(
+                f"unsupported failure schema on line {line_number}: "
+                f"{row['schema_version']!r}"
+            )
+        key = (
+            str(row["pair_id"]),
+            str(row["judge_model"]),
+            int(row["repetition"]),
+            str(row["order"]),
+        )
+        if key in keys:
+            raise ValueError(f"duplicate persistent-failure key: {key}")
+        keys.add(key)
+    return keys
+
+
 def _append(path: Path, row: dict[str, object]) -> None:
     exists = path.is_file() and path.stat().st_size > 0
     with path.open("a", encoding="utf-8", newline="") as handle:
@@ -215,6 +268,15 @@ def _append(path: Path, row: dict[str, object]) -> None:
         if not exists:
             writer.writeheader()
         writer.writerow(row)
+
+
+def _append_failure(path: Path, row: dict[str, object]) -> None:
+    """Append one terminal logical-call failure without inventing a score."""
+    missing = FAILURE_REQUIRED_FIELDS - row.keys()
+    if missing:
+        raise ValueError(f"failure record is missing {sorted(missing)}")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
 def _normalize_preference(preferred: str, baseline_position: str) -> str:
@@ -292,7 +354,15 @@ def main() -> None:
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
     score_path = args.output_root / "hybrid_judge_scores.csv"
-    completed = _completed(score_path)
+    failure_path = args.output_root / "hybrid_judge_failures.jsonl"
+    successful = _completed(score_path)
+    failed = _failed(failure_path)
+    overlap = successful & failed
+    if overlap:
+        raise SystemExit(
+            f"keys occur in both success and failure outputs: {len(overlap)}"
+        )
+    completed = successful | failed
     expected = len(pairs) * 2 * args.repetitions * len(args.judge_models)
     contexts: dict[tuple[str, str], tuple[str, ValidationContext]] = {}
     for pair in pairs:
@@ -306,6 +376,7 @@ def main() -> None:
         }
         print(
             f"pairs={len(pairs)} tasks={len(contexts)} expected_calls={expected} "
+            f"successful={len(successful)} failed={len(failed)} "
             f"completed={len(completed)} remaining={expected - len(completed)} "
             f"semantic_units={unit_counts}"
         )
@@ -422,11 +493,40 @@ def main() -> None:
                     key = (pair.pair_id, model_spec, repetition, order)
                     if key in completed:
                         continue
-                    result = clients[repetition].assess_hybrid(
-                        system_prompt=system_prompt,
-                        user_prompt=json.dumps(request, sort_keys=True),
-                        expected_absolute_units=expected_units,
-                    )
+                    try:
+                        result = clients[repetition].assess_hybrid(
+                            system_prompt=system_prompt,
+                            user_prompt=json.dumps(request, sort_keys=True),
+                            expected_absolute_units=expected_units,
+                        )
+                    except LLMError as exc:
+                        category = getattr(exc, "category", None)
+                        _append_failure(
+                            failure_path,
+                            {
+                                "schema_version": FAILURE_SCHEMA_VERSION,
+                                "pair_id": pair.pair_id,
+                                "benchmark_id": pair.benchmark_id,
+                                "tier": pair.tier,
+                                "mutation_type": pair.mutation_type,
+                                "judge_model": model_spec,
+                                "repetition": repetition,
+                                "order": order,
+                                "baseline_position": baseline_position,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc)[:4000],
+                                "failure_category": getattr(category, "value", None),
+                                "provider_attempt_limit": args.max_attempts,
+                            },
+                        )
+                        failed.add(key)
+                        completed.add(key)
+                        print(
+                            f"failed {len(completed)}/{expected}: {key}: "
+                            f"{type(exc).__name__}",
+                            flush=True,
+                        )
+                        continue
                     pair_score = score_hybrid_pair(
                         result.parsed,
                         deterministic,
@@ -492,6 +592,7 @@ def main() -> None:
                         },
                     )
                     completed.add(key)
+                    successful.add(key)
                     print(f"completed {len(completed)}/{expected}: {key}", flush=True)
 
 
