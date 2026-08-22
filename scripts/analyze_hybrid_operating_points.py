@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import itertools
 import json
 import random
@@ -103,6 +104,7 @@ def _adaptive_operating_points(
     labels: dict[str, HybridCalibrationLabels],
     tie_threshold: float,
     bootstrap_samples: int,
+    frozen_max_seeds: int | None,
 ) -> list[dict[str, object]]:
     """Retry only a missing orientation and require symmetric pair evidence."""
     results = []
@@ -168,6 +170,7 @@ def _adaptive_operating_points(
             {
                 "configuration": f"adaptive_both_orders_up_to_{attempt_limit}_seed"
                 + ("s" if attempt_limit != 1 else ""),
+                "frozen_selected": attempt_limit == frozen_max_seeds,
                 "max_attempts_per_orientation": attempt_limit,
                 "initial_calls_per_pair": 2,
                 "max_calls_per_pair": 2 * attempt_limit,
@@ -200,6 +203,7 @@ def analyze_operating_points(
     *,
     tie_threshold: float = 0.05,
     bootstrap_samples: int = 2000,
+    frozen_max_seeds: int | None = None,
 ) -> dict[str, object]:
     """Aggregate frozen calls under progressively larger repetition budgets."""
     if bootstrap_samples < 1:
@@ -249,6 +253,13 @@ def analyze_operating_points(
     for model in sorted(models):
         model_keys = {key for key in all_keys if key[1] == model}
         repetition_ids = tuple(sorted({key[2] for key in model_keys}))
+        if frozen_max_seeds is not None and not (
+            1 <= frozen_max_seeds <= len(repetition_ids)
+        ):
+            raise ValueError(
+                f"frozen retry limit {frozen_max_seeds} is unavailable for "
+                f"model {model!r} with {len(repetition_ids)} repetitions"
+            )
         labeled_pairs = tuple(
             sorted(
                 pair_id
@@ -391,6 +402,7 @@ def analyze_operating_points(
                 labels=labels,
                 tie_threshold=tie_threshold,
                 bootstrap_samples=bootstrap_samples,
+                frozen_max_seeds=frozen_max_seeds,
             ),
         }
     return output
@@ -453,10 +465,11 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
                 "response. A failed orientation alone advances to the next frozen "
                 "seed.",
                 "",
-                "| Maximum seeds/orientation | Expected calls/pair | Maximum calls | "
+                "| Selected | Maximum seeds/orientation | Expected calls/pair | "
+                "Maximum calls | "
                 "Retry activation | Paired coverage | Conditional pair accuracy | "
                 "End-to-end pair accuracy | Order consistency | Decision SD |",
-                "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+                "|:---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )
         adaptive_points = values["adaptive_operating_points"]
@@ -467,6 +480,7 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
                 "| "
                 + " | ".join(
                     (
+                        "yes" if item["frozen_selected"] else "",
                         str(item["max_attempts_per_orientation"]),
                         _format(item["expected_calls_per_pair"]),
                         str(item["max_calls_per_pair"]),
@@ -490,6 +504,43 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _load_frozen_protocol(
+    path: Path,
+    *,
+    tie_threshold: float,
+) -> tuple[dict[str, object], int, str]:
+    """Validate the small frozen contract used to select one reported row."""
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    expected = {
+        "schema_version": "hybrid-judge-protocol-1",
+        "transport": "json_schema",
+        "tool_fallback": False,
+        "candidate_order_policy": "both_orientations",
+    }
+    for key, value in expected.items():
+        if payload.get(key) != value:
+            raise ValueError(f"frozen protocol has invalid {key}: {payload.get(key)!r}")
+    retry = payload.get("retry_policy")
+    if not isinstance(retry, dict) or retry.get("trigger") != (
+        "missing_orientation_only"
+    ):
+        raise ValueError("frozen protocol must retry only a missing orientation")
+    if retry.get("require_both_orientations") is not True:
+        raise ValueError("frozen protocol must require both orientations")
+    if retry.get("terminal_behavior") != "abstain":
+        raise ValueError("frozen protocol must abstain after terminal failure")
+    limit = retry.get("max_distinct_seeds_per_orientation")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise ValueError("frozen protocol retry limit must be a positive integer")
+    aggregation = payload.get("aggregation")
+    if not isinstance(aggregation, dict) or aggregation.get("tie_threshold") != (
+        tie_threshold
+    ):
+        raise ValueError("analysis tie threshold differs from frozen protocol")
+    return payload, limit, hashlib.sha256(raw).hexdigest()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scores", type=Path, required=True)
@@ -498,6 +549,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--tie-threshold", type=float, default=0.05)
     parser.add_argument("--bootstrap-samples", type=int, default=2000)
+    parser.add_argument("--protocol-config", type=Path)
     args = parser.parse_args()
     with args.scores.open(encoding="utf-8", newline="") as handle:
         rows: list[dict[str, object]] = list(csv.DictReader(handle))
@@ -516,13 +568,37 @@ def main() -> None:
             if line.strip()
         )
     }
+    frozen_payload = None
+    frozen_max_seeds = None
+    protocol_sha256 = None
+    if args.protocol_config is not None:
+        frozen_payload, frozen_max_seeds, protocol_sha256 = _load_frozen_protocol(
+            args.protocol_config,
+            tie_threshold=args.tie_threshold,
+        )
     metrics = analyze_operating_points(
         rows,
         failures,
         labels,
         tie_threshold=args.tie_threshold,
         bootstrap_samples=args.bootstrap_samples,
+        frozen_max_seeds=frozen_max_seeds,
     )
+    if frozen_payload is not None:
+        for values in metrics.values():
+            assert isinstance(values, dict)
+            selected = [
+                item
+                for item in values["adaptive_operating_points"]
+                if item["frozen_selected"]
+            ]
+            if len(selected) != 1:
+                raise ValueError("frozen protocol did not select exactly one row")
+            values["frozen_protocol"] = {
+                "schema_version": frozen_payload["schema_version"],
+                "config_sha256": protocol_sha256,
+                "selected_operating_point": selected[0],
+            }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(metrics, indent=2, sort_keys=True) + "\n",

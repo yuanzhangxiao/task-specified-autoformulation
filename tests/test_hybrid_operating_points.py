@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from autoformalism.rebuttal.hybrid_labels import HybridCalibrationLabels
-from scripts.analyze_hybrid_operating_points import analyze_operating_points
+from scripts.analyze_hybrid_operating_points import (
+    _load_frozen_protocol,
+    analyze_operating_points,
+)
 
 
 def _labels(pair_id: str) -> HybridCalibrationLabels:
@@ -61,6 +66,7 @@ def test_operating_points_measure_order_bias_and_provider_failures() -> None:
         failures,
         labels,
         bootstrap_samples=100,
+        frozen_max_seeds=2,
     )["ollama:test"]
     by_name = {
         item["configuration"]: item for item in metrics["operating_points"]
@@ -105,6 +111,7 @@ def test_operating_points_measure_order_bias_and_provider_failures() -> None:
     assert no_retry["end_to_end_pair_accuracy"] == 0.25
 
     retry_once = adaptive[2]
+    assert retry_once["frozen_selected"] is True
     assert retry_once["expected_calls_per_pair"] == 2.25
     assert retry_once["retry_activation_rate"] == 0.25
     assert retry_once["paired_response_coverage"] == 1.0
@@ -132,4 +139,20 @@ def test_operating_points_reject_unrecorded_order() -> None:
             [],
             {"pair_1": _labels("pair_1")},
             bootstrap_samples=10,
+        )
+
+
+def test_frozen_protocol_selects_predeclared_retry_limit() -> None:
+    payload, limit, digest = _load_frozen_protocol(
+        Path("configs/hybrid_judge_protocol_v1.json"),
+        tie_threshold=0.05,
+    )
+
+    assert payload["transport"] == "json_schema"
+    assert limit == 5
+    assert len(digest) == 64
+    with pytest.raises(ValueError, match="tie threshold"):
+        _load_frozen_protocol(
+            Path("configs/hybrid_judge_protocol_v1.json"),
+            tie_threshold=0.1,
         )

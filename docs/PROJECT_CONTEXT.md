@@ -142,6 +142,11 @@ The pipeline is iterative:
   transport ablations only: completed frozen-pair tests found that their small
   completion gain did not preserve scientific accuracy or A/B order consistency.
   Tool-call results must not silently replace a missing JSON-schema judgment.
+- The first frozen hybrid operating point requires both candidate orientations,
+  retries only a missing orientation for at most five distinct seeds, and
+  abstains if symmetric evidence remains incomplete. Its next evaluation holds
+  out canonical candidate structures while retaining audited mutation contracts;
+  search integration remains blocked until the predeclared held-out gates pass.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

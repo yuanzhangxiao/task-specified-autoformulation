@@ -1,0 +1,35 @@
+{
+  "schema_version": "hybrid-judge-protocol-1",
+  "status": "frozen_for_baseline_structure_heldout_evaluation",
+  "judge_model": "ollama:gpt-oss:20b",
+  "transport": "json_schema",
+  "tool_fallback": false,
+  "candidate_order_policy": "both_orientations",
+  "retry_policy": {
+    "trigger": "missing_orientation_only",
+    "max_distinct_seeds_per_orientation": 5,
+    "require_both_orientations": true,
+    "terminal_behavior": "abstain"
+  },
+  "aggregation": {
+    "orientation_normalization": "canonical_pair_member_1_minus_member_2",
+    "across_orientations": "arithmetic_mean",
+    "tie_threshold": 0.05
+  },
+  "hybrid_scoring": {
+    "partial_tiebreak_weight": 0.05,
+    "comparative_weight": 0.25
+  },
+  "logical_call": {
+    "max_provider_attempts": 10,
+    "timeout_seconds": 900,
+    "ollama_thinking": "low",
+    "ollama_temperature": 0.2
+  },
+  "frozen_calibration_operating_point": {
+    "expected_logical_calls_per_pair": 2.4,
+    "paired_response_coverage": 0.96,
+    "conditional_pair_accuracy": 0.992,
+    "end_to_end_pair_accuracy": 0.952
+  }
+}

@@ -276,6 +276,12 @@ It also simulates a bounded adaptive policy that obtains one valid response in
 each candidate orientation, retries only a missing orientation with a new seed,
 and withholds the pair decision if symmetric evidence remains incomplete. This
 policy is evaluated offline before it may become a search-time judge contract.
+The selected policy is stored in a versioned JSON configuration. A held-out pair
+builder compares canonical repaired baseline-structure fingerprints against the
+calibration set and fails closed if the requested number of unseen structures is
+unavailable. Held-out labels remain limited to deterministic graph facts and the
+pre-existing mutation contracts; the protocol configuration and evaluation gates
+are frozen before calls begin.
 
 ### Simulation, fitting, metrics, and pruning
 

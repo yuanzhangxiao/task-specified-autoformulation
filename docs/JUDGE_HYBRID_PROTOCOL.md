@@ -275,6 +275,7 @@ python scripts/analyze_hybrid_operating_points.py \
   --scores hybrid_judge_scores.csv \
   --failures hybrid_judge_failures.jsonl \
   --labels hybrid_labels.jsonl \
+  --protocol-config configs/hybrid_judge_protocol_v1.json \
   --output hybrid_judge_operating_points.json
 ```
 
@@ -292,6 +293,59 @@ accuracy, expected and maximum calls per pair, retry activation, order
 consistency, decision variability, and pair-clustered confidence intervals. This
 adaptive analysis avoids counting a single position-biased response as a complete
 pair judgment while avoiding unconditional repeated calls.
+
+### Frozen baseline-structure-held-out evaluation
+
+`configs/hybrid_judge_protocol_v1.json` freezes the first held-out operating
+point: JSON-schema transport, no tool fallback, both candidate orientations,
+retry of only a missing orientation, at most five distinct seeds per orientation,
+abstention unless both orientations succeed, arithmetic-mean aggregation after
+orientation normalization, and the calibrated scoring/tie parameters. The
+frozen calibration point used 2.400 logical calls per pair on average and reached
+`0.960` paired coverage, `0.992` conditional pair accuracy, and `0.952`
+end-to-end pair accuracy. These are selection-set measurements, not held-out
+performance claims.
+
+The first held-out evaluation uses newly selected candidate structures while
+retaining the already audited mutation contracts. The builder fingerprints the
+canonical repaired executable baseline with identifiers and summaries excluded,
+rejects every structure present in the calibration pair file, removes duplicate
+new baselines, requires all four base mutations, and then adds the retained
+disconnection control. Its manifest records the calibration-pair digest and the
+selected structural fingerprints. This is baseline-structure-held-out, not
+mutation-family-held-out; it tests transfer across candidate structures but not
+across previously unseen defect definitions.
+
+Before results are opened, the held-out gate is frozen as:
+
+- conditional pair accuracy at least `0.90`;
+- end-to-end pair accuracy at least `0.85`;
+- symmetric paired-response coverage at least `0.90`;
+- order consistency at least `0.80`.
+
+Build two unseen baselines (ten pairs after augmentation) from a run root not used
+to create the calibration pairs:
+
+```bash
+python scripts/build_hybrid_judge_heldout_pairs.py \
+  --runs-root /path/to/unused/runs \
+  --data-root /path/to/public/data \
+  --calibration-pairs /path/to/calibration/pairs.jsonl \
+  --baseline-count 2 \
+  --output /path/to/heldout/pairs.jsonl
+
+python scripts/build_hybrid_judge_label_template.py \
+  --pairs /path/to/heldout/pairs.jsonl \
+  --data-root /path/to/public/data \
+  --output /path/to/heldout/hybrid_labels.jsonl
+```
+
+The held-out measurement collects all five frozen seeds in both orientations so
+the adaptive policy can be replayed exactly without outcome-dependent new calls.
+The operating-point analyzer receives `--protocol-config
+configs/hybrid_judge_protocol_v1.json`; it marks exactly one adaptive row as the
+frozen selection. No prompt, scoring weight, threshold, transport, retry rule, or
+mutation contract may change after the held-out calls begin.
 
 `build_hybrid_judge_pairs.py` preserves the original frozen pairs as controls
 and adds a retained disconnected pathway for every old repaired-away
