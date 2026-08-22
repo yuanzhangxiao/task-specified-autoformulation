@@ -315,6 +315,12 @@ disconnection control. Its manifest records the calibration-pair digest and the
 selected structural fingerprints. This is baseline-structure-held-out, not
 mutation-family-held-out; it tests transfer across candidate structures but not
 across previously unseen defect definitions.
+Run-directory-derived source pair IDs may have appeared in an earlier pair file
+even when a rerun selected a new canonical structure. After the structural
+holdout check passes, the builder therefore assigns evaluation-local pair IDs
+from the unseen structural fingerprint, mutation type, and source ID. Identifier
+reuse alone neither admits nor rejects a baseline; canonical structural overlap
+remains the exclusion criterion.
 
 Before results are opened, the held-out gate is frozen as:
 

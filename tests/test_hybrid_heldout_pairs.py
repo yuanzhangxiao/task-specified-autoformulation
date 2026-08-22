@@ -111,6 +111,25 @@ def test_select_heldout_pairs_rejects_calibration_structures() -> None:
     }
     assert fingerprints == (candidate_structure_fingerprint(_candidate("q")),)
     assert fingerprints[0] != candidate_structure_fingerprint(_candidate("k"))
+    assert all(pair.pair_id.startswith(("heldout_", "hybrid_")) for pair in selected)
+
+
+def test_unseen_structure_is_rekeyed_when_source_pair_ids_collide() -> None:
+    calibration = _group("k")
+    unseen = tuple(
+        pair.model_copy(update={"pair_id": calibration[index].pair_id})
+        for index, pair in enumerate(_group("q"))
+    )
+
+    selected, _ = select_heldout_pairs(
+        unseen,
+        calibration,
+        baseline_count=1,
+    )
+
+    selected_ids = {pair.pair_id for pair in selected}
+    calibration_ids = {pair.pair_id for pair in calibration}
+    assert not (selected_ids & calibration_ids)
 
 
 def test_select_heldout_pairs_fails_when_unseen_supply_is_insufficient() -> None:

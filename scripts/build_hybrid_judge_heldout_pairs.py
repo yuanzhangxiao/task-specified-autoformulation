@@ -85,7 +85,9 @@ def select_heldout_pairs(
                 f"fingerprint={fingerprint} mutations={sorted(mutations)} "
                 f"pairs={len(group)}"
             )
-        selected_groups.extend(group)
+        selected_groups.extend(
+            _heldout_pair(pair, baseline_fingerprint=fingerprint) for pair in group
+        )
         selected_fingerprints.append(fingerprint)
         if len(selected_fingerprints) == baseline_count:
             break
@@ -103,6 +105,28 @@ def select_heldout_pairs(
     if overlap:
         raise ValueError(f"held-out pair identifiers overlap calibration: {overlap}")
     return augmented, tuple(selected_fingerprints)
+
+
+def _heldout_pair(
+    pair: AdversarialPair,
+    *,
+    baseline_fingerprint: str,
+) -> AdversarialPair:
+    """Assign an evaluation-local ID independent of a reused run directory."""
+    digest = hashlib.sha256(
+        (
+            "hybrid-heldout-v1:"
+            f"{baseline_fingerprint}:{pair.mutation_type}:{pair.pair_id}"
+        ).encode()
+    ).hexdigest()[:16]
+    return AdversarialPair(
+        pair_id=f"heldout_{digest}",
+        benchmark_id=pair.benchmark_id,
+        tier=pair.tier,
+        mutation_type=pair.mutation_type,
+        valid_candidate=pair.valid_candidate,
+        adversarial_candidate=pair.adversarial_candidate,
+    )
 
 
 def main() -> None:
@@ -147,6 +171,7 @@ def main() -> None:
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "calibration_pairs_sha256": hashlib.sha256(calibration_bytes).hexdigest(),
         "baseline_holdout_unit": "canonical_candidate_structure",
+        "pair_identifier_scheme": "heldout_structure_mutation_source_v1",
         "selected_baseline_count": len(fingerprints),
         "selected_baseline_fingerprints": list(fingerprints),
         "pair_count": len(heldout),
