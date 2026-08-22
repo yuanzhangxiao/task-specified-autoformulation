@@ -251,9 +251,11 @@ Hybrid calibration resume is additionally guarded by an immutable per-shard run
 manifest and exact planned-key validation, including the pair-file digest and
 selected pair IDs.
 For Ollama calibration, the response transport is a manifest-pinned ablation:
-either schema-constrained final content or a single schema-validated tool call.
-Both paths ignore hidden reasoning and retain identical scientific questions and
-runtime aggregation.
+schema-constrained final content, an always-on schema-validated tool call, or a
+JSON-primary mode that reserves the final bounded attempt for the tool only after
+a typed empty-content failure. All paths ignore hidden reasoning and retain
+identical scientific questions and runtime aggregation. The JSON-primary fallback
+does not add a tool instruction to the general scientific system prompt.
 
 ### Simulation, fitting, metrics, and pruning
 

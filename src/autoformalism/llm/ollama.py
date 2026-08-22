@@ -59,6 +59,13 @@ class OllamaClient(CachedLLMClient):
             log_path=log_path,
             **retry_options,
         )
+        if (
+            response_mode is OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK
+            and self._max_attempts < 2
+        ):
+            raise ValueError(
+                "json_schema_tool_fallback requires at least two attempts"
+            )
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
@@ -76,6 +83,12 @@ class OllamaClient(CachedLLMClient):
             "max_output_tokens": self._max_output_tokens,
             "thinking": self._thinking,
             "response_mode": self._response_mode.value,
+            "tool_fallback_attempt": (
+                self._max_attempts
+                if self._response_mode
+                is OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK
+                else None
+            ),
             "schema_compatibility": "bounded-compact-provider-schema-v4",
         }
 
@@ -98,7 +111,15 @@ class OllamaClient(CachedLLMClient):
         if self._seed is not None:
             attempt_seed = self._seed + attempt_number - 1
             options["seed"] = attempt_seed
-        use_tool_call = self._response_mode is OllamaResponseMode.TOOL_CALL
+        use_tool_call = self._uses_tool_call(
+            attempt_number=attempt_number,
+            repair_diagnostic_codes=repair_diagnostic_codes,
+        )
+        use_tool_fallback = (
+            use_tool_call
+            and self._response_mode
+            is OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK
+        )
         use_openai_fallback = (
             not use_tool_call
             and RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
@@ -113,8 +134,16 @@ class OllamaClient(CachedLLMClient):
         )
         if use_tool_call:
             endpoint = f"{self._base_url}/api/chat"
+            fallback_override = (
+                "For this final fallback attempt, this tool requirement "
+                "supersedes any earlier instruction to place JSON in ordinary "
+                "final content. "
+                if use_tool_fallback
+                else ""
+            )
             messages[-1]["content"] += (
-                "\n\nProtocol completion requirement: call exactly the provided "
+                "\n\nProtocol completion requirement: "
+                f"{fallback_override}call exactly the provided "
                 f"{_STRUCTURED_TOOL_NAME} tool once with the complete assessment. "
                 "Do not place the assessment in ordinary final text."
             )
@@ -186,7 +215,9 @@ class OllamaClient(CachedLLMClient):
             "attempt_number": attempt_number,
             "sampling_seed": attempt_seed,
             "format_mode": (
-                "native_tool_call"
+                "native_tool_call_fallback"
+                if use_tool_fallback
+                else "native_tool_call"
                 if use_tool_call
                 else "openai_json_schema_no_reasoning"
                 if use_openai_fallback
@@ -282,6 +313,23 @@ class OllamaClient(CachedLLMClient):
             )
             usage = TokenUsage(prompt_tokens, output_tokens, total)
         return ProviderResponse(parsed, raw_response, usage, latency_ms)
+
+    def _uses_tool_call(
+        self,
+        *,
+        attempt_number: int,
+        repair_diagnostic_codes: tuple[RepairDiagnosticCode, ...],
+    ) -> bool:
+        """Use tools always in tool mode or once after exhausted empty JSON."""
+        if self._response_mode is OllamaResponseMode.TOOL_CALL:
+            return True
+        return (
+            self._response_mode
+            is OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK
+            and attempt_number == self._max_attempts
+            and RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
+            in repair_diagnostic_codes
+        )
 
     def _parse_tool_response(
         self,

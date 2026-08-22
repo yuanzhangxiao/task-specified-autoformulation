@@ -130,6 +130,9 @@ FIELDS = (
     "deterministic_assessments",
     "absolute_assessments",
     "comparative_assessments",
+    "response_transport",
+    "provider_attempts",
+    "successful_attempt_seed",
     "request_hash",
 )
 
@@ -351,7 +354,7 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=900.0)
     parser.add_argument("--max-output-tokens", type=int, default=6144)
-    parser.add_argument("--max-attempts", type=int, default=10, choices=range(1, 11))
+    parser.add_argument("--max-attempts", type=int, default=10, choices=range(1, 12))
     parser.add_argument("--ollama-base-url", default="http://127.0.0.1:11434")
     parser.add_argument(
         "--ollama-thinking",
@@ -626,6 +629,11 @@ def main() -> None:
                     )
                     decision = pair_score.decision_value
                     relative = pair_score.relative_preference_for_a
+                    retry_provenance = result.raw_response.get(
+                        "_autoformalism_retry"
+                    )
+                    if not isinstance(retry_provenance, dict):
+                        retry_provenance = {}
                     _append(
                         score_path,
                         {
@@ -678,6 +686,13 @@ def main() -> None:
                                     item.model_dump(mode="json")
                                     for item in result.parsed.comparative_assessments
                                 ]
+                            ),
+                            "response_transport": retry_provenance.get(
+                                "format_mode"
+                            ),
+                            "provider_attempts": result.provider_attempts,
+                            "successful_attempt_seed": retry_provenance.get(
+                                "sampling_seed"
                             ),
                             "request_hash": result.request_hash,
                         },

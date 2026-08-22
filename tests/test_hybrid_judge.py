@@ -20,7 +20,7 @@ from autoformalism.judging import (
     semantic_absolute_units,
     structural_facts,
 )
-from autoformalism.llm import MockLLMClient
+from autoformalism.llm import MockLLMClient, OllamaResponseMode
 from autoformalism.rebuttal.adversarial import AdversarialPair
 from autoformalism.rebuttal.hybrid_labels import (
     ExpectedPairPreference,
@@ -46,6 +46,7 @@ from scripts.run_hybrid_judge import (
     _ensure_run_manifest,
     _failed,
     _planned_keys,
+    _system_prompt,
 )
 
 
@@ -203,6 +204,35 @@ def test_structural_facts_certify_paths_without_scientific_verdicts() -> None:
     assert facts["components"]["X"]["reaches_requested_target"]
     assert facts["components"]["extra"]["reaches_requested_target"] is False
     assert "scientifically_valid" not in facts["components"]["extra"]
+
+
+def test_json_primary_tool_fallback_keeps_general_judge_prompt_unchanged() -> None:
+    context = ValidationContext(
+        targets=("Gp", "U"),
+        external_inputs=("meal_event_g", "insulin_input"),
+    )
+    ordinary = _system_prompt(
+        _prompt(),
+        context,
+        "ollama:gpt-oss:20b",
+        OllamaResponseMode.JSON_SCHEMA,
+    )
+    fallback = _system_prompt(
+        _prompt(),
+        context,
+        "ollama:gpt-oss:20b",
+        OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK,
+    )
+    tool_only = _system_prompt(
+        _prompt(),
+        context,
+        "ollama:gpt-oss:20b",
+        OllamaResponseMode.TOOL_CALL,
+    )
+
+    assert fallback == ordinary
+    assert "Configured transport override" not in fallback
+    assert "Configured transport override" in tool_only
 
 
 def test_deterministic_pair_assessments_keep_retained_disconnection() -> None:
@@ -508,6 +538,7 @@ def test_hybrid_analysis_uses_certified_question_labels(
     assert metrics["combined_preference_accuracy_including_failures"] == 0.5
     assert metrics["failed_comparison_count"] == 1
     assert metrics["failures_by_error_type"] == {"LLMResponseError": 1}
+    assert metrics["responses_by_transport"] == {"unrecorded": 1}
     assert metrics["runtime_certification_accuracy"] == 1.0
     assert metrics["absolute_verdict_accuracy"] == 1.0
     assert metrics["gold_label_scope"] == "runtime_and_mutation_contract_only"

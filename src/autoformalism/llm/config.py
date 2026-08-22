@@ -33,6 +33,7 @@ class OllamaResponseMode(str, Enum):
     """Ollama transport used to obtain a validated structured response."""
 
     JSON_SCHEMA = "json_schema"
+    JSON_SCHEMA_TOOL_FALLBACK = "json_schema_tool_fallback"
     TOOL_CALL = "tool_call"
 
 
@@ -43,7 +44,7 @@ class LLMConfig(StrictSchema):
     model: str = Field(min_length=1, max_length=256)
     cache_directory: Path
     log_path: Path
-    max_attempts: int = Field(default=3, ge=1, le=10)
+    max_attempts: int = Field(default=3, ge=1, le=11)
     initial_backoff_seconds: float = Field(default=1.0, ge=0.0)
     max_backoff_seconds: float = Field(default=30.0, ge=0.0)
     jitter_fraction: float = Field(default=0.25, ge=0.0, le=1.0)

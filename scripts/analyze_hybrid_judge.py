@@ -402,6 +402,14 @@ def main() -> None:
                     ).items()
                 )
             ),
+            "responses_by_transport": dict(
+                sorted(
+                    Counter(
+                        str(row.get("response_transport") or "unrecorded")
+                        for row in model_rows
+                    ).items()
+                )
+            ),
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

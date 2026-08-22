@@ -748,6 +748,129 @@ def test_ollama_tool_call_transport_fails_without_required_call(
         client.judge(system_prompt="system", user_prompt="user")
 
 
+def test_ollama_json_schema_uses_tool_only_on_final_empty_content_attempt(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def transport(
+        url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append((url, body))
+        if len(calls) == 1:
+            return {
+                "done_reason": "stop",
+                "message": {"content": "", "thinking": "No final JSON."},
+            }
+        if len(calls) == 2:
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": ""},
+                    }
+                ]
+            }
+        return {
+            "message": {
+                "content": "",
+                "thinking": "Validated assessment.",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "submit_structured_response",
+                            "arguments": _judge().model_dump(mode="json"),
+                        }
+                    }
+                ],
+            },
+            "prompt_eval_count": 10,
+            "eval_count": 20,
+        }
+
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        response_mode=OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK,
+        max_attempts=3,
+        initial_backoff_seconds=0.0,
+        seed=17,
+        transport=transport,
+    )
+
+    result = client.judge(system_prompt="system", user_prompt="user")
+
+    assert result.parsed == _judge()
+    assert result.attempts == 3
+    assert calls[0][0].endswith("/api/chat")
+    assert "format" in calls[0][1]
+    assert "tools" not in calls[0][1]
+    assert calls[1][0].endswith("/v1/chat/completions")
+    assert calls[1][1]["reasoning_effort"] == "none"
+    assert calls[2][0].endswith("/api/chat")
+    assert "format" not in calls[2][1]
+    assert len(calls[2][1]["tools"]) == 1
+    assert calls[0][1]["options"]["seed"] == 17
+    assert calls[1][1]["seed"] == 18
+    assert calls[2][1]["options"]["seed"] == 19
+    assert "supersedes any earlier instruction" in (
+        calls[2][1]["messages"][1]["content"]
+    )
+    assert result.raw_response["_autoformalism_retry"] == {
+        "attempt_number": 3,
+        "sampling_seed": 19,
+        "format_mode": "native_tool_call_fallback",
+        "embedded_json_extracted": False,
+    }
+
+
+def test_ollama_json_schema_tool_fallback_requires_empty_content_diagnostic(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def transport(
+        _url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append(body)
+        return {"message": {"content": "{}"}}
+
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        response_mode=OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK,
+        max_attempts=2,
+        initial_backoff_seconds=0.0,
+        transport=transport,
+    )
+
+    with pytest.raises(LLMResponseError, match="ScientificJudgeResult validation"):
+        client.judge(system_prompt="system", user_prompt="user")
+
+    assert len(calls) == 2
+    assert all("format" in call for call in calls)
+    assert all("tools" not in call for call in calls)
+
+
+def test_ollama_json_schema_tool_fallback_requires_two_attempts(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="requires at least two attempts"):
+        OllamaClient(
+            model="gpt-oss:20b",
+            cache_directory=tmp_path / "cache",
+            log_path=tmp_path / "events.jsonl",
+            response_mode=OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK,
+            max_attempts=1,
+        )
+
+
 def test_ollama_response_mode_changes_request_hash(tmp_path: Path) -> None:
     common = {
         "model": "gpt-oss:20b",
@@ -758,6 +881,15 @@ def test_ollama_response_mode_changes_request_hash(tmp_path: Path) -> None:
         **common, response_mode=OllamaResponseMode.JSON_SCHEMA
     )
     tool_client = OllamaClient(**common, response_mode=OllamaResponseMode.TOOL_CALL)
+    fallback_client = OllamaClient(
+        **common,
+        response_mode=OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK,
+    )
+    later_fallback_client = OllamaClient(
+        **common,
+        response_mode=OllamaResponseMode.JSON_SCHEMA_TOOL_FALLBACK,
+        max_attempts=4,
+    )
 
     schema_hash = schema_client.request_hash(
         role="judge",
@@ -771,8 +903,22 @@ def test_ollama_response_mode_changes_request_hash(tmp_path: Path) -> None:
         user_prompt="user",
         response_model=ScientificJudgeResult,
     )
+    fallback_hash = fallback_client.request_hash(
+        role="judge",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=ScientificJudgeResult,
+    )
+    later_fallback_hash = later_fallback_client.request_hash(
+        role="judge",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=ScientificJudgeResult,
+    )
 
-    assert schema_hash != tool_hash
+    assert len(
+        {schema_hash, fallback_hash, later_fallback_hash, tool_hash}
+    ) == 4
 
 
 def test_ollama_auto_disables_thinking_for_non_gpt_oss(tmp_path: Path) -> None:

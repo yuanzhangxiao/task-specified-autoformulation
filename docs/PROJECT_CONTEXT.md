@@ -137,6 +137,12 @@ The pipeline is iterative:
   claims, deterministic graph facts, absolute semantic predicates, and direct
   comparative residuals. It remains calibration-only until question-level
   held-out evaluation is complete.
+- Ollama hybrid-judge calibration keeps JSON-schema output as the primary
+  transport. A manifest-pinned experimental mode may reserve the final bounded
+  attempt for a validated tool call after typed empty final content; it does not
+  change the scientific prompt. The confirmation configuration retains the full
+  JSON retry budget and permits one additional tool generation only after terminal
+  JSON failure.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

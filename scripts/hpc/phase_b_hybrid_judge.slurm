@@ -26,6 +26,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_CALIBRATION_PAIRS:=${AF_WORK}/phase_b/judge-hybrid-v1/pairs.jsonl}"
 : "${AF_REPETITIONS:=5}"
 : "${AF_SHARD_COUNT:=5}"
+: "${AF_MAX_ATTEMPTS:=10}"
 : "${AF_JUDGE_SEED_BASE:=5000}"
 : "${AF_PARTIAL_WEIGHT:=0.05}"
 : "${AF_COMPARATIVE_WEIGHT:=0.25}"
@@ -83,7 +84,7 @@ flock --exclusive "${shard_root}/hybrid_judge.lock" \
   --output-root "${shard_root}" \
   --timeout-seconds 900 \
   --max-output-tokens 6144 \
-  --max-attempts 10 \
+  --max-attempts "${AF_MAX_ATTEMPTS}" \
   --ollama-base-url "${endpoint}" \
   --ollama-thinking low \
   --ollama-temperature 0.2 \

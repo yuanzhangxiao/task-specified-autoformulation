@@ -214,6 +214,31 @@ The initial experiment retains five repetitions in both orders. Existing output
 supports offline ablations of absolute-only, comparative-only, and combined
 decisions before any production integration.
 
+The frozen four-pair transport pilot found that always-on tool calls removed the
+two remaining structured-response failures (`40/40` versus `38/40`) but reduced
+conditional combined preference accuracy from `1.000` to `0.825`, order
+consistency from `1.000` to `0.650`, and repeat ICC from `0.895` to `0.575`.
+All material preference errors favored Candidate A when the valid baseline was
+Candidate B. Averaging both candidate orders improved tool-mode accuracy to
+`18/20`, but did not match the JSON-schema control's `18/18`. Always-on tool mode
+therefore failed the predeclared expansion gate and is not a production default.
+
+The explicit `json_schema_tool_fallback` mode instead preserves the general
+scientific prompt and uses the existing JSON-schema path for attempts 1 through
+`max_attempts - 1`. The final bounded attempt switches to the single validated
+tool only when an earlier attempt received the typed `empty_provider_content`
+diagnostic. Ordinary schema-validation failures do not activate the tool. The
+confirmation configuration uses eleven total attempts so the first ten exactly
+preserve the frozen JSON control budget and only a terminal case incurs one extra
+tool generation. Accepted score rows record the transport, provider-attempt count,
+and successful sampling seed.
+
+An offline cascade simulation retained all 38 accepted JSON-schema judgments and
+filled only their two terminal failures from the tool pilot. It achieved `40/40`
+response success, `1.000` combined conditional and end-to-end accuracy, `1.000`
+order consistency, and `0.911` repeat ICC. This simulation motivates, but does
+not replace, a fresh end-to-end 40-call confirmation of the bounded cascade.
+
 `build_hybrid_judge_pairs.py` preserves the original frozen pairs as controls
 and adds a retained disconnected pathway for every old repaired-away
 disconnection. The retained variant uses a driven, relaxing latent module whose
