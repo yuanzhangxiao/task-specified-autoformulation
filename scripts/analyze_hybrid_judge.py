@@ -410,6 +410,14 @@ def main() -> None:
                     ).items()
                 )
             ),
+            "responses_with_tool_argument_key_repairs": sum(
+                int(row.get("tool_argument_key_repairs") or 0) > 0
+                for row in model_rows
+            ),
+            "tool_argument_key_repair_count": sum(
+                int(row.get("tool_argument_key_repairs") or 0)
+                for row in model_rows
+            ),
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

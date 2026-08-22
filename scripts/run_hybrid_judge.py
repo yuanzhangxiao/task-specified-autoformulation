@@ -133,6 +133,7 @@ FIELDS = (
     "response_transport",
     "provider_attempts",
     "successful_attempt_seed",
+    "tool_argument_key_repairs",
     "request_hash",
 )
 
@@ -693,6 +694,9 @@ def main() -> None:
                             "provider_attempts": result.provider_attempts,
                             "successful_attempt_seed": retry_provenance.get(
                                 "sampling_seed"
+                            ),
+                            "tool_argument_key_repairs": retry_provenance.get(
+                                "tool_argument_key_repairs", 0
                             ),
                             "request_hash": result.request_hash,
                         },

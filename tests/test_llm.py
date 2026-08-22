@@ -33,7 +33,9 @@ from autoformalism.llm.models import StructuredT, TokenUsage
 from autoformalism.llm.ollama import OllamaClient, _ollama_compatible_schema
 from autoformalism.llm.openai_responses import OpenAIResponsesClient
 from autoformalism.schemas import (
+    AbsoluteCriterion,
     CandidateModel,
+    HybridJudgeResult,
     ProposerCandidateV2,
     ScientificJudgeResult,
     enrich_proposal_v2,
@@ -123,6 +125,40 @@ def _judge() -> ScientificJudgeResult:
             },
             "missing_requirements": [],
             "actionable_edits": [],
+        }
+    )
+
+
+def _hybrid_judge() -> HybridJudgeResult:
+    return HybridJudgeResult.model_validate(
+        {
+            "schema_version": "hybrid-1",
+            "absolute_assessments": [
+                {
+                    "criterion": "source_roles_consistent",
+                    "subject_id": "candidate",
+                    "candidate_a": {
+                        "verdict": "pass",
+                        "evidence": "Candidate A source evidence.",
+                    },
+                    "candidate_b": {
+                        "verdict": "fail",
+                        "evidence": "Candidate B source evidence.",
+                    },
+                }
+            ],
+            "comparative_assessments": [
+                {
+                    "criterion": criterion,
+                    "verdict": "candidate_a",
+                    "evidence": "Direct comparative evidence.",
+                }
+                for criterion in (
+                    "parsimony_while_task_sufficient",
+                    "fewer_unsupported_assumptions",
+                    "mechanistic_interpretability",
+                )
+            ],
         }
     )
 
@@ -746,6 +782,85 @@ def test_ollama_tool_call_transport_fails_without_required_call(
 
     with pytest.raises(LLMResponseError, match="exactly one structured tool call"):
         client.judge(system_prompt="system", user_prompt="user")
+
+
+def test_ollama_repairs_exact_tool_verdict_key_corruption(tmp_path: Path) -> None:
+    expected = _hybrid_judge()
+    arguments = expected.model_dump(mode="json")
+    candidate_a = arguments["absolute_assessments"][0]["candidate_a"]
+    candidate_a["ver verdict"] = candidate_a.pop("verdict")
+    raw_response = {
+        "message": {
+            "content": "",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "submit_structured_response",
+                        "arguments": arguments,
+                    }
+                }
+            ],
+        }
+    }
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        response_mode=OllamaResponseMode.TOOL_CALL,
+        max_attempts=1,
+        transport=lambda _url, _body, _timeout: raw_response,
+    )
+
+    result = client.assess_hybrid(
+        system_prompt="system",
+        user_prompt="user",
+        expected_absolute_units={
+            (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate")
+        },
+    )
+
+    assert result.parsed == expected
+    assert "ver verdict" in arguments["absolute_assessments"][0]["candidate_a"]
+    assert result.raw_response["_autoformalism_retry"][
+        "tool_argument_key_repairs"
+    ] == 1
+
+
+def test_ollama_rejects_ambiguous_tool_verdict_key_collision(
+    tmp_path: Path,
+) -> None:
+    arguments = _hybrid_judge().model_dump(mode="json")
+    candidate_a = arguments["absolute_assessments"][0]["candidate_a"]
+    candidate_a["ver verdict"] = "fail"
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        response_mode=OllamaResponseMode.TOOL_CALL,
+        max_attempts=1,
+        transport=lambda _url, _body, _timeout: {
+            "message": {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "submit_structured_response",
+                            "arguments": arguments,
+                        }
+                    }
+                ],
+            }
+        },
+    )
+
+    with pytest.raises(LLMResponseError, match="Extra inputs are not permitted"):
+        client.assess_hybrid(
+            system_prompt="system",
+            user_prompt="user",
+            expected_absolute_units={
+                (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate")
+            },
+        )
 
 
 def test_ollama_json_schema_uses_tool_only_on_final_empty_content_attempt(

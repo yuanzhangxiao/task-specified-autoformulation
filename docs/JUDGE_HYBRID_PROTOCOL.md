@@ -239,6 +239,23 @@ response success, `1.000` combined conditional and end-to-end accuracy, `1.000`
 order consistency, and `0.911` repeat ICC. This simulation motivates, but does
 not replace, a fresh end-to-end 40-call confirmation of the bounded cascade.
 
+The first end-to-end cascade confirmation reached 29 of 40 calls before its
+two-hour allocation expired: 6 native-JSON successes, 15 final-tool successes,
+and 8 terminal failures. Every terminal failure contained a complete tool call
+but used the invalid key `ver verdict` in place of `verdict` inside one or more
+evidence-bearing assessment objects. The scientific evidence and verdict literal
+were otherwise present. This is classified as a provider serialization defect,
+not a scientific repair opportunity.
+
+The tool parser therefore permits one exact deterministic key repair. It renames
+`ver verdict` only when the object also contains evidence, the correct `verdict`
+key is absent, and the value is one of the closed-schema verdict literals. It
+does not use fuzzy matching, does not repair collisions, and does not change a
+verdict value or scientific statement. Full Pydantic and expected-unit validation
+still follow. The accepted score row and raw event record the repair count. A
+corrected continuation remains experimental until its completed accuracy and
+order-consistency results are analyzed.
+
 `build_hybrid_judge_pairs.py` preserves the original frozen pairs as controls
 and adds a retained disconnected pathway for every old repaired-away
 disconnection. The retained variant uses a driven, relaxing latent module whose

@@ -21,6 +21,17 @@ from autoformalism.llm.models import StructuredT, TokenUsage
 
 OllamaTransport = Callable[[str, dict[str, object], float], dict[str, object]]
 _STRUCTURED_TOOL_NAME = "submit_structured_response"
+_TOOL_VERDICT_VALUES = frozenset(
+    {
+        "candidate_a",
+        "candidate_b",
+        "fail",
+        "indeterminate",
+        "not_applicable",
+        "pass",
+        "tie",
+    }
+)
 
 
 class OllamaClient(CachedLLMClient):
@@ -370,14 +381,28 @@ class OllamaClient(CachedLLMClient):
             )
         arguments = function.get("arguments")
         if isinstance(arguments, dict):
-            encoded = json.dumps(arguments)
+            normalized, repair_count = _repair_tool_argument_keys(arguments)
+            encoded = json.dumps(normalized)
         elif isinstance(arguments, str):
-            encoded = arguments
+            try:
+                decoded = json.loads(arguments)
+            except json.JSONDecodeError:
+                decoded = None
+            if isinstance(decoded, dict):
+                normalized, repair_count = _repair_tool_argument_keys(decoded)
+                encoded = json.dumps(normalized)
+            else:
+                repair_count = 0
+                encoded = arguments
         else:
             raise LLMResponseError(
                 "Ollama structured tool arguments must be an object or JSON string",
                 raw_response=raw_response,
             )
+        if repair_count:
+            retry = raw_response.get("_autoformalism_retry")
+            if isinstance(retry, dict):
+                retry["tool_argument_key_repairs"] = repair_count
         try:
             return self._parse_json(encoded, response_model)
         except LLMResponseError as exc:
@@ -420,6 +445,42 @@ class OllamaClient(CachedLLMClient):
         if not isinstance(payload, dict):
             raise LLMResponseError("Ollama response must be a JSON object")
         return payload
+
+
+def _repair_tool_argument_keys(value: object) -> tuple[object, int]:
+    """Repair one observed, unambiguous Ollama verdict-key corruption.
+
+    The repair is intentionally narrower than fuzzy key matching. It applies only
+    to an evidence-bearing assessment object, only when the correct key is absent,
+    and only when the value is an allowed verdict literal. Local Pydantic and
+    expected-unit validation still own the complete trusted boundary.
+    """
+    if isinstance(value, list):
+        repaired_items = []
+        repair_count = 0
+        for item in value:
+            repaired, count = _repair_tool_argument_keys(item)
+            repaired_items.append(repaired)
+            repair_count += count
+        return repaired_items, repair_count
+    if not isinstance(value, dict):
+        return value, 0
+
+    repair_alias = (
+        "ver verdict" in value
+        and "verdict" not in value
+        and "evidence" in value
+        and isinstance(value["ver verdict"], str)
+        and value["ver verdict"] in _TOOL_VERDICT_VALUES
+    )
+    repaired_object: dict[str, object] = {}
+    repair_count = 0
+    for key, item in value.items():
+        repaired_key = "verdict" if repair_alias and key == "ver verdict" else key
+        repaired_item, count = _repair_tool_argument_keys(item)
+        repaired_object[repaired_key] = repaired_item
+        repair_count += count
+    return repaired_object, repair_count + int(repair_alias)
 
 
 def _resolve_thinking(

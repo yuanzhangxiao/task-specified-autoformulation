@@ -256,6 +256,12 @@ JSON-primary mode that reserves the final bounded attempt for the tool only afte
 a typed empty-content failure. All paths ignore hidden reasoning and retain
 identical scientific questions and runtime aggregation. The JSON-primary fallback
 does not add a tool instruction to the general scientific system prompt.
+One observed Ollama tool serialization defect may receive an exact contract-only
+repair: `ver verdict` is normalized to `verdict` only in an evidence-bearing
+verdict object with no correct-key collision and a closed-schema verdict literal.
+The runtime records the repair count and still applies the complete local schema
+and expected-unit validators; no fuzzy field repair or scientific-value repair is
+allowed.
 
 ### Simulation, fitting, metrics, and pruning
 
