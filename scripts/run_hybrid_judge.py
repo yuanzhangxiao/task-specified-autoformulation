@@ -367,6 +367,10 @@ def main() -> None:
         "--ollama-response-mode",
         choices=tuple(item.value for item in OllamaResponseMode),
         default=OllamaResponseMode.JSON_SCHEMA.value,
+        help=(
+            "structured-response transport; json_schema is the primary "
+            "protocol and tool modes are calibration ablations only"
+        ),
     )
     parser.add_argument("--ollama-seed-base", type=int)
     parser.add_argument("--partial-tiebreak-weight", type=float, default=0.05)

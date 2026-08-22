@@ -212,7 +212,10 @@ usage before any production integration.
 
 The initial experiment retains five repetitions in both orders. Existing output
 supports offline ablations of absolute-only, comparative-only, and combined
-decisions before any production integration.
+decisions before any production integration. The operating-point analyzer also
+enumerates every frozen repetition subset for one call in either single order and
+for one through five repetitions in both orders. It clusters uncertainty by pair
+rather than treating repeated calls as independent scientific examples.
 
 The frozen four-pair transport pilot found that always-on tool calls removed the
 two remaining structured-response failures (`40/40` versus `38/40`) but reduced
@@ -252,9 +255,32 @@ The tool parser therefore permits one exact deterministic key repair. It renames
 key is absent, and the value is one of the closed-schema verdict literals. It
 does not use fuzzy matching, does not repair collisions, and does not change a
 verdict value or scientific statement. Full Pydantic and expected-unit validation
-still follow. The accepted score row and raw event record the repair count. A
-corrected continuation remains experimental until its completed accuracy and
-order-consistency results are analyzed.
+still follow. The accepted score row and raw event record the repair count.
+
+The completed corrected continuation produced 39 structured responses and one
+recorded provider failure in 40 planned calls. Of the successful responses, 29
+used tool fallback and 10 used native JSON schema; four responses required 20
+exact key repairs. The completion rate improved from the frozen JSON control's
+`0.950` to `0.975`, but conditional combined preference accuracy fell from
+`1.000` to `0.667`, end-to-end accuracy from `0.950` to `0.650`, and order
+consistency from `1.000` to `0.368`. The remaining failure emitted no tool call,
+so no safe deterministic repair was possible. The fallback therefore failed the
+scientific-stability gate. JSON schema is the primary calibration transport;
+tool modes remain diagnostics and will not be expanded to the 250-call protocol.
+
+Run the offline call-budget analysis on a complete merged JSON-schema result:
+
+```bash
+python scripts/analyze_hybrid_operating_points.py \
+  --scores hybrid_judge_scores.csv \
+  --failures hybrid_judge_failures.jsonl \
+  --labels hybrid_labels.jsonl \
+  --output hybrid_judge_operating_points.json
+```
+
+The failure ledger calls candidate orientation `order`, with values `baseline_a`
+and `baseline_b`; `baseline_position` separately records `A` or `B`. There is no
+`candidate_order` field.
 
 `build_hybrid_judge_pairs.py` preserves the original frozen pairs as controls
 and adds a retained disconnected pathway for every old repaired-away

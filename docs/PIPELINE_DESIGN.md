@@ -250,18 +250,28 @@ failures; no hidden reasoning is parsed and no missing score is imputed.
 Hybrid calibration resume is additionally guarded by an immutable per-shard run
 manifest and exact planned-key validation, including the pair-file digest and
 selected pair IDs.
-For Ollama calibration, the response transport is a manifest-pinned ablation:
-schema-constrained final content, an always-on schema-validated tool call, or a
-JSON-primary mode that reserves the final bounded attempt for the tool only after
-a typed empty-content failure. All paths ignore hidden reasoning and retain
-identical scientific questions and runtime aggregation. The JSON-primary fallback
-does not add a tool instruction to the general scientific system prompt.
+For Ollama calibration, schema-constrained final content is the primary response
+transport. Always-on schema-validated tool calls and JSON-primary/tool-fallback
+are manifest-pinned experimental ablations. Although all paths ignore hidden
+reasoning and retain identical scientific questions and runtime aggregation, the
+tool transport materially changed frozen-pair preferences and A/B order
+consistency. A tool-call result therefore cannot silently replace a missing
+JSON-schema judgment in the primary protocol. Terminal JSON failures remain
+first-class outcomes.
 One observed Ollama tool serialization defect may receive an exact contract-only
 repair: `ver verdict` is normalized to `verdict` only in an evidence-bearing
 verdict object with no correct-key collision and a closed-schema verdict literal.
 The runtime records the repair count and still applies the complete local schema
 and expected-unit validators; no fuzzy field repair or scientific-value repair is
 allowed.
+
+The frozen 250-call JSON-schema dataset supports an offline operating-point
+analysis that enumerates one-order/one-call and both-order configurations with
+one through five repetitions. Repetition subsets are evaluated without new LLM
+calls. Confidence intervals cluster by calibration pair, and reports separate
+response success, complete-call coverage, conditional pair accuracy, strict
+end-to-end pair accuracy, order consistency, and decision variability. This
+analysis selects a call budget before any hybrid judge is integrated into search.
 
 ### Simulation, fitting, metrics, and pruning
 
