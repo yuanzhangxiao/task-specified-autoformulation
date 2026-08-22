@@ -272,6 +272,10 @@ calls. Confidence intervals cluster by calibration pair, and reports separate
 response success, complete-call coverage, conditional pair accuracy, strict
 end-to-end pair accuracy, order consistency, and decision variability. This
 analysis selects a call budget before any hybrid judge is integrated into search.
+It also simulates a bounded adaptive policy that obtains one valid response in
+each candidate orientation, retries only a missing orientation with a new seed,
+and withholds the pair decision if symmetric evidence remains incomplete. This
+policy is evaluated offline before it may become a search-time judge contract.
 
 ### Simulation, fitting, metrics, and pruning
 

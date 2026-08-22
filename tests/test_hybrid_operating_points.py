@@ -92,6 +92,26 @@ def test_operating_points_measure_order_bias_and_provider_failures() -> None:
     assert both_twice["pair_accuracy_conditional_ci95"] is not None
     assert both_twice["strict_end_to_end_pair_accuracy_ci95"] is not None
 
+    adaptive = {
+        item["max_attempts_per_orientation"]: item
+        for item in metrics["adaptive_operating_points"]
+    }
+    no_retry = adaptive[1]
+    assert no_retry["expected_calls_per_pair"] == 2.0
+    assert no_retry["paired_response_coverage"] == 0.75
+    assert no_retry["pair_accuracy_conditional_on_paired_response"] == pytest.approx(
+        1 / 3
+    )
+    assert no_retry["end_to_end_pair_accuracy"] == 0.25
+
+    retry_once = adaptive[2]
+    assert retry_once["expected_calls_per_pair"] == 2.25
+    assert retry_once["retry_activation_rate"] == 0.25
+    assert retry_once["paired_response_coverage"] == 1.0
+    assert retry_once["pair_accuracy_conditional_on_paired_response"] == 0.5
+    assert retry_once["end_to_end_pair_accuracy"] == 0.5
+    assert retry_once["order_consistency_rate"] == 0.5
+
 
 def test_operating_points_reject_success_failure_overlap() -> None:
     row = _row("pair_1", 0, "baseline_a", 0.5)

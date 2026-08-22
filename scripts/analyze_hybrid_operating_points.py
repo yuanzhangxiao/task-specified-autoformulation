@@ -87,6 +87,112 @@ def _configurations(repetitions: tuple[int, ...]) -> list[dict[str, object]]:
     return configurations
 
 
+def _cyclic_repetitions(
+    repetitions: tuple[int, ...], start_index: int
+) -> tuple[int, ...]:
+    """Rotate frozen seed identifiers without reusing one within a trial."""
+    return repetitions[start_index:] + repetitions[:start_index]
+
+
+def _adaptive_operating_points(
+    *,
+    model: str,
+    repetitions: tuple[int, ...],
+    pair_ids: tuple[str, ...],
+    success_by_key: dict[tuple[str, str, int, str], float],
+    labels: dict[str, HybridCalibrationLabels],
+    tie_threshold: float,
+    bootstrap_samples: int,
+) -> list[dict[str, object]]:
+    """Retry only a missing orientation and require symmetric pair evidence."""
+    results = []
+    for attempt_limit in range(1, len(repetitions) + 1):
+        accuracy_by_pair: dict[str, list[float]] = defaultdict(list)
+        end_to_end_by_pair: dict[str, list[float]] = defaultdict(list)
+        coverage_by_pair: dict[str, list[float]] = defaultdict(list)
+        decisions_by_pair: dict[str, list[float]] = defaultdict(list)
+        calls_used: list[float] = []
+        retry_activated: list[float] = []
+        order_agreements: list[float] = []
+        for start_index in range(len(repetitions)):
+            retry_sequence = _cyclic_repetitions(repetitions, start_index)[
+                :attempt_limit
+            ]
+            for pair_id in pair_ids:
+                selected: dict[str, float] = {}
+                pair_calls = 0
+                initial_missing = False
+                for order in ORDERS:
+                    for attempt_index, repetition in enumerate(retry_sequence):
+                        pair_calls += 1
+                        value = success_by_key.get(
+                            (pair_id, model, repetition, order)
+                        )
+                        if value is not None:
+                            selected[order] = value
+                            break
+                        if attempt_index == 0:
+                            initial_missing = True
+                calls_used.append(float(pair_calls))
+                retry_activated.append(float(initial_missing))
+                available = len(selected) == len(ORDERS)
+                coverage_by_pair[pair_id].append(float(available))
+                if not available:
+                    end_to_end_by_pair[pair_id].append(0.0)
+                    continue
+                decision_value = mean(selected.values())
+                decisions_by_pair[pair_id].append(decision_value)
+                expected = labels[pair_id].overall_preference.value
+                correct = _direction(decision_value, tie_threshold) == expected
+                accuracy_by_pair[pair_id].append(float(correct))
+                end_to_end_by_pair[pair_id].append(float(correct))
+                order_agreements.append(
+                    float(
+                        _direction(selected[ORDERS[0]], tie_threshold)
+                        == _direction(selected[ORDERS[1]], tie_threshold)
+                    )
+                )
+        accuracy_values = [
+            value for values in accuracy_by_pair.values() for value in values
+        ]
+        end_to_end_values = [
+            value for values in end_to_end_by_pair.values() for value in values
+        ]
+        coverage_values = [
+            value for values in coverage_by_pair.values() for value in values
+        ]
+        subset_sd_values = [
+            pstdev(values) for values in decisions_by_pair.values() if values
+        ]
+        results.append(
+            {
+                "configuration": f"adaptive_both_orders_up_to_{attempt_limit}_seed"
+                + ("s" if attempt_limit != 1 else ""),
+                "max_attempts_per_orientation": attempt_limit,
+                "initial_calls_per_pair": 2,
+                "max_calls_per_pair": 2 * attempt_limit,
+                "expected_calls_per_pair": _mean_or_none(calls_used),
+                "retry_activation_rate": _mean_or_none(retry_activated),
+                "paired_response_coverage": _mean_or_none(coverage_values),
+                "pair_accuracy_conditional_on_paired_response": _mean_or_none(
+                    accuracy_values
+                ),
+                "pair_accuracy_conditional_ci95": _cluster_bootstrap_ci(
+                    accuracy_by_pair, samples=bootstrap_samples
+                ),
+                "end_to_end_pair_accuracy": _mean_or_none(end_to_end_values),
+                "end_to_end_pair_accuracy_ci95": _cluster_bootstrap_ci(
+                    end_to_end_by_pair, samples=bootstrap_samples
+                ),
+                "order_consistency_rate": _mean_or_none(order_agreements),
+                "mean_pair_decision_sd_across_start_seeds": _mean_or_none(
+                    subset_sd_values
+                ),
+            }
+        )
+    return results
+
+
 def analyze_operating_points(
     rows: list[dict[str, object]],
     failures: list[dict[str, object]],
@@ -277,6 +383,15 @@ def analyze_operating_points(
             "available_repetitions": list(repetition_ids),
             "labeled_pair_count": len(labeled_pairs),
             "operating_points": model_results,
+            "adaptive_operating_points": _adaptive_operating_points(
+                model=model,
+                repetitions=repetition_ids,
+                pair_ids=labeled_pairs,
+                success_by_key=success_by_key,
+                labels=labels,
+                tie_threshold=tie_threshold,
+                bootstrap_samples=bootstrap_samples,
+            ),
         }
     return output
 
@@ -325,6 +440,48 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
                         _format(item["strict_end_to_end_pair_accuracy"]),
                         _format(item["order_consistency_rate"]),
                         _format(item["mean_pair_decision_sd_across_subsets"]),
+                    )
+                )
+                + " |"
+            )
+        lines.append("")
+        lines.extend(
+            [
+                "### Symmetry-preserving adaptive retry",
+                "",
+                "A decision is emitted only after both orientations return a valid "
+                "response. A failed orientation alone advances to the next frozen "
+                "seed.",
+                "",
+                "| Maximum seeds/orientation | Expected calls/pair | Maximum calls | "
+                "Retry activation | Paired coverage | Conditional pair accuracy | "
+                "End-to-end pair accuracy | Order consistency | Decision SD |",
+                "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        adaptive_points = values["adaptive_operating_points"]
+        assert isinstance(adaptive_points, list)
+        for item in adaptive_points:
+            assert isinstance(item, dict)
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        str(item["max_attempts_per_orientation"]),
+                        _format(item["expected_calls_per_pair"]),
+                        str(item["max_calls_per_pair"]),
+                        _format(item["retry_activation_rate"]),
+                        _format(item["paired_response_coverage"]),
+                        _format(
+                            item[
+                                "pair_accuracy_conditional_on_paired_response"
+                            ]
+                        ),
+                        _format(item["end_to_end_pair_accuracy"]),
+                        _format(item["order_consistency_rate"]),
+                        _format(
+                            item["mean_pair_decision_sd_across_start_seeds"]
+                        ),
                     )
                 )
                 + " |"

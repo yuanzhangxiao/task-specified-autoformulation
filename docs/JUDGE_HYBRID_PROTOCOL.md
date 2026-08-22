@@ -282,6 +282,17 @@ The failure ledger calls candidate orientation `order`, with values `baseline_a`
 and `baseline_b`; `baseline_position` separately records `A` or `B`. There is no
 `candidate_order` field.
 
+The same analyzer evaluates a symmetry-preserving adaptive policy. It begins with
+one JSON-schema call in each orientation and emits no decision unless both
+orientations succeed. Only a missing orientation advances to the next frozen
+sampling seed; a successful orientation is not called again. Retry limits from
+one through all five frozen seeds are evaluated for every possible starting seed.
+The report includes paired-response coverage, conditional and end-to-end pair
+accuracy, expected and maximum calls per pair, retry activation, order
+consistency, decision variability, and pair-clustered confidence intervals. This
+adaptive analysis avoids counting a single position-biased response as a complete
+pair judgment while avoiding unconditional repeated calls.
+
 `build_hybrid_judge_pairs.py` preserves the original frozen pairs as controls
 and adds a retained disconnected pathway for every old repaired-away
 disconnection. The retained variant uses a driven, relaxing latent module whose
