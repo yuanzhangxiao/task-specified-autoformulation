@@ -192,6 +192,16 @@ Pydantic schema. Expected-unit post-validation remains mandatory, so this recove
 changes only the provider emission channel and does not weaken the trusted boundary
 or infer an answer from hidden reasoning.
 
+The baseline-structure-held-out evaluation later showed that every accepted
+response completed on the first native JSON-schema attempt and no
+reasoning-disabled repair attempt recovered an empty response. The explicit
+`json_schema_native_retry` ablation tests the minimal alternative: every attempt
+uses `/api/chat`, the same compact schema, and low reasoning; only the
+deterministic sampling seed and contract-only finalization hint change. The
+historical `json_schema` behavior remains available as the matched control.
+`configs/hybrid_judge_native_retry_pilot_v1.json` freezes the four-pair,
+40-logical-call pilot and its relative expansion gate before new calls are made.
+
 ### Ollama protocol-completion transport ablation
 
 The calibration runner supports `--ollama-response-mode json_schema` (the frozen

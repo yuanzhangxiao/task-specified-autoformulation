@@ -1,0 +1,38 @@
+{
+  "schema_version": "hybrid-judge-native-retry-pilot-1",
+  "status": "experimental_protocol_completion_ablation",
+  "judge_model": "ollama:gpt-oss:20b",
+  "source_pairs": "judge-hybrid-heldout-v1/pairs.jsonl",
+  "selected_pair_ids": [
+    "heldout_cca8883e6ae1b33f",
+    "heldout_55d8026028a90be5",
+    "heldout_bdaffa988141aeff",
+    "heldout_5a0e7e972521763d"
+  ],
+  "mutation_types": [
+    "wrong_meal_sink",
+    "duplicated_gp_flux",
+    "disconnected_claimed_mechanism",
+    "unjustified_one_sided_accumulator"
+  ],
+  "repetitions": 5,
+  "candidate_order_policy": "both_orientations",
+  "planned_logical_calls": 40,
+  "transport": "json_schema_native_retry",
+  "provider_retry": {
+    "max_attempts": 10,
+    "endpoint": "/api/chat",
+    "thinking": "low",
+    "schema": "unchanged_on_retry",
+    "repair_feedback": "contract_only",
+    "seed_policy": "configured_seed_plus_attempt_minus_one"
+  },
+  "matched_control": {
+    "transport": "json_schema",
+    "source": "judge-hybrid-heldout-v1"
+  },
+  "expansion_gate": {
+    "minimum_response_success_gain": 0.25,
+    "maximum_conditional_accuracy_decrease": 0.05
+  }
+}

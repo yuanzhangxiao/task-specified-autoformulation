@@ -33,6 +33,7 @@ class OllamaResponseMode(str, Enum):
     """Ollama transport used to obtain a validated structured response."""
 
     JSON_SCHEMA = "json_schema"
+    JSON_SCHEMA_NATIVE_RETRY = "json_schema_native_retry"
     JSON_SCHEMA_TOOL_FALLBACK = "json_schema_tool_fallback"
     TOOL_CALL = "tool_call"
 

@@ -133,6 +133,15 @@ class OllamaClient(CachedLLMClient):
         )
         use_openai_fallback = (
             not use_tool_call
+            and self._response_mode
+            is not OllamaResponseMode.JSON_SCHEMA_NATIVE_RETRY
+            and RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
+            in repair_diagnostic_codes
+        )
+        use_native_retry = (
+            not use_tool_call
+            and self._response_mode
+            is OllamaResponseMode.JSON_SCHEMA_NATIVE_RETRY
             and RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
             in repair_diagnostic_codes
         )
@@ -232,6 +241,8 @@ class OllamaClient(CachedLLMClient):
                 if use_tool_call
                 else "openai_json_schema_no_reasoning"
                 if use_openai_fallback
+                else "native_json_schema_retry"
+                if use_native_retry
                 else "native_json_schema"
             ),
             "embedded_json_extracted": False,

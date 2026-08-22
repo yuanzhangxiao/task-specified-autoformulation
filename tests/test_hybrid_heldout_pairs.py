@@ -157,3 +157,24 @@ def test_frozen_protocol_is_json_symmetric_and_abstaining() -> None:
         "require_both_orientations": True,
         "terminal_behavior": "abstain",
     }
+
+
+def test_native_retry_pilot_is_frozen_as_separate_transport() -> None:
+    payload = json.loads(
+        Path("configs/hybrid_judge_native_retry_pilot_v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert payload["transport"] == "json_schema_native_retry"
+    assert payload["planned_logical_calls"] == 40
+    assert len(payload["selected_pair_ids"]) == 4
+    assert payload["provider_retry"] == {
+        "max_attempts": 10,
+        "endpoint": "/api/chat",
+        "thinking": "low",
+        "schema": "unchanged_on_retry",
+        "repair_feedback": "contract_only",
+        "seed_policy": "configured_seed_plus_attempt_minus_one",
+    }
+    assert payload["matched_control"]["transport"] == "json_schema"

@@ -147,6 +147,13 @@ The pipeline is iterative:
   abstains if symmetric evidence remains incomplete. Its next evaluation holds
   out canonical candidate structures while retaining audited mutation contracts;
   search integration remains blocked until the predeclared held-out gates pass.
+- A baseline-structure-held-out run exposed an Ollama protocol-completion
+  failure: all accepted judgments completed on the first native JSON-schema
+  attempt, while the OpenAI-compatible reasoning-disabled repair path recovered
+  none. The separately named `json_schema_native_retry` ablation preserves
+  `/api/chat`, low reasoning, and the same schema on contract-only retries. It
+  has a distinct cache/manifest identity and cannot silently alter the frozen
+  JSON-schema control.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and
