@@ -178,3 +178,18 @@ def test_native_retry_pilot_is_frozen_as_separate_transport() -> None:
         "seed_policy": "configured_seed_plus_attempt_minus_one",
     }
     assert payload["matched_control"]["transport"] == "json_schema"
+
+
+def test_openai_thinking_retry_pilot_is_endpoint_ablation() -> None:
+    payload = json.loads(
+        Path("configs/hybrid_judge_openai_thinking_retry_pilot_v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert payload["transport"] == "json_schema_openai_thinking_retry"
+    assert payload["planned_logical_calls"] == 10
+    assert payload["selected_pair_ids"] == ["heldout_cca8883e6ae1b33f"]
+    assert payload["provider_retry"]["first_endpoint"] == "/api/chat"
+    assert payload["provider_retry"]["retry_endpoint"] == "/v1/chat/completions"
+    assert payload["provider_retry"]["reasoning_effort"] == "low"

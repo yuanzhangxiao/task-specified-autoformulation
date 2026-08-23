@@ -202,6 +202,25 @@ historical `json_schema` behavior remains available as the matched control.
 `configs/hybrid_judge_native_retry_pilot_v1.json` freezes the four-pair,
 40-logical-call pilot and its relative expansion gate before new calls are made.
 
+The four-pair pilot improved structured-response success from `1/40` in the
+matched historical control to `37/40`, with `0.892` conditional combined
+accuracy and perfect pair aggregation. Expansion over all ten baseline-
+structure-held-out pairs produced `97/100` valid responses. At the frozen
+adaptive operating point, paired coverage was `1.000`, conditional pair
+accuracy was `0.920`, end-to-end pair accuracy was `0.920`, and order
+consistency was `0.800`; all four numerical gates passed. The result is an
+engineering validation because transport recovery was designed after observing
+the original held-out completion failure, not an untouched confirmatory paper
+holdout.
+
+The residual three failures all occurred on one wrong-meal-sink pair after ten
+native attempts, with populated reasoning and empty final content. The next
+manifest-pinned ablation, `json_schema_openai_thinking_retry`, returns to the
+OpenAI-compatible endpoint while retaining `reasoning_effort: low`. This changes
+one factor relative to native retry and one factor relative to the historical
+reasoning-disabled fallback. Its ten calls are frozen in
+`configs/hybrid_judge_openai_thinking_retry_pilot_v1.json`.
+
 ### Ollama protocol-completion transport ablation
 
 The calibration runner supports `--ollama-response-mode json_schema` (the frozen

@@ -227,6 +227,11 @@ The manifest-pinned `json_schema_native_retry` ablation instead keeps the native
 `/api/chat` endpoint, configured thinking level, and unchanged schema while
 advancing the deterministic attempt seed. Its name is included in the request
 hash, so it cannot reuse or overwrite control responses.
+The `json_schema_openai_thinking_retry` ablation keeps the historical endpoint
+switch but carries the configured GPT-OSS reasoning effort into the
+OpenAI-compatible retry. Comparing it with native retry and the historical
+reasoning-disabled retry separates endpoint effects from reasoning suppression;
+it is never selected implicitly.
 Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
 raw full history. The judge sees the benchmark judge prompt, certified

@@ -1,0 +1,33 @@
+{
+  "schema_version": "hybrid-judge-openai-thinking-retry-pilot-1",
+  "status": "experimental_channel_transition_ablation",
+  "judge_model": "ollama:gpt-oss:20b",
+  "source_pairs": "judge-hybrid-heldout-v1/pairs.jsonl",
+  "selected_pair_ids": [
+    "heldout_cca8883e6ae1b33f"
+  ],
+  "mutation_types": [
+    "wrong_meal_sink"
+  ],
+  "repetitions": 5,
+  "candidate_order_policy": "both_orientations",
+  "planned_logical_calls": 10,
+  "transport": "json_schema_openai_thinking_retry",
+  "provider_retry": {
+    "max_attempts": 10,
+    "first_endpoint": "/api/chat",
+    "retry_endpoint": "/v1/chat/completions",
+    "reasoning_effort": "low",
+    "schema": "unchanged_on_retry",
+    "repair_feedback": "contract_only",
+    "seed_policy": "configured_seed_plus_attempt_minus_one"
+  },
+  "matched_controls": [
+    "json_schema",
+    "json_schema_native_retry"
+  ],
+  "interpretation": {
+    "purpose": "separate endpoint effects from reasoning-disabled retry effects",
+    "preferred_outcome": "completion and scientific accuracy match native retry"
+  }
+}

@@ -138,6 +138,11 @@ class OllamaClient(CachedLLMClient):
             and RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT
             in repair_diagnostic_codes
         )
+        use_openai_thinking_retry = (
+            use_openai_fallback
+            and self._response_mode
+            is OllamaResponseMode.JSON_SCHEMA_OPENAI_THINKING_RETRY
+        )
         use_native_retry = (
             not use_tool_call
             and self._response_mode
@@ -193,7 +198,12 @@ class OllamaClient(CachedLLMClient):
                 "model": self._model,
                 "messages": messages,
                 "stream": False,
-                "reasoning_effort": "none",
+                "reasoning_effort": (
+                    self._thinking
+                    if use_openai_thinking_retry
+                    and isinstance(self._thinking, str)
+                    else "none"
+                ),
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": {
@@ -240,7 +250,9 @@ class OllamaClient(CachedLLMClient):
                 else "native_tool_call"
                 if use_tool_call
                 else "openai_json_schema_no_reasoning"
-                if use_openai_fallback
+                if use_openai_fallback and not use_openai_thinking_retry
+                else "openai_json_schema_thinking_retry"
+                if use_openai_thinking_retry
                 else "native_json_schema_retry"
                 if use_native_retry
                 else "native_json_schema"

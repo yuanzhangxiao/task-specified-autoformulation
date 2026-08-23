@@ -999,6 +999,10 @@ def test_ollama_response_mode_changes_request_hash(tmp_path: Path) -> None:
         **common,
         response_mode=OllamaResponseMode.JSON_SCHEMA_NATIVE_RETRY,
     )
+    openai_thinking_retry_client = OllamaClient(
+        **common,
+        response_mode=OllamaResponseMode.JSON_SCHEMA_OPENAI_THINKING_RETRY,
+    )
     tool_client = OllamaClient(**common, response_mode=OllamaResponseMode.TOOL_CALL)
     fallback_client = OllamaClient(
         **common,
@@ -1017,6 +1021,12 @@ def test_ollama_response_mode_changes_request_hash(tmp_path: Path) -> None:
         response_model=ScientificJudgeResult,
     )
     native_retry_hash = native_retry_client.request_hash(
+        role="judge",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=ScientificJudgeResult,
+    )
+    openai_thinking_retry_hash = openai_thinking_retry_client.request_hash(
         role="judge",
         system_prompt="system",
         user_prompt="user",
@@ -1045,11 +1055,12 @@ def test_ollama_response_mode_changes_request_hash(tmp_path: Path) -> None:
         {
             schema_hash,
             native_retry_hash,
+            openai_thinking_retry_hash,
             fallback_hash,
             later_fallback_hash,
             tool_hash,
         }
-    ) == 5
+    ) == 6
 
 
 def test_ollama_auto_disables_thinking_for_non_gpt_oss(tmp_path: Path) -> None:
@@ -1232,6 +1243,65 @@ def test_ollama_native_json_retry_preserves_thinking_and_schema(
         "attempt_number": 2,
         "sampling_seed": 18,
         "format_mode": "native_json_schema_retry",
+        "embedded_json_extracted": False,
+    }
+
+
+def test_ollama_openai_retry_preserves_configured_thinking(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def transport(
+        url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append((url, body))
+        if len(calls) == 1:
+            return {
+                "done": True,
+                "done_reason": "stop",
+                "message": {"content": "", "thinking": "No final answer."},
+            }
+        return {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": _judge().model_dump_json()},
+                }
+            ],
+            "usage": {"prompt_tokens": 8, "completion_tokens": 13},
+        }
+
+    client = OllamaClient(
+        model="gpt-oss:20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        response_mode=OllamaResponseMode.JSON_SCHEMA_OPENAI_THINKING_RETRY,
+        thinking=OllamaThinking.LOW,
+        max_attempts=2,
+        initial_backoff_seconds=0.0,
+        seed=17,
+        transport=transport,
+    )
+
+    result = client.judge(system_prompt="system", user_prompt="user")
+
+    assert result.attempts == 2
+    assert calls[0][0].endswith("/api/chat")
+    assert calls[0][1]["think"] == "low"
+    assert calls[0][1]["options"]["seed"] == 17
+    assert calls[1][0].endswith("/v1/chat/completions")
+    assert calls[1][1]["reasoning_effort"] == "low"
+    assert calls[1][1]["seed"] == 18
+    assert calls[1][1]["response_format"]["type"] == "json_schema"
+    assert "final response content" in calls[1][1]["messages"][1]["content"]
+    assert result.usage == TokenUsage(8, 13, 21)
+    assert result.raw_response["_autoformalism_retry"] == {
+        "attempt_number": 2,
+        "sampling_seed": 18,
+        "format_mode": "openai_json_schema_thinking_retry",
         "embedded_json_extracted": False,
     }
 

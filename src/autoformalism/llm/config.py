@@ -34,6 +34,7 @@ class OllamaResponseMode(str, Enum):
 
     JSON_SCHEMA = "json_schema"
     JSON_SCHEMA_NATIVE_RETRY = "json_schema_native_retry"
+    JSON_SCHEMA_OPENAI_THINKING_RETRY = "json_schema_openai_thinking_retry"
     JSON_SCHEMA_TOOL_FALLBACK = "json_schema_tool_fallback"
     TOOL_CALL = "tool_call"
 

@@ -154,6 +154,12 @@ The pipeline is iterative:
   `/api/chat`, low reasoning, and the same schema on contract-only retries. It
   has a distinct cache/manifest identity and cannot silently alter the frozen
   JSON-schema control.
+- Native low-reasoning retries recovered 97 of 100 calls on the same ten
+  held-out pairs and passed the frozen adaptive pair-level gates. Because this
+  transport was selected after the original held-out completion failure, it is
+  engineering validation rather than a new pristine paper holdout. A bounded
+  OpenAI-compatible low-reasoning retry ablation isolates endpoint behavior from
+  reasoning suppression before any serving-engine change.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and
