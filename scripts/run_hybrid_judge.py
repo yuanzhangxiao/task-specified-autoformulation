@@ -463,10 +463,20 @@ def _baseline_probability(value: float | None, baseline_position: str) -> float 
     return value if baseline_position == "A" else 1.0 - value
 
 
-def _json(value: object) -> str:
+def _jsonable(value: object) -> object:
+    """Recursively convert Pydantic results into JSON-compatible values."""
     if hasattr(value, "model_dump"):
-        value = value.model_dump(mode="json")
-    return json.dumps(value, sort_keys=True)
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return {key: _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _json(value: object) -> str:
+    """Serialize nested Pydantic results as canonical JSON for CSV storage."""
+    return json.dumps(_jsonable(value), sort_keys=True)
 
 
 def main() -> None:

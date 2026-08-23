@@ -6,6 +6,14 @@ import json
 import subprocess
 from pathlib import Path
 
+from autoformalism.schemas import (
+    AbsoluteCriterion,
+    AbsoluteVerdict,
+    CandidateAbsoluteAssessment,
+    PairedAbsoluteAssessment,
+)
+from scripts.run_hybrid_judge import _json
+
 CONFIG = Path("configs/hybrid_judge_atomic_occurrence_v1.json")
 COMMON = Path("scripts/hpc/run_vllm_atomic_judge.sh")
 SCRIPT_20B = Path("scripts/hpc/phase_b_hybrid_judge_vllm_atomic_20b.slurm")
@@ -74,3 +82,22 @@ def test_atomic_slurm_contracts_are_self_contained_and_syntax_valid() -> None:
     assert "openai/gpt-oss-120b" in large
     assert "atomic_evidence_schema_version" in runner
     assert "logical_stages_per_judgment" in runner
+
+
+def test_atomic_compatibility_assessments_are_csv_json_serializable() -> None:
+    assessment = PairedAbsoluteAssessment(
+        criterion=AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+        subject_id="candidate",
+        candidate_a=CandidateAbsoluteAssessment(
+            verdict=AbsoluteVerdict.PASS,
+            evidence="Certified occurrence polarity matches the inferred role.",
+        ),
+        candidate_b=CandidateAbsoluteAssessment(
+            verdict=AbsoluteVerdict.FAIL,
+            evidence="Certified occurrence polarity conflicts with the inferred role.",
+        ),
+    )
+
+    payload = json.loads(_json((assessment,)))
+
+    assert payload == [assessment.model_dump(mode="json")]
