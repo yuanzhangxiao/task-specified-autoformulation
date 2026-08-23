@@ -268,6 +268,16 @@ process and state equation. These facts are authoritative descriptions of the
 canonical expression but never scientific source/sink or duplication verdicts;
 the LLM remains responsible for interpretation against public requirements.
 
+The calibration-only atomic extension makes that interpretation auditable in two
+stages. A first structured call sees unsigned additive occurrences and candidate
+component context but not certified outer polarity. It infers expected scientific
+direction and interprets exact-repeat candidates. Runtime compares determinate
+directions with the withheld sign and passes the provenance-bearing findings to a
+second blinded hybrid call. No task-specific sign relation is added to the prompt,
+and no benchmark answer is encoded in deterministic facts. Source/sink group
+inputs in this mode come from the atomic LLM inference plus deterministic polarity
+comparison; all score weights and final pair aggregation remain runtime-owned.
+
 Calibration provider failures are first-class outcomes. After bounded
 contract-only retries, a terminal structured-response failure is stored in an
 append-only ledger and the shard continues. The analyzer reports both conditional

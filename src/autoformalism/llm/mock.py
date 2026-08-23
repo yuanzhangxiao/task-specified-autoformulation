@@ -9,6 +9,7 @@ from typing import Any
 from autoformalism.llm.models import LLMCallResult
 from autoformalism.schemas import (
     AbsoluteCriterion,
+    AtomicJudgeResult,
     CandidateModel,
     ComparativeJudgeResult,
     HybridJudgeResult,
@@ -28,11 +29,13 @@ class MockLLMClient:
             ComparativeJudgeResult | dict[str, Any]
         ] | None = None,
         hybrid_responses: list[HybridJudgeResult | dict[str, Any]] | None = None,
+        atomic_responses: list[AtomicJudgeResult | dict[str, Any]] | None = None,
     ) -> None:
         self._proposer_responses = deque(proposer_responses or [])
         self._judge_responses = deque(judge_responses or [])
         self._comparative_responses = deque(comparative_responses or [])
         self._hybrid_responses = deque(hybrid_responses or [])
+        self._atomic_responses = deque(atomic_responses or [])
         self.calls: list[dict[str, str]] = []
 
     def propose(
@@ -119,6 +122,33 @@ class MockLLMClient:
         parsed.validate_expected_absolute_units(expected_absolute_units)
         return self._result("hybrid_judge", system_prompt, user_prompt, parsed)
 
+    def assess_atomic_evidence(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_occurrence_ids: set[str],
+        expected_repeat_pair_ids: set[str],
+    ) -> LLMCallResult[AtomicJudgeResult]:
+        """Return the next validated sign-blinded atomic response."""
+        if not self._atomic_responses:
+            raise AssertionError("no mock atomic response remains")
+        self.calls.append(
+            {
+                "role": "atomic_evidence_judge",
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+        )
+        parsed = AtomicJudgeResult.model_validate(self._atomic_responses.popleft())
+        parsed.validate_expected_units(
+            occurrence_ids=expected_occurrence_ids,
+            repeat_pair_ids=expected_repeat_pair_ids,
+        )
+        return self._result(
+            "atomic_evidence_judge", system_prompt, user_prompt, parsed
+        )
+
     @staticmethod
     def _result(
         role: str,
@@ -128,6 +158,7 @@ class MockLLMClient:
             CandidateModel
             | ScientificJudgeResult
             | ComparativeJudgeResult
+            | AtomicJudgeResult
             | HybridJudgeResult
         ),
     ) -> LLMCallResult[Any]:

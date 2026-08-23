@@ -1,0 +1,72 @@
+{
+  "schema_version": "hybrid-judge-atomic-occurrence-experiment-1",
+  "status": "frozen_matched_development_factorial",
+  "purpose": "separate atomic-question presentation from GPT-OSS model-scale capability",
+  "source_pairs": "judge-hybrid-heldout-v1/pairs.jsonl",
+  "selected_pair_ids": [
+    "heldout_55d8026028a90be5",
+    "heldout_ee453d8cc6fcb7a2",
+    "heldout_70b3222d4736ea1d",
+    "heldout_cca8883e6ae1b33f"
+  ],
+  "selected_mutations": [
+    "duplicated_gp_flux",
+    "wrong_meal_sink"
+  ],
+  "protocol": {
+    "hybrid_judge_protocol_version": "hybrid-judge-protocol-3-atomic-occurrence",
+    "atomic_evidence_schema_version": "atomic-evidence-plan-1",
+    "structural_facts_schema_version": "structural-facts-2",
+    "stage_1": "infer expected direction from unsigned occurrences and interpret exact-repeat candidates",
+    "stage_2": "compare full candidates using stage-1 findings and deterministic polarity compatibility",
+    "semantic_answer_disclosure": false,
+    "mutation_labels_visible_to_judge": false
+  },
+  "models": [
+    {
+      "judge_model": "vllm:openai/gpt-oss-20b",
+      "gpus": 1,
+      "tensor_parallel_size": 1
+    },
+    {
+      "judge_model": "vllm:openai/gpt-oss-120b",
+      "gpus": 4,
+      "tensor_parallel_size": 4
+    }
+  ],
+  "matched_factors": {
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 10000,
+    "repetitions": 5,
+    "candidate_order_policy": "both_orientations",
+    "scoring": {
+      "partial_tiebreak_weight": 0.05,
+      "comparative_weight": 0.25,
+      "tie_threshold": 0.05
+    }
+  },
+  "planned_per_model": {
+    "paired_judgments": 40,
+    "llm_stages": 80
+  },
+  "matched_broad_protocol_control": {
+    "judge_model": "vllm:openai/gpt-oss-20b",
+    "response_success": 1.0,
+    "pair_aggregate_accuracy": 1.0,
+    "order_consistency": 0.55,
+    "source_roles_consistent_accuracy": 0.25,
+    "semantic_fluxes_not_duplicated_accuracy": 0.95,
+    "targeted_comparative_accuracy": 0.45
+  },
+  "development_gate": {
+    "minimum_response_success": 0.95,
+    "minimum_pair_aggregate_accuracy": 1.0,
+    "minimum_order_consistency": 0.8,
+    "minimum_source_roles_consistent_accuracy": 0.75,
+    "minimum_semantic_fluxes_not_duplicated_accuracy": 0.75,
+    "minimum_targeted_comparative_accuracy": 0.6,
+    "next_if_passed": "freeze unchanged protocol for genuinely unseen baseline structures",
+    "next_if_failed": "attribute failure to atomic inference, compatibility, or comparative propagation before any further change"
+  }
+}

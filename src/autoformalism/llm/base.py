@@ -30,6 +30,7 @@ from autoformalism.llm.models import (
 )
 from autoformalism.schemas import (
     AbsoluteCriterion,
+    AtomicJudgeResult,
     CandidateModel,
     ComparativeJudgeResult,
     HybridJudgeResult,
@@ -162,6 +163,26 @@ class CachedLLMClient(ABC):
             response_model=HybridJudgeResult,
             validate_parsed=lambda result: result.validate_expected_absolute_units(
                 expected_absolute_units
+            ),
+        )
+
+    def assess_atomic_evidence(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_occurrence_ids: set[str],
+        expected_repeat_pair_ids: set[str],
+    ) -> LLMCallResult[AtomicJudgeResult]:
+        """Request sign-blinded atomic evidence before pairwise assessment."""
+        return self._structured_call(
+            role="atomic_evidence_judge",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=AtomicJudgeResult,
+            validate_parsed=lambda result: result.validate_expected_units(
+                occurrence_ids=expected_occurrence_ids,
+                repeat_pair_ids=expected_repeat_pair_ids,
             ),
         )
 

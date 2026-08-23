@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from autoformalism.schemas.candidate import CandidateModel
 from autoformalism.schemas.judge import (
+    AtomicJudgeResult,
     ComparativeJudgeResult,
     HybridJudgeResult,
     JudgeResult,
@@ -17,6 +18,7 @@ from autoformalism.schemas.judge import (
 from autoformalism.schemas.proposal import ProposerCandidate, ProposerCandidateV2
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
+    "atomic-judge-v1.schema.json": AtomicJudgeResult,
     "candidate.schema.json": CandidateModel,
     "proposer-candidate.schema.json": ProposerCandidate,
     "proposer-candidate-v2.schema.json": ProposerCandidateV2,

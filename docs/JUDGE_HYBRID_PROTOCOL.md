@@ -456,3 +456,56 @@ limit, and score weights. The manifest records both protocol and fact-schema
 versions so an old output directory cannot silently resume under the new prompt.
 Because the pair outcomes were already opened, a passing result only authorizes
 freezing an unchanged protocol for new baseline structures.
+
+The matched facts pilot completed all `40/40` calls and correctly selected the
+baseline for all four pairs, but it failed the atomic and stability gates. Exact
+duplicate-flux accuracy improved from `0.55` to `0.95`, while source-role
+accuracy fell from `0.45` to `0.25`, targeted comparative accuracy was `0.45`,
+and order consistency was `0.55`. Syntax-only repetition facts therefore solve
+an evidence-location problem, but signed-symbol polarity alone does not solve
+scientific role inference.
+
+### Sign-blinded atomic occurrence development protocol
+
+Protocol version `hybrid-judge-protocol-3-atomic-occurrence` adds a separate
+structured scientific call before the ordinary blinded comparison. Runtime
+flattens every state equation and generated process into top-level additive
+occurrences, removes only
+the certified outer sign from the first-stage request, and supplies the unsigned
+term, governed quantity, public prompt, public symbol contract, component
+definitions, and proposer-owned claims. The first-stage judge must infer
+`positive_contribution`, `negative_contribution`, `context_dependent`, or
+`insufficient_public_information`. It is never shown the mutation label,
+expected answer, reference model, fitted trajectory, or hidden benchmark fact.
+
+Runtime then compares a determinate inferred direction with the privately held
+certified polarity. This compatibility operation is deterministic, but its
+scientific premise retains explicit LLM provenance. Candidate-wide source and
+sink verdicts in atomic mode are derived from those compatibility checks rather
+than requested again from the second-stage judge. Indeterminate scientific
+directions remain indeterminate; they are not converted into failures.
+
+The same first-stage call receives pairs of exact same-polarity repeated
+expressions without calling them scientific duplicates. It classifies each pair
+as the same physical contribution, distinct contributions, or insufficiently
+specified. A determinate same-contribution answer forces failure of the
+nonduplication predicate. Otherwise, the second-stage broader semantic verdict
+is retained so nonexact equivalent pathways remain judgeable.
+
+The second-stage blinded comparison receives the frozen atomic inferences and
+runtime polarity-compatibility outcomes. It answers all other absolute units and
+the same three comparative questions. This prevents a later comparative tie from
+silently ignoring an atomic mismatch while leaving the scientific inference with
+the LLM. Both calls are separately content-addressed, cached, logged, and
+schema-validated. A failure in either stage is a terminal failure for that planned
+judgment, annotated with its stage; merge-safe score and failure files are created
+before provider calls.
+
+`configs/hybrid_judge_atomic_occurrence_v1.json` freezes the next development
+factorial. GPT-OSS 20B and GPT-OSS 120B receive the same four opened pairs, public
+prompt, atomic protocol, low reasoning, temperature, seeds, orientations, retry
+budget, schema, and scoring. The 20B condition uses one A40; 120B uses four A40s
+with tensor parallelism. Each model produces 40 paired judgments and 80 logical
+LLM stages. This is a model-scale and protocol diagnostic, not a confirmatory
+paper holdout. If the development gates pass, the selected protocol must be
+frozen unchanged before testing genuinely unseen baseline structures.

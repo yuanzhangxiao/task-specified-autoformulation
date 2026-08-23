@@ -190,6 +190,15 @@ The pipeline is iterative:
   based only on declaration counts. A frozen matched development pilot therefore
   adds symmetric syntax-only signed-term and exact-repeat facts plus general rubric
   clarification without changing the LLM, seeds, schema, retries, or score weights.
+  That matched pilot solved exact-repeat detection (`0.95`) but failed source-role
+  (`0.25`), comparative (`0.45`), and order-consistency (`0.55`) gates. The next
+  frozen development protocol therefore separates expected scientific direction
+  from the candidate's actual outer sign. A first sign-blinded call infers atomic
+  directions and exact-repeat relationships; runtime checks polarity; a second
+  call receives those findings for comparative assessment. No task-specific role
+  answer is disclosed. A matched 20B/120B vLLM factorial tests question
+  presentation and model-scale capability separately before any new-structure
+  confirmation or search integration.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

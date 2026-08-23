@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from autoformalism.schemas import (
     AbsoluteCriterion,
+    AtomicJudgeResult,
     CandidateModel,
     ComparativeJudgeResult,
     HybridJudgeResult,
@@ -93,4 +94,15 @@ class LLMClient(Protocol):
         expected_absolute_units: set[tuple[AbsoluteCriterion, str]],
     ) -> LLMCallResult[HybridJudgeResult]:
         """Request paired absolute assessments and comparative residuals."""
+        ...
+
+    def assess_atomic_evidence(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_occurrence_ids: set[str],
+        expected_repeat_pair_ids: set[str],
+    ) -> LLMCallResult[AtomicJudgeResult]:
+        """Request sign-blinded occurrence and exact-repeat assessments."""
         ...

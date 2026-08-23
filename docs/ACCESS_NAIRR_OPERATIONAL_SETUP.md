@@ -472,6 +472,87 @@ This is development reuse of opened pairs, not a new held-out claim. Model,
 reasoning effort, seeds, orders, retries, schema, and scoring remain matched to
 the old control. Only the general algebraic facts and rubric wording change.
 
+The facts treatment improved exact-repeat detection but did not pass source-role,
+comparative, or order-consistency gates. Run the frozen two-stage atomic protocol
+with both model sizes from any fresh login; all persistent paths are reconstructed
+inside the scripts:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_atomic_20b.slurm
+
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_atomic_120b.slurm
+```
+
+The 20B job is a four-task array with one A40 per task. The 120B job is one
+four-A40 task using tensor parallelism, which avoids repeatedly loading the large
+model. Each model performs 40 paired judgments; every judgment has one
+sign-blinded atomic call and one full hybrid comparison call. Both use low
+reasoning, temperature `0.2`, seeds `10000` through `10004`, both candidate
+orientations, and unchanged scoring.
+
+After both jobs finish, merge each model and then the matched comparison:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+atomic=/work/hdd/bibo/$USER/phase_b/judge-hybrid-atomic-v1
+heldout=/work/hdd/bibo/$USER/phase_b/judge-hybrid-heldout-v1
+labels="$heldout/hybrid_labels.jsonl"
+pairs="$heldout/pairs.jsonl"
+
+for model in gpt-oss-20b gpt-oss-120b; do
+  root="$atomic/$model"
+  "$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+    --inputs "$root"/shards/shard_*/hybrid_judge_scores.csv \
+    --failure-inputs "$root"/shards/shard_*/hybrid_judge_failures.jsonl \
+    --output "$root/hybrid_judge_scores.csv" \
+    --failure-output "$root/hybrid_judge_failures.jsonl" \
+    --expected 40
+
+  "$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+    --scores "$root/hybrid_judge_scores.csv" \
+    --failures "$root/hybrid_judge_failures.jsonl" \
+    --labels "$labels" \
+    --output "$root/hybrid_judge_metrics.json"
+
+  "$python_bin" "$repo/scripts/analyze_atomic_evidence.py" \
+    --scores "$root/hybrid_judge_scores.csv" \
+    --output "$root/atomic_evidence_metrics.json"
+done
+
+comparison="$atomic/matched-comparison"
+mkdir -p "$comparison"
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$atomic"/gpt-oss-*/hybrid_judge_scores.csv \
+  --failure-inputs "$atomic"/gpt-oss-*/hybrid_judge_failures.jsonl \
+  --output "$comparison/hybrid_judge_scores.csv" \
+  --failure-output "$comparison/hybrid_judge_failures.jsonl" \
+  --expected 80
+
+"$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+  --scores "$comparison/hybrid_judge_scores.csv" \
+  --failures "$comparison/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --output "$comparison/hybrid_judge_metrics.json"
+
+"$python_bin" "$repo/scripts/analyze_atomic_evidence.py" \
+  --scores "$comparison/hybrid_judge_scores.csv" \
+  --output "$comparison/atomic_evidence_metrics.json"
+
+cat "$comparison/hybrid_judge_summary.md"
+cat "$comparison/atomic_evidence_metrics.md"
+```
+
+This remains a matched development factorial over opened pairs. Mutation labels
+are used only by the offline analyzers after calls complete. A selected protocol
+must be frozen unchanged before any new-structure confirmation.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

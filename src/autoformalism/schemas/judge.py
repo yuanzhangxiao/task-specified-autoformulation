@@ -320,6 +320,90 @@ class RelativeAssessment(StrictSchema):
     evidence: NonEmptyText
 
 
+class ExpectedContributionDirection(str, Enum):
+    """Scientific direction inferred without seeing an occurrence's outer sign."""
+
+    POSITIVE = "positive_contribution"
+    NEGATIVE = "negative_contribution"
+    CONTEXT_DEPENDENT = "context_dependent"
+    INSUFFICIENT_PUBLIC_INFORMATION = "insufficient_public_information"
+
+
+class AtomicSignedOccurrenceAssessment(StrictSchema):
+    """Expected scientific direction for one sign-blinded additive occurrence."""
+
+    occurrence_id: Identifier
+    expected_direction: ExpectedContributionDirection
+    evidence: NonEmptyText
+
+
+class RepeatedContributionRelation(str, Enum):
+    """Scientific relationship between two certified repeated expressions."""
+
+    SAME_PHYSICAL_CONTRIBUTION = "same_physical_contribution"
+    DISTINCT_CONTRIBUTIONS = "distinct_contributions"
+    INSUFFICIENT_PUBLIC_INFORMATION = "insufficient_public_information"
+
+
+class AtomicRepeatedContributionAssessment(StrictSchema):
+    """Scientific interpretation of one exact-repeat pair."""
+
+    repeat_pair_id: Identifier
+    relation: RepeatedContributionRelation
+    evidence: NonEmptyText
+
+
+class AtomicJudgeResult(StrictSchema):
+    """Sign-blinded occurrence judgments made before pairwise comparison."""
+
+    schema_version: Literal["atomic-judge-1"] = "atomic-judge-1"
+    signed_occurrence_assessments: tuple[
+        AtomicSignedOccurrenceAssessment, ...
+    ] = Field(min_length=1, max_length=256)
+    repeated_contribution_assessments: tuple[
+        AtomicRepeatedContributionAssessment, ...
+    ] = Field(default=(), max_length=256)
+
+    @model_validator(mode="after")
+    def unique_identifiers(self) -> AtomicJudgeResult:
+        """Reject repeated occurrence or repeat-pair identifiers."""
+        occurrence_ids = [
+            item.occurrence_id for item in self.signed_occurrence_assessments
+        ]
+        if len(occurrence_ids) != len(set(occurrence_ids)):
+            raise ValueError("signed occurrence identifiers must be unique")
+        repeat_ids = [
+            item.repeat_pair_id
+            for item in self.repeated_contribution_assessments
+        ]
+        if len(repeat_ids) != len(set(repeat_ids)):
+            raise ValueError("repeated contribution identifiers must be unique")
+        return self
+
+    def validate_expected_units(
+        self,
+        *,
+        occurrence_ids: set[str],
+        repeat_pair_ids: set[str],
+    ) -> None:
+        """Require exactly the runtime-requested sign-blinded atomic units."""
+        actual_occurrences = {
+            item.occurrence_id for item in self.signed_occurrence_assessments
+        }
+        actual_repeats = {
+            item.repeat_pair_id
+            for item in self.repeated_contribution_assessments
+        }
+        if actual_occurrences != occurrence_ids or actual_repeats != repeat_pair_ids:
+            raise ValueError(
+                "atomic assessment units differ; "
+                f"missing_occurrences={sorted(occurrence_ids - actual_occurrences)}, "
+                f"extra_occurrences={sorted(actual_occurrences - occurrence_ids)}, "
+                f"missing_repeats={sorted(repeat_pair_ids - actual_repeats)}, "
+                f"extra_repeats={sorted(actual_repeats - repeat_pair_ids)}"
+            )
+
+
 class HybridJudgeResult(StrictSchema):
     """Paired absolute assessments plus a separate comparative residual."""
 

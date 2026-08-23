@@ -1,0 +1,116 @@
+{
+  "$defs": {
+    "AtomicRepeatedContributionAssessment": {
+      "additionalProperties": false,
+      "description": "Scientific interpretation of one exact-repeat pair.",
+      "properties": {
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "relation": {
+          "$ref": "#/$defs/RepeatedContributionRelation"
+        },
+        "repeat_pair_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Repeat Pair Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repeat_pair_id",
+        "relation",
+        "evidence"
+      ],
+      "title": "AtomicRepeatedContributionAssessment",
+      "type": "object"
+    },
+    "AtomicSignedOccurrenceAssessment": {
+      "additionalProperties": false,
+      "description": "Expected scientific direction for one sign-blinded additive occurrence.",
+      "properties": {
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "expected_direction": {
+          "$ref": "#/$defs/ExpectedContributionDirection"
+        },
+        "occurrence_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Occurrence Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "occurrence_id",
+        "expected_direction",
+        "evidence"
+      ],
+      "title": "AtomicSignedOccurrenceAssessment",
+      "type": "object"
+    },
+    "ExpectedContributionDirection": {
+      "description": "Scientific direction inferred without seeing an occurrence's outer sign.",
+      "enum": [
+        "positive_contribution",
+        "negative_contribution",
+        "context_dependent",
+        "insufficient_public_information"
+      ],
+      "title": "ExpectedContributionDirection",
+      "type": "string"
+    },
+    "RepeatedContributionRelation": {
+      "description": "Scientific relationship between two certified repeated expressions.",
+      "enum": [
+        "same_physical_contribution",
+        "distinct_contributions",
+        "insufficient_public_information"
+      ],
+      "title": "RepeatedContributionRelation",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Sign-blinded occurrence judgments made before pairwise comparison.",
+  "properties": {
+    "repeated_contribution_assessments": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/AtomicRepeatedContributionAssessment"
+      },
+      "maxItems": 256,
+      "title": "Repeated Contribution Assessments",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "atomic-judge-1",
+      "default": "atomic-judge-1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "signed_occurrence_assessments": {
+      "items": {
+        "$ref": "#/$defs/AtomicSignedOccurrenceAssessment"
+      },
+      "maxItems": 256,
+      "minItems": 1,
+      "title": "Signed Occurrence Assessments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "signed_occurrence_assessments"
+  ],
+  "title": "AtomicJudgeResult",
+  "type": "object"
+}

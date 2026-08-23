@@ -21,11 +21,17 @@ from autoformalism.expressions import (
     repair_protected_declarations,
 )
 from autoformalism.judging import (
+    ATOMIC_EVIDENCE_SCHEMA_VERSION,
     STRUCTURAL_FACTS_SCHEMA_VERSION,
     HybridScoringConfig,
+    atomic_candidate_context,
+    atomic_findings_payload,
+    atomic_role_compatibility_assessments,
+    build_atomic_evidence_plan,
     candidate_claims,
     deterministic_pair_assessments,
     extract_public_requirements,
+    merge_atomic_assessments,
     score_hybrid_pair,
     semantic_absolute_units,
     structural_facts,
@@ -116,6 +122,44 @@ Do not add fields.
 """
 
 HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-2"
+ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-3-atomic-occurrence"
+
+ATOMIC_EVIDENCE_PROMPT = """You infer atomic scientific expectations before a
+blinded pairwise model comparison. For every supplied signed-occurrence unit, the
+runtime has deliberately removed only its outer top-level plus or minus sign. Do
+not assume that an unsigned expression enters positively, and do not attempt to
+reconstruct the hidden candidate sign. Based only on the public task, public symbol
+descriptions, unsigned component context, and proposer-owned claims, state how that
+term should contribute to the named state derivative or generated process:
+- positive_contribution
+- negative_contribution
+- context_dependent
+- insufficient_public_information
+
+Ordinary scientific knowledge appropriate to the named public task may be used.
+Do not invent hidden equations, mutation labels, reference models, fitted behavior,
+or private benchmark facts. Proposer claims are hypotheses, not task authority.
+
+For every supplied exact-repeat candidate, decide whether its two occurrences
+represent the same physical contribution, distinct contributions, or whether the
+public evidence is insufficient. Exact syntax is authoritative, but it is not by
+itself a scientific duplication verdict.
+
+Answer every requested identifier exactly once and cite public wording, symbol
+meaning, or component meaning. Do not compare Candidate A with Candidate B and do
+not emit scores or an overall winner. Return strict JSON with schema_version
+"atomic-judge-1", signed_occurrence_assessments, and
+repeated_contribution_assessments. Do not add fields.
+"""
+
+ATOMIC_STAGE_TWO_NOTE = """The request also contains sign-blinded atomic scientific
+inferences from a prior structured call and runtime comparisons of those inferred
+directions with certified outer polarity. Use these findings when answering the
+remaining absolute and comparative questions. Do not reverse or ignore a supplied
+atomic mismatch merely because declaration counts are equal. Source-role and
+sink-role candidate-wide units are runtime-owned in this mode and are intentionally
+absent from the requested LLM units.
+"""
 
 
 FIELDS = (
@@ -150,6 +194,17 @@ FIELDS = (
     "successful_attempt_seed",
     "tool_argument_key_repairs",
     "request_hash",
+)
+
+ATOMIC_FIELDS = (
+    *FIELDS,
+    "atomic_evidence_plan",
+    "atomic_assessments",
+    "atomic_compatibility_assessments",
+    "atomic_response_transport",
+    "atomic_provider_attempts",
+    "atomic_successful_attempt_seed",
+    "atomic_request_hash",
 )
 
 FAILURE_SCHEMA_VERSION = "hybrid-judge-failure-1"
@@ -277,6 +332,8 @@ def _system_prompt(
     context: ValidationContext,
     model: str,
     response_mode: OllamaResponseMode,
+    *,
+    atomic_mode: bool = False,
 ) -> str:
     transport_override = ""
     if response_mode is OllamaResponseMode.TOOL_CALL:
@@ -290,7 +347,22 @@ def _system_prompt(
         f"Public scientific task:\n{public_prompt}\n\n"
         f"{_prediction_protocol_prompt(context)}\n\n"
         f"{_symbol_contract(context)}\n\n"
-        f"Hybrid judge protocol:\n{HYBRID_JUDGE_PROMPT}{transport_override}"
+        f"Hybrid judge protocol:\n{HYBRID_JUDGE_PROMPT}"
+        f"{ATOMIC_STAGE_TWO_NOTE if atomic_mode else ''}{transport_override}"
+    )
+
+
+def _atomic_system_prompt(
+    public_prompt: str,
+    context: ValidationContext,
+    model: str,
+) -> str:
+    """Return the sign-blinded first-stage scientific prompt."""
+    return (
+        f"Configured judge model: {model}\n\n"
+        f"Public scientific task:\n{public_prompt}\n\n"
+        f"{_symbol_contract(context)}\n\n"
+        f"Atomic evidence protocol:\n{ATOMIC_EVIDENCE_PROMPT}"
     )
 
 
@@ -342,10 +414,15 @@ def _failed(path: Path) -> set[tuple[str, str, int, str]]:
     return keys
 
 
-def _append(path: Path, row: dict[str, object]) -> None:
+def _append(
+    path: Path,
+    row: dict[str, object],
+    *,
+    fieldnames: tuple[str, ...] = FIELDS,
+) -> None:
     exists = path.is_file() and path.stat().st_size > 0
     with path.open("a", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         if not exists:
             writer.writeheader()
         writer.writerow(row)
@@ -358,6 +435,19 @@ def _append_failure(path: Path, row: dict[str, object]) -> None:
         raise ValueError(f"failure record is missing {sorted(missing)}")
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def _ensure_outcome_files(
+    score_path: Path,
+    failure_path: Path,
+    *,
+    fieldnames: tuple[str, ...],
+) -> None:
+    """Create merge-safe empty outputs before any provider call."""
+    if not score_path.exists():
+        with score_path.open("w", encoding="utf-8", newline="") as handle:
+            csv.DictWriter(handle, fieldnames=fieldnames).writeheader()
+    failure_path.touch(exist_ok=True)
 
 
 def _normalize_preference(preferred: str, baseline_position: str) -> str:
@@ -419,6 +509,14 @@ def main() -> None:
     parser.add_argument("--partial-tiebreak-weight", type=float, default=0.05)
     parser.add_argument("--comparative-weight", type=float, default=0.25)
     parser.add_argument("--tie-threshold", type=float, default=0.05)
+    parser.add_argument(
+        "--atomic-signed-occurrences",
+        action="store_true",
+        help=(
+            "run a sign-blinded atomic evidence call before each hybrid "
+            "comparison; calibration-only"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
@@ -459,9 +557,14 @@ def main() -> None:
         strategy=args.shard_strategy,
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
+    protocol_version = (
+        ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION
+        if args.atomic_signed_occurrences
+        else HYBRID_JUDGE_PROTOCOL_VERSION
+    )
     manifest = {
         "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
-        "hybrid_judge_protocol_version": HYBRID_JUDGE_PROTOCOL_VERSION,
+        "hybrid_judge_protocol_version": protocol_version,
         "structural_facts_schema_version": STRUCTURAL_FACTS_SCHEMA_VERSION,
         "pairs_sha256": hashlib.sha256(pair_bytes).hexdigest(),
         "pair_count": len(all_pairs),
@@ -481,6 +584,14 @@ def main() -> None:
         "comparative_weight": args.comparative_weight,
         "tie_threshold": args.tie_threshold,
     }
+    if args.atomic_signed_occurrences:
+        manifest.update(
+            {
+                "atomic_signed_occurrences": True,
+                "atomic_evidence_schema_version": ATOMIC_EVIDENCE_SCHEMA_VERSION,
+                "logical_stages_per_judgment": 2,
+            }
+        )
     if args.pair_ids is not None:
         manifest["source_pair_count"] = len(source_pairs)
         manifest["requested_pair_ids"] = args.pair_ids
@@ -497,6 +608,11 @@ def main() -> None:
     )
     score_path = args.output_root / "hybrid_judge_scores.csv"
     failure_path = args.output_root / "hybrid_judge_failures.jsonl"
+    _ensure_outcome_files(
+        score_path,
+        failure_path,
+        fieldnames=(ATOMIC_FIELDS if args.atomic_signed_occurrences else FIELDS),
+    )
     successful = _completed(score_path)
     failed = _failed(failure_path)
     overlap = successful & failed
@@ -523,7 +639,12 @@ def main() -> None:
             contexts[key] = _task_context(args.data_root.resolve(), pair)
     if args.dry_run:
         unit_counts = {
-            key: len(semantic_absolute_units(extract_public_requirements(prompt)))
+            key: len(
+                semantic_absolute_units(
+                    extract_public_requirements(prompt),
+                    include_role_consistency=not args.atomic_signed_occurrences,
+                )
+            )
             for key, (prompt, _context_value) in contexts.items()
         }
         print(
@@ -584,13 +705,22 @@ def main() -> None:
         for pair in pairs:
             public_prompt, context = contexts[(pair.benchmark_id, pair.tier)]
             requirements = extract_public_requirements(public_prompt)
-            units = semantic_absolute_units(requirements)
+            units = semantic_absolute_units(
+                requirements,
+                include_role_consistency=not args.atomic_signed_occurrences,
+            )
             expected_units = set(units)
             system_prompt = _system_prompt(
                 public_prompt,
                 context,
                 model_spec,
                 OllamaResponseMode(args.ollama_response_mode),
+                atomic_mode=args.atomic_signed_occurrences,
+            )
+            atomic_system_prompt = _atomic_system_prompt(
+                public_prompt,
+                context,
+                model_spec,
             )
             baseline, baseline_repairs = repair_protected_declarations(
                 pair.valid_candidate, context
@@ -630,6 +760,7 @@ def main() -> None:
                     candidate_b,
                     task_inputs=task_inputs,
                 )
+                atomic_plan = build_atomic_evidence_plan(candidate_a, candidate_b)
                 request = {
                     "public_requirement_registry": requirements.model_dump(mode="json"),
                     "requested_absolute_units": [
@@ -660,11 +791,50 @@ def main() -> None:
                         item.model_dump(mode="json") for item in deterministic
                     ],
                 }
+                atomic_request = {
+                    "public_requirement_registry": requirements.model_dump(
+                        mode="json"
+                    ),
+                    "candidate_unsigned_context": {
+                        "candidate_a": atomic_candidate_context(candidate_a),
+                        "candidate_b": atomic_candidate_context(candidate_b),
+                    },
+                    "atomic_evidence_plan": atomic_plan.prompt_payload(),
+                }
                 for repetition in range(args.repetitions):
                     key = (pair.pair_id, model_spec, repetition, order)
                     if key in completed:
                         continue
+                    failure_stage = "hybrid_comparison"
+                    atomic_call = None
+                    role_assessments = ()
                     try:
+                        if args.atomic_signed_occurrences:
+                            failure_stage = "atomic_evidence"
+                            atomic_call = clients[repetition].assess_atomic_evidence(
+                                system_prompt=atomic_system_prompt,
+                                user_prompt=json.dumps(
+                                    atomic_request, sort_keys=True
+                                ),
+                                expected_occurrence_ids=atomic_plan.occurrence_ids,
+                                expected_repeat_pair_ids=(
+                                    atomic_plan.repeat_pair_ids
+                                ),
+                            )
+                            role_assessments = (
+                                atomic_role_compatibility_assessments(
+                                    atomic_call.parsed,
+                                    atomic_plan,
+                                )
+                            )
+                            request["atomic_scientific_findings"] = (
+                                atomic_findings_payload(
+                                    atomic_call.parsed,
+                                    atomic_plan,
+                                    role_assessments,
+                                )
+                            )
+                        failure_stage = "hybrid_comparison"
                         result = clients[repetition].assess_hybrid(
                             system_prompt=system_prompt,
                             user_prompt=json.dumps(request, sort_keys=True),
@@ -688,6 +858,7 @@ def main() -> None:
                                 "error": str(exc)[:4000],
                                 "failure_category": getattr(category, "value", None),
                                 "provider_attempt_limit": args.max_attempts,
+                                "failure_stage": failure_stage,
                             },
                         )
                         failed.add(key)
@@ -698,8 +869,20 @@ def main() -> None:
                             flush=True,
                         )
                         continue
+                    parsed = result.parsed
+                    if args.atomic_signed_occurrences:
+                        assert atomic_call is not None
+                        parsed = merge_atomic_assessments(
+                            parsed,
+                            atomic_call.parsed,
+                            atomic_plan,
+                            role_assessments,
+                        )
+                        parsed.validate_expected_absolute_units(
+                            set(semantic_absolute_units(requirements))
+                        )
                     pair_score = score_hybrid_pair(
-                        result.parsed,
+                        parsed,
                         deterministic,
                         requirements,
                         scoring,
@@ -711,9 +894,7 @@ def main() -> None:
                     )
                     if not isinstance(retry_provenance, dict):
                         retry_provenance = {}
-                    _append(
-                        score_path,
-                        {
+                    row = {
                             "pair_id": pair.pair_id,
                             "benchmark_id": pair.benchmark_id,
                             "tier": pair.tier,
@@ -755,13 +936,13 @@ def main() -> None:
                             "absolute_assessments": _json(
                                 [
                                     item.model_dump(mode="json")
-                                    for item in result.parsed.absolute_assessments
+                                    for item in parsed.absolute_assessments
                                 ]
                             ),
                             "comparative_assessments": _json(
                                 [
                                     item.model_dump(mode="json")
-                                    for item in result.parsed.comparative_assessments
+                                    for item in parsed.comparative_assessments
                                 ]
                             ),
                             "response_transport": retry_provenance.get(
@@ -775,7 +956,43 @@ def main() -> None:
                                 "tool_argument_key_repairs", 0
                             ),
                             "request_hash": result.request_hash,
-                        },
+                        }
+                    if args.atomic_signed_occurrences:
+                        assert atomic_call is not None
+                        atomic_retry = atomic_call.raw_response.get(
+                            "_autoformalism_retry"
+                        )
+                        if not isinstance(atomic_retry, dict):
+                            atomic_retry = {}
+                        row.update(
+                            {
+                                "atomic_evidence_plan": _json(
+                                    atomic_plan.prompt_payload()
+                                ),
+                                "atomic_assessments": _json(atomic_call.parsed),
+                                "atomic_compatibility_assessments": _json(
+                                    role_assessments
+                                ),
+                                "atomic_response_transport": atomic_retry.get(
+                                    "format_mode"
+                                ),
+                                "atomic_provider_attempts": (
+                                    atomic_call.provider_attempts
+                                ),
+                                "atomic_successful_attempt_seed": atomic_retry.get(
+                                    "sampling_seed"
+                                ),
+                                "atomic_request_hash": atomic_call.request_hash,
+                            }
+                        )
+                    _append(
+                        score_path,
+                        row,
+                        fieldnames=(
+                            ATOMIC_FIELDS
+                            if args.atomic_signed_occurrences
+                            else FIELDS
+                        ),
                     )
                     completed.add(key)
                     successful.add(key)

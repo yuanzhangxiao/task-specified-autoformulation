@@ -12,6 +12,7 @@ import hashlib
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
+from itertools import combinations
 
 from pydantic import Field
 
@@ -19,11 +20,14 @@ from autoformalism.expressions import RestrictedParser
 from autoformalism.schemas import (
     AbsoluteCriterion,
     AbsoluteVerdict,
+    AtomicJudgeResult,
     CandidateAbsoluteAssessment,
     CandidateModel,
+    ExpectedContributionDirection,
     HybridJudgeResult,
     PairedAbsoluteAssessment,
     ProposerClaim,
+    RepeatedContributionRelation,
     RequirementEnforcement,
     RequirementRegistry,
     RequirementSource,
@@ -33,6 +37,7 @@ from autoformalism.schemas.base import Identifier, StrictSchema, UnitInterval
 
 _CANDIDATE_SUBJECT = "candidate"
 STRUCTURAL_FACTS_SCHEMA_VERSION = "structural-facts-2"
+ATOMIC_EVIDENCE_SCHEMA_VERSION = "atomic-evidence-plan-1"
 _SEMANTIC_CANDIDATE_CRITERIA = (
     AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
     AbsoluteCriterion.SINK_ROLES_CONSISTENT,
@@ -284,6 +289,410 @@ def structural_facts(
     }
 
 
+@dataclass(frozen=True)
+class SignedOccurrence:
+    """One additive state-equation term whose outer sign can be withheld."""
+
+    occurrence_id: str
+    candidate_side: str
+    equation_location: str
+    governed_quantity: str
+    unsigned_expression: str
+    symbols: tuple[str, ...]
+    actual_polarity: str
+
+    def prompt_payload(self) -> dict[str, object]:
+        """Return the scientific question without exposing actual polarity."""
+        return {
+            "occurrence_id": self.occurrence_id,
+            "candidate_side": self.candidate_side,
+            "equation_location": self.equation_location,
+            "governed_quantity": self.governed_quantity,
+            "unsigned_expression": self.unsigned_expression,
+            "symbols": list(self.symbols),
+        }
+
+
+@dataclass(frozen=True)
+class ExactRepeatCandidate:
+    """One pair of exact same-polarity terms needing scientific interpretation."""
+
+    repeat_pair_id: str
+    candidate_side: str
+    equation_location: str
+    governed_quantity: str
+    unsigned_expression: str
+    occurrence_ids: tuple[str, str]
+
+    def prompt_payload(self) -> dict[str, object]:
+        """Return an atomic repeat question without declaring duplication."""
+        return {
+            "repeat_pair_id": self.repeat_pair_id,
+            "candidate_side": self.candidate_side,
+            "equation_location": self.equation_location,
+            "governed_quantity": self.governed_quantity,
+            "unsigned_expression": self.unsigned_expression,
+            "occurrence_ids": list(self.occurrence_ids),
+        }
+
+
+@dataclass(frozen=True)
+class AtomicEvidencePlan:
+    """Sign-blinded questions plus runtime-private occurrence polarities."""
+
+    occurrences: tuple[SignedOccurrence, ...]
+    repeat_candidates: tuple[ExactRepeatCandidate, ...]
+
+    @property
+    def occurrence_ids(self) -> set[str]:
+        """Return the exact expected occurrence identifiers."""
+        return {item.occurrence_id for item in self.occurrences}
+
+    @property
+    def repeat_pair_ids(self) -> set[str]:
+        """Return the exact expected repeat-pair identifiers."""
+        return {item.repeat_pair_id for item in self.repeat_candidates}
+
+    def prompt_payload(self) -> dict[str, object]:
+        """Return only sign-blinded facts safe for the first LLM stage."""
+        return {
+            "schema_version": ATOMIC_EVIDENCE_SCHEMA_VERSION,
+            "signed_occurrences": [
+                item.prompt_payload() for item in self.occurrences
+            ],
+            "exact_repeat_candidates": [
+                item.prompt_payload() for item in self.repeat_candidates
+            ],
+        }
+
+
+def _candidate_atomic_occurrences(
+    candidate: CandidateModel,
+    *,
+    candidate_side: str,
+) -> tuple[tuple[SignedOccurrence, ...], tuple[ExactRepeatCandidate, ...]]:
+    """Build stable sign-blinded units for one canonical candidate."""
+    parser = RestrictedParser()
+    occurrences: list[SignedOccurrence] = []
+    repeats: list[ExactRepeatCandidate] = []
+    expressions = [
+        (f"process:{item.name}", item.name, item.expression)
+        for item in candidate.processes
+    ]
+    expressions.extend(
+        (f"equation:{item.state}", item.state, item.rhs)
+        for item in candidate.state_equations
+    )
+    for location, governed_quantity, source_expression in expressions:
+        facts = _algebraic_expression_facts(
+            source_expression,
+            location=location,
+            parser=parser,
+        )
+        by_term_id: dict[str, SignedOccurrence] = {}
+        for term in facts["top_level_additive_terms"]:
+            assert isinstance(term, dict)
+            term_id = str(term["term_id"])
+            expression = str(term["normalized_expression"])
+            digest = hashlib.sha256(
+                f"{candidate_side}\0{location}\0{term_id}\0{expression}".encode()
+            ).hexdigest()[:16]
+            occurrence = SignedOccurrence(
+                occurrence_id=f"occurrence_{digest}",
+                candidate_side=candidate_side,
+                equation_location=location,
+                governed_quantity=governed_quantity,
+                unsigned_expression=expression,
+                symbols=tuple(str(item) for item in term["symbols"]),
+                actual_polarity=str(term["polarity"]),
+            )
+            occurrences.append(occurrence)
+            by_term_id[term_id] = occurrence
+        for group in facts["exact_repeated_additive_terms"]:
+            assert isinstance(group, dict)
+            term_ids = tuple(str(item) for item in group["term_ids"])
+            for left_id, right_id in combinations(term_ids, 2):
+                left = by_term_id[left_id]
+                right = by_term_id[right_id]
+                digest = hashlib.sha256(
+                    f"{left.occurrence_id}\0{right.occurrence_id}".encode()
+                ).hexdigest()[:16]
+                repeats.append(
+                    ExactRepeatCandidate(
+                        repeat_pair_id=f"repeat_{digest}",
+                        candidate_side=candidate_side,
+                        equation_location=location,
+                        governed_quantity=governed_quantity,
+                        unsigned_expression=str(group["normalized_expression"]),
+                        occurrence_ids=(left.occurrence_id, right.occurrence_id),
+                    )
+                )
+    return tuple(occurrences), tuple(repeats)
+
+
+def build_atomic_evidence_plan(
+    candidate_a: CandidateModel,
+    candidate_b: CandidateModel,
+) -> AtomicEvidencePlan:
+    """Build symmetric atomic questions while retaining signs only at runtime."""
+    left_occurrences, left_repeats = _candidate_atomic_occurrences(
+        candidate_a, candidate_side="candidate_a"
+    )
+    right_occurrences, right_repeats = _candidate_atomic_occurrences(
+        candidate_b, candidate_side="candidate_b"
+    )
+    return AtomicEvidencePlan(
+        occurrences=(*left_occurrences, *right_occurrences),
+        repeat_candidates=(*left_repeats, *right_repeats),
+    )
+
+
+def atomic_candidate_context(candidate: CandidateModel) -> dict[str, object]:
+    """Return component meaning without exposing state-equation outer signs."""
+    return {
+        "states": [
+            {
+                "name": item.name,
+                "kind": item.kind.value,
+                "description": item.description,
+                "mechanisms": list(item.mechanisms),
+            }
+            for item in candidate.states
+        ],
+        "processes": [
+            {
+                "name": item.name,
+                "description": item.description,
+                "mechanisms": list(item.mechanisms),
+            }
+            for item in candidate.processes
+        ],
+        "proposer_claims": [
+            item.model_dump(mode="json") for item in candidate_claims(candidate)
+        ],
+    }
+
+
+def _direction_assessment(
+    *,
+    side: str,
+    expected_direction: ExpectedContributionDirection,
+    result: AtomicJudgeResult,
+    plan: AtomicEvidencePlan,
+) -> CandidateAbsoluteAssessment:
+    """Compare LLM-inferred direction with runtime-private certified polarity."""
+    answers = {
+        item.occurrence_id: item for item in result.signed_occurrence_assessments
+    }
+    side_occurrences = [
+        item for item in plan.occurrences if item.candidate_side == side
+    ]
+    relevant = [
+        item
+        for item in side_occurrences
+        if answers[item.occurrence_id].expected_direction is expected_direction
+    ]
+    unresolved = [
+        item
+        for item in side_occurrences
+        if answers[item.occurrence_id].expected_direction
+        in {
+            ExpectedContributionDirection.CONTEXT_DEPENDENT,
+            ExpectedContributionDirection.INSUFFICIENT_PUBLIC_INFORMATION,
+        }
+    ]
+    expected_polarity = (
+        "positive"
+        if expected_direction is ExpectedContributionDirection.POSITIVE
+        else "negative"
+    )
+    mismatched = [
+        item for item in relevant if item.actual_polarity != expected_polarity
+    ]
+    if mismatched:
+        return CandidateAbsoluteAssessment(
+            verdict=AbsoluteVerdict.FAIL,
+            evidence=(
+                f"Expected {expected_polarity} contribution but certified the "
+                f"opposite outer polarity for: "
+                f"{', '.join(item.occurrence_id for item in mismatched)}."
+            ),
+        )
+    relevant_quantities = {item.governed_quantity for item in relevant}
+    relevant_unresolved = [
+        item for item in unresolved if item.governed_quantity in relevant_quantities
+    ]
+    if relevant_unresolved:
+        return CandidateAbsoluteAssessment(
+            verdict=AbsoluteVerdict.INDETERMINATE,
+            evidence=(
+                "At least one occurrence in a quantity with a determinate role "
+                "lacks an expected direction; unresolved occurrences: "
+                f"{', '.join(item.occurrence_id for item in relevant_unresolved)}."
+            ),
+        )
+    if relevant:
+        return CandidateAbsoluteAssessment(
+            verdict=AbsoluteVerdict.PASS,
+            evidence=(
+                f"All {len(relevant)} occurrences inferred as {expected_polarity} "
+                "contributions have matching certified outer polarity."
+            ),
+        )
+    if unresolved:
+        return CandidateAbsoluteAssessment(
+            verdict=AbsoluteVerdict.INDETERMINATE,
+            evidence=(
+                "No occurrence received this determinate role; unresolved "
+                "occurrences remain: "
+                f"{', '.join(item.occurrence_id for item in unresolved)}."
+            ),
+        )
+    return CandidateAbsoluteAssessment(
+        verdict=AbsoluteVerdict.NOT_APPLICABLE,
+        evidence=f"No occurrence was inferred as a {expected_polarity} contribution.",
+    )
+
+
+def atomic_role_compatibility_assessments(
+    result: AtomicJudgeResult,
+    plan: AtomicEvidencePlan,
+) -> tuple[PairedAbsoluteAssessment, PairedAbsoluteAssessment]:
+    """Derive candidate-level source/sink consistency from atomic directions."""
+    result.validate_expected_units(
+        occurrence_ids=plan.occurrence_ids,
+        repeat_pair_ids=plan.repeat_pair_ids,
+    )
+    assessments = []
+    for criterion, direction in (
+        (
+            AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+            ExpectedContributionDirection.POSITIVE,
+        ),
+        (
+            AbsoluteCriterion.SINK_ROLES_CONSISTENT,
+            ExpectedContributionDirection.NEGATIVE,
+        ),
+    ):
+        assessments.append(
+            PairedAbsoluteAssessment(
+                criterion=criterion,
+                subject_id=_CANDIDATE_SUBJECT,
+                candidate_a=_direction_assessment(
+                    side="candidate_a",
+                    expected_direction=direction,
+                    result=result,
+                    plan=plan,
+                ),
+                candidate_b=_direction_assessment(
+                    side="candidate_b",
+                    expected_direction=direction,
+                    result=result,
+                    plan=plan,
+                ),
+            )
+        )
+    return assessments[0], assessments[1]
+
+
+def atomic_findings_payload(
+    result: AtomicJudgeResult,
+    plan: AtomicEvidencePlan,
+    role_assessments: tuple[PairedAbsoluteAssessment, ...],
+) -> dict[str, object]:
+    """Expose stage-one findings, now including polarity compatibility, to stage two."""
+    repeat_side = {
+        item.repeat_pair_id: item.candidate_side
+        for item in plan.repeat_candidates
+    }
+    return {
+        "atomic_evidence_plan": plan.prompt_payload(),
+        "certified_outer_polarities": {
+            item.occurrence_id: item.actual_polarity
+            for item in plan.occurrences
+        },
+        "signed_occurrence_inferences": [
+            item.model_dump(mode="json")
+            for item in result.signed_occurrence_assessments
+        ],
+        "runtime_role_compatibility": [
+            item.model_dump(mode="json") for item in role_assessments
+        ],
+        "exact_repeat_interpretations": [
+            {
+                **item.model_dump(mode="json"),
+                "candidate_side": repeat_side[item.repeat_pair_id],
+            }
+            for item in result.repeated_contribution_assessments
+        ],
+    }
+
+
+def merge_atomic_assessments(
+    result: HybridJudgeResult,
+    atomic_result: AtomicJudgeResult,
+    plan: AtomicEvidencePlan,
+    role_assessments: tuple[PairedAbsoluteAssessment, ...],
+) -> HybridJudgeResult:
+    """Replace broad role answers and enforce determinate exact-repeat failures."""
+    role_criteria = {
+        AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+        AbsoluteCriterion.SINK_ROLES_CONSISTENT,
+    }
+    assessments = {
+        (item.criterion, item.subject_id): item
+        for item in result.absolute_assessments
+        if item.criterion not in role_criteria
+    }
+    for item in role_assessments:
+        assessments[(item.criterion, item.subject_id)] = item
+    duplicate_key = (
+        AbsoluteCriterion.SEMANTIC_FLUXES_NOT_DUPLICATED,
+        _CANDIDATE_SUBJECT,
+    )
+    duplicate = assessments.get(duplicate_key)
+    if duplicate is not None:
+        repeat_sides = {
+            item.repeat_pair_id: item.candidate_side
+            for item in plan.repeat_candidates
+        }
+        same_by_side: dict[str, list[str]] = defaultdict(list)
+        for item in atomic_result.repeated_contribution_assessments:
+            if (
+                item.relation
+                is RepeatedContributionRelation.SAME_PHYSICAL_CONTRIBUTION
+            ):
+                same_by_side[repeat_sides[item.repeat_pair_id]].append(
+                    item.repeat_pair_id
+                )
+
+        def repeated_override(
+            side: str, current: CandidateAbsoluteAssessment
+        ) -> CandidateAbsoluteAssessment:
+            identifiers = same_by_side.get(side, [])
+            if not identifiers:
+                return current
+            return CandidateAbsoluteAssessment(
+                verdict=AbsoluteVerdict.FAIL,
+                evidence=(
+                    "Atomic repeat assessment identified the same physical "
+                    f"contribution in: {', '.join(identifiers)}."
+                ),
+            )
+
+        assessments[duplicate_key] = PairedAbsoluteAssessment(
+            criterion=duplicate.criterion,
+            subject_id=duplicate.subject_id,
+            candidate_a=repeated_override("candidate_a", duplicate.candidate_a),
+            candidate_b=repeated_override("candidate_b", duplicate.candidate_b),
+        )
+    payload = result.model_dump(mode="json")
+    payload["absolute_assessments"] = [
+        item.model_dump(mode="json") for item in assessments.values()
+    ]
+    return HybridJudgeResult.model_validate(payload)
+
+
 def _runtime_candidate_assessments(
     candidate: CandidateModel,
     *,
@@ -367,6 +776,8 @@ def deterministic_pair_assessments(
 
 def semantic_absolute_units(
     requirements: RequirementRegistry,
+    *,
+    include_role_consistency: bool = True,
 ) -> tuple[tuple[AbsoluteCriterion, str], ...]:
     """Return the exact semantic units that the LLM must assess."""
     units: list[tuple[AbsoluteCriterion, str]] = []
@@ -386,6 +797,12 @@ def semantic_absolute_units(
     units.extend(
         (criterion, _CANDIDATE_SUBJECT)
         for criterion in _SEMANTIC_CANDIDATE_CRITERIA
+        if include_role_consistency
+        or criterion
+        not in {
+            AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+            AbsoluteCriterion.SINK_ROLES_CONSISTENT,
+        }
     )
     return tuple(units)
 
