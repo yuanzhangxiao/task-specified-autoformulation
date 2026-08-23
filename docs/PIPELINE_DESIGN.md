@@ -232,6 +232,12 @@ switch but carries the configured GPT-OSS reasoning effort into the
 OpenAI-compatible retry. Comparing it with native retry and the historical
 reasoning-disabled retry separates endpoint effects from reasoning suppression;
 it is never selected implicitly.
+The experimental vLLM adapter targets only a local OpenAI-compatible
+`/v1/chat/completions` server, uses the same compact strict JSON schema and full
+local validation boundary, and records its endpoint, reasoning effort, seed,
+transport, usage, and repair attempts in cache identity and provenance. The
+frozen vLLM reasoning pilot changes only serving runtime and reasoning effort;
+it cannot silently replace the selected Ollama judge transport.
 Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
 raw full history. The judge sees the benchmark judge prompt, certified

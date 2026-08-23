@@ -17,6 +17,7 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
     OLLAMA = "ollama"
+    VLLM = "vllm"
 
 
 class OllamaThinking(str, Enum):
@@ -39,6 +40,14 @@ class OllamaResponseMode(str, Enum):
     TOOL_CALL = "tool_call"
 
 
+class VLLMReasoningEffort(str, Enum):
+    """GPT-OSS reasoning effort exposed by vLLM chat completions."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class LLMConfig(StrictSchema):
     """Provider-neutral settings; API keys are intentionally absent."""
 
@@ -55,6 +64,10 @@ class LLMConfig(StrictSchema):
     ollama_response_mode: OllamaResponseMode = OllamaResponseMode.JSON_SCHEMA
     ollama_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     ollama_seed: int | None = Field(default=None, ge=0)
+    vllm_base_url: str = "http://127.0.0.1:8000"
+    vllm_reasoning_effort: VLLMReasoningEffort = VLLMReasoningEffort.LOW
+    vllm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    vllm_seed: int | None = Field(default=None, ge=0)
     timeout_seconds: float = Field(default=120.0, gt=0.0)
     max_output_tokens: int = Field(default=2048, ge=128, le=32768)
     proposal_target_channels: tuple[str, ...] = ()
@@ -88,6 +101,21 @@ def create_llm_client(config: LLMConfig) -> LLMClient:
             model=config.model,
             cache_directory=config.cache_directory,
             log_path=config.log_path,
+            timeout_seconds=config.timeout_seconds,
+            max_output_tokens=config.max_output_tokens,
+            **retry_options,
+        )
+    if config.provider is LLMProvider.VLLM:
+        from autoformalism.llm.vllm import VLLMClient
+
+        return VLLMClient(
+            model=config.model,
+            cache_directory=config.cache_directory,
+            log_path=config.log_path,
+            base_url=config.vllm_base_url,
+            reasoning_effort=config.vllm_reasoning_effort,
+            temperature=config.vllm_temperature,
+            seed=config.vllm_seed,
             timeout_seconds=config.timeout_seconds,
             max_output_tokens=config.max_output_tokens,
             **retry_options,

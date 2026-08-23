@@ -46,6 +46,7 @@ from scripts.run_hybrid_judge import (
     _ensure_run_manifest,
     _failed,
     _planned_keys,
+    _select_pair_ids,
     _system_prompt,
 )
 
@@ -112,6 +113,26 @@ The primary objective is to recover the following task-required mechanisms:
 
 The dimensionality must be inferred.
 """
+
+
+def test_named_pair_selection_preserves_requested_order_and_fails_closed() -> None:
+    first = AdversarialPair(
+        pair_id="first",
+        benchmark_id="phase_b_test",
+        tier="easy",
+        mutation_type="wrong_meal_sink",
+        valid_candidate=_candidate(),
+        adversarial_candidate=_candidate(disconnected_claim=True),
+    )
+    second = first.model_copy(update={"pair_id": "second"})
+
+    selected = _select_pair_ids((first, second), ["second", "first"])
+
+    assert [pair.pair_id for pair in selected] == ["second", "first"]
+    with pytest.raises(ValueError, match="missing"):
+        _select_pair_ids((first, second), ["unknown"])
+    with pytest.raises(ValueError, match="duplicates"):
+        _select_pair_ids((first, second), ["first", "first"])
 
 
 def _hybrid_payload(

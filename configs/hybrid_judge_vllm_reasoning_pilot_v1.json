@@ -1,0 +1,49 @@
+{
+  "schema_version": "hybrid-judge-vllm-reasoning-pilot-1",
+  "status": "frozen_cross_runtime_reasoning_ablation",
+  "judge_model": "vllm:openai/gpt-oss-20b",
+  "source_pairs": "judge-hybrid-heldout-v1/pairs.jsonl",
+  "selected_pair_ids": [
+    "heldout_cca8883e6ae1b33f",
+    "heldout_55d8026028a90be5",
+    "heldout_bdaffa988141aeff",
+    "heldout_5a0e7e972521763d"
+  ],
+  "mutation_types": [
+    "wrong_meal_sink",
+    "duplicated_gp_flux",
+    "disconnected_claimed_mechanism",
+    "unjustified_one_sided_accumulator"
+  ],
+  "reasoning_efforts": [
+    "low",
+    "high"
+  ],
+  "repetitions": 5,
+  "candidate_order_policy": "both_orientations",
+  "planned_logical_calls_per_reasoning_effort": 40,
+  "planned_logical_calls_total": 80,
+  "transport": "vllm_openai_chat_json_schema",
+  "provider_retry": {
+    "max_attempts": 10,
+    "endpoint": "/v1/chat/completions",
+    "schema": "unchanged_on_retry",
+    "repair_feedback": "contract_only",
+    "seed_policy": "configured_seed_plus_attempt_minus_one"
+  },
+  "serving_runtime": {
+    "container": "docker://vllm/vllm-openai:v0.27.1",
+    "container_format": "job_local_apptainer_sandbox",
+    "gpu_count": 1,
+    "gpu_class": "A40",
+    "max_model_length": 32768
+  },
+  "comparison_metrics": [
+    "structured_response_success_rate",
+    "combined_preference_accuracy_conditional_on_response",
+    "combined_preference_accuracy_including_failures",
+    "order_consistency_rate",
+    "repeat_icc_1_1",
+    "provider_attempts"
+  ]
+}

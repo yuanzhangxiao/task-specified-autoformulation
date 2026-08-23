@@ -168,7 +168,11 @@ The pipeline is iterative:
   shared `/work/hdd` filesystem, before vLLM started. The failure persisted on
   node-local NVMe, isolating it to SquashFS creation rather than storage space.
   The smoke job now retains its OCI cache persistently but builds and executes a
-  bounded job-local sandbox, bypassing SquashFS entirely.
+  bounded job-local sandbox, bypassing SquashFS entirely. The smoke succeeded on
+  one A40 with nonempty strict JSON output, but its single low-reasoning verdict
+  was scientifically incorrect. A frozen four-pair vLLM pilot therefore compares
+  low and high reasoning under identical seeds, candidate orientations, schemas,
+  and scoring without changing the production judge.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

@@ -287,6 +287,55 @@ virtual-environment, public-data, container, and model paths from
 inputs, so a disconnected or expired login session does not affect an already
 submitted job.
 
+### Delta vLLM judge reasoning pilot
+
+After the one-A40 vLLM smoke test passes, compare low and high GPT-OSS reasoning
+on the same four frozen difficult pairs, five seeds, and both candidate
+orientations. The eight array tasks are self-contained: tasks 0--3 run low
+reasoning and tasks 4--7 run high reasoning, with one pair per task. Each task
+builds a job-local Apptainer sandbox from the persistent OCI cache, avoiding the
+Delta `mksquashfs` failure observed when converting this image to SIF.
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_reasoning.slurm
+```
+
+The input is the existing held-out pair and label set under
+`$AF_WORK/phase_b/judge-hybrid-heldout-v1`; no new labels or mutations are
+generated. After all eight tasks finish, merge and analyze low and high
+separately:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+pilot=/work/hdd/bibo/$USER/phase_b/judge-hybrid-vllm-reasoning-pilot-v1
+labels=/work/hdd/bibo/$USER/phase_b/judge-hybrid-heldout-v1/hybrid_labels.jsonl
+
+for effort in low high; do
+  root="$pilot/$effort"
+  "$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+    --inputs "$root"/shards/shard_*/hybrid_judge_scores.csv \
+    --failure-inputs "$root"/shards/shard_*/hybrid_judge_failures.jsonl \
+    --output "$root/hybrid_judge_scores.csv" \
+    --failure-output "$root/hybrid_judge_failures.jsonl" \
+    --expected 40
+  "$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+    --scores "$root/hybrid_judge_scores.csv" \
+    --failures "$root/hybrid_judge_failures.jsonl" \
+    --labels "$labels" \
+    --output "$root/hybrid_judge_metrics.json"
+done
+```
+
+Compare response success, conditional and end-to-end preference accuracy,
+question-level accuracy, order consistency, repeat ICC/SD, provider attempts,
+and elapsed time. This is a serving-runtime and reasoning-effort ablation only;
+it does not change the production Ollama judge or search objective.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

@@ -34,6 +34,7 @@ from autoformalism.llm import (
     LLMProvider,
     OllamaResponseMode,
     OllamaThinking,
+    VLLMReasoningEffort,
     create_llm_client,
 )
 from autoformalism.llm.exceptions import LLMError
@@ -175,6 +176,24 @@ def _select_shard(
         for index, pair in enumerate(pairs)
         if index % shard_count == shard_index
     )
+
+
+def _select_pair_ids(
+    pairs: tuple[AdversarialPair, ...],
+    pair_ids: list[str] | None,
+) -> tuple[AdversarialPair, ...]:
+    """Select named pairs in requested order and fail on ambiguous plans."""
+    if pair_ids is None:
+        return pairs
+    if len(set(pair_ids)) != len(pair_ids):
+        raise ValueError("--pair-ids must not contain duplicates")
+    by_id = {pair.pair_id: pair for pair in pairs}
+    if len(by_id) != len(pairs):
+        raise ValueError("pair file contains duplicate pair identifiers")
+    missing = [pair_id for pair_id in pair_ids if pair_id not in by_id]
+    if missing:
+        raise ValueError(f"requested pair identifiers are missing: {missing}")
+    return tuple(by_id[pair_id] for pair_id in pair_ids)
 
 
 def _planned_keys(
@@ -349,6 +368,7 @@ def _json(value: object) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pairs", type=Path, required=True)
+    parser.add_argument("--pair-ids", nargs="+")
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--judge-models", nargs="+", required=True)
     parser.add_argument("--repetitions", type=int, default=3)
@@ -374,6 +394,14 @@ def main() -> None:
         ),
     )
     parser.add_argument("--ollama-seed-base", type=int)
+    parser.add_argument("--vllm-base-url", default="http://127.0.0.1:8000")
+    parser.add_argument(
+        "--vllm-reasoning-effort",
+        choices=tuple(item.value for item in VLLMReasoningEffort),
+        default=VLLMReasoningEffort.LOW.value,
+    )
+    parser.add_argument("--vllm-temperature", type=float, default=0.0)
+    parser.add_argument("--vllm-seed-base", type=int)
     parser.add_argument("--partial-tiebreak-weight", type=float, default=0.05)
     parser.add_argument("--comparative-weight", type=float, default=0.25)
     parser.add_argument("--tie-threshold", type=float, default=0.05)
@@ -392,6 +420,10 @@ def main() -> None:
         raise SystemExit("--ollama-temperature must be in [0, 2]")
     if args.ollama_seed_base is not None and args.ollama_seed_base < 0:
         raise SystemExit("--ollama-seed-base must be nonnegative")
+    if not 0.0 <= args.vllm_temperature <= 2.0:
+        raise SystemExit("--vllm-temperature must be in [0, 2]")
+    if args.vllm_seed_base is not None and args.vllm_seed_base < 0:
+        raise SystemExit("--vllm-seed-base must be nonnegative")
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         raise SystemExit("shard index must be in [0, shard count)")
     scoring = HybridScoringConfig(
@@ -400,11 +432,12 @@ def main() -> None:
         tie_threshold=args.tie_threshold,
     )
     pair_bytes = args.pairs.read_bytes()
-    all_pairs = tuple(
+    source_pairs = tuple(
         AdversarialPair.model_validate_json(line)
         for line in pair_bytes.decode("utf-8").splitlines()
         if line.strip()
     )
+    all_pairs = _select_pair_ids(source_pairs, args.pair_ids)
     pairs = _select_shard(
         all_pairs,
         shard_index=args.shard_index,
@@ -432,6 +465,17 @@ def main() -> None:
         "comparative_weight": args.comparative_weight,
         "tie_threshold": args.tie_threshold,
     }
+    if args.pair_ids is not None:
+        manifest["source_pair_count"] = len(source_pairs)
+        manifest["requested_pair_ids"] = args.pair_ids
+    if any(model.startswith("vllm:") for model in args.judge_models):
+        manifest.update(
+            {
+                "vllm_reasoning_effort": args.vllm_reasoning_effort,
+                "vllm_temperature": args.vllm_temperature,
+                "vllm_seed_base": args.vllm_seed_base,
+            }
+        )
     _ensure_run_manifest(
         args.output_root / "hybrid_judge_run_manifest.json", manifest
     )
@@ -476,6 +520,7 @@ def main() -> None:
     for model_spec in args.judge_models:
         provider_name, model = model_spec.split(":", 1)
         provider = LLMProvider(provider_name)
+        model_storage_name = model.replace("/", "__")
         clients = tuple(
             create_llm_client(
                 LLMConfig(
@@ -485,12 +530,12 @@ def main() -> None:
                         args.output_root
                         / "cache"
                         / provider.value
-                        / model
+                        / model_storage_name
                         / f"repetition_{repetition}"
                     ),
                     log_path=(
                         args.output_root
-                        / f"{provider.value}_{model}_events.jsonl"
+                        / f"{provider.value}_{model_storage_name}_events.jsonl"
                     ),
                     max_attempts=args.max_attempts,
                     ollama_base_url=args.ollama_base_url,
@@ -503,6 +548,16 @@ def main() -> None:
                         None
                         if args.ollama_seed_base is None
                         else args.ollama_seed_base + repetition
+                    ),
+                    vllm_base_url=args.vllm_base_url,
+                    vllm_reasoning_effort=VLLMReasoningEffort(
+                        args.vllm_reasoning_effort
+                    ),
+                    vllm_temperature=args.vllm_temperature,
+                    vllm_seed=(
+                        None
+                        if args.vllm_seed_base is None
+                        else args.vllm_seed_base + repetition
                     ),
                     timeout_seconds=args.timeout_seconds,
                     max_output_tokens=args.max_output_tokens,
