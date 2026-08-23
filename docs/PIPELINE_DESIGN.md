@@ -261,6 +261,12 @@ predicates, and retains direct comparative judgments as a distinct residual.
 Generic conjunctive groups and all numeric aggregation are runtime-owned. This
 prospective protocol must pass held-out question-level calibration before it may
 replace the production category-score judge.
+Its deterministic evidence is versioned. In addition to graph reachability,
+version 2 supplies symmetric syntax-only algebraic facts: top-level additive-term
+polarity, symbol membership, and exact same-polarity repeated terms for every
+process and state equation. These facts are authoritative descriptions of the
+canonical expression but never scientific source/sink or duplication verdicts;
+the LLM remains responsible for interpretation against public requirements.
 
 Calibration provider failures are first-class outcomes. After bounded
 contract-only retries, a terminal structured-response failure is stored in an

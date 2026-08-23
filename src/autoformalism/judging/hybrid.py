@@ -7,8 +7,9 @@ loads private benchmark truth, fit metrics, or trajectories.
 
 from __future__ import annotations
 
+import ast
 import hashlib
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
 
@@ -31,6 +32,7 @@ from autoformalism.schemas import (
 from autoformalism.schemas.base import Identifier, StrictSchema, UnitInterval
 
 _CANDIDATE_SUBJECT = "candidate"
+STRUCTURAL_FACTS_SCHEMA_VERSION = "structural-facts-2"
 _SEMANTIC_CANDIDATE_CRITERIA = (
     AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
     AbsoluteCriterion.SINK_ROLES_CONSISTENT,
@@ -94,6 +96,95 @@ def candidate_claims(candidate: CandidateModel) -> tuple[ProposerClaim, ...]:
     return tuple(claims)
 
 
+def _signed_additive_terms(
+    node: ast.expr, polarity: int = 1
+) -> list[tuple[int, ast.expr]]:
+    """Flatten top-level addition while preserving deterministic polarity."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [
+            *_signed_additive_terms(node.left, polarity),
+            *_signed_additive_terms(node.right, polarity),
+        ]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub):
+        return [
+            *_signed_additive_terms(node.left, polarity),
+            *_signed_additive_terms(node.right, -polarity),
+        ]
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return _signed_additive_terms(node.operand, -polarity)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
+        return _signed_additive_terms(node.operand, polarity)
+    return [(polarity, node)]
+
+
+def _algebraic_expression_facts(
+    source: str,
+    *,
+    location: str,
+    parser: RestrictedParser,
+) -> dict[str, object]:
+    """Return syntax-only additive, polarity, and exact-repeat facts."""
+    parsed = parser.parse(source, location=location)
+    raw_terms = _signed_additive_terms(parsed.tree.body)
+    terms = []
+    repeat_groups: dict[tuple[int, str], list[str]] = defaultdict(list)
+    symbol_occurrences: dict[str, dict[str, list[str]]] = defaultdict(
+        lambda: {"positive_term_ids": [], "negative_term_ids": []}
+    )
+    for index, (polarity, node) in enumerate(raw_terms):
+        term_id = f"term_{index}"
+        normalized = ast.unparse(ast.fix_missing_locations(node))
+        term_symbols = sorted(
+            parser.parse(normalized, location=f"{location}:{term_id}").symbols
+        )
+        polarity_name = "positive" if polarity > 0 else "negative"
+        terms.append(
+            {
+                "term_id": term_id,
+                "polarity": polarity_name,
+                "normalized_expression": normalized,
+                "symbols": term_symbols,
+            }
+        )
+        fingerprint = ast.dump(node, annotate_fields=True, include_attributes=False)
+        repeat_groups[(polarity, fingerprint)].append(term_id)
+        occurrence_key = f"{polarity_name}_term_ids"
+        for symbol in term_symbols:
+            symbol_occurrences[symbol][occurrence_key].append(term_id)
+    repeated = []
+    terms_by_id = {str(item["term_id"]): item for item in terms}
+    for (polarity, _fingerprint), term_ids in repeat_groups.items():
+        if len(term_ids) < 2:
+            continue
+        exemplar = terms_by_id[term_ids[0]]
+        repeated.append(
+            {
+                "polarity": "positive" if polarity > 0 else "negative",
+                "normalized_expression": exemplar["normalized_expression"],
+                "count": len(term_ids),
+                "term_ids": term_ids,
+            }
+        )
+    return {
+        "source_expression": source,
+        "top_level_additive_terms": terms,
+        "signed_symbol_occurrences": {
+            symbol: {
+                **occurrences,
+                "positive_term_count": len(occurrences["positive_term_ids"]),
+                "negative_term_count": len(occurrences["negative_term_ids"]),
+            }
+            for symbol, occurrences in sorted(symbol_occurrences.items())
+        },
+        "exact_repeated_additive_terms": sorted(
+            repeated,
+            key=lambda item: (
+                str(item["polarity"]), str(item["normalized_expression"])
+            ),
+        ),
+    }
+
+
 def structural_facts(
     candidate: CandidateModel,
     *,
@@ -102,25 +193,32 @@ def structural_facts(
     """Return certified dependency facts for one canonical candidate."""
     parser = RestrictedParser()
     graph: dict[str, set[str]] = {}
+    algebraic_expressions: dict[str, object] = {}
 
     def edge(source: str, destination: str) -> None:
         graph.setdefault(source, set()).add(destination)
 
     expression_symbols: dict[str, set[str]] = {}
     for process in candidate.processes:
-        symbols = set(
-            parser.parse(
-                process.expression, location=f"process:{process.name}"
-            ).symbols
+        location = f"process:{process.name}"
+        parsed = parser.parse(process.expression, location=location)
+        symbols = set(parsed.symbols)
+        algebraic_expressions[location] = _algebraic_expression_facts(
+            process.expression,
+            location=location,
+            parser=parser,
         )
         expression_symbols[process.name] = symbols
         for symbol in symbols:
             edge(symbol, process.name)
     for equation in candidate.state_equations:
-        symbols = set(
-            parser.parse(
-                equation.rhs, location=f"equation:{equation.state}"
-            ).symbols
+        location = f"equation:{equation.state}"
+        parsed = parser.parse(equation.rhs, location=location)
+        symbols = set(parsed.symbols)
+        algebraic_expressions[location] = _algebraic_expression_facts(
+            equation.rhs,
+            location=location,
+            parser=parser,
         )
         expression_symbols[equation.state] = symbols
         for symbol in symbols:
@@ -170,6 +268,7 @@ def structural_facts(
             "target_paths": paths,
         }
     return {
+        "schema_version": STRUCTURAL_FACTS_SCHEMA_VERSION,
         "task_inputs": {
             name: {
                 "reaches_requested_target": bool(paths_from(name)),
@@ -181,6 +280,7 @@ def structural_facts(
         "proposer_claims": [
             item.model_dump(mode="json") for item in candidate_claims(candidate)
         ],
+        "algebraic_expressions": algebraic_expressions,
     }
 
 

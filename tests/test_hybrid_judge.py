@@ -104,6 +104,15 @@ def _candidate(*, disconnected_claim: bool = False) -> CandidateModel:
     )
 
 
+def _candidate_with_gp_rhs(rhs: str) -> CandidateModel:
+    payload = _candidate().model_dump(mode="json")
+    equation = next(
+        item for item in payload["state_equations"] if item["state"] == "Gp"
+    )
+    equation["rhs"] = rhs
+    return CandidateModel.model_validate(payload)
+
+
 def _prompt() -> str:
     return """A. Task specification
 
@@ -227,6 +236,48 @@ def test_structural_facts_certify_paths_without_scientific_verdicts() -> None:
     assert "scientifically_valid" not in facts["components"]["extra"]
 
 
+def test_structural_facts_certify_signed_occurrences_and_exact_repeats() -> None:
+    baseline = structural_facts(
+        _candidate_with_gp_rhs("meal_event_g - U"),
+        task_inputs=("meal_event_g", "insulin_input"),
+    )
+    wrong_sink = structural_facts(
+        _candidate_with_gp_rhs("(meal_event_g - U) - abs(meal_event_g)"),
+        task_inputs=("meal_event_g", "insulin_input"),
+    )
+    duplicated = structural_facts(
+        _candidate_with_gp_rhs("(meal_event_g - U) + meal_event_g"),
+        task_inputs=("meal_event_g", "insulin_input"),
+    )
+
+    assert baseline["schema_version"] == "structural-facts-2"
+    baseline_equation = baseline["algebraic_expressions"]["equation:Gp"]
+    assert baseline_equation["signed_symbol_occurrences"]["meal_event_g"] == {
+        "positive_term_ids": ["term_0"],
+        "negative_term_ids": [],
+        "positive_term_count": 1,
+        "negative_term_count": 0,
+    }
+    wrong_equation = wrong_sink["algebraic_expressions"]["equation:Gp"]
+    assert wrong_equation["signed_symbol_occurrences"]["meal_event_g"] == {
+        "positive_term_ids": ["term_0"],
+        "negative_term_ids": ["term_2"],
+        "positive_term_count": 1,
+        "negative_term_count": 1,
+    }
+    assert wrong_equation["exact_repeated_additive_terms"] == []
+    duplicate_equation = duplicated["algebraic_expressions"]["equation:Gp"]
+    assert duplicate_equation["exact_repeated_additive_terms"] == [
+        {
+            "polarity": "positive",
+            "normalized_expression": "meal_event_g",
+            "count": 2,
+            "term_ids": ["term_0", "term_2"],
+        }
+    ]
+    assert "scientifically_duplicated" not in duplicate_equation
+
+
 def test_json_primary_tool_fallback_keeps_general_judge_prompt_unchanged() -> None:
     context = ValidationContext(
         targets=("Gp", "U"),
@@ -254,6 +305,9 @@ def test_json_primary_tool_fallback_keeps_general_judge_prompt_unchanged() -> No
     assert fallback == ordinary
     assert "Configured transport override" not in fallback
     assert "Configured transport override" in tool_only
+    assert "certified signed" in ordinary
+    assert "Algebraically redundant terms" in ordinary
+    assert "infer that candidates are identical" in ordinary
 
 
 def test_deterministic_pair_assessments_keep_retained_disconnection() -> None:

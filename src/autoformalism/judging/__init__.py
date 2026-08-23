@@ -1,6 +1,7 @@
 """Scientific-judge fact extraction and deterministic aggregation."""
 
 from autoformalism.judging.hybrid import (
+    STRUCTURAL_FACTS_SCHEMA_VERSION,
     HybridScoringConfig,
     build_group_registry,
     candidate_claims,
@@ -12,6 +13,7 @@ from autoformalism.judging.hybrid import (
 )
 
 __all__ = [
+    "STRUCTURAL_FACTS_SCHEMA_VERSION",
     "HybridScoringConfig",
     "build_group_registry",
     "candidate_claims",

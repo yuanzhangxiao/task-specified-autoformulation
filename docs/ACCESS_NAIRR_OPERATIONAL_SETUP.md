@@ -422,6 +422,56 @@ stored rationale in JSONL, while the Markdown report groups verdict patterns by
 criterion, mutation, and candidate order and shows bounded representative
 examples. Hidden reasoning is never parsed.
 
+The evidence audit identified two development targets: wrong source/sink polarity
+and exact repeated flux accounting. Run the frozen 40-call matched vLLM-low pilot
+on only the two pairs from each mutation family:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(sacct -X -n -j 21372879 -o Account%40 | awk 'NF {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_facts_pilot.slurm
+```
+
+The four array tasks each request one A40 and make ten calls for one pair. After
+all four finish, merge and analyze the 40 treatment outcomes:
+
+```bash
+facts=/work/hdd/bibo/$USER/phase_b/judge-hybrid-vllm-facts-pilot-v1
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$facts"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs "$facts"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$facts/hybrid_judge_scores.csv" \
+  --failure-output "$facts/hybrid_judge_failures.jsonl" \
+  --expected 40
+
+"$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+  --scores "$facts/hybrid_judge_scores.csv" \
+  --failures "$facts/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --output "$facts/hybrid_judge_metrics.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_diagnostics.py" \
+  --scores "$facts/hybrid_judge_scores.csv" \
+  --failures "$facts/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --pairs "$pairs" \
+  --output "$facts/hybrid_judge_diagnostics.json"
+
+"$python_bin" "$repo/scripts/audit_hybrid_judge_evidence.py" \
+  --scores "$facts/hybrid_judge_scores.csv" \
+  --labels "$labels" \
+  --pairs "$pairs" \
+  --output "$facts/hybrid_judge_evidence_errors.jsonl" \
+  --summary "$facts/hybrid_judge_evidence_audit.md"
+```
+
+This is development reuse of opened pairs, not a new held-out claim. Model,
+reasoning effort, seeds, orders, retries, schema, and scoring remain matched to
+the old control. Only the general algebraic facts and rubric wording change.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

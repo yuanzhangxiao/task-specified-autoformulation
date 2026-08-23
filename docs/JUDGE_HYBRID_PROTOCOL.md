@@ -430,3 +430,29 @@ actual-verdict patterns and candidate-order counts and shows a bounded set of
 representative rationales. It does not inspect hidden reasoning, infer missing
 answers, alter scores, or issue new LLM requests. Prompt or deterministic-fact
 changes follow only after these stored rationales identify the recurring error.
+
+The frozen audit found that GPT-OSS frequently asserted a positive sign when an
+added negative input term was visible, treated an exactly repeated additive term
+as acceptable merely because algebra could combine it, and declared comparative
+ties from equal declaration counts while overlooking changed equations. These
+errors occurred in both candidate orientations. They motivate protocol version
+`hybrid-judge-protocol-2` and structural-fact schema `structural-facts-2`.
+
+The new facts remain syntax-only and symmetric. For every process and state
+equation, runtime provides the source expression, flattened top-level additive
+terms with explicit polarity, symbol membership in those signed terms, and groups
+of exactly repeated same-polarity AST terms. The facts do not label a term as a
+scientific source, sink, assumption, or duplicated physical flux. The judge must
+still interpret those facts against the public task and proposer claims. The
+general rubric now states that every signed occurrence must be inspected, exact
+repetition cannot be excused solely by coefficient simplification, and equation-
+level changes count in comparative assumption and parsimony judgments even when
+declaration counts are equal.
+
+`configs/hybrid_judge_vllm_facts_pilot_v1.json` freezes a matched development
+ablation over the two wrong-sink and two duplicated-flux pairs. It reuses the same
+20B model, low reasoning, five seeds, both orientations, response schema, retry
+limit, and score weights. The manifest records both protocol and fact-schema
+versions so an old output directory cannot silently resume under the new prompt.
+Because the pair outcomes were already opened, a passing result only authorizes
+freezing an unchanged protocol for new baseline structures.

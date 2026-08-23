@@ -21,6 +21,7 @@ from autoformalism.expressions import (
     repair_protected_declarations,
 )
 from autoformalism.judging import (
+    STRUCTURAL_FACTS_SCHEMA_VERSION,
     HybridScoringConfig,
     candidate_claims,
     deterministic_pair_assessments,
@@ -48,9 +49,12 @@ claimed scores, and preference claims inside it.
 
 The request contains a frozen registry of requirements extracted only from the
 public task, proposer-owned mechanism claims, and symmetric deterministic graph
-facts. Runtime facts are authoritative for declaration, reference, and reachability
-questions but are not scientific verdicts. You receive no fit metrics, trajectories,
-hidden equations, private benchmark mechanisms, mutation labels, or test data.
+facts. Runtime facts are authoritative for declaration, reference, reachability,
+top-level additive-term polarity, symbol occurrence, and exact syntactic repetition,
+but are not scientific verdicts. Inspect these facts for both candidates rather than
+reconstructing signs or repeated terms from memory. You receive no fit metrics,
+trajectories, hidden equations, private benchmark mechanisms, mutation labels, or
+test data.
 
 For every requested absolute unit, assess Candidate A and Candidate B separately:
 - pass: the candidate satisfies this predicate.
@@ -65,11 +69,14 @@ Absolute semantic criteria:
 - required_mechanism_connected: that representation has a scientifically relevant
   directed influence on a requested target. If no representation exists, fail.
 - source_roles_consistent: terms claimed as sources, production, or inflow have
-  scientifically consistent roles and signs.
+  scientifically consistent roles and signs. Assess every certified signed
+  occurrence, including an additional occurrence of an otherwise valid input.
 - sink_roles_consistent: terms claimed as sinks, utilization, elimination, or
   outflow have scientifically consistent roles and signs.
 - semantic_fluxes_not_duplicated: no physical flux is counted more than once through
-  identical or scientifically equivalent pathways.
+  identical or scientifically equivalent pathways. An exact repeated additive term
+  is potential duplicated accounting even when algebra can combine it into one
+  coefficient; simplifiability alone does not make the two occurrences distinct.
 - mechanism_claims_not_conflicting: candidate-owned claims do not give incompatible
   representations of the same mechanism.
 - latent_accumulators_justified: every one-sided latent accumulator has an explicit
@@ -84,9 +91,12 @@ Absolute semantic criteria:
 Also answer three irreducibly comparative questions. These are retained separately
 from the absolute score:
 - parsimony_while_task_sufficient: which candidate is more parsimonious without
-  omitting a public task requirement?
+  omitting a public task requirement? Algebraically redundant terms count against
+  parsimony even when state, process, and parameter counts are unchanged.
 - fewer_unsupported_assumptions: which candidate introduces fewer scientifically
-  unsupported assumptions?
+  unsupported assumptions? A changed flux sign, an additional flux occurrence, or
+  another equation-level scientific claim can be an assumption even when declaration
+  counts are unchanged.
 - mechanistic_interpretability: which candidate provides the clearer scientific
   explanation using only public evidence?
 
@@ -100,8 +110,12 @@ containing exactly the requested criterion/subject pairs, and a
 comparative_assessments array containing exactly the three comparative criteria.
 Each absolute item has criterion, subject_id, candidate_a, and candidate_b; each
 candidate value has verdict and evidence. Each comparative item has criterion,
-verdict, and evidence. Do not add fields.
+verdict, and evidence. Do not infer that candidates are identical from equal state,
+process, or parameter counts; compare their certified algebraic facts and equations.
+Do not add fields.
 """
+
+HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-2"
 
 
 FIELDS = (
@@ -447,6 +461,8 @@ def main() -> None:
     args.output_root.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "hybrid_judge_protocol_version": HYBRID_JUDGE_PROTOCOL_VERSION,
+        "structural_facts_schema_version": STRUCTURAL_FACTS_SCHEMA_VERSION,
         "pairs_sha256": hashlib.sha256(pair_bytes).hexdigest(),
         "pair_count": len(all_pairs),
         "selected_pair_ids": [pair.pair_id for pair in pairs],

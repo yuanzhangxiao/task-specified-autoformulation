@@ -185,6 +185,11 @@ The pipeline is iterative:
   but the scientific protocol missed its accuracy and order-consistency gates.
   Offline pair/criterion attribution and structure-aware aggregation sensitivity
   are diagnostics only; any revised protocol requires new baseline structures.
+  The stored-rationale audit traced the weak categories to missed signed terms,
+  dismissal of exact repetition as algebraically mergeable, and comparative ties
+  based only on declaration counts. A frozen matched development pilot therefore
+  adds symmetric syntax-only signed-term and exact-repeat facts plus general rubric
+  clarification without changing the LLM, seeds, schema, retries, or score weights.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

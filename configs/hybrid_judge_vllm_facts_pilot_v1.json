@@ -1,0 +1,71 @@
+{
+  "schema_version": "hybrid-judge-vllm-facts-pilot-1",
+  "status": "frozen_matched_development_ablation",
+  "purpose": "test benchmark-independent algebraic facts and rubric clarification",
+  "judge_model": "vllm:openai/gpt-oss-20b",
+  "source_pairs": "judge-hybrid-heldout-v1/pairs.jsonl",
+  "selected_pair_ids": [
+    "heldout_55d8026028a90be5",
+    "heldout_ee453d8cc6fcb7a2",
+    "heldout_70b3222d4736ea1d",
+    "heldout_cca8883e6ae1b33f"
+  ],
+  "selected_mutations": [
+    "duplicated_gp_flux",
+    "wrong_meal_sink"
+  ],
+  "treatment": {
+    "hybrid_judge_protocol_version": "hybrid-judge-protocol-2",
+    "structural_facts_schema_version": "structural-facts-2",
+    "new_runtime_facts": [
+      "top_level_additive_terms",
+      "signed_symbol_occurrences",
+      "exact_repeated_additive_terms"
+    ],
+    "rubric_changes": [
+      "inspect every signed occurrence",
+      "algebraic simplifiability does not excuse repeated accounting",
+      "comparative judgments include equation-level differences"
+    ]
+  },
+  "matched_control": {
+    "root": "judge-hybrid-vllm-low-full-v1",
+    "hybrid_judge_protocol_version": "hybrid-judge-protocol-1",
+    "structural_facts_schema_version": "structural-facts-1",
+    "same_model_reasoning_seeds_orders_and_scoring": true,
+    "targeted_pair_aggregate_accuracy": 0.75,
+    "targeted_call_accuracy": 0.575,
+    "targeted_order_consistency": 0.45,
+    "source_roles_consistent_accuracy": 0.45,
+    "semantic_fluxes_not_duplicated_accuracy": 0.55
+  },
+  "reasoning_effort": "low",
+  "temperature": 0.2,
+  "seed_base": 9000,
+  "repetitions": 5,
+  "candidate_order_policy": "both_orientations",
+  "planned_logical_calls": 40,
+  "transport": "vllm_openai_chat_json_schema",
+  "provider_retry": {
+    "max_attempts": 10,
+    "endpoint": "/v1/chat/completions",
+    "schema": "unchanged_on_retry",
+    "repair_feedback": "contract_only",
+    "seed_policy": "configured_seed_plus_attempt_minus_one"
+  },
+  "scoring": {
+    "partial_tiebreak_weight": 0.05,
+    "comparative_weight": 0.25,
+    "tie_threshold": 0.05
+  },
+  "development_gate": {
+    "minimum_response_success": 0.95,
+    "minimum_pair_aggregate_accuracy": 1.0,
+    "minimum_order_consistency": 0.8,
+    "minimum_source_roles_consistent_accuracy": 0.75,
+    "minimum_semantic_fluxes_not_duplicated_accuracy": 0.75,
+    "minimum_targeted_comparative_accuracy": 0.6,
+    "next_if_passed": "freeze unchanged protocol for new baseline structures",
+    "next_if_failed": "inspect stored rationales before further prompt changes"
+  }
+}
