@@ -421,3 +421,12 @@ Because these outcomes have already been opened, every alternative aggregation
 and cross-structure estimate is exploratory. A revised weight or threshold must be
 frozen and tested on new baseline structures before it becomes a performance claim
 or enters search.
+
+`audit_hybrid_judge_evidence.py` is the next read-only boundary. For every
+mutation-contract label, it normalizes Candidate A/B back to baseline/mutated,
+checks the certified verdict, and preserves the exact public evidence attached to
+an incorrect answer. The JSONL contains every error; the Markdown report groups
+actual-verdict patterns and candidate-order counts and shows a bounded set of
+representative rationales. It does not inspect hidden reasoning, infer missing
+answers, alter scores, or issue new LLM requests. Prompt or deterministic-fact
+changes follow only after these stored rationales identify the recurring error.

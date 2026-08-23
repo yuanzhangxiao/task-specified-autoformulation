@@ -401,6 +401,15 @@ pairs=/work/hdd/bibo/$USER/phase_b/judge-hybrid-heldout-v1/pairs.jsonl
   --output "$final/hybrid_judge_diagnostics.json"
 
 cat "$final/hybrid_judge_diagnostics.md"
+
+"$python_bin" "$repo/scripts/audit_hybrid_judge_evidence.py" \
+  --scores "$final/hybrid_judge_scores.csv" \
+  --labels "$labels" \
+  --pairs "$pairs" \
+  --output "$final/hybrid_judge_evidence_errors.jsonl" \
+  --summary "$final/hybrid_judge_evidence_audit.md"
+
+cat "$final/hybrid_judge_evidence_audit.md"
 ```
 
 The diagnostic reconstructs the frozen score before evaluating a fixed generic
@@ -408,6 +417,10 @@ grid of comparative weights and tie thresholds. It groups mutations by
 canonical baseline structure and reports leave-one-structure-out sensitivity.
 All alternative aggregation results are explicitly post-hoc and cannot be used
 as confirmatory performance for a revised protocol on the same pairs.
+The separate evidence audit retains every incorrect certified verdict and its
+stored rationale in JSONL, while the Markdown report groups verdict patterns by
+criterion, mutation, and candidate order and shows bounded representative
+examples. Hidden reasoning is never parsed.
 
 ## ACES: first login and identity check
 
