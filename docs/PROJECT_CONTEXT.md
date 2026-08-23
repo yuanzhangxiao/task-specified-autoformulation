@@ -163,7 +163,11 @@ The pipeline is iterative:
 - The low-reasoning OpenAI-compatible retry completed all calls but reintroduced
   Candidate-A order bias, so native JSON retry remains the Ollama choice. The
   next cross-runtime diagnostic uses a pinned vLLM container and a one-A40
-  structured-output smoke test before implementing a new judge provider.
+  structured-output smoke test before implementing a new judge provider. Its
+  first deployment attempt failed during Apptainer SquashFS creation on the
+  shared `/work/hdd` filesystem, before vLLM started. The smoke job now retains
+  its OCI cache persistently but uses bounded node-local build temporary storage
+  and limited SquashFS parallelism.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

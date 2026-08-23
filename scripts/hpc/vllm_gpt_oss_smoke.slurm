@@ -22,13 +22,29 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_HF_HOME:=${AF_PROJECT}/huggingface-cache}"
 : "${AF_LOCAL_MODEL:=openai/gpt-oss-20b}"
 : "${AF_VLLM_SMOKE_ROOT:=${AF_WORK}/phase_b/vllm-gpt-oss-smoke-v1}"
+: "${AF_APPTAINER_TMP_MIN_GIB:=40}"
+: "${AF_APPTAINER_MKSQUASHFS_PROCESSORS:=2}"
 
 readonly port=$((20000 + SLURM_JOB_ID % 20000))
 readonly endpoint="http://127.0.0.1:${port}"
 readonly server_log="${AF_VLLM_SMOKE_ROOT}/vllm-${SLURM_JOB_ID}.log"
 readonly response_path="${AF_VLLM_SMOKE_ROOT}/response-${SLURM_JOB_ID}.json"
 readonly apptainer_cache="${AF_PROJECT}/apptainer-cache"
-readonly apptainer_tmp="${AF_WORK}/apptainer-tmp"
+readonly node_local_tmp_root="${SLURM_TMPDIR:-/tmp/${af_user}}"
+readonly apptainer_tmp="${node_local_tmp_root}/apptainer-${SLURM_JOB_ID}"
+
+server_pid=""
+partial_image=""
+cleanup() {
+  if [[ -n "${server_pid}" ]]; then
+    kill "${server_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${partial_image}" ]]; then
+    rm -f -- "${partial_image}"
+  fi
+  rm -rf -- "${apptainer_tmp}"
+}
+trap cleanup EXIT
 
 mkdir -p \
   "${AF_REPO_ROOT}/logs" \
@@ -41,13 +57,28 @@ cd "${AF_REPO_ROOT}"
 
 export APPTAINER_CACHEDIR="${apptainer_cache}"
 export APPTAINER_TMPDIR="${apptainer_tmp}"
+export APPTAINER_MKSQUASHFS_ARGS="-processors ${AF_APPTAINER_MKSQUASHFS_PROCESSORS}"
+
+readonly available_tmp_kib="$(
+  df -Pk "${apptainer_tmp}" | awk 'NR == 2 {print $4}'
+)"
+readonly required_tmp_kib=$((AF_APPTAINER_TMP_MIN_GIB * 1024 * 1024))
+echo "Apptainer build temp: ${apptainer_tmp}"
+df -hP "${apptainer_tmp}"
+if ((available_tmp_kib < required_tmp_kib)); then
+  echo \
+    "Apptainer build temp has less than ${AF_APPTAINER_TMP_MIN_GIB} GiB free" \
+    >&2
+  exit 1
+fi
+echo \
+  "Apptainer SquashFS processors: ${AF_APPTAINER_MKSQUASHFS_PROCESSORS}"
 
 if [[ ! -f "${AF_VLLM_IMAGE}" ]]; then
   partial_image="${AF_VLLM_IMAGE}.partial-${SLURM_JOB_ID}"
-  trap 'rm -f "${partial_image:-}"' EXIT
   apptainer pull "${partial_image}" "${AF_VLLM_IMAGE_URI}"
   mv "${partial_image}" "${AF_VLLM_IMAGE}"
-  trap - EXIT
+  partial_image=""
 fi
 
 sha256sum "${AF_VLLM_IMAGE}"
@@ -65,8 +96,7 @@ apptainer exec --nv \
     --max-num-seqs 1 \
     --gpu-memory-utilization 0.90 \
     >"${server_log}" 2>&1 &
-readonly server_pid=$!
-trap 'kill "${server_pid}" 2>/dev/null || true' EXIT
+server_pid=$!
 
 ready=false
 for _ in $(seq 1 900); do
