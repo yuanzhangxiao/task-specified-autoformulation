@@ -23,7 +23,6 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_LOCAL_MODEL:=openai/gpt-oss-20b}"
 : "${AF_VLLM_SMOKE_ROOT:=${AF_WORK}/phase_b/vllm-gpt-oss-smoke-v1}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
-: "${AF_APPTAINER_MKSQUASHFS_PROCESSORS:=2}"
 
 readonly port=$((20000 + SLURM_JOB_ID % 20000))
 readonly endpoint="http://127.0.0.1:${port}"
@@ -34,13 +33,9 @@ readonly node_local_tmp_root="${SLURM_TMPDIR:-/tmp/${af_user}}"
 readonly apptainer_tmp="${node_local_tmp_root}/apptainer-${SLURM_JOB_ID}"
 
 server_pid=""
-partial_image=""
 cleanup() {
   if [[ -n "${server_pid}" ]]; then
     kill "${server_pid}" 2>/dev/null || true
-  fi
-  if [[ -n "${partial_image}" ]]; then
-    rm -f -- "${partial_image}"
   fi
   rm -rf -- "${apptainer_tmp}"
 }
@@ -57,7 +52,6 @@ cd "${AF_REPO_ROOT}"
 
 export APPTAINER_CACHEDIR="${apptainer_cache}"
 export APPTAINER_TMPDIR="${apptainer_tmp}"
-export APPTAINER_MKSQUASHFS_ARGS="-processors ${AF_APPTAINER_MKSQUASHFS_PROCESSORS}"
 
 readonly available_tmp_kib="$(
   df -Pk "${apptainer_tmp}" | awk 'NR == 2 {print $4}'
@@ -71,24 +65,24 @@ if ((available_tmp_kib < required_tmp_kib)); then
     >&2
   exit 1
 fi
-echo \
-  "Apptainer SquashFS processors: ${AF_APPTAINER_MKSQUASHFS_PROCESSORS}"
 
-if [[ ! -f "${AF_VLLM_IMAGE}" ]]; then
-  partial_image="${AF_VLLM_IMAGE}.partial-${SLURM_JOB_ID}"
-  apptainer pull "${partial_image}" "${AF_VLLM_IMAGE_URI}"
-  mv "${partial_image}" "${AF_VLLM_IMAGE}"
-  partial_image=""
+runtime_image="${AF_VLLM_IMAGE}"
+if [[ -f "${runtime_image}" ]]; then
+  sha256sum "${runtime_image}"
+else
+  runtime_image="${apptainer_tmp}/vllm-openai-v0.27.1-sandbox"
+  echo "Building job-local Apptainer sandbox from ${AF_VLLM_IMAGE_URI}"
+  apptainer build --sandbox "${runtime_image}" "${AF_VLLM_IMAGE_URI}"
+  du -sh "${runtime_image}"
 fi
 
-sha256sum "${AF_VLLM_IMAGE}"
 nvidia-smi --query-gpu=name,driver_version,memory.total \
   --format=csv,noheader
 
 apptainer exec --nv \
   --bind "${AF_PROJECT}:${AF_PROJECT},${AF_WORK}:${AF_WORK}" \
   --env "HF_HOME=${AF_HF_HOME}" \
-  "${AF_VLLM_IMAGE}" \
+  "${runtime_image}" \
   vllm serve "${AF_LOCAL_MODEL}" \
     --host 127.0.0.1 \
     --port "${port}" \

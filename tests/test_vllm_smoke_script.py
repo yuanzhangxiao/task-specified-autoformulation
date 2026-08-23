@@ -25,11 +25,12 @@ def test_vllm_smoke_script_pins_and_isolates_deployment() -> None:
     assert "AF_VLLM_IMAGE" in text
 
 
-def test_vllm_smoke_builds_the_sif_in_bounded_node_local_storage() -> None:
+def test_vllm_smoke_builds_a_sandbox_in_bounded_node_local_storage() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
 
     assert 'node_local_tmp_root="${SLURM_TMPDIR:-/tmp/${af_user}}"' in text
     assert 'APPTAINER_TMPDIR="${apptainer_tmp}"' in text
     assert "AF_APPTAINER_TMP_MIN_GIB" in text
-    assert 'APPTAINER_MKSQUASHFS_ARGS="-processors ' in text
+    assert 'apptainer build --sandbox "${runtime_image}"' in text
+    assert '"${runtime_image}" \\\n  vllm serve' in text
     assert 'readonly apptainer_tmp="${AF_WORK}/apptainer-tmp"' not in text
