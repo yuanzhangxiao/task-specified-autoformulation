@@ -221,6 +221,15 @@ one factor relative to native retry and one factor relative to the historical
 reasoning-disabled fallback. Its ten calls are frozen in
 `configs/hybrid_judge_openai_thinking_retry_pilot_v1.json`.
 
+That endpoint ablation completed `10/10` calls, confirming that disabling
+GPT-OSS reasoning was the main cause of the historical empty repair responses.
+It did not preserve judgment stability: combined accuracy was `0.800`, order
+consistency was `0.600`, and errors again favored Candidate A when the baseline
+occupied B. The OpenAI-compatible Ollama endpoint is therefore not selected as
+the repair transport. A separately pinned vLLM container smoke test is the next
+cross-runtime diagnostic; it must succeed on one A40 before any vLLM client is
+added to the calibration runner.
+
 ### Ollama protocol-completion transport ablation
 
 The calibration runner supports `--ollama-response-mode json_schema` (the frozen

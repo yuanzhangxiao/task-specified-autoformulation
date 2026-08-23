@@ -160,6 +160,10 @@ The pipeline is iterative:
   engineering validation rather than a new pristine paper holdout. A bounded
   OpenAI-compatible low-reasoning retry ablation isolates endpoint behavior from
   reasoning suppression before any serving-engine change.
+- The low-reasoning OpenAI-compatible retry completed all calls but reintroduced
+  Candidate-A order bias, so native JSON retry remains the Ollama choice. The
+  next cross-runtime diagnostic uses a pinned vLLM container and a one-A40
+  structured-output smoke test before implementing a new judge provider.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and
