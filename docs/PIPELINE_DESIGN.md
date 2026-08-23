@@ -238,6 +238,11 @@ local validation boundary, and records its endpoint, reasoning effort, seed,
 transport, usage, and repair attempts in cache identity and provenance. The
 frozen vLLM reasoning pilot changes only serving runtime and reasoning effort;
 it cannot silently replace the selected Ollama judge transport.
+The subsequent vLLM-low expansion is disjoint from the four-pair reasoning
+stress subset. It adds six held-out pairs and uses duplicate-rejecting merge
+semantics to create one ten-pair, 100-call evaluation. Its symmetry-preserving
+adaptive operating point is frozen before those calls and is evaluated with the
+same clustered pair-level analysis; the expansion still cannot alter search.
 Invalid structured responses are recorded and returned as failures,
 not passed downstream. The proposer sees compact summaries rather than
 raw full history. The judge sees the benchmark judge prompt, certified

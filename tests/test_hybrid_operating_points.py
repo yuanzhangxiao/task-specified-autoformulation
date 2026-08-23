@@ -151,6 +151,12 @@ def test_frozen_protocol_selects_predeclared_retry_limit() -> None:
     assert payload["transport"] == "json_schema"
     assert limit == 5
     assert len(digest) == 64
+    vllm_payload, vllm_limit, _ = _load_frozen_protocol(
+        Path("configs/hybrid_judge_vllm_low_protocol_v1.json"),
+        tie_threshold=0.05,
+    )
+    assert vllm_payload["transport"] == "vllm_openai_chat_json_schema"
+    assert vllm_limit == 5
     with pytest.raises(ValueError, match="tie threshold"):
         _load_frozen_protocol(
             Path("configs/hybrid_judge_protocol_v1.json"),

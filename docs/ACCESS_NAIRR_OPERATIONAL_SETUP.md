@@ -336,6 +336,57 @@ question-level accuracy, order consistency, repeat ICC/SD, provider attempts,
 and elapsed time. This is a serving-runtime and reasoning-effort ablation only;
 it does not change the production Ollama judge or search objective.
 
+If low reasoning is selected, do not repeat its first four pairs. Run only the
+six untouched held-out pairs with the frozen expansion job:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_low_expansion.slurm
+```
+
+The six array tasks produce 60 new calls. Merge them with the previously merged
+40-call low-reasoning stress subset, rejecting any duplicate key, then analyze
+the complete ten-pair/100-call held-out set:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+pilot=/work/hdd/bibo/$USER/phase_b/judge-hybrid-vllm-reasoning-pilot-v1
+expansion=/work/hdd/bibo/$USER/phase_b/judge-hybrid-vllm-low-expansion-v1
+final=/work/hdd/bibo/$USER/phase_b/judge-hybrid-vllm-low-full-v1
+labels=/work/hdd/bibo/$USER/phase_b/judge-hybrid-heldout-v1/hybrid_labels.jsonl
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs \
+    "$pilot/low/hybrid_judge_scores.csv" \
+    "$expansion"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs \
+    "$pilot/low/hybrid_judge_failures.jsonl" \
+    "$expansion"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$final/hybrid_judge_scores.csv" \
+  --failure-output "$final/hybrid_judge_failures.jsonl" \
+  --expected 100
+
+"$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+  --scores "$final/hybrid_judge_scores.csv" \
+  --failures "$final/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --output "$final/hybrid_judge_metrics.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_operating_points.py" \
+  --scores "$final/hybrid_judge_scores.csv" \
+  --failures "$final/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --protocol-config "$repo/configs/hybrid_judge_vllm_low_protocol_v1.json" \
+  --output "$final/hybrid_judge_operating_points.json"
+```
+
+This final merge is valid only when it reports exactly 100 unique outcomes and
+zero conflicting preference keys.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

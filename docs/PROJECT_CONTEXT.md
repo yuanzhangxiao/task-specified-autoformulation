@@ -172,7 +172,14 @@ The pipeline is iterative:
   one A40 with nonempty strict JSON output, but its single low-reasoning verdict
   was scientifically incorrect. A frozen four-pair vLLM pilot therefore compares
   low and high reasoning under identical seeds, candidate orientations, schemas,
-  and scoring without changing the production judge.
+  and scoring without changing the production judge. The four-pair pilot selected
+  low reasoning operationally: it completed 40/40 calls and achieved 0.900
+  end-to-end preference accuracy, while high reasoning completed 36/40, achieved
+  0.875 end-to-end accuracy, consumed about 6.8 times as much aggregate GPU time,
+  and degraded atomic source-role accuracy despite better conditional comparative
+  consistency. The next frozen expansion adds only the six untouched held-out
+  pairs, then merges them with the reused low-reasoning calls for a 100-call
+  evaluation.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

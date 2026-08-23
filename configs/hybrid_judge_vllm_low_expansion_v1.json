@@ -1,0 +1,36 @@
+{
+  "schema_version": "hybrid-judge-vllm-low-expansion-1",
+  "status": "frozen_remaining_structure_heldout_expansion",
+  "judge_model": "vllm:openai/gpt-oss-20b",
+  "source_pairs": "judge-hybrid-heldout-v1/pairs.jsonl",
+  "reused_source": "judge-hybrid-vllm-reasoning-pilot-v1/low",
+  "reused_pair_count": 4,
+  "reused_logical_calls": 40,
+  "selected_pair_ids": [
+    "heldout_d88d09cac157f0be",
+    "heldout_70b3222d4736ea1d",
+    "heldout_ee453d8cc6fcb7a2",
+    "heldout_67ba9c9635088d02",
+    "hybrid_26c22957ae30e2d2",
+    "hybrid_b79bb7bc0aa08ea0"
+  ],
+  "reasoning_effort": "low",
+  "repetitions": 5,
+  "candidate_order_policy": "both_orientations",
+  "planned_new_logical_calls": 60,
+  "planned_final_logical_calls": 100,
+  "transport": "vllm_openai_chat_json_schema",
+  "provider_retry": {
+    "max_attempts": 10,
+    "endpoint": "/v1/chat/completions",
+    "schema": "unchanged_on_retry",
+    "repair_feedback": "contract_only",
+    "seed_policy": "configured_seed_plus_attempt_minus_one"
+  },
+  "final_analysis": {
+    "pair_count": 10,
+    "merge_duplicate_policy": "error",
+    "operating_point": "adaptive_both_orders_up_to_5_seeds"
+  },
+  "protocol_config": "configs/hybrid_judge_vllm_low_protocol_v1.json"
+}

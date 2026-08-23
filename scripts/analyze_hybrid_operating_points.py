@@ -514,13 +514,19 @@ def _load_frozen_protocol(
     payload = json.loads(raw)
     expected = {
         "schema_version": "hybrid-judge-protocol-1",
-        "transport": "json_schema",
         "tool_fallback": False,
         "candidate_order_policy": "both_orientations",
     }
     for key, value in expected.items():
         if payload.get(key) != value:
             raise ValueError(f"frozen protocol has invalid {key}: {payload.get(key)!r}")
+    if payload.get("transport") not in {
+        "json_schema",
+        "vllm_openai_chat_json_schema",
+    }:
+        raise ValueError(
+            f"frozen protocol has invalid transport: {payload.get('transport')!r}"
+        )
     retry = payload.get("retry_policy")
     if not isinstance(retry, dict) or retry.get("trigger") != (
         "missing_orientation_only"
