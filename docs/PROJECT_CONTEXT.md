@@ -177,9 +177,14 @@ The pipeline is iterative:
   end-to-end preference accuracy, while high reasoning completed 36/40, achieved
   0.875 end-to-end accuracy, consumed about 6.8 times as much aggregate GPU time,
   and degraded atomic source-role accuracy despite better conditional comparative
-  consistency. The next frozen expansion adds only the six untouched held-out
-  pairs, then merges them with the reused low-reasoning calls for a 100-call
-  evaluation.
+  consistency. The frozen expansion added the six untouched held-out pairs and
+  merged them with the reused low-reasoning calls. The complete 100-call set had
+  perfect response success, 0.810 per-call combined accuracy, 0.900 full pair
+  aggregation, and 0.740 order consistency. Its predeclared two-orientation
+  adaptive operating point reached 0.880 pair accuracy, so the transport passed
+  but the scientific protocol missed its accuracy and order-consistency gates.
+  Offline pair/criterion attribution and structure-aware aggregation sensitivity
+  are diagnostics only; any revised protocol requires new baseline structures.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

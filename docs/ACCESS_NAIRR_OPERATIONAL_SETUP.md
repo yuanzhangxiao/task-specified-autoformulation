@@ -387,6 +387,28 @@ labels=/work/hdd/bibo/$USER/phase_b/judge-hybrid-heldout-v1/hybrid_labels.jsonl
 This final merge is valid only when it reports exactly 100 unique outcomes and
 zero conflicting preference keys.
 
+Diagnose pair, mutation, order, repetition, and certified-question errors without
+making another LLM call:
+
+```bash
+pairs=/work/hdd/bibo/$USER/phase_b/judge-hybrid-heldout-v1/pairs.jsonl
+
+"$python_bin" "$repo/scripts/analyze_hybrid_diagnostics.py" \
+  --scores "$final/hybrid_judge_scores.csv" \
+  --failures "$final/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --pairs "$pairs" \
+  --output "$final/hybrid_judge_diagnostics.json"
+
+cat "$final/hybrid_judge_diagnostics.md"
+```
+
+The diagnostic reconstructs the frozen score before evaluating a fixed generic
+grid of comparative weights and tie thresholds. It groups mutations by
+canonical baseline structure and reports leave-one-structure-out sensitivity.
+All alternative aggregation results are explicitly post-hoc and cannot be used
+as confirmatory performance for a revised protocol on the same pairs.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

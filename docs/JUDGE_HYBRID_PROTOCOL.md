@@ -397,3 +397,27 @@ disconnection. The retained variant uses a driven, relaxing latent module whose
 components survive canonicalization but have no target path. This tests the
 production judge boundary without confusing a harmless discarded declaration
 with an executable scientific defect.
+
+### Frozen vLLM-low diagnostic boundary
+
+The ten-pair vLLM-low evaluation completed all `100/100` structured responses,
+removing provider completion as a confounder. Its per-call combined accuracy was
+`0.810`, full ten-call pair aggregation was `0.900`, and order consistency was
+`0.740`. Under the predeclared missing-orientation-only adaptive protocol, perfect
+response success reduced the operating point to one call in each orientation;
+pair accuracy was `0.880`. It therefore missed the existing `0.90` conditional
+pair-accuracy and `0.80` order-consistency gates even though transport reliability
+was perfect. Absolute-only preference accuracy was `0.500`, while comparative-only
+accuracy was `0.810`; runtime certification remained `1.000`.
+
+`analyze_hybrid_diagnostics.py` attributes this result without new LLM calls. It
+validates that stored decisions exactly match the frozen hard-requirement override,
+absolute shaped-score delta, comparative residual weight, and tie threshold before
+producing any diagnostic. It reports pair and mutation margins, candidate-order
+means, repetition consistency, certified atomic-question accuracy, and a generic
+aggregation-sensitivity grid. Candidate pairs are grouped by canonical baseline
+structure, and weight sensitivity includes leave-one-baseline-structure-out folds.
+Because these outcomes have already been opened, every alternative aggregation
+and cross-structure estimate is exploratory. A revised weight or threshold must be
+frozen and tested on new baseline structures before it becomes a performance claim
+or enters search.
