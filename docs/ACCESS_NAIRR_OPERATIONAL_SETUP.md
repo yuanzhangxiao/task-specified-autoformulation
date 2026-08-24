@@ -549,6 +549,28 @@ cat "$comparison/hybrid_judge_summary.md"
 cat "$comparison/atomic_evidence_metrics.md"
 ```
 
+Decompose the persisted decisions into atomic-sensitive, other-absolute, and
+direct-comparative contributions without making new LLM calls:
+
+```bash
+"$python_bin" "$repo/scripts/analyze_hybrid_decision_decomposition.py" \
+  --scores \
+    "$atomic/gpt-oss-20b/hybrid_judge_scores.csv" \
+    "$atomic/gpt-oss-120b/hybrid_judge_scores.csv" \
+  --failures \
+    "$atomic/gpt-oss-20b/hybrid_judge_failures.jsonl" \
+    "$atomic/gpt-oss-120b/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --output "$comparison/hybrid_decision_decomposition.json"
+
+cat "$comparison/hybrid_decision_decomposition.md"
+```
+
+The atomic-sensitive marginal is a counterfactual diagnostic: it removes the
+source-role, sink-role, and semantic-duplication assessments and recomputes the
+existing nonlinear group score. It does not claim that all remaining absolute
+answers have certified question-level labels.
+
 This remains a matched development factorial over opened pairs. Mutation labels
 are used only by the offline analyzers after calls complete. A selected protocol
 must be frozen unchanged before any new-structure confirmation.
