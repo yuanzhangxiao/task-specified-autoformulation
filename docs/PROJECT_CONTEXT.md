@@ -198,7 +198,20 @@ The pipeline is iterative:
   call receives those findings for comparative assessment. No task-specific role
   answer is disclosed. A matched 20B/120B vLLM factorial tests question
   presentation and model-scale capability separately before any new-structure
-  confirmation or search integration.
+  confirmation or search integration. The 120B condition completed all calls,
+  achieved `0.925` conditional/end-to-end preference accuracy, perfect pair
+  aggregation, `0.850` order consistency, and `0.975` targeted atomic accuracy.
+  Frozen decision decomposition showed that direct comparative judgments, not
+  the saturated conjunctive absolute groups, supplied nearly all separation.
+  Comparative-criterion ablation found a broad stable weight/threshold region
+  and no benefit from removing any of the three general comparative questions.
+  Protocol, weights, threshold, reasoning effort, seeds, and retry budget are
+  therefore frozen unchanged for a new canonical-structure confirmation. The
+  confirmation builder excludes every structure appearing in any opened pair
+  file, records those files and hashes in a manifest, and selects only the two
+  prespecified wrong-sink and duplicated-flux mutation families. Passing requires
+  every predeclared response, pair, order, atomic, and comparative gate; no
+  parameter may be tuned on the confirmation outcomes.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

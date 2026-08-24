@@ -596,6 +596,120 @@ This remains a matched development factorial over opened pairs. Mutation labels
 are used only by the offline analyzers after calls complete. A selected protocol
 must be frozen unchanged before any new-structure confirmation.
 
+### Frozen 120B unseen-structure confirmation
+
+The 120B atomic protocol passed the opened-pair development gates. Build the
+confirmation input from selected models whose canonical structures have never
+appeared in an earlier pair artifact. The commands below conservatively exclude
+every `pairs.jsonl` under the Phase-B root, not merely the final calibration and
+held-out files. They also inventory every available local-generation run root and
+deduplicate repeated structures. Run this once, inspect and retain the manifest,
+then do not add or remove exclusions after judge calls begin:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+phase=/work/hdd/bibo/$USER/phase_b
+confirm="$phase/judge-hybrid-atomic-confirmation-v1"
+data=/projects/bibo/$USER/phase_b/inputs/public
+
+mkdir -p "$confirm"
+runs_args=()
+while IFS= read -r path; do
+  runs_args+=(--runs-root "$path")
+done < <(
+  find "$phase" -mindepth 2 -maxdepth 2 -type d -name runs \
+    -path '*local-generation*' | sort
+)
+exclusion_args=()
+while IFS= read -r path; do
+  exclusion_args+=(--exclude-pairs "$path")
+done < <(
+  find "$phase" -type f -name pairs.jsonl \
+    ! -path "$confirm/*" | sort
+)
+
+(( ${#runs_args[@]} > 0 )) || { echo "no local-generation run roots" >&2; exit 1; }
+(( ${#exclusion_args[@]} > 0 )) || { echo "no historical pair files" >&2; exit 1; }
+
+"$python_bin" "$repo/scripts/build_hybrid_judge_confirmation_pairs.py" \
+  "${runs_args[@]}" \
+  --data-root "$data" \
+  "${exclusion_args[@]}" \
+  --baseline-count 2 \
+  --output "$confirm/pairs.jsonl" \
+  --manifest "$confirm/confirmation_pairs_manifest.json"
+
+"$python_bin" "$repo/scripts/build_hybrid_judge_label_template.py" \
+  --pairs "$confirm/pairs.jsonl" \
+  --data-root "$data" \
+  --output "$confirm/hybrid_labels.jsonl"
+
+cp "$repo/configs/hybrid_judge_atomic_confirmation_v1.json" \
+  "$confirm/protocol_config.json"
+wc -l "$confirm/pairs.jsonl" "$confirm/hybrid_labels.jsonl"
+jq . "$confirm/confirmation_pairs_manifest.json"
+sha256sum "$confirm/pairs.jsonl" "$confirm/hybrid_labels.jsonl" \
+  "$confirm/confirmation_pairs_manifest.json" "$confirm/protocol_config.json" \
+  > "$confirm/frozen_inputs.sha256"
+```
+
+The two line counts must both be four. The manifest must report two selected
+baseline fingerprints, four selected pair IDs, the two frozen mutation types,
+and a nonempty exclusion-file list. If fewer than two unseen structures remain,
+stop and generate additional development-only candidates under new seeds; do not
+relax the exclusion boundary.
+
+Submit the self-contained four-A40 120B job from any fresh login:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_atomic_confirmation_120b.slurm
+```
+
+After completion, merge exactly 40 outcomes and apply the standard, atomic, and
+predeclared confirmation analyses:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+confirm=/work/hdd/bibo/$USER/phase_b/judge-hybrid-atomic-confirmation-v1
+root="$confirm/gpt-oss-120b"
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$root"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs "$root"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$root/hybrid_judge_scores.csv" \
+  --failure-output "$root/hybrid_judge_failures.jsonl" \
+  --expected 40
+
+"$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$confirm/hybrid_labels.jsonl" \
+  --output "$root/hybrid_judge_metrics.json"
+
+"$python_bin" "$repo/scripts/analyze_atomic_evidence.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --output "$root/atomic_evidence_metrics.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_judge_confirmation.py" \
+  --hybrid-metrics "$root/hybrid_judge_metrics.json" \
+  --atomic-metrics "$root/atomic_evidence_metrics.json" \
+  --protocol-config "$confirm/protocol_config.json" \
+  --output "$root/confirmation_result.json"
+
+cat "$root/confirmation_result.md"
+```
+
+Report the frozen result whether it passes or fails. Do not use these outcomes to
+tune the three comparative questions, `0.25` comparative weight, `0.05` partial
+weight, or `0.05` tie threshold. Equivalent-model and mechanism-tradeoff pairs are
+a subsequent calibration milestone, not part of this confirmation.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

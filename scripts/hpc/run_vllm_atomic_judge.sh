@@ -24,6 +24,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_COMPARATIVE_WEIGHT:=0.25}"
 : "${AF_TIE_THRESHOLD:=0.05}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
+: "${AF_PAIR_IDS=heldout_55d8026028a90be5 heldout_ee453d8cc6fcb7a2 heldout_70b3222d4736ea1d heldout_cca8883e6ae1b33f}"
 
 [[ "${AF_REPETITIONS}" == 5 && "${AF_MAX_ATTEMPTS}" == 10 ]] || {
   echo "atomic comparison requires five repetitions and ten attempts" >&2
@@ -42,12 +43,11 @@ readonly server_log="${shard_root}/vllm-${SLURM_JOB_ID}.log"
 readonly apptainer_cache="${AF_PROJECT}/apptainer-cache"
 readonly node_local_tmp_root="${SLURM_TMPDIR:-/tmp/${af_user}}"
 readonly apptainer_tmp="${node_local_tmp_root}/apptainer-${SLURM_JOB_ID}"
-readonly pair_ids=(
-  heldout_55d8026028a90be5
-  heldout_ee453d8cc6fcb7a2
-  heldout_70b3222d4736ea1d
-  heldout_cca8883e6ae1b33f
-)
+pair_id_args=()
+if [[ -n "${AF_PAIR_IDS}" ]]; then
+  read -r -a pair_ids <<<"${AF_PAIR_IDS}"
+  pair_id_args=(--pair-ids "${pair_ids[@]}")
+fi
 
 server_pid=""
 cleanup() {
@@ -145,7 +145,7 @@ fi
 flock --exclusive "${shard_root}/hybrid_judge.lock" \
   "${AF_PYTHON}" scripts/run_hybrid_judge.py \
   --pairs "${AF_CALIBRATION_PAIRS}" \
-  --pair-ids "${pair_ids[@]}" \
+  "${pair_id_args[@]}" \
   --data-root "${AF_PUBLIC_DATA_ROOT}" \
   --judge-models "vllm:${AF_LOCAL_MODEL}" \
   --repetitions "${AF_REPETITIONS}" \

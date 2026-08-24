@@ -1,0 +1,50 @@
+{
+  "schema_version": "hybrid-judge-structure-confirmation-1",
+  "status": "frozen_before_unseen_structure_confirmation",
+  "purpose": "confirm the selected 120B atomic hybrid judge on canonical candidate structures absent from every opened pair set",
+  "judge_model": "vllm:openai/gpt-oss-120b",
+  "pair_construction": {
+    "holdout_unit": "canonical_candidate_structure",
+    "baseline_count": 2,
+    "selected_mutations": [
+      "duplicated_gp_flux",
+      "wrong_meal_sink"
+    ],
+    "required_exclusion_scope": "every pair file used for prompt, protocol, aggregation, or model-scale development",
+    "mutation_labels_visible_to_judge": false
+  },
+  "protocol": {
+    "hybrid_judge_protocol_version": "hybrid-judge-protocol-3-atomic-occurrence",
+    "atomic_evidence_schema_version": "atomic-evidence-plan-1",
+    "structural_facts_schema_version": "structural-facts-2",
+    "semantic_answer_disclosure": false,
+    "candidate_order_policy": "both_orientations",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 10000,
+    "repetitions": 5,
+    "max_provider_attempts": 10,
+    "scoring": {
+      "partial_tiebreak_weight": 0.05,
+      "comparative_weight": 0.25,
+      "tie_threshold": 0.05
+    }
+  },
+  "planned": {
+    "paired_judgments": 40,
+    "llm_stages": 80,
+    "gpus": 4,
+    "tensor_parallel_size": 4
+  },
+  "confirmation_gate": {
+    "minimum_response_success": 0.95,
+    "minimum_pair_aggregate_accuracy": 1.0,
+    "minimum_order_consistency": 0.8,
+    "minimum_wrong_sink_atomic_accuracy": 0.75,
+    "minimum_duplicate_atomic_accuracy": 0.75,
+    "minimum_targeted_comparative_accuracy": 0.6
+  },
+  "decision_rule": "pass only if every predeclared confirmation gate passes; do not tune prompts, weights, or thresholds on these outcomes",
+  "next_if_passed": "retain the protocol and build a separate equivalence-and-tradeoff calibration set",
+  "next_if_failed": "report the failed gate and treat any revision as a new development protocol requiring another fresh structure holdout"
+}

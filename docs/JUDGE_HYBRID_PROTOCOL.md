@@ -509,3 +509,33 @@ with tensor parallelism. Each model produces 40 paired judgments and 80 logical
 LLM stages. This is a model-scale and protocol diagnostic, not a confirmatory
 paper holdout. If the development gates pass, the selected protocol must be
 frozen unchanged before testing genuinely unseen baseline structures.
+
+### Frozen canonical-structure confirmation
+
+The matched factorial selected the 120B, low-reasoning, two-stage atomic
+protocol. Its confirmation is defined by
+`configs/hybrid_judge_atomic_confirmation_v1.json`; this file is frozen before
+any confirmation call. It preserves the public prompt, model, serving endpoint,
+atomic and hybrid schemas, temperature, five seeds, both orientations, ten-attempt
+provider budget, group scoring, comparative weight, and tie threshold. It changes
+only the canonical baseline structures supplied to the judge.
+
+`build_hybrid_judge_confirmation_pairs.py` inventories completed model-selection
+summaries across one or more run roots. It canonicalizes and deduplicates their
+selected structures, then excludes every structure appearing as the valid member
+of any supplied historical pair file. The exclusion files, hashes, pair counts,
+and total unique excluded structures are written to a persistent manifest. The
+output contains exactly two prespecified mutations for each selected unseen
+structure: duplicated glucose flux and a wrong-sign meal occurrence. Confirmation
+pair identifiers use a separate namespace. Mutation labels and certified polarity
+remain hidden from both LLM stages.
+
+The primary confirmation has two unseen baseline structures, four pairs, five
+seeds, and both orientations: 40 paired judgments and 80 separately logged LLM
+stages. It passes only if all predeclared gates pass: response success at least
+`0.95`, perfect four-pair aggregation, order consistency at least `0.80`, each
+targeted atomic accuracy at least `0.75`, and targeted comparative-question
+accuracy at least `0.60`. `analyze_hybrid_judge_confirmation.py` applies these
+thresholds mechanically. A failed gate is reported as a failed confirmation;
+changing a prompt, model, weight, or threshold creates a new development protocol
+and requires another fresh canonical-structure holdout.
