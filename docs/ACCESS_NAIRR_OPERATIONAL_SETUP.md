@@ -571,6 +571,27 @@ source-role, sink-role, and semantic-duplication assessments and recomputes the
 existing nonlinear group score. It does not claim that all remaining absolute
 answers have certified question-level labels.
 
+Run comparative-criterion leave-one-out, single-criterion, and frozen
+weight/threshold sensitivity analyses on the same rows:
+
+```bash
+"$python_bin" "$repo/scripts/analyze_hybrid_comparative_ablation.py" \
+  --scores \
+    "$atomic/gpt-oss-20b/hybrid_judge_scores.csv" \
+    "$atomic/gpt-oss-120b/hybrid_judge_scores.csv" \
+  --failures \
+    "$atomic/gpt-oss-20b/hybrid_judge_failures.jsonl" \
+    "$atomic/gpt-oss-120b/hybrid_judge_failures.jsonl" \
+  --labels "$labels" \
+  --output "$comparison/hybrid_comparative_ablation.json"
+
+cat "$comparison/hybrid_comparative_ablation.md"
+```
+
+The mutation-contract-labeled-only configuration is an offline diagnostic upper
+bound. It uses label provenance to choose a criterion subset and therefore must
+never be used during ordinary judging or search.
+
 This remains a matched development factorial over opened pairs. Mutation labels
 are used only by the offline analyzers after calls complete. A selected protocol
 must be frozen unchanged before any new-structure confirmation.
