@@ -574,3 +574,24 @@ mutation-certified atomic accuracy, order consistency, orientation bias, and
 repeat variance. Tradeoff winner counts are descriptive. Passing this milestone
 does not establish a calibrated continuous search score; it supports freezing an
 interpretation for a later new-structure validation.
+
+The development run completed all 80 paired judgments. It achieved perfect
+equivalence-tie, mutation-certified atomic, and labeled comparative accuracy;
+order consistency was `0.900` and mean repeat decision SD was `0.055`. The
+predeclared outcome was still **FAIL** because mean tradeoff orientation bias was
+`0.115`, above the frozen `0.100` maximum. Attribution localized every directional
+inconsistency to wrong-sink versus duplicate-flux pairs. In that comparison,
+`mechanistic_interpretability` often preferred the displayed Candidate A in both
+orientations. This is a position-sensitive relative judgment between two distinct
+known defects, not an atomic-detection error.
+
+`analyze_hybrid_symmetric_aggregation.py` is the next post-hoc development step.
+It reuses frozen rows and compares three identity-normalized rules without new LLM
+calls: paired final-decision mean, strict question consensus, and orientation-
+interval abstention. Question consensus accepts a verdict only if both candidate
+orders agree after mapping them to the same candidate identities; disagreements
+become indeterminate and the unchanged runtime scorer is rerun. The interval rule
+uses the mean decision as its center and half the A/B decision gap as uncertainty,
+withholding a result whenever that interval crosses the tie boundary. Reports keep
+coverage, equivalence truth, repeat stability, and disagreement counts distinct.
+Tradeoff preferences remain descriptive and cannot establish rule accuracy.

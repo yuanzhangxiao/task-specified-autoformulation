@@ -223,6 +223,16 @@ The pipeline is iterative:
   and non-ordered defect tradeoffs. Equivalence has a known tie label; tradeoff
   winners remain unlabeled, with only mutation-certified atomic defects scored.
   This milestone calibrates score interpretation and stability, not search.
+  The 80-call development run completed without provider failures and achieved
+  perfect equivalence, mutation-certified atomic, and labeled comparative
+  accuracy. It nevertheless failed its frozen orientation-bias gate (`0.115`
+  versus `0.100`) while passing order consistency (`0.900`) and repeat stability
+  (`0.055`). All four directional inconsistencies occurred in wrong-sink versus
+  duplicate-flux tradeoffs. The mechanistic-interpretability question frequently
+  preferred whichever candidate was displayed as A, whereas equivalence was
+  perfectly symmetric. A post-hoc, no-call analysis therefore compares paired
+  final-decision averaging, strict question-level orientation consensus, and an
+  uncertainty-aware abstention rule. Tradeoff winners remain unlabeled throughout.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

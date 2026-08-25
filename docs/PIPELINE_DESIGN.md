@@ -295,6 +295,18 @@ unlabeled. Only the mutation-certified per-side atomic failures are accuracy
 targets. Preference frequencies, orientation bias, and repetition variance are
 descriptive reliability measurements and cannot be optimized as correctness.
 
+Both orientations are required before any symmetric pair result is emitted.
+Offline development compares three deterministic aggregators over frozen calls:
+(1) the mean of identity-normalized final decisions; (2) identity-normalized
+question consensus, which marks any cross-orientation absolute or comparative
+disagreement indeterminate before recomputing the standard score; and (3) an
+uncertainty-aware rule that retains half the normalized decision gap and abstains
+when its interval crosses the tie boundary. Deterministic facts must agree exactly
+after identity normalization. These transformations do not repair or reinterpret
+LLM answers. Their equivalence accuracy, decision coverage, repeat stability, and
+disagreement rates are reported separately. Unlabeled defect tradeoffs cannot be
+used to choose a preferred scientific winner or claim accuracy.
+
 Calibration provider failures are first-class outcomes. After bounded
 contract-only retries, a terminal structured-response failure is stored in an
 append-only ledger and the shard continues. The analyzer reports both conditional

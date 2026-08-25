@@ -794,6 +794,32 @@ cat "$root/equivalence_tradeoff_result.md"
 Report pass or fail without altering the frozen thresholds. A tradeoff preference
 count is not an accuracy result because no overall tradeoff winner was labeled.
 
+If the orientation-bias gate fails, compare symmetry-preserving aggregators over
+the frozen calls before making another LLM request. This is explicitly post-hoc
+development analysis, not a reinterpretation of the frozen gate:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+scorecal=/work/hdd/bibo/$USER/phase_b/judge-hybrid-equivalence-tradeoff-v1
+root="$scorecal/gpt-oss-120b"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_symmetric_aggregation.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$scorecal/hybrid_labels.jsonl" \
+  --protocol-config "$scorecal/protocol_config.json" \
+  --output "$root/symmetric_aggregation_analysis.json"
+
+cat "$root/symmetric_aggregation_analysis.md"
+```
+
+The report compares paired final-decision averaging, strict question consensus,
+and uncertainty-aware abstention. It must preserve equivalence truth and report
+coverage, repeat stability, raw orientation gaps, and question disagreements.
+Do not count unlabeled tradeoff winners as accuracy or select a rule because it
+prefers a particular defect.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA
