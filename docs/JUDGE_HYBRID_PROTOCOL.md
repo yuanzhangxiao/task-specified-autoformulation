@@ -595,3 +595,40 @@ uses the mean decision as its center and half the A/B decision gap as uncertaint
 withholding a result whenever that interval crosses the tie boundary. Reports keep
 coverage, equivalence truth, repeat stability, and disagreement counts distinct.
 Tradeoff preferences remain descriptive and cannot establish rule accuracy.
+
+### Frozen question-consensus validation
+
+The development analysis selected `paired_question_consensus` without changing
+the judge prompt, model, atomic questions, score weights, or tie threshold. The
+rule first normalizes both orientations to the same candidate identities. An
+absolute or comparative answer survives only when both orientations agree;
+otherwise that unit becomes `indeterminate`. Deterministic graph facts must agree
+exactly. The standard hybrid scorer is then rerun on the consensus result. Half
+the normalized A/B final-decision gap is retained as an uncertainty diagnostic;
+it does not trigger automatic abstention in this protocol.
+
+`configs/hybrid_judge_consensus_validation_v1.json` freezes the confirmatory
+contract. `build_hybrid_judge_consensus_validation_pairs.py` excludes every
+canonical baseline structure present in any supplied opened pair file and selects
+exactly two unseen structures. Each structure generates seven pairs:
+
+1. one exact additive-reordering equivalence with certified tie truth;
+2. three baseline-versus-single-defect pairs for wrong meal sign, exact repeated
+   glucose flux, and unjustified one-sided accumulation;
+3. two monotonic pairs in which a wrong-sign or repeated-flux candidate is
+   compared with the same candidate plus an unjustified accumulator; and
+4. one wrong-sign-versus-repeated-flux tradeoff with no overall winner label.
+
+The monotonic labels require only set inclusion of controlled defects: the first
+member's defect is preserved in the second, which adds one certified accumulator
+defect. They do not assert which distinct scientific defect is worse. Tradeoff
+preferences remain descriptive. Mutation contracts are held privately for
+evaluation and are never shown to either LLM stage.
+
+The planned run has 14 pairs, five seeds, and both orientations: 140 judgments
+and 280 separately logged LLM stages on the frozen 120B low-reasoning vLLM
+protocol. It passes only if every predeclared completion, coverage, tie,
+dominance, mutation-certified atomic, stability, and orientation-uncertainty gate
+passes. A failed gate cannot be repaired by retuning on these structures. Search
+objective integration remains a separate later milestone even if validation
+passes.

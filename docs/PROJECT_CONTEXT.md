@@ -233,6 +233,17 @@ The pipeline is iterative:
   perfectly symmetric. A post-hoc, no-call analysis therefore compares paired
   final-decision averaging, strict question-level orientation consensus, and an
   uncertainty-aware abstention rule. Tradeoff winners remain unlabeled throughout.
+  Strict question consensus was selected: it preserved full labeled and tradeoff
+  coverage, perfect equivalence accuracy, and `0.950` modal consistency while
+  reducing repeat decision SD from `0.043` to `0.034`. The selected rule maps both
+  orientations to stable candidate identities, marks any question-level
+  disagreement indeterminate, and reruns the unchanged deterministic scorer.
+  Half the normalized orientation decision gap remains a reported uncertainty
+  diagnostic but does not automatically abstain. Before search integration, this
+  frozen rule is tested on two canonical structures absent from every opened pair
+  set. The new set combines exact ties, single controlled defects, monotonic
+  extra-defect pairs, and unlabeled defect tradeoffs; only predeclared tie and
+  dominance relations contribute to accuracy.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

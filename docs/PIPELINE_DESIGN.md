@@ -307,6 +307,17 @@ LLM answers. Their equivalence accuracy, decision coverage, repeat stability, an
 disagreement rates are reported separately. Unlabeled defect tradeoffs cannot be
 used to choose a preferred scientific winner or claim accuracy.
 
+The selected calibration rule is identity-normalized question consensus. Both
+orientations at the same seed are mandatory. Matching normalized absolute and
+comparative answers are retained; disagreements become `indeterminate`; then the
+unchanged deterministic hybrid scorer recomputes the pair decision. The raw
+orientation half-gap is retained separately and does not silently change the
+decision. A frozen fresh-structure validation must pass before this aggregation
+may be considered for search. It includes exact-equivalence ties, baseline versus
+single-defect pairs, defect versus the same defect plus one controlled
+accumulator, and unlabeled defect-versus-defect tradeoffs. The latter measure
+stability only and never enter an accuracy gate.
+
 Calibration provider failures are first-class outcomes. After bounded
 contract-only retries, a terminal structured-response failure is stored in an
 append-only ledger and the shard continues. The analyzer reports both conditional

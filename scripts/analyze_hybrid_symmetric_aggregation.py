@@ -313,6 +313,12 @@ def aggregate_trial(
         "orientation_half_gap": half_gap,
         "absolute_disagreements": list(absolute_disagreements),
         "comparative_disagreements": list(comparative_disagreements),
+        "consensus_absolute_assessments": [
+            item.model_dump(mode="json") for item in absolute
+        ],
+        "consensus_comparative_assessments": [
+            item.model_dump(mode="json") for item in comparative
+        ],
         "rules": {
             RULE_FINAL_MEAN: {
                 "decision": center,

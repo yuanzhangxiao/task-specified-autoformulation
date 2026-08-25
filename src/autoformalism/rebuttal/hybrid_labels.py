@@ -312,6 +312,72 @@ _CONTRACTS = {
                 ),
             ),
         ),
+        MutationLabelContract(
+            mutation_type="additional_accumulator_on_wrong_sink",
+            overall_preference=_BASELINE,
+            absolute=(
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.LATENT_ACCUMULATORS_JUSTIFIED,
+                    mutated=ExpectedVerdict.FAIL,
+                    rationale=(
+                        "The second member preserves the first member's wrong-"
+                        "sink defect and additionally introduces a one-sided "
+                        "latent accumulator."
+                    ),
+                ),
+            ),
+            comparative=(
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.PARSIMONY_WHILE_TASK_SUFFICIENT,
+                    preference=_BASELINE,
+                    rationale=(
+                        "Only the second member adds an unnecessary one-sided "
+                        "latent accumulator."
+                    ),
+                ),
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.FEWER_UNSUPPORTED_ASSUMPTIONS,
+                    preference=_BASELINE,
+                    rationale=(
+                        "The second member contains every controlled defect of "
+                        "the first plus an unjustified accumulation mechanism."
+                    ),
+                ),
+            ),
+        ),
+        MutationLabelContract(
+            mutation_type="additional_accumulator_on_duplicate",
+            overall_preference=_BASELINE,
+            absolute=(
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.LATENT_ACCUMULATORS_JUSTIFIED,
+                    mutated=ExpectedVerdict.FAIL,
+                    rationale=(
+                        "The second member preserves the first member's duplicate-"
+                        "flux defect and additionally introduces a one-sided "
+                        "latent accumulator."
+                    ),
+                ),
+            ),
+            comparative=(
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.PARSIMONY_WHILE_TASK_SUFFICIENT,
+                    preference=_BASELINE,
+                    rationale=(
+                        "Only the second member adds an unnecessary one-sided "
+                        "latent accumulator."
+                    ),
+                ),
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.FEWER_UNSUPPORTED_ASSUMPTIONS,
+                    preference=_BASELINE,
+                    rationale=(
+                        "The second member contains every controlled defect of "
+                        "the first plus an unjustified accumulation mechanism."
+                    ),
+                ),
+            ),
+        ),
     )
 }
 

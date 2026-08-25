@@ -820,6 +820,123 @@ coverage, repeat stability, raw orientation gaps, and question disagreements.
 Do not count unlabeled tradeoff winners as accuracy or select a rule because it
 prefers a particular defect.
 
+### Frozen fresh-structure question-consensus validation
+
+After selecting strict question consensus from the opened equivalence/tradeoff
+calls, build the final validation set from canonical structures absent from every
+opened pair file. All roots are reconstructed in this single shell block so a
+later login does not depend on exported session variables:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+phase=/work/hdd/bibo/$USER/phase_b
+data=/projects/bibo/$USER/phase_b/inputs/public
+validation="$phase/judge-hybrid-consensus-validation-v1"
+
+cd "$repo"
+mkdir -p "$validation"
+
+mapfile -t run_roots < <(
+  find "$phase" -type d -name runs -path "$phase/local-generation-*" | sort
+)
+runs_args=()
+for root in "${run_roots[@]}"; do
+  runs_args+=(--runs-root "$root")
+done
+
+mapfile -t exclusion_files < <(
+  find "$phase" -type f -name pairs.jsonl \
+    ! -path "$validation/*" | sort
+)
+exclusion_args=()
+for path in "${exclusion_files[@]}"; do
+  exclusion_args+=(--exclude-pairs "$path")
+done
+
+"$python_bin" "$repo/scripts/build_hybrid_judge_consensus_validation_pairs.py" \
+  "${runs_args[@]}" \
+  --data-root "$data" \
+  "${exclusion_args[@]}" \
+  --baseline-count 2 \
+  --output "$validation/pairs.jsonl" \
+  --manifest "$validation/consensus_validation_pairs_manifest.json"
+
+"$python_bin" "$repo/scripts/build_hybrid_judge_label_template.py" \
+  --pairs "$validation/pairs.jsonl" \
+  --data-root "$data" \
+  --output "$validation/hybrid_labels.jsonl"
+
+cp "$repo/configs/hybrid_judge_consensus_validation_v1.json" \
+  "$validation/protocol_config.json"
+wc -l "$validation/pairs.jsonl" "$validation/hybrid_labels.jsonl"
+jq . "$validation/consensus_validation_pairs_manifest.json"
+sha256sum "$validation/pairs.jsonl" "$validation/hybrid_labels.jsonl" \
+  "$validation/consensus_validation_pairs_manifest.json" \
+  "$validation/protocol_config.json" > "$validation/frozen_inputs.sha256"
+```
+
+Both line counts must be 14. The manifest must report two selected baseline
+fingerprints, seven pair types, 14 unique pair IDs, a nonempty exclusion list,
+and status `frozen_before_judge_calls`. If the builder finds fewer than two unseen
+structures, stop and generate new development-only candidates; do not remove an
+exclusion file or reuse an opened structure.
+
+Submit the self-contained four-A40 job. The script reconstructs all persistent
+paths inside the job, so logout does not unset `AF_PROJECT` or related variables:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_consensus_validation_120b.slurm
+```
+
+After completion, merge exactly 140 outcomes, create the standard report, form
+identity-normalized question consensus, and apply the frozen gates:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+validation=/work/hdd/bibo/$USER/phase_b/judge-hybrid-consensus-validation-v1
+root="$validation/gpt-oss-120b"
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$root"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs "$root"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$root/hybrid_judge_scores.csv" \
+  --failure-output "$root/hybrid_judge_failures.jsonl" \
+  --expected 140
+
+"$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$validation/hybrid_labels.jsonl" \
+  --output "$root/hybrid_judge_metrics.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_symmetric_aggregation.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$validation/hybrid_labels.jsonl" \
+  --protocol-config "$validation/protocol_config.json" \
+  --output "$root/symmetric_aggregation_analysis.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_consensus_validation.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$validation/hybrid_labels.jsonl" \
+  --symmetric-analysis "$root/symmetric_aggregation_analysis.json" \
+  --protocol-config "$validation/protocol_config.json" \
+  --output "$root/consensus_validation_result.json"
+
+cat "$root/consensus_validation_result.md"
+```
+
+Report PASS or FAIL exactly as produced. The defect-tradeoff winner counts are
+descriptive, and no prompt, weight, threshold, aggregation rule, or gate may be
+tuned using these validation structures.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

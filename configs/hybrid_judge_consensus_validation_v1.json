@@ -1,0 +1,82 @@
+{
+  "schema_version": "hybrid-judge-consensus-validation-1",
+  "status": "frozen_before_consensus_validation_calls",
+  "purpose": "validate identity-normalized question consensus on canonical structures absent from every opened judge pair set",
+  "judge_model": "vllm:openai/gpt-oss-120b",
+  "pair_construction": {
+    "holdout_unit": "canonical_candidate_structure",
+    "baseline_count": 2,
+    "pairs_per_structure": 7,
+    "known_tie_types": [
+      "algebraic_reordering_equivalent"
+    ],
+    "known_dominance_types": [
+      "wrong_meal_sink",
+      "duplicated_gp_flux",
+      "unjustified_one_sided_accumulator",
+      "additional_accumulator_on_wrong_sink",
+      "additional_accumulator_on_duplicate"
+    ],
+    "unlabeled_stability_types": [
+      "tradeoff_wrong_sink_vs_duplicate"
+    ],
+    "required_exclusion_scope": "every pair file used for prompt, model, transport, aggregation, or score-development decisions",
+    "mutation_labels_visible_to_judge": false
+  },
+  "protocol": {
+    "hybrid_judge_protocol_version": "hybrid-judge-protocol-3-atomic-occurrence",
+    "contract_repair_version": "atomic-redundant-role-unit-repair-1",
+    "atomic_evidence_schema_version": "atomic-evidence-plan-1",
+    "structural_facts_schema_version": "structural-facts-2",
+    "semantic_answer_disclosure": false,
+    "candidate_order_policy": "both_orientations",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 10000,
+    "repetitions": 5,
+    "max_provider_attempts": 10,
+    "scoring": {
+      "partial_tiebreak_weight": 0.05,
+      "comparative_weight": 0.25,
+      "tie_threshold": 0.05
+    }
+  },
+  "aggregation": {
+    "primary_rule": "paired_question_consensus",
+    "requires_both_orientations_at_same_seed": true,
+    "candidate_identity_normalization": true,
+    "absolute_disagreement_result": "indeterminate",
+    "comparative_disagreement_result": "indeterminate",
+    "score_recomputation": "unchanged_deterministic_hybrid_scorer",
+    "uncertainty_diagnostic": "half_normalized_orientation_decision_gap",
+    "automatic_uncertainty_abstention": false
+  },
+  "planned": {
+    "baseline_structures": 2,
+    "pairs": 14,
+    "paired_judgments": 140,
+    "llm_stages": 280,
+    "gpus": 4,
+    "tensor_parallel_size": 4
+  },
+  "validation_gate": {
+    "minimum_response_success": 0.95,
+    "minimum_paired_response_coverage": 0.95,
+    "minimum_labeled_decision_coverage": 0.95,
+    "minimum_labeled_accuracy": 0.90,
+    "minimum_equivalence_tie_accuracy": 0.90,
+    "minimum_known_dominance_accuracy": 0.90,
+    "minimum_known_dominance_pair_accuracy": 0.90,
+    "minimum_wrong_sink_absolute_accuracy": 0.90,
+    "minimum_duplicate_absolute_accuracy": 0.90,
+    "minimum_accumulator_absolute_accuracy": 0.90,
+    "minimum_modal_preference_consistency": 0.90,
+    "maximum_mean_repeat_decision_sd": 0.05,
+    "maximum_mean_orientation_half_gap": 0.10,
+    "maximum_equivalence_mean_orientation_half_gap": 0.05,
+    "maximum_comparative_disagreement_rate": 0.30
+  },
+  "decision_rule": "pass only if every predeclared gate passes; unlabeled tradeoff winners never contribute to accuracy",
+  "next_if_passed": "retain paired question consensus as the judge aggregation contract and design a separate search-objective integration pilot",
+  "next_if_failed": "report the failed gate; any protocol revision is new development and requires another fresh canonical-structure validation"
+}
