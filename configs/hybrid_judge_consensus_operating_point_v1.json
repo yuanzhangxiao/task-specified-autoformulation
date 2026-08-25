@@ -1,0 +1,61 @@
+{
+  "schema_version": "hybrid-judge-consensus-operating-point-development-1",
+  "status": "frozen_before_offline_operating_point_rescoring",
+  "purpose": "select the least expensive paired-question-consensus call budget from frozen fresh-structure validation outcomes",
+  "source_protocol": "hybrid-judge-consensus-validation-1",
+  "source_primary_rule": "paired_question_consensus",
+  "new_llm_calls": 0,
+  "scoring": {
+    "tie_threshold": 0.05
+  },
+  "available_seed_ids": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "candidate_grid": {
+    "target_complete_paired_seeds": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "maximum_distinct_seed_attempts": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "requires_maximum_at_least_target": true,
+    "paired_seed_definition": "both candidate orientations at one common sampling seed",
+    "terminal_pair_failure_policy": "discard the incomplete paired seed and retry both orientations at the next distinct seed",
+    "scientific_disagreement_retry_policy": "none; identity-normalized question consensus owns cross-orientation disagreement",
+    "repetition_aggregation": "arithmetic mean of complete paired-question-consensus decision values followed by the frozen tie threshold"
+  },
+  "cost_accounting": {
+    "judge_operations_per_paired_seed_attempt": 2,
+    "logical_llm_stages_per_judge_operation": 2
+  },
+  "selection_gate": {
+    "minimum_decision_coverage": 0.99,
+    "minimum_labeled_decision_coverage": 0.99,
+    "minimum_labeled_accuracy": 0.95,
+    "minimum_equivalence_tie_accuracy": 0.90,
+    "minimum_known_dominance_accuracy": 0.95,
+    "minimum_known_dominance_pair_accuracy": 0.95,
+    "minimum_modal_preference_consistency": 0.95,
+    "maximum_mean_repeat_decision_sd": 0.05
+  },
+  "selection_rule": [
+    "retain only configurations passing every gate",
+    "minimize expected logical LLM stages per pair",
+    "then minimize maximum logical LLM stages per pair",
+    "then minimize target complete paired seeds",
+    "then minimize maximum distinct seed attempts"
+  ],
+  "interpretation_boundary": "unlabeled defect-tradeoff winners never contribute to accuracy or operating-point selection"
+}

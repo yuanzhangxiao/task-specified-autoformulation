@@ -318,6 +318,19 @@ single-defect pairs, defect versus the same defect plus one controlled
 accumulator, and unlabeled defect-versus-defect tradeoffs. The latter measure
 stability only and never enter an accuracy gate.
 
+The fresh-structure validation passed all frozen gates, so prompt, atomic
+protocol, 120B low-reasoning model, question-consensus rule, score weights, and
+tie threshold are fixed. Production call-budget selection is a separate offline
+development step. A paired seed means both candidate orientations at one common
+sampling seed. If either orientation has a terminal provider failure, that paired
+seed is discarded and both orientations may be attempted at the next distinct
+seed. Scientific orientation disagreements do not trigger another call; strict
+question consensus already converts them to indeterminate units. Repeated
+complete paired-seed decisions, when requested, are averaged before applying the
+unchanged tie threshold. The selected budget minimizes expected logical LLM
+stages among configurations satisfying frozen coverage, accuracy, equivalence,
+dominance, and repeat-stability gates.
+
 Calibration provider failures are first-class outcomes. After bounded
 contract-only retries, a terminal structured-response failure is stored in an
 append-only ledger and the shard continues. The analyzer reports both conditional

@@ -244,6 +244,18 @@ The pipeline is iterative:
   set. The new set combines exact ties, single controlled defects, monotonic
   extra-defect pairs, and unlabeled defect tradeoffs; only predeclared tie and
   dominance relations contribute to accuracy.
+  The frozen fresh-structure validation passed every gate. It completed 139 of
+  140 judgments (`0.993` response success), formed 69 of 70 paired-seed trials
+  (`0.986` paired coverage), achieved `0.983` labeled accuracy, perfect
+  equivalence and mutation-certified atomic accuracy, `0.980` known-dominance
+  call accuracy, and perfect dominance after pair aggregation. Question consensus
+  also reduced repeat decision SD to `0.007`; mean orientation half-gap was
+  `0.017`. The judge protocol and question-consensus rule are therefore frozen.
+  Before search integration, an offline-only operating-point analysis rotates the
+  five stored seeds and selects the least expensive response-retry/repetition
+  budget that preserves coverage, scientific accuracy, equivalence, dominance,
+  and stability. It never counts unlabeled tradeoff winners as accuracy and makes
+  no new LLM calls.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

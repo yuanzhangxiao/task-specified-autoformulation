@@ -632,3 +632,31 @@ dominance, mutation-certified atomic, stability, and orientation-uncertainty gat
 passes. A failed gate cannot be repaired by retuning on these structures. Search
 objective integration remains a separate later milestone even if validation
 passes.
+
+The validation did pass all gates. Of 140 planned judgments, 139 returned valid
+responses. This yielded `0.986` paired-seed coverage, `0.983` labeled accuracy,
+`1.000` equivalence-tie accuracy, `0.980` known-dominance accuracy, `1.000`
+known-dominance pair accuracy, and `1.000` accuracy for each targeted atomic
+family. Modal preference consistency was `0.986`, repeat decision SD was `0.007`,
+mean orientation half-gap was `0.017`, and comparative disagreement rate was
+`0.058`. These are confirmatory results for the frozen judge aggregation, not a
+license to tune its questions or weights.
+
+`configs/hybrid_judge_consensus_operating_point_v1.json` defines the subsequent
+post-hoc call-budget analysis. It makes no LLM requests. For every canonical pair,
+each stored seed is rotated into the first position. Candidate configurations
+request one through five complete paired seeds under one through five maximum
+distinct seed attempts. An incomplete seed is replaced only by rerunning both
+orientations at the next seed. It is never combined across mismatched seeds, and
+scientific disagreement does not activate a retry. When multiple complete paired
+seeds are requested, their question-consensus decision values are averaged before
+the frozen tie threshold is applied.
+
+The analyzer reports expected and maximum judge operations and logical LLM
+stages, response-replacement activation, decision coverage, clustered accuracy,
+equivalence, dominance, repeat SD, and modal consistency. Selection first requires
+every frozen scientific and coverage gate, then minimizes expected logical LLM
+stages, maximum logical stages, requested complete seeds, and maximum attempted
+seeds in that order. Unlabeled tradeoff winners remain excluded. The selected row
+is a development choice for a later search-integration pilot, not another held-out
+scientific result.

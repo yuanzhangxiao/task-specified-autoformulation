@@ -937,6 +937,38 @@ Report PASS or FAIL exactly as produced. The defect-tradeoff winner counts are
 descriptive, and no prompt, weight, threshold, aggregation rule, or gate may be
 tuned using these validation structures.
 
+After a PASS, run the frozen call-budget analysis on the stored symmetric trials.
+This is a quick CPU-only login-node analysis and makes no LLM request:
+
+```bash
+(
+set -euo pipefail
+
+repo="/projects/bibo/$USER/repos/autoformalism-v21"
+validation="/work/hdd/bibo/$USER/phase_b/judge-hybrid-consensus-validation-v1"
+root="$validation/gpt-oss-120b"
+python_bin="/projects/bibo/$USER/venvs/autoformalism-v21/bin/python"
+
+cd "$repo"
+cp "$repo/configs/hybrid_judge_consensus_operating_point_v1.json" \
+  "$validation/operating_point_config.json"
+sha256sum "$validation/operating_point_config.json" \
+  > "$validation/operating_point_config.sha256"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_consensus_operating_points.py" \
+  --symmetric-analysis "$root/symmetric_aggregation_analysis.json" \
+  --labels "$validation/hybrid_labels.jsonl" \
+  --protocol-config "$validation/operating_point_config.json" \
+  --output "$root/consensus_operating_points.json"
+
+cat "$root/consensus_operating_points.md"
+)
+```
+
+The selected row must pass every gate. Do not select a more expensive row merely
+because it improves an unlabeled tradeoff preference, and do not make additional
+judge calls for this analysis.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA
