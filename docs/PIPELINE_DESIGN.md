@@ -485,6 +485,11 @@ component preference, selected identity, and cumulative incumbent-path score is
 stored in the round checkpoint. Resume replays this ledger and fails if a
 challenge names a stale incumbent. This pilot is development-only and cannot
 open the test split.
+When a valid challenger loses, its compact fit/science comparison and equations
+remain in the next proposer request as a non-parent feedback item. This preserves
+the scientific learning signal without allowing the rejected lineage to bypass
+the beam-one incumbent contract. Provider transport details and request hashes
+remain checkpoint-only and are not exposed to the proposer.
 
 After the controller emits `FrozenSelection`, the selection artifact is
 hashed and immutable. `FinalEvaluator` then loads test exactly once,

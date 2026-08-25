@@ -267,6 +267,10 @@ The pipeline is iterative:
   globally ranked. The bounded objective has one free fit/science weight, stores
   every challenge in the checkpoint, retains the incumbent on ties or missing
   symmetric evidence, requires `beam_size=1`, and cannot access test data.
+  A losing but valid challenger remains bounded feedback for the next proposal:
+  the proposer sees its equations and compact consensus comparison, marked as an
+  ineligible parent. This closes the feedback loop without changing lineage or
+  exposing provider internals.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

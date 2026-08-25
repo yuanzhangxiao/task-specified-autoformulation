@@ -353,6 +353,56 @@ def test_incumbent_relative_hybrid_uses_one_common_challenge_and_resumes(
     assert pairwise.calls == 1
 
 
+def test_losing_hybrid_challenge_is_feedback_but_not_an_eligible_parent(
+    tmp_path: Path,
+) -> None:
+    incumbent = _candidate("incumbent", "-0.6 * x", ())
+    rejected = _candidate(
+        "rejected_challenger",
+        "-0.55 * x",
+        (),
+        parent="incumbent",
+    )
+    next_candidate = _candidate(
+        "next_candidate",
+        "-0.65 * x",
+        (),
+        parent="incumbent",
+    )
+    client = MockLLMClient(
+        proposer_responses=[incumbent, rejected, next_candidate]
+    )
+    pairwise = _FixedPairwiseJudge(decision_for_incumbent=1.0)
+    config = _config(tmp_path / "hybrid-rejected-feedback", 3).model_copy(
+        update={
+            "beam_size": 1,
+            "cheap_prefit_judge": False,
+            "evaluate_test": False,
+            "selection_policy": "incumbent_relative_hybrid",
+            "hybrid_science_weight": 1.0,
+        }
+    )
+
+    controller = _controller(client, config, pairwise_judge=pairwise)
+    controller.run()
+
+    third_prompt = json.loads(
+        [call for call in client.calls if call["role"] == "proposer"][2][
+            "user_prompt"
+        ]
+    )
+    incumbent_feedback = third_prompt["beam_feedback"][0]
+    rejected_feedback = incumbent_feedback["recent_rejected_challenger"]
+    assert incumbent_feedback["candidate_id"] == "incumbent"
+    assert rejected_feedback["candidate_id"] == "rejected_challenger"
+    assert rejected_feedback["eligible_parent"] is False
+    assert rejected_feedback["comparison"]["selected_candidate_hash"] == (
+        controller._completed_records()[0].structural_hash
+    )
+    assert "request_hashes" not in json.dumps(rejected_feedback)
+    assert "transport" not in json.dumps(rejected_feedback)
+
+
 def test_development_only_search_never_calls_test_loader(tmp_path: Path) -> None:
     candidate = _candidate(
         "development_candidate", "-decay * x", (("decay", 0.2, 1.0),)

@@ -969,6 +969,66 @@ The selected row must pass every gate. Do not select a more expensive row merely
 because it improves an unlabeled tradeoff preference, and do not make additional
 judge calls for this analysis.
 
+### Incumbent-relative hybrid-search plumbing smoke
+
+After the frozen consensus operating point passes, run one development-only
+controller smoke test. This job uses the same four-A40 vLLM 120B server for both
+proposal and paired scientific judgment. That choice isolates checkpoint,
+feedback, and selection plumbing; it is not a comparison with the 20B proposer
+and must not be reported as such. The default three rounds make one incumbent and
+at most two paired challenges. Test data are never opened.
+
+The Slurm file contains the Delta GPU account, partition, and persistent path
+defaults, so it does not depend on exported login-shell variables after logout:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+git pull --ff-only
+mkdir -p logs
+sbatch scripts/hpc/phase_b_hybrid_search_smoke_120b.slurm
+```
+
+The job automatically resumes if the same run directory already contains a
+checkpoint. To restart deliberately with a different seed, give it a new output
+root rather than overwriting the existing ledger:
+
+```bash
+sbatch --export=ALL,AF_SEED=1,AF_OUTPUT_ROOT=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v1-seed1 \
+  scripts/hpc/phase_b_hybrid_search_smoke_120b.slurm
+```
+
+After reconnecting, replace `JOB_ID` below. Log paths are absolute, so the
+commands work from any login directory:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+sacct -j JOB_ID --format=JobID,JobName,State,ExitCode,Elapsed,Start,End
+tail -n 80 "$repo/logs/phase-b-hybrid-search-smoke-JOB_ID.out"
+tail -n 80 "$repo/logs/phase-b-hybrid-search-smoke-JOB_ID.err"
+```
+
+Inspect the development summary and checkpointed challenge ledger:
+
+```bash
+run=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v1/runs/phase_b_dalla_man_t2_canonical_named_easy_easy_seed0
+jq '{status,stopping_reason,selection_validation_normalized_mse,selected_candidate_id}' \
+  "$run/summary.json"
+
+for file in "$run"/checkpoints/round_*.json; do
+  jq -r '[input_filename,
+    (.record.pruned_candidate.candidate_id // .candidate.candidate_id // "-"),
+    (.record.incumbent_challenge.fit_preference_for_challenger // "seed"),
+    (.record.incumbent_challenge.science_preference_for_challenger // "seed"),
+    (.record.incumbent_challenge.combined_preference_for_challenger // "seed"),
+    (.record.incumbent_challenge.selected_hash // "seed")]
+    | @tsv' "$file"
+done
+```
+
+Passing this smoke means the end-to-end development plumbing completed and the
+challenge ledger is internally consistent. It does not establish scientific
+superiority, tune the fit/science weight, or authorize test access.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

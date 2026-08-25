@@ -542,6 +542,13 @@ class SearchController:
                 feedback[-1].pop("incumbent_relative_scientific_comparison")
         remaining = self._config.beam_size - len(feedback)
         if remaining <= 0 and feedback:
+            if self._config.selection_policy == "incumbent_relative_hybrid":
+                recent_challenger = self._recent_rejected_hybrid_challenger(
+                    beam,
+                    round_index,
+                )
+                if recent_challenger is not None:
+                    feedback[0]["recent_rejected_challenger"] = recent_challenger
             for rejected_round in range(round_index - 1, -1, -1):
                 payload = self._store.load_round(rejected_round)
                 if (
@@ -644,6 +651,49 @@ class SearchController:
                 if remaining == 0:
                     break
         return feedback
+
+    def _recent_rejected_hybrid_challenger(
+        self,
+        beam: Sequence[CandidateRecord],
+        round_index: int,
+    ) -> dict[str, object] | None:
+        """Expose the latest losing valid challenge without making it a parent."""
+        if not beam:
+            return None
+        incumbent_hash = beam[0].structural_hash
+        for prior_round in range(round_index - 1, -1, -1):
+            payload = self._store.load_round(prior_round)
+            if (
+                payload is None
+                or payload.get("stage") != "complete"
+                or not payload.get("valid")
+                or not isinstance(payload.get("record"), dict)
+            ):
+                continue
+            record = _record_from_dict(payload["record"])
+            challenge = record.incumbent_challenge
+            if challenge is None:
+                continue
+            if (
+                challenge.selected_hash == incumbent_hash
+                and record.structural_hash != incumbent_hash
+            ):
+                return {
+                    "candidate_id": record.pruned_candidate.candidate_id,
+                    "eligible_parent": False,
+                    "equations": {
+                        item.state: item.rhs
+                        for item in record.pruned_candidate.state_equations
+                    },
+                    "comparison": _incumbent_challenge_feedback(challenge),
+                    "instruction": (
+                        "Use the scientific and fit evidence to improve the "
+                        "eligible incumbent; this rejected challenger is context, "
+                        "not an eligible parent."
+                    ),
+                }
+            return None
+        return None
 
     def _rejected_candidate_ids(self, round_index: int) -> set[str]:
         """Return checkpointed rejected candidates that may be refined."""
@@ -1036,9 +1086,6 @@ def _incumbent_challenge_feedback(
                 "absolute": list(judgment.absolute_disagreements),
                 "comparative": list(judgment.comparative_disagreements),
             }
-        ),
-        "terminal_response_failure_count": (
-            0 if judgment is None else len(judgment.prior_terminal_failures)
         ),
     }
 
