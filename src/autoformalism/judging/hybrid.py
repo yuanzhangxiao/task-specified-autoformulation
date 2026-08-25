@@ -27,6 +27,9 @@ from autoformalism.schemas import (
     HybridJudgeResult,
     PairedAbsoluteAssessment,
     ProposerClaim,
+    RelativeAssessment,
+    RelativeCriterion,
+    RelativeVerdict,
     RepeatedContributionRelation,
     RequirementEnforcement,
     RequirementRegistry,
@@ -1157,4 +1160,161 @@ def score_hybrid_pair(
         relative_preference_for_a=relative,
         decision_value=decision,
         preferred=preferred,
+    )
+
+
+def reverse_paired_assessments(
+    assessments: tuple[PairedAbsoluteAssessment, ...],
+) -> tuple[PairedAbsoluteAssessment, ...]:
+    """Map B/A-oriented absolute assessments back to A/B identity order."""
+    return tuple(
+        PairedAbsoluteAssessment(
+            criterion=item.criterion,
+            subject_id=item.subject_id,
+            candidate_a=item.candidate_b,
+            candidate_b=item.candidate_a,
+        )
+        for item in assessments
+    )
+
+
+def reverse_hybrid_result(result: HybridJudgeResult) -> HybridJudgeResult:
+    """Map a B/A judge result back to the stable A/B candidate identities."""
+    reversed_relative = []
+    for item in result.comparative_assessments:
+        verdict = item.verdict
+        if verdict is RelativeVerdict.CANDIDATE_A:
+            verdict = RelativeVerdict.CANDIDATE_B
+        elif verdict is RelativeVerdict.CANDIDATE_B:
+            verdict = RelativeVerdict.CANDIDATE_A
+        reversed_relative.append(
+            RelativeAssessment(
+                criterion=item.criterion,
+                verdict=verdict,
+                evidence=item.evidence,
+            )
+        )
+    return HybridJudgeResult(
+        absolute_assessments=reverse_paired_assessments(
+            result.absolute_assessments
+        ),
+        comparative_assessments=tuple(reversed_relative),
+    )
+
+
+def question_consensus(
+    first: HybridJudgeResult,
+    second: HybridJudgeResult,
+) -> tuple[HybridJudgeResult, tuple[str, ...], tuple[str, ...]]:
+    """Retain only question verdicts shared by two identity-aligned results.
+
+    Evidence is replaced by a runtime-owned consensus statement. The function
+    never chooses between disagreeing scientific answers.
+    """
+    first_absolute = {
+        (item.criterion, item.subject_id): item
+        for item in first.absolute_assessments
+    }
+    second_absolute = {
+        (item.criterion, item.subject_id): item
+        for item in second.absolute_assessments
+    }
+    if first_absolute.keys() != second_absolute.keys():
+        raise ValueError("orientation absolute-unit sets differ")
+    absolute = []
+    absolute_disagreements = []
+    for key in sorted(first_absolute, key=lambda item: (item[0].value, item[1])):
+        left = first_absolute[key]
+        right = second_absolute[key]
+        candidates = []
+        for side in ("candidate_a", "candidate_b"):
+            left_verdict = getattr(left, side).verdict
+            right_verdict = getattr(right, side).verdict
+            if left_verdict is right_verdict:
+                verdict = left_verdict
+                evidence = (
+                    "Symmetric orientations agree. First orientation: "
+                    f"{getattr(left, side).evidence} Second orientation: "
+                    f"{getattr(right, side).evidence}"
+                )
+            else:
+                verdict = AbsoluteVerdict.INDETERMINATE
+                evidence = "Orientations disagreed; withheld as indeterminate."
+                absolute_disagreements.append(
+                    f"{key[0].value}:{key[1]}:{side}"
+                )
+            candidates.append(
+                CandidateAbsoluteAssessment(verdict=verdict, evidence=evidence)
+            )
+        absolute.append(
+            PairedAbsoluteAssessment(
+                criterion=key[0],
+                subject_id=key[1],
+                candidate_a=candidates[0],
+                candidate_b=candidates[1],
+            )
+        )
+
+    first_relative = {
+        item.criterion: item for item in first.comparative_assessments
+    }
+    second_relative = {
+        item.criterion: item for item in second.comparative_assessments
+    }
+    if first_relative.keys() != second_relative.keys() or set(
+        first_relative
+    ) != set(RelativeCriterion):
+        raise ValueError("orientation comparative criteria differ")
+    relative = []
+    relative_disagreements = []
+    for criterion in RelativeCriterion:
+        left_verdict = first_relative[criterion].verdict
+        right_verdict = second_relative[criterion].verdict
+        if left_verdict is right_verdict:
+            verdict = left_verdict
+            evidence = (
+                "Symmetric orientations agree. First orientation: "
+                f"{first_relative[criterion].evidence} Second orientation: "
+                f"{second_relative[criterion].evidence}"
+            )
+        else:
+            verdict = RelativeVerdict.INDETERMINATE
+            evidence = "Orientations disagreed; withheld as indeterminate."
+            relative_disagreements.append(criterion.value)
+        relative.append(
+            RelativeAssessment(
+                criterion=criterion,
+                verdict=verdict,
+                evidence=evidence,
+            )
+        )
+    return (
+        HybridJudgeResult(
+            absolute_assessments=tuple(absolute),
+            comparative_assessments=tuple(relative),
+        ),
+        tuple(absolute_disagreements),
+        tuple(relative_disagreements),
+    )
+
+
+def require_deterministic_orientation_consensus(
+    first: tuple[PairedAbsoluteAssessment, ...],
+    second: tuple[PairedAbsoluteAssessment, ...],
+) -> tuple[PairedAbsoluteAssessment, ...]:
+    """Fail closed unless identity-aligned runtime facts exactly agree."""
+    first_index = {(item.criterion, item.subject_id): item for item in first}
+    second_index = {(item.criterion, item.subject_id): item for item in second}
+    if first_index.keys() != second_index.keys():
+        raise ValueError("orientation deterministic-unit sets differ")
+    for key, left in first_index.items():
+        right = second_index[key]
+        if (
+            left.candidate_a.verdict is not right.candidate_a.verdict
+            or left.candidate_b.verdict is not right.candidate_b.verdict
+        ):
+            raise ValueError(f"deterministic orientation mismatch: {key}")
+    return tuple(
+        first_index[key]
+        for key in sorted(first_index, key=lambda item: (item[0].value, item[1]))
     )

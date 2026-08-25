@@ -6,6 +6,7 @@ from autoformalism.search.models import (
     CandidateRecord,
     FinalEvaluation,
     FrozenSelection,
+    IncumbentChallenge,
     SearchConfig,
 )
 
@@ -15,6 +16,7 @@ __all__ = [
     "CheckpointStore",
     "FinalEvaluation",
     "FrozenSelection",
+    "IncumbentChallenge",
     "SearchConfig",
     "SearchController",
 ]

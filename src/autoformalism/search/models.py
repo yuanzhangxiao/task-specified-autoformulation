@@ -11,8 +11,33 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from autoformalism.fitting import EvaluationMetrics, FitConfig, FitResult
 from autoformalism.pruning import PruningConfig
 from autoformalism.schemas import CandidateModel, JudgeAssessment
+from autoformalism.schemas.base import StrictSchema
+from autoformalism.search.hybrid_pair import HybridPairJudgment
 
-SelectionPolicy = Literal["validation_only", "normalized_weighted_sum"]
+SelectionPolicy = Literal[
+    "validation_only",
+    "normalized_weighted_sum",
+    "incumbent_relative_hybrid",
+]
+
+
+class IncumbentChallenge(StrictSchema):
+    """One checkpointed fit/science challenge against the current incumbent."""
+
+    incumbent_hash: str
+    challenger_hash: str
+    fit_preference_for_challenger: float = Field(ge=-1.0, le=1.0)
+    science_preference_for_challenger: float | None = Field(
+        default=None, ge=-1.0, le=1.0
+    )
+    combined_preference_for_challenger: float | None = Field(
+        default=None, ge=-1.0, le=1.0
+    )
+    challenger_relative_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    incumbent_path_score_before: float = Field(ge=0.0)
+    incumbent_path_score_after: float = Field(ge=0.0)
+    selected_hash: str
+    judgment: HybridPairJudgment | None = None
 
 
 class SearchConfig(BaseModel):
@@ -30,6 +55,7 @@ class SearchConfig(BaseModel):
     selection_policy: SelectionPolicy = "validation_only"
     judge_weight: float = Field(default=0.25, ge=0.0)
     judge_score_epsilon: float = Field(default=0.05, gt=0.0)
+    hybrid_science_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     evaluate_test: bool = True
     proposer_system_prompt: str
     judge_system_prompt: str
@@ -38,10 +64,23 @@ class SearchConfig(BaseModel):
     pruning_config: PruningConfig = PruningConfig()
 
     @model_validator(mode="after")
-    def require_judge_for_weighted_selection(self) -> SearchConfig:
-        """Reject a judge-weighted policy when judge calls are disabled."""
-        if self.selection_policy == "normalized_weighted_sum" and not self.use_judge:
-            raise ValueError("normalized_weighted_sum requires use_judge=True")
+    def validate_selection_policy_contract(self) -> SearchConfig:
+        """Enforce judge, beam, and split boundaries for selection policies."""
+        if self.selection_policy != "validation_only" and not self.use_judge:
+            raise ValueError(f"{self.selection_policy} requires use_judge=True")
+        if (
+            self.selection_policy == "incumbent_relative_hybrid"
+            and self.beam_size != 1
+        ):
+            raise ValueError("incumbent_relative_hybrid requires beam_size=1")
+        if (
+            self.selection_policy == "incumbent_relative_hybrid"
+            and self.evaluate_test
+        ):
+            raise ValueError(
+                "incumbent_relative_hybrid is development-only and requires "
+                "evaluate_test=False"
+            )
         return self
 
 
@@ -61,6 +100,7 @@ class CandidateRecord:
     pruning_removed_terms: tuple[str, ...]
     pruning_removed_parameters: tuple[str, ...]
     pruning_contributions: dict[str, float]
+    incumbent_challenge: IncumbentChallenge | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +116,8 @@ class FrozenSelection:
     normalized_log_validation: float
     normalized_judge_penalty: float
     judge_score: float
+    incumbent_path_score: float | None = None
+    hybrid_science_weight: float | None = None
 
 
 @dataclass(frozen=True)

@@ -473,6 +473,19 @@ The bounded feedback payload retains the most recent rejected candidate when the
 beam is full and explicitly states that alpha-renaming does not constitute a new
 structure.
 
+The separately gated `incumbent_relative_hybrid` development policy does not
+pretend that pairwise scores against different references are globally
+comparable. It permits one proposal per round and a beam of one. The current
+incumbent is frozen before the round; after deterministic validation, fitting,
+and pruning, the challenger is evaluated by the frozen two-stage 120B hybrid
+judge in both candidate orientations. Identity-normalized question consensus is
+then combined with a symmetric relative validation-NMSE improvement through one
+prespecified science weight. Every challenge, request hash, disagreement,
+component preference, selected identity, and cumulative incumbent-path score is
+stored in the round checkpoint. Resume replays this ledger and fails if a
+challenge names a stale incumbent. This pilot is development-only and cannot
+open the test split.
+
 After the controller emits `FrozenSelection`, the selection artifact is
 hashed and immutable. `FinalEvaluator` then loads test exactly once,
 fits no new structure or parameters using test data, simulates the

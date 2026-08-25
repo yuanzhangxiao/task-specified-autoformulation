@@ -17,7 +17,7 @@ from autoformalism.execution import (
     execute,
 )
 from autoformalism.expressions import ValidationContext
-from autoformalism.llm import OllamaThinking
+from autoformalism.llm import OllamaThinking, VLLMReasoningEffort
 
 
 def _arguments(
@@ -110,6 +110,12 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.selection_policy == "validation_only"
     assert default.judge_weight == 0.25
     assert default.judge_score_epsilon == 0.05
+    assert default.hybrid_science_weight == 0.5
+    assert default.hybrid_judge_seed_base is None
+    assert default.vllm_base_url == "http://127.0.0.1:8000"
+    assert default.vllm_reasoning_effort is VLLMReasoningEffort.LOW
+    assert default.vllm_temperature == 0.0
+    assert default.vllm_seed is None
 
 
 def test_cli_accepts_weighted_selection_and_rejects_no_judge() -> None:
@@ -151,6 +157,52 @@ def test_cli_accepts_development_only_mode() -> None:
     )
 
     assert arguments.development_only is True
+
+
+def test_cli_freezes_incumbent_hybrid_to_development_single_beam_vllm() -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--dry-run",
+                "--development-only",
+                "--beam-size",
+                "1",
+                "--proposer-model",
+                "ollama:gpt-oss:20b",
+                "--judge-model",
+                "vllm:openai/gpt-oss-120b",
+                "--selection-policy",
+                "incumbent_relative_hybrid",
+                "--hybrid-science-weight",
+                "0.4",
+            ]
+        )
+    )
+
+    assert arguments.selection_policy == "incumbent_relative_hybrid"
+    assert arguments.hybrid_science_weight == 0.4
+
+    for invalid in (
+        ["--beam-size", "2"],
+        ["--judge-model", "ollama:gpt-oss:120b"],
+    ):
+        with pytest.raises(SystemExit):
+            arguments_from_namespace(
+                parser.parse_args(
+                    [
+                        "--dry-run",
+                        "--development-only",
+                        "--proposer-model",
+                        "ollama:gpt-oss:20b",
+                        "--judge-model",
+                        "vllm:openai/gpt-oss-120b",
+                        "--selection-policy",
+                        "incumbent_relative_hybrid",
+                        *invalid,
+                    ]
+                )
+            )
 
 
 def test_cli_accepts_custom_ollama_endpoint() -> None:

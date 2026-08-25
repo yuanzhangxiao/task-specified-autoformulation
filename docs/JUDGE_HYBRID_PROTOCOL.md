@@ -660,3 +660,24 @@ stages, maximum logical stages, requested complete seeds, and maximum attempted
 seeds in that order. Unlabeled tradeoff winners remain excluded. The selected row
 is a development choice for a later search-integration pilot, not another held-out
 scientific result.
+
+The selected operating point requests one complete paired seed and permits one
+whole-pair replacement at a second distinct seed. Frozen rotation analysis
+estimated `2.029` judge operations (`4.057` logical atomic/comparative stages)
+per comparison, with a maximum of four operations/eight stages. It retained full
+decision coverage, `0.983` labeled accuracy, perfect equivalence, `0.980`
+known-dominance accuracy, and perfect pair-aggregated dominance.
+
+`configs/hybrid_search_objective_pilot_v1.json` freezes the subsequent online
+development boundary. The existing production defaults are unchanged. In the
+new opt-in mode, the first fitted candidate seeds an incumbent and each later
+round supplies exactly one challenger. Both judge orientations use the same
+seed; a terminal failure in either orientation discards that incomplete pair and
+retries both orientations once. Scientific disagreement never triggers a retry.
+Question consensus is recomputed before a bounded challenger science preference
+is combined with symmetric relative validation-NMSE improvement. The only new
+tradeoff parameter is the science weight. A positive combined preference replaces
+the incumbent; zero, indeterminate science, or exhausted response attempts retain
+it. Comparisons against different incumbents are never treated as a shared global
+score. The mode requires a one-member beam, records its full challenge ledger for
+deterministic resume, and is structurally unable to open test data.

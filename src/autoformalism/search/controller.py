@@ -35,10 +35,15 @@ from autoformalism.schemas import (
     parse_judge_assessment,
 )
 from autoformalism.search.checkpoints import CheckpointStore
+from autoformalism.search.hybrid_pair import (
+    HybridPairJudgment,
+    PairwiseScientificJudge,
+)
 from autoformalism.search.models import (
     CandidateRecord,
     FinalEvaluation,
     FrozenSelection,
+    IncumbentChallenge,
     SearchConfig,
 )
 
@@ -77,6 +82,7 @@ class SearchController:
         validation: DatasetSplit,
         test_loader: Callable[[FrozenSelection], DatasetSplit],
         config: SearchConfig,
+        pairwise_judge: PairwiseScientificJudge | None = None,
         stage_callback: StageCallback | None = None,
     ) -> None:
         if training.name is not SplitName.TRAIN:
@@ -89,6 +95,14 @@ class SearchController:
         self._validation = validation
         self._test_loader = test_loader
         self._config = config
+        self._pairwise_judge = pairwise_judge
+        if (
+            config.selection_policy == "incumbent_relative_hybrid"
+            and pairwise_judge is None
+        ):
+            raise ValueError(
+                "incumbent_relative_hybrid requires a pairwise scientific judge"
+            )
         self._callback = stage_callback or (lambda _stage, _round: None)
         self._store = CheckpointStore(
             config.checkpoint_directory, self._run_fingerprint()
@@ -98,10 +112,21 @@ class SearchController:
         """Run search, freeze validation selection, and optionally test once."""
         completed = self._completed_records()
         start_round = self._completed_round_count()
-        best_seen = min(
-            (item.pruned_fit.validation_metrics.normalized_mse for item in completed),
-            default=float("inf"),
-        )
+        if self._config.selection_policy == "incumbent_relative_hybrid":
+            incumbent = _hybrid_incumbent(completed)
+            best_seen = (
+                float("inf")
+                if incumbent is None
+                else incumbent[0].pruned_fit.validation_metrics.normalized_mse
+            )
+        else:
+            best_seen = min(
+                (
+                    item.pruned_fit.validation_metrics.normalized_mse
+                    for item in completed
+                ),
+                default=float("inf"),
+            )
         stagnant = _trailing_stagnation(completed, self._config)
         stopping_reason = "iteration_budget"
 
@@ -118,12 +143,13 @@ class SearchController:
             record = self._run_round(round_index, beam, completed)
             if record is not None:
                 completed.append(record)
-                current = record.pruned_fit.validation_metrics.normalized_mse
-                if current < best_seen - 1e-12:
-                    best_seen = current
                 current_selection = _beam(completed, 1, self._config)[
                     0
                 ].structural_hash
+                selected_record = _beam(completed, 1, self._config)[0]
+                current = selected_record.pruned_fit.validation_metrics.normalized_mse
+                if current < best_seen - 1e-12:
+                    best_seen = current
                 if current_selection != previous_selection:
                     stagnant = 0
                 else:
@@ -320,6 +346,42 @@ class SearchController:
         postpruning = parse_judge_assessment(payload["postpruning_judge"])
 
         if stage == "postpruning_judged":
+            challenge = None
+            if self._config.selection_policy == "incumbent_relative_hybrid":
+                incumbent_state = _hybrid_incumbent(completed)
+                if incumbent_state is not None:
+                    incumbent, path_score = incumbent_state
+                    assert self._pairwise_judge is not None
+                    judgment = self._pairwise_judge.compare(
+                        incumbent.pruned_candidate,
+                        pruned_candidate,
+                    )
+                    challenge = _incumbent_challenge(
+                        incumbent=incumbent,
+                        challenger_hash=_structural_hash(pruned_candidate),
+                        challenger_validation_mse=(
+                            pruned_fit.validation_metrics.normalized_mse
+                        ),
+                        incumbent_path_score=path_score,
+                        judgment=judgment,
+                        science_weight=self._config.hybrid_science_weight,
+                    )
+                    payload["incumbent_challenge"] = challenge.model_dump(
+                        mode="json"
+                    )
+                stage = self._save_stage(
+                    round_index, payload, "incumbent_compared"
+                )
+            else:
+                stage = "incumbent_compared"
+
+        if stage == "incumbent_compared":
+            challenge_payload = payload.get("incumbent_challenge")
+            challenge = (
+                None
+                if challenge_payload is None
+                else IncumbentChallenge.model_validate(challenge_payload)
+            )
             record = CandidateRecord(
                 round_index=round_index,
                 candidate=candidate,
@@ -335,6 +397,7 @@ class SearchController:
                     payload["pruning"]["removed_parameters"]
                 ),
                 pruning_contributions=dict(payload["pruning"]["contributions"]),
+                incumbent_challenge=challenge,
             )
             payload.update(
                 valid=True,
@@ -345,7 +408,10 @@ class SearchController:
         raise RuntimeError(f"unsupported checkpoint stage: {stage}")
 
     def _judge(self, candidate: CandidateModel, stage: str) -> JudgeAssessment:
-        if not self._config.use_judge:
+        if (
+            not self._config.use_judge
+            or self._config.selection_policy == "incumbent_relative_hybrid"
+        ):
             return ScientificJudgeResult.model_validate(
                 {
                     "hard_red_flags": [],
@@ -430,6 +496,13 @@ class SearchController:
                         item.model_dump(mode="json")
                         for item in record.postpruning_judge.actionable_edits
                     ],
+                    "incumbent_relative_scientific_comparison": (
+                        None
+                        if record.incumbent_challenge is None
+                        else _incumbent_challenge_feedback(
+                            record.incumbent_challenge
+                        )
+                    ),
                     "numerical_failures": {
                         "training_trajectories": list(
                             fit.training_metrics.failed_trajectories
@@ -454,7 +527,10 @@ class SearchController:
                     ),
                 }
             )
-            if not self._config.use_judge:
+            if (
+                not self._config.use_judge
+                or self._config.selection_policy == "incumbent_relative_hybrid"
+            ):
                 for key in (
                     "judge_category_scores",
                     "judge_advisory_red_flags",
@@ -462,6 +538,8 @@ class SearchController:
                     "judge_actionable_edits",
                 ):
                     feedback[-1].pop(key)
+            if not self._config.use_judge:
+                feedback[-1].pop("incumbent_relative_scientific_comparison")
         remaining = self._config.beam_size - len(feedback)
         if remaining <= 0 and feedback:
             for rejected_round in range(round_index - 1, -1, -1):
@@ -609,9 +687,16 @@ class SearchController:
     ) -> FinalEvaluation:
         existing = self._store.load_final()
         selected = _beam(completed, 1, self._config)[0]
-        objective = _selection_objectives(_unique_records(completed), self._config)[
-            selected.structural_hash
-        ]
+        if self._config.selection_policy == "incumbent_relative_hybrid":
+            incumbent_state = _hybrid_incumbent(completed)
+            assert incumbent_state is not None
+            objective = (-incumbent_state[1], 0.0, 0.0)
+            incumbent_path_score = incumbent_state[1]
+        else:
+            objective = _selection_objectives(
+                _unique_records(completed), self._config
+            )[selected.structural_hash]
+            incumbent_path_score = None
         frozen = FrozenSelection(
             selection_hash=selected.structural_hash,
             candidate=selected.pruned_candidate,
@@ -622,6 +707,12 @@ class SearchController:
             normalized_log_validation=objective[1],
             normalized_judge_penalty=objective[2],
             judge_score=selected.postpruning_judge.aggregate_score,
+            incumbent_path_score=incumbent_path_score,
+            hybrid_science_weight=(
+                self._config.hybrid_science_weight
+                if self._config.selection_policy == "incumbent_relative_hybrid"
+                else None
+            ),
         )
         if existing is None:
             existing = {
@@ -728,6 +819,11 @@ class SearchController:
             "config": self._config.model_dump(
                 mode="json", exclude={"checkpoint_directory"}
             ),
+            "pairwise_judge_fingerprint": (
+                None
+                if self._pairwise_judge is None
+                else self._pairwise_judge.fingerprint
+            ),
             "context": self._context.model_dump(mode="json"),
             "splits": {
                 "train": self._training.fingerprint,
@@ -749,6 +845,10 @@ def _implementation_fingerprint() -> str:
     paths = (
         Path(__file__).resolve(),
         root / "search" / "checkpoints.py",
+        root / "search" / "hybrid_pair.py",
+        root / "search" / "models.py",
+        root / "judging" / "hybrid.py",
+        root / "judging" / "prompts.py",
         root / "expressions" / "compiler.py",
         root / "fitting" / "fitter.py",
         root / "pruning" / "pruner.py",
@@ -845,6 +945,9 @@ def _canonical_expression(source: str, names: Mapping[str, str]) -> str:
 def _beam(
     records: Sequence[CandidateRecord], size: int, config: SearchConfig
 ) -> list[CandidateRecord]:
+    if config.selection_policy == "incumbent_relative_hybrid":
+        incumbent = _hybrid_incumbent(records)
+        return [] if incumbent is None else [incumbent[0]]
     candidates = _unique_records(records)
     objectives = _selection_objectives(candidates, config)
     return sorted(
@@ -854,6 +957,161 @@ def _beam(
             *_validation_rank(record),
         ),
     )[:size]
+
+
+def _hybrid_incumbent(
+    records: Sequence[CandidateRecord],
+) -> tuple[CandidateRecord, float] | None:
+    """Replay checkpointed sequential challenges and return incumbent/path score."""
+    ordered = sorted(records, key=lambda item: item.round_index)
+    if not ordered:
+        return None
+    incumbent = ordered[0]
+    path_score = 0.0
+    if incumbent.incumbent_challenge is not None:
+        raise ValueError("first hybrid-search record must seed the incumbent")
+    for challenger in ordered[1:]:
+        challenge = challenger.incumbent_challenge
+        if challenge is None:
+            raise ValueError("hybrid-search record is missing incumbent challenge")
+        if challenge.incumbent_hash != incumbent.structural_hash:
+            raise ValueError("hybrid-search challenge references a stale incumbent")
+        if abs(challenge.incumbent_path_score_before - path_score) > 1e-12:
+            raise ValueError("hybrid-search path score is inconsistent")
+        if challenge.selected_hash == challenger.structural_hash:
+            incumbent = challenger
+        elif challenge.selected_hash != incumbent.structural_hash:
+            raise ValueError("hybrid-search challenge selected an unknown candidate")
+        path_score = challenge.incumbent_path_score_after
+    return incumbent, path_score
+
+
+def _fit_preference_for_challenger(
+    incumbent_loss: float,
+    challenger_loss: float,
+) -> float:
+    """Return a bounded, symmetric relative validation-fit improvement."""
+    denominator = incumbent_loss + challenger_loss
+    if denominator <= np.finfo(float).tiny:
+        return 0.0
+    return float(np.clip((incumbent_loss - challenger_loss) / denominator, -1, 1))
+
+
+def _incumbent_challenge_feedback(
+    challenge: IncumbentChallenge,
+) -> dict[str, object]:
+    """Return bounded scientific feedback without transport/checkpoint internals."""
+    judgment = challenge.judgment
+    result = None if judgment is None else judgment.consensus_result
+    return {
+        "incumbent_candidate_hash": challenge.incumbent_hash,
+        "challenger_candidate_hash": challenge.challenger_hash,
+        "selected_candidate_hash": challenge.selected_hash,
+        "fit_preference_for_challenger": challenge.fit_preference_for_challenger,
+        "science_preference_for_challenger": (
+            challenge.science_preference_for_challenger
+        ),
+        "combined_preference_for_challenger": (
+            challenge.combined_preference_for_challenger
+        ),
+        "challenger_relative_score": challenge.challenger_relative_score,
+        "symmetric_scientific_evidence_available": result is not None,
+        "absolute_assessments": (
+            []
+            if result is None
+            else [item.model_dump(mode="json") for item in result.absolute_assessments]
+        ),
+        "comparative_assessments": (
+            []
+            if result is None
+            else [
+                item.model_dump(mode="json")
+                for item in result.comparative_assessments
+            ]
+        ),
+        "orientation_disagreements": (
+            {}
+            if judgment is None
+            else {
+                "absolute": list(judgment.absolute_disagreements),
+                "comparative": list(judgment.comparative_disagreements),
+            }
+        ),
+        "terminal_response_failure_count": (
+            0 if judgment is None else len(judgment.prior_terminal_failures)
+        ),
+    }
+
+
+def _science_preference_for_challenger(
+    decision_for_incumbent: float | None,
+    *,
+    decision_scale: float,
+    tie_threshold: float,
+) -> float | None:
+    """Map the frozen hybrid decision to a bounded challenger preference.
+
+    Values inside the judge's already-frozen tie interval contribute no science
+    preference. Outside it, the remaining interval is linearly mapped to [-1, 1].
+    """
+    if decision_for_incumbent is None:
+        return None
+    challenger = -decision_for_incumbent
+    magnitude = abs(challenger)
+    if magnitude <= tie_threshold:
+        return 0.0
+    denominator = max(decision_scale - tie_threshold, np.finfo(float).eps)
+    return float(
+        np.sign(challenger) * min(1.0, (magnitude - tie_threshold) / denominator)
+    )
+
+
+def _incumbent_challenge(
+    *,
+    incumbent: CandidateRecord,
+    challenger_hash: str,
+    challenger_validation_mse: float,
+    incumbent_path_score: float,
+    judgment: HybridPairJudgment | None,
+    science_weight: float,
+) -> IncumbentChallenge:
+    fit_delta = _fit_preference_for_challenger(
+        incumbent.pruned_fit.validation_metrics.normalized_mse,
+        challenger_validation_mse,
+    )
+    science_delta = (
+        None
+        if judgment is None
+        else _science_preference_for_challenger(
+            judgment.decision_value_for_incumbent,
+            decision_scale=judgment.decision_scale,
+            tie_threshold=judgment.tie_threshold,
+        )
+    )
+    combined = (
+        None
+        if science_delta is None
+        else (1.0 - science_weight) * fit_delta + science_weight * science_delta
+    )
+    challenger_selected = combined is not None and combined > 0.0
+    selected_hash = (
+        challenger_hash if challenger_selected else incumbent.structural_hash
+    )
+    path_after = incumbent_path_score + (max(0.0, combined) if combined else 0.0)
+    return IncumbentChallenge(
+        incumbent_hash=incumbent.structural_hash,
+        challenger_hash=challenger_hash,
+        fit_preference_for_challenger=fit_delta,
+        science_preference_for_challenger=science_delta,
+        combined_preference_for_challenger=combined,
+        challenger_relative_score=(
+            None if combined is None else (1.0 + combined) / 2.0
+        ),
+        incumbent_path_score_before=incumbent_path_score,
+        incumbent_path_score_after=path_after,
+        selected_hash=selected_hash,
+        judgment=judgment,
+    )
 
 
 def _unique_records(records: Sequence[CandidateRecord]) -> list[CandidateRecord]:
@@ -1070,6 +1328,11 @@ def _record_to_dict(record: CandidateRecord) -> dict[str, Any]:
         "pruning_removed_terms": list(record.pruning_removed_terms),
         "pruning_removed_parameters": list(record.pruning_removed_parameters),
         "pruning_contributions": record.pruning_contributions,
+        "incumbent_challenge": (
+            None
+            if record.incumbent_challenge is None
+            else record.incumbent_challenge.model_dump(mode="json")
+        ),
     }
 
 
@@ -1089,6 +1352,11 @@ def _record_from_dict(payload: Mapping[str, Any]) -> CandidateRecord:
         pruning_removed_terms=tuple(payload["pruning_removed_terms"]),
         pruning_removed_parameters=tuple(payload["pruning_removed_parameters"]),
         pruning_contributions=dict(payload["pruning_contributions"]),
+        incumbent_challenge=(
+            None
+            if payload.get("incumbent_challenge") is None
+            else IncumbentChallenge.model_validate(payload["incumbent_challenge"])
+        ),
     )
 
 
@@ -1103,6 +1371,8 @@ def _frozen_to_dict(frozen: FrozenSelection) -> dict[str, Any]:
         "normalized_log_validation": frozen.normalized_log_validation,
         "normalized_judge_penalty": frozen.normalized_judge_penalty,
         "judge_score": frozen.judge_score,
+        "incumbent_path_score": frozen.incumbent_path_score,
+        "hybrid_science_weight": frozen.hybrid_science_weight,
     }
 
 
@@ -1123,4 +1393,14 @@ def _frozen_from_dict(payload: Mapping[str, Any]) -> FrozenSelection:
             payload.get("normalized_judge_penalty", 0.0)
         ),
         judge_score=float(payload.get("judge_score", 0.0)),
+        incumbent_path_score=(
+            None
+            if payload.get("incumbent_path_score") is None
+            else float(payload["incumbent_path_score"])
+        ),
+        hybrid_science_weight=(
+            None
+            if payload.get("hybrid_science_weight") is None
+            else float(payload["hybrid_science_weight"])
+        ),
     )

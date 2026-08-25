@@ -14,9 +14,21 @@ from autoformalism.fitting import FitConfig
 from autoformalism.llm import MockLLMClient
 from autoformalism.llm.exceptions import LLMResponseError
 from autoformalism.pruning import PruningConfig
-from autoformalism.schemas import CandidateModel, ScientificJudgeResult
+from autoformalism.schemas import (
+    AbsoluteCriterion,
+    AbsoluteVerdict,
+    CandidateAbsoluteAssessment,
+    CandidateModel,
+    HybridJudgeResult,
+    PairedAbsoluteAssessment,
+    RelativeAssessment,
+    RelativeCriterion,
+    RelativeVerdict,
+    ScientificJudgeResult,
+)
 from autoformalism.search import CheckpointError, SearchConfig, SearchController
-from autoformalism.search.controller import _beam
+from autoformalism.search.controller import _beam, _hybrid_incumbent
+from autoformalism.search.hybrid_pair import HybridPairJudgment
 
 
 def _candidate(
@@ -122,6 +134,7 @@ def _controller(
     config: SearchConfig,
     callback=None,
     test_loader=None,
+    pairwise_judge=None,
 ) -> SearchController:
     return SearchController(
         llm_client=client,
@@ -134,8 +147,60 @@ def _controller(
             else lambda _frozen: _split(SplitName.TEST, "test")
         ),
         config=config,
+        pairwise_judge=pairwise_judge,
         stage_callback=callback,
     )
+
+
+class _FixedPairwiseJudge:
+    fingerprint = "fixed-pairwise-judge"
+
+    def __init__(self, decision_for_incumbent: float | None) -> None:
+        self._decision = decision_for_incumbent
+        self.calls = 0
+
+    def compare(
+        self, incumbent: CandidateModel, challenger: CandidateModel
+    ) -> HybridPairJudgment:
+        self.calls += 1
+        absolute = PairedAbsoluteAssessment(
+            criterion=AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+            subject_id="candidate",
+            candidate_a=CandidateAbsoluteAssessment(
+                verdict=AbsoluteVerdict.PASS,
+                evidence="Incumbent evidence.",
+            ),
+            candidate_b=CandidateAbsoluteAssessment(
+                verdict=AbsoluteVerdict.PASS,
+                evidence="Challenger evidence.",
+            ),
+        )
+        consensus = HybridJudgeResult(
+            absolute_assessments=(absolute,),
+            comparative_assessments=tuple(
+                RelativeAssessment(
+                    criterion=criterion,
+                    verdict=RelativeVerdict.TIE,
+                    evidence="Fixed comparison evidence.",
+                )
+                for criterion in RelativeCriterion
+            ),
+        )
+        return HybridPairJudgment(
+            incumbent_candidate_id=incumbent.candidate_id,
+            challenger_candidate_id=challenger.candidate_id,
+            seed_attempt_index=0,
+            seed=12000,
+            decision_value_for_incumbent=self._decision,
+            decision_scale=1.25,
+            tie_threshold=0.05,
+            preferred="candidate_b",
+            orientation_values_for_incumbent=(self._decision, self._decision),
+            orientation_half_gap=0.0,
+            consensus_result=consensus,
+            deterministic_assessments=(),
+            request_hashes=("a", "b", "c", "d"),
+        )
 
 
 def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
@@ -240,6 +305,52 @@ def test_weighted_selection_can_trade_validation_fit_for_scientific_score(
 
     assert validation_selected.candidate.candidate_id == "best_fit"
     assert weighted_selected.candidate.candidate_id == "better_science"
+
+
+def test_incumbent_relative_hybrid_uses_one_common_challenge_and_resumes(
+    tmp_path: Path,
+) -> None:
+    incumbent = _candidate("incumbent", "-0.6 * x", ())
+    challenger = _candidate(
+        "challenger",
+        "-0.55 * x",
+        (),
+        parent="incumbent",
+    )
+    client = MockLLMClient(proposer_responses=[incumbent, challenger])
+    pairwise = _FixedPairwiseJudge(decision_for_incumbent=-1.0)
+    config = _config(tmp_path / "hybrid", 2).model_copy(
+        update={
+            "beam_size": 1,
+            "cheap_prefit_judge": False,
+            "evaluate_test": False,
+            "selection_policy": "incumbent_relative_hybrid",
+            "hybrid_science_weight": 0.75,
+        }
+    )
+
+    controller = _controller(client, config, pairwise_judge=pairwise)
+    result = controller.run()
+    records = controller._completed_records()
+    selected, path_score = _hybrid_incumbent(records)
+
+    assert pairwise.calls == 1
+    assert selected.pruned_candidate.candidate_id == "challenger"
+    assert path_score > 0.0
+    assert result.frozen_selection.selection_hash == selected.structural_hash
+    assert records[0].incumbent_challenge is None
+    challenge = records[1].incumbent_challenge
+    assert challenge is not None
+    assert challenge.science_preference_for_challenger > 0.0
+    assert challenge.selected_hash == records[1].structural_hash
+    assert not [call for call in client.calls if call["role"] == "judge"]
+
+    resumed = _controller(client, config, pairwise_judge=pairwise).run()
+    assert (
+        resumed.frozen_selection.selection_hash
+        == result.frozen_selection.selection_hash
+    )
+    assert pairwise.calls == 1
 
 
 def test_development_only_search_never_calls_test_loader(tmp_path: Path) -> None:

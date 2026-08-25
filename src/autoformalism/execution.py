@@ -25,17 +25,25 @@ from autoformalism.data import (
 )
 from autoformalism.expressions import ValidationContext
 from autoformalism.fitting import FitConfig
+from autoformalism.judging import HybridScoringConfig, extract_public_requirements
+from autoformalism.judging.prompts import (
+    ATOMIC_EVIDENCE_PROMPT,
+    ATOMIC_STAGE_TWO_NOTE,
+    HYBRID_JUDGE_PROMPT,
+)
 from autoformalism.llm import (
     LLMClient,
     LLMConfig,
     LLMProvider,
     MockLLMClient,
     OllamaThinking,
+    VLLMReasoningEffort,
     create_llm_client,
 )
 from autoformalism.pruning import PruningConfig
 from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 from autoformalism.search import FinalEvaluation, SearchConfig, SearchController
+from autoformalism.search.hybrid_pair import PairedHybridJudge
 
 _CONTROLLER_PROMPT = """
 Return exactly one complete ProposerCandidateV2. Treat every current target value as a
@@ -151,6 +159,12 @@ class ExecutionArguments:
     selection_policy: str = "validation_only"
     judge_weight: float = 0.25
     judge_score_epsilon: float = 0.05
+    hybrid_science_weight: float = 0.5
+    hybrid_judge_seed_base: int | None = None
+    vllm_base_url: str = "http://127.0.0.1:8000"
+    vllm_reasoning_effort: VLLMReasoningEffort = VLLMReasoningEffort.LOW
+    vllm_temperature: float = 0.0
+    vllm_seed: int | None = None
 
 
 class _RoleClient:
@@ -196,11 +210,16 @@ def build_experiment_parser(
     parser.add_argument("--beam-size", type=int, default=2)
     parser.add_argument(
         "--selection-policy",
-        choices=("validation_only", "normalized_weighted_sum"),
+        choices=(
+            "validation_only",
+            "normalized_weighted_sum",
+            "incumbent_relative_hybrid",
+        ),
         default="validation_only",
         help=(
-            "candidate ranking policy; weighted selection combines robustly "
-            "normalized log validation NMSE and negative-log judge score"
+            "candidate ranking policy; normalized weighted selection uses "
+            "standalone judge scores, while incumbent-relative hybrid uses the "
+            "frozen paired-question-consensus development protocol"
         ),
     )
     parser.add_argument(
@@ -214,6 +233,23 @@ def build_experiment_parser(
         type=float,
         default=0.05,
         help="positive guard added inside the negative-log judge penalty",
+    )
+    parser.add_argument(
+        "--hybrid-science-weight",
+        type=float,
+        default=0.5,
+        help=(
+            "single fit/science tradeoff in [0, 1] for the development-only "
+            "incumbent-relative hybrid policy"
+        ),
+    )
+    parser.add_argument(
+        "--hybrid-judge-seed-base",
+        type=int,
+        help=(
+            "first of two distinct paired-orientation vLLM judge seeds; "
+            "defaults deterministically from --seed"
+        ),
     )
     parser.add_argument(
         "--llm-timeout-seconds",
@@ -312,6 +348,18 @@ def build_experiment_parser(
         help="nonnegative Ollama sampling seed; omitted by default",
     )
     parser.add_argument(
+        "--vllm-base-url",
+        default=os.environ.get("VLLM_BASE_URL", "http://127.0.0.1:8000"),
+        help="vLLM OpenAI-compatible endpoint",
+    )
+    parser.add_argument(
+        "--vllm-reasoning-effort",
+        choices=tuple(item.value for item in VLLMReasoningEffort),
+        default=VLLMReasoningEffort.LOW.value,
+    )
+    parser.add_argument("--vllm-temperature", type=float, default=0.0)
+    parser.add_argument("--vllm-seed", type=int)
+    parser.add_argument(
         "--stagnation-iterations",
         type=int,
         help=(
@@ -351,14 +399,50 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--judge-weight must be nonnegative")
     if namespace.judge_score_epsilon <= 0.0:
         raise SystemExit("--judge-score-epsilon must be positive")
+    if not 0.0 <= namespace.hybrid_science_weight <= 1.0:
+        raise SystemExit("--hybrid-science-weight must be in [0, 1]")
     if namespace.selection_policy == "normalized_weighted_sum" and namespace.no_judge:
         raise SystemExit("--selection-policy normalized_weighted_sum requires judge")
+    if namespace.selection_policy == "incumbent_relative_hybrid":
+        if namespace.no_judge:
+            raise SystemExit(
+                "--selection-policy incumbent_relative_hybrid requires judge"
+            )
+        if not namespace.development_only:
+            raise SystemExit(
+                "--selection-policy incumbent_relative_hybrid requires "
+                "--development-only"
+            )
+        if namespace.beam_size != 1:
+            raise SystemExit(
+                "--selection-policy incumbent_relative_hybrid requires --beam-size 1"
+            )
+        if namespace.mock_llm:
+            raise SystemExit(
+                "--selection-policy incumbent_relative_hybrid does not support "
+                "--mock-llm"
+            )
+        judge_model = namespace.judge_model or namespace.proposer_model
+        if judge_model is not None and not judge_model.startswith("vllm:"):
+            raise SystemExit(
+                "--selection-policy incumbent_relative_hybrid requires a "
+                "vllm: judge model"
+            )
     if namespace.llm_timeout_seconds <= 0:
         raise SystemExit("--llm-timeout-seconds must be positive")
     if namespace.llm_max_output_tokens < 128:
         raise SystemExit("--llm-max-output-tokens must be at least 128")
     if not 0.0 <= namespace.ollama_temperature <= 2.0:
         raise SystemExit("--ollama-temperature must be between 0 and 2")
+    if not 0.0 <= namespace.vllm_temperature <= 2.0:
+        raise SystemExit("--vllm-temperature must be between 0 and 2")
+    if namespace.vllm_seed is not None and namespace.vllm_seed < 0:
+        raise SystemExit("--vllm-seed must be nonnegative")
+    if (
+        namespace.hybrid_judge_seed_base is not None
+        and namespace.hybrid_judge_seed_base < 0
+    ):
+        raise SystemExit("--hybrid-judge-seed-base must be nonnegative")
     if namespace.ollama_seed is not None and namespace.ollama_seed < 0:
         raise SystemExit("--ollama-seed must be nonnegative")
     if (
@@ -421,6 +505,14 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         selection_policy=namespace.selection_policy,
         judge_weight=namespace.judge_weight,
         judge_score_epsilon=namespace.judge_score_epsilon,
+        hybrid_science_weight=namespace.hybrid_science_weight,
+        hybrid_judge_seed_base=namespace.hybrid_judge_seed_base,
+        vllm_base_url=namespace.vllm_base_url,
+        vllm_reasoning_effort=VLLMReasoningEffort(
+            namespace.vllm_reasoning_effort
+        ),
+        vllm_temperature=namespace.vllm_temperature,
+        vllm_seed=namespace.vllm_seed,
     )
 
 
@@ -454,6 +546,27 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "selection_policy": arguments.selection_policy,
         "judge_weight": arguments.judge_weight,
         "judge_score_epsilon": arguments.judge_score_epsilon,
+        "hybrid_science_weight": arguments.hybrid_science_weight,
+        "hybrid_judge_seed_base": (
+            arguments.hybrid_judge_seed_base
+            if arguments.hybrid_judge_seed_base is not None
+            else 12000 + 2 * arguments.seed
+        ),
+        "hybrid_judge_contract": (
+            {
+                "model": arguments.judge_model,
+                "reasoning_effort": "low",
+                "temperature": 0.2,
+                "max_output_tokens": 6144,
+                "max_provider_attempts_per_stage": 10,
+                "paired_seed_attempts": 2,
+                "orientations_per_attempt": 2,
+                "logical_stages_per_orientation": 2,
+                "aggregation": "paired_question_consensus",
+            }
+            if arguments.selection_policy == "incumbent_relative_hybrid"
+            else None
+        ),
         "llm_timeout_seconds": arguments.llm_timeout_seconds,
         "llm_max_output_tokens": arguments.llm_max_output_tokens,
         "fit_starts": arguments.fit_starts,
@@ -475,6 +588,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "ollama_thinking": arguments.ollama_thinking.value,
         "ollama_temperature": arguments.ollama_temperature,
         "ollama_seed": arguments.ollama_seed,
+        "vllm_base_url": arguments.vllm_base_url,
+        "vllm_reasoning_effort": arguments.vllm_reasoning_effort.value,
+        "vllm_temperature": arguments.vllm_temperature,
+        "vllm_seed": arguments.vllm_seed,
         "stagnation_iterations": (
             arguments.stagnation_iterations
             if arguments.stagnation_iterations is not None
@@ -500,8 +617,14 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
     if not arguments.resume and run_metadata.exists():
         raise SystemExit(f"run already exists at {experiment_directory}; pass --resume")
     experiment_directory.mkdir(parents=True, exist_ok=True)
-    client = _make_client(arguments, dataset, experiment_directory)
     context = _context(arguments, dataset)
+    client = _make_client(arguments, dataset, experiment_directory)
+    pairwise_judge = _make_pairwise_judge(
+        arguments,
+        experiment_directory,
+        context,
+        proposer_prompt,
+    )
     symbol_contract = _symbol_contract(context)
     protocol_prompt = _prediction_protocol_prompt(context)
     search_config = SearchConfig(
@@ -519,6 +642,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         selection_policy=arguments.selection_policy,
         judge_weight=arguments.judge_weight,
         judge_score_epsilon=arguments.judge_score_epsilon,
+        hybrid_science_weight=arguments.hybrid_science_weight,
         evaluate_test=not arguments.development_only,
         proposer_system_prompt=(
             f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
@@ -558,6 +682,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         validation=dataset.validation,
         test_loader=test_loader,
         config=search_config,
+        pairwise_judge=pairwise_judge,
     ).run()
     summary = _result_summary(arguments, result)
     (experiment_directory / "summary.json").write_text(
@@ -795,8 +920,14 @@ def _make_client(
             ollama_thinking=arguments.ollama_thinking,
             ollama_temperature=arguments.ollama_temperature,
             ollama_seed=arguments.ollama_seed,
+            vllm_base_url=arguments.vllm_base_url,
+            vllm_reasoning_effort=arguments.vllm_reasoning_effort,
+            vllm_temperature=arguments.vllm_temperature,
+            vllm_seed=arguments.vllm_seed,
         )
     )
+    if arguments.selection_policy == "incumbent_relative_hybrid":
+        return _RoleClient(proposer, proposer)
     judge = create_llm_client(
         LLMConfig(
             provider=judge_provider,
@@ -810,9 +941,100 @@ def _make_client(
             ollama_thinking=arguments.ollama_thinking,
             ollama_temperature=arguments.ollama_temperature,
             ollama_seed=arguments.ollama_seed,
+            vllm_base_url=arguments.vllm_base_url,
+            vllm_reasoning_effort=arguments.vllm_reasoning_effort,
+            vllm_temperature=arguments.vllm_temperature,
+            vllm_seed=arguments.vllm_seed,
         )
     )
     return _RoleClient(proposer, judge)
+
+
+def _make_pairwise_judge(
+    arguments: ExecutionArguments,
+    experiment_directory: Path,
+    context: ValidationContext,
+    public_prompt: str,
+) -> PairedHybridJudge | None:
+    """Construct the frozen development-only incumbent-relative judge."""
+    if arguments.selection_policy != "incumbent_relative_hybrid":
+        return None
+    assert arguments.judge_model is not None
+    provider, model = _parse_model(arguments.judge_model)
+    if provider is not LLMProvider.VLLM:
+        raise SystemExit("incumbent_relative_hybrid requires a vllm: judge model")
+    seed_base = (
+        arguments.hybrid_judge_seed_base
+        if arguments.hybrid_judge_seed_base is not None
+        else 12000 + 2 * arguments.seed
+    )
+    cache_root = arguments.llm_cache_root or experiment_directory / "llm_cache"
+    pair_cache = (
+        cache_root
+        if arguments.llm_cache_root is not None
+        else cache_root / "hybrid_pair"
+    )
+    seeded_clients = tuple(
+        (
+            seed,
+            create_llm_client(
+                LLMConfig(
+                    provider=provider,
+                    model=model,
+                    cache_directory=pair_cache / f"seed_{seed}",
+                    log_path=experiment_directory / "hybrid_pair_events.jsonl",
+                    max_attempts=10,
+                    initial_backoff_seconds=1.0,
+                    max_backoff_seconds=30.0,
+                    jitter_fraction=0.0,
+                    cache_only=arguments.llm_cache_only,
+                    vllm_base_url=arguments.vllm_base_url,
+                    vllm_reasoning_effort=VLLMReasoningEffort.LOW,
+                    vllm_temperature=0.2,
+                    vllm_seed=seed,
+                    timeout_seconds=900.0,
+                    max_output_tokens=6144,
+                )
+            ),
+        )
+        for seed in (seed_base, seed_base + 1)
+    )
+    symbol_contract = _symbol_contract(context)
+    protocol_prompt = _prediction_protocol_prompt(context)
+    hybrid_system_prompt = (
+        f"Configured judge model: {arguments.judge_model}\n\n"
+        f"Public scientific task:\n{public_prompt}\n\n"
+        f"{protocol_prompt}\n\n{symbol_contract}\n\n"
+        f"Hybrid judge protocol:\n{HYBRID_JUDGE_PROMPT}"
+        f"{ATOMIC_STAGE_TWO_NOTE}"
+    )
+    atomic_system_prompt = (
+        f"Configured judge model: {arguments.judge_model}\n\n"
+        f"Public scientific task:\n{public_prompt}\n\n"
+        f"{symbol_contract}\n\n"
+        f"Atomic evidence protocol:\n{ATOMIC_EVIDENCE_PROMPT}"
+    )
+    identity = json.dumps(
+        {
+            "judge_model": arguments.judge_model,
+            "provider": provider.value,
+            "reasoning_effort": "low",
+            "temperature": 0.2,
+            "max_provider_attempts": 10,
+            "max_output_tokens": 6144,
+            "seed_base": seed_base,
+        },
+        sort_keys=True,
+    )
+    return PairedHybridJudge(
+        seeded_clients=seeded_clients,
+        requirements=extract_public_requirements(public_prompt),
+        task_inputs=tuple(context.external_inputs),
+        system_prompt=hybrid_system_prompt,
+        atomic_system_prompt=atomic_system_prompt,
+        scoring=HybridScoringConfig(),
+        identity=identity,
+    )
 
 
 def _parse_model(value: str) -> tuple[LLMProvider, str]:
@@ -1001,6 +1223,12 @@ def _result_summary(
             result.frozen_selection.normalized_judge_penalty
         ),
         "selection_judge_score": result.frozen_selection.judge_score,
+        "selection_incumbent_path_score": (
+            result.frozen_selection.incumbent_path_score
+        ),
+        "selection_hybrid_science_weight": (
+            result.frozen_selection.hybrid_science_weight
+        ),
         "final_global_parameters": dict(result.final_fit.global_parameters),
         "final_training_normalized_mse": (
             result.final_fit.training_metrics.normalized_mse

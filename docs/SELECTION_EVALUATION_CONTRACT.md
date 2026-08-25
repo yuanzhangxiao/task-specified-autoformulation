@@ -75,10 +75,15 @@ All objective components are development-only. Lower values are preferred.
 2. **Normalized weighted sum:** robustly standardized log validation NMSE,
    plus a weighted negative-log judge penalty. This is available to the online
    beam and final selector as `normalized_weighted_sum`.
-3. **Pareto compromise:** discard candidates dominated simultaneously in
+3. **Incumbent-relative hybrid (development pilot):** one challenger per round
+   is compared with the incumbent frozen before that round. The first valid
+   candidate seeds the incumbent; later pairwise values are never globally
+   sorted because they may use different references. This mode is restricted to
+   `beam_size=1` and cannot open test data.
+4. **Pareto compromise:** discard candidates dominated simultaneously in
    validation NMSE, judge penalty, and term count, then choose a normalized
    compromise on the frontier.
-4. **Epsilon constrained:** retain candidates within `delta` of the best
+5. **Epsilon constrained:** retain candidates within `delta` of the best
    validation NMSE, then prefer judge score, term count, and validation NMSE in
    that order.
 
@@ -99,6 +104,25 @@ same diagnostics but ranks on raw validation NMSE. Weighted selection requires
 the judge to be enabled. Pruning remains distinct and no additional complexity
 penalty is included in this first prospective online objective, avoiding double
 counting with the judge's complexity-justification category.
+
+The incumbent-relative pilot uses only one new tradeoff parameter, `alpha`:
+
+```text
+fit_delta = (nmse_incumbent - nmse_challenger)
+            / (nmse_incumbent + nmse_challenger)
+science_delta = bounded challenger preference from the frozen hybrid decision
+combined_delta = (1 - alpha) * fit_delta + alpha * science_delta
+relative_score = (1 + combined_delta) / 2
+```
+
+The hybrid judge's frozen tie interval maps to `science_delta = 0`; values
+outside it are linearly scaled to `[-1, 1]`. The challenger replaces the
+incumbent only when `combined_delta > 0`. A tie, indeterminate scientific
+decision, or terminal paired-response failure retains the incumbent. Both
+orientations use the same seed. If either orientation fails, the entire
+incomplete pair is discarded and both orientations are retried once at the next
+distinct seed. `configs/hybrid_search_objective_pilot_v1.json` freezes this
+development contract before any search calls.
 
 ## Hyperparameter discipline
 

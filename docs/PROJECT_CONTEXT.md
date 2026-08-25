@@ -256,6 +256,17 @@ The pipeline is iterative:
   budget that preserves coverage, scientific accuracy, equivalence, dominance,
   and stability. It never counts unlabeled tradeoff winners as accuracy and makes
   no new LLM calls.
+  The selected operating point targets one complete paired seed and permits at
+  most two distinct seed attempts. Its expected cost is `2.029` paired judge
+  operations (`4.057` logical LLM stages), with four operations/eight stages as
+  the maximum. It preserved `1.000` decision coverage and `0.983` labeled
+  accuracy. Search integration is therefore enabled only as the disabled-by-
+  default `incumbent_relative_hybrid` development pilot. Because one proposal is
+  produced per round, each challenger is compared with the incumbent frozen at
+  the start of that round; pairwise scores against different incumbents are never
+  globally ranked. The bounded objective has one free fit/science weight, stores
+  every challenge in the checkpoint, retains the incumbent on ties or missing
+  symmetric evidence, requires `beam_size=1`, and cannot access test data.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and
