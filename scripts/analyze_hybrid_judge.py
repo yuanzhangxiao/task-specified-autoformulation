@@ -236,18 +236,22 @@ def main() -> None:
                 if baseline_position == "A"
                 else score_b - score_a
             )
-            absolute_only_correct.append(
-                _direction(baseline_delta, args.tie_threshold) == expected_overall
-            )
+            if expected_overall != ExpectedPairPreference.UNLABELED.value:
+                absolute_only_correct.append(
+                    _direction(baseline_delta, args.tie_threshold)
+                    == expected_overall
+                )
             raw_relative = row["baseline_relative_preference"]
             relative_delta = (
                 None
                 if raw_relative == ""
                 else 2.0 * float(raw_relative) - 1.0
             )
-            relative_only_correct.append(
-                _direction(relative_delta, args.tie_threshold) == expected_overall
-            )
+            if expected_overall != ExpectedPairPreference.UNLABELED.value:
+                relative_only_correct.append(
+                    _direction(relative_delta, args.tie_threshold)
+                    == expected_overall
+                )
             order[(row["pair_id"], int(row["repetition"]))][row["order"]] = row[
                 "baseline_preference"
             ]

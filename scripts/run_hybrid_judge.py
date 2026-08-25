@@ -46,6 +46,7 @@ from autoformalism.llm import (
 )
 from autoformalism.llm.exceptions import LLMError
 from autoformalism.rebuttal.adversarial import AdversarialPair
+from autoformalism.schemas import AbsoluteCriterion
 
 HYBRID_JUDGE_PROMPT = """You are a blinded scientific judge evaluating two
 candidate continuous-time models against the same public task. Candidate order is
@@ -123,6 +124,7 @@ Do not add fields.
 
 HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-2"
 ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-3-atomic-occurrence"
+ATOMIC_CONTRACT_REPAIR_VERSION = "atomic-redundant-role-unit-repair-1"
 
 ATOMIC_EVIDENCE_PROMPT = """You infer atomic scientific expectations before a
 blinded pairwise model comparison. For every supplied signed-occurrence unit, the
@@ -193,6 +195,7 @@ FIELDS = (
     "provider_attempts",
     "successful_attempt_seed",
     "tool_argument_key_repairs",
+    "redundant_absolute_unit_repairs",
     "request_hash",
 )
 
@@ -599,6 +602,7 @@ def main() -> None:
             {
                 "atomic_signed_occurrences": True,
                 "atomic_evidence_schema_version": ATOMIC_EVIDENCE_SCHEMA_VERSION,
+                "contract_repair_version": ATOMIC_CONTRACT_REPAIR_VERSION,
                 "logical_stages_per_judgment": 2,
             }
         )
@@ -849,6 +853,20 @@ def main() -> None:
                             system_prompt=system_prompt,
                             user_prompt=json.dumps(request, sort_keys=True),
                             expected_absolute_units=expected_units,
+                            redundant_absolute_units=(
+                                {
+                                    (
+                                        AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+                                        "candidate",
+                                    ),
+                                    (
+                                        AbsoluteCriterion.SINK_ROLES_CONSISTENT,
+                                        "candidate",
+                                    ),
+                                }
+                                if args.atomic_signed_occurrences
+                                else None
+                            ),
                         )
                     except LLMError as exc:
                         category = getattr(exc, "category", None)
@@ -904,6 +922,11 @@ def main() -> None:
                     )
                     if not isinstance(retry_provenance, dict):
                         retry_provenance = {}
+                    contract_repair = result.raw_response.get(
+                        "_autoformalism_contract_repair"
+                    )
+                    if not isinstance(contract_repair, dict):
+                        contract_repair = {}
                     row = {
                             "pair_id": pair.pair_id,
                             "benchmark_id": pair.benchmark_id,
@@ -964,6 +987,11 @@ def main() -> None:
                             ),
                             "tool_argument_key_repairs": retry_provenance.get(
                                 "tool_argument_key_repairs", 0
+                            ),
+                            "redundant_absolute_unit_repairs": (
+                                contract_repair.get(
+                                    "redundant_absolute_unit_repair_count", 0
+                                )
                             ),
                             "request_hash": result.request_hash,
                         }

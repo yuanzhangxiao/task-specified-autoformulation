@@ -113,6 +113,8 @@ class MutationLabelContract(StrictSchema):
 
 
 _BASELINE = ExpectedPairPreference.BASELINE
+_TIE = ExpectedPairPreference.TIE
+_UNLABELED = ExpectedPairPreference.UNLABELED
 _CONTRACTS = {
     contract.mutation_type: contract
     for contract in (
@@ -218,6 +220,94 @@ _CONTRACTS = {
                     rationale=(
                         "Only the mutated candidate claims a target-disconnected "
                         "mechanism."
+                    ),
+                ),
+            ),
+        ),
+        MutationLabelContract(
+            mutation_type="algebraic_reordering_equivalent",
+            overall_preference=_TIE,
+            comparative=tuple(
+                MutationComparativeExpectation(
+                    criterion=criterion,
+                    preference=_TIE,
+                    rationale=(
+                        "The candidates differ only by an exact reordering of "
+                        "top-level additive terms and are scientifically "
+                        "equivalent."
+                    ),
+                )
+                for criterion in RelativeCriterion
+            ),
+        ),
+        MutationLabelContract(
+            mutation_type="tradeoff_wrong_sink_vs_unjustified_accumulator",
+            overall_preference=_UNLABELED,
+            absolute=(
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+                    baseline=ExpectedVerdict.FAIL,
+                    mutated=ExpectedVerdict.UNLABELED,
+                    rationale=(
+                        "The first member adds meal input as a negative glucose "
+                        "term; the second member is not certified on this unit."
+                    ),
+                ),
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.LATENT_ACCUMULATORS_JUSTIFIED,
+                    baseline=ExpectedVerdict.UNLABELED,
+                    mutated=ExpectedVerdict.FAIL,
+                    rationale=(
+                        "The second member adds a one-sided accumulator; the "
+                        "first member is not certified on this unit."
+                    ),
+                ),
+            ),
+        ),
+        MutationLabelContract(
+            mutation_type="tradeoff_duplicate_vs_unjustified_accumulator",
+            overall_preference=_UNLABELED,
+            absolute=(
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.SEMANTIC_FLUXES_NOT_DUPLICATED,
+                    baseline=ExpectedVerdict.FAIL,
+                    mutated=ExpectedVerdict.UNLABELED,
+                    rationale=(
+                        "The first member repeats an existing glucose-balance "
+                        "flux; the second member is not certified on this unit."
+                    ),
+                ),
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.LATENT_ACCUMULATORS_JUSTIFIED,
+                    baseline=ExpectedVerdict.UNLABELED,
+                    mutated=ExpectedVerdict.FAIL,
+                    rationale=(
+                        "The second member adds a one-sided accumulator; the "
+                        "first member is not certified on this unit."
+                    ),
+                ),
+            ),
+        ),
+        MutationLabelContract(
+            mutation_type="tradeoff_wrong_sink_vs_duplicate",
+            overall_preference=_UNLABELED,
+            absolute=(
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
+                    baseline=ExpectedVerdict.FAIL,
+                    mutated=ExpectedVerdict.UNLABELED,
+                    rationale=(
+                        "The first member adds meal input as a negative glucose "
+                        "term; the second member is not certified on this unit."
+                    ),
+                ),
+                MutationAbsoluteExpectation(
+                    criterion=AbsoluteCriterion.SEMANTIC_FLUXES_NOT_DUPLICATED,
+                    baseline=ExpectedVerdict.UNLABELED,
+                    mutated=ExpectedVerdict.FAIL,
+                    rationale=(
+                        "The second member repeats an existing glucose-balance "
+                        "flux; the first member is not certified on this unit."
                     ),
                 ),
             ),

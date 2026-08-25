@@ -81,6 +81,8 @@ def test_atomic_slurm_contracts_are_self_contained_and_syntax_valid() -> None:
     assert "#SBATCH --gpus-per-node=4" in large
     assert "openai/gpt-oss-120b" in large
     assert "atomic_evidence_schema_version" in runner
+    assert "atomic-redundant-role-unit-repair-1" in runner
+    assert "redundant_absolute_unit_repairs" in runner
     assert "logical_stages_per_judgment" in runner
 
 

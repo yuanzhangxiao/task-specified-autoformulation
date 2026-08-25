@@ -453,6 +453,37 @@ class HybridJudgeResult(StrictSchema):
                 f"absolute assessment units differ; missing={missing}, extra={extra}"
             )
 
+    def discard_redundant_absolute_units(
+        self,
+        *,
+        expected: set[tuple[AbsoluteCriterion, str]],
+        redundant: set[tuple[AbsoluteCriterion, str]],
+    ) -> tuple[HybridJudgeResult, tuple[tuple[AbsoluteCriterion, str], ...]]:
+        """Remove only a complete, explicitly whitelisted set of extra units."""
+        actual = {
+            (item.criterion, item.subject_id)
+            for item in self.absolute_assessments
+        }
+        missing = expected - actual
+        extra = actual - expected
+        if missing or not redundant or extra != redundant:
+            return self, ()
+        retained = tuple(
+            item
+            for item in self.absolute_assessments
+            if (item.criterion, item.subject_id) not in extra
+        )
+        payload = self.model_dump(mode="json")
+        payload["absolute_assessments"] = [
+            item.model_dump(mode="json") for item in retained
+        ]
+        normalized = HybridJudgeResult.model_validate(payload)
+        normalized.validate_expected_absolute_units(expected)
+        removed = tuple(
+            sorted(extra, key=lambda item: (item[0].value, item[1]))
+        )
+        return normalized, removed
+
     @property
     def numeric_relative_preference(self) -> float | None:
         """Return mean A preference for determined comparative assessments."""

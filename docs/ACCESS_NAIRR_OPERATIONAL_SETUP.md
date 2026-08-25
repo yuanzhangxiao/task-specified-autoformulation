@@ -710,6 +710,90 @@ tune the three comparative questions, `0.25` comparative weight, `0.05` partial
 weight, or `0.05` tie threshold. Equivalent-model and mechanism-tradeoff pairs are
 a subsequent calibration milestone, not part of this confirmation.
 
+### Equivalence and non-ordered tradeoff development
+
+After opening and reporting the confirmation result, build the next development
+set from its two baseline structures. This set has known truth only for exact
+equivalence and mutation-certified atomic defects; it deliberately does not assign
+a gold winner to defect-vs-defect tradeoffs:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+phase=/work/hdd/bibo/$USER/phase_b
+confirm="$phase/judge-hybrid-atomic-confirmation-v1"
+scorecal="$phase/judge-hybrid-equivalence-tradeoff-v1"
+data=/projects/bibo/$USER/phase_b/inputs/public
+
+mkdir -p "$scorecal"
+"$python_bin" "$repo/scripts/build_hybrid_judge_equivalence_tradeoff_pairs.py" \
+  --source-pairs "$confirm/pairs.jsonl" \
+  --data-root "$data" \
+  --baseline-count 2 \
+  --output "$scorecal/pairs.jsonl" \
+  --manifest "$scorecal/equivalence_tradeoff_pairs_manifest.json"
+
+"$python_bin" "$repo/scripts/build_hybrid_judge_label_template.py" \
+  --pairs "$scorecal/pairs.jsonl" \
+  --data-root "$data" \
+  --output "$scorecal/hybrid_labels.jsonl"
+
+cp "$repo/configs/hybrid_judge_equivalence_tradeoff_v1.json" \
+  "$scorecal/protocol_config.json"
+wc -l "$scorecal/pairs.jsonl" "$scorecal/hybrid_labels.jsonl"
+jq . "$scorecal/equivalence_tradeoff_pairs_manifest.json"
+sha256sum "$scorecal/pairs.jsonl" "$scorecal/hybrid_labels.jsonl" \
+  "$scorecal/equivalence_tradeoff_pairs_manifest.json" \
+  "$scorecal/protocol_config.json" > "$scorecal/frozen_inputs.sha256"
+```
+
+Both line counts must be eight. The manifest must show two source structures,
+eight unique pair IDs, one equivalence type, three tradeoff types, and status
+`frozen_before_judge_calls`. Then submit the self-contained four-A40 job:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_hybrid_judge_vllm_equivalence_tradeoff_120b.slurm
+```
+
+After completion, merge exactly 80 outcomes and apply both the standard report
+and the predeclared equivalence/tradeoff analysis:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+scorecal=/work/hdd/bibo/$USER/phase_b/judge-hybrid-equivalence-tradeoff-v1
+root="$scorecal/gpt-oss-120b"
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$root"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs "$root"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$root/hybrid_judge_scores.csv" \
+  --failure-output "$root/hybrid_judge_failures.jsonl" \
+  --expected 80
+
+"$python_bin" "$repo/scripts/analyze_hybrid_judge.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$scorecal/hybrid_labels.jsonl" \
+  --output "$root/hybrid_judge_metrics.json"
+
+"$python_bin" "$repo/scripts/analyze_equivalence_tradeoff_judge.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$scorecal/hybrid_labels.jsonl" \
+  --protocol-config "$scorecal/protocol_config.json" \
+  --output "$root/equivalence_tradeoff_result.json"
+
+cat "$root/equivalence_tradeoff_result.md"
+```
+
+Report pass or fail without altering the frozen thresholds. A tradeoff preference
+count is not an accuracy result because no overall tradeoff winner was labeled.
+
 ## ACES: first login and identity check
 
 Use the ACES portal at `https://portal-aces.hprc.tamu.edu`. The portal's SSHCA

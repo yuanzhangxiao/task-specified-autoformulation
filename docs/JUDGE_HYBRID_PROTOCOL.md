@@ -539,3 +539,38 @@ accuracy at least `0.60`. `analyze_hybrid_judge_confirmation.py` applies these
 thresholds mechanically. A failed gate is reported as a failed confirmation;
 changing a prompt, model, weight, or threshold creates a new development protocol
 and requires another fresh canonical-structure holdout.
+
+The frozen confirmation passed every gate: `0.975` response success, `1.000`
+pair-aggregate accuracy, `0.842` order consistency, `1.000` accuracy for each of
+the wrong-sink and exact-repeat atomic tasks, and `0.932` targeted comparative
+accuracy. One of 40 planned judgments failed because the second-stage response
+included every requested absolute unit plus redundant candidate-level source and
+sink units already owned by the atomic stage.
+
+Protocol version 3 therefore has one contract-only implementation repair. In
+atomic mode, and only when the requested unit set is otherwise exact, the runtime
+may discard both redundant `source_roles_consistent:candidate` and
+`sink_roles_consistent:candidate` units. Missing units, only one of the two role
+units, or any other extra unit remain errors. The response is rebuilt and
+revalidated; the separate cache role, manifest repair version, removed keys, and
+repair count preserve provenance. This does not alter the frozen scientific
+prompt, atomic inference, verdicts, evidence, comparative questions, weights, or
+decision rule.
+
+### Equivalence and non-ordered tradeoff development
+
+`configs/hybrid_judge_equivalence_tradeoff_v1.json` freezes the next development
+milestone over the two now-open confirmation structures. Each structure produces
+one mathematically identical pair by reordering top-level additive terms and
+three pairs whose members carry different controlled defects. Equivalence calls
+and all three comparative questions have a certified tie target. Tradeoff overall
+preferences have no gold winner: only mutation-certified per-side wrong-sink,
+duplicate-flux, or one-sided-accumulator failures are scored.
+
+The experiment retains the confirmed 120B low-reasoning atomic protocol, five
+seeds, both orientations, scoring weights, and tie threshold. Its predeclared
+development gates cover response completion, equivalence tie recognition,
+mutation-certified atomic accuracy, order consistency, orientation bias, and
+repeat variance. Tradeoff winner counts are descriptive. Passing this milestone
+does not establish a calibrated continuous search score; it supports freezing an
+interpretation for a later new-structure validation.

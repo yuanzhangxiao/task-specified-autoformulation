@@ -1,0 +1,63 @@
+{
+  "schema_version": "hybrid-judge-equivalence-tradeoff-development-1",
+  "status": "frozen_before_equivalence_tradeoff_calls",
+  "purpose": "test true-tie recognition and score stability on non-ordered defect tradeoffs without treating tradeoff preferences as gold truth",
+  "judge_model": "vllm:openai/gpt-oss-120b",
+  "source": {
+    "pair_file": "judge-hybrid-atomic-confirmation-v1/pairs.jsonl",
+    "opened_confirmation_structures": 2,
+    "development_only": true
+  },
+  "pair_design": {
+    "pairs_per_structure": 4,
+    "baseline_structures": 2,
+    "pair_types": [
+      "algebraic_reordering_equivalent",
+      "tradeoff_wrong_sink_vs_unjustified_accumulator",
+      "tradeoff_duplicate_vs_unjustified_accumulator",
+      "tradeoff_wrong_sink_vs_duplicate"
+    ],
+    "equivalence_truth": "tie",
+    "tradeoff_overall_truth": "unlabeled",
+    "tradeoff_scored_truth": "mutation-certified atomic defects only",
+    "mutation_labels_visible_to_judge": false
+  },
+  "protocol": {
+    "hybrid_judge_protocol_version": "hybrid-judge-protocol-3-atomic-occurrence",
+    "contract_repair_version": "atomic-redundant-role-unit-repair-1",
+    "atomic_evidence_schema_version": "atomic-evidence-plan-1",
+    "structural_facts_schema_version": "structural-facts-2",
+    "semantic_answer_disclosure": false,
+    "candidate_order_policy": "both_orientations",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 10000,
+    "repetitions": 5,
+    "max_provider_attempts": 10,
+    "scoring": {
+      "partial_tiebreak_weight": 0.05,
+      "comparative_weight": 0.25,
+      "tie_threshold": 0.05
+    }
+  },
+  "planned": {
+    "pairs": 8,
+    "paired_judgments": 80,
+    "llm_stages": 160,
+    "gpus": 4,
+    "tensor_parallel_size": 4
+  },
+  "development_gate": {
+    "minimum_response_success": 0.95,
+    "minimum_equivalence_call_tie_accuracy": 0.8,
+    "minimum_equivalence_pair_tie_accuracy": 1.0,
+    "minimum_equivalence_comparative_tie_accuracy": 0.8,
+    "minimum_tradeoff_targeted_absolute_accuracy": 0.9,
+    "minimum_overall_order_consistency": 0.8,
+    "maximum_tradeoff_orientation_bias": 0.1,
+    "maximum_mean_repeat_decision_sd": 0.1
+  },
+  "decision_rule": "all reliability gates must pass; tradeoff winner frequencies are descriptive and cannot be optimized as accuracy",
+  "next_if_passed": "freeze the scoring interpretation and validate it on new structures with separately designed equivalence and tradeoff cases",
+  "next_if_failed": "diagnose tie recognition, criterion conflict, order bias, or repeat instability without tuning on a claimed holdout"
+}

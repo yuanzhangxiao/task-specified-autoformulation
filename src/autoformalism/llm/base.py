@@ -154,13 +154,38 @@ class CachedLLMClient(ABC):
         system_prompt: str,
         user_prompt: str,
         expected_absolute_units: set[tuple[AbsoluteCriterion, str]],
+        redundant_absolute_units: set[tuple[AbsoluteCriterion, str]] | None = None,
     ) -> LLMCallResult[HybridJudgeResult]:
         """Request a strict provenance-aware hybrid calibration result."""
+        redundant = redundant_absolute_units or set()
+
+        def normalize(
+            result: HybridJudgeResult,
+        ) -> tuple[HybridJudgeResult, dict[str, object]]:
+            normalized, removed = result.discard_redundant_absolute_units(
+                expected=expected_absolute_units,
+                redundant=redundant,
+            )
+            return normalized, {
+                "redundant_absolute_units_removed": [
+                    f"{criterion.value}:{subject}"
+                    for criterion, subject in removed
+                ],
+                "redundant_absolute_unit_repair_count": len(removed),
+            }
+
         return self._structured_call(
-            role="hybrid_judge",
+            role=(
+                "hybrid_judge_atomic_repair_v1"
+                if redundant_absolute_units is not None
+                else "hybrid_judge"
+            ),
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=HybridJudgeResult,
+            normalize_parsed=(
+                normalize if redundant_absolute_units is not None else None
+            ),
             validate_parsed=lambda result: result.validate_expected_absolute_units(
                 expected_absolute_units
             ),
@@ -193,6 +218,9 @@ class CachedLLMClient(ABC):
         system_prompt: str,
         user_prompt: str,
         response_model: type[StructuredT],
+        normalize_parsed: (
+            Callable[[StructuredT], tuple[StructuredT, dict[str, object]]] | None
+        ) = None,
         validate_parsed: Callable[[StructuredT], object] | None = None,
     ) -> LLMCallResult[StructuredT]:
         if not system_prompt.strip() or not user_prompt.strip():
@@ -247,6 +275,16 @@ class CachedLLMClient(ABC):
                     attempt_number=attempts,
                     repair_diagnostic_codes=repair_diagnostic_codes,
                 )
+                if normalize_parsed is not None:
+                    parsed, repair = normalize_parsed(provider_response.parsed)
+                    raw_response = dict(provider_response.raw_response)
+                    raw_response["_autoformalism_contract_repair"] = repair
+                    provider_response = ProviderResponse(
+                        parsed=parsed,
+                        raw_response=raw_response,
+                        usage=provider_response.usage,
+                        latency_ms=provider_response.latency_ms,
+                    )
                 if validate_parsed is not None:
                     try:
                         validate_parsed(provider_response.parsed)

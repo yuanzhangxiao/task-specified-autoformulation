@@ -212,6 +212,17 @@ The pipeline is iterative:
   prespecified wrong-sink and duplicated-flux mutation families. Passing requires
   every predeclared response, pair, order, atomic, and comparative gate; no
   parameter may be tuned on the confirmation outcomes.
+  The frozen confirmation passed: response success was `0.975`, pair aggregation
+  was `1.000`, order consistency was `0.842`, both targeted atomic accuracies
+  were `1.000`, and targeted comparative accuracy was `0.932`. Its sole failed
+  call contained every requested absolute unit plus two redundant candidate-level
+  source/sink units. Atomic mode now applies one narrow, logged contract repair:
+  it removes exactly those two units only when no requested unit is missing and
+  no other extra unit exists. All other unit mismatches still fail closed.
+  The next opened-structure development milestone tests exact-equivalence ties
+  and non-ordered defect tradeoffs. Equivalence has a known tie label; tradeoff
+  winners remain unlabeled, with only mutation-certified atomic defects scored.
+  This milestone calibrates score interpretation and stability, not search.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

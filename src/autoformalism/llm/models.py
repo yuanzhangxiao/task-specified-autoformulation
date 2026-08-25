@@ -92,6 +92,7 @@ class LLMClient(Protocol):
         system_prompt: str,
         user_prompt: str,
         expected_absolute_units: set[tuple[AbsoluteCriterion, str]],
+        redundant_absolute_units: set[tuple[AbsoluteCriterion, str]] | None = None,
     ) -> LLMCallResult[HybridJudgeResult]:
         """Request paired absolute assessments and comparative residuals."""
         ...

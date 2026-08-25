@@ -278,6 +278,23 @@ and no benchmark answer is encoded in deterministic facts. Source/sink group
 inputs in this mode come from the atomic LLM inference plus deterministic polarity
 comparison; all score weights and final pair aggregation remain runtime-owned.
 
+The atomic second stage permits one versioned contract-only normalization for a
+specific observed redundancy: if the response contains the complete requested
+absolute-unit set plus both `source_roles_consistent:candidate` and
+`sink_roles_consistent:candidate`, those two atomic-owned units are discarded.
+The repair is refused when any requested unit is missing or any other extra unit
+is present. The normalized response is schema-validated again, stored under a
+separate cache role, and logged with the removed keys and count. It never changes
+a verdict, evidence string, comparative answer, scientific fact, or score.
+
+Score interpretation is calibrated separately from defect detection. Exact
+top-level additive reorderings provide genuine equivalence/tie cases. Pairs in
+which each member carries a different certified defect probe whether decisions
+remain stable under non-ordered tradeoffs; their overall winner is intentionally
+unlabeled. Only the mutation-certified per-side atomic failures are accuracy
+targets. Preference frequencies, orientation bias, and repetition variance are
+descriptive reliability measurements and cannot be optimized as correctness.
+
 Calibration provider failures are first-class outcomes. After bounded
 contract-only retries, a terminal structured-response failure is stored in an
 append-only ledger and the shard continues. The analyzer reports both conditional

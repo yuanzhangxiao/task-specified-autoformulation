@@ -235,6 +235,82 @@ def test_mock_has_separate_proposer_and_judge_methods() -> None:
     assert [call["role"] for call in client.calls] == ["proposer", "judge"]
 
 
+def test_cached_hybrid_client_repairs_only_redundant_atomic_role_units(
+    tmp_path: Path,
+) -> None:
+    payload = _hybrid_judge().model_dump(mode="json")
+    payload["absolute_assessments"].extend(
+        [
+            {
+                "criterion": "sink_roles_consistent",
+                "subject_id": "candidate",
+                "candidate_a": {
+                    "verdict": "pass",
+                    "evidence": "Redundant sink evidence A.",
+                },
+                "candidate_b": {
+                    "verdict": "pass",
+                    "evidence": "Redundant sink evidence B.",
+                },
+            },
+            {
+                "criterion": "proposer_claims_supported",
+                "subject_id": "candidate",
+                "candidate_a": {
+                    "verdict": "pass",
+                    "evidence": "Requested claim evidence A.",
+                },
+                "candidate_b": {
+                    "verdict": "pass",
+                    "evidence": "Requested claim evidence B.",
+                },
+            },
+        ]
+    )
+    response = HybridJudgeResult.model_validate(payload)
+
+    class HybridClient(StubCachedClient):
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            self.provider_calls += 1
+            assert kwargs["role"] == "hybrid_judge_atomic_repair_v1"
+            return ProviderResponse(parsed=response, raw_response={"provider": True})
+
+    client = HybridClient(tmp_path)
+    redundant = {
+        (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate"),
+        (AbsoluteCriterion.SINK_ROLES_CONSISTENT, "candidate"),
+    }
+    expected = {(AbsoluteCriterion.PROPOSER_CLAIMS_SUPPORTED, "candidate")}
+
+    first = client.assess_hybrid(
+        system_prompt="system",
+        user_prompt="atomic hybrid request",
+        expected_absolute_units=expected,
+        redundant_absolute_units=redundant,
+    )
+    second = client.assess_hybrid(
+        system_prompt="system",
+        user_prompt="atomic hybrid request",
+        expected_absolute_units=expected,
+        redundant_absolute_units=redundant,
+    )
+
+    assert client.provider_calls == 1
+    assert first.attempts == 1
+    assert second.cache_hit is True
+    assert {
+        (item.criterion, item.subject_id)
+        for item in first.parsed.absolute_assessments
+    } == expected
+    assert first.raw_response["_autoformalism_contract_repair"] == {
+        "redundant_absolute_units_removed": [
+            "sink_roles_consistent:candidate",
+            "source_roles_consistent:candidate",
+        ],
+        "redundant_absolute_unit_repair_count": 2,
+    }
+
+
 def test_request_hash_is_stable_and_materially_sensitive(tmp_path: Path) -> None:
     client = StubCachedClient(tmp_path)
 

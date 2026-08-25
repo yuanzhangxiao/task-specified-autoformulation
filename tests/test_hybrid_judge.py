@@ -341,6 +341,110 @@ def test_hybrid_schema_requires_exact_runtime_requested_units() -> None:
         )
 
 
+def test_hybrid_schema_discards_only_complete_whitelisted_extra_units() -> None:
+    payload = _hybrid_payload()
+    result = HybridJudgeResult.model_validate(payload)
+    registry = extract_public_requirements(_prompt())
+    expected = set(
+        semantic_absolute_units(registry, include_role_consistency=False)
+    )
+    redundant = {
+        (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate"),
+        (AbsoluteCriterion.SINK_ROLES_CONSISTENT, "candidate"),
+    }
+
+    repaired, removed = result.discard_redundant_absolute_units(
+        expected=expected,
+        redundant=redundant,
+    )
+
+    repaired.validate_expected_absolute_units(expected)
+    assert set(removed) == redundant
+    assert len(repaired.absolute_assessments) == len(expected)
+
+    incomplete_expected = expected | {
+        (AbsoluteCriterion.REQUIRED_MECHANISM_REPRESENTED, "missing")
+    }
+    unchanged, removed = result.discard_redundant_absolute_units(
+        expected=incomplete_expected,
+        redundant=redundant,
+    )
+    assert unchanged is result
+    assert removed == ()
+
+    other_extra = (
+        AbsoluteCriterion.REQUIRED_MECHANISM_REPRESENTED,
+        "candidate",
+    )
+    extra_payload = _hybrid_payload()
+    extra_payload["absolute_assessments"].append(  # type: ignore[union-attr]
+        {
+            "criterion": other_extra[0].value,
+            "subject_id": other_extra[1],
+            "candidate_a": {
+                "verdict": "pass",
+                "evidence": "Unexpected non-role unit A.",
+            },
+            "candidate_b": {
+                "verdict": "pass",
+                "evidence": "Unexpected non-role unit B.",
+            },
+        }
+    )
+    unexpected = HybridJudgeResult.model_validate(extra_payload)
+    unchanged, removed = unexpected.discard_redundant_absolute_units(
+        expected=expected,
+        redundant=redundant,
+    )
+    assert unchanged is unexpected
+    assert removed == ()
+
+    one_role_payload = _hybrid_payload()
+    one_role_payload["absolute_assessments"] = [  # type: ignore[index]
+        item
+        for item in one_role_payload["absolute_assessments"]  # type: ignore[union-attr]
+        if item["criterion"] != "sink_roles_consistent"
+    ]
+    one_role = HybridJudgeResult.model_validate(one_role_payload)
+    unchanged, removed = one_role.discard_redundant_absolute_units(
+        expected=expected,
+        redundant=redundant,
+    )
+    assert unchanged is one_role
+    assert removed == ()
+
+
+def test_mock_atomic_hybrid_logs_redundant_role_unit_repair() -> None:
+    payload = _hybrid_payload()
+    registry = extract_public_requirements(_prompt())
+    expected = set(
+        semantic_absolute_units(registry, include_role_consistency=False)
+    )
+    redundant = {
+        (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate"),
+        (AbsoluteCriterion.SINK_ROLES_CONSISTENT, "candidate"),
+    }
+    client = MockLLMClient(hybrid_responses=[payload])
+
+    result = client.assess_hybrid(
+        system_prompt="system",
+        user_prompt="user",
+        expected_absolute_units=expected,
+        redundant_absolute_units=redundant,
+    )
+
+    assert client.calls[0]["role"] == "hybrid_judge_atomic_repair_v1"
+    assert len(result.parsed.absolute_assessments) == len(expected)
+    repair = result.raw_response["_autoformalism_contract_repair"]
+    assert repair == {
+        "redundant_absolute_units_removed": [
+            "sink_roles_consistent:candidate",
+            "source_roles_consistent:candidate",
+        ],
+        "redundant_absolute_unit_repair_count": 2,
+    }
+
+
 def test_mock_hybrid_client_enforces_requested_units() -> None:
     registry = extract_public_requirements(_prompt())
     payload = _hybrid_payload()

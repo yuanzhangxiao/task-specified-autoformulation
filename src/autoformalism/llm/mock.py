@@ -107,20 +107,53 @@ class MockLLMClient:
         system_prompt: str,
         user_prompt: str,
         expected_absolute_units: set[tuple[AbsoluteCriterion, str]],
+        redundant_absolute_units: set[tuple[AbsoluteCriterion, str]] | None = None,
     ) -> LLMCallResult[HybridJudgeResult]:
         """Return the next validated hybrid calibration response."""
         if not self._hybrid_responses:
             raise AssertionError("no mock hybrid response remains")
+        role = (
+            "hybrid_judge_atomic_repair_v1"
+            if redundant_absolute_units is not None
+            else "hybrid_judge"
+        )
         self.calls.append(
             {
-                "role": "hybrid_judge",
+                "role": role,
                 "system_prompt": system_prompt,
                 "user_prompt": user_prompt,
             }
         )
         parsed = HybridJudgeResult.model_validate(self._hybrid_responses.popleft())
+        repair: dict[str, object] | None = None
+        if redundant_absolute_units is not None:
+            parsed, removed = parsed.discard_redundant_absolute_units(
+                expected=expected_absolute_units,
+                redundant=redundant_absolute_units,
+            )
+            repair = {
+                "redundant_absolute_units_removed": [
+                    f"{criterion.value}:{subject}"
+                    for criterion, subject in removed
+                ],
+                "redundant_absolute_unit_repair_count": len(removed),
+            }
         parsed.validate_expected_absolute_units(expected_absolute_units)
-        return self._result("hybrid_judge", system_prompt, user_prompt, parsed)
+        result = self._result(role, system_prompt, user_prompt, parsed)
+        if repair is None:
+            return result
+        return LLMCallResult(
+            request_hash=result.request_hash,
+            parsed=result.parsed,
+            raw_response={
+                **result.raw_response,
+                "_autoformalism_contract_repair": repair,
+            },
+            cache_hit=result.cache_hit,
+            attempts=result.attempts,
+            latency_ms=result.latency_ms,
+            usage=result.usage,
+        )
 
     def assess_atomic_evidence(
         self,
