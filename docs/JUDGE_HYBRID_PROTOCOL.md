@@ -750,3 +750,24 @@ low-reasoning atomic protocol, both orientations, five seeds, paired question
 consensus, and the neutral fixed denominator. These are development pairs because
 prior structures may be reused and that reuse is recorded; passing permits only a
 later versioned search pilot.
+
+The v2 run completed all calls but failed its scientific gates: labeled accuracy
+was `0.100`, pair aggregation was `0.000`, and target-mapping absolute accuracy was
+`0.150`. Post-run review found that the public prompt called `U` only "glucose
+disposal rate." It did not define `U` as the total of insulin-independent and
+insulin-dependent contributions. Because hidden component semantics cannot serve
+as a judge label when the public contract leaves them ambiguous, v2 is retained as
+evidence of prompt underspecification rather than evidence that the judge cannot
+evaluate a defined total.
+
+The frozen v3 development rerun isolates that interpretation. It reuses the exact
+v2 pair bytes, candidates, mutation labels, model, seeds, retries, scoring, and
+aggregation. An audited overlay changes exactly three proposer-prompt phrases: it
+defines `U` as total glucose utilization/disposal, identifies `Uii` as the supplied
+insulin-independent contribution, and connects the already-required delayed
+insulin pathway to the insulin-dependent contribution to `U`. Numeric tables and
+the judge prompt are byte-identical to v2. The original release remains unchanged,
+and the overlay records hashes for the source prompt, revised prompt, source pairs,
+and every unchanged release file. Labels are regenerated because public-requirement
+identifiers depend on prompt text. Search integration remains blocked unless every
+unchanged v2 gate passes.

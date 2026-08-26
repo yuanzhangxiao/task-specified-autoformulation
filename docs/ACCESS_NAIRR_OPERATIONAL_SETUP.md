@@ -1184,6 +1184,61 @@ hybrid, symmetric-aggregation, and model-semantics validation analyzers. The
 initialization accuracy gate is intentionally absent because identity-observed
 initialization is now deterministic canonicalization rather than an LLM task.
 
+The v2 result is a failed development result because its public prompt did not
+define `U` as total disposal. Run the frozen matched prompt-only v3 milestone
+without changing or deleting v2 artifacts. It reuses the v2 pair file and creates
+an audited copy-on-write public-data overlay containing the revised proposer
+prompt. Numeric tables, candidates, judge prompt, model, seeds, and aggregation
+remain fixed.
+
+Prepare the overlay and regenerate labels because public-requirement identifiers
+depend on prompt text:
+
+```bash
+cd "$AF_REPO_ROOT"
+
+experiment_root="$AF_WORK/phase_b/judge-hybrid-target-mapping-v3-prompt-only"
+source_pairs="$AF_WORK/phase_b/judge-hybrid-target-mapping-v2/pairs.jsonl"
+protocol_config="$AF_REPO_ROOT/configs/hybrid_judge_target_mapping_prompt_revision_v3.json"
+
+"$AF_PYTHON" scripts/prepare_target_mapping_prompt_revision.py \
+  --source-data-root "$AF_PUBLIC_DATA_ROOT" \
+  --output-data-root "$experiment_root/public" \
+  --pairs "$source_pairs" \
+  --protocol-config "$protocol_config" \
+  --manifest "$experiment_root/prompt_revision_manifest.json"
+
+"$AF_PYTHON" scripts/build_hybrid_judge_label_template.py \
+  --pairs "$source_pairs" \
+  --data-root "$experiment_root/public" \
+  --target-mapping-semantic-contract \
+  --output "$experiment_root/hybrid_labels.jsonl"
+
+cp "$protocol_config" "$experiment_root/protocol_config.json"
+sha256sum \
+  "$source_pairs" \
+  "$experiment_root/public/phase_b_v1/phase_b_dalla_man_t2_canonical_named_easy/proposer_prompt.txt" \
+  "$experiment_root/hybrid_labels.jsonl" \
+  "$experiment_root/prompt_revision_manifest.json" \
+  "$experiment_root/protocol_config.json"
+```
+
+The preparation command is deterministic and safe to rerun. It fails if the v2
+pair hash, source prompt hash, revised prompt hash, benchmark identifier, file
+inventory, or any non-prompt file differs. Submit from the repository after the
+two labels are present:
+
+```bash
+cd "$AF_REPO_ROOT"
+mkdir -p logs
+sbatch scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v3_prompt_120b.slurm
+```
+
+The job has durable defaults for every path and may prepare or verify the same
+overlay after the login session ends. Analyze the new root with the existing
+hybrid, symmetric-aggregation, and model-semantics validators using its copied
+`protocol_config.json`. Do not merge or overwrite v2 outputs.
+
 ## Acceptance checklist
 
 For each system, do not start production until all are true:

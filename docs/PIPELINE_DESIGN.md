@@ -570,6 +570,12 @@ question in one-step tasks: contextual canonicalization binds it to the observed
 channel, matching the simulator's causal reset rule, while open-loop tasks retain
 their explicit initializers. The invalid v1 calibration is preserved for audit;
 only certified target-mapping protocol v2 may advance after its frozen gates pass.
+Protocol v2 subsequently failed because the public target description did not
+determine whether `U` meant total or insulin-dependent disposal. A matched v3
+development rerun uses a hash-audited prompt overlay that defines the total while
+holding pair payloads and all judge settings fixed. The registered release and
+numeric tables remain unchanged. Target-mapping semantics remain disabled in
+search until the matched rerun passes every predeclared gate.
 
 ## Failure and security behavior
 

@@ -290,6 +290,15 @@ The pipeline is iterative:
   Protocol 5 evaluates only target mapping on pairs
   certified to isolate omission of a supplied component; it must pass its frozen
   development gates before any new search pilot.
+  The completed protocol-5 v2 run had perfect response success but only `0.100`
+  labeled accuracy and `0.150` target-mapping absolute accuracy. Inspection then
+  exposed an ambiguity in the public contract: `U` was called "glucose disposal
+  rate" without saying it was total disposal, even though the hidden label treated
+  omission of `Uii` as wrong. A matched v3 rerun therefore changes only three
+  reviewed public-prompt phrases and reuses the exact v2 pairs, candidates, model,
+  seeds, retries, scoring, and aggregation. Its prompt overlay is hash-audited and
+  leaves the registered release untouched. This rerun tests the clarified public
+  semantics; it is not a new-structure confirmation.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and
