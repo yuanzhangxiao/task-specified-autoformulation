@@ -68,6 +68,7 @@ def build_label_template(
     public_prompt: str,
     task_inputs: tuple[str, ...],
     validation_context: ValidationContext | None = None,
+    include_model_semantics: bool = False,
 ) -> HybridCalibrationLabels:
     """Create runtime and mutation-contract labels without expert inference."""
     requirements = extract_public_requirements(public_prompt)
@@ -104,7 +105,10 @@ def build_label_template(
             ),
             label_source="not_scored_by_mutation_contract",
         )
-        for criterion, subject in semantic_absolute_units(requirements)
+        for criterion, subject in semantic_absolute_units(
+            requirements,
+            include_model_semantics=include_model_semantics,
+        )
     }
     comparative = {
         criterion: ExpectedComparativeLabel(
@@ -180,6 +184,11 @@ def main() -> None:
     parser.add_argument("--pairs", type=Path, required=True)
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--model-semantic-contract",
+        action="store_true",
+        help="include target-mapping and initialization semantic labels",
+    )
     args = parser.parse_args()
     pairs = tuple(
         AdversarialPair.model_validate_json(line)
@@ -201,6 +210,7 @@ def main() -> None:
                 public_prompt=public_prompt,
                 task_inputs=tuple(context.external_inputs),
                 validation_context=context,
+                include_model_semantics=args.model_semantic_contract,
             )
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)

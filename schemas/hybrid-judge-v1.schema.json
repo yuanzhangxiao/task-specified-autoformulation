@@ -16,7 +16,9 @@
         "latent_accumulators_justified",
         "claimed_delays_meaningful",
         "claimed_saturations_appropriate",
-        "proposer_claims_supported"
+        "proposer_claims_supported",
+        "target_mapping_semantically_consistent",
+        "initialization_semantically_consistent"
       ],
       "title": "AbsoluteCriterion",
       "type": "string"

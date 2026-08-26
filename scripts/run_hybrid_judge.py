@@ -43,6 +43,8 @@ from autoformalism.judging.prompts import (
     ATOMIC_STAGE_TWO_NOTE,
     HYBRID_JUDGE_PROMPT,
     HYBRID_JUDGE_PROTOCOL_VERSION,
+    MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT,
+    MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION,
 )
 from autoformalism.llm import (
     LLMConfig,
@@ -230,6 +232,7 @@ def _system_prompt(
     response_mode: OllamaResponseMode,
     *,
     atomic_mode: bool = False,
+    model_semantic_contract: bool = False,
 ) -> str:
     transport_override = ""
     if response_mode is OllamaResponseMode.TOOL_CALL:
@@ -238,12 +241,17 @@ def _system_prompt(
             "the arguments of the single provided structured-response tool. Do "
             "not place it in ordinary final message content."
         )
+    judge_prompt = (
+        MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT
+        if model_semantic_contract
+        else HYBRID_JUDGE_PROMPT
+    )
     return (
         f"Configured judge model: {model}\n\n"
         f"Public scientific task:\n{public_prompt}\n\n"
         f"{_prediction_protocol_prompt(context)}\n\n"
         f"{_symbol_contract(context)}\n\n"
-        f"Hybrid judge protocol:\n{HYBRID_JUDGE_PROMPT}"
+        f"Hybrid judge protocol:\n{judge_prompt}"
         f"{ATOMIC_STAGE_TWO_NOTE if atomic_mode else ''}{transport_override}"
     )
 
@@ -416,11 +424,29 @@ def main() -> None:
     parser.add_argument("--comparative-weight", type=float, default=0.25)
     parser.add_argument("--tie-threshold", type=float, default=0.05)
     parser.add_argument(
+        "--comparative-indeterminate-policy",
+        choices=("exclude", "neutral_fixed_denominator"),
+        default="exclude",
+        help=(
+            "how deterministic aggregation treats indeterminate direct "
+            "comparisons; the fixed-denominator policy contributes zero "
+            "without removing the criterion weight"
+        ),
+    )
+    parser.add_argument(
         "--atomic-signed-occurrences",
         action="store_true",
         help=(
             "run a sign-blinded atomic evidence call before each hybrid "
             "comparison; calibration-only"
+        ),
+    )
+    parser.add_argument(
+        "--model-semantic-contract",
+        action="store_true",
+        help=(
+            "request the versioned target-mapping and initialization semantic "
+            "units; requires atomic signed-occurrence mode"
         ),
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -444,10 +470,18 @@ def main() -> None:
         raise SystemExit("--vllm-seed-base must be nonnegative")
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         raise SystemExit("shard index must be in [0, shard count)")
+    if args.model_semantic_contract and not args.atomic_signed_occurrences:
+        raise SystemExit(
+            "--model-semantic-contract requires --atomic-signed-occurrences"
+        )
     scoring = HybridScoringConfig(
         partial_tiebreak_weight=args.partial_tiebreak_weight,
         comparative_weight=args.comparative_weight,
         tie_threshold=args.tie_threshold,
+        comparative_indeterminate_policy=(
+            args.comparative_indeterminate_policy
+        ),
+        include_model_semantics=args.model_semantic_contract,
     )
     pair_bytes = args.pairs.read_bytes()
     source_pairs = tuple(
@@ -464,9 +498,13 @@ def main() -> None:
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
     protocol_version = (
-        ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION
-        if args.atomic_signed_occurrences
-        else HYBRID_JUDGE_PROTOCOL_VERSION
+        MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION
+        if args.model_semantic_contract
+        else (
+            ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION
+            if args.atomic_signed_occurrences
+            else HYBRID_JUDGE_PROTOCOL_VERSION
+        )
     )
     manifest = {
         "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
@@ -489,6 +527,10 @@ def main() -> None:
         "partial_tiebreak_weight": args.partial_tiebreak_weight,
         "comparative_weight": args.comparative_weight,
         "tie_threshold": args.tie_threshold,
+        "comparative_indeterminate_policy": (
+            args.comparative_indeterminate_policy
+        ),
+        "model_semantic_contract": args.model_semantic_contract,
     }
     if args.atomic_signed_occurrences:
         manifest.update(
@@ -550,6 +592,7 @@ def main() -> None:
                 semantic_absolute_units(
                     extract_public_requirements(prompt),
                     include_role_consistency=not args.atomic_signed_occurrences,
+                    include_model_semantics=args.model_semantic_contract,
                 )
             )
             for key, (prompt, _context_value) in contexts.items()
@@ -615,6 +658,7 @@ def main() -> None:
             units = semantic_absolute_units(
                 requirements,
                 include_role_consistency=not args.atomic_signed_occurrences,
+                include_model_semantics=args.model_semantic_contract,
             )
             expected_units = set(units)
             system_prompt = _system_prompt(
@@ -623,6 +667,7 @@ def main() -> None:
                 model_spec,
                 OllamaResponseMode(args.ollama_response_mode),
                 atomic_mode=args.atomic_signed_occurrences,
+                model_semantic_contract=args.model_semantic_contract,
             )
             atomic_system_prompt = _atomic_system_prompt(
                 public_prompt,
@@ -800,7 +845,14 @@ def main() -> None:
                             role_assessments,
                         )
                         parsed.validate_expected_absolute_units(
-                            set(semantic_absolute_units(requirements))
+                            set(
+                                semantic_absolute_units(
+                                    requirements,
+                                    include_model_semantics=(
+                                        args.model_semantic_contract
+                                    ),
+                                )
+                            )
                         )
                     pair_score = score_hybrid_pair(
                         parsed,

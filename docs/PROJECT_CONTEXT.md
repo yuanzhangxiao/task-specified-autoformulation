@@ -280,6 +280,14 @@ The pipeline is iterative:
   atomic protocol, 120B model, scientific weight, and tie threshold are unchanged;
   the new policy is versioned in both the frozen config and checkpoints before a
   confirmation search is run.
+- The fixed-denominator confirmation search selected a valid fitted model but
+  revealed two additional scientific interfaces not covered by protocol 3:
+  whether an observation mapping reports the complete public target and whether
+  an observed absolute state has a semantically justified initialization.
+  Protocol 4 adds these as opt-in atomic absolute questions. It does not change
+  benchmark prompts, inspect the hidden generator, or alter prior frozen rows.
+  A fresh-structure 120B validation must pass before the questions are allowed to
+  affect the online search objective.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

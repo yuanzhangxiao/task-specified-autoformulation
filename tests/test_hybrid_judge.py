@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from autoformalism.expressions import ValidationContext, repair_protected_declarations
 from autoformalism.judging import (
     HybridScoringConfig,
+    build_group_registry,
     candidate_claims,
     deterministic_pair_assessments,
     extract_public_requirements,
@@ -310,6 +311,34 @@ def test_json_primary_tool_fallback_keeps_general_judge_prompt_unchanged() -> No
     assert "infer that candidates are identical" in ordinary
 
 
+def test_model_semantic_prompt_extension_does_not_change_frozen_prompt() -> None:
+    context = ValidationContext(
+        targets=("Gp", "I", "U"),
+        auxiliaries=("Uii",),
+        external_inputs=("meal_event_g", "insulin_input"),
+    )
+    ordinary = _system_prompt(
+        _prompt(),
+        context,
+        "vllm:openai/gpt-oss-120b",
+        OllamaResponseMode.JSON_SCHEMA,
+        atomic_mode=True,
+    )
+    versioned = _system_prompt(
+        _prompt(),
+        context,
+        "vllm:openai/gpt-oss-120b",
+        OllamaResponseMode.JSON_SCHEMA,
+        atomic_mode=True,
+        model_semantic_contract=True,
+    )
+
+    assert "target_mapping_semantically_consistent" not in ordinary
+    assert "initialization_semantically_consistent" not in ordinary
+    assert "target_mapping_semantically_consistent" in versioned
+    assert "initialization_semantically_consistent" in versioned
+
+
 def test_deterministic_pair_assessments_keep_retained_disconnection() -> None:
     assessments = deterministic_pair_assessments(
         _candidate(),
@@ -339,6 +368,44 @@ def test_hybrid_schema_requires_exact_runtime_requested_units() -> None:
             expected
             | {(AbsoluteCriterion.REQUIRED_MECHANISM_REPRESENTED, "extra")}
         )
+
+
+def test_model_semantic_units_are_versioned_and_opt_in() -> None:
+    registry = extract_public_requirements(_prompt())
+    ordinary = set(semantic_absolute_units(registry))
+    versioned = set(
+        semantic_absolute_units(registry, include_model_semantics=True)
+    )
+
+    target_mapping = (
+        AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
+        "candidate",
+    )
+    initialization = (
+        AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT,
+        "candidate",
+    )
+    assert target_mapping not in ordinary
+    assert initialization not in ordinary
+    assert versioned == ordinary | {target_mapping, initialization}
+
+    ordinary_groups = build_group_registry(registry, HybridScoringConfig())
+    versioned_groups = build_group_registry(
+        registry,
+        HybridScoringConfig(include_model_semantics=True),
+    )
+    assert target_mapping not in {
+        key for group in ordinary_groups for key in group.keys
+    }
+    assert initialization not in {
+        key for group in ordinary_groups for key in group.keys
+    }
+    assert target_mapping in {
+        key for group in versioned_groups for key in group.keys
+    }
+    assert initialization in {
+        key for group in versioned_groups for key in group.keys
+    }
 
 
 def test_hybrid_schema_discards_only_complete_whitelisted_extra_units() -> None:
@@ -612,6 +679,16 @@ def test_label_template_combines_runtime_and_mutation_contract_labels() -> None:
             2,
         ),
         ("retained_disconnected_claimed_mechanism", None, 2),
+        (
+            "omitted_target_component",
+            AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
+            2,
+        ),
+        (
+            "unjustified_zero_observed_initialization",
+            AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT,
+            2,
+        ),
     ),
 )
 def test_mutation_contracts_label_only_guaranteed_questions(

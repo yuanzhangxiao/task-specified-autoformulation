@@ -560,6 +560,16 @@ Outputs are small versioned JSON/JSONL artifacts:
 Raw API payloads, datasets, secrets, and large generated trajectories
 must not be committed.
 
+The scientific-judge boundary also validates observation semantics and initial
+conditions when the versioned model-semantic contract is enabled. Deterministic
+code identifies the exact mappings, states, channels, and dependency facts; it
+does not infer whether a modeled symbol denotes a total quantity or a component,
+or whether zero is a scientifically meaningful baseline. The LLM answers those
+atomic questions only from the public task and candidate. Missing public
+semantics yield `indeterminate`, which remains a neutral vote in the fixed
+comparative denominator. This extension must pass its frozen calibration before
+it is enabled in search.
+
 ## Failure and security behavior
 
 - Missing `AUTOFORMALISM_DATA_ROOT`, contradictory metadata, unsafe

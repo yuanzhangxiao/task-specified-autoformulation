@@ -1130,6 +1130,32 @@ smoke test, record model/token throughput and memory, then write a separate
 checkpointed inference array. Never place API keys or model tokens in a Slurm
 script or repository.
 
+### Delta model-semantics judge validation
+
+The model-semantic validation is a separate frozen milestone; do not reuse or
+overwrite the earlier consensus-validation directory. Prepare `pairs.jsonl`,
+`hybrid_labels.jsonl`, the pair manifest, and a copied protocol config under
+`$AF_WORK/phase_b/judge-hybrid-model-semantics-v1`. The builder must receive all
+previously opened pair files through repeated `--exclude-pairs` arguments and
+enough completed run roots to find two eligible unseen structures. Label
+generation must include `--model-semantic-contract`.
+
+Submit only after verifying the counts are four pairs and four labels:
+
+```bash
+cd "$AF_REPO_ROOT"
+mkdir -p logs
+sbatch scripts/hpc/phase_b_hybrid_judge_vllm_model_semantics_120b.slurm
+```
+
+The launcher is session-independent: the durable project, work, repository,
+model, pair, output, semantic-contract, and fixed-denominator defaults are all
+resolved inside the batch job. Logging out does not unset them. After completion,
+merge the single shard, run the existing hybrid and symmetric analyzers, and run
+`analyze_hybrid_model_semantics_validation.py`. Do not integrate the questions
+into search unless the final Markdown report says `PASS` for every predeclared
+gate.
+
 ## Acceptance checklist
 
 For each system, do not start production until all are true:

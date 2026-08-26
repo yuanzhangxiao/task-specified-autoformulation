@@ -277,6 +277,12 @@ class AbsoluteCriterion(str, Enum):
     CLAIMED_DELAYS_MEANINGFUL = "claimed_delays_meaningful"
     CLAIMED_SATURATIONS_APPROPRIATE = "claimed_saturations_appropriate"
     PROPOSER_CLAIMS_SUPPORTED = "proposer_claims_supported"
+    TARGET_MAPPING_SEMANTICALLY_CONSISTENT = (
+        "target_mapping_semantically_consistent"
+    )
+    INITIALIZATION_SEMANTICALLY_CONSISTENT = (
+        "initialization_semantically_consistent"
+    )
 
 
 class CandidateAbsoluteAssessment(StrictSchema):

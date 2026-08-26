@@ -46,7 +46,6 @@ Absolute semantic criteria:
   the quantity said to saturate.
 - proposer_claims_supported: every proposer-owned mechanism claim is supported by
   its component equations and dependencies. Extra claims earn no task credit.
-
 Also answer three irreducibly comparative questions. These are retained separately
 from the absolute score:
 - parsimony_while_task_sufficient: which candidate is more parsimonious without
@@ -73,6 +72,29 @@ verdict, and evidence. Do not infer that candidates are identical from equal sta
 process, or parameter counts; compare their certified algebraic facts and equations.
 Do not add fields.
 """
+
+_MODEL_SEMANTIC_CRITERIA = """- target_mapping_semantically_consistent: every
+  observation mapping generates the complete public quantity named by its target
+  channel. It must not silently map a component to a total, omit a publicly
+  described component, double-count a supplied component, or contradict the
+  candidate's use of that symbol elsewhere. If the public channel descriptions do
+  not determine component-versus-total semantics, answer indeterminate rather than
+  inventing a hidden decomposition.
+- initialization_semantically_consistent: every initial condition is consistent
+  with whether its state represents an absolute quantity or a signed deviation and
+  with initial observations explicitly available through public channels. A fixed
+  zero for an absolute observed quantity requires public or candidate-grounded
+  justification; do not assume an unobserved basal value. If the public evidence
+  cannot distinguish a justified zero from an unknown baseline, answer
+  indeterminate.
+
+"""
+
+MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT = HYBRID_JUDGE_PROMPT.replace(
+    "Also answer three irreducibly comparative questions.",
+    _MODEL_SEMANTIC_CRITERIA
+    + "Also answer three irreducibly comparative questions.",
+)
 
 ATOMIC_EVIDENCE_PROMPT = """You infer atomic scientific expectations before a
 blinded pairwise model comparison. For every supplied signed-occurrence unit, the
@@ -113,4 +135,7 @@ absent from the requested LLM units.
 
 HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-2"
 ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-3-atomic-occurrence"
+MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION = (
+    "hybrid-judge-protocol-4-target-mapping-initialization"
+)
 ATOMIC_CONTRACT_REPAIR_VERSION = "atomic-redundant-role-unit-repair-1"

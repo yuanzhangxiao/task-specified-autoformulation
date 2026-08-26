@@ -698,3 +698,39 @@ rule remains available only to reproduce frozen version-1 analyses.
 next development search. Checkpoints record both the new protocol version and
 the indeterminate policy so version-1 and version-2 runs cannot silently resume
 across the scoring boundary.
+
+### Model-semantic extension: target mappings and initialization
+
+The second objective-pilot candidate exposed two scientific contracts that the
+validated judge did not ask about. An observation mapping can report only one
+component of a public target while the dynamics use that symbol as a component,
+and an absolute observed state can be fixed to zero without any public or model
+justification. These are not parser failures: both candidates can compile and
+fit. They therefore require scientific evaluation after deterministic repair.
+
+Protocol version
+`hybrid-judge-protocol-4-target-mapping-initialization` adds two atomic,
+benchmark-general absolute questions:
+
+- `target_mapping_semantically_consistent`: does each mapping generate the
+  complete public quantity rather than silently omit or double-count a known
+  component or contradict the model's own use of that symbol?
+- `initialization_semantically_consistent`: is each initialization compatible
+  with absolute-versus-deviation semantics and any explicitly available initial
+  observation, with fixed zero requiring public or candidate justification?
+
+Both questions explicitly require `indeterminate` when the public task and the
+candidate do not supply enough semantics. The hidden generator and mutation
+contract are never included in either LLM prompt. The questions are opt-in, so
+all previously frozen protocol-3 rows and scores remain reproducible.
+
+Before either question can influence search,
+`hybrid_judge_model_semantics_validation_v1.json` freezes a fresh-structure
+validation. Two isolated mutations are evaluated over two unseen canonical
+structures: omission of the public target component, and replacement of a
+data-consistent observed-state initialization by an unjustified fixed zero.
+Both orientations and five seeds are judged by the frozen 120B low-reasoning
+atomic protocol. Paired question consensus and the neutral fixed denominator
+are retained. Failure of any completion, coverage, overall accuracy,
+pair-aggregate accuracy, targeted absolute accuracy, stability, or orientation
+gate blocks search integration.

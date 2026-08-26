@@ -52,6 +52,10 @@ _SEMANTIC_CANDIDATE_CRITERIA = (
     AbsoluteCriterion.CLAIMED_SATURATIONS_APPROPRIATE,
     AbsoluteCriterion.PROPOSER_CLAIMS_SUPPORTED,
 )
+_MODEL_SEMANTIC_CANDIDATE_CRITERIA = (
+    AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
+    AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT,
+)
 
 
 def extract_public_requirements(prompt: str) -> RequirementRegistry:
@@ -782,6 +786,7 @@ def semantic_absolute_units(
     requirements: RequirementRegistry,
     *,
     include_role_consistency: bool = True,
+    include_model_semantics: bool = False,
 ) -> tuple[tuple[AbsoluteCriterion, str], ...]:
     """Return the exact semantic units that the LLM must assess."""
     units: list[tuple[AbsoluteCriterion, str]] = []
@@ -808,6 +813,11 @@ def semantic_absolute_units(
             AbsoluteCriterion.SINK_ROLES_CONSISTENT,
         }
     )
+    if include_model_semantics:
+        units.extend(
+            (criterion, _CANDIDATE_SUBJECT)
+            for criterion in _MODEL_SEMANTIC_CANDIDATE_CRITERIA
+        )
     return tuple(units)
 
 
@@ -848,6 +858,7 @@ class HybridScoringConfig:
     comparative_indeterminate_policy: Literal[
         "exclude", "neutral_fixed_denominator"
     ] = "exclude"
+    include_model_semantics: bool = False
 
     def __post_init__(self) -> None:
         values = (
@@ -898,6 +909,28 @@ def build_group_registry(
         for item in requirements.requirements
         if item.enforcement is not RequirementEnforcement.DESCRIPTIVE
     ]
+    balance_keys = [
+        (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, _CANDIDATE_SUBJECT),
+        (AbsoluteCriterion.SINK_ROLES_CONSISTENT, _CANDIDATE_SUBJECT),
+        (AbsoluteCriterion.SEMANTIC_FLUXES_NOT_DUPLICATED, _CANDIDATE_SUBJECT),
+    ]
+    dynamic_keys = [
+        (AbsoluteCriterion.CLAIMED_DELAYS_MEANINGFUL, _CANDIDATE_SUBJECT),
+        (AbsoluteCriterion.CLAIMED_SATURATIONS_APPROPRIATE, _CANDIDATE_SUBJECT),
+    ]
+    if config.include_model_semantics:
+        balance_keys.append(
+            (
+                AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
+                _CANDIDATE_SUBJECT,
+            )
+        )
+        dynamic_keys.append(
+            (
+                AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT,
+                _CANDIDATE_SUBJECT,
+            )
+        )
     groups.extend(
         (
             GroupDefinition(
@@ -926,14 +959,7 @@ def build_group_registry(
                 "balance_semantics",
                 GroupKind.BALANCE_SEMANTICS,
                 config.balance_weight,
-                (
-                    (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, _CANDIDATE_SUBJECT),
-                    (AbsoluteCriterion.SINK_ROLES_CONSISTENT, _CANDIDATE_SUBJECT),
-                    (
-                        AbsoluteCriterion.SEMANTIC_FLUXES_NOT_DUPLICATED,
-                        _CANDIDATE_SUBJECT,
-                    ),
-                ),
+                tuple(balance_keys),
             ),
             GroupDefinition(
                 "latent_validity",
@@ -958,13 +984,7 @@ def build_group_registry(
                 "dynamic_claims",
                 GroupKind.DYNAMIC_CLAIMS,
                 config.dynamic_claim_weight,
-                (
-                    (AbsoluteCriterion.CLAIMED_DELAYS_MEANINGFUL, _CANDIDATE_SUBJECT),
-                    (
-                        AbsoluteCriterion.CLAIMED_SATURATIONS_APPROPRIATE,
-                        _CANDIDATE_SUBJECT,
-                    ),
-                ),
+                tuple(dynamic_keys),
             ),
         )
     )

@@ -203,6 +203,78 @@ _CONTRACTS = {
             ),
         ),
         MutationLabelContract(
+            mutation_type="omitted_target_component",
+            overall_preference=_BASELINE,
+            absolute=(
+                MutationAbsoluteExpectation(
+                    criterion=(
+                        AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT
+                    ),
+                    baseline=ExpectedVerdict.PASS,
+                    mutated=ExpectedVerdict.FAIL,
+                    rationale=(
+                        "The baseline observation mapping includes the publicly "
+                        "declared component and supplied complementary component; "
+                        "the mutation silently omits the complementary component."
+                    ),
+                ),
+            ),
+            comparative=(
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.PARSIMONY_WHILE_TASK_SUFFICIENT,
+                    preference=_BASELINE,
+                    rationale=(
+                        "The shorter mutated mapping omits part of the public "
+                        "target and is therefore not task-sufficient."
+                    ),
+                ),
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.FEWER_UNSUPPORTED_ASSUMPTIONS,
+                    preference=_BASELINE,
+                    rationale=(
+                        "Only the mutated candidate assumes that one component "
+                        "alone equals the complete public target."
+                    ),
+                ),
+            ),
+        ),
+        MutationLabelContract(
+            mutation_type="unjustified_zero_observed_initialization",
+            overall_preference=_BASELINE,
+            absolute=(
+                MutationAbsoluteExpectation(
+                    criterion=(
+                        AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT
+                    ),
+                    baseline=ExpectedVerdict.PASS,
+                    mutated=ExpectedVerdict.FAIL,
+                    rationale=(
+                        "The baseline initializes the directly mapped absolute "
+                        "state from its available initial observation; the mutation "
+                        "replaces that initializer with an unjustified fixed zero."
+                    ),
+                ),
+            ),
+            comparative=(
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.FEWER_UNSUPPORTED_ASSUMPTIONS,
+                    preference=_BASELINE,
+                    rationale=(
+                        "Only the mutated candidate assumes an unexplained zero "
+                        "for an absolute observed state."
+                    ),
+                ),
+                MutationComparativeExpectation(
+                    criterion=RelativeCriterion.MECHANISTIC_INTERPRETABILITY,
+                    preference=_BASELINE,
+                    rationale=(
+                        "The baseline preserves one interpretation of the state "
+                        "across initialization and direct observation mapping."
+                    ),
+                ),
+            ),
+        ),
+        MutationLabelContract(
             mutation_type="retained_disconnected_claimed_mechanism",
             overall_preference=_BASELINE,
             comparative=(
