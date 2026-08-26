@@ -124,6 +124,16 @@ incomplete pair is discarded and both orientations are retried once at the next
 distinct seed. `configs/hybrid_search_objective_pilot_v1.json` freezes this
 development contract before any search calls.
 
+Version 2 changes only the deterministic treatment of comparative
+`indeterminate` answers after A/B question consensus. Each of the three required
+comparative questions contributes a signed vote: challenger preference `+1`,
+incumbent preference `-1`, and tie or indeterminate `0` after identities are
+normalized. The mean always divides by three. This prevents the remaining
+determined question from inheriting the weight of questions withheld by
+consensus. `configs/hybrid_search_objective_pilot_v2.json` freezes this scoring
+boundary; the version-1 exclusion rule remains available for exact replay of old
+artifacts.
+
 ## Hyperparameter discipline
 
 - Use one prespecified grid across benchmarks and tiers.

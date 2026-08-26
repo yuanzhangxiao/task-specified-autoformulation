@@ -13,6 +13,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
 from itertools import combinations
+from typing import Literal
 
 from pydantic import Field
 
@@ -844,6 +845,9 @@ class HybridScoringConfig:
     partial_tiebreak_weight: float = 0.05
     comparative_weight: float = 0.25
     tie_threshold: float = 0.05
+    comparative_indeterminate_policy: Literal[
+        "exclude", "neutral_fixed_denominator"
+    ] = "exclude"
 
     def __post_init__(self) -> None:
         values = (
@@ -861,6 +865,11 @@ class HybridScoringConfig:
             raise ValueError("comparative weight must be nonnegative")
         if not 0.0 <= self.tie_threshold <= 1.0:
             raise ValueError("tie threshold must be in [0, 1]")
+        if self.comparative_indeterminate_policy not in {
+            "exclude",
+            "neutral_fixed_denominator",
+        }:
+            raise ValueError("unsupported comparative indeterminate policy")
 
 
 def build_group_registry(
@@ -1115,7 +1124,12 @@ def score_hybrid_pair(
         side="candidate_b",
         partial_weight=config.partial_tiebreak_weight,
     )
-    relative = result.numeric_relative_preference
+    relative = (
+        result.numeric_relative_preference_fixed_denominator
+        if config.comparative_indeterminate_policy
+        == "neutral_fixed_denominator"
+        else result.numeric_relative_preference
+    )
     if left.hard_requirement_status is True and right.hard_requirement_status is False:
         return HybridPairScore(
             candidate_a=left,

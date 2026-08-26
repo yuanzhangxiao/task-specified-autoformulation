@@ -498,6 +498,27 @@ class HybridJudgeResult(StrictSchema):
         determined = [value for value in values if value is not None]
         return sum(determined) / len(determined) if determined else None
 
+    @property
+    def numeric_relative_preference_fixed_denominator(self) -> float:
+        """Return mean A preference with indeterminate answers scored neutrally.
+
+        Every schema-required comparative question contributes to the
+        denominator. Candidate-A, candidate-B, tie, and indeterminate verdicts
+        contribute 1, 0, 0.5, and 0.5 respectively. In signed preference space
+        this is equivalent to averaging +1, -1, 0, and 0 over the fixed
+        question set.
+        """
+        values = [
+            {
+                RelativeVerdict.CANDIDATE_A: 1.0,
+                RelativeVerdict.CANDIDATE_B: 0.0,
+                RelativeVerdict.TIE: 0.5,
+                RelativeVerdict.INDETERMINATE: 0.5,
+            }[item.verdict]
+            for item in self.comparative_assessments
+        ]
+        return sum(values) / len(values)
+
 
 JudgeAssessment: TypeAlias = JudgeResult | ScientificJudgeResult
 

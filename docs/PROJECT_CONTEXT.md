@@ -271,6 +271,15 @@ The pipeline is iterative:
   the proposer sees its equations and compact consensus comparison, marked as an
   ineligible parent. This closes the feedback loop without changing lineage or
   exposing provider internals.
+  The first eight-round smoke produced five fitted candidates and four paired
+  challenges, but also revealed that version-1 comparative aggregation omitted
+  indeterminate questions from its denominator. In one challenge, two of three
+  comparative questions became indeterminate, allowing the sole surviving answer
+  to receive the full comparative weight. Version 2 keeps every question in the
+  denominator and scores indeterminate as a neutral signed vote. The judge prompt,
+  atomic protocol, 120B model, scientific weight, and tie threshold are unchanged;
+  the new policy is versioned in both the frozen config and checkpoints before a
+  confirmation search is run.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

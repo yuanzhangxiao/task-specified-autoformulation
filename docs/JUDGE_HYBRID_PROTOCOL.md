@@ -681,3 +681,20 @@ the incumbent; zero, indeterminate science, or exhausted response attempts retai
 it. Comparisons against different incumbents are never treated as a shared global
 score. The mode requires a one-member beam, records its full challenge ledger for
 deterministic resume, and is structurally unable to open test data.
+
+The first eight-round plumbing run exposed an aggregation pathology rather than
+a new judge failure. After A/B question consensus, one comparative answer could
+remain determined while two became `indeterminate`. Version 1 averaged only the
+determined answers, so that single answer received the entire comparative
+weight. Version 2 instead encodes comparative answers as `+1` for candidate A,
+`-1` for candidate B, and `0` for both tie and indeterminate, then divides by the
+fixed set of three schema-required comparative questions. Indeterminate evidence
+therefore remains neutral but still consumes its share of the denominator. This
+is a deterministic aggregation change: it does not alter the prompt, questions,
+LLM answers, absolute groups, weights, or tie threshold. The legacy exclusion
+rule remains available only to reproduce frozen version-1 analyses.
+
+`configs/hybrid_search_objective_pilot_v2.json` freezes this rule before the
+next development search. Checkpoints record both the new protocol version and
+the indeterminate policy so version-1 and version-2 runs cannot silently resume
+across the scoring boundary.

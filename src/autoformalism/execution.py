@@ -1032,7 +1032,9 @@ def _make_pairwise_judge(
         task_inputs=tuple(context.external_inputs),
         system_prompt=hybrid_system_prompt,
         atomic_system_prompt=atomic_system_prompt,
-        scoring=HybridScoringConfig(),
+        scoring=HybridScoringConfig(
+            comparative_indeterminate_policy="neutral_fixed_denominator"
+        ),
         identity=identity,
     )
 

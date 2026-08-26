@@ -1,0 +1,56 @@
+{
+  "schema_version": "hybrid-search-objective-development-2",
+  "status": "frozen_before_search_calls",
+  "purpose": "confirm the incumbent-relative objective after neutral fixed-denominator aggregation of comparative indeterminacy",
+  "scope": {
+    "development_only": true,
+    "test_access": false,
+    "proposals_per_round": 1,
+    "beam_size": 1,
+    "selection_policy": "incumbent_relative_hybrid",
+    "first_valid_candidate_policy": "seed_incumbent_without_pairwise_call"
+  },
+  "judge_contract": {
+    "model": "vllm:openai/gpt-oss-120b",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 6144,
+    "max_provider_attempts_per_logical_stage": 10,
+    "logical_stages_per_orientation": 2,
+    "candidate_order_policy": "both_orientations_at_same_seed",
+    "aggregation": "identity_normalized_question_consensus",
+    "comparative_indeterminate_policy": "neutral_fixed_denominator",
+    "comparative_vote_encoding": {
+      "candidate_a": 1,
+      "candidate_b": -1,
+      "tie": 0,
+      "indeterminate": 0
+    },
+    "comparative_denominator": "all_three_schema_required_comparative_questions",
+    "target_complete_paired_seeds": 1,
+    "maximum_distinct_seed_attempts": 2,
+    "terminal_failure_policy": "discard_incomplete_seed_and_retry_both_orientations_once",
+    "scientific_disagreement_retry_policy": "none",
+    "terminal_pair_failure_selection_policy": "retain_incumbent"
+  },
+  "hybrid_scoring": {
+    "partial_tiebreak_weight": 0.05,
+    "comparative_weight": 0.25,
+    "tie_threshold": 0.05
+  },
+  "search_objective": {
+    "science_weight": 0.5,
+    "free_hyperparameters": [
+      "science_weight"
+    ],
+    "fit_preference_for_challenger": "(incumbent_validation_nmse - challenger_validation_nmse) / (incumbent_validation_nmse + challenger_validation_nmse)",
+    "science_preference_for_challenger": "negate the incumbent hybrid decision; map the frozen tie interval to zero and linearly scale the remainder to [-1, 1]",
+    "combined_preference_for_challenger": "(1 - science_weight) * fit_preference + science_weight * science_preference",
+    "challenger_relative_score": "(1 + combined_preference_for_challenger) / 2",
+    "replacement_rule": "replace the incumbent only when combined_preference_for_challenger > 0",
+    "tie_rule": "retain_incumbent"
+  },
+  "comparability_boundary": "each challenger is compared only with the incumbent frozen before its round; relative scores from different incumbents are never globally sorted",
+  "checkpoint_contract": "store the versioned indeterminate policy, incumbent identity, both orientation request hashes, consensus disagreements, fit/science/combined preferences, selected identity, and cumulative incumbent path score in the round checkpoint",
+  "pilot_interpretation": "development evidence only; do not open test data or claim a benchmark improvement from this run"
+}

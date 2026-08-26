@@ -485,6 +485,15 @@ component preference, selected identity, and cumulative incumbent-path score is
 stored in the round checkpoint. Resume replays this ledger and fails if a
 challenge names a stale incumbent. This pilot is development-only and cannot
 open the test split.
+
+The version-2 pilot keeps the same search objective and judge calls but changes
+comparative aggregation after question consensus. All three direct comparative
+questions remain in a fixed denominator: A/B/tie/indeterminate map to signed
+votes `+1/-1/0/0`. Orientation disagreements that become indeterminate therefore
+cannot transfer their unused weight to whichever question happens to survive.
+`configs/hybrid_search_objective_pilot_v2.json` freezes this rule and the search
+checkpoint records its protocol identity.
+
 When a valid challenger loses, its compact fit/science comparison and equations
 remain in the next proposer request as a non-parent feedback item. This preserves
 the scientific learning signal without allowing the rejected lineage to bypass

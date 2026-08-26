@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import Field
 
@@ -37,7 +37,12 @@ from autoformalism.schemas import (
 )
 from autoformalism.schemas.base import StrictSchema
 
-PAIRWISE_SEARCH_PROTOCOL_VERSION = "incumbent-hybrid-question-consensus-1"
+LEGACY_PAIRWISE_SEARCH_PROTOCOL_VERSION = (
+    "incumbent-hybrid-question-consensus-1"
+)
+PAIRWISE_SEARCH_PROTOCOL_VERSION = (
+    "incumbent-hybrid-question-consensus-2-fixed-denominator"
+)
 _REDUNDANT_ATOMIC_ROLE_UNITS = {
     (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate"),
     (AbsoluteCriterion.SINK_ROLES_CONSISTENT, "candidate"),
@@ -55,6 +60,9 @@ class HybridPairJudgment(StrictSchema):
     decision_value_for_incumbent: float | None = Field(ge=-2.0, le=2.0)
     decision_scale: float = Field(gt=0.0)
     tie_threshold: float = Field(ge=0.0, le=1.0)
+    comparative_indeterminate_policy: Literal[
+        "exclude", "neutral_fixed_denominator"
+    ] = "exclude"
     preferred: str
     orientation_values_for_incumbent: tuple[float | None, float | None]
     orientation_half_gap: float | None = Field(default=None, ge=0.0)
@@ -115,8 +123,14 @@ class PairedHybridJudge:
         self._system_prompt = system_prompt
         self._atomic_system_prompt = atomic_system_prompt
         self._scoring = scoring or HybridScoringConfig()
+        self._protocol_version = (
+            PAIRWISE_SEARCH_PROTOCOL_VERSION
+            if self._scoring.comparative_indeterminate_policy
+            == "neutral_fixed_denominator"
+            else LEGACY_PAIRWISE_SEARCH_PROTOCOL_VERSION
+        )
         fingerprint_payload = {
-            "protocol": PAIRWISE_SEARCH_PROTOCOL_VERSION,
+            "protocol": self._protocol_version,
             "identity": identity,
             "seeds": [seed for seed, _client in seeded_clients],
             "requirements": requirements.model_dump(mode="json"),
@@ -177,6 +191,7 @@ class PairedHybridJudge:
                 else abs(forward_value - reverse_value) / 2.0
             )
             return HybridPairJudgment(
+                protocol_version=self._protocol_version,
                 incumbent_candidate_id=incumbent.candidate_id,
                 challenger_candidate_id=challenger.candidate_id,
                 seed_attempt_index=attempt_index,
@@ -184,6 +199,9 @@ class PairedHybridJudge:
                 decision_value_for_incumbent=score.decision_value,
                 decision_scale=1.0 + self._scoring.comparative_weight,
                 tie_threshold=self._scoring.tie_threshold,
+                comparative_indeterminate_policy=(
+                    self._scoring.comparative_indeterminate_policy
+                ),
                 preferred=score.preferred,
                 orientation_values_for_incumbent=(forward_value, reverse_value),
                 orientation_half_gap=half_gap,
@@ -199,6 +217,7 @@ class PairedHybridJudge:
             )
         final_seed = self._seeded_clients[-1][0]
         return HybridPairJudgment(
+            protocol_version=self._protocol_version,
             incumbent_candidate_id=incumbent.candidate_id,
             challenger_candidate_id=challenger.candidate_id,
             seed_attempt_index=len(self._seeded_clients) - 1,
@@ -206,6 +225,9 @@ class PairedHybridJudge:
             decision_value_for_incumbent=None,
             decision_scale=1.0 + self._scoring.comparative_weight,
             tie_threshold=self._scoring.tie_threshold,
+            comparative_indeterminate_policy=(
+                self._scoring.comparative_indeterminate_policy
+            ),
             preferred="indeterminate",
             orientation_values_for_incumbent=(None, None),
             deterministic_assessments=(),

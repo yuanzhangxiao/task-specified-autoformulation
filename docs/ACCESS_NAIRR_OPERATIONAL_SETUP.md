@@ -969,14 +969,14 @@ The selected row must pass every gate. Do not select a more expensive row merely
 because it improves an unlabeled tradeoff preference, and do not make additional
 judge calls for this analysis.
 
-### Incumbent-relative hybrid-search plumbing smoke
+### Incumbent-relative hybrid-search fixed-denominator confirmation
 
 After the frozen consensus operating point passes, run one development-only
-controller smoke test. This job uses the same four-A40 vLLM 120B server for both
+controller confirmation. This job uses the same four-A40 vLLM 120B server for both
 proposal and paired scientific judgment. That choice isolates checkpoint,
 feedback, and selection plumbing; it is not a comparison with the 20B proposer
-and must not be reported as such. The default three rounds make one incumbent and
-at most two paired challenges. Test data are never opened.
+and must not be reported as such. The default eight rounds use the version-2
+neutral fixed-denominator comparative rule. Test data are never opened.
 
 The Slurm file contains the Delta GPU account, partition, and persistent path
 defaults, so it does not depend on exported login-shell variables after logout:
@@ -993,7 +993,7 @@ checkpoint. To restart deliberately with a different seed, give it a new output
 root rather than overwriting the existing ledger:
 
 ```bash
-sbatch --export=ALL,AF_SEED=1,AF_OUTPUT_ROOT=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v1-seed1 \
+sbatch --export=ALL,AF_SEED=1,AF_OUTPUT_ROOT=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v3-seed1 \
   scripts/hpc/phase_b_hybrid_search_smoke_120b.slurm
 ```
 
@@ -1010,13 +1010,15 @@ tail -n 80 "$repo/logs/phase-b-hybrid-search-smoke-JOB_ID.err"
 Inspect the development summary and checkpointed challenge ledger:
 
 ```bash
-run=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v1/runs/phase_b_dalla_man_t2_canonical_named_easy_easy_seed0
+run=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v3/runs/phase_b_dalla_man_t2_canonical_named_easy_easy_seed0
 jq '{status,stopping_reason,selection_validation_normalized_mse,selected_candidate_id}' \
   "$run/summary.json"
 
 for file in "$run"/checkpoints/round_*.json; do
   jq -r '[input_filename,
     (.record.pruned_candidate.candidate_id // .candidate.candidate_id // "-"),
+    (.record.incumbent_challenge.judgment.protocol_version // "seed"),
+    (.record.incumbent_challenge.judgment.comparative_indeterminate_policy // "seed"),
     (.record.incumbent_challenge.fit_preference_for_challenger // "seed"),
     (.record.incumbent_challenge.science_preference_for_challenger // "seed"),
     (.record.incumbent_challenge.combined_preference_for_challenger // "seed"),

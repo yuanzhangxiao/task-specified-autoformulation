@@ -518,6 +518,44 @@ def test_direct_comparison_is_a_separate_configurable_residual() -> None:
     assert with_relative.preferred == "candidate_b"
 
 
+def test_fixed_denominator_treats_indeterminate_comparisons_as_neutral() -> None:
+    payload = _hybrid_payload(
+        requirement_a="pass",
+        requirement_b="pass",
+        relative="indeterminate",
+    )
+    comparative = payload["comparative_assessments"]
+    assert isinstance(comparative, list)
+    comparative[0]["verdict"] = "candidate_a"
+    result = HybridJudgeResult.model_validate(payload)
+    deterministic = deterministic_pair_assessments(
+        _candidate(),
+        _candidate(),
+        task_inputs=("meal_event_g", "insulin_input"),
+    )
+    registry = extract_public_requirements(_prompt())
+
+    legacy = score_hybrid_pair(
+        result,
+        deterministic,
+        registry,
+        HybridScoringConfig(comparative_indeterminate_policy="exclude"),
+    )
+    fixed = score_hybrid_pair(
+        result,
+        deterministic,
+        registry,
+        HybridScoringConfig(
+            comparative_indeterminate_policy="neutral_fixed_denominator"
+        ),
+    )
+
+    assert legacy.relative_preference_for_a == pytest.approx(1.0)
+    assert legacy.decision_value == pytest.approx(0.25)
+    assert fixed.relative_preference_for_a == pytest.approx(2.0 / 3.0)
+    assert fixed.decision_value == pytest.approx(1.0 / 12.0)
+
+
 def test_label_template_combines_runtime_and_mutation_contract_labels() -> None:
     pair = AdversarialPair(
         pair_id="pair_1",

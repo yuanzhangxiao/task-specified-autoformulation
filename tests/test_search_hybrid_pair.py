@@ -22,7 +22,10 @@ from autoformalism.schemas import (
     RelativeVerdict,
     RequirementRegistry,
 )
-from autoformalism.search.hybrid_pair import PairedHybridJudge
+from autoformalism.search.hybrid_pair import (
+    PAIRWISE_SEARCH_PROTOCOL_VERSION,
+    PairedHybridJudge,
+)
 
 
 def _candidate(identifier: str, rhs: str) -> CandidateModel:
@@ -145,6 +148,35 @@ def test_paired_hybrid_judge_replaces_whole_failed_seed_and_reverses_order(
         "atomic_evidence_judge",
         "hybrid_judge_atomic_repair_v1",
     ]
+
+
+def test_paired_hybrid_judge_versions_fixed_denominator_scoring() -> None:
+    incumbent = _candidate("incumbent", "meal_event_g")
+    challenger = _candidate("challenger", "meal_event_g - 0.1 * Gp")
+    requirements = RequirementRegistry()
+    successful = MockLLMClient(
+        atomic_responses=[
+            _atomic(incumbent, challenger),
+            _atomic(challenger, incumbent),
+        ],
+        hybrid_responses=[_hybrid(requirements), _hybrid(requirements)],
+    )
+    judge = PairedHybridJudge(
+        seeded_clients=((100, successful),),
+        requirements=requirements,
+        task_inputs=("meal_event_g",),
+        system_prompt="Hybrid prompt.",
+        atomic_system_prompt="Atomic prompt.",
+        scoring=HybridScoringConfig(
+            comparative_indeterminate_policy="neutral_fixed_denominator"
+        ),
+        identity="test",
+    )
+
+    result = judge.compare(incumbent, challenger)
+
+    assert result.protocol_version == PAIRWISE_SEARCH_PROTOCOL_VERSION
+    assert result.comparative_indeterminate_policy == "neutral_fixed_denominator"
 
 
 def test_paired_hybrid_judge_records_exhausted_symmetric_evidence() -> None:
