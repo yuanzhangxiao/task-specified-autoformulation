@@ -627,6 +627,11 @@ def main() -> None:
         partial_tiebreak_weight=scoring["partial_tiebreak_weight"],
         comparative_weight=scoring["comparative_weight"],
         tie_threshold=scoring["tie_threshold"],
+        comparative_indeterminate_policy=scoring.get(
+            "comparative_indeterminate_policy",
+            "exclude",
+        ),
+        include_model_semantics=scoring.get("include_model_semantics", False),
     )
     result = analyze(rows, failures, labels, config=config)
     args.output.parent.mkdir(parents=True, exist_ok=True)

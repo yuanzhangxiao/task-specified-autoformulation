@@ -303,6 +303,7 @@ def test_launcher_and_config_freeze_versioned_protocol() -> None:
     assert config["protocol"]["scoring"]["comparative_indeterminate_policy"] == (
         "neutral_fixed_denominator"
     )
+    assert config["protocol"]["scoring"]["include_model_semantics"] is True
     assert "AF_MODEL_SEMANTIC_CONTRACT:=true" in launcher
     assert "AF_COMPARATIVE_INDETERMINATE_POLICY:=neutral_fixed_denominator" in (
         launcher
