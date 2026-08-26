@@ -1,4 +1,4 @@
-"""Build fresh-structure pairs for target-mapping and initialization judging."""
+"""Build controlled pairs for target-mapping and initialization judging."""
 
 from __future__ import annotations
 
@@ -93,8 +93,9 @@ def select_unseen_semantic_baselines(
     target_channel: str,
     target_component: str,
     observed_state: str,
+    allow_opened_baselines: bool = False,
 ) -> tuple[tuple[tuple[str, CandidateModel, str, str], ...], int]:
-    """Select eligible canonical structures absent from prior judge pair sets."""
+    """Select eligible structures, optionally permitting prior structure use."""
     excluded = {
         candidate_structure_fingerprint(
             pair.valid_candidate,
@@ -111,7 +112,7 @@ def select_unseen_semantic_baselines(
             contexts[task],
         )
         fingerprint = candidate_structure_fingerprint(baseline, contexts[task])
-        if fingerprint in excluded or fingerprint in seen:
+        if fingerprint in seen:
             continue
         if not _eligible(
             baseline,
@@ -120,13 +121,15 @@ def select_unseen_semantic_baselines(
             observed_state=observed_state,
         ):
             continue
+        if fingerprint in excluded and not allow_opened_baselines:
+            continue
         seen.add(fingerprint)
         selected.append((fingerprint, baseline, *task))
         if len(selected) == baseline_count:
             break
     if len(selected) != baseline_count:
         raise ValueError(
-            f"requested {baseline_count} unseen eligible structures but found "
+            f"requested {baseline_count} eligible structures but found "
             f"{len(selected)}"
         )
     return tuple(selected), len(excluded)
@@ -260,6 +263,15 @@ def main() -> None:
     parser.add_argument("--target-component", default="U")
     parser.add_argument("--complete-target-expression", default="Uii + U")
     parser.add_argument("--observed-state", default="I")
+    parser.add_argument(
+        "--allow-opened-baselines",
+        action="store_true",
+        help=(
+            "permit structures used by earlier judge studies; the manifest "
+            "records the overlap and the result is development calibration, "
+            "not fresh-structure confirmation"
+        ),
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--manifest", type=Path)
     args = parser.parse_args()
@@ -291,6 +303,7 @@ def main() -> None:
         target_channel=args.target_channel,
         target_component=args.target_component,
         observed_state=args.observed_state,
+        allow_opened_baselines=args.allow_opened_baselines,
     )
     pairs = build_model_semantics_pairs(
         baselines,
@@ -309,6 +322,15 @@ def main() -> None:
     manifest_path = args.manifest or args.output.with_name(
         "model_semantics_pairs_manifest.json"
     )
+    selected_fingerprints = [item[0] for item in baselines]
+    excluded_fingerprints = {
+        candidate_structure_fingerprint(
+            pair.valid_candidate,
+            contexts[(pair.benchmark_id, pair.tier)],
+        )
+        for pair in exclusions
+    }
+    selected_overlap = sorted(set(selected_fingerprints) & excluded_fingerprints)
     manifest = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "status": "frozen_before_judge_calls",
@@ -324,7 +346,10 @@ def main() -> None:
         ],
         "excluded_baseline_fingerprint_count": excluded_count,
         "selected_baseline_count": len(baselines),
-        "selected_baseline_fingerprints": [item[0] for item in baselines],
+        "selected_baseline_fingerprints": selected_fingerprints,
+        "allow_opened_baselines": args.allow_opened_baselines,
+        "selected_previously_opened_fingerprint_count": len(selected_overlap),
+        "selected_previously_opened_fingerprints": selected_overlap,
         "pair_count": len(pairs),
         "selected_pair_ids": [pair.pair_id for pair in pairs],
         "mutation_types": list(PAIR_TYPES),
@@ -335,6 +360,14 @@ def main() -> None:
             "observed_state": args.observed_state,
         },
         "mutation_labels_visible_to_judge": False,
+        "interpretation_boundary": (
+            "Prior structure exposure is recorded explicitly. The two semantic "
+            "criteria and controlled mutations are new, so this artifact is "
+            "protocol development calibration rather than unseen-structure "
+            "confirmation."
+            if args.allow_opened_baselines
+            else "Selected canonical structures are absent from supplied opened pairs."
+        ),
     }
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -342,7 +375,7 @@ def main() -> None:
     )
     print(
         f"wrote {len(pairs)} frozen model-semantics pairs from "
-        f"{len(baselines)} unseen structures to {args.output}; "
+        f"{len(baselines)} eligible structures to {args.output}; "
         f"excluded_structures={excluded_count}"
     )
 

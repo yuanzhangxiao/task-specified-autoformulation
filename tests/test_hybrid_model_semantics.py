@@ -162,6 +162,37 @@ def test_builder_isolates_mapping_and_initialization_mutations(
     assert zero_initial.expression is None
 
 
+def test_builder_can_record_previously_opened_development_baseline(
+    context: ValidationContext,
+) -> None:
+    opened = _source_pair("opened", _candidate("k"))
+    contexts = {("phase_b_test", "easy"): context}
+
+    with pytest.raises(ValueError, match="found 0"):
+        select_unseen_semantic_baselines(
+            (opened,),
+            (opened,),
+            baseline_count=1,
+            contexts=contexts,
+            target_channel="U",
+            target_component="U",
+            observed_state="I",
+        )
+    selected, excluded_count = select_unseen_semantic_baselines(
+        (opened,),
+        (opened,),
+        baseline_count=1,
+        contexts=contexts,
+        target_channel="U",
+        target_component="U",
+        observed_state="I",
+        allow_opened_baselines=True,
+    )
+
+    assert len(selected) == 1
+    assert excluded_count == 1
+
+
 @pytest.mark.parametrize(
     ("mutation_type", "criterion"),
     (
@@ -300,6 +331,9 @@ def test_launcher_and_config_freeze_versioned_protocol() -> None:
     assert config["status"] == "frozen_before_model_semantics_validation_calls"
     assert config["pair_construction"]["mutation_labels_visible_to_judge"] is False
     assert config["pair_construction"]["hidden_generator_visible_to_judge"] is False
+    assert config["pair_construction"]["baseline_structure_novelty_required"] is (
+        False
+    )
     assert config["protocol"]["scoring"]["comparative_indeterminate_policy"] == (
         "neutral_fixed_denominator"
     )

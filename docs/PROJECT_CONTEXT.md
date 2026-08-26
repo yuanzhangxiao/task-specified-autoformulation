@@ -286,8 +286,12 @@ The pipeline is iterative:
   an observed absolute state has a semantically justified initialization.
   Protocol 4 adds these as opt-in atomic absolute questions. It does not change
   benchmark prompts, inspect the hidden generator, or alter prior frozen rows.
-  A fresh-structure 120B validation must pass before the questions are allowed to
-  affect the online search objective.
+  The current run inventory has no eligible canonical structure outside every
+  previously opened pair set. Before any protocol-4 call, the construction
+  contract was therefore changed to a targeted development calibration that
+  records reuse of two structures while holding out the new questions and
+  mutations. It must pass before a versioned online pilot, and that pilot supplies
+  the fresh operational check.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

@@ -725,12 +725,18 @@ contract are never included in either LLM prompt. The questions are opt-in, so
 all previously frozen protocol-3 rows and scores remain reproducible.
 
 Before either question can influence search,
-`hybrid_judge_model_semantics_validation_v1.json` freezes a fresh-structure
-validation. Two isolated mutations are evaluated over two unseen canonical
-structures: omission of the public target component, and replacement of a
-data-consistent observed-state initialization by an unjustified fixed zero.
+`hybrid_judge_model_semantics_validation_v1.json` freezes a targeted development
+calibration. The completed-run inventory contains no eligible canonical structure
+that is absent from every prior judge pair file. Because no protocol-4 calls had
+been made when this was discovered, the pre-call construction contract permits
+two previously opened structures and records their fingerprints explicitly. The
+question families and controlled mutations remain new; this result is not called
+an unseen-structure confirmation. Two isolated mutations are evaluated: omission
+of the public target component, and replacement of a data-consistent observed-
+state initialization by an unjustified fixed zero.
 Both orientations and five seeds are judged by the frozen 120B low-reasoning
 atomic protocol. Paired question consensus and the neutral fixed denominator
 are retained. Failure of any completion, coverage, overall accuracy,
 pair-aggregate accuracy, targeted absolute accuracy, stability, or orientation
-gate blocks search integration.
+gate blocks search integration. If it passes, the next online search pilot—not
+this calibration—provides the fresh operational check.

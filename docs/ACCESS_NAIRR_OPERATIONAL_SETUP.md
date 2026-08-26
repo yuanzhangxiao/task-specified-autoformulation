@@ -1137,8 +1137,12 @@ overwrite the earlier consensus-validation directory. Prepare `pairs.jsonl`,
 `hybrid_labels.jsonl`, the pair manifest, and a copied protocol config under
 `$AF_WORK/phase_b/judge-hybrid-model-semantics-v1`. The builder must receive all
 previously opened pair files through repeated `--exclude-pairs` arguments and
-enough completed run roots to find two eligible unseen structures. Label
-generation must include `--model-semantic-contract`.
+enough completed run roots to find two eligible structures. The current inventory
+has no eligible structure outside all earlier pair files, so preparation uses
+`--allow-opened-baselines` and the manifest must report exactly two previously
+opened fingerprints. This makes the result targeted development calibration, not
+fresh-structure confirmation. Label generation must include
+`--model-semantic-contract`.
 
 Submit only after verifying the counts are four pairs and four labels:
 

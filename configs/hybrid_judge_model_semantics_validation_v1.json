@@ -1,10 +1,12 @@
 {
   "schema_version": "hybrid-judge-model-semantics-validation-1",
   "status": "frozen_before_model_semantics_validation_calls",
-  "purpose": "validate public target-mapping and initialization semantics before either criterion can influence search",
+  "purpose": "targeted development calibration of public target-mapping and initialization semantics before either criterion can influence search",
   "judge_model": "vllm:openai/gpt-oss-120b",
   "pair_construction": {
-    "holdout_unit": "canonical_candidate_structure",
+    "holdout_unit": "new_semantic_question_and_controlled_mutation_family",
+    "baseline_structure_novelty_required": false,
+    "prior_structure_exposure_must_be_recorded": true,
     "baseline_count": 2,
     "pairs_per_structure": 2,
     "known_dominance_types": [
@@ -70,7 +72,7 @@
     "maximum_mean_orientation_half_gap": 0.10,
     "maximum_comparative_disagreement_rate": 0.30
   },
-  "decision_rule": "pass only if every predeclared gate passes",
-  "next_if_passed": "integrate the two criteria into a versioned hybrid-search pilot",
+  "decision_rule": "pass only if every predeclared gate passes; this development result is not an unseen-structure confirmation",
+  "next_if_passed": "integrate the two criteria into a versioned hybrid-search pilot that supplies the fresh operational check",
   "next_if_failed": "do not expose either new criterion to search; inspect question-level errors without revising this frozen result"
 }
