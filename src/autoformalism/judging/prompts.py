@@ -96,6 +96,17 @@ MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT = HYBRID_JUDGE_PROMPT.replace(
     + "Also answer three irreducibly comparative questions.",
 )
 
+_TARGET_MAPPING_CRITERION = _MODEL_SEMANTIC_CRITERIA.split(
+    "- initialization_semantically_consistent:", maxsplit=1
+)[0]
+TARGET_MAPPING_HYBRID_JUDGE_PROMPT = HYBRID_JUDGE_PROMPT.replace(
+    "Also answer three irreducibly comparative questions.",
+    _TARGET_MAPPING_CRITERION
+    + "The supplied model-semantic structural facts are authoritative about "
+    "observation-expression bindings and component definitions.\n\n"
+    + "Also answer three irreducibly comparative questions.",
+)
+
 ATOMIC_EVIDENCE_PROMPT = """You infer atomic scientific expectations before a
 blinded pairwise model comparison. For every supplied signed-occurrence unit, the
 runtime has deliberately removed only its outer top-level plus or minus sign. Do
@@ -137,5 +148,8 @@ HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-2"
 ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION = "hybrid-judge-protocol-3-atomic-occurrence"
 MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION = (
     "hybrid-judge-protocol-4-target-mapping-initialization"
+)
+TARGET_MAPPING_HYBRID_JUDGE_PROTOCOL_VERSION = (
+    "hybrid-judge-protocol-5-target-mapping-certified"
 )
 ATOMIC_CONTRACT_REPAIR_VERSION = "atomic-redundant-role-unit-repair-1"

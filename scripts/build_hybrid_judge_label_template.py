@@ -69,6 +69,7 @@ def build_label_template(
     task_inputs: tuple[str, ...],
     validation_context: ValidationContext | None = None,
     include_model_semantics: bool = False,
+    include_target_mapping_semantics: bool = False,
 ) -> HybridCalibrationLabels:
     """Create runtime and mutation-contract labels without expert inference."""
     requirements = extract_public_requirements(public_prompt)
@@ -108,6 +109,9 @@ def build_label_template(
         for criterion, subject in semantic_absolute_units(
             requirements,
             include_model_semantics=include_model_semantics,
+            include_target_mapping_semantics=(
+                include_target_mapping_semantics
+            ),
         )
     }
     comparative = {
@@ -189,7 +193,14 @@ def main() -> None:
         action="store_true",
         help="include target-mapping and initialization semantic labels",
     )
+    parser.add_argument(
+        "--target-mapping-semantic-contract",
+        action="store_true",
+        help="include only the target-mapping semantic label",
+    )
     args = parser.parse_args()
+    if args.model_semantic_contract and args.target_mapping_semantic_contract:
+        raise SystemExit("semantic contract flags are mutually exclusive")
     pairs = tuple(
         AdversarialPair.model_validate_json(line)
         for line in args.pairs.read_text(encoding="utf-8").splitlines()
@@ -211,6 +222,9 @@ def main() -> None:
                 task_inputs=tuple(context.external_inputs),
                 validation_context=context,
                 include_model_semantics=args.model_semantic_contract,
+                include_target_mapping_semantics=(
+                    args.target_mapping_semantic_contract
+                ),
             )
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,7 @@
 
 from autoformalism.judging.hybrid import (
     ATOMIC_EVIDENCE_SCHEMA_VERSION,
+    MODEL_SEMANTIC_STRUCTURAL_FACTS_SCHEMA_VERSION,
     STRUCTURAL_FACTS_SCHEMA_VERSION,
     AtomicEvidencePlan,
     HybridScoringConfig,
@@ -25,6 +26,7 @@ from autoformalism.judging.hybrid import (
 
 __all__ = [
     "ATOMIC_EVIDENCE_SCHEMA_VERSION",
+    "MODEL_SEMANTIC_STRUCTURAL_FACTS_SCHEMA_VERSION",
     "STRUCTURAL_FACTS_SCHEMA_VERSION",
     "AtomicEvidencePlan",
     "HybridScoringConfig",

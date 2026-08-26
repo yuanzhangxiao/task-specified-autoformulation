@@ -1,0 +1,20 @@
+{
+  "schema_version": "hybrid-judge-model-semantics-v1-adjudication-1",
+  "status": "invalid_pair_construction",
+  "frozen_protocol_config": "configs/hybrid_judge_model_semantics_validation_v1.json",
+  "adjudication_date": "2026-08-26",
+  "result_use": "exclude_from_protocol_accuracy_and_paper_claims",
+  "findings": [
+    {
+      "pair_type": "omitted_target_component",
+      "problem": "The constructed baseline mapped U to Uii + U even when the selected process U already contained Uii, thereby double-counting the supplied component.",
+      "resolution": "Protocol v2 certifies that the selected target process excludes Uii before constructing the complete Uii + U mapping."
+    },
+    {
+      "pair_type": "unjustified_zero_observed_initialization",
+      "problem": "Identity-mapped observed states are initialized from their observed channel by the simulator, so the submitted fixed-zero mutation was behaviorally inert.",
+      "resolution": "Identity-mapped initialization is canonicalized deterministically and is not scored by the v2 LLM judge."
+    }
+  ],
+  "provenance_policy": "The frozen v1 inputs and outputs remain unchanged as an auditable invalid experiment."
+}

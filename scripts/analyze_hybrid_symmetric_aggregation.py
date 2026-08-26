@@ -632,6 +632,12 @@ def main() -> None:
             "exclude",
         ),
         include_model_semantics=scoring.get("include_model_semantics", False),
+        include_target_mapping_semantics=scoring.get(
+            "include_target_mapping_semantics", False
+        ),
+        include_initialization_semantics=scoring.get(
+            "include_initialization_semantics", False
+        ),
     )
     result = analyze(rows, failures, labels, config=config)
     args.output.parent.mkdir(parents=True, exist_ok=True)

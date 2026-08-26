@@ -1160,6 +1160,30 @@ merge the single shard, run the existing hybrid and symmetric analyzers, and run
 into search unless the final Markdown report says `PASS` for every predeclared
 gate.
 
+The completed v1 run must not be interpreted with those gates. Post-run audit
+found invalid pair construction, recorded in
+`configs/hybrid_judge_model_semantics_validation_v1_adjudication.json`. Preserve
+its directory unchanged.
+
+Prepare the corrected target-only v2 milestone under a new root. Use
+`build_hybrid_judge_target_mapping_pairs.py`; it fails unless process `U` excludes
+`Uii` and records every certification in the manifest. Generate labels with
+`--target-mapping-semantic-contract`, copy
+`configs/hybrid_judge_target_mapping_validation_v2.json` to
+`protocol_config.json`, verify two pairs/two labels and their hashes, then submit:
+
+```bash
+cd "$AF_REPO_ROOT"
+mkdir -p logs
+sbatch scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v2_120b.slurm
+```
+
+The v2 launcher is session-independent and writes only beneath
+`$AF_WORK/phase_b/judge-hybrid-target-mapping-v2`. Analyze it with the existing
+hybrid, symmetric-aggregation, and model-semantics validation analyzers. The
+initialization accuracy gate is intentionally absent because identity-observed
+initialization is now deterministic canonicalization rather than an LLM task.
+
 ## Acceptance checklist
 
 For each system, do not start production until all are true:

@@ -372,6 +372,8 @@ def test_repair_maps_declared_lagged_target_alias() -> None:
     }["target_prev"] == "target"
     assert diagnostics == (
         "mapped causal lag alias target_prev to interval-boundary target",
+        "bound identity-observed state initialization to causal channel: "
+        "y -> target",
         "removed unreferenced algebraic process: flux",
         "removed unused parameter declaration: gain",
         "removed unused parameter declaration: offset",
@@ -699,6 +701,36 @@ def test_one_step_null_observed_initialization_uses_mapped_channel() -> None:
 
     expression = validated.initial_condition_expressions["y"]
     assert expression.symbols == frozenset({"target"})
+
+
+def test_one_step_fixed_observed_initialization_is_canonically_repaired() -> None:
+    payload = candidate_payload()
+    payload["initial_conditions"][1] = {
+        "state": "y",
+        "scope": "global",
+        "fixed_value": 0.0,
+    }
+    context = ValidationContext(
+        targets=("target",),
+        lagged_targets=("target",),
+        auxiliaries=("aux",),
+        external_inputs=("input_u",),
+        fixed_covariates=("covariate",),
+    )
+
+    repaired, diagnostics = repair_protected_declarations(
+        _candidate(payload), context
+    )
+
+    initial = next(
+        item for item in repaired.initial_conditions if item.state == "y"
+    )
+    assert initial.fixed_value is None
+    assert initial.expression == "target"
+    assert any(
+        "bound identity-observed state initialization" in item
+        for item in diagnostics
+    )
 
 
 def test_one_step_latent_initialization_rejects_range_and_unknown_symbol() -> None:

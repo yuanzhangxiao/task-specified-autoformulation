@@ -35,10 +35,22 @@ from scripts.build_hybrid_judge_model_semantics_pairs import (
     build_model_semantics_pairs,
     select_unseen_semantic_baselines,
 )
+from scripts.build_hybrid_judge_target_mapping_pairs import (
+    build_target_mapping_pairs,
+    certify_pair,
+    select_baselines,
+)
 
 CONFIG = Path("configs/hybrid_judge_model_semantics_validation_v1.json")
 SLURM = Path(
     "scripts/hpc/phase_b_hybrid_judge_vllm_model_semantics_120b.slurm"
+)
+V2_CONFIG = Path("configs/hybrid_judge_target_mapping_validation_v2.json")
+V2_SLURM = Path(
+    "scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v2_120b.slurm"
+)
+V1_ADJUDICATION = Path(
+    "configs/hybrid_judge_model_semantics_validation_v1_adjudication.json"
 )
 
 
@@ -193,6 +205,66 @@ def test_builder_can_record_previously_opened_development_baseline(
     assert excluded_count == 1
 
 
+def test_v2_builder_certifies_target_process_before_mapping_edit(
+    context: ValidationContext,
+) -> None:
+    source = _source_pair("source", _candidate("k"))
+    contexts = {("phase_b_test", "easy"): context}
+    selected, excluded = select_baselines(
+        (source,),
+        (source,),
+        baseline_count=1,
+        contexts=contexts,
+        target_channel="U",
+        target_component="U",
+        supplied_component="Uii",
+        allow_opened_baselines=True,
+    )
+    pairs, certifications = build_target_mapping_pairs(
+        selected,
+        contexts=contexts,
+        target_channel="U",
+        target_component="U",
+        supplied_component="Uii",
+    )
+
+    assert len(excluded) == 1
+    assert len(pairs) == 1
+    pair = pairs[0]
+    assert pair.mutation_type == "omitted_target_component"
+    assert certifications[pair.pair_id] == certify_pair(
+        pair.valid_candidate,
+        pair.adversarial_candidate,
+        target_channel="U",
+        target_component="U",
+        supplied_component="Uii",
+    )
+    assert certifications[pair.pair_id][
+        "target_process_excludes_supplied_component"
+    ]
+
+
+def test_v2_builder_rejects_process_that_already_contains_supplied_component(
+    context: ValidationContext,
+) -> None:
+    payload = _candidate("k").model_dump(mode="json")
+    payload["processes"][0]["expression"] = "Uii + k * X * Gp"
+    invalid = _source_pair("invalid", CandidateModel.model_validate(payload))
+    contexts = {("phase_b_test", "easy"): context}
+
+    with pytest.raises(ValueError, match="found 0"):
+        select_baselines(
+            (invalid,),
+            (),
+            baseline_count=1,
+            contexts=contexts,
+            target_channel="U",
+            target_component="U",
+            supplied_component="Uii",
+            allow_opened_baselines=True,
+        )
+
+
 @pytest.mark.parametrize(
     ("mutation_type", "criterion"),
     (
@@ -343,3 +415,20 @@ def test_launcher_and_config_freeze_versioned_protocol() -> None:
         launcher
     )
     subprocess.run(["bash", "-n", str(SLURM)], check=True)
+
+
+def test_v2_config_launcher_and_v1_adjudication_are_explicit() -> None:
+    config = json.loads(V2_CONFIG.read_text(encoding="utf-8"))
+    launcher = V2_SLURM.read_text(encoding="utf-8")
+    adjudication = json.loads(V1_ADJUDICATION.read_text(encoding="utf-8"))
+
+    assert config["status"] == "frozen_before_target_mapping_validation_calls"
+    scoring = config["protocol"]["scoring"]
+    assert scoring["include_target_mapping_semantics"] is True
+    assert scoring["include_initialization_semantics"] is False
+    assert "AF_TARGET_MAPPING_SEMANTIC_CONTRACT:=true" in launcher
+    assert adjudication["status"] == "invalid_pair_construction"
+    assert adjudication["result_use"] == (
+        "exclude_from_protocol_accuracy_and_paper_claims"
+    )
+    subprocess.run(["bash", "-n", str(V2_SLURM)], check=True)

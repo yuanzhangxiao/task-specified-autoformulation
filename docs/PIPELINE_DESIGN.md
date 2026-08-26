@@ -560,15 +560,16 @@ Outputs are small versioned JSON/JSONL artifacts:
 Raw API payloads, datasets, secrets, and large generated trajectories
 must not be committed.
 
-The scientific-judge boundary also validates observation semantics and initial
-conditions when the versioned model-semantic contract is enabled. Deterministic
-code identifies the exact mappings, states, channels, and dependency facts; it
-does not infer whether a modeled symbol denotes a total quantity or a component,
-or whether zero is a scientifically meaningful baseline. The LLM answers those
-atomic questions only from the public task and candidate. Missing public
-semantics yield `indeterminate`, which remains a neutral vote in the fixed
-comparative denominator. This extension must pass its frozen calibration before
-it is enabled in search.
+The versioned model-semantic boundary can ask whether an observation expression
+generates the complete public target. Deterministic code supplies authoritative
+mapping symbols, component definitions, and dependency facts, but does not infer
+total-versus-component scientific semantics. Missing public semantics yield
+`indeterminate`, which remains a neutral vote in the fixed comparative
+denominator. Identity-mapped observed-state initialization is not an LLM
+question in one-step tasks: contextual canonicalization binds it to the observed
+channel, matching the simulator's causal reset rule, while open-loop tasks retain
+their explicit initializers. The invalid v1 calibration is preserved for audit;
+only certified target-mapping protocol v2 may advance after its frozen gates pass.
 
 ## Failure and security behavior
 

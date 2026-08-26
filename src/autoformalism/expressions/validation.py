@@ -158,6 +158,46 @@ def repair_protected_declarations(
             f"mapped causal lag alias {alias} to interval-boundary {target}"
             for alias, target in sorted(lag_aliases.items())
         )
+    if context.lagged_targets:
+        available_observed = set(context.targets) | set(context.auxiliaries)
+        state_names = {item.name for item in candidate.states}
+        identity_channels = {
+            mapping.expression.replace(" ", ""): mapping.channel
+            for mapping in candidate.observation_mappings
+            if mapping.channel in available_observed
+            and mapping.expression.replace(" ", "") in state_names
+        }
+        changed_states = {
+            initial.state
+            for initial in candidate.initial_conditions
+            if initial.state in identity_channels
+            and (
+                initial.expression != identity_channels[initial.state]
+                or initial.fixed_value is not None
+                or initial.initialization_range is not None
+                or initial.scope != ParameterScope.GLOBAL
+            )
+        }
+        if changed_states:
+            payload = candidate.model_dump(mode="json")
+            for initial in payload["initial_conditions"]:
+                state = initial["state"]
+                if state not in changed_states:
+                    continue
+                initial.update(
+                    {
+                        "scope": ParameterScope.GLOBAL.value,
+                        "fixed_value": None,
+                        "initialization_range": None,
+                        "expression": identity_channels[state],
+                    }
+                )
+            candidate = CandidateModel.model_validate(payload)
+            initial_repairs.extend(
+                "bound identity-observed state initialization to causal "
+                f"channel: {state} -> {identity_channels[state]}"
+                for state in sorted(changed_states)
+            )
     protected = set(context.external_inputs) | set(context.fixed_covariates)
     equation_states = {item.state for item in candidate.state_equations}
     undifferentiated_auxiliaries = {

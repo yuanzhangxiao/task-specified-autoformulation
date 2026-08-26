@@ -41,6 +41,9 @@ from autoformalism.schemas.base import Identifier, StrictSchema, UnitInterval
 
 _CANDIDATE_SUBJECT = "candidate"
 STRUCTURAL_FACTS_SCHEMA_VERSION = "structural-facts-2"
+MODEL_SEMANTIC_STRUCTURAL_FACTS_SCHEMA_VERSION = (
+    "structural-facts-3-model-semantics"
+)
 ATOMIC_EVIDENCE_SCHEMA_VERSION = "atomic-evidence-plan-1"
 _SEMANTIC_CANDIDATE_CRITERIA = (
     AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
@@ -52,12 +55,6 @@ _SEMANTIC_CANDIDATE_CRITERIA = (
     AbsoluteCriterion.CLAIMED_SATURATIONS_APPROPRIATE,
     AbsoluteCriterion.PROPOSER_CLAIMS_SUPPORTED,
 )
-_MODEL_SEMANTIC_CANDIDATE_CRITERIA = (
-    AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
-    AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT,
-)
-
-
 def extract_public_requirements(prompt: str) -> RequirementRegistry:
     """Extract the frozen task-required bullet list from a public prompt.
 
@@ -202,6 +199,8 @@ def structural_facts(
     candidate: CandidateModel,
     *,
     task_inputs: tuple[str, ...],
+    include_model_semantics: bool = False,
+    causal_observation_resets: bool = False,
 ) -> dict[str, object]:
     """Return certified dependency facts for one canonical candidate."""
     parser = RestrictedParser()
@@ -280,8 +279,12 @@ def structural_facts(
             "reaches_requested_target": bool(paths),
             "target_paths": paths,
         }
-    return {
-        "schema_version": STRUCTURAL_FACTS_SCHEMA_VERSION,
+    facts: dict[str, object] = {
+        "schema_version": (
+            MODEL_SEMANTIC_STRUCTURAL_FACTS_SCHEMA_VERSION
+            if include_model_semantics
+            else STRUCTURAL_FACTS_SCHEMA_VERSION
+        ),
         "task_inputs": {
             name: {
                 "reaches_requested_target": bool(paths_from(name)),
@@ -295,6 +298,61 @@ def structural_facts(
         ],
         "algebraic_expressions": algebraic_expressions,
     }
+    if include_model_semantics:
+        identity_channels = {
+            mapping.expression.replace(" ", ""): mapping.channel
+            for mapping in candidate.observation_mappings
+            if mapping.expression.replace(" ", "")
+            in {state.name for state in candidate.states}
+        } if causal_observation_resets else {}
+        facts["observation_mappings"] = [
+            {
+                "channel": mapping.channel,
+                "expression": mapping.expression,
+                "symbols": sorted(
+                    parser.parse(
+                        mapping.expression,
+                        location=f"observation:{mapping.channel}",
+                    ).symbols
+                ),
+            }
+            for mapping in candidate.observation_mappings
+        ]
+        facts["initialization_bindings"] = [
+            {
+                "state": initial.state,
+                "effective_binding_kind": (
+                    "observed_initial_channel"
+                    if initial.state in identity_channels
+                    else (
+                        "analytic_expression"
+                        if initial.expression is not None
+                        else (
+                            "fixed_value"
+                            if initial.fixed_value is not None
+                            else "fitted_initial_range"
+                        )
+                    )
+                ),
+                "effective_channel": identity_channels.get(initial.state),
+                "expression": initial.expression,
+                "fixed_value": initial.fixed_value,
+                "initialization_range": (
+                    None
+                    if initial.initialization_range is None
+                    else initial.initialization_range.model_dump(mode="json")
+                ),
+                "runtime_rule": (
+                    "Identity-mapped states are initialized from the observed "
+                    "channel at the causal interval boundary."
+                    if initial.state in identity_channels
+                    else "The canonical initializer is runtime-effective."
+                ),
+            }
+            for initial in candidate.initial_conditions
+        ]
+        facts["causal_observation_resets"] = causal_observation_resets
+    return facts
 
 
 @dataclass(frozen=True)
@@ -787,6 +845,8 @@ def semantic_absolute_units(
     *,
     include_role_consistency: bool = True,
     include_model_semantics: bool = False,
+    include_target_mapping_semantics: bool = False,
+    include_initialization_semantics: bool = False,
 ) -> tuple[tuple[AbsoluteCriterion, str], ...]:
     """Return the exact semantic units that the LLM must assess."""
     units: list[tuple[AbsoluteCriterion, str]] = []
@@ -813,10 +873,19 @@ def semantic_absolute_units(
             AbsoluteCriterion.SINK_ROLES_CONSISTENT,
         }
     )
-    if include_model_semantics:
-        units.extend(
-            (criterion, _CANDIDATE_SUBJECT)
-            for criterion in _MODEL_SEMANTIC_CANDIDATE_CRITERIA
+    if include_model_semantics or include_target_mapping_semantics:
+        units.append(
+            (
+                AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
+                _CANDIDATE_SUBJECT,
+            )
+        )
+    if include_model_semantics or include_initialization_semantics:
+        units.append(
+            (
+                AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT,
+                _CANDIDATE_SUBJECT,
+            )
         )
     return tuple(units)
 
@@ -859,6 +928,8 @@ class HybridScoringConfig:
         "exclude", "neutral_fixed_denominator"
     ] = "exclude"
     include_model_semantics: bool = False
+    include_target_mapping_semantics: bool = False
+    include_initialization_semantics: bool = False
 
     def __post_init__(self) -> None:
         values = (
@@ -918,13 +989,14 @@ def build_group_registry(
         (AbsoluteCriterion.CLAIMED_DELAYS_MEANINGFUL, _CANDIDATE_SUBJECT),
         (AbsoluteCriterion.CLAIMED_SATURATIONS_APPROPRIATE, _CANDIDATE_SUBJECT),
     ]
-    if config.include_model_semantics:
+    if config.include_model_semantics or config.include_target_mapping_semantics:
         balance_keys.append(
             (
                 AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
                 _CANDIDATE_SUBJECT,
             )
         )
+    if config.include_model_semantics or config.include_initialization_semantics:
         dynamic_keys.append(
             (
                 AbsoluteCriterion.INITIALIZATION_SEMANTICALLY_CONSISTENT,

@@ -25,6 +25,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_TIE_THRESHOLD:=0.05}"
 : "${AF_COMPARATIVE_INDETERMINATE_POLICY:=exclude}"
 : "${AF_MODEL_SEMANTIC_CONTRACT:=false}"
+: "${AF_TARGET_MAPPING_SEMANTIC_CONTRACT:=false}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 : "${AF_PAIR_IDS=heldout_55d8026028a90be5 heldout_ee453d8cc6fcb7a2 heldout_70b3222d4736ea1d heldout_cca8883e6ae1b33f}"
 
@@ -58,10 +59,19 @@ if [[ -n "${AF_PAIR_IDS}" ]]; then
   read -r -a pair_ids <<<"${AF_PAIR_IDS}"
   pair_id_args=(--pair-ids "${pair_ids[@]}")
 fi
-if [[ "${AF_MODEL_SEMANTIC_CONTRACT}" == true ]]; then
+if [[ "${AF_MODEL_SEMANTIC_CONTRACT}" == true && \
+  "${AF_TARGET_MAPPING_SEMANTIC_CONTRACT}" == true ]]; then
+  echo "semantic contract flags are mutually exclusive" >&2
+  exit 2
+elif [[ "${AF_MODEL_SEMANTIC_CONTRACT}" == true ]]; then
   semantic_contract_args=(--model-semantic-contract)
 elif [[ "${AF_MODEL_SEMANTIC_CONTRACT}" != false ]]; then
   echo "AF_MODEL_SEMANTIC_CONTRACT must be true or false" >&2
+  exit 2
+elif [[ "${AF_TARGET_MAPPING_SEMANTIC_CONTRACT}" == true ]]; then
+  semantic_contract_args=(--target-mapping-semantic-contract)
+elif [[ "${AF_TARGET_MAPPING_SEMANTIC_CONTRACT}" != false ]]; then
+  echo "AF_TARGET_MAPPING_SEMANTIC_CONTRACT must be true or false" >&2
   exit 2
 fi
 

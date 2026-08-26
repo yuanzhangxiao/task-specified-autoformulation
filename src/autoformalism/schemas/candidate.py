@@ -259,7 +259,8 @@ class CandidateModel(StrictSchema):
             ):
                 # Identity-mapped states are reset from the measured channel at
                 # every one-step interval. The data contract is authoritative:
-                # never fit or invent a separate initial value for them.
+                # never fit, preserve, or invent a separate initial value for
+                # them.
                 item["scope"] = ParameterScope.GLOBAL.value
                 item["fixed_value"] = None
                 item["initialization_range"] = None

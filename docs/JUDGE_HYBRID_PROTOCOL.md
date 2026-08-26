@@ -724,19 +724,29 @@ candidate do not supply enough semantics. The hidden generator and mutation
 contract are never included in either LLM prompt. The questions are opt-in, so
 all previously frozen protocol-3 rows and scores remain reproducible.
 
-Before either question can influence search,
-`hybrid_judge_model_semantics_validation_v1.json` freezes a targeted development
-calibration. The completed-run inventory contains no eligible canonical structure
-that is absent from every prior judge pair file. Because no protocol-4 calls had
-been made when this was discovered, the pre-call construction contract permits
-two previously opened structures and records their fingerprints explicitly. The
-question families and controlled mutations remain new; this result is not called
-an unseen-structure confirmation. Two isolated mutations are evaluated: omission
-of the public target component, and replacement of a data-consistent observed-
-state initialization by an unjustified fixed zero.
-Both orientations and five seeds are judged by the frozen 120B low-reasoning
-atomic protocol. Paired question consensus and the neutral fixed denominator
-are retained. Failure of any completion, coverage, overall accuracy,
-pair-aggregate accuracy, targeted absolute accuracy, stability, or orientation
-gate blocks search integration. If it passes, the next online search pilot—not
-this calibration—provides the fresh operational check.
+The completed v1 calibration is retained but adjudicated invalid rather than
+relabeled. Its target-mapping baseline used `Uii + U` without first checking
+whether process `U` already contained `Uii`; on the selected structures this
+could double-count the supplied component. Its fixed-zero observed-state
+mutation was also behaviorally inert: the simulator initializes an
+identity-mapped state from its observed channel at each causal boundary.
+`hybrid_judge_model_semantics_validation_v1_adjudication.json` records both
+construction errors and excludes the v1 accuracy from protocol and paper claims.
+
+Initialization is now resolved at the deterministic contextual-repair boundary.
+For a one-step causal task, an identity observation mapping such as channel `I`
+mapped to state `I` causes any submitted fixed, ranged, or analytic initializer
+to be replaced by the authoritative observed-channel binding. Open-loop tasks
+retain their explicit initializers. Versioned structural facts expose the
+effective runtime binding, but no LLM initialization question is included in
+protocol v2.
+
+`hybrid-judge-protocol-5-target-mapping-certified` retains only the target-mapping
+question. Its builder fails closed unless the target process is a unique process,
+does not already reference the supplied component `Uii`, the complete mapping has
+exactly symbols `{Uii, U}`, the omission has exactly `{U}`, and the candidates are
+otherwise identical. The frozen v2 configuration uses the established 120B
+low-reasoning atomic protocol, both orientations, five seeds, paired question
+consensus, and the neutral fixed denominator. These are development pairs because
+prior structures may be reused and that reuse is recorded; passing permits only a
+later versioned search pilot.

@@ -390,6 +390,28 @@ def test_identity_mapped_observed_initialization_uses_measured_channel(
     assert initial.initialization_range is None
 
 
+def test_identity_mapping_preserves_fixed_initialization_without_context(
+    candidate_payload: dict[str, Any],
+) -> None:
+    payload = copy.deepcopy(candidate_payload)
+    payload["initial_conditions"][0].update(
+        {
+            "scope": "global",
+            "fixed_value": 0.0,
+            "expression": None,
+            "initialization_range": None,
+        }
+    )
+
+    candidate = CandidateModel.model_validate(payload)
+
+    initial = candidate.initial_conditions[0]
+    assert initial.scope.value == "global"
+    assert initial.fixed_value == 0.0
+    assert initial.expression is None
+    assert initial.initialization_range is None
+
+
 def test_identity_mapping_overrides_incorrect_latent_label_for_initialization(
     candidate_payload: dict[str, Any],
 ) -> None:

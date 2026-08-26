@@ -237,6 +237,37 @@ def test_structural_facts_certify_paths_without_scientific_verdicts() -> None:
     assert "scientifically_valid" not in facts["components"]["extra"]
 
 
+def test_model_semantic_structural_facts_expose_effective_bindings() -> None:
+    candidate = _candidate()
+
+    ordinary = structural_facts(
+        candidate, task_inputs=("meal_event_g", "insulin_input")
+    )
+    semantic = structural_facts(
+        candidate,
+        task_inputs=("meal_event_g", "insulin_input"),
+        include_model_semantics=True,
+        causal_observation_resets=True,
+    )
+
+    assert "observation_mappings" not in ordinary
+    assert "initialization_bindings" not in ordinary
+    assert semantic["schema_version"] == "structural-facts-3-model-semantics"
+    mapping = next(
+        item
+        for item in semantic["observation_mappings"]
+        if item["channel"] == "Gp"
+    )
+    assert mapping["symbols"] == ["Gp"]
+    binding = next(
+        item
+        for item in semantic["initialization_bindings"]
+        if item["state"] == "Gp"
+    )
+    assert binding["effective_binding_kind"] == "observed_initial_channel"
+    assert binding["effective_channel"] == "Gp"
+
+
 def test_structural_facts_certify_signed_occurrences_and_exact_repeats() -> None:
     baseline = structural_facts(
         _candidate_with_gp_rhs("meal_event_g - U"),
@@ -389,10 +420,21 @@ def test_model_semantic_units_are_versioned_and_opt_in() -> None:
     assert initialization not in ordinary
     assert versioned == ordinary | {target_mapping, initialization}
 
+    target_only = set(
+        semantic_absolute_units(
+            registry, include_target_mapping_semantics=True
+        )
+    )
+    assert target_only == ordinary | {target_mapping}
+
     ordinary_groups = build_group_registry(registry, HybridScoringConfig())
     versioned_groups = build_group_registry(
         registry,
         HybridScoringConfig(include_model_semantics=True),
+    )
+    target_only_groups = build_group_registry(
+        registry,
+        HybridScoringConfig(include_target_mapping_semantics=True),
     )
     assert target_mapping not in {
         key for group in ordinary_groups for key in group.keys
@@ -405,6 +447,12 @@ def test_model_semantic_units_are_versioned_and_opt_in() -> None:
     }
     assert initialization in {
         key for group in versioned_groups for key in group.keys
+    }
+    assert target_mapping in {
+        key for group in target_only_groups for key in group.keys
+    }
+    assert initialization not in {
+        key for group in target_only_groups for key in group.keys
     }
 
 

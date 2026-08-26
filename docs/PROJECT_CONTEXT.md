@@ -280,18 +280,16 @@ The pipeline is iterative:
   atomic protocol, 120B model, scientific weight, and tie threshold are unchanged;
   the new policy is versioned in both the frozen config and checkpoints before a
   confirmation search is run.
-- The fixed-denominator confirmation search selected a valid fitted model but
-  revealed two additional scientific interfaces not covered by protocol 3:
-  whether an observation mapping reports the complete public target and whether
-  an observed absolute state has a semantically justified initialization.
-  Protocol 4 adds these as opt-in atomic absolute questions. It does not change
-  benchmark prompts, inspect the hidden generator, or alter prior frozen rows.
-  The current run inventory has no eligible canonical structure outside every
-  previously opened pair set. Before any protocol-4 call, the construction
-  contract was therefore changed to a targeted development calibration that
-  records reuse of two structures while holding out the new questions and
-  mutations. It must pass before a versioned online pilot, and that pilot supplies
-  the fresh operational check.
+- The fixed-denominator search exposed target-mapping and initialization
+  interfaces. The first model-semantic calibration was invalid: its constructed
+  complete mapping could double-count a component already inside process `U`,
+  and its fixed-zero identity-observed initializer was ignored by simulation.
+  The frozen v1 artifacts remain auditable but are excluded from accuracy claims.
+  Contextual repair now deterministically binds identity-observed states to their
+  measured initial channel for one-step tasks; open-loop initializers are retained.
+  Protocol 5 evaluates only target mapping on pairs
+  certified to isolate omission of a supplied component; it must pass its frozen
+  development gates before any new search pilot.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

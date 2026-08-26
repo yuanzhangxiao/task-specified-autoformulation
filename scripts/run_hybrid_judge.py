@@ -22,6 +22,7 @@ from autoformalism.expressions import (
 )
 from autoformalism.judging import (
     ATOMIC_EVIDENCE_SCHEMA_VERSION,
+    MODEL_SEMANTIC_STRUCTURAL_FACTS_SCHEMA_VERSION,
     STRUCTURAL_FACTS_SCHEMA_VERSION,
     HybridScoringConfig,
     atomic_candidate_context,
@@ -45,6 +46,8 @@ from autoformalism.judging.prompts import (
     HYBRID_JUDGE_PROTOCOL_VERSION,
     MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT,
     MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION,
+    TARGET_MAPPING_HYBRID_JUDGE_PROMPT,
+    TARGET_MAPPING_HYBRID_JUDGE_PROTOCOL_VERSION,
 )
 from autoformalism.llm import (
     LLMConfig,
@@ -233,6 +236,7 @@ def _system_prompt(
     *,
     atomic_mode: bool = False,
     model_semantic_contract: bool = False,
+    target_mapping_semantic_contract: bool = False,
 ) -> str:
     transport_override = ""
     if response_mode is OllamaResponseMode.TOOL_CALL:
@@ -241,11 +245,11 @@ def _system_prompt(
             "the arguments of the single provided structured-response tool. Do "
             "not place it in ordinary final message content."
         )
-    judge_prompt = (
-        MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT
-        if model_semantic_contract
-        else HYBRID_JUDGE_PROMPT
-    )
+    judge_prompt = HYBRID_JUDGE_PROMPT
+    if model_semantic_contract:
+        judge_prompt = MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT
+    elif target_mapping_semantic_contract:
+        judge_prompt = TARGET_MAPPING_HYBRID_JUDGE_PROMPT
     return (
         f"Configured judge model: {model}\n\n"
         f"Public scientific task:\n{public_prompt}\n\n"
@@ -449,6 +453,14 @@ def main() -> None:
             "units; requires atomic signed-occurrence mode"
         ),
     )
+    parser.add_argument(
+        "--target-mapping-semantic-contract",
+        action="store_true",
+        help=(
+            "request only the certified target-mapping semantic unit; "
+            "requires atomic signed-occurrence mode"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
@@ -474,6 +486,16 @@ def main() -> None:
         raise SystemExit(
             "--model-semantic-contract requires --atomic-signed-occurrences"
         )
+    if (
+        args.target_mapping_semantic_contract
+        and not args.atomic_signed_occurrences
+    ):
+        raise SystemExit(
+            "--target-mapping-semantic-contract requires "
+            "--atomic-signed-occurrences"
+        )
+    if args.model_semantic_contract and args.target_mapping_semantic_contract:
+        raise SystemExit("semantic contract flags are mutually exclusive")
     scoring = HybridScoringConfig(
         partial_tiebreak_weight=args.partial_tiebreak_weight,
         comparative_weight=args.comparative_weight,
@@ -482,6 +504,9 @@ def main() -> None:
             args.comparative_indeterminate_policy
         ),
         include_model_semantics=args.model_semantic_contract,
+        include_target_mapping_semantics=(
+            args.target_mapping_semantic_contract
+        ),
     )
     pair_bytes = args.pairs.read_bytes()
     source_pairs = tuple(
@@ -497,19 +522,25 @@ def main() -> None:
         strategy=args.shard_strategy,
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
-    protocol_version = (
-        MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION
-        if args.model_semantic_contract
-        else (
-            ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION
-            if args.atomic_signed_occurrences
-            else HYBRID_JUDGE_PROTOCOL_VERSION
-        )
+    if args.model_semantic_contract:
+        protocol_version = MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION
+    elif args.target_mapping_semantic_contract:
+        protocol_version = TARGET_MAPPING_HYBRID_JUDGE_PROTOCOL_VERSION
+    elif args.atomic_signed_occurrences:
+        protocol_version = ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION
+    else:
+        protocol_version = HYBRID_JUDGE_PROTOCOL_VERSION
+    include_semantic_facts = (
+        args.model_semantic_contract or args.target_mapping_semantic_contract
     )
     manifest = {
         "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
         "hybrid_judge_protocol_version": protocol_version,
-        "structural_facts_schema_version": STRUCTURAL_FACTS_SCHEMA_VERSION,
+        "structural_facts_schema_version": (
+            MODEL_SEMANTIC_STRUCTURAL_FACTS_SCHEMA_VERSION
+            if include_semantic_facts
+            else STRUCTURAL_FACTS_SCHEMA_VERSION
+        ),
         "pairs_sha256": hashlib.sha256(pair_bytes).hexdigest(),
         "pair_count": len(all_pairs),
         "selected_pair_ids": [pair.pair_id for pair in pairs],
@@ -531,6 +562,9 @@ def main() -> None:
             args.comparative_indeterminate_policy
         ),
         "model_semantic_contract": args.model_semantic_contract,
+        "target_mapping_semantic_contract": (
+            args.target_mapping_semantic_contract
+        ),
     }
     if args.atomic_signed_occurrences:
         manifest.update(
@@ -593,6 +627,9 @@ def main() -> None:
                     extract_public_requirements(prompt),
                     include_role_consistency=not args.atomic_signed_occurrences,
                     include_model_semantics=args.model_semantic_contract,
+                    include_target_mapping_semantics=(
+                        args.target_mapping_semantic_contract
+                    ),
                 )
             )
             for key, (prompt, _context_value) in contexts.items()
@@ -659,6 +696,9 @@ def main() -> None:
                 requirements,
                 include_role_consistency=not args.atomic_signed_occurrences,
                 include_model_semantics=args.model_semantic_contract,
+                include_target_mapping_semantics=(
+                    args.target_mapping_semantic_contract
+                ),
             )
             expected_units = set(units)
             system_prompt = _system_prompt(
@@ -668,6 +708,9 @@ def main() -> None:
                 OllamaResponseMode(args.ollama_response_mode),
                 atomic_mode=args.atomic_signed_occurrences,
                 model_semantic_contract=args.model_semantic_contract,
+                target_mapping_semantic_contract=(
+                    args.target_mapping_semantic_contract
+                ),
             )
             atomic_system_prompt = _atomic_system_prompt(
                 public_prompt,
@@ -733,10 +776,20 @@ def main() -> None:
                     },
                     "deterministic_structural_facts": {
                         "candidate_a": structural_facts(
-                            candidate_a, task_inputs=task_inputs
+                            candidate_a,
+                            task_inputs=task_inputs,
+                            include_model_semantics=include_semantic_facts,
+                            causal_observation_resets=bool(
+                                context.lagged_targets
+                            ),
                         ),
                         "candidate_b": structural_facts(
-                            candidate_b, task_inputs=task_inputs
+                            candidate_b,
+                            task_inputs=task_inputs,
+                            include_model_semantics=include_semantic_facts,
+                            causal_observation_resets=bool(
+                                context.lagged_targets
+                            ),
                         ),
                     },
                     "runtime_owned_absolute_assessments": [
@@ -850,6 +903,9 @@ def main() -> None:
                                     requirements,
                                     include_model_semantics=(
                                         args.model_semantic_contract
+                                    ),
+                                    include_target_mapping_semantics=(
+                                        args.target_mapping_semantic_contract
                                     ),
                                 )
                             )
