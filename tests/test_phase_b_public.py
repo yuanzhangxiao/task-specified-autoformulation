@@ -92,6 +92,26 @@ def test_named_t1_uses_natural_task_language_and_units() -> None:
     assert "free-rollout" not in named_prompt
 
 
+def test_named_t2_defines_total_disposal_target_and_required_contribution() -> None:
+    spec = phase_b_public_spec(
+        "dalla_man", "easy", "named", task="T2", data_root=DATA_ROOT
+    )
+    prompt = render_phase_b_prompts(spec)[0]
+
+    assert (
+        "U(t): total glucose utilization/disposal rate, including "
+        "insulin-independent and insulin-dependent contributions"
+    ) in prompt
+    assert (
+        "Uii(t): supplied insulin-independent contribution to glucose utilization"
+    ) in prompt
+    assert (
+        "plasma insulin regulates the insulin-dependent contribution to total "
+        "glucose disposal U(t)"
+    ) in prompt
+    assert "U = Uii" not in prompt
+
+
 @pytest.mark.parametrize("task", ["T2", "T3", "T4"])
 def test_multi_channel_obfuscated_dalla_preserves_role_level_obligations(
     task: str,

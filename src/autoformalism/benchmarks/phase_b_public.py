@@ -714,7 +714,8 @@ def _task_mechanism_lines(spec: PhaseBPublicSpec) -> list[str]:
                     "a causal pathway through which meal timing and meal amount "
                     "contribute to the observed plasma-glucose mass",
                     "a delayed insulin-action pathway through which plasma insulin "
-                    "regulates insulin-dependent glucose disposal",
+                    "regulates the insulin-dependent contribution to total glucose "
+                    "disposal U(t)",
                 ],
                 "T3": [
                     "a causal meal-appearance pathway",
@@ -816,9 +817,12 @@ def _channel_description(family: Family, name: str, variant: SemanticVariant) ->
         "Gp": "primary nonnegative target representing plasma glucose mass",
         "Gt": "observed tissue glucose mass",
         "I": "insulin concentration",
-        "U": "glucose disposal rate",
+        "U": (
+            "total glucose utilization/disposal rate, including "
+            "insulin-independent and insulin-dependent contributions"
+        ),
         "EGP": "endogenous glucose production rate",
-        "Uii": "insulin-independent utilization rate",
+        "Uii": "supplied insulin-independent contribution to glucose utilization",
         "E": "renal excretion rate",
         "Ipo": "portal insulin amount",
         "meal_event_g": "declared meal amount pulse",
