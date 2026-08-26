@@ -35,6 +35,10 @@ from scripts.build_hybrid_judge_model_semantics_pairs import (
     build_model_semantics_pairs,
     select_unseen_semantic_baselines,
 )
+from scripts.build_hybrid_judge_target_mapping_clean_names import (
+    build_clean_target_mapping_pairs,
+    certify_clean_pair,
+)
 from scripts.build_hybrid_judge_target_mapping_pairs import (
     build_target_mapping_pairs,
     certify_pair,
@@ -48,6 +52,10 @@ SLURM = Path(
 V2_CONFIG = Path("configs/hybrid_judge_target_mapping_validation_v2.json")
 V2_SLURM = Path(
     "scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v2_120b.slurm"
+)
+V4_CONFIG = Path("configs/hybrid_judge_target_mapping_clean_names_v4.json")
+V4_SLURM = Path(
+    "scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v4_clean_names_120b.slurm"
 )
 V1_ADJUDICATION = Path(
     "configs/hybrid_judge_model_semantics_validation_v1_adjudication.json"
@@ -265,6 +273,90 @@ def test_v2_builder_rejects_process_that_already_contains_supplied_component(
         )
 
 
+def test_v4_builder_separates_total_and_dependent_process_names(
+    context: ValidationContext,
+) -> None:
+    source = AdversarialPair(
+        pair_id="source",
+        benchmark_id="phase_b_test",
+        tier="easy",
+        mutation_type="omitted_target_component",
+        valid_candidate=_candidate("k"),
+        adversarial_candidate=_candidate("k"),
+    )
+    pairs, certifications = build_clean_target_mapping_pairs(
+        (source,),
+        contexts={("phase_b_test", "easy"): context},
+    )
+
+    assert len(pairs) == 1
+    pair = pairs[0]
+    baseline_processes = {
+        item.name: item for item in pair.valid_candidate.processes
+    }
+    mutated_processes = {
+        item.name: item for item in pair.adversarial_candidate.processes
+    }
+    assert set(baseline_processes) == {"U", "Uid"}
+    assert baseline_processes["U"].expression == "Uii + Uid"
+    assert mutated_processes["U"].expression == "Uid"
+    assert baseline_processes["Uid"].expression == "k * X * Gp"
+    assert baseline_processes["Uid"].mechanisms == (
+        "insulin_dependent_disposal",
+    )
+    assert next(
+        item.expression
+        for item in pair.valid_candidate.observation_mappings
+        if item.channel == "U"
+    ) == "U"
+    assert next(
+        item.rhs
+        for item in pair.valid_candidate.state_equations
+        if item.state == "Gp"
+    ) == "meal_event_g + EGP - Uii - Uid"
+    assert certifications[pair.pair_id] == certify_clean_pair(
+        pair.valid_candidate,
+        pair.adversarial_candidate,
+        target_channel="U",
+        target_process="U",
+        dependent_process="Uid",
+        supplied_component="Uii",
+    )
+
+
+def test_v4_certification_rejects_a_second_pair_difference(
+    context: ValidationContext,
+) -> None:
+    source = AdversarialPair(
+        pair_id="source",
+        benchmark_id="phase_b_test",
+        tier="easy",
+        mutation_type="omitted_target_component",
+        valid_candidate=_candidate("k"),
+        adversarial_candidate=_candidate("k"),
+    )
+    pairs, _ = build_clean_target_mapping_pairs(
+        (source,),
+        contexts={("phase_b_test", "easy"): context},
+    )
+    pair = pairs[0]
+    payload = pair.adversarial_candidate.model_dump(mode="json")
+    next(
+        item for item in payload["state_equations"] if item["state"] == "Gp"
+    )["rhs"] = "meal_event_g + EGP - Uii"
+    changed = CandidateModel.model_validate(payload)
+
+    with pytest.raises(ValueError, match="outside the controlled total expression"):
+        certify_clean_pair(
+            pair.valid_candidate,
+            changed,
+            target_channel="U",
+            target_process="U",
+            dependent_process="Uid",
+            supplied_component="Uii",
+        )
+
+
 @pytest.mark.parametrize(
     ("mutation_type", "criterion"),
     (
@@ -432,3 +524,24 @@ def test_v2_config_launcher_and_v1_adjudication_are_explicit() -> None:
         "exclude_from_protocol_accuracy_and_paper_claims"
     )
     subprocess.run(["bash", "-n", str(V2_SLURM)], check=True)
+
+
+def test_v4_config_and_launcher_freeze_clean_name_experiment() -> None:
+    config = json.loads(V4_CONFIG.read_text(encoding="utf-8"))
+    launcher = V4_SLURM.read_text(encoding="utf-8")
+
+    assert config["status"] == (
+        "frozen_before_target_mapping_clean_names_calls"
+    )
+    construction = config["pair_construction"]
+    assert construction["total_process"] == "U"
+    assert construction["dependent_process"] == "Uid"
+    assert construction["valid_total_expression"] == "Uii + Uid"
+    assert construction["mutated_total_expression"] == "Uid"
+    assert config["protocol"]["scoring"][
+        "comparative_indeterminate_policy"
+    ] == "neutral_fixed_denominator"
+    assert "AF_PROJECT:=/projects/bibo/${af_user}" in launcher
+    assert "build_hybrid_judge_target_mapping_clean_names.py" in launcher
+    assert "AF_TARGET_MAPPING_SEMANTIC_CONTRACT:=true" in launcher
+    subprocess.run(["bash", "-n", str(V4_SLURM)], check=True)

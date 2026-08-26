@@ -1239,6 +1239,33 @@ overlay after the login session ends. Analyze the new root with the existing
 hybrid, symmetric-aggregation, and model-semantics validators using its copied
 `protocol_config.json`. Do not merge or overwrite v2 outputs.
 
+The v3 prompt clarification produced perfect target-mapping accuracy on all
+usable paired trials, but one seed failed the atomic unit-ID contract in both
+orientations and the run narrowly missed its reliability gates. Preserve v3 and
+run the clean-name v4 follow-up under a new root. The batch script is
+session-independent: it verifies or prepares the revised-prompt overlay, builds
+and certifies two `Uid`/`U` pairs, regenerates target-mapping labels, copies the
+frozen config, and then launches vLLM.
+
+```bash
+cd /projects/bibo/yxiao2/repos/autoformalism-v21
+mkdir -p logs
+
+git fetch origin main
+git switch main
+git pull --ff-only origin main
+
+sbatch \
+  scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v4_clean_names_120b.slurm
+```
+
+The valid candidate in each pair has an insulin-dependent process `Uid`, a total
+target process `U = Uii + Uid`, and mapping `U -> U`. Its mutation retains the
+same names and mapping but defines `U = Uid`. Pair certification fails if the
+source-pair hash or revised-prompt hash differs, if `Uid` already exists, if the
+insulin mechanism is lost, if `Uid` contains `Uii`, or if any field other than
+the total-process expression differs.
+
 ## Acceptance checklist
 
 For each system, do not start production until all are true:

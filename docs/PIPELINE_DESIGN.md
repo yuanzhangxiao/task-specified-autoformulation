@@ -575,7 +575,16 @@ determine whether `U` meant total or insulin-dependent disposal. A matched v3
 development rerun uses a hash-audited prompt overlay that defines the total while
 holding pair payloads and all judge settings fixed. The registered release and
 numeric tables remain unchanged. Target-mapping semantics remain disabled in
-search until the matched rerun passes every predeclared gate.
+search until a matched follow-up passes every predeclared gate. The v3 scientific
+answers were perfect after prompt clarification, but a same-seed atomic unit-ID
+contract failure in both orientations reduced paired coverage and the run
+narrowly missed stability gates. Protocol v4 removes the remaining
+representational overload without changing the scientific task: `Uid` denotes
+only the modeled insulin-dependent contribution, `U` denotes the observed total
+process, and the controlled pair differs only between `U = Uii + Uid` and
+`U = Uid`. The builder renames identifiers through a parsed AST, compiles both
+candidates, verifies that the insulin mechanism remains attached to `Uid`, and
+fails if anything outside the total-process expression differs.
 
 ## Failure and security behavior
 

@@ -299,6 +299,17 @@ The pipeline is iterative:
   seeds, retries, scoring, and aggregation. Its prompt overlay is hash-audited and
   leaves the registered release untouched. This rerun tests the clarified public
   semantics; it is not a new-structure confirmation.
+  The matched v3 prompt-only rerun resolved the scientific ambiguity: labeled,
+  pair-aggregate, and target-mapping absolute accuracy were all `1.000` on the
+  usable paired trials. It nevertheless failed the strict reliability gate
+  because one seed returned invented atomic-repeat identifiers in both
+  orientations, leaving response and paired coverage at `0.900`; repeat and
+  orientation diagnostics also narrowly missed their frozen bounds. The runtime
+  rejected those contract-invalid responses without reinterpreting them. A
+  frozen v4 representation-only follow-up therefore gives the insulin-dependent
+  component its own name `Uid` and reserves `U` for the observed total: the
+  valid model has `U = Uii + Uid` and the controlled omission has `U = Uid`.
+  The public prompt, judge, seeds, scoring, aggregation, and gates are unchanged.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

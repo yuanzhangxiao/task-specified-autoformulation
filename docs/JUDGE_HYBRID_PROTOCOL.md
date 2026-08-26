@@ -771,3 +771,24 @@ and the overlay records hashes for the source prompt, revised prompt, source pai
 and every unchanged release file. Labels are regenerated because public-requirement
 identifiers depend on prompt text. Search integration remains blocked unless every
 unchanged v2 gate passes.
+
+The v3 clarification fixed the scientific judgment on every usable paired trial:
+labeled accuracy, pair aggregation, and target-mapping absolute accuracy were all
+`1.000`. The run still failed the predeclared all-gates rule. One sampling seed
+returned the wrong atomic unit namespace in both orientations—eight invented
+repeat-comparison identifiers instead of the eight requested signed-occurrence
+identifiers—so response success and paired coverage were `0.900`. The validator
+failed closed; it did not infer an occurrence mapping from the response prose.
+Mean repeat SD (`0.057`), mean orientation half-gap (`0.113`), and comparative
+disagreement (`0.333`) also narrowly exceeded their frozen limits.
+
+The frozen v4 follow-up changes representation, not the public scientific
+contract. The former process `U`, which carries the insulin-dependent mechanism,
+is renamed safely to `Uid` throughout the candidate AST. A new process `U` is the
+same-named observed total in both candidates. The complete candidate defines
+`U = Uii + Uid`; the controlled omission defines `U = Uid`; both map observed
+channel `U` to process `U`. Certification requires a unique insulin-claimed
+`Uid`, excludes `Uii` from `Uid`, compiles both candidates, and proves that only
+the total-process expression differs. The revised v3 prompt, 120B judge, five
+seeds, both orientations, fixed-denominator scoring, question consensus, and all
+validation thresholds remain frozen.
