@@ -34,7 +34,8 @@ benchmark_index=$((within_provider / 3))
 repetition=$((within_provider % 3))
 
 providers=(openai gemini)
-models=(gpt-5.6-sol gemini-3.1-pro-preview)
+gemini_model="${AF_GEMINI_MODEL:-gemini-3.1-pro-preview}"
+models=(gpt-5.6-sol "$gemini_model")
 benchmarks=(
   phase_b_dalla_man_t2_canonical_named_easy
   phase_b_anonymous_system_task_canonical_opaque_hard
