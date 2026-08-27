@@ -653,3 +653,11 @@ derivative labels. It uses upstream D3's PyTorch Adam defaults and
 teacher-forced Euler objective. Validation selects frozen parameters and test is
 opened exactly once; no Autoformalism refit is applied. Expressions use the
 restricted AST-to-PyTorch compiler rather than executing generated Python.
+
+The raw-data frontier-agent baseline is a separate, deliberately strong
+boundary. A hosted model receives the finalized public prompt plus public train
+and validation tables and may use its provider-hosted Python tool. It returns
+one typed structure, which is compiled and refit by the shared deterministic
+runtime without pruning or judge feedback. Calls are bounded, cached, logged,
+and checkpointed; test data and private equations are never attached. See
+`docs/RAW_DATA_AGENT_BASELINE.md` for the frozen two-cell pilot protocol.

@@ -398,3 +398,11 @@ stop other scheduled runs. D3-native-no-tools uses the native Adam and
 teacher-forced Euler fitting protocol over all eligible observed states, with
 external tools disabled and safe restricted expressions in place of arbitrary
 generated Python. Its numerical fitting configuration must be reported.
+
+A complementary raw-data frontier-agent baseline gives current hosted models
+the same public prompt, train split, and validation split, together with hosted
+code execution. It returns one strict candidate that is refit through the shared
+runtime. This baseline has no Autoformalism search, pruning, scientific judge,
+test access, private model information, or web access. Provider calls and
+development evaluation are independently checkpointed so a scheduler timeout
+does not repeat a completed paid call.

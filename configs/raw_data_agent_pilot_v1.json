@@ -1,0 +1,40 @@
+{
+  "schema_version": "raw-data-agent-pilot-1",
+  "benchmarks": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard"
+    }
+  ],
+  "models": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-sol"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3.1-pro-preview"
+    }
+  ],
+  "repetitions": 3,
+  "agent_budget": {
+    "reasoning_effort": "high",
+    "max_tool_calls": 12,
+    "max_output_tokens": 30000,
+    "timeout_seconds": 1200,
+    "max_attempts": 2
+  },
+  "fit_budget": {
+    "number_of_starts": 1,
+    "maximum_function_evaluations": 50,
+    "maximum_wall_time_seconds": 300,
+    "integration_backend": "solve_ivp",
+    "allow_derivative_regression": false
+  },
+  "development_only": true,
+  "pruning_applied": false
+}
