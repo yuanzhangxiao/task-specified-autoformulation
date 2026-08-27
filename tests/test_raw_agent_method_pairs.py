@@ -162,4 +162,6 @@ def test_method_summary_normalizes_both_candidate_orientations() -> None:
     )
 
     assert result["preference_counts"] == {"autoformalism": 1}
+    assert result["response_success_rate"] == 1.0
+    assert result["paired_response_coverage"] == 1.0
     assert result["outcomes"][0]["preferred"] == "autoformalism"

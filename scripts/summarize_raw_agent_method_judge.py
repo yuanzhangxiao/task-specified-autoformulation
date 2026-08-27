@@ -133,13 +133,21 @@ def summarize(
                 ],
             }
         )
+    complete = sum(item["status"] == "complete" for item in outcomes)
+    expected_responses = 2 * len(pairs)
     return {
         "schema_version": "raw-data-agent-method-judge-summary-1",
         "pair_truth": "unlabeled",
         "accuracy_claimed": False,
         "pair_count": len(pairs),
-        "complete_comparison_count": sum(
-            item["status"] == "complete" for item in outcomes
+        "expected_response_count": expected_responses,
+        "successful_response_count": len(rows),
+        "response_success_rate": (
+            len(rows) / expected_responses if expected_responses else None
+        ),
+        "complete_comparison_count": complete,
+        "paired_response_coverage": (
+            complete / len(pairs) if pairs else None
         ),
         "preference_counts": dict(sorted(preference_counts.items())),
         "outcomes": outcomes,
