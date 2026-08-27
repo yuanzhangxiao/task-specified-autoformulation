@@ -1266,6 +1266,53 @@ source-pair hash or revised-prompt hash differs, if `Uid` already exists, if the
 insulin mechanism is lost, if `Uid` contains `Uii`, or if any field other than
 the total-process expression differs.
 
+V4 failed because some calls stopped at `U -> U` without expanding process `U`,
+and because the soft balance group allowed comparative preferences to override a
+correctly detected target omission. After updating to the protocol-6 commit,
+first rescore the frozen v4 calls with hard target enforcement only. This makes
+no LLM requests and does not overwrite the original v4 reports:
+
+```bash
+repo=/projects/bibo/yxiao2/repos/autoformalism-v21
+python_bin=/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python
+control=/work/hdd/bibo/yxiao2/phase_b/judge-hybrid-target-mapping-v4-clean-names
+root="$control/gpt-oss-120b"
+v5_config="$repo/configs/hybrid_judge_target_mapping_recursive_hard_v5.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_symmetric_aggregation.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$control/hybrid_labels.jsonl" \
+  --protocol-config "$v5_config" \
+  --output "$root/hard_target_contract_rescore.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_model_semantics_validation.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$control/hybrid_labels.jsonl" \
+  --symmetric-analysis "$root/hard_target_contract_rescore.json" \
+  --protocol-config "$v5_config" \
+  --output "$root/hard_target_contract_rescore_validation.json"
+
+cat "$root/hard_target_contract_rescore.md"
+cat "$root/hard_target_contract_rescore_validation.md"
+```
+
+Then submit the matched recursive-prompt experiment. Its launcher copies and
+byte-compares the v4 pair and label files before starting vLLM, and all paths and
+protocol flags survive logout:
+
+```bash
+cd /projects/bibo/yxiao2/repos/autoformalism-v21
+mkdir -p logs
+sbatch \
+  scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v5_recursive_hard_120b.slurm
+```
+
+Do not reinterpret the offline ablation as prompt accuracy: it changes only the
+deterministic enforcement of stored v4 answers. V5 is the matched test of the
+recursive instruction plus the frozen hard contract.
+
 ## Acceptance checklist
 
 For each system, do not start production until all are true:

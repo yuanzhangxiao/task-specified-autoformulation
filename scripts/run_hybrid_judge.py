@@ -46,6 +46,8 @@ from autoformalism.judging.prompts import (
     HYBRID_JUDGE_PROTOCOL_VERSION,
     MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT,
     MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION,
+    RECURSIVE_HARD_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION,
+    RECURSIVE_TARGET_MAPPING_HYBRID_JUDGE_PROMPT,
     TARGET_MAPPING_HYBRID_JUDGE_PROMPT,
     TARGET_MAPPING_HYBRID_JUDGE_PROTOCOL_VERSION,
 )
@@ -237,6 +239,7 @@ def _system_prompt(
     atomic_mode: bool = False,
     model_semantic_contract: bool = False,
     target_mapping_semantic_contract: bool = False,
+    recursive_target_mapping_semantics: bool = False,
 ) -> str:
     transport_override = ""
     if response_mode is OllamaResponseMode.TOOL_CALL:
@@ -246,7 +249,9 @@ def _system_prompt(
             "not place it in ordinary final message content."
         )
     judge_prompt = HYBRID_JUDGE_PROMPT
-    if model_semantic_contract:
+    if recursive_target_mapping_semantics:
+        judge_prompt = RECURSIVE_TARGET_MAPPING_HYBRID_JUDGE_PROMPT
+    elif model_semantic_contract:
         judge_prompt = MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT
     elif target_mapping_semantic_contract:
         judge_prompt = TARGET_MAPPING_HYBRID_JUDGE_PROMPT
@@ -461,6 +466,20 @@ def main() -> None:
             "requires atomic signed-occurrence mode"
         ),
     )
+    parser.add_argument(
+        "--recursive-target-mapping-semantics",
+        action="store_true",
+        help=(
+            "require recursive expansion of mapped components; versioned "
+            "protocol-6 calibration only"
+        ),
+    )
+    parser.add_argument(
+        "--target-mapping-enforcement",
+        choices=("soft", "hard"),
+        default="soft",
+        help="whether determinate target completeness is advisory or mandatory",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
@@ -496,6 +515,24 @@ def main() -> None:
         )
     if args.model_semantic_contract and args.target_mapping_semantic_contract:
         raise SystemExit("semantic contract flags are mutually exclusive")
+    if (
+        args.recursive_target_mapping_semantics
+        and not args.target_mapping_semantic_contract
+    ):
+        raise SystemExit(
+            "--recursive-target-mapping-semantics requires "
+            "--target-mapping-semantic-contract"
+        )
+    if (
+        args.target_mapping_enforcement == "hard"
+        and not (
+            args.model_semantic_contract
+            or args.target_mapping_semantic_contract
+        )
+    ):
+        raise SystemExit(
+            "hard target-mapping enforcement requires a semantic contract"
+        )
     scoring = HybridScoringConfig(
         partial_tiebreak_weight=args.partial_tiebreak_weight,
         comparative_weight=args.comparative_weight,
@@ -507,6 +544,7 @@ def main() -> None:
         include_target_mapping_semantics=(
             args.target_mapping_semantic_contract
         ),
+        target_mapping_enforcement=args.target_mapping_enforcement,
     )
     pair_bytes = args.pairs.read_bytes()
     source_pairs = tuple(
@@ -522,7 +560,9 @@ def main() -> None:
         strategy=args.shard_strategy,
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
-    if args.model_semantic_contract:
+    if args.recursive_target_mapping_semantics:
+        protocol_version = RECURSIVE_HARD_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION
+    elif args.model_semantic_contract:
         protocol_version = MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION
     elif args.target_mapping_semantic_contract:
         protocol_version = TARGET_MAPPING_HYBRID_JUDGE_PROTOCOL_VERSION
@@ -566,6 +606,12 @@ def main() -> None:
             args.target_mapping_semantic_contract
         ),
     }
+    if args.recursive_target_mapping_semantics:
+        manifest["recursive_target_mapping_semantics"] = True
+    if args.target_mapping_enforcement != "soft":
+        manifest["target_mapping_enforcement"] = (
+            args.target_mapping_enforcement
+        )
     if args.atomic_signed_occurrences:
         manifest.update(
             {
@@ -710,6 +756,9 @@ def main() -> None:
                 model_semantic_contract=args.model_semantic_contract,
                 target_mapping_semantic_contract=(
                     args.target_mapping_semantic_contract
+                ),
+                recursive_target_mapping_semantics=(
+                    args.recursive_target_mapping_semantics
                 ),
             )
             atomic_system_prompt = _atomic_system_prompt(

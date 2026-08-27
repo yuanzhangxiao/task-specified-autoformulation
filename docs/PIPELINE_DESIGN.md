@@ -586,6 +586,20 @@ process, and the controlled pair differs only between `U = Uii + Uid` and
 candidates, verifies that the insulin mechanism remains attached to `Uid`, and
 fails if anything outside the total-process expression differs.
 
+The clean-name v4 run showed that naming alone does not make the measurement
+contract reliable. The LLM sometimes accepted a same-named identity mapping
+without resolving the mapped process, and the deterministic scorer could let
+comparative parsimony override an LLM-detected target omission because target
+semantics belonged to the soft balance group. Protocol 6 is explicitly
+versioned. Its prompt requires recursive resolution of every mapped state and
+process before target completeness is judged. Its scorer moves the target unit
+to a separate hard `target_contract` group only when
+`target_mapping_enforcement="hard"`. A determinate pass/fail asymmetry triggers
+the existing hard override; pass/pass, fail/fail, or any indeterminate side uses
+ordinary scoring. This is a feasibility constraint over the public output
+contract, not another tunable objective weight. Defaults remain soft so all
+earlier frozen reports reproduce exactly.
+
 ## Failure and security behavior
 
 - Missing `AUTOFORMALISM_DATA_ROOT`, contradictory metadata, unsafe

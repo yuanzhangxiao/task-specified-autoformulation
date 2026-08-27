@@ -899,6 +899,7 @@ class GroupKind(str, Enum):
     BALANCE_SEMANTICS = "balance_semantics"
     LATENT_VALIDITY = "latent_validity"
     DYNAMIC_CLAIMS = "dynamic_claims"
+    TARGET_CONTRACT = "target_contract"
 
 
 @dataclass(frozen=True)
@@ -930,6 +931,7 @@ class HybridScoringConfig:
     include_model_semantics: bool = False
     include_target_mapping_semantics: bool = False
     include_initialization_semantics: bool = False
+    target_mapping_enforcement: Literal["soft", "hard"] = "soft"
 
     def __post_init__(self) -> None:
         values = (
@@ -952,6 +954,18 @@ class HybridScoringConfig:
             "neutral_fixed_denominator",
         }:
             raise ValueError("unsupported comparative indeterminate policy")
+        if self.target_mapping_enforcement not in {"soft", "hard"}:
+            raise ValueError("unsupported target-mapping enforcement")
+        if (
+            self.target_mapping_enforcement == "hard"
+            and not (
+                self.include_model_semantics
+                or self.include_target_mapping_semantics
+            )
+        ):
+            raise ValueError(
+                "hard target-mapping enforcement requires semantic assessment"
+            )
 
 
 def build_group_registry(
@@ -989,7 +1003,10 @@ def build_group_registry(
         (AbsoluteCriterion.CLAIMED_DELAYS_MEANINGFUL, _CANDIDATE_SUBJECT),
         (AbsoluteCriterion.CLAIMED_SATURATIONS_APPROPRIATE, _CANDIDATE_SUBJECT),
     ]
-    if config.include_model_semantics or config.include_target_mapping_semantics:
+    include_target_mapping = (
+        config.include_model_semantics or config.include_target_mapping_semantics
+    )
+    if include_target_mapping and config.target_mapping_enforcement == "soft":
         balance_keys.append(
             (
                 AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
@@ -1060,6 +1077,21 @@ def build_group_registry(
             ),
         )
     )
+    if include_target_mapping and config.target_mapping_enforcement == "hard":
+        groups.append(
+            GroupDefinition(
+                "target_contract",
+                GroupKind.TARGET_CONTRACT,
+                1.0,
+                (
+                    (
+                        AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
+                        _CANDIDATE_SUBJECT,
+                    ),
+                ),
+                enforcement=RequirementEnforcement.HARD,
+            )
+        )
     return tuple(groups)
 
 

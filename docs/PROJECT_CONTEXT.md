@@ -310,6 +310,16 @@ The pipeline is iterative:
   component its own name `Uid` and reserves `U` for the observed total: the
   valid model has `U = Uii + Uid` and the controlled omission has `U = Uid`.
   The public prompt, judge, seeds, scoring, aggregation, and gates are unchanged.
+  V4 failed: target-mapping absolute accuracy was `0.778`, paired-question-
+  consensus accuracy was `0.667`, modal consistency was `0.675`, and paired
+  coverage was `0.900`. Stored rationales showed two distinct causes. Some calls
+  stopped at the superficial identity mapping `U -> U` instead of expanding the
+  declared process `U`; other calls correctly marked the omitted component but
+  still preferred the incomplete candidate through soft comparative scoring.
+  Protocol 6 therefore adds a general recursive-mapping instruction and an
+  opt-in hard `target_contract` group. A determinate pass-versus-fail target
+  contract overrides comparative preferences; indeterminate or equal verdicts
+  do not. Legacy protocols retain soft enforcement and remain reproducible.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

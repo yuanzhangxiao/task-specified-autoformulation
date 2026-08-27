@@ -107,6 +107,21 @@ TARGET_MAPPING_HYBRID_JUDGE_PROMPT = HYBRID_JUDGE_PROMPT.replace(
     + "Also answer three irreducibly comparative questions.",
 )
 
+_RECURSIVE_TARGET_MAPPING_CRITERION = _TARGET_MAPPING_CRITERION + (
+    "Before deciding this criterion, recursively resolve every symbol in each "
+    "observation mapping through its declared state or process definition. A "
+    "same-named identity mapping does not by itself establish completeness. "
+    "Compare the resolved expression with the public target definition, and "
+    "cite both the mapping and the definitions that determine your verdict.\n"
+)
+RECURSIVE_TARGET_MAPPING_HYBRID_JUDGE_PROMPT = HYBRID_JUDGE_PROMPT.replace(
+    "Also answer three irreducibly comparative questions.",
+    _RECURSIVE_TARGET_MAPPING_CRITERION
+    + "The supplied model-semantic structural facts are authoritative about "
+    "observation-expression bindings and component definitions.\n\n"
+    + "Also answer three irreducibly comparative questions.",
+)
+
 ATOMIC_EVIDENCE_PROMPT = """You infer atomic scientific expectations before a
 blinded pairwise model comparison. For every supplied signed-occurrence unit, the
 runtime has deliberately removed only its outer top-level plus or minus sign. Do
@@ -151,5 +166,8 @@ MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION = (
 )
 TARGET_MAPPING_HYBRID_JUDGE_PROTOCOL_VERSION = (
     "hybrid-judge-protocol-5-target-mapping-certified"
+)
+RECURSIVE_HARD_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION = (
+    "hybrid-judge-protocol-6-recursive-hard-target-contract"
 )
 ATOMIC_CONTRACT_REPAIR_VERSION = "atomic-redundant-role-unit-repair-1"

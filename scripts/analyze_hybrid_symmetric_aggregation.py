@@ -638,6 +638,9 @@ def main() -> None:
         include_initialization_semantics=scoring.get(
             "include_initialization_semantics", False
         ),
+        target_mapping_enforcement=scoring.get(
+            "target_mapping_enforcement", "soft"
+        ),
     )
     result = analyze(rows, failures, labels, config=config)
     args.output.parent.mkdir(parents=True, exist_ok=True)

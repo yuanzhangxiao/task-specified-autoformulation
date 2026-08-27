@@ -26,6 +26,8 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_COMPARATIVE_INDETERMINATE_POLICY:=exclude}"
 : "${AF_MODEL_SEMANTIC_CONTRACT:=false}"
 : "${AF_TARGET_MAPPING_SEMANTIC_CONTRACT:=false}"
+: "${AF_RECURSIVE_TARGET_MAPPING_SEMANTICS:=false}"
+: "${AF_TARGET_MAPPING_ENFORCEMENT:=soft}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 : "${AF_PAIR_IDS=heldout_55d8026028a90be5 heldout_ee453d8cc6fcb7a2 heldout_70b3222d4736ea1d heldout_cca8883e6ae1b33f}"
 
@@ -55,6 +57,7 @@ readonly node_local_tmp_root="${SLURM_TMPDIR:-/tmp/${af_user}}"
 readonly apptainer_tmp="${node_local_tmp_root}/apptainer-${SLURM_JOB_ID}"
 pair_id_args=()
 semantic_contract_args=()
+target_contract_args=()
 if [[ -n "${AF_PAIR_IDS}" ]]; then
   read -r -a pair_ids <<<"${AF_PAIR_IDS}"
   pair_id_args=(--pair-ids "${pair_ids[@]}")
@@ -74,6 +77,27 @@ elif [[ "${AF_TARGET_MAPPING_SEMANTIC_CONTRACT}" != false ]]; then
   echo "AF_TARGET_MAPPING_SEMANTIC_CONTRACT must be true or false" >&2
   exit 2
 fi
+case "${AF_RECURSIVE_TARGET_MAPPING_SEMANTICS}" in
+  true)
+    target_contract_args+=(--recursive-target-mapping-semantics)
+    ;;
+  false) ;;
+  *)
+    echo "AF_RECURSIVE_TARGET_MAPPING_SEMANTICS must be true or false" >&2
+    exit 2
+    ;;
+esac
+case "${AF_TARGET_MAPPING_ENFORCEMENT}" in
+  soft|hard)
+    target_contract_args+=(
+      --target-mapping-enforcement "${AF_TARGET_MAPPING_ENFORCEMENT}"
+    )
+    ;;
+  *)
+    echo "AF_TARGET_MAPPING_ENFORCEMENT must be soft or hard" >&2
+    exit 2
+    ;;
+esac
 
 server_pid=""
 cleanup() {
@@ -190,6 +214,7 @@ flock --exclusive "${shard_root}/hybrid_judge.lock" \
     "${AF_COMPARATIVE_INDETERMINATE_POLICY}" \
   --atomic-signed-occurrences \
   "${semantic_contract_args[@]}" \
+  "${target_contract_args[@]}" \
   --shard-index "${shard_index}" \
   --shard-count "${AF_SHARD_COUNT}" \
   --shard-strategy contiguous

@@ -21,6 +21,10 @@ from autoformalism.judging import (
     semantic_absolute_units,
     structural_facts,
 )
+from autoformalism.judging.prompts import (
+    RECURSIVE_TARGET_MAPPING_HYBRID_JUDGE_PROMPT,
+    TARGET_MAPPING_HYBRID_JUDGE_PROMPT,
+)
 from autoformalism.llm import MockLLMClient, OllamaResponseMode
 from autoformalism.rebuttal.adversarial import AdversarialPair
 from autoformalism.rebuttal.hybrid_labels import (
@@ -363,11 +367,22 @@ def test_model_semantic_prompt_extension_does_not_change_frozen_prompt() -> None
         atomic_mode=True,
         model_semantic_contract=True,
     )
+    target_v5 = _system_prompt(
+        _prompt(),
+        context,
+        "vllm:openai/gpt-oss-120b",
+        OllamaResponseMode.JSON_SCHEMA,
+        atomic_mode=True,
+        target_mapping_semantic_contract=True,
+        recursive_target_mapping_semantics=True,
+    )
 
     assert "target_mapping_semantically_consistent" not in ordinary
     assert "initialization_semantically_consistent" not in ordinary
     assert "target_mapping_semantically_consistent" in versioned
     assert "initialization_semantically_consistent" in versioned
+    assert "same-named identity mapping" not in versioned
+    assert "same-named identity mapping" in target_v5
 
 
 def test_deterministic_pair_assessments_keep_retained_disconnection() -> None:
@@ -454,6 +469,101 @@ def test_model_semantic_units_are_versioned_and_opt_in() -> None:
     assert initialization not in {
         key for group in target_only_groups for key in group.keys
     }
+
+
+def test_recursive_target_prompt_requires_expansion_beyond_identity_mapping() -> None:
+    instruction = (
+        "A same-named identity mapping does not by itself establish completeness."
+    )
+
+    assert instruction not in TARGET_MAPPING_HYBRID_JUDGE_PROMPT
+    assert instruction in RECURSIVE_TARGET_MAPPING_HYBRID_JUDGE_PROMPT
+    assert "recursively resolve every symbol" in (
+        RECURSIVE_TARGET_MAPPING_HYBRID_JUDGE_PROMPT
+    )
+
+
+def test_target_contract_can_be_hard_without_changing_legacy_default() -> None:
+    registry = extract_public_requirements(_prompt())
+    target = (
+        AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT,
+        "candidate",
+    )
+    soft_groups = build_group_registry(
+        registry,
+        HybridScoringConfig(include_target_mapping_semantics=True),
+    )
+    hard_groups = build_group_registry(
+        registry,
+        HybridScoringConfig(
+            include_target_mapping_semantics=True,
+            target_mapping_enforcement="hard",
+        ),
+    )
+
+    assert target in next(
+        group.keys for group in soft_groups if group.kind.value == "balance_semantics"
+    )
+    assert target not in next(
+        group.keys for group in hard_groups if group.kind.value == "balance_semantics"
+    )
+    target_group = next(
+        group for group in hard_groups if group.kind.value == "target_contract"
+    )
+    assert target_group.keys == (target,)
+    assert target_group.enforcement.value == "hard"
+
+
+def test_hard_target_contract_overrides_comparative_simplicity() -> None:
+    registry = extract_public_requirements(_prompt())
+    payload = _hybrid_payload(
+        requirement_a="pass",
+        requirement_b="pass",
+        candidate_a="pass",
+        candidate_b="pass",
+        relative="candidate_b",
+    )
+    payload["absolute_assessments"].append(  # type: ignore[union-attr]
+        {
+            "criterion": "target_mapping_semantically_consistent",
+            "subject_id": "candidate",
+            "candidate_a": {
+                "verdict": "pass",
+                "evidence": "The complete target is generated.",
+            },
+            "candidate_b": {
+                "verdict": "fail",
+                "evidence": "A public target component is omitted.",
+            },
+        }
+    )
+    result = HybridJudgeResult.model_validate(payload)
+    deterministic = deterministic_pair_assessments(
+        _candidate(),
+        _candidate(),
+        task_inputs=("meal_event_g", "insulin_input"),
+    )
+
+    score = score_hybrid_pair(
+        result,
+        deterministic,
+        registry,
+        HybridScoringConfig(
+            include_target_mapping_semantics=True,
+            target_mapping_enforcement="hard",
+            comparative_weight=1.0,
+        ),
+    )
+
+    assert score.candidate_a.hard_requirement_status is True
+    assert score.candidate_b.hard_requirement_status is False
+    assert score.decision_value == 1.0
+    assert score.preferred == "candidate_a"
+
+
+def test_hard_target_contract_requires_semantic_question() -> None:
+    with pytest.raises(ValueError, match="requires semantic assessment"):
+        HybridScoringConfig(target_mapping_enforcement="hard")
 
 
 def test_hybrid_schema_discards_only_complete_whitelisted_extra_units() -> None:

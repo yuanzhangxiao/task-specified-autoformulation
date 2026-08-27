@@ -792,3 +792,29 @@ channel `U` to process `U`. Certification requires a unique insulin-claimed
 the total-process expression differs. The revised v3 prompt, 120B judge, five
 seeds, both orientations, fixed-denominator scoring, question consensus, and all
 validation thresholds remain frozen.
+
+V4 failed its scientific and stability gates despite using the cleaner names.
+Response success was `0.950`, but paired coverage was `0.900`, target-mapping
+absolute accuracy was `0.778`, paired-question-consensus accuracy was `0.667`,
+and modal consistency was `0.675`. The stored evidence exposed two independent
+failure modes. Four successful calls treated `U -> U` as sufficient and did not
+resolve the process definition. In several other calls, the absolute unit
+correctly said that `U = Uid` omitted `Uii`, yet direct comparative questions
+still caused a tie or preference for the incomplete model.
+
+`hybrid-judge-protocol-6-recursive-hard-target-contract` repairs both interfaces
+without encoding a benchmark-specific decomposition. The judge receives one
+general instruction: recursively resolve mapped states and processes, never
+treat identity naming as proof of completeness, compare the resolved expression
+with the public target definition, and cite the mapping plus the determining
+definitions. The runtime adds a separate `target_contract` group with hard
+enforcement. If question consensus yields pass for exactly one candidate and fail
+for the other, the passing candidate wins before comparative residuals. Equal or
+indeterminate target verdicts produce no hard override. The old target prompt and
+soft balance-group placement remain the default for reproducibility.
+
+Before new calls, the frozen v4 rows are rescored offline with hard enforcement
+only. That measures aggregation independently of the recursive instruction. The
+matched v5 call experiment then reuses the exact v4 pair and label bytes, public
+prompt, model, seeds, weights, thresholds, and question consensus; only the
+recursive instruction and versioned hard target contract change.

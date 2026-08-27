@@ -57,6 +57,10 @@ V4_CONFIG = Path("configs/hybrid_judge_target_mapping_clean_names_v4.json")
 V4_SLURM = Path(
     "scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v4_clean_names_120b.slurm"
 )
+V5_CONFIG = Path("configs/hybrid_judge_target_mapping_recursive_hard_v5.json")
+V5_SLURM = Path(
+    "scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v5_recursive_hard_120b.slurm"
+)
 V1_ADJUDICATION = Path(
     "configs/hybrid_judge_model_semantics_validation_v1_adjudication.json"
 )
@@ -545,3 +549,22 @@ def test_v4_config_and_launcher_freeze_clean_name_experiment() -> None:
     assert "build_hybrid_judge_target_mapping_clean_names.py" in launcher
     assert "AF_TARGET_MAPPING_SEMANTIC_CONTRACT:=true" in launcher
     subprocess.run(["bash", "-n", str(V4_SLURM)], check=True)
+
+
+def test_v5_config_and_launcher_freeze_recursive_hard_target_contract() -> None:
+    config = json.loads(V5_CONFIG.read_text(encoding="utf-8"))
+    launcher = V5_SLURM.read_text(encoding="utf-8")
+
+    assert config["status"] == "frozen_before_recursive_hard_target_calls"
+    assert config["matched_control"]["pair_bytes_must_match_source"] is True
+    protocol = config["protocol"]
+    assert protocol["recursive_target_mapping_semantics"] is True
+    assert protocol["target_mapping_enforcement"] == "hard"
+    assert protocol["hard_override_policy"]["indeterminate_in_either_candidate"] == (
+        "no_target_contract_override"
+    )
+    assert protocol["scoring"]["target_mapping_enforcement"] == "hard"
+    assert "AF_RECURSIVE_TARGET_MAPPING_SEMANTICS:=true" in launcher
+    assert "AF_TARGET_MAPPING_ENFORCEMENT:=hard" in launcher
+    assert "cmp --silent" in launcher
+    subprocess.run(["bash", "-n", str(V5_SLURM)], check=True)
