@@ -120,4 +120,5 @@ def test_scientific_audit_reports_runtime_compliance_without_fitting() -> None:
 
     assert result["parameter_fitting_used"] is False
     assert result["response_success_rate"] == 1.0
+    assert result["neutral_atomic_unit_repair_count"] == 0
     assert result["task_compliance_counts"] == {"fail": 1}

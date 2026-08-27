@@ -412,10 +412,7 @@ class OpenAIRawDataAgent:
             raw_response=raw,
             response_id=_optional_text(getattr(response, "id", None)),
             usage=_openai_usage(response),
-            tool_call_count=sum(
-                getattr(item, "type", None) == "code_interpreter_call"
-                for item in (getattr(response, "output", None) or [])
-            ),
+            tool_call_count=_openai_processed_tool_call_count(response),
             fitted_parameter_values=fitted_values,
             fit_method_summary=fit_summary,
         )
@@ -1103,6 +1100,16 @@ def _gemini_usage(response: Any) -> RawAgentUsage | None:
         input_tokens=getattr(usage, "prompt_token_count", None),
         output_tokens=getattr(usage, "candidates_token_count", None),
         total_tokens=getattr(usage, "total_token_count", None),
+    )
+
+
+def _openai_processed_tool_call_count(response: Any) -> int:
+    """Count processed calls while excluding nonterminal response records."""
+    nonterminal = {"in_progress", "interpreting"}
+    return sum(
+        getattr(item, "type", None) == "code_interpreter_call"
+        and getattr(item, "status", None) not in nonterminal
+        for item in (getattr(response, "output", None) or [])
     )
 
 

@@ -72,6 +72,35 @@ scientifically meaningful seeds and hosted providers may not guarantee exact
 seed reproducibility. The pilot is a development comparison, not a final test
 evaluation.
 
+## Full Phase-B primary baseline
+
+The full development experiment applies the unchanged GPT-5.6 Sol fitted-model
+contract to all 40 registered Phase-B cells with three independent repetitions,
+for 120 expected models. It covers every Dalla Man task, canonical and perturbed
+dynamics, named and obfuscated variants, both difficulty tiers, both CSTR
+semantic variants and tiers, and both alien-device semantic variants and tiers.
+The six exact pilot runs are reused only if the content-addressed request hash
+matches the full request; otherwise execution fails closed rather than mixing
+protocols.
+
+Complete evaluation means more than NMSE, but it does not collapse unlike
+evidence into one opaque score. Each run reports:
+
+- hosted-agent completion and contract-repair provenance;
+- exact-value train and validation rollout NMSE;
+- failed trajectories and soft-constraint violations;
+- deterministic validity and hard public-requirement compliance;
+- every structure-only absolute scientific verdict from the validated 120B
+  paired-question-consensus judge; and
+- response, orientation, and neutral missing-unit-repair coverage.
+
+The scientific judge does not see parameter values, trajectories, or NMSE, so
+its result remains an evaluation of submitted model semantics rather than a
+second fit assessor. Natural-candidate verdicts are descriptive and do not have
+gold-label accuracy. The combined report separately identifies candidates with
+known scientific failures and candidates for which all applicable questions
+passed. Test data remain unopened in this development matrix.
+
 ## Outputs
 
 Each run directory contains `run_config.json`, `agent_result.json`,
@@ -80,6 +109,14 @@ and an append-only event log. Fitted-model artifacts additionally record the
 agent-provided parameter values, fit-method summary, and
 `parameter_refit_applied: false`. `scripts/summarize_raw_data_agent_pilot.py`
 creates a compact `summary.csv` after the array completes.
+
+For the full matrix, `scripts/summarize_raw_data_agent_full_evaluation.py`
+joins numerical artifacts, the authoritative offline tool-budget audit, and the
+scientific self-audit. It writes a run-level CSV plus JSON and Markdown
+aggregates. The run-level `tool_call_count` in the earliest six artifacts counts
+one retained nonterminal `interpreting` record; the offline audit is
+authoritative for processed-call limits. New calls exclude `interpreting` and
+`in_progress` records at ingestion.
 
 ## Common refit and scientific comparison
 

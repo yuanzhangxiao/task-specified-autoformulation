@@ -666,6 +666,20 @@ plus Autoformalism refit remains a labeled ablation, not the primary frontier-
 agent baseline. See `docs/RAW_DATA_AGENT_BASELINE.md` for the frozen two-cell
 pilot protocol.
 
+The full primary-baseline matrix contains the 40 registered Phase-B cells and
+three repetitions per cell. It retains the pilot's model, prompt/data boundary,
+fitted response schema, 12-call tool budget, and direct `solve_ivp` evaluator.
+The agent stage is a 120-task resumable CPU array; matching pilot artifacts are
+restored only after request-hash verification. A separate four-shard 120B job
+duplicates each returned candidate into a blinded identity self-pair and
+requires both candidate orientations. Missing atomic units may be filled with
+explicit `insufficient_information` only after ten structured-response attempts;
+the repair count remains in provenance and never creates a scientific pass.
+The combined report retains response/rollout completion, train and validation
+NMSE, failed trajectories, soft-constraint violations, hard public-task
+compliance, and every absolute scientific verdict. Test evaluation remains a
+later frozen stage.
+
 Cross-method reporting separates four layers. First, the full agent-system
 outcome retains generation failures, contract repairs, fitted values, and exact-
 value simulation. Second, a fit-free identity self-audit reports deterministic

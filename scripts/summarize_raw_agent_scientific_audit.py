@@ -155,6 +155,11 @@ def summarize(
         )
     complete = sum(item["status"] == "complete" for item in outcomes)
     expected = 2 * len(pairs)
+    atomic_repairs = sum(
+        int(row.get("atomic_missing_occurrence_repairs") or 0)
+        + int(row.get("atomic_missing_repeat_repairs") or 0)
+        for row in rows
+    )
     return {
         "schema_version": "raw-agent-scientific-audit-summary-1",
         "parameter_fitting_used": False,
@@ -165,6 +170,15 @@ def summarize(
         "expected_response_count": expected,
         "response_success_rate": len(rows) / expected if expected else None,
         "paired_response_coverage": complete / len(pairs) if pairs else None,
+        "responses_with_neutral_atomic_unit_repairs": sum(
+            (
+                int(row.get("atomic_missing_occurrence_repairs") or 0)
+                + int(row.get("atomic_missing_repeat_repairs") or 0)
+            )
+            > 0
+            for row in rows
+        ),
+        "neutral_atomic_unit_repair_count": atomic_repairs,
         "task_compliance_counts": dict(sorted(status_counts.items())),
         "outcomes": outcomes,
     }

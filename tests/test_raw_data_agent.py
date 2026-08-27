@@ -232,6 +232,16 @@ class _OpenAIResponses:
         )
 
 
+class _OpenAIResponsesWithNonterminalToolRecord(_OpenAIResponses):
+    def parse(self, **kwargs: Any) -> SimpleNamespace:
+        response = super().parse(**kwargs)
+        response.output = [
+            SimpleNamespace(type="code_interpreter_call", status="completed"),
+            SimpleNamespace(type="code_interpreter_call", status="interpreting"),
+        ]
+        return response
+
+
 def test_openai_adapter_attaches_files_and_bounds_tools(tmp_path: Path) -> None:
     files = _OpenAIFiles()
     responses = _OpenAIResponses()
@@ -260,6 +270,21 @@ def test_openai_adapter_attaches_files_and_bounds_tools(tmp_path: Path) -> None:
     )
     assert "tools" not in responses.kwargs
     assert responses.kwargs["input"] == "repair-user"
+
+
+def test_openai_adapter_excludes_nonterminal_tool_records(tmp_path: Path) -> None:
+    files = _OpenAIFiles()
+    responses = _OpenAIResponsesWithNonterminalToolRecord()
+    client = SimpleNamespace(files=files, responses=responses)
+
+    result = OpenAIRawDataAgent(client).call(
+        config=_config(RawAgentProvider.OPENAI),
+        inputs=_inputs(tmp_path),
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result.tool_call_count == 1
 
 
 def test_openai_adapter_returns_agent_fitted_parameter_vector(

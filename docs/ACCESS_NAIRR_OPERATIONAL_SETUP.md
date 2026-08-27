@@ -1419,7 +1419,7 @@ jq . "$audit/raw_agent_scientific_audit_manifest.json"
 ```
 
 Expect six pairs and `evaluation_scope` equal to
-`structure_only_no_parameter_fitting`. Submit the one-seed, two-orientation
+`structure_only_no_parameter_fitting_by_judge`. Submit the one-seed, two-orientation
 120B audit:
 
 ```bash
@@ -1458,6 +1458,102 @@ jq . "$root/raw_agent_scientific_audit_summary.json"
 The remaining commands treat the older structure-only candidates as secondary
 ablations. They audit the hosted tool budget, apply a common evaluator, and run
 an NMSE-blind cross-method scientific comparison.
+
+### Expand the fitted GPT-5.6 baseline to all Phase-B cells
+
+The full array contains 40 cells times three repetitions. It uses the existing
+`raw-data-agent-fitted-v1` root so the six exact pilot calls are restored after
+request-hash verification. Submit the API key explicitly because Delta does not
+reliably preserve an implicitly inherited variable:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+git pull --ff-only origin main
+: "${OPENAI_API_KEY:?OPENAI_API_KEY is unset}"
+mkdir -p logs
+FULL_AGENT_JOB="$(
+  sbatch --parsable --export=ALL,OPENAI_API_KEY \
+    scripts/hpc/phase_b_raw_data_agent_fitted_model_full.slurm
+)"
+echo "FULL_AGENT_JOB=$FULL_AGENT_JOB"
+```
+
+After all 120 tasks reach a terminal state, summarize numerical results, audit
+the hosted tool budget offline, and freeze one identity self-pair per returned
+candidate:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+runs=/work/hdd/bibo/$USER/phase_b/raw-data-agent-fitted-v1
+evaluation=/work/hdd/bibo/$USER/phase_b/raw-data-agent-fitted-full-evaluation-v1
+mkdir -p "$evaluation"
+
+"$python_bin" "$repo/scripts/summarize_raw_data_agent_pilot.py" \
+  --root "$runs"
+"$python_bin" "$repo/scripts/audit_raw_data_agent_budget.py" \
+  --root "$runs"
+"$python_bin" "$repo/scripts/build_raw_agent_scientific_audit_pairs.py" \
+  --raw-runs-root "$runs" \
+  --data-root /projects/bibo/$USER/phase_b/inputs/public \
+  --provider openai \
+  --model gpt-5.6-sol \
+  --output "$evaluation/pairs.jsonl" \
+  --manifest "$evaluation/raw_agent_scientific_audit_manifest.json"
+
+wc -l "$evaluation/pairs.jsonl"
+jq . "$evaluation/raw_agent_scientific_audit_manifest.json"
+```
+
+The pair count equals the number of returned executable candidates and may be
+less than 120 when the agent itself failed. Submit the four-shard 120B audit:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+FULL_AUDIT_JOB="$(
+  sbatch --parsable --account="$gpu_account" --partition=gpuA40x4 \
+    scripts/hpc/phase_b_raw_agent_scientific_audit_full_120b.slurm
+)"
+echo "FULL_AUDIT_JOB=$FULL_AUDIT_JOB"
+```
+
+Merge all successful and failed judge calls, summarize paired scientific
+coverage, and create the complete development report:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+runs=/work/hdd/bibo/$USER/phase_b/raw-data-agent-fitted-v1
+evaluation=/work/hdd/bibo/$USER/phase_b/raw-data-agent-fitted-full-evaluation-v1
+judge="$evaluation/gpt-oss-120b"
+pair_count="$(wc -l < "$evaluation/pairs.jsonl")"
+expected="$((2 * pair_count))"
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$judge"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs "$judge"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$judge/hybrid_judge_scores.csv" \
+  --failure-output "$judge/hybrid_judge_failures.jsonl" \
+  --expected "$expected"
+
+"$python_bin" "$repo/scripts/summarize_raw_agent_scientific_audit.py" \
+  --pairs "$evaluation/pairs.jsonl" \
+  --scores "$judge/hybrid_judge_scores.csv" \
+  --output "$judge/raw_agent_scientific_audit_summary.json"
+
+"$python_bin" "$repo/scripts/summarize_raw_data_agent_full_evaluation.py" \
+  --runs-root "$runs" \
+  --protocol-config "$repo/configs/raw_data_agent_fitted_model_full_v1.json" \
+  --audit-manifest \
+    "$evaluation/raw_agent_scientific_audit_manifest.json" \
+  --audit-summary "$judge/raw_agent_scientific_audit_summary.json" \
+  --tool-budget-csv "$runs/tool_budget_audit.csv" \
+  --output-root "$evaluation"
+
+cat "$evaluation/full_evaluation_summary.md"
+jq . "$evaluation/full_evaluation_summary.json"
+```
 
 Audit the six completed GPT-5.6 calls directly from their cached Responses API
 objects. This makes no API request:

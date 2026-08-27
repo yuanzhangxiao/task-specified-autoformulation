@@ -420,3 +420,15 @@ to report deterministic validity, task compliance, target/initialization
 semantics, and absolute scientific assessments. Comparative self-pair answers
 are ignored and no accuracy claim is made. Raw-agent versus Autoformalism pairs
 remain identity-blinded, NMSE-blinded, and unlabeled.
+
+The primary frontier-agent baseline now expands the unchanged fitted-model
+contract to all 40 registered Phase-B cells with three independent repetitions
+per cell. The six exact pilot calls are reused only when their content-addressed
+request hashes match, leaving at most 114 new hosted calls. Development
+evaluation combines exact-value train/validation rollout metrics, integration
+and soft-constraint diagnostics, deterministic public-task compliance, and the
+validated 120B paired-question-consensus scientific audit. These layers remain
+separate: public-task compliance does not imply that every descriptive
+scientific predicate passed, and judge output on natural candidates is not
+treated as gold-label accuracy. The full development run does not open test
+data.

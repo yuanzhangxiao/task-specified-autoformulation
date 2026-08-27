@@ -70,7 +70,7 @@ def main() -> None:
     raw_root = args.raw_runs_root.expanduser().resolve()
     data_root = args.data_root.expanduser().resolve()
     candidates = []
-    sources = []
+    sources: list[dict[str, object]] = []
     tasks = set()
     for run in sorted(raw_root.iterdir()):
         config_path = run / "run_config.json"
@@ -121,12 +121,27 @@ def main() -> None:
     manifest_path = args.manifest or args.output.with_name(
         "raw_agent_scientific_audit_manifest.json"
     )
+    for source, pair, candidate_record in zip(
+        sources, pairs, candidates, strict=True
+    ):
+        benchmark_id, tier, repetition, candidate = candidate_record
+        source.update(
+            {
+                "pair_id": pair.pair_id,
+                "benchmark_id": benchmark_id,
+                "tier": tier,
+                "repetition": repetition,
+                "candidate_id": candidate.candidate_id,
+            }
+        )
     manifest = {
-        "schema_version": "raw-agent-scientific-audit-manifest-1",
+        "schema_version": "raw-agent-scientific-audit-manifest-2",
         "status": "frozen_before_judge_calls",
         "pair_count": len(pairs),
         "pair_ids": [pair.pair_id for pair in pairs],
-        "evaluation_scope": "structure_only_no_parameter_fitting",
+        "evaluation_scope": "structure_only_no_parameter_fitting_by_judge",
+        "candidate_parameter_values_visible_to_judge": False,
+        "candidate_parameter_source": "recorded_in_source_run",
         "pair_design": "identity_self_pair_for_repeated_absolute_assessment",
         "comparative_outcomes_interpretable": False,
         "accuracy_claimed": False,
