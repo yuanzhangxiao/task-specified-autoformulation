@@ -754,6 +754,25 @@ def test_one_step_latent_initialization_rejects_range_and_unknown_symbol() -> No
     assert "INVALID_INITIALIZATION_SYMBOL" in _codes(unknown.value)
 
 
+def test_observed_state_initialization_accepts_differently_named_target() -> None:
+    payload = candidate_payload()
+    payload["initial_conditions"][1] = {
+        "state": "y",
+        "scope": "global",
+        "expression": "target",
+    }
+    context = ValidationContext(
+        targets=("target",),
+        auxiliaries=("aux",),
+        external_inputs=("input_u",),
+        fixed_covariates=("covariate",),
+    )
+
+    validated = CandidateValidator().validate(_candidate(payload), context)
+
+    assert validated.initial_condition_expressions["y"].symbols == {"target"}
+
+
 def test_contextual_validation_rejects_latent_initialization_without_mode() -> None:
     payload = candidate_payload()
     payload["initial_conditions"][0]["initialization_range"] = None

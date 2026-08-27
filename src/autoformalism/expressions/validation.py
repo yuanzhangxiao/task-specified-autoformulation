@@ -460,7 +460,10 @@ class CandidateValidator:
                 observation_expressions[observation.channel] = parsed
 
         initial_condition_expressions: dict[str, ParsedExpression] = {}
-        observed_states = self._identity_observed_states(candidate, context)
+        observed_state_channels = self._identity_observed_state_channels(
+            candidate, context
+        )
+        observed_states = set(observed_state_channels)
         if context.forbid_latent_states:
             for state in candidate.states:
                 if state.name not in observed_states:
@@ -520,7 +523,13 @@ class CandidateValidator:
             initial_condition_expressions[initial.state] = parsed
             allowed_initial_symbols = forcing_names | {context.time_symbol}
             if initial.state in observed_states:
-                allowed_initial_symbols.add(initial.state)
+                # A target is unavailable as a continuous exogenous forcing but
+                # its value at the first time point is a causal initial
+                # observation.  The model state and measured channel need not
+                # have the same identifier (for example, v -> v01).
+                allowed_initial_symbols.update(
+                    observed_state_channels[initial.state]
+                )
             unknown = parsed.symbols - allowed_initial_symbols
             for symbol in sorted(unknown):
                 diagnostics.append(
@@ -883,9 +892,21 @@ class CandidateValidator:
         context: ValidationContext,
     ) -> set[str]:
         """Return states directly tied to available measured channels."""
+        return set(
+            CandidateValidator._identity_observed_state_channels(candidate, context)
+        )
+
+    @staticmethod
+    def _identity_observed_state_channels(
+        candidate: CandidateModel,
+        context: ValidationContext,
+    ) -> dict[str, frozenset[str]]:
+        """Map directly observed states to their available measured channels."""
         available = set(context.targets) | set(context.auxiliaries)
-        observed = {
-            state.name for state in candidate.states if state.name in available
+        observed: dict[str, set[str]] = {
+            state.name: {state.name}
+            for state in candidate.states
+            if state.name in available
         }
         for mapping in candidate.observation_mappings:
             try:
@@ -900,8 +921,10 @@ class CandidateValidator:
                 and isinstance(parsed.tree.body, ast.Name)
                 and parsed.tree.body.id in {state.name for state in candidate.states}
             ):
-                observed.add(parsed.tree.body.id)
-        return observed
+                observed.setdefault(parsed.tree.body.id, set()).add(mapping.channel)
+        return {
+            state: frozenset(channels) for state, channels in observed.items()
+        }
 
     @staticmethod
     def _validate_symbols(
