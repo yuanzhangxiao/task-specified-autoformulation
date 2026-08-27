@@ -406,3 +406,11 @@ runtime. This baseline has no Autoformalism search, pruning, scientific judge,
 test access, private model information, or web access. Provider calls and
 development evaluation are independently checkpointed so a scheduler timeout
 does not repeat a completed paid call.
+
+The development comparison now audits the hosted tool-call budget from cached
+responses, includes a matched 12-versus-24-call GPT sensitivity, and separates
+the raw system outcome from a common two-stage numerical refit. Scientific
+comparison uses the validated 120B paired-question-consensus protocol on
+identity-blinded, NMSE-blinded raw-agent versus Autoformalism structures. Those
+pairs are unlabeled, so their outcomes are descriptive rather than an accuracy
+claim.

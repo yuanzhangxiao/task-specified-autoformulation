@@ -45,6 +45,16 @@ response, at most 12 OpenAI tool calls where the provider exposes that limit,
 attempts. The shared refit uses one start, 50 function evaluations, and a
 five-minute fit timeout.
 
+The value 12 is a predeclared pilot compute budget, not a claim that 12 is an
+intrinsically fair or sufficient number. Every response now records the
+requested limit, the provider-echoed limit when available, and the observed
+code-interpreter call count. `scripts/audit_raw_data_agent_budget.py` inspects
+the cached provider response offline, without making another paid call. A
+matched GPT-5.6 sensitivity changes only this limit from 12 to 24. Results from
+the 12-call pilot must therefore be described as budget-conditioned; if the
+24-call run materially improves validity or fit, both operating points should
+be reported.
+
 The three repetitions estimate stochastic variability; they are not treated as
 scientifically meaningful seeds and hosted providers may not guarantee exact
 seed reproducibility. The pilot is a development comparison, not a final test
@@ -56,3 +66,26 @@ Each run directory contains `run_config.json`, `agent_result.json`,
 `candidate.json`, `evaluation.json`, `status.json`, a content-addressed cache,
 and an append-only event log. `scripts/summarize_raw_data_agent_pilot.py`
 creates a compact `summary.csv` after the array completes.
+
+## Common refit and scientific comparison
+
+The provider-agent outcome and the numerical evaluator are reported
+separately. The original five-minute fit remains useful as an end-to-end
+failure outcome, but it is not the final cross-method numerical comparison.
+The common evaluator first screens every frozen candidate with bounded
+fixed-step RK4 and then warm-starts a longer `solve_ivp` refit. The exact same
+configuration accepts either a raw-agent run (`--source-run`) or an
+Autoformalism search summary (`--source-summary`). This prevents a stiff or
+poorly initialized raw structure from being assigned a sentinel NMSE solely
+because one short adaptive fit timed out, while preserving that initial timeout
+as part of the raw-agent system result.
+
+NMSE is not a mechanism-validity metric. For tasks with a frozen
+Autoformalism reference, `scripts/build_raw_agent_method_pairs.py` creates
+identity-blinded, metric-blinded pairs and the validated 120B
+paired-question-consensus judge evaluates deterministic validity, absolute
+scientific questions, and direct comparative questions in both orientations.
+The pair winner is intentionally unlabeled: this is a descriptive comparison,
+not an accuracy test whose truth is assumed to be Autoformalism. The report
+must show question-level assessments, orientation disagreements, response
+coverage, and the consensus preference alongside common-refit NMSE.

@@ -661,3 +661,12 @@ one typed structure, which is compiled and refit by the shared deterministic
 runtime without pruning or judge feedback. Calls are bounded, cached, logged,
 and checkpointed; test data and private equations are never attached. See
 `docs/RAW_DATA_AGENT_BASELINE.md` for the frozen two-cell pilot protocol.
+
+Cross-method reporting separates three layers. First, the agent-system outcome
+retains generation failures, contract repairs, and the original bounded fit.
+Second, a common two-stage numerical evaluator applies identical fixed-RK4
+screening and `solve_ivp` final refitting to frozen raw-agent and Autoformalism
+candidates. Third, an identity- and NMSE-blinded paired-question-consensus judge
+reports mechanistic validity and preference. The scientific comparison is
+unlabeled and cannot be reported as judge accuracy; only mutation-contract
+calibration experiments support accuracy claims.

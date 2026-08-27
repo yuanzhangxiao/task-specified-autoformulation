@@ -1,0 +1,27 @@
+{
+  "schema_version": "raw-data-agent-budget-sensitivity-1",
+  "status": "frozen_before_calls",
+  "source_protocol": "raw_data_agent_pilot_v1",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "benchmarks": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard"
+    }
+  ],
+  "repetitions": 3,
+  "changed_field": {
+    "max_tool_calls": {
+      "control": 12,
+      "sensitivity": 24
+    }
+  },
+  "all_other_agent_and_initial_fit_settings": "unchanged",
+  "development_only": true,
+  "test_data_opened": false
+}

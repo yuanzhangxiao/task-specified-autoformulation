@@ -17,9 +17,11 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_CALIBRATION_PAIRS:=${AF_WORK}/phase_b/judge-hybrid-heldout-v1/pairs.jsonl}"
 : "${AF_CALIBRATION_ROOT:?set AF_CALIBRATION_ROOT in the Slurm wrapper}"
 : "${AF_REPETITIONS:=5}"
+: "${AF_REQUIRED_REPETITIONS:=5}"
 : "${AF_SHARD_COUNT:=1}"
 : "${AF_MAX_ATTEMPTS:=10}"
 : "${AF_JUDGE_SEED_BASE:=10000}"
+: "${AF_REQUIRED_JUDGE_SEED_BASE:=10000}"
 : "${AF_PARTIAL_WEIGHT:=0.05}"
 : "${AF_COMPARATIVE_WEIGHT:=0.25}"
 : "${AF_TIE_THRESHOLD:=0.05}"
@@ -33,12 +35,13 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 : "${AF_PAIR_IDS=heldout_55d8026028a90be5 heldout_ee453d8cc6fcb7a2 heldout_70b3222d4736ea1d heldout_cca8883e6ae1b33f}"
 
-[[ "${AF_REPETITIONS}" == 5 && "${AF_MAX_ATTEMPTS}" == 10 ]] || {
-  echo "atomic comparison requires five repetitions and ten attempts" >&2
+[[ "${AF_REPETITIONS}" == "${AF_REQUIRED_REPETITIONS}" && \
+  "${AF_MAX_ATTEMPTS}" == 10 ]] || {
+  echo "atomic comparison requires ${AF_REQUIRED_REPETITIONS} repetitions and ten attempts" >&2
   exit 2
 }
-[[ "${AF_JUDGE_SEED_BASE}" == 10000 ]] || {
-  echo "atomic comparison requires seed base 10000" >&2
+[[ "${AF_JUDGE_SEED_BASE}" == "${AF_REQUIRED_JUDGE_SEED_BASE}" ]] || {
+  echo "atomic comparison requires seed base ${AF_REQUIRED_JUDGE_SEED_BASE}" >&2
   exit 2
 }
 case "${AF_COMPARATIVE_INDETERMINATE_POLICY}" in

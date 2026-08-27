@@ -33,6 +33,19 @@ def main() -> None:
                 ),
                 "agent_latency_seconds": status.get("agent_latency_seconds", ""),
                 "tool_call_count": status.get("tool_call_count", ""),
+                "requested_max_tool_calls": status.get(
+                    "requested_max_tool_calls",
+                    config.get("agent_config", {}).get("max_tool_calls", ""),
+                ),
+                "tool_call_limit_exceeded": status.get(
+                    "tool_call_limit_exceeded",
+                    (
+                        status.get("tool_call_count", 0)
+                        > config.get("agent_config", {}).get(
+                            "max_tool_calls", float("inf")
+                        )
+                    ),
+                ),
                 "error_type": status.get("error_type", ""),
             }
         )

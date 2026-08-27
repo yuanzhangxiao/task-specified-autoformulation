@@ -11,20 +11,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from autoformalism.baselines.raw_data_agent import (
     RawAgentConfig,
     RawAgentInputs,
     RawAgentProvider,
     evaluate_raw_agent_candidate,
     fit_result_payload,
+    raw_agent_validation_context,
     repair_raw_data_agent_candidate,
     run_raw_data_agent,
 )
 from autoformalism.config import DataConfig
-from autoformalism.data import BenchmarkLoader, BenchmarkRegistry, DevelopmentDataset
-from autoformalism.expressions import ValidationContext
+from autoformalism.data import BenchmarkLoader, BenchmarkRegistry
 from autoformalism.expressions.diagnostics import ModelValidationError
 from autoformalism.fitting import FitConfig
 
@@ -80,7 +78,7 @@ def main() -> None:
         if not path.is_file():
             raise SystemExit(f"required public input is missing: {path}")
 
-    context = _validation_context(dataset, spec)
+    context = raw_agent_validation_context(dataset, spec)
     inputs = RawAgentInputs(
         benchmark_id=args.benchmark_id,
         tier=args.tier,
@@ -188,6 +186,13 @@ def main() -> None:
             "training_normalized_mse": fit.training_metrics.normalized_mse,
             "agent_latency_seconds": artifact.latency_seconds,
             "tool_call_count": artifact.tool_call_count,
+            "requested_max_tool_calls": config.max_tool_calls,
+            "provider_reported_max_tool_calls": (
+                artifact.provider_reported_max_tool_calls
+            ),
+            "tool_call_limit_exceeded": (
+                artifact.tool_call_count > config.max_tool_calls
+            ),
             "usage": None if artifact.usage is None else artifact.usage.model_dump(),
         }
         _write_json(run_directory / "status.json", status)
@@ -207,49 +212,6 @@ def _tidy_path(prompt_root: Path, spec: Any, split: str) -> Path:
     if spec.data_layout != "tidy_split_file":
         raise SystemExit("the raw-data pilot currently supports tidy Phase-B cells")
     return prompt_root / spec.split_filename_template.format(split=split)
-
-
-def _validation_context(dataset: DevelopmentDataset, spec: Any) -> ValidationContext:
-    bounds = _forcing_bounds(dataset, include_targets=spec.one_step_target_history)
-    return ValidationContext(
-        targets=dataset.roles.targets,
-        auxiliaries=dataset.roles.auxiliaries,
-        external_inputs=tuple(name for name in spec.external_inputs if name in bounds),
-        fixed_covariates=tuple(
-            name for name in spec.fixed_covariates if name in bounds
-        ),
-        lagged_targets=dataset.roles.targets if spec.one_step_target_history else (),
-        forcing_bounds=bounds,
-    )
-
-
-def _forcing_bounds(
-    dataset: DevelopmentDataset, *, include_targets: bool
-) -> dict[str, tuple[float, float]]:
-    collected: dict[str, list[np.ndarray[Any, Any]]] = {}
-    for split in (dataset.train, dataset.validation):
-        for trajectory in split.trajectories:
-            channels: dict[str, Any] = {
-                **trajectory.auxiliaries,
-                **trajectory.external_inputs,
-                **trajectory.fixed_covariates,
-            }
-            if include_targets:
-                channels.update(trajectory.targets)
-            for name, raw in channels.items():
-                try:
-                    values = np.asarray(raw, dtype=float).reshape(-1)
-                except (TypeError, ValueError):
-                    continue
-                if len(values) and np.isfinite(values).all():
-                    collected.setdefault(name, []).append(values)
-    return {
-        name: (
-            float(min(np.min(values) for values in arrays)),
-            float(max(np.max(values) for values in arrays)),
-        )
-        for name, arrays in collected.items()
-    }
 
 
 def _run_name(config: RawAgentConfig, inputs: RawAgentInputs) -> str:

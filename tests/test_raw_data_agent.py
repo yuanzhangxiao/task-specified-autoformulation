@@ -123,6 +123,9 @@ def test_agent_result_is_checkpointed_and_cacheable(tmp_path: Path) -> None:
     assert adapter.calls == 1
     assert first == second
     assert first.candidate.observation_mappings[0].channel == "x"
+    assert first.requested_max_tool_calls == 7
+    assert first.provider_reported_max_tool_calls is None
+    assert first.tool_call_limit_exceeded is False
     assert (output / "agent_result.json").is_file()
     assert len(list((output / "cache").glob("*.json"))) == 1
 

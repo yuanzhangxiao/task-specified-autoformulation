@@ -1,0 +1,37 @@
+{
+  "schema_version": "common-candidate-refit-config-1",
+  "purpose": "apply the same two-stage numerical evaluator to frozen raw-agent and Autoformalism structures without new LLM calls",
+  "screening_fit": {
+    "number_of_starts": 1,
+    "random_seed": 0,
+    "integration_backend": "fixed_rk4",
+    "allow_derivative_regression": false,
+    "integration_method": "RK45",
+    "fixed_step_substeps": 1,
+    "relative_tolerance": 1e-07,
+    "absolute_tolerance": 1e-09,
+    "maximum_function_evaluations": 50,
+    "maximum_wall_time_seconds": 300.0,
+    "failure_penalty": 1000000.0,
+    "bound_tolerance": 1e-05,
+    "soft_constraint_penalty_weight": 1.0
+  },
+  "final_fit": {
+    "number_of_starts": 1,
+    "random_seed": 0,
+    "integration_backend": "solve_ivp",
+    "allow_derivative_regression": false,
+    "integration_method": "RK45",
+    "fixed_step_substeps": 1,
+    "relative_tolerance": 1e-07,
+    "absolute_tolerance": 1e-09,
+    "maximum_function_evaluations": 150,
+    "maximum_wall_time_seconds": 1200.0,
+    "failure_penalty": 1000000.0,
+    "bound_tolerance": 1e-05,
+    "soft_constraint_penalty_weight": 1.0
+  },
+  "selection_data": "development_train_and_validation_only",
+  "test_data_opened": false,
+  "pruning_applied": false
+}

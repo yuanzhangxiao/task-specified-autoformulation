@@ -1360,6 +1360,133 @@ the exact neutral fills remain visible in the CSV provenance fields. Do not
 enable either repair in search until v6 passes every unchanged gate and a later
 fresh-structure confirmation passes.
 
+## Audit and compare the raw-data frontier-agent pilot
+
+These commands do not reuse the short initial fit as the only numerical result.
+They first audit the hosted tool budget, then refit frozen candidates under a
+common evaluator, and finally run an NMSE-blind scientific comparison.
+
+Audit the six completed GPT-5.6 calls directly from their cached Responses API
+objects. This makes no API request:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+raw_root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-pilot-v1
+
+"$python_bin" scripts/audit_raw_data_agent_budget.py --root "$raw_root"
+cat "$raw_root/tool_budget_audit.csv"
+```
+
+The 12-call value is a pilot operating point. To run the predeclared matched
+24-call sensitivity for GPT-5.6 only, submit the six even array indices. Use a
+new root so cached 12-call responses cannot be mistaken for 24-call responses:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+export AF_RAW_AGENT_ROOT=/work/hdd/bibo/$USER/phase_b/raw-data-agent-budget24-v1
+export AF_RAW_AGENT_MAX_TOOL_CALLS=24
+export AF_RAW_AGENT_PROTOCOL_CONFIG=$PWD/configs/raw_data_agent_budget_sensitivity_v1.json
+sbatch --array=0,2,4,6,8,10%6 \
+  scripts/hpc/phase_b_raw_data_agent_pilot.slurm
+```
+
+Apply the common fixed-RK4 screen and longer `solve_ivp` refit to all six frozen
+GPT candidates. No LLM call is made:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+sbatch --array=0-5%6 \
+  scripts/hpc/phase_b_raw_data_agent_common_refit.slurm
+```
+
+Apply the identical evaluator to the easy-cell Autoformalism incumbent, then
+summarize both kinds of source in the same table:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+data_root=/projects/bibo/$USER/phase_b/inputs/public
+refit_root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-common-refit-v1
+reference=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v3/runs/phase_b_dalla_man_t2_canonical_named_easy_easy_seed0/summary.json
+
+"$python_bin" "$repo/scripts/refit_raw_data_agent_candidate.py" \
+  --source-summary "$reference" \
+  --data-root "$data_root" \
+  --protocol-config "$repo/configs/raw_data_agent_common_refit_v1.json" \
+  --output-root "$refit_root"
+
+"$python_bin" "$repo/scripts/summarize_raw_data_agent_common_refit.py" \
+  --root "$refit_root"
+```
+
+The hard anonymous cell cannot yet enter a raw-agent-versus-method pair until a
+frozen Autoformalism summary for that same benchmark and tier exists. Build the
+three easy-cell unlabeled pairs now; the builder hides method identity and fit
+metrics from the judge:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+raw_root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-pilot-v1
+judge_root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-method-judge-v1
+reference=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v3/runs/phase_b_dalla_man_t2_canonical_named_easy_easy_seed0/summary.json
+mkdir -p "$judge_root"
+
+"$python_bin" "$repo/scripts/build_raw_agent_method_pairs.py" \
+  --raw-runs-root "$raw_root" \
+  --reference-summary "$reference" \
+  --data-root /projects/bibo/$USER/phase_b/inputs/public \
+  --provider openai \
+  --model gpt-5.6-sol \
+  --output "$judge_root/pairs.jsonl" \
+  --manifest "$judge_root/raw_agent_method_pairs_manifest.json"
+
+cp "$repo/configs/raw_data_agent_mechanism_comparison_v1.json" \
+  "$judge_root/protocol_config.json"
+wc -l "$judge_root/pairs.jsonl"
+jq . "$judge_root/raw_agent_method_pairs_manifest.json"
+```
+
+After checking that the manifest says `pair_truth: unlabeled`, submit the
+one-repetition, two-orientation 120B comparison:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_raw_agent_method_judge_120b.slurm
+```
+
+Merge exactly two calls per frozen pair and create the descriptive scientific
+report. Do not call the resulting preference an accuracy measurement:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+experiment=/work/hdd/bibo/$USER/phase_b/raw-data-agent-method-judge-v1
+root="$experiment/gpt-oss-120b"
+pair_count="$(wc -l < "$experiment/pairs.jsonl")"
+expected="$((2 * pair_count))"
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$root"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs "$root"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$root/hybrid_judge_scores.csv" \
+  --failure-output "$root/hybrid_judge_failures.jsonl" \
+  --expected "$expected"
+
+"$python_bin" "$repo/scripts/summarize_raw_agent_method_judge.py" \
+  --pairs "$experiment/pairs.jsonl" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --output "$root/raw_agent_method_judge_summary.json"
+
+jq . "$root/raw_agent_method_judge_summary.json"
+```
+
 ## Acceptance checklist
 
 For each system, do not start production until all are true:

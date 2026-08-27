@@ -6,15 +6,17 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Mapping
 from contextlib import ExitStack, suppress
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
+import numpy as np
 from pydantic import Field, ValidationError
 
-from autoformalism.data import DevelopmentDataset
+from autoformalism.data import BenchmarkSpec, DevelopmentDataset
 from autoformalism.expressions import (
     ValidationContext,
     compile_candidate,
@@ -69,6 +71,9 @@ class RawAgentArtifact(StrictSchema):
     response_id: str | None = None
     latency_seconds: float = Field(ge=0.0)
     tool_call_count: int = Field(ge=0)
+    requested_max_tool_calls: int | None = Field(default=None, ge=0)
+    provider_reported_max_tool_calls: int | None = Field(default=None, ge=0)
+    tool_call_limit_exceeded: bool = False
     usage: RawAgentUsage | None = None
     compact_candidate: ProposerCandidateV2
     candidate: CandidateModel
@@ -117,6 +122,68 @@ class _ProviderResult:
     response_id: str | None
     usage: RawAgentUsage | None
     tool_call_count: int
+
+
+def provider_reported_max_tool_calls(
+    raw_response: Mapping[str, object],
+) -> int | None:
+    """Return the provider-echoed built-in tool limit when it is available."""
+    value = raw_response.get("max_tool_calls")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def raw_agent_validation_context(
+    dataset: DevelopmentDataset,
+    spec: BenchmarkSpec,
+) -> ValidationContext:
+    """Build the exact public runtime context used by raw-agent evaluation."""
+    bounds = _raw_agent_forcing_bounds(
+        dataset,
+        include_targets=spec.one_step_target_history,
+    )
+    return ValidationContext(
+        targets=dataset.roles.targets,
+        auxiliaries=dataset.roles.auxiliaries,
+        external_inputs=tuple(name for name in spec.external_inputs if name in bounds),
+        fixed_covariates=tuple(
+            name for name in spec.fixed_covariates if name in bounds
+        ),
+        lagged_targets=dataset.roles.targets if spec.one_step_target_history else (),
+        forcing_bounds=bounds,
+    )
+
+
+def _raw_agent_forcing_bounds(
+    dataset: DevelopmentDataset,
+    *,
+    include_targets: bool,
+) -> dict[str, tuple[float, float]]:
+    collected: dict[str, list[np.ndarray[Any, Any]]] = {}
+    for split in (dataset.train, dataset.validation):
+        for trajectory in split.trajectories:
+            channels: dict[str, Any] = {
+                **trajectory.auxiliaries,
+                **trajectory.external_inputs,
+                **trajectory.fixed_covariates,
+            }
+            if include_targets:
+                channels.update(trajectory.targets)
+            for name, raw in channels.items():
+                try:
+                    values = np.asarray(raw, dtype=float).reshape(-1)
+                except (TypeError, ValueError):
+                    continue
+                if len(values) and np.isfinite(values).all():
+                    collected.setdefault(name, []).append(values)
+    return {
+        name: (
+            float(min(np.min(values) for values in arrays)),
+            float(max(np.max(values) for values in arrays)),
+        )
+        for name, arrays in collected.items()
+    }
 
 
 class _AgentAdapter(Protocol):
@@ -446,6 +513,13 @@ def run_raw_data_agent(
         response_id=provider_result.response_id,
         latency_seconds=time.monotonic() - started,
         tool_call_count=provider_result.tool_call_count,
+        requested_max_tool_calls=config.max_tool_calls,
+        provider_reported_max_tool_calls=provider_reported_max_tool_calls(
+            provider_result.raw_response
+        ),
+        tool_call_limit_exceeded=(
+            provider_result.tool_call_count > config.max_tool_calls
+        ),
         usage=provider_result.usage,
         compact_candidate=provider_result.parsed,
         candidate=candidate,
@@ -466,6 +540,11 @@ def run_raw_data_agent(
             "provider": config.provider.value,
             "model": config.model,
             "tool_call_count": provider_result.tool_call_count,
+            "requested_max_tool_calls": config.max_tool_calls,
+            "provider_reported_max_tool_calls": (
+                artifact.provider_reported_max_tool_calls
+            ),
+            "tool_call_limit_exceeded": artifact.tool_call_limit_exceeded,
             "usage": (
                 None
                 if provider_result.usage is None
@@ -563,6 +642,8 @@ def repair_raw_data_agent_candidate(
         response_id=result.response_id,
         latency_seconds=time.monotonic() - started,
         tool_call_count=0,
+        requested_max_tool_calls=0,
+        tool_call_limit_exceeded=False,
         usage=result.usage,
         compact_candidate=result.parsed,
         candidate=candidate,

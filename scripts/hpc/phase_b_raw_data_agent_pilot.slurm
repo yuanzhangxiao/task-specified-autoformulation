@@ -21,10 +21,13 @@ repo_root="${AF_REPO_ROOT:-${project_root}/repos/autoformalism-v21}"
 python_bin="${AF_PYTHON:-${project_root}/venvs/autoformalism-v21/bin/python}"
 data_root="${AF_PUBLIC_DATA_ROOT:-${project_root}/phase_b/inputs/public}"
 output_root="${AF_RAW_AGENT_ROOT:-${work_root}/phase_b/raw-data-agent-pilot-v1}"
+protocol_config="${AF_RAW_AGENT_PROTOCOL_CONFIG:-${repo_root}/configs/raw_data_agent_pilot_v1.json}"
+max_tool_calls="${AF_RAW_AGENT_MAX_TOOL_CALLS:-12}"
 
 test -d "$repo_root" || { echo "missing repository: $repo_root" >&2; exit 2; }
 test -x "$python_bin" || { echo "missing Python: $python_bin" >&2; exit 2; }
 test -d "$data_root" || { echo "missing public data root: $data_root" >&2; exit 2; }
+test -f "$protocol_config" || { echo "missing protocol config: $protocol_config" >&2; exit 2; }
 mkdir -p "$repo_root/logs" "$output_root"
 cd "$repo_root"
 
@@ -61,7 +64,7 @@ else
 fi
 
 if [[ "$task_id" -eq 0 ]]; then
-  cp -f configs/raw_data_agent_pilot_v1.json "$output_root/protocol_config.json"
+  cp -f "$protocol_config" "$output_root/protocol_config.json"
 fi
 "$python_bin" scripts/run_raw_data_agent.py \
   --data-root "$data_root" \
@@ -72,7 +75,7 @@ fi
   --repetition "$repetition" \
   --output-root "$output_root" \
   --reasoning-effort high \
-  --max-tool-calls 12 \
+  --max-tool-calls "$max_tool_calls" \
   --max-output-tokens 30000 \
   --llm-timeout-seconds 1200 \
   --llm-max-attempts 2 \

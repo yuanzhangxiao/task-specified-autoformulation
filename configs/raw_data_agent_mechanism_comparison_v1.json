@@ -1,0 +1,30 @@
+{
+  "schema_version": "raw-data-agent-mechanism-comparison-1",
+  "status": "frozen_before_judge_calls",
+  "purpose": "compare frozen raw-data frontier-agent and Autoformalism structures using the validated paired-question-consensus scientific protocol",
+  "candidate_identity_disclosure": false,
+  "fit_metrics_disclosed_to_judge": false,
+  "pair_truth": "unlabeled",
+  "judge_model": "vllm:openai/gpt-oss-120b",
+  "protocol": {
+    "atomic_signed_occurrences": true,
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 16000,
+    "repetitions": 1,
+    "max_provider_attempts": 10,
+    "candidate_order_policy": "both_orientations",
+    "aggregation": "paired_question_consensus",
+    "comparative_indeterminate_policy": "neutral_fixed_denominator",
+    "partial_tiebreak_weight": 0.05,
+    "comparative_weight": 0.25,
+    "tie_threshold": 0.05
+  },
+  "reporting": {
+    "accuracy_claimed": false,
+    "report_absolute_questions": true,
+    "report_comparative_questions": true,
+    "report_orientation_disagreements": true,
+    "report_response_coverage": true
+  }
+}
