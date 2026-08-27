@@ -15,6 +15,7 @@ from autoformalism.baselines.raw_data_agent import (
     raw_agent_request_hash,
     raw_agent_system_prompt,
     raw_agent_user_prompt,
+    repair_raw_data_agent_candidate,
     run_raw_data_agent,
 )
 from autoformalism.schemas import ProposerCandidateV2
@@ -78,6 +79,7 @@ def _config(provider: RawAgentProvider) -> RawAgentConfig:
 class _Adapter:
     def __init__(self) -> None:
         self.calls = 0
+        self.repairs = 0
 
     def call(self, **_: Any) -> SimpleNamespace:
         self.calls += 1
@@ -87,6 +89,16 @@ class _Adapter:
             response_id="response-1",
             usage=None,
             tool_call_count=3,
+        )
+
+    def repair(self, **_: Any) -> SimpleNamespace:
+        self.repairs += 1
+        return SimpleNamespace(
+            parsed=_proposal(),
+            raw_response={"provider": "fake-repair"},
+            response_id="repair-1",
+            usage=None,
+            tool_call_count=0,
         )
 
 
@@ -113,6 +125,43 @@ def test_agent_result_is_checkpointed_and_cacheable(tmp_path: Path) -> None:
     assert first.candidate.observation_mappings[0].channel == "x"
     assert (output / "agent_result.json").is_file()
     assert len(list((output / "cache").glob("*.json"))) == 1
+
+
+def test_contract_repair_is_diagnostics_only_and_checkpointed(tmp_path: Path) -> None:
+    adapter = _Adapter()
+    inputs = _inputs(tmp_path)
+    config = _config(RawAgentProvider.OPENAI)
+    output = tmp_path / "run"
+    original = run_raw_data_agent(
+        config=config,
+        inputs=inputs,
+        output_directory=output,
+        adapter=adapter,
+    )
+
+    first = repair_raw_data_agent_candidate(
+        config=config,
+        inputs=inputs,
+        original=original,
+        diagnostics="INVALID_INITIALIZATION_SYMBOL at initial_condition:z",
+        repair_index=1,
+        output_directory=output,
+        adapter=adapter,
+    )
+    second = repair_raw_data_agent_candidate(
+        config=config,
+        inputs=inputs,
+        original=original,
+        diagnostics="INVALID_INITIALIZATION_SYMBOL at initial_condition:z",
+        repair_index=1,
+        output_directory=output,
+        adapter=adapter,
+    )
+
+    assert adapter.repairs == 1
+    assert first == second
+    assert first.tool_call_count == 0
+    assert (output / "repair_result_01.json").is_file()
 
 
 class _OpenAIFiles:
@@ -167,6 +216,14 @@ def test_openai_adapter_attaches_files_and_bounds_tools(tmp_path: Path) -> None:
     assert result.tool_call_count == 1
     assert result.usage is not None and result.usage.total_tokens == 30
 
+    OpenAIRawDataAgent(client).repair(
+        config=_config(RawAgentProvider.OPENAI),
+        system_prompt="repair-system",
+        user_prompt="repair-user",
+    )
+    assert "tools" not in responses.kwargs
+    assert responses.kwargs["input"] == "repair-user"
+
 
 class _GeminiFiles:
     def __init__(self) -> None:
@@ -218,6 +275,14 @@ def test_gemini_adapter_uses_code_execution_and_seed(tmp_path: Path) -> None:
     assert models.kwargs["config"]["tools"] == [{"code_execution": {}}]
     assert models.kwargs["config"]["seed"] == 2
     assert result.usage is not None and result.usage.total_tokens == 33
+
+    GeminiRawDataAgent(client).repair(
+        config=_config(RawAgentProvider.GEMINI),
+        system_prompt="repair-system",
+        user_prompt="repair-user",
+    )
+    assert "tools" not in models.kwargs["config"]
+    assert models.kwargs["config"]["seed"] == 10_002
 
 
 def test_request_hash_covers_data_and_repetition(tmp_path: Path) -> None:

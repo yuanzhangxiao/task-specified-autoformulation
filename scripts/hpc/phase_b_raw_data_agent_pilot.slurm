@@ -59,7 +59,9 @@ else
   }
 fi
 
-cp configs/raw_data_agent_pilot_v1.json "$output_root/protocol_config.json"
+if [[ "$task_id" -eq 0 ]]; then
+  cp -f configs/raw_data_agent_pilot_v1.json "$output_root/protocol_config.json"
+fi
 "$python_bin" scripts/run_raw_data_agent.py \
   --data-root "$data_root" \
   --benchmark-id "$benchmark_id" \
@@ -73,5 +75,6 @@ cp configs/raw_data_agent_pilot_v1.json "$output_root/protocol_config.json"
   --max-output-tokens 30000 \
   --llm-timeout-seconds 1200 \
   --llm-max-attempts 2 \
+  --contract-repair-attempts 1 \
   --fit-max-nfev 50 \
   --fit-timeout-seconds 300

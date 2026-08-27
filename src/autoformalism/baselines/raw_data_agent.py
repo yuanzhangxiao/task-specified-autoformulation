@@ -129,6 +129,14 @@ class _AgentAdapter(Protocol):
         user_prompt: str,
     ) -> _ProviderResult: ...
 
+    def repair(
+        self,
+        *,
+        config: RawAgentConfig,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> _ProviderResult: ...
+
 
 class OpenAIRawDataAgent:
     """OpenAI Responses adapter using a provider-hosted Python container."""
@@ -207,6 +215,46 @@ class OpenAIRawDataAgent:
             ),
         )
 
+    def repair(
+        self,
+        *,
+        config: RawAgentConfig,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> _ProviderResult:
+        """Repair only the typed runtime contract, without data or tools."""
+        response = self._client.responses.parse(
+            model=config.model,
+            instructions=system_prompt,
+            input=user_prompt,
+            max_output_tokens=config.max_output_tokens,
+            reasoning={"effort": config.reasoning_effort},
+            text_format=ProposerCandidateV2,
+            store=False,
+            timeout=config.timeout_seconds,
+        )
+        status = getattr(response, "status", None)
+        if status not in (None, "completed"):
+            raise RuntimeError(f"OpenAI repair response did not complete: {status}")
+        parsed = getattr(response, "output_parsed", None)
+        if not isinstance(parsed, ProposerCandidateV2):
+            text = getattr(response, "output_text", None)
+            if not isinstance(text, str) or not text.strip():
+                raise RuntimeError("OpenAI repair response contained no candidate")
+            try:
+                parsed = ProposerCandidateV2.model_validate_json(text)
+            except ValidationError as exc:
+                raise RuntimeError(
+                    f"OpenAI repaired candidate failed validation: {exc}"
+                ) from exc
+        return _ProviderResult(
+            parsed=parsed,
+            raw_response=_raw_response(response),
+            response_id=_optional_text(getattr(response, "id", None)),
+            usage=_openai_usage(response),
+            tool_call_count=0,
+        )
+
 
 class GeminiRawDataAgent:
     """Gemini adapter using Files API inputs and hosted code execution."""
@@ -277,6 +325,50 @@ class GeminiRawDataAgent:
             ),
             usage=_gemini_usage(response),
             tool_call_count=_gemini_tool_call_count(response),
+        )
+
+    def repair(
+        self,
+        *,
+        config: RawAgentConfig,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> _ProviderResult:
+        """Repair only the typed runtime contract, without data or tools."""
+        response = self._client.models.generate_content(
+            model=config.model,
+            contents=user_prompt,
+            config={
+                "system_instruction": system_prompt,
+                "max_output_tokens": config.max_output_tokens,
+                "response_mime_type": "application/json",
+                "response_json_schema": _gemini_provider_schema(
+                    ProposerCandidateV2
+                ),
+                "seed": config.repetition + 10_000,
+                "thinking_config": {
+                    "thinking_level": config.reasoning_effort.upper()
+                },
+            },
+        )
+        text = getattr(response, "text", None)
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Gemini repair response contained no candidate")
+        try:
+            parsed = ProposerCandidateV2.model_validate_json(text)
+        except ValidationError as exc:
+            raise RuntimeError(
+                f"Gemini repaired candidate failed validation: {exc}"
+            ) from exc
+        return _ProviderResult(
+            parsed=parsed,
+            raw_response=_raw_response(response),
+            response_id=_optional_text(
+                getattr(response, "response_id", None)
+                or getattr(response, "id", None)
+            ),
+            usage=_gemini_usage(response),
+            tool_call_count=0,
         )
 
 
@@ -379,6 +471,121 @@ def run_raw_data_agent(
                 if provider_result.usage is None
                 else provider_result.usage.model_dump(mode="json")
             ),
+        },
+    )
+    return artifact
+
+
+def repair_raw_data_agent_candidate(
+    *,
+    config: RawAgentConfig,
+    inputs: RawAgentInputs,
+    original: RawAgentArtifact,
+    diagnostics: str,
+    repair_index: int,
+    output_directory: Path,
+    adapter: _AgentAdapter | None = None,
+) -> RawAgentArtifact:
+    """Run or restore one diagnostics-only candidate contract repair."""
+    if repair_index < 1:
+        raise ValueError("repair_index must be positive")
+    system_prompt = (
+        "Repair a proposed scientific model only enough to satisfy its typed "
+        "syntax and deterministic runtime contract. Preserve its scientific "
+        "structure, equations, mechanisms, target mappings, and parameter "
+        "bounds whenever the diagnostic does not require a change. Do not add "
+        "new scientific mechanisms. Latent initial expressions may use only "
+        "the explicitly supplied forcing channels and time; they may never use "
+        "parameters, other latent states, or unavailable observations. If such "
+        "an initializer cannot be made causal without changing the science, "
+        "replace it with a finite fixed_value and remove declarations made "
+        "unused by that repair. Return exactly one ProposerCandidateV2."
+    )
+    user_prompt = (
+        "Public symbol contract:\n"
+        f"targets={list(inputs.targets)}\n"
+        f"auxiliaries={list(inputs.auxiliaries)}\n"
+        f"external_inputs={list(inputs.external_inputs)}\n"
+        f"fixed_covariates={list(inputs.fixed_covariates)}\n"
+        f"lagged_targets={list(inputs.lagged_targets)}\n\n"
+        "Deterministic validator diagnostics:\n"
+        f"{diagnostics[:8000]}\n\n"
+        "Candidate to repair:\n"
+        + original.compact_candidate.model_dump_json(indent=2)
+    )
+    request_payload = {
+        "schema_version": "raw-data-agent-repair-request-1",
+        "config": config.model_dump(mode="json"),
+        "original_request_hash": original.request_hash,
+        "repair_index": repair_index,
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "response_schema": ProposerCandidateV2.model_json_schema(
+            mode="validation"
+        ),
+    }
+    request_hash = hashlib.sha256(
+        json.dumps(
+            request_payload, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    artifact_path = output_directory / f"repair_result_{repair_index:02d}.json"
+    cache_path = output_directory / "cache" / f"{request_hash}.json"
+    if artifact_path.is_file():
+        restored = RawAgentArtifact.model_validate_json(
+            artifact_path.read_text(encoding="utf-8")
+        )
+        if restored.request_hash != request_hash:
+            raise ValueError("repair checkpoint does not match the requested repair")
+        return restored
+    if cache_path.is_file():
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        restored = RawAgentArtifact.model_validate(payload["artifact"])
+        _atomic_json(artifact_path, restored.model_dump(mode="json"))
+        return restored
+
+    selected_adapter = adapter or _adapter(config)
+    started = time.monotonic()
+    result = selected_adapter.repair(
+        config=config,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+    candidate = enrich_proposal_v2(result.parsed, inputs.targets)
+    raw_encoded = json.dumps(
+        result.raw_response, sort_keys=True, default=str
+    ).encode("utf-8")
+    artifact = RawAgentArtifact(
+        request_hash=request_hash,
+        provider=config.provider,
+        model=config.model,
+        repetition=config.repetition,
+        response_id=result.response_id,
+        latency_seconds=time.monotonic() - started,
+        tool_call_count=0,
+        usage=result.usage,
+        compact_candidate=result.parsed,
+        candidate=candidate,
+        raw_response_sha256=hashlib.sha256(raw_encoded).hexdigest(),
+    )
+    _atomic_json(
+        cache_path,
+        {
+            "schema_version": "raw-data-agent-repair-cache-1",
+            "artifact": artifact.model_dump(mode="json"),
+            "raw_response": result.raw_response,
+        },
+    )
+    _atomic_json(artifact_path, artifact.model_dump(mode="json"))
+    _append_event(
+        output_directory / "events.jsonl",
+        {
+            "event": "raw_agent_contract_repair",
+            "request_hash": request_hash,
+            "repair_index": repair_index,
+            "diagnostics_sha256": hashlib.sha256(
+                diagnostics.encode("utf-8")
+            ).hexdigest(),
         },
     )
     return artifact

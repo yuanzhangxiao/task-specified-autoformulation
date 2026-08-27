@@ -26,7 +26,8 @@
     "max_tool_calls": 12,
     "max_output_tokens": 30000,
     "timeout_seconds": 1200,
-    "max_attempts": 2
+    "max_attempts": 2,
+    "contract_repair_attempts": 1
   },
   "fit_budget": {
     "number_of_starts": 1,

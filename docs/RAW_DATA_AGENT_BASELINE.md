@@ -20,12 +20,16 @@ web search, or external data. It must return one strict
 logged, and checkpointed. Credentials are read only from environment variables
 and are never written to artifacts.
 
-The returned structure is compiled and refit by the shared Autoformalism
-runtime using train only for continuous optimization and validation for the
-reported development NMSE. No deterministic pruning or scientific judge is
-applied. Test data remains unopened. This makes the baseline strong but
-auditable: it gets the same public data and task, while its own hosted analysis
-is the discovery algorithm.
+The returned structure is compiled by the shared Autoformalism runtime. One
+cached diagnostics-only repair turn is allowed for a typed syntax or runtime
+contract failure; it receives the candidate, public symbol contract, and
+deterministic errors, but no data, fit score, or scientific feedback. This
+matches the non-scientific repair allowance in the main pipeline. The valid
+structure is then refit using train only for continuous optimization and
+validation for the reported development NMSE. No deterministic pruning or
+scientific judge is applied. Test data remains unopened. This makes the
+baseline strong but auditable: it gets the same public data and task, while its
+own hosted analysis is the discovery algorithm.
 
 ## Two-cell pilot
 

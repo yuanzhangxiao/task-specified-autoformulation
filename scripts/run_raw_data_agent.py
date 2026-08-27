@@ -19,11 +19,13 @@ from autoformalism.baselines.raw_data_agent import (
     RawAgentProvider,
     evaluate_raw_agent_candidate,
     fit_result_payload,
+    repair_raw_data_agent_candidate,
     run_raw_data_agent,
 )
 from autoformalism.config import DataConfig
 from autoformalism.data import BenchmarkLoader, BenchmarkRegistry, DevelopmentDataset
 from autoformalism.expressions import ValidationContext
+from autoformalism.expressions.diagnostics import ModelValidationError
 from autoformalism.fitting import FitConfig
 
 
@@ -41,6 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-output-tokens", type=int, default=30000)
     parser.add_argument("--llm-timeout-seconds", type=float, default=1200.0)
     parser.add_argument("--llm-max-attempts", type=int, default=2)
+    parser.add_argument("--contract-repair-attempts", type=int, default=1)
     parser.add_argument("--fit-max-nfev", type=int, default=50)
     parser.add_argument("--fit-timeout-seconds", type=float, default=300.0)
     parser.add_argument("--dry-run", action="store_true")
@@ -51,6 +54,8 @@ def main() -> None:
     args = _parser().parse_args()
     if args.repetition < 0:
         raise SystemExit("--repetition must be nonnegative")
+    if args.contract_repair_attempts < 0:
+        raise SystemExit("--contract-repair-attempts must be nonnegative")
     data_root = args.data_root.expanduser().resolve()
     output_root = args.output_root.expanduser().resolve()
     registry = BenchmarkRegistry()
@@ -126,6 +131,7 @@ def main() -> None:
         },
         "test_data_opened": False,
         "pruning_applied": False,
+        "contract_repair_attempts": args.contract_repair_attempts,
     }
     _write_json(run_directory / "run_config.json", run_config)
     if args.dry_run:
@@ -143,12 +149,27 @@ def main() -> None:
             inputs=inputs,
             output_directory=run_directory,
         )
-        candidate, repairs, fit, warnings = evaluate_raw_agent_candidate(
-            artifact=artifact,
-            dataset=dataset,
-            context=context,
-            fit_config=FitConfig(**run_config["fit_config"]),
-        )
+        evaluated_artifact = artifact
+        for repair_index in range(args.contract_repair_attempts + 1):
+            try:
+                candidate, repairs, fit, warnings = evaluate_raw_agent_candidate(
+                    artifact=evaluated_artifact,
+                    dataset=dataset,
+                    context=context,
+                    fit_config=FitConfig(**run_config["fit_config"]),
+                )
+                break
+            except ModelValidationError as exc:
+                if repair_index >= args.contract_repair_attempts:
+                    raise
+                evaluated_artifact = repair_raw_data_agent_candidate(
+                    config=config,
+                    inputs=inputs,
+                    original=evaluated_artifact,
+                    diagnostics=str(exc),
+                    repair_index=repair_index + 1,
+                    output_directory=run_directory,
+                )
         evaluation = {
             "schema_version": "raw-data-agent-evaluation-1",
             "candidate_id": candidate.candidate_id,
