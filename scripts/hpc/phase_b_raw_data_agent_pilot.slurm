@@ -7,6 +7,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
+#SBATCH --export=ALL
 #SBATCH --output=logs/phase-b-raw-agent-%A_%a.out
 #SBATCH --error=logs/phase-b-raw-agent-%A_%a.err
 
@@ -27,8 +28,8 @@ test -d "$data_root" || { echo "missing public data root: $data_root" >&2; exit 
 mkdir -p "$repo_root/logs" "$output_root"
 cd "$repo_root"
 
-provider_index=$((task_id / 6))
-within_provider=$((task_id % 6))
+provider_index=$((task_id % 2))
+within_provider=$((task_id / 2))
 benchmark_index=$((within_provider / 3))
 repetition=$((within_provider % 3))
 
