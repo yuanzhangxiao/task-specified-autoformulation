@@ -56,12 +56,16 @@ does not run an optimizer.
 The value 12 is a predeclared pilot compute budget, not a claim that 12 is an
 intrinsically fair or sufficient number. Every response now records the
 requested limit, the provider-echoed limit when available, and the observed
-code-interpreter call count. `scripts/audit_raw_data_agent_budget.py` inspects
-the cached provider response offline, without making another paid call. A
-matched GPT-5.6 sensitivity changes only this limit from 12 to 24. Results from
-the 12-call pilot must therefore be described as budget-conditioned; if the
-24-call run materially improves validity or fit, both operating points should
-be reported.
+code-interpreter records by status. In the Responses API, completed,
+incomplete, and failed records are terminal processed calls; `in_progress` and
+`interpreting` records are nonterminal and are reported separately. This avoids
+mistaking a provider-retained ignored/nonterminal attempt at the tool ceiling
+for an additional completed call. `scripts/audit_raw_data_agent_budget.py`
+inspects the cached provider response offline, without making another paid
+call. Both total records and processed calls remain visible. A matched GPT-5.6
+sensitivity changes only this limit from 12 to 24. Results from the 12-call
+pilot must therefore be described as budget-conditioned; if the 24-call run
+materially improves validity or fit, both operating points should be reported.
 
 The three repetitions estimate stochastic variability; they are not treated as
 scientifically meaningful seeds and hosted providers may not guarantee exact

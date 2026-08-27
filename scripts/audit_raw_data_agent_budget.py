@@ -24,9 +24,14 @@ FIELDS = (
     "raw_code_interpreter_items",
     "raw_unique_code_interpreter_ids",
     "raw_code_interpreter_statuses",
+    "raw_processed_code_interpreter_calls",
+    "raw_nonterminal_code_interpreter_records",
     "limit_exceeded",
+    "artifact_count_disagrees_with_processed_count",
     "raw_cache_available",
 )
+
+_TERMINAL_TOOL_STATUSES = frozenset({"completed", "incomplete", "failed"})
 
 
 def _read_json(path: Path) -> dict[str, object]:
@@ -82,6 +87,9 @@ def audit_run(run: Path) -> dict[str, object]:
     raw_limit = None if raw is None else raw.get("max_tool_calls")
     if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
         raw_limit = None
+    processed = sum(statuses[status] for status in _TERMINAL_TOOL_STATUSES)
+    nonterminal = len(items) - processed
+    authoritative_count = processed if raw is not None else artifact.tool_call_count
     return {
         "run": run.name,
         "provider": config["provider"],
@@ -95,7 +103,12 @@ def audit_run(run: Path) -> dict[str, object]:
         "raw_code_interpreter_items": len(items),
         "raw_unique_code_interpreter_ids": len(identifiers),
         "raw_code_interpreter_statuses": json.dumps(statuses, sort_keys=True),
-        "limit_exceeded": artifact.tool_call_count > requested,
+        "raw_processed_code_interpreter_calls": processed,
+        "raw_nonterminal_code_interpreter_records": nonterminal,
+        "limit_exceeded": authoritative_count > requested,
+        "artifact_count_disagrees_with_processed_count": (
+            raw is not None and artifact.tool_call_count != processed
+        ),
         "raw_cache_available": raw is not None,
     }
 
@@ -118,13 +131,21 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
     summary = {
-        "schema_version": "raw-data-agent-tool-budget-audit-1",
+        "schema_version": "raw-data-agent-tool-budget-audit-2",
         "run_count": len(rows),
         "runs_exceeding_requested_limit": sum(
             bool(row["limit_exceeded"]) for row in rows
         ),
         "runs_with_raw_cache": sum(
             bool(row["raw_cache_available"]) for row in rows
+        ),
+        "runs_with_nonterminal_tool_records": sum(
+            bool(row["raw_nonterminal_code_interpreter_records"])
+            for row in rows
+        ),
+        "runs_with_legacy_count_disagreement": sum(
+            bool(row["artifact_count_disagrees_with_processed_count"])
+            for row in rows
         ),
         "output": str(output),
     }
