@@ -4,21 +4,30 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
+
+import pytest
+from pydantic import ValidationError
 
 from autoformalism.baselines.raw_data_agent import (
     GeminiRawDataAgent,
     OpenAIRawDataAgent,
+    RawAgentArtifact,
     RawAgentConfig,
+    RawAgentFittedModel,
+    RawAgentFittedParameter,
     RawAgentInputs,
+    RawAgentOutputContract,
     RawAgentProvider,
+    evaluate_raw_agent_fitted_model,
     raw_agent_request_hash,
     raw_agent_system_prompt,
     raw_agent_user_prompt,
     repair_raw_data_agent_candidate,
     run_raw_data_agent,
 )
-from autoformalism.schemas import ProposerCandidateV2
+from autoformalism.fitting import EvaluationMetrics
+from autoformalism.schemas import ProposerCandidateV2, enrich_proposal_v2
 
 
 def _proposal() -> ProposerCandidateV2:
@@ -74,6 +83,30 @@ def _config(provider: RawAgentProvider) -> RawAgentConfig:
         max_output_tokens=4096,
         max_attempts=1,
     )
+
+
+def _fitted_model() -> RawAgentFittedModel:
+    return RawAgentFittedModel(
+        candidate=_proposal(),
+        fitted_parameters=(RawAgentFittedParameter(name="k", value=0.25),),
+        fit_method_summary="Bounded least squares on train trajectories.",
+    )
+
+
+def test_fitted_model_contract_requires_exact_in_bounds_values() -> None:
+    assert _fitted_model().fitted_parameter_values == {"k": 0.25}
+    with pytest.raises(ValidationError, match=r"missing=\['k'\]"):
+        RawAgentFittedModel(
+            candidate=_proposal(),
+            fitted_parameters=(),
+            fit_method_summary="Train fit.",
+        )
+    with pytest.raises(ValidationError, match="outside declared bounds"):
+        RawAgentFittedModel(
+            candidate=_proposal(),
+            fitted_parameters=(RawAgentFittedParameter(name="k", value=3.0),),
+            fit_method_summary="Train fit.",
+        )
 
 
 class _Adapter:
@@ -183,15 +216,16 @@ class _OpenAIFiles:
 
 
 class _OpenAIResponses:
-    def __init__(self) -> None:
+    def __init__(self, parsed: object | None = None) -> None:
         self.kwargs: dict[str, Any] = {}
+        self.parsed = parsed or _proposal()
 
     def parse(self, **kwargs: Any) -> SimpleNamespace:
         self.kwargs = kwargs
         return SimpleNamespace(
             id="response-openai",
             status="completed",
-            output_parsed=_proposal(),
+            output_parsed=self.parsed,
             output=[SimpleNamespace(type="code_interpreter_call")],
             usage=SimpleNamespace(input_tokens=10, output_tokens=20, total_tokens=30),
             model_dump=lambda **_: {"id": "response-openai"},
@@ -226,6 +260,29 @@ def test_openai_adapter_attaches_files_and_bounds_tools(tmp_path: Path) -> None:
     )
     assert "tools" not in responses.kwargs
     assert responses.kwargs["input"] == "repair-user"
+
+
+def test_openai_adapter_returns_agent_fitted_parameter_vector(
+    tmp_path: Path,
+) -> None:
+    files = _OpenAIFiles()
+    responses = _OpenAIResponses(_fitted_model())
+    client = SimpleNamespace(files=files, responses=responses)
+    config = _config(RawAgentProvider.OPENAI).model_copy(
+        update={"output_contract": RawAgentOutputContract.FITTED_MODEL}
+    )
+
+    result = OpenAIRawDataAgent(client).call(
+        config=config,
+        inputs=_inputs(tmp_path),
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert responses.kwargs["text_format"] is RawAgentFittedModel
+    assert result.parsed == _proposal()
+    assert result.fitted_parameter_values == {"k": 0.25}
+    assert result.fit_method_summary is not None
 
 
 class _GeminiFiles:
@@ -304,3 +361,87 @@ def test_request_hash_covers_data_and_repetition(tmp_path: Path) -> None:
     assert "No test data" in system
     assert "glucose" not in system.lower()
     assert "validation.csv" in user
+
+
+def test_fitted_model_prompt_requires_train_only_values(tmp_path: Path) -> None:
+    prompt = raw_agent_system_prompt(
+        _inputs(tmp_path), RawAgentOutputContract.FITTED_MODEL
+    )
+
+    assert "using train only" in prompt
+    assert "without parameter optimization" in prompt
+    assert "RawAgentFittedModel" in prompt
+
+
+def test_fitted_model_evaluation_does_not_optimize_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proposal_payload = _proposal().model_dump(mode="json")
+    proposal_payload["parameters"].append(
+        {"name": "unused_removed", "bounds": {"lower": 0.0, "upper": 1.0}}
+    )
+    proposal_with_unused = ProposerCandidateV2.model_validate(proposal_payload)
+    original_candidate = enrich_proposal_v2(proposal_with_unused, ("x",))
+    candidate = enrich_proposal_v2(_proposal(), ("x",))
+    artifact = RawAgentArtifact(
+        request_hash="request",
+        provider=RawAgentProvider.OPENAI,
+        model="frontier",
+        repetition=0,
+        latency_seconds=1.0,
+        tool_call_count=1,
+        compact_candidate=proposal_with_unused,
+        candidate=original_candidate,
+        output_contract=RawAgentOutputContract.FITTED_MODEL,
+        # An unused declaration can be removed by deterministic normalization;
+        # only the compiled model's exact vector may reach simulation.
+        fitted_parameter_values={"k": 0.25, "unused_removed": 0.75},
+        fit_method_summary="Train-only fit.",
+        raw_response_sha256="digest",
+    )
+    compiled = SimpleNamespace(
+        validated=SimpleNamespace(candidate=candidate, warnings=())
+    )
+    monkeypatch.setattr(
+        "autoformalism.baselines.raw_data_agent.repair_protected_declarations",
+        lambda value, context: (candidate, ("removed unused parameter",)),
+    )
+    monkeypatch.setattr(
+        "autoformalism.baselines.raw_data_agent.compile_candidate",
+        lambda value, context: compiled,
+    )
+
+    class _Scaler:
+        scales: ClassVar = {
+            "target:x": SimpleNamespace(standard_deviation=2.0)
+        }
+
+        def fit(self, split):
+            return self
+
+    monkeypatch.setattr(
+        "autoformalism.baselines.raw_data_agent.TrainingScaler", _Scaler
+    )
+    calls = []
+
+    def fake_evaluate(model, split, **kwargs):
+        calls.append(kwargs)
+        return {}, EvaluationMetrics(0.5, {"x": 0.5})
+
+    monkeypatch.setattr(
+        "autoformalism.baselines.raw_data_agent.evaluate_fitted_candidate",
+        fake_evaluate,
+    )
+    dataset = SimpleNamespace(train=object(), validation=object())
+    context = SimpleNamespace(targets=("x",))
+
+    _, _, training, validation, _ = evaluate_raw_agent_fitted_model(
+        artifact=artifact,
+        dataset=dataset,
+        context=context,
+    )
+
+    assert training.normalized_mse == validation.normalized_mse == 0.5
+    assert len(calls) == 2
+    assert all(call["global_parameters"] == {"k": 0.25} for call in calls)
+    assert all(call["fit_trajectory_initial_conditions"] is False for call in calls)

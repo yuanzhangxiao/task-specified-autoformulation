@@ -21,8 +21,8 @@ repo_root="${AF_REPO_ROOT:-${project_root}/repos/autoformalism-v21}"
 python_bin="${AF_PYTHON:-${project_root}/venvs/autoformalism-v21/bin/python}"
 data_root="${AF_PUBLIC_DATA_ROOT:-${project_root}/phase_b/inputs/public}"
 source_root="${AF_RAW_AGENT_SOURCE_ROOT:-${work_root}/phase_b/raw-data-agent-pilot-v1}"
-output_root="${AF_COMMON_REFIT_ROOT:-${work_root}/phase_b/raw-data-agent-common-refit-v1}"
-protocol_config="${AF_COMMON_REFIT_CONFIG:-${repo_root}/configs/raw_data_agent_common_refit_v1.json}"
+output_root="${AF_COMMON_REFIT_ROOT:-${work_root}/phase_b/raw-data-agent-common-refit-v2}"
+protocol_config="${AF_COMMON_REFIT_CONFIG:-${repo_root}/configs/raw_data_agent_common_refit_v2.json}"
 
 test -d "$repo_root" || { echo "missing repository: $repo_root" >&2; exit 2; }
 test -x "$python_bin" || { echo "missing Python: $python_bin" >&2; exit 2; }

@@ -18,6 +18,7 @@ FIELDS = (
     "candidate_id",
     "screening_success",
     "screening_validation_normalized_mse",
+    "final_initialization",
     "final_success",
     "final_validation_normalized_mse",
     "error_type",
@@ -48,6 +49,7 @@ def main() -> None:
                 "screening_validation_normalized_mse": status.get(
                     "screening_validation_normalized_mse", ""
                 ),
+                "final_initialization": status.get("final_initialization", ""),
                 "final_success": status.get("final_success", ""),
                 "final_validation_normalized_mse": status.get(
                     "final_validation_normalized_mse", ""

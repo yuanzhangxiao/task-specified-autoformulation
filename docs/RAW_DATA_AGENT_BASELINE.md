@@ -13,23 +13,30 @@ Each independent repetition receives exactly:
 - the public runtime symbol roles; and
 - a provider-hosted Python/code-execution tool.
 
-The agent may inspect trajectories, write analysis code, fit parameters, and use
-validation to choose a structure. It cannot access test data, private equations,
-web search, or external data. It must return one strict
-`ProposerCandidateV2`. The response and request are content-addressed, cached,
-logged, and checkpointed. Credentials are read only from environment variables
-and are never written to artifacts.
+The agent may inspect trajectories, write analysis code, fit parameters on the
+training split, and use validation to choose a structure. It cannot access test
+data, private equations, web search, or external data. The primary baseline must
+return one strict `RawAgentFittedModel`: a `ProposerCandidateV2`, one fitted
+value for every global parameter, and a short fit-method summary. The response
+and request are content-addressed, cached, logged, and checkpointed. Credentials
+are read only from environment variables and are never written to artifacts.
 
-The returned structure is compiled by the shared Autoformalism runtime. One
+The returned candidate is compiled by the shared Autoformalism runtime. One
 cached diagnostics-only repair turn is allowed for a typed syntax or runtime
 contract failure; it receives the candidate, public symbol contract, and
 deterministic errors, but no data, fit score, or scientific feedback. This
-matches the non-scientific repair allowance in the main pipeline. The valid
-structure is then refit using train only for continuous optimization and
-validation for the reported development NMSE. No deterministic pruning or
-scientific judge is applied. Test data remains unopened. This makes the
-baseline strong but auditable: it gets the same public data and task, while its
-own hosted analysis is the discovery algorithm.
+matches the non-scientific repair allowance in the main pipeline. Parameter
+names, uniqueness, completeness, bounds, and finiteness are schema-validated.
+The evaluator then simulates the candidate with exactly the agent-returned
+values; it fits no model parameter or trajectory-specific initial condition.
+Only target normalization scales are estimated from train. Validation is used
+for the frozen development report and test remains unopened. No deterministic
+pruning or scientific judge is applied during generation or selection.
+
+The earlier `structure_only` contract is retained as an explicitly labeled
+ablation. It returns only `ProposerCandidateV2` and therefore necessarily uses
+Autoformalism parameter fitting. Results from that contract must be called
+"GPT structure + Autoformalism fit," not a full fitted-model agent baseline.
 
 ## Two-cell pilot
 
@@ -38,12 +45,13 @@ The frozen pilot contains two contrasting Phase-B cells:
 1. named Dalla Man T2, easy tier;
 2. anonymous-system task, opaque hard tier.
 
-It uses GPT-5.6 Sol and Gemini 3.1 Pro Preview with three independent
-repetitions each, for 12 tasks total. Each task is bounded to one hosted agent
-response, at most 12 OpenAI tool calls where the provider exposes that limit,
+The original structure-only pilot used GPT-5.6 Sol and Gemini 3.1 Pro Preview
+with three independent repetitions each. The fitted-model confirmation begins
+with GPT-5.6 Sol only: the same two cells and three repetitions, for six tasks.
+Each task is bounded to one hosted agent response, at most 12 OpenAI tool calls,
 30,000 output tokens, 20 minutes per provider request, and two provider
-attempts. The shared refit uses one start, 50 function evaluations, and a
-five-minute fit timeout.
+attempts. The fitted-model evaluator performs direct `solve_ivp` simulation and
+does not run an optimizer.
 
 The value 12 is a predeclared pilot compute budget, not a claim that 12 is an
 intrinsically fair or sufficient number. Every response now records the
@@ -64,28 +72,32 @@ evaluation.
 
 Each run directory contains `run_config.json`, `agent_result.json`,
 `candidate.json`, `evaluation.json`, `status.json`, a content-addressed cache,
-and an append-only event log. `scripts/summarize_raw_data_agent_pilot.py`
+and an append-only event log. Fitted-model artifacts additionally record the
+agent-provided parameter values, fit-method summary, and
+`parameter_refit_applied: false`. `scripts/summarize_raw_data_agent_pilot.py`
 creates a compact `summary.csv` after the array completes.
 
 ## Common refit and scientific comparison
 
-The provider-agent outcome and the numerical evaluator are reported
-separately. The original five-minute fit remains useful as an end-to-end
-failure outcome, but it is not the final cross-method numerical comparison.
-The common evaluator first screens every frozen candidate with bounded
-fixed-step RK4 and then warm-starts a longer `solve_ivp` refit. The exact same
+The provider-agent outcome and numerical evaluator are reported separately.
+The primary fitted-model result uses the agent's exact values. A common-refit
+ablation may subsequently refit frozen structures under identical
+Autoformalism settings, but it answers a different question. Its fixed-RK4
+screen is only an optional warm start: a screening failure falls back to an
+independent `solve_ivp` start and cannot suppress the final refit. The same
 configuration accepts either a raw-agent run (`--source-run`) or an
-Autoformalism search summary (`--source-summary`). This prevents a stiff or
-poorly initialized raw structure from being assigned a sentinel NMSE solely
-because one short adaptive fit timed out, while preserving that initial timeout
-as part of the raw-agent system result.
+Autoformalism search summary (`--source-summary`).
 
-NMSE is not a mechanism-validity metric. For tasks with a frozen
-Autoformalism reference, `scripts/build_raw_agent_method_pairs.py` creates
-identity-blinded, metric-blinded pairs and the validated 120B
-paired-question-consensus judge evaluates deterministic validity, absolute
-scientific questions, and direct comparative questions in both orientations.
-The pair winner is intentionally unlabeled: this is a descriptive comparison,
-not an accuracy test whose truth is assumed to be Autoformalism. The report
-must show question-level assessments, orientation disagreements, response
-coverage, and the consensus preference alongside common-refit NMSE.
+NMSE is not a mechanism-validity metric. Two fit-free audits are therefore
+separate from numerical fitting. First,
+`scripts/build_raw_agent_scientific_audit_pairs.py` duplicates each prior GPT
+structure into an identity-blinded self-pair. The validated 120B judge reads it
+in both orientations, and the report retains deterministic validity, public
+requirement compliance, target/initialization semantics, and every absolute
+scientific assessment. Direct comparative answers are discarded because the
+two candidates are identical. This audit is descriptive and claims no judge
+accuracy. Second, when a frozen Autoformalism reference exists,
+`scripts/build_raw_agent_method_pairs.py` creates identity- and metric-blinded
+cross-method pairs. Their winner is also unlabeled; question-level assessments,
+orientation disagreements, response coverage, and consensus preference are
+reported without assuming Autoformalism is ground truth.

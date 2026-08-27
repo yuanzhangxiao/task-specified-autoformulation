@@ -1362,9 +1362,102 @@ fresh-structure confirmation passes.
 
 ## Audit and compare the raw-data frontier-agent pilot
 
-These commands do not reuse the short initial fit as the only numerical result.
-They first audit the hosted tool budget, then refit frozen candidates under a
-common evaluator, and finally run an NMSE-blind scientific comparison.
+The primary GPT baseline returns a full fitted model. Submit the two-benchmark,
+three-repetition GPT-5.6 array after updating the checkout. These are six new
+paid provider calls; parameter values returned by GPT are evaluated directly
+and are never refit by Autoformalism:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+git pull --ff-only origin main
+mkdir -p logs
+sbatch --array=0-5%6 \
+  scripts/hpc/phase_b_raw_data_agent_fitted_model.slurm
+```
+
+After completion, inspect statuses and the exact-value development metrics:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-fitted-v1
+
+"$python_bin" "$repo/scripts/summarize_raw_data_agent_pilot.py" \
+  --root "$root"
+cat "$root/summary.csv"
+find "$root" -mindepth 2 -maxdepth 2 -name agent_result.json -print0 | \
+  xargs -0 -n1 jq '{output_contract, fitted_parameter_values, fit_method_summary}'
+find "$root" -mindepth 2 -maxdepth 2 -name evaluation.json -print0 | \
+  xargs -0 -n1 jq \
+    '{parameter_source, parameter_refit_applied, training_metrics, validation_metrics}'
+```
+
+The six earlier GPT-5.6 outputs used the structure-only contract. Freeze a
+fit-free scientific self-audit of their equations before any further numerical
+optimization. Each candidate is duplicated into a blinded identity pair so the
+judge provides two orientation-controlled readings of every absolute question;
+comparative answers are not interpreted:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+source_root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-pilot-v1
+audit=/work/hdd/bibo/$USER/phase_b/raw-agent-scientific-audit-v1
+mkdir -p "$audit"
+
+"$python_bin" "$repo/scripts/build_raw_agent_scientific_audit_pairs.py" \
+  --raw-runs-root "$source_root" \
+  --data-root /projects/bibo/$USER/phase_b/inputs/public \
+  --provider openai \
+  --model gpt-5.6-sol \
+  --output "$audit/pairs.jsonl" \
+  --manifest "$audit/raw_agent_scientific_audit_manifest.json"
+cp "$repo/configs/raw_data_agent_scientific_audit_v1.json" \
+  "$audit/protocol_config.json"
+wc -l "$audit/pairs.jsonl"
+jq . "$audit/raw_agent_scientific_audit_manifest.json"
+```
+
+Expect six pairs and `evaluation_scope` equal to
+`structure_only_no_parameter_fitting`. Submit the one-seed, two-orientation
+120B audit:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+mkdir -p logs
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+sbatch --account="$gpu_account" --partition=gpuA40x4 \
+  scripts/hpc/phase_b_raw_agent_scientific_audit_120b.slurm
+```
+
+Merge exactly two responses per candidate and produce the question-level
+scientific/task-compliance report:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+audit=/work/hdd/bibo/$USER/phase_b/raw-agent-scientific-audit-v1
+root="$audit/gpt-oss-120b"
+pair_count="$(wc -l < "$audit/pairs.jsonl")"
+expected="$((2 * pair_count))"
+
+"$python_bin" "$repo/scripts/merge_hybrid_scores.py" \
+  --inputs "$root"/shards/shard_*/hybrid_judge_scores.csv \
+  --failure-inputs "$root"/shards/shard_*/hybrid_judge_failures.jsonl \
+  --output "$root/hybrid_judge_scores.csv" \
+  --failure-output "$root/hybrid_judge_failures.jsonl" \
+  --expected "$expected"
+
+"$python_bin" "$repo/scripts/summarize_raw_agent_scientific_audit.py" \
+  --pairs "$audit/pairs.jsonl" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --output "$root/raw_agent_scientific_audit_summary.json"
+jq . "$root/raw_agent_scientific_audit_summary.json"
+```
+
+The remaining commands treat the older structure-only candidates as secondary
+ablations. They audit the hosted tool budget, apply a common evaluator, and run
+an NMSE-blind cross-method scientific comparison.
 
 Audit the six completed GPT-5.6 calls directly from their cached Responses API
 objects. This makes no API request:
@@ -1392,8 +1485,10 @@ sbatch --array=0,2,4,6,8,10%6 \
   scripts/hpc/phase_b_raw_data_agent_pilot.slurm
 ```
 
-Apply the common fixed-RK4 screen and longer `solve_ivp` refit to all six frozen
-GPT candidates. No LLM call is made:
+Apply the common fixed-RK4 warm-start screen and longer `solve_ivp` refit to all
+six frozen GPT structures. A screen failure now falls back to the independent
+default `solve_ivp` start instead of terminating the candidate. No LLM call is
+made, and the v2 root prevents stale v1 failures from being resumed:
 
 ```bash
 cd /projects/bibo/$USER/repos/autoformalism-v21
@@ -1409,13 +1504,13 @@ summarize both kinds of source in the same table:
 repo=/projects/bibo/$USER/repos/autoformalism-v21
 python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
 data_root=/projects/bibo/$USER/phase_b/inputs/public
-refit_root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-common-refit-v1
+refit_root=/work/hdd/bibo/$USER/phase_b/raw-data-agent-common-refit-v2
 reference=/work/hdd/bibo/$USER/phase_b/hybrid-search-smoke-v3/runs/phase_b_dalla_man_t2_canonical_named_easy_easy_seed0/summary.json
 
 "$python_bin" "$repo/scripts/refit_raw_data_agent_candidate.py" \
   --source-summary "$reference" \
   --data-root "$data_root" \
-  --protocol-config "$repo/configs/raw_data_agent_common_refit_v1.json" \
+  --protocol-config "$repo/configs/raw_data_agent_common_refit_v2.json" \
   --output-root "$refit_root"
 
 "$python_bin" "$repo/scripts/summarize_raw_data_agent_common_refit.py" \

@@ -67,15 +67,15 @@ def evaluate_common_refit(
         dataset.validation,
         config.screening_fit,
     )
-    final = None
-    if screening.success:
-        final = fit_candidate(
-            compiled,
-            dataset.train,
-            dataset.validation,
-            config.final_fit,
-            initial_global_parameters=screening.global_parameters,
-        )
+    final = fit_candidate(
+        compiled,
+        dataset.train,
+        dataset.validation,
+        config.final_fit,
+        initial_global_parameters=(
+            screening.global_parameters if screening.success else None
+        ),
+    )
     warnings = tuple(
         {
             "code": item.code,

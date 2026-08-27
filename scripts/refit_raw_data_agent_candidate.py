@@ -217,6 +217,11 @@ def main() -> None:
             "repairs": list(result.repairs),
             "validation_warnings": list(result.warnings),
             "screening_fit": fit_result_payload(result.screening_fit),
+            "final_initialization": (
+                "screening_warm_start"
+                if result.screening_fit.success
+                else "independent_default_start"
+            ),
             "final_fit": (
                 None
                 if result.final_fit is None
@@ -230,14 +235,15 @@ def main() -> None:
             "status": (
                 "complete"
                 if final is not None and final.success
-                else (
-                    "screening_fit_failed"
-                    if not result.screening_fit.success
-                    else "final_fit_failed"
-                )
+                else "final_fit_failed"
             ),
             "candidate_id": result.candidate.candidate_id,
             "screening_success": result.screening_fit.success,
+            "final_initialization": (
+                "screening_warm_start"
+                if result.screening_fit.success
+                else "independent_default_start"
+            ),
             "screening_validation_normalized_mse": (
                 result.screening_fit.validation_metrics.normalized_mse
             ),

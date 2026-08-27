@@ -657,16 +657,24 @@ restricted AST-to-PyTorch compiler rather than executing generated Python.
 The raw-data frontier-agent baseline is a separate, deliberately strong
 boundary. A hosted model receives the finalized public prompt plus public train
 and validation tables and may use its provider-hosted Python tool. It returns
-one typed structure, which is compiled and refit by the shared deterministic
-runtime without pruning or judge feedback. Calls are bounded, cached, logged,
-and checkpointed; test data and private equations are never attached. See
-`docs/RAW_DATA_AGENT_BASELINE.md` for the frozen two-cell pilot protocol.
+one typed fitted model: candidate structure, one fitted value for every global
+parameter, and a fit-method summary. The shared runtime compiles the candidate
+and evaluates exactly those values without parameter optimization, pruning, or
+judge feedback. Calls are bounded, cached, logged, and checkpointed; test data
+and private equations are never attached. The former structure-only response
+plus Autoformalism refit remains a labeled ablation, not the primary frontier-
+agent baseline. See `docs/RAW_DATA_AGENT_BASELINE.md` for the frozen two-cell
+pilot protocol.
 
-Cross-method reporting separates three layers. First, the agent-system outcome
-retains generation failures, contract repairs, and the original bounded fit.
-Second, a common two-stage numerical evaluator applies identical fixed-RK4
-screening and `solve_ivp` final refitting to frozen raw-agent and Autoformalism
-candidates. Third, an identity- and NMSE-blinded paired-question-consensus judge
-reports mechanistic validity and preference. The scientific comparison is
-unlabeled and cannot be reported as judge accuracy; only mutation-contract
-calibration experiments support accuracy claims.
+Cross-method reporting separates four layers. First, the full agent-system
+outcome retains generation failures, contract repairs, fitted values, and exact-
+value simulation. Second, a fit-free identity self-audit reports deterministic
+validity, public-requirement compliance, and absolute scientific assessments
+for earlier GPT structures; its comparative answers are discarded. Third, a
+common-refit ablation may apply identical numerical optimization to frozen raw-
+agent and Autoformalism structures. Fixed RK4 is only a warm-start screen;
+failure falls back to an independent `solve_ivp` start. Fourth, an identity- and
+NMSE-blinded paired-question-consensus judge reports cross-method mechanistic
+validity and preference. Scientific comparisons are unlabeled and cannot be
+reported as judge accuracy; only mutation-contract calibration experiments
+support accuracy claims.

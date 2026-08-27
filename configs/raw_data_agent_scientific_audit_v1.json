@@ -1,0 +1,26 @@
+{
+  "schema_version": "raw-agent-scientific-audit-1",
+  "status": "frozen_before_judge_calls",
+  "judge_model": "vllm:openai/gpt-oss-120b",
+  "candidate_source": "previous_gpt_5_6_structure_only_pilot",
+  "parameter_fitting_used": false,
+  "pair_design": "identity_self_pair",
+  "protocol": {
+    "atomic_signed_occurrences": true,
+    "model_semantic_contract": true,
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 17000,
+    "repetitions": 1,
+    "candidate_order_policy": "both_orientations",
+    "aggregation": "paired_question_consensus"
+  },
+  "reporting": {
+    "accuracy_claimed": false,
+    "comparative_outcomes_interpretable": false,
+    "report_deterministic_assessments": true,
+    "report_absolute_scientific_assessments": true,
+    "report_task_requirements": true,
+    "report_response_coverage": true
+  }
+}

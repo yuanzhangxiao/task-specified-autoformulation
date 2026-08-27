@@ -79,15 +79,20 @@ def test_common_refit_warm_starts_final_fit(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls[1][1] == {"k": 0.25}
 
 
-def test_common_refit_stops_after_failed_screen(
+def test_common_refit_falls_back_after_failed_screen(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = []
 
-    def fake_fit(model, training, validation, config, **kwargs):
-        del model, training, validation, kwargs
-        calls.append(config)
-        return SimpleNamespace(success=False, global_parameters={})
+    def fake_fit(
+        model, training, validation, config, *, initial_global_parameters=None
+    ):
+        del model, training, validation
+        calls.append((config, initial_global_parameters))
+        return SimpleNamespace(
+            success=len(calls) == 2,
+            global_parameters={"k": 0.5} if len(calls) == 2 else {},
+        )
 
     monkeypatch.setattr(
         "autoformalism.baselines.common_refit.fit_candidate", fake_fit
@@ -98,8 +103,9 @@ def test_common_refit_stops_after_failed_screen(
         _candidate(), dataset, ValidationContext(targets=("x",)), _config()
     )
 
-    assert result.final_fit is None
-    assert len(calls) == 1
+    assert result.final_fit is not None and result.final_fit.success
+    assert len(calls) == 2
+    assert calls[1][1] is None
 
 
 def test_common_refit_rejects_adaptive_screening() -> None:

@@ -14,8 +14,11 @@ from typing import Any
 from autoformalism.baselines.raw_data_agent import (
     RawAgentConfig,
     RawAgentInputs,
+    RawAgentOutputContract,
     RawAgentProvider,
     evaluate_raw_agent_candidate,
+    evaluate_raw_agent_fitted_model,
+    evaluation_metrics_payload,
     fit_result_payload,
     raw_agent_validation_context,
     repair_raw_data_agent_candidate,
@@ -42,6 +45,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm-timeout-seconds", type=float, default=1200.0)
     parser.add_argument("--llm-max-attempts", type=int, default=2)
     parser.add_argument("--contract-repair-attempts", type=int, default=1)
+    parser.add_argument(
+        "--output-contract",
+        choices=tuple(item.value for item in RawAgentOutputContract),
+        default=RawAgentOutputContract.STRUCTURE_ONLY.value,
+    )
     parser.add_argument("--fit-max-nfev", type=int, default=50)
     parser.add_argument("--fit-timeout-seconds", type=float, default=300.0)
     parser.add_argument("--dry-run", action="store_true")
@@ -100,6 +108,7 @@ def main() -> None:
         max_output_tokens=args.max_output_tokens,
         max_tool_calls=args.max_tool_calls,
         max_attempts=args.llm_max_attempts,
+        output_contract=RawAgentOutputContract(args.output_contract),
     )
     run_directory = output_root / _run_name(config, inputs)
     run_directory.mkdir(parents=True, exist_ok=True)
@@ -111,14 +120,28 @@ def main() -> None:
         "model": config.model,
         "repetition": config.repetition,
         "agent_config": config.model_dump(mode="json"),
-        "fit_config": {
-            "number_of_starts": 1,
-            "random_seed": args.repetition,
-            "integration_backend": "solve_ivp",
-            "allow_derivative_regression": False,
-            "maximum_function_evaluations": args.fit_max_nfev,
-            "maximum_wall_time_seconds": args.fit_timeout_seconds,
-        },
+        "fit_config": (
+            None
+            if config.output_contract is RawAgentOutputContract.FITTED_MODEL
+            else {
+                "number_of_starts": 1,
+                "random_seed": args.repetition,
+                "integration_backend": "solve_ivp",
+                "allow_derivative_regression": False,
+                "maximum_function_evaluations": args.fit_max_nfev,
+                "maximum_wall_time_seconds": args.fit_timeout_seconds,
+            }
+        ),
+        "fixed_model_evaluation_config": (
+            {
+                "integration_backend": "solve_ivp",
+                "parameter_optimization": False,
+                "fit_trajectory_initial_conditions": False,
+                "target_scales_fit_on": "train",
+            }
+            if config.output_contract is RawAgentOutputContract.FITTED_MODEL
+            else None
+        ),
         "public_input_hashes": {
             **inputs.file_hashes,
             "proposer_prompt.txt": _sha256(prompt_path),
@@ -129,6 +152,9 @@ def main() -> None:
         },
         "test_data_opened": False,
         "pruning_applied": False,
+        "parameter_refit_applied": (
+            config.output_contract is RawAgentOutputContract.STRUCTURE_ONLY
+        ),
         "contract_repair_attempts": args.contract_repair_attempts,
     }
     _write_json(run_directory / "run_config.json", run_config)
@@ -150,12 +176,30 @@ def main() -> None:
         evaluated_artifact = artifact
         for repair_index in range(args.contract_repair_attempts + 1):
             try:
-                candidate, repairs, fit, warnings = evaluate_raw_agent_candidate(
-                    artifact=evaluated_artifact,
-                    dataset=dataset,
-                    context=context,
-                    fit_config=FitConfig(**run_config["fit_config"]),
-                )
+                if config.output_contract is RawAgentOutputContract.FITTED_MODEL:
+                    (
+                        candidate,
+                        repairs,
+                        training_metrics,
+                        validation_metrics,
+                        warnings,
+                    ) = evaluate_raw_agent_fitted_model(
+                        artifact=evaluated_artifact,
+                        dataset=dataset,
+                        context=context,
+                        simulation_config=FitConfig(
+                            random_seed=args.repetition,
+                            integration_backend="solve_ivp",
+                            allow_derivative_regression=False,
+                        ),
+                    )
+                else:
+                    candidate, repairs, fit, warnings = evaluate_raw_agent_candidate(
+                        artifact=evaluated_artifact,
+                        dataset=dataset,
+                        context=context,
+                        fit_config=FitConfig(**run_config["fit_config"]),
+                    )
                 break
             except ModelValidationError as exc:
                 if repair_index >= args.contract_repair_attempts:
@@ -168,22 +212,60 @@ def main() -> None:
                     repair_index=repair_index + 1,
                     output_directory=run_directory,
                 )
-        evaluation = {
-            "schema_version": "raw-data-agent-evaluation-1",
-            "candidate_id": candidate.candidate_id,
-            "repairs": list(repairs),
-            "validation_warnings": list(warnings),
-            "fit": fit_result_payload(fit),
-            "test_data_opened": False,
-            "pruning_applied": False,
-        }
+        if config.output_contract is RawAgentOutputContract.FITTED_MODEL:
+            rollout_success = not (
+                training_metrics.failed_trajectories
+                or validation_metrics.failed_trajectories
+            )
+            evaluation = {
+                "schema_version": "raw-data-agent-fitted-evaluation-1",
+                "candidate_id": candidate.candidate_id,
+                "repairs": list(repairs),
+                "validation_warnings": list(warnings),
+                "parameter_source": "provider_agent",
+                "fitted_parameter_values": {
+                    item.name: (evaluated_artifact.fitted_parameter_values or {})[
+                        item.name
+                    ]
+                    for item in candidate.parameters
+                },
+                "fit_method_summary": evaluated_artifact.fit_method_summary,
+                "parameter_refit_applied": False,
+                "training_metrics": evaluation_metrics_payload(training_metrics),
+                "validation_metrics": evaluation_metrics_payload(
+                    validation_metrics
+                ),
+                "test_data_opened": False,
+                "pruning_applied": False,
+            }
+            status = {
+                "status": "complete" if rollout_success else "rollout_failed",
+                "candidate_id": candidate.candidate_id,
+                "validation_normalized_mse": validation_metrics.normalized_mse,
+                "training_normalized_mse": training_metrics.normalized_mse,
+                "parameter_refit_applied": False,
+            }
+        else:
+            evaluation = {
+                "schema_version": "raw-data-agent-evaluation-1",
+                "candidate_id": candidate.candidate_id,
+                "repairs": list(repairs),
+                "validation_warnings": list(warnings),
+                "fit": fit_result_payload(fit),
+                "parameter_refit_applied": True,
+                "test_data_opened": False,
+                "pruning_applied": False,
+            }
+            status = {
+                "status": "complete" if fit.success else "fit_failed",
+                "candidate_id": candidate.candidate_id,
+                "validation_normalized_mse": fit.validation_metrics.normalized_mse,
+                "training_normalized_mse": fit.training_metrics.normalized_mse,
+                "parameter_refit_applied": True,
+            }
         _write_json(run_directory / "candidate.json", candidate.model_dump(mode="json"))
         _write_json(run_directory / "evaluation.json", evaluation)
-        status = {
-            "status": "complete" if fit.success else "fit_failed",
-            "candidate_id": candidate.candidate_id,
-            "validation_normalized_mse": fit.validation_metrics.normalized_mse,
-            "training_normalized_mse": fit.training_metrics.normalized_mse,
+        status.update({
             "agent_latency_seconds": artifact.latency_seconds,
             "tool_call_count": artifact.tool_call_count,
             "requested_max_tool_calls": config.max_tool_calls,
@@ -194,7 +276,7 @@ def main() -> None:
                 artifact.tool_call_count > config.max_tool_calls
             ),
             "usage": None if artifact.usage is None else artifact.usage.model_dump(),
-        }
+        })
         _write_json(run_directory / "status.json", status)
         print(json.dumps(status, indent=2, sort_keys=True))
     except Exception as exc:

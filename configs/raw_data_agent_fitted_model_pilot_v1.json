@@ -1,0 +1,37 @@
+{
+  "schema_version": "raw-data-agent-fitted-model-pilot-1",
+  "status": "frozen_before_calls",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "output_contract": "fitted_model",
+  "benchmarks": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard"
+    }
+  ],
+  "repetitions": 3,
+  "agent_budget": {
+    "reasoning_effort": "high",
+    "max_tool_calls": 12,
+    "max_output_tokens": 30000,
+    "timeout_seconds": 1200,
+    "max_attempts": 2,
+    "contract_repair_attempts": 1
+  },
+  "evaluation": {
+    "parameter_source": "provider_agent",
+    "parameter_refit_applied": false,
+    "integration_backend": "solve_ivp",
+    "target_scales_fit_on": "train",
+    "train_parameters_fit_on": "train_only",
+    "validation_role": "structure_selection_and_frozen_evaluation"
+  },
+  "development_only": true,
+  "test_data_opened": false,
+  "pruning_applied": false
+}

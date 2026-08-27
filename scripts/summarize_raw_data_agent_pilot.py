@@ -26,6 +26,13 @@ def main() -> None:
                 "benchmark_id": config["benchmark_id"],
                 "tier": config["tier"],
                 "repetition": config["repetition"],
+                "output_contract": config.get("agent_config", {}).get(
+                    "output_contract", "structure_only"
+                ),
+                "parameter_refit_applied": status.get(
+                    "parameter_refit_applied",
+                    config.get("parameter_refit_applied", ""),
+                ),
                 "status": status["status"],
                 "candidate_id": status.get("candidate_id", ""),
                 "validation_normalized_mse": status.get(

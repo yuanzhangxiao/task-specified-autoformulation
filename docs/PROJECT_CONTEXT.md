@@ -401,16 +401,22 @@ generated Python. Its numerical fitting configuration must be reported.
 
 A complementary raw-data frontier-agent baseline gives current hosted models
 the same public prompt, train split, and validation split, together with hosted
-code execution. It returns one strict candidate that is refit through the shared
-runtime. This baseline has no Autoformalism search, pruning, scientific judge,
-test access, private model information, or web access. Provider calls and
-development evaluation are independently checkpointed so a scheduler timeout
-does not repeat a completed paid call.
+code execution. The primary contract now returns one strict candidate plus one
+fitted value for every global parameter. The shared runtime evaluates exactly
+those values and does not refit them. This baseline has no Autoformalism search,
+pruning, scientific judge, test access, private model information, or web access.
+Provider calls and development evaluation are independently checkpointed so a
+scheduler timeout does not repeat a completed paid call. The earlier structure-
+only GPT outputs are explicitly retained as a "GPT structure + Autoformalism
+fit" ablation rather than presented as full agent models.
 
-The development comparison now audits the hosted tool-call budget from cached
-responses, includes a matched 12-versus-24-call GPT sensitivity, and separates
-the raw system outcome from a common two-stage numerical refit. Scientific
-comparison uses the validated 120B paired-question-consensus protocol on
-identity-blinded, NMSE-blinded raw-agent versus Autoformalism structures. Those
-pairs are unlabeled, so their outcomes are descriptive rather than an accuracy
-claim.
+The fitted-model two-cell pilot uses GPT-5.6 Sol for three repetitions per cell,
+with train-only parameter fitting performed by the hosted agent and direct
+`solve_ivp` evaluation of its returned values. The development comparison still
+audits the hosted tool-call budget and retains common refitting as a secondary
+ablation. Before fitting the six earlier GPT structures again, a fit-free
+identity self-audit uses the validated 120B paired-question-consensus protocol
+to report deterministic validity, task compliance, target/initialization
+semantics, and absolute scientific assessments. Comparative self-pair answers
+are ignored and no accuracy claim is made. Raw-agent versus Autoformalism pairs
+remain identity-blinded, NMSE-blinded, and unlabeled.
