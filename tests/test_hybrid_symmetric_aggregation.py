@@ -26,6 +26,7 @@ from scripts.analyze_hybrid_symmetric_aggregation import (
     RULE_FINAL_MEAN,
     RULE_QUESTION_CONSENSUS,
     RULE_UNCERTAINTY_ABSTENTION,
+    _absolute_consensus,
     _uncertainty_direction,
     aggregate_trial,
     analyze,
@@ -239,6 +240,24 @@ def test_question_consensus_withholds_position_biased_criterion() -> None:
     ]
     assert trial["rules"][RULE_QUESTION_CONSENSUS]["preference"] == "baseline"
     assert trial["orientation_half_gap"] > 0.0
+
+
+def test_hard_target_consensus_fails_closed_on_orientation_disagreement() -> None:
+    criterion = AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT
+    left = (_paired(criterion, AbsoluteVerdict.PASS, AbsoluteVerdict.PASS),)
+    right = (_paired(criterion, AbsoluteVerdict.PASS, AbsoluteVerdict.FAIL),)
+
+    consensus, disagreements = _absolute_consensus(
+        left,
+        right,
+        fail_dominant_criteria=frozenset({criterion}),
+    )
+
+    assert consensus[0].candidate_a.verdict is AbsoluteVerdict.PASS
+    assert consensus[0].candidate_b.verdict is AbsoluteVerdict.FAIL
+    assert disagreements == (
+        "target_mapping_semantically_consistent:candidate:candidate_b",
+    )
 
 
 def test_uncertainty_rule_abstains_when_orientation_interval_crosses_tie() -> None:

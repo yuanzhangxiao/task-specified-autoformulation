@@ -41,7 +41,9 @@ from autoformalism.judging.prompts import (
     ATOMIC_CONTRACT_REPAIR_VERSION,
     ATOMIC_EVIDENCE_PROMPT,
     ATOMIC_HYBRID_JUDGE_PROTOCOL_VERSION,
+    ATOMIC_MISSING_UNIT_REPAIR_VERSION,
     ATOMIC_STAGE_TWO_NOTE,
+    FAIL_CLOSED_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION,
     HYBRID_JUDGE_PROMPT,
     HYBRID_JUDGE_PROTOCOL_VERSION,
     MODEL_SEMANTIC_HYBRID_JUDGE_PROMPT,
@@ -107,6 +109,10 @@ ATOMIC_FIELDS = (
     "atomic_response_transport",
     "atomic_provider_attempts",
     "atomic_successful_attempt_seed",
+    "atomic_missing_occurrences_filled",
+    "atomic_missing_repeats_filled",
+    "atomic_missing_occurrence_repairs",
+    "atomic_missing_repeat_repairs",
     "atomic_request_hash",
 )
 
@@ -480,6 +486,20 @@ def main() -> None:
         default="soft",
         help="whether determinate target completeness is advisory or mandatory",
     )
+    parser.add_argument(
+        "--target-mapping-consensus",
+        choices=("indeterminate", "fail_dominant"),
+        default="indeterminate",
+        help="how A/B-order disagreement is resolved for target completeness",
+    )
+    parser.add_argument(
+        "--repair-missing-atomic-units",
+        action="store_true",
+        help=(
+            "fill omitted runtime-owned atomic units with insufficient-public-"
+            "information verdicts after provider parsing"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
@@ -533,6 +553,17 @@ def main() -> None:
         raise SystemExit(
             "hard target-mapping enforcement requires a semantic contract"
         )
+    if (
+        args.target_mapping_consensus == "fail_dominant"
+        and args.target_mapping_enforcement != "hard"
+    ):
+        raise SystemExit(
+            "fail-dominant target consensus requires hard enforcement"
+        )
+    if args.repair_missing_atomic_units and not args.atomic_signed_occurrences:
+        raise SystemExit(
+            "missing atomic-unit repair requires atomic signed-occurrence mode"
+        )
     scoring = HybridScoringConfig(
         partial_tiebreak_weight=args.partial_tiebreak_weight,
         comparative_weight=args.comparative_weight,
@@ -545,6 +576,7 @@ def main() -> None:
             args.target_mapping_semantic_contract
         ),
         target_mapping_enforcement=args.target_mapping_enforcement,
+        target_mapping_consensus=args.target_mapping_consensus,
     )
     pair_bytes = args.pairs.read_bytes()
     source_pairs = tuple(
@@ -560,7 +592,12 @@ def main() -> None:
         strategy=args.shard_strategy,
     )
     args.output_root.mkdir(parents=True, exist_ok=True)
-    if args.recursive_target_mapping_semantics:
+    if (
+        args.target_mapping_consensus == "fail_dominant"
+        or args.repair_missing_atomic_units
+    ):
+        protocol_version = FAIL_CLOSED_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION
+    elif args.recursive_target_mapping_semantics:
         protocol_version = RECURSIVE_HARD_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION
     elif args.model_semantic_contract:
         protocol_version = MODEL_SEMANTIC_HYBRID_JUDGE_PROTOCOL_VERSION
@@ -611,6 +648,17 @@ def main() -> None:
     if args.target_mapping_enforcement != "soft":
         manifest["target_mapping_enforcement"] = (
             args.target_mapping_enforcement
+        )
+    if args.target_mapping_consensus != "indeterminate":
+        manifest["target_mapping_consensus"] = args.target_mapping_consensus
+    if args.repair_missing_atomic_units:
+        manifest.update(
+            {
+                "repair_missing_atomic_units": True,
+                "atomic_missing_unit_repair_version": (
+                    ATOMIC_MISSING_UNIT_REPAIR_VERSION
+                ),
+            }
         )
     if args.atomic_signed_occurrences:
         manifest.update(
@@ -874,6 +922,9 @@ def main() -> None:
                                 expected_repeat_pair_ids=(
                                     atomic_plan.repeat_pair_ids
                                 ),
+                                repair_missing_units=(
+                                    args.repair_missing_atomic_units
+                                ),
                             )
                             role_assessments = (
                                 atomic_role_compatibility_assessments(
@@ -1052,6 +1103,11 @@ def main() -> None:
                         )
                         if not isinstance(atomic_retry, dict):
                             atomic_retry = {}
+                        atomic_repair = atomic_call.raw_response.get(
+                            "_autoformalism_contract_repair"
+                        )
+                        if not isinstance(atomic_repair, dict):
+                            atomic_repair = {}
                         row.update(
                             {
                                 "atomic_evidence_plan": _json(
@@ -1069,6 +1125,26 @@ def main() -> None:
                                 ),
                                 "atomic_successful_attempt_seed": atomic_retry.get(
                                     "sampling_seed"
+                                ),
+                                "atomic_missing_occurrences_filled": _json(
+                                    atomic_repair.get(
+                                        "missing_occurrences_filled", []
+                                    )
+                                ),
+                                "atomic_missing_repeats_filled": _json(
+                                    atomic_repair.get(
+                                        "missing_repeats_filled", []
+                                    )
+                                ),
+                                "atomic_missing_occurrence_repairs": (
+                                    atomic_repair.get(
+                                        "missing_occurrence_repair_count", 0
+                                    )
+                                ),
+                                "atomic_missing_repeat_repairs": (
+                                    atomic_repair.get(
+                                        "missing_repeat_repair_count", 0
+                                    )
                                 ),
                                 "atomic_request_hash": atomic_call.request_hash,
                             }

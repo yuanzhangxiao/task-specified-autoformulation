@@ -103,7 +103,6 @@
         "$ref": "#/$defs/AtomicSignedOccurrenceAssessment"
       },
       "maxItems": 256,
-      "minItems": 1,
       "title": "Signed Occurrence Assessments",
       "type": "array"
     }

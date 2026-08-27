@@ -17,6 +17,7 @@ from autoformalism.judging import (
     candidate_claims,
     deterministic_pair_assessments,
     extract_public_requirements,
+    question_consensus,
     score_hybrid_pair,
     semantic_absolute_units,
     structural_facts,
@@ -564,6 +565,55 @@ def test_hard_target_contract_overrides_comparative_simplicity() -> None:
 def test_hard_target_contract_requires_semantic_question() -> None:
     with pytest.raises(ValueError, match="requires semantic assessment"):
         HybridScoringConfig(target_mapping_enforcement="hard")
+
+
+def test_fail_dominant_target_consensus_fails_closed() -> None:
+    first_payload = _hybrid_payload()
+    second_payload = _hybrid_payload()
+    target_unit = {
+        "criterion": "target_mapping_semantically_consistent",
+        "subject_id": "candidate",
+        "candidate_a": {
+            "verdict": "pass",
+            "evidence": "Candidate A appears complete.",
+        },
+        "candidate_b": {
+            "verdict": "pass",
+            "evidence": "Candidate B appears complete in this orientation.",
+        },
+    }
+    first_payload["absolute_assessments"].append(target_unit)  # type: ignore[union-attr]
+    second_target = json.loads(json.dumps(target_unit))
+    second_target["candidate_b"] = {
+        "verdict": "fail",
+        "evidence": "Candidate B omits a required target component.",
+    }
+    second_payload["absolute_assessments"].append(second_target)  # type: ignore[union-attr]
+
+    consensus, disagreements, _ = question_consensus(
+        HybridJudgeResult.model_validate(first_payload),
+        HybridJudgeResult.model_validate(second_payload),
+        fail_dominant_absolute_criteria=frozenset(
+            {AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT}
+        ),
+    )
+
+    target = next(
+        item
+        for item in consensus.absolute_assessments
+        if item.criterion
+        is AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT
+    )
+    assert target.candidate_a.verdict.value == "pass"
+    assert target.candidate_b.verdict.value == "fail"
+    assert disagreements == (
+        "target_mapping_semantically_consistent:candidate:candidate_b",
+    )
+
+
+def test_fail_dominant_consensus_requires_hard_target_enforcement() -> None:
+    with pytest.raises(ValueError, match="requires hard enforcement"):
+        HybridScoringConfig(target_mapping_consensus="fail_dominant")
 
 
 def test_hybrid_schema_discards_only_complete_whitelisted_extra_units() -> None:

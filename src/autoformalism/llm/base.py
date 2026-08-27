@@ -198,13 +198,37 @@ class CachedLLMClient(ABC):
         user_prompt: str,
         expected_occurrence_ids: set[str],
         expected_repeat_pair_ids: set[str],
+        repair_missing_units: bool = False,
     ) -> LLMCallResult[AtomicJudgeResult]:
         """Request sign-blinded atomic evidence before pairwise assessment."""
+        def normalize(
+            result: AtomicJudgeResult,
+        ) -> tuple[AtomicJudgeResult, dict[str, object]]:
+            repaired, occurrences, repeats = (
+                result.fill_missing_units_with_insufficient_information(
+                    occurrence_ids=expected_occurrence_ids,
+                    repeat_pair_ids=expected_repeat_pair_ids,
+                )
+            )
+            return repaired, {
+                "missing_occurrences_filled": list(occurrences),
+                "missing_repeats_filled": list(repeats),
+                "missing_occurrence_repair_count": len(occurrences),
+                "missing_repeat_repair_count": len(repeats),
+            }
+
         return self._structured_call(
-            role="atomic_evidence_judge",
+            role=(
+                "atomic_evidence_judge_missing_unit_repair_v1"
+                if repair_missing_units
+                else "atomic_evidence_judge"
+            ),
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=AtomicJudgeResult,
+            normalize_after_exhausted=(
+                normalize if repair_missing_units else None
+            ),
             validate_parsed=lambda result: result.validate_expected_units(
                 occurrence_ids=expected_occurrence_ids,
                 repeat_pair_ids=expected_repeat_pair_ids,
@@ -219,6 +243,9 @@ class CachedLLMClient(ABC):
         user_prompt: str,
         response_model: type[StructuredT],
         normalize_parsed: (
+            Callable[[StructuredT], tuple[StructuredT, dict[str, object]]] | None
+        ) = None,
+        normalize_after_exhausted: (
             Callable[[StructuredT], tuple[StructuredT, dict[str, object]]] | None
         ) = None,
         validate_parsed: Callable[[StructuredT], object] | None = None,
@@ -289,13 +316,43 @@ class CachedLLMClient(ABC):
                     try:
                         validate_parsed(provider_response.parsed)
                     except ValueError as exc:
-                        raise LLMResponseError(
-                            f"response failed post-schema validation: {exc}",
-                            raw_response=provider_response.raw_response,
-                            diagnostic_code=(
-                                RepairDiagnosticCode.POST_SCHEMA_VALIDATION
-                            ),
-                        ) from exc
+                        if (
+                            normalize_after_exhausted is not None
+                            and attempts >= self._max_attempts
+                        ):
+                            parsed, repair = normalize_after_exhausted(
+                                provider_response.parsed
+                            )
+                            try:
+                                validate_parsed(parsed)
+                            except ValueError as repaired_exc:
+                                raise LLMResponseError(
+                                    "response failed post-schema validation: "
+                                    f"{repaired_exc}",
+                                    raw_response=provider_response.raw_response,
+                                    diagnostic_code=(
+                                        RepairDiagnosticCode.POST_SCHEMA_VALIDATION
+                                    ),
+                                ) from repaired_exc
+                            raw_response = dict(provider_response.raw_response)
+                            raw_response[
+                                "_autoformalism_contract_repair"
+                            ] = repair
+                            provider_response = ProviderResponse(
+                                parsed=parsed,
+                                raw_response=raw_response,
+                                usage=provider_response.usage,
+                                latency_ms=provider_response.latency_ms,
+                            )
+                        else:
+                            raise LLMResponseError(
+                                "response failed post-schema validation: "
+                                f"{exc}",
+                                raw_response=provider_response.raw_response,
+                                diagnostic_code=(
+                                    RepairDiagnosticCode.POST_SCHEMA_VALIDATION
+                                ),
+                            ) from exc
                 break
             except (LLMProviderError, LLMResponseError) as exc:
                 self._log_failure(role, request_hash, attempts, exc)

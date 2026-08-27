@@ -19,6 +19,7 @@ from autoformalism.rebuttal.hybrid_labels import (
     HybridCalibrationLabels,
 )
 from autoformalism.schemas import (
+    AbsoluteCriterion,
     AbsoluteVerdict,
     CandidateAbsoluteAssessment,
     HybridJudgeResult,
@@ -153,6 +154,8 @@ def _normalized_comparative(
 def _absolute_consensus(
     left: tuple[PairedAbsoluteAssessment, ...],
     right: tuple[PairedAbsoluteAssessment, ...],
+    *,
+    fail_dominant_criteria: frozenset[AbsoluteCriterion] = frozenset(),
 ) -> tuple[tuple[PairedAbsoluteAssessment, ...], tuple[str, ...]]:
     """Keep matching verdicts and mark orientation disagreements unknown."""
     left_index = {(item.criterion, item.subject_id): item for item in left}
@@ -170,17 +173,25 @@ def _absolute_consensus(
             second_verdict = getattr(second, side).verdict
             if first_verdict is second_verdict:
                 verdict = first_verdict
+                evidence = "Symmetric orientation consensus."
+            elif (
+                key[0] in fail_dominant_criteria
+                and AbsoluteVerdict.FAIL in {first_verdict, second_verdict}
+            ):
+                verdict = AbsoluteVerdict.FAIL
+                evidence = (
+                    "Orientations disagreed; hard public requirement failed "
+                    "closed because one orientation detected a violation."
+                )
+                disagreements.append(f"{key[0].value}:{key[1]}:{side}")
             else:
                 verdict = AbsoluteVerdict.INDETERMINATE
+                evidence = "Orientations disagreed; withheld as indeterminate."
                 disagreements.append(f"{key[0].value}:{key[1]}:{side}")
             candidates.append(
                 CandidateAbsoluteAssessment(
                     verdict=verdict,
-                    evidence=(
-                        "Symmetric orientation consensus."
-                        if first_verdict is second_verdict
-                        else "Orientations disagreed; withheld as indeterminate."
-                    ),
+                    evidence=evidence,
                 )
             )
         output.append(
@@ -279,6 +290,13 @@ def aggregate_trial(
     absolute, absolute_disagreements = _absolute_consensus(
         _normalized_absolute(row_a),
         _normalized_absolute(row_b),
+        fail_dominant_criteria=(
+            frozenset(
+                {AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT}
+            )
+            if config.target_mapping_consensus == "fail_dominant"
+            else frozenset()
+        ),
     )
     comparative, comparative_disagreements = _comparative_consensus(
         _normalized_comparative(row_a),
@@ -474,6 +492,7 @@ def analyze(
         "schema_version": "hybrid-symmetric-aggregation-analysis-1",
         "status": "posthoc_development_analysis",
         "new_llm_calls": 0,
+        "target_mapping_consensus": config.target_mapping_consensus,
         "attempted_paired_trials": len(attempted),
         "complete_paired_trials": len(trials),
         "paired_response_coverage": len(trials) / len(attempted) if attempted else None,
@@ -513,6 +532,16 @@ def analyze(
 
 
 def _summary(result: dict[str, object]) -> str:
+    consensus_description = (
+        "Question consensus fails a hard target requirement when either "
+        "normalized orientation detects a violation; other disagreements "
+        "remain indeterminate"
+        if result.get("target_mapping_consensus") == "fail_dominant"
+        else (
+            "Question consensus marks any normalized orientation disagreement "
+            "indeterminate"
+        )
+    )
     lines = [
         "# Symmetry-preserving hybrid aggregation",
         "",
@@ -542,8 +571,7 @@ def _summary(result: dict[str, object]) -> str:
         (
             "",
             "Orientation uncertainty is retained as half the normalized "
-            "A/B decision gap. Question consensus marks any normalized "
-            "orientation disagreement indeterminate; uncertainty abstention "
+            f"A/B decision gap. {consensus_description}; uncertainty abstention "
             "withholds a decision when the orientation interval crosses the "
             "tie boundary.",
         )
@@ -640,6 +668,9 @@ def main() -> None:
         ),
         target_mapping_enforcement=scoring.get(
             "target_mapping_enforcement", "soft"
+        ),
+        target_mapping_consensus=scoring.get(
+            "target_mapping_consensus", "indeterminate"
         ),
     )
     result = analyze(rows, failures, labels, config=config)

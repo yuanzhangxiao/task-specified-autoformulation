@@ -104,6 +104,7 @@ class LLMClient(Protocol):
         user_prompt: str,
         expected_occurrence_ids: set[str],
         expected_repeat_pair_ids: set[str],
+        repair_missing_units: bool = False,
     ) -> LLMCallResult[AtomicJudgeResult]:
         """Request sign-blinded occurrence and exact-repeat assessments."""
         ...

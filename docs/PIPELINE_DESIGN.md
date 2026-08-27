@@ -600,6 +600,17 @@ ordinary scoring. This is a feasibility constraint over the public output
 contract, not another tunable objective weight. Defaults remain soft so all
 earlier frozen reports reproduce exactly.
 
+Protocol 7 distinguishes presentation symmetry from hard-contract acceptance.
+The same candidate pair is judged in A/B and B/A order and normalized back to
+stable identities. Ordinary disagreements remain indeterminate. A hard target
+contract is fail-closed: both orientations must pass a candidate, while either
+orientation may establish failure. This asymmetric logical rule applies only to
+mandatory public requirements and is not used for comparative scientific taste.
+After all provider retries, omitted atomic units may be filled only with the
+neutral `insufficient_public_information` value. The repair is permitted only
+when there are no unexpected identifiers, is logged per unit, and does not
+convert missing evidence into a scientific claim.
+
 ## Failure and security behavior
 
 - Missing `AUTOFORMALISM_DATA_ROOT`, contradictory metadata, unsafe

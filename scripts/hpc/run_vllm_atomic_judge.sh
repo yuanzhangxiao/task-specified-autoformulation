@@ -28,6 +28,8 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_TARGET_MAPPING_SEMANTIC_CONTRACT:=false}"
 : "${AF_RECURSIVE_TARGET_MAPPING_SEMANTICS:=false}"
 : "${AF_TARGET_MAPPING_ENFORCEMENT:=soft}"
+: "${AF_TARGET_MAPPING_CONSENSUS:=indeterminate}"
+: "${AF_REPAIR_MISSING_ATOMIC_UNITS:=false}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 : "${AF_PAIR_IDS=heldout_55d8026028a90be5 heldout_ee453d8cc6fcb7a2 heldout_70b3222d4736ea1d heldout_cca8883e6ae1b33f}"
 
@@ -95,6 +97,27 @@ case "${AF_TARGET_MAPPING_ENFORCEMENT}" in
     ;;
   *)
     echo "AF_TARGET_MAPPING_ENFORCEMENT must be soft or hard" >&2
+    exit 2
+    ;;
+esac
+case "${AF_TARGET_MAPPING_CONSENSUS}" in
+  indeterminate|fail_dominant)
+    target_contract_args+=(
+      --target-mapping-consensus "${AF_TARGET_MAPPING_CONSENSUS}"
+    )
+    ;;
+  *)
+    echo "AF_TARGET_MAPPING_CONSENSUS must be indeterminate or fail_dominant" >&2
+    exit 2
+    ;;
+esac
+case "${AF_REPAIR_MISSING_ATOMIC_UNITS}" in
+  true)
+    target_contract_args+=(--repair-missing-atomic-units)
+    ;;
+  false) ;;
+  *)
+    echo "AF_REPAIR_MISSING_ATOMIC_UNITS must be true or false" >&2
     exit 2
     ;;
 esac

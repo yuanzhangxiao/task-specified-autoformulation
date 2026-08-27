@@ -818,3 +818,24 @@ only. That measures aggregation independently of the recursive instruction. The
 matched v5 call experiment then reuses the exact v4 pair and label bytes, public
 prompt, model, seeds, weights, thresholds, and question consensus; only the
 recursive instruction and versioned hard target contract change.
+
+V5 produced the correct paired winner for every usable trial and improved the
+target-mapping result, but failed the frozen reliability gates. The valid model
+passed in all 19 successful orientations. The incomplete model failed in 17 of
+19 orientations; its two false passes occurred only when the baseline was shown
+first, while the swapped presentation correctly found the omission. Here an
+orientation means one presentation order of the same two candidate identities:
+the runtime asks A/B and B/A, then maps both answers back to those identities.
+One additional B/A call failed before comparison because all nine requested
+atomic occurrence units were omitted after ten provider attempts.
+
+`hybrid-judge-protocol-7-fail-closed-target-contract` makes two versioned,
+general repairs. Ordinary scientific-question disagreements remain
+indeterminate. For a hard public requirement only, pass requires pass in both
+orientations, while a fail in either orientation yields fail; this is recorded
+as an orientation disagreement even though the contract fails closed. Separately,
+the atomic provider still receives all bounded retries. If its final parsed
+response contains only missing runtime-owned units and no unexpected units, the
+runtime fills each omission with `insufficient_public_information`, records the
+exact identifiers and repair counts, and continues. It never invents a direction
+or repeated-flux relation, and any unexpected identifier remains terminal.

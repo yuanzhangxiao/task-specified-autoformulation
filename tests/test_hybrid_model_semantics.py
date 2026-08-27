@@ -61,6 +61,10 @@ V5_CONFIG = Path("configs/hybrid_judge_target_mapping_recursive_hard_v5.json")
 V5_SLURM = Path(
     "scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v5_recursive_hard_120b.slurm"
 )
+V6_CONFIG = Path("configs/hybrid_judge_target_mapping_fail_closed_v6.json")
+V6_SLURM = Path(
+    "scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v6_fail_closed_120b.slurm"
+)
 V1_ADJUDICATION = Path(
     "configs/hybrid_judge_model_semantics_validation_v1_adjudication.json"
 )
@@ -568,3 +572,22 @@ def test_v5_config_and_launcher_freeze_recursive_hard_target_contract() -> None:
     assert "AF_TARGET_MAPPING_ENFORCEMENT:=hard" in launcher
     assert "cmp --silent" in launcher
     subprocess.run(["bash", "-n", str(V5_SLURM)], check=True)
+
+
+def test_v6_config_and_launcher_freeze_fail_closed_repair() -> None:
+    config = json.loads(V6_CONFIG.read_text(encoding="utf-8"))
+    launcher = V6_SLURM.read_text(encoding="utf-8")
+
+    assert config["status"] == "frozen_before_fail_closed_target_calls"
+    assert config["matched_control"]["pair_bytes_must_match_source"] is True
+    protocol = config["protocol"]
+    assert protocol["recursive_target_mapping_semantics"] is True
+    assert protocol["target_mapping_enforcement"] == "hard"
+    assert protocol["target_mapping_consensus"] == "fail_dominant"
+    assert protocol["repair_missing_atomic_units"] is True
+    assert protocol["hard_override_policy"]["any_fail"] == "fail"
+    assert protocol["scoring"]["target_mapping_consensus"] == "fail_dominant"
+    assert "AF_TARGET_MAPPING_CONSENSUS:=fail_dominant" in launcher
+    assert "AF_REPAIR_MISSING_ATOMIC_UNITS:=true" in launcher
+    assert "cmp --silent" in launcher
+    subprocess.run(["bash", "-n", str(V6_SLURM)], check=True)

@@ -34,6 +34,7 @@ from autoformalism.llm.ollama import OllamaClient, _ollama_compatible_schema
 from autoformalism.llm.openai_responses import OpenAIResponsesClient
 from autoformalism.schemas import (
     AbsoluteCriterion,
+    AtomicJudgeResult,
     CandidateModel,
     HybridJudgeResult,
     ProposerCandidateV2,
@@ -309,6 +310,46 @@ def test_cached_hybrid_client_repairs_only_redundant_atomic_role_units(
         ],
         "redundant_absolute_unit_repair_count": 2,
     }
+
+
+def test_cached_atomic_client_repairs_missing_units_only_after_retries(
+    tmp_path: Path,
+) -> None:
+    empty = AtomicJudgeResult.model_validate(
+        {
+            "signed_occurrence_assessments": [],
+            "repeated_contribution_assessments": [],
+        }
+    )
+
+    class AtomicClient(StubCachedClient):
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            self.provider_calls += 1
+            self.provider_attempt_numbers.append(kwargs["attempt_number"])
+            assert kwargs["role"] == (
+                "atomic_evidence_judge_missing_unit_repair_v1"
+            )
+            return ProviderResponse(parsed=empty, raw_response={"provider": True})
+
+    client = AtomicClient(tmp_path)
+
+    result = client.assess_atomic_evidence(
+        system_prompt="system",
+        user_prompt="atomic",
+        expected_occurrence_ids={"occurrence_a"},
+        expected_repeat_pair_ids=set(),
+        repair_missing_units=True,
+    )
+
+    assert client.provider_calls == 3
+    assert client.provider_attempt_numbers == [1, 2, 3]
+    assert result.attempts == 3
+    assert result.parsed.signed_occurrence_assessments[0].expected_direction.value == (
+        "insufficient_public_information"
+    )
+    assert result.raw_response["_autoformalism_contract_repair"][
+        "missing_occurrence_repair_count"
+    ] == 1
 
 
 def test_request_hash_is_stable_and_materially_sensitive(tmp_path: Path) -> None:

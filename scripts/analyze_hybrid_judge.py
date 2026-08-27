@@ -422,6 +422,22 @@ def main() -> None:
                 int(row.get("tool_argument_key_repairs") or 0)
                 for row in model_rows
             ),
+            "responses_with_missing_atomic_unit_repairs": sum(
+                (
+                    int(row.get("atomic_missing_occurrence_repairs") or 0)
+                    + int(row.get("atomic_missing_repeat_repairs") or 0)
+                )
+                > 0
+                for row in model_rows
+            ),
+            "missing_atomic_occurrence_repair_count": sum(
+                int(row.get("atomic_missing_occurrence_repairs") or 0)
+                for row in model_rows
+            ),
+            "missing_atomic_repeat_repair_count": sum(
+                int(row.get("atomic_missing_repeat_repairs") or 0)
+                for row in model_rows
+            ),
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
@@ -483,6 +499,17 @@ def _write_summary(path: Path, metrics: dict[str, object]) -> None:
             )
             + " |"
         )
+        repair_responses = int(
+            values.get("responses_with_missing_atomic_unit_repairs") or 0
+        )
+        if repair_responses:
+            lines.append(
+                f"\n{model}: {repair_responses} responses required neutral "
+                "missing-atomic-unit repair "
+                f"({values['missing_atomic_occurrence_repair_count']} "
+                "occurrences; "
+                f"{values['missing_atomic_repeat_repair_count']} repeats)."
+            )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

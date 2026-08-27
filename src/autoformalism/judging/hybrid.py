@@ -932,6 +932,9 @@ class HybridScoringConfig:
     include_target_mapping_semantics: bool = False
     include_initialization_semantics: bool = False
     target_mapping_enforcement: Literal["soft", "hard"] = "soft"
+    target_mapping_consensus: Literal["indeterminate", "fail_dominant"] = (
+        "indeterminate"
+    )
 
     def __post_init__(self) -> None:
         values = (
@@ -956,6 +959,11 @@ class HybridScoringConfig:
             raise ValueError("unsupported comparative indeterminate policy")
         if self.target_mapping_enforcement not in {"soft", "hard"}:
             raise ValueError("unsupported target-mapping enforcement")
+        if self.target_mapping_consensus not in {
+            "indeterminate",
+            "fail_dominant",
+        }:
+            raise ValueError("unsupported target-mapping consensus")
         if (
             self.target_mapping_enforcement == "hard"
             and not (
@@ -965,6 +973,13 @@ class HybridScoringConfig:
         ):
             raise ValueError(
                 "hard target-mapping enforcement requires semantic assessment"
+            )
+        if (
+            self.target_mapping_consensus == "fail_dominant"
+            and self.target_mapping_enforcement != "hard"
+        ):
+            raise ValueError(
+                "fail-dominant target consensus requires hard enforcement"
             )
 
 
@@ -1343,6 +1358,8 @@ def reverse_hybrid_result(result: HybridJudgeResult) -> HybridJudgeResult:
 def question_consensus(
     first: HybridJudgeResult,
     second: HybridJudgeResult,
+    *,
+    fail_dominant_absolute_criteria: frozenset[AbsoluteCriterion] = frozenset(),
 ) -> tuple[HybridJudgeResult, tuple[str, ...], tuple[str, ...]]:
     """Retain only question verdicts shared by two identity-aligned results.
 
@@ -1374,6 +1391,18 @@ def question_consensus(
                     "Symmetric orientations agree. First orientation: "
                     f"{getattr(left, side).evidence} Second orientation: "
                     f"{getattr(right, side).evidence}"
+                )
+            elif (
+                key[0] in fail_dominant_absolute_criteria
+                and AbsoluteVerdict.FAIL in {left_verdict, right_verdict}
+            ):
+                verdict = AbsoluteVerdict.FAIL
+                evidence = (
+                    "Orientations disagreed; this hard public requirement "
+                    "fails closed because one orientation detected a violation."
+                )
+                absolute_disagreements.append(
+                    f"{key[0].value}:{key[1]}:{side}"
                 )
             else:
                 verdict = AbsoluteVerdict.INDETERMINATE

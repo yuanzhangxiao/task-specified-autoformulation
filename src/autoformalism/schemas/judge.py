@@ -365,7 +365,7 @@ class AtomicJudgeResult(StrictSchema):
     schema_version: Literal["atomic-judge-1"] = "atomic-judge-1"
     signed_occurrence_assessments: tuple[
         AtomicSignedOccurrenceAssessment, ...
-    ] = Field(min_length=1, max_length=256)
+    ] = Field(max_length=256)
     repeated_contribution_assessments: tuple[
         AtomicRepeatedContributionAssessment, ...
     ] = Field(default=(), max_length=256)
@@ -408,6 +408,72 @@ class AtomicJudgeResult(StrictSchema):
                 f"missing_repeats={sorted(repeat_pair_ids - actual_repeats)}, "
                 f"extra_repeats={sorted(actual_repeats - repeat_pair_ids)}"
             )
+
+    def fill_missing_units_with_insufficient_information(
+        self,
+        *,
+        occurrence_ids: set[str],
+        repeat_pair_ids: set[str],
+    ) -> tuple[AtomicJudgeResult, tuple[str, ...], tuple[str, ...]]:
+        """Fill only missing runtime-owned units with neutral assessments.
+
+        Extra or otherwise unexpected identifiers are never repaired because
+        they can indicate that the provider answered a different question.
+        """
+        actual_occurrences = {
+            item.occurrence_id for item in self.signed_occurrence_assessments
+        }
+        actual_repeats = {
+            item.repeat_pair_id
+            for item in self.repeated_contribution_assessments
+        }
+        if actual_occurrences - occurrence_ids or actual_repeats - repeat_pair_ids:
+            return self, (), ()
+        missing_occurrences = tuple(sorted(occurrence_ids - actual_occurrences))
+        missing_repeats = tuple(sorted(repeat_pair_ids - actual_repeats))
+        if not missing_occurrences and not missing_repeats:
+            return self, (), ()
+        repaired = AtomicJudgeResult(
+            signed_occurrence_assessments=(
+                *self.signed_occurrence_assessments,
+                *(
+                    AtomicSignedOccurrenceAssessment(
+                        occurrence_id=occurrence_id,
+                        expected_direction=(
+                            ExpectedContributionDirection.INSUFFICIENT_PUBLIC_INFORMATION
+                        ),
+                        evidence=(
+                            "Provider omitted this runtime-requested unit after "
+                            "bounded retries; retained as insufficient public "
+                            "information without inferring a scientific answer."
+                        ),
+                    )
+                    for occurrence_id in missing_occurrences
+                ),
+            ),
+            repeated_contribution_assessments=(
+                *self.repeated_contribution_assessments,
+                *(
+                    AtomicRepeatedContributionAssessment(
+                        repeat_pair_id=repeat_pair_id,
+                        relation=(
+                            RepeatedContributionRelation.INSUFFICIENT_PUBLIC_INFORMATION
+                        ),
+                        evidence=(
+                            "Provider omitted this runtime-requested unit after "
+                            "bounded retries; retained as insufficient public "
+                            "information without inferring a scientific answer."
+                        ),
+                    )
+                    for repeat_pair_id in missing_repeats
+                ),
+            ),
+        )
+        repaired.validate_expected_units(
+            occurrence_ids=occurrence_ids,
+            repeat_pair_ids=repeat_pair_ids,
+        )
+        return repaired, missing_occurrences, missing_repeats
 
 
 class HybridJudgeResult(StrictSchema):

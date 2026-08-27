@@ -1313,6 +1313,53 @@ Do not reinterpret the offline ablation as prompt accuracy: it changes only the
 deterministic enforcement of stored v4 answers. V5 is the matched test of the
 recursive instruction plus the frozen hard contract.
 
+V5 retained one atomic terminal failure and two order-specific false passes for
+the incomplete target. Before making new calls, rescore its nine complete paired
+trials using fail-closed hard-target consensus. This does not recover the failed
+call and does not overwrite v5 reports:
+
+```bash
+repo=/projects/bibo/yxiao2/repos/autoformalism-v21
+python_bin=/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python
+source=/work/hdd/bibo/yxiao2/phase_b/judge-hybrid-target-mapping-v5-recursive-hard
+root="$source/gpt-oss-120b"
+v6_config="$repo/configs/hybrid_judge_target_mapping_fail_closed_v6.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_symmetric_aggregation.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$source/hybrid_labels.jsonl" \
+  --protocol-config "$v6_config" \
+  --output "$root/fail_closed_target_rescore.json"
+
+"$python_bin" "$repo/scripts/analyze_hybrid_model_semantics_validation.py" \
+  --scores "$root/hybrid_judge_scores.csv" \
+  --failures "$root/hybrid_judge_failures.jsonl" \
+  --labels "$source/hybrid_labels.jsonl" \
+  --symmetric-analysis "$root/fail_closed_target_rescore.json" \
+  --protocol-config "$v6_config" \
+  --output "$root/fail_closed_target_rescore_validation.json"
+
+cat "$root/fail_closed_target_rescore.md"
+cat "$root/fail_closed_target_rescore_validation.md"
+```
+
+Then submit the matched v6 run. It reuses and byte-compares the v5 pair and label
+files, keeps the recursive prompts and all numeric settings fixed, and changes
+only fail-closed hard-target consensus plus the bounded neutral atomic repair:
+
+```bash
+cd /projects/bibo/yxiao2/repos/autoformalism-v21
+mkdir -p logs
+sbatch \
+  scripts/hpc/phase_b_hybrid_judge_vllm_target_mapping_v6_fail_closed_120b.slurm
+```
+
+The atomic repair does not silently claim success. Raw provider omissions and
+the exact neutral fills remain visible in the CSV provenance fields. Do not
+enable either repair in search until v6 passes every unchanged gate and a later
+fresh-structure confirmation passes.
+
 ## Acceptance checklist
 
 For each system, do not start production until all are true:

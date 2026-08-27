@@ -320,6 +320,15 @@ The pipeline is iterative:
   opt-in hard `target_contract` group. A determinate pass-versus-fail target
   contract overrides comparative preferences; indeterminate or equal verdicts
   do not. Legacy protocols retain soft enforcement and remain reproducible.
+  V5 then achieved the correct paired winner on every usable trial. Across 19
+  successful orientations, the valid target passed 19/19 and the incomplete
+  target failed 17/19; both false passes were corrected by the swapped order.
+  One atomic call remained terminal after omitting all nine requested units.
+  Protocol 7 therefore fails hard target contracts when either normalized
+  orientation detects a violation and, only after bounded retries, fills missing
+  atomic units with logged insufficient-information assessments. Unexpected
+  units are never repaired. These behaviors remain opt-in pending the matched v6
+  result and a subsequent fresh-structure confirmation.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

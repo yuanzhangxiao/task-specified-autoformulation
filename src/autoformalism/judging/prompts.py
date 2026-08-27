@@ -171,3 +171,9 @@ RECURSIVE_HARD_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION = (
     "hybrid-judge-protocol-6-recursive-hard-target-contract"
 )
 ATOMIC_CONTRACT_REPAIR_VERSION = "atomic-redundant-role-unit-repair-1"
+ATOMIC_MISSING_UNIT_REPAIR_VERSION = (
+    "atomic-missing-unit-insufficient-information-repair-1"
+)
+FAIL_CLOSED_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION = (
+    "hybrid-judge-protocol-7-fail-closed-target-contract"
+)

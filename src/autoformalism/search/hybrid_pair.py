@@ -43,10 +43,16 @@ LEGACY_PAIRWISE_SEARCH_PROTOCOL_VERSION = (
 PAIRWISE_SEARCH_PROTOCOL_VERSION = (
     "incumbent-hybrid-question-consensus-2-fixed-denominator"
 )
+FAIL_CLOSED_TARGET_SEARCH_PROTOCOL_VERSION = (
+    "incumbent-hybrid-question-consensus-3-fail-closed-target"
+)
 _REDUNDANT_ATOMIC_ROLE_UNITS = {
     (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate"),
     (AbsoluteCriterion.SINK_ROLES_CONSISTENT, "candidate"),
 }
+_FAIL_DOMINANT_TARGET_CRITERIA = frozenset(
+    {AbsoluteCriterion.TARGET_MAPPING_SEMANTICALLY_CONSISTENT}
+)
 
 
 class HybridPairJudgment(StrictSchema):
@@ -111,6 +117,7 @@ class PairedHybridJudge:
         system_prompt: str,
         atomic_system_prompt: str,
         scoring: HybridScoringConfig | None = None,
+        repair_missing_atomic_units: bool = False,
         identity: str,
     ) -> None:
         if not seeded_clients:
@@ -123,12 +130,16 @@ class PairedHybridJudge:
         self._system_prompt = system_prompt
         self._atomic_system_prompt = atomic_system_prompt
         self._scoring = scoring or HybridScoringConfig()
-        self._protocol_version = (
-            PAIRWISE_SEARCH_PROTOCOL_VERSION
-            if self._scoring.comparative_indeterminate_policy
-            == "neutral_fixed_denominator"
-            else LEGACY_PAIRWISE_SEARCH_PROTOCOL_VERSION
-        )
+        self._repair_missing_atomic_units = repair_missing_atomic_units
+        if self._scoring.target_mapping_consensus == "fail_dominant":
+            self._protocol_version = FAIL_CLOSED_TARGET_SEARCH_PROTOCOL_VERSION
+        else:
+            self._protocol_version = (
+                PAIRWISE_SEARCH_PROTOCOL_VERSION
+                if self._scoring.comparative_indeterminate_policy
+                == "neutral_fixed_denominator"
+                else LEGACY_PAIRWISE_SEARCH_PROTOCOL_VERSION
+            )
         fingerprint_payload = {
             "protocol": self._protocol_version,
             "identity": identity,
@@ -136,6 +147,7 @@ class PairedHybridJudge:
             "requirements": requirements.model_dump(mode="json"),
             "task_inputs": task_inputs,
             "scoring": self._scoring.__dict__,
+            "repair_missing_atomic_units": repair_missing_atomic_units,
             "system_prompt_sha256": hashlib.sha256(system_prompt.encode()).hexdigest(),
             "atomic_system_prompt_sha256": hashlib.sha256(
                 atomic_system_prompt.encode()
@@ -167,7 +179,16 @@ class PairedHybridJudge:
                 continue
             reverse_result = reverse_hybrid_result(reverse.result)
             consensus, absolute_disagreements, comparative_disagreements = (
-                question_consensus(forward.result, reverse_result)
+                question_consensus(
+                    forward.result,
+                    reverse_result,
+                    fail_dominant_absolute_criteria=(
+                        _FAIL_DOMINANT_TARGET_CRITERIA
+                        if self._scoring.target_mapping_consensus
+                        == "fail_dominant"
+                        else frozenset()
+                    ),
+                )
             )
             deterministic = require_deterministic_orientation_consensus(
                 forward.deterministic,
@@ -261,6 +282,7 @@ class PairedHybridJudge:
             user_prompt=json.dumps(atomic_request, sort_keys=True),
             expected_occurrence_ids=atomic_plan.occurrence_ids,
             expected_repeat_pair_ids=atomic_plan.repeat_pair_ids,
+            repair_missing_units=self._repair_missing_atomic_units,
         )
         role_assessments = atomic_role_compatibility_assessments(
             atomic_call.parsed,

@@ -279,6 +279,73 @@ def test_mock_atomic_client_requires_exact_runtime_units() -> None:
         )
 
 
+def test_missing_atomic_units_are_repaired_only_as_insufficient_information() -> None:
+    client = MockLLMClient(
+        atomic_responses=[
+            {
+                "signed_occurrence_assessments": [],
+                "repeated_contribution_assessments": [],
+            }
+        ]
+    )
+
+    result = client.assess_atomic_evidence(
+        system_prompt="system",
+        user_prompt="unsigned request",
+        expected_occurrence_ids={"occurrence_a", "occurrence_b"},
+        expected_repeat_pair_ids={"repeat_a"},
+        repair_missing_units=True,
+    )
+
+    assert client.calls[0]["role"] == (
+        "atomic_evidence_judge_missing_unit_repair_v1"
+    )
+    assert {
+        item.expected_direction.value
+        for item in result.parsed.signed_occurrence_assessments
+    } == {"insufficient_public_information"}
+    assert {
+        item.relation.value
+        for item in result.parsed.repeated_contribution_assessments
+    } == {"insufficient_public_information"}
+    assert result.raw_response["_autoformalism_contract_repair"] == {
+        "missing_occurrences_filled": ["occurrence_a", "occurrence_b"],
+        "missing_repeats_filled": ["repeat_a"],
+        "missing_occurrence_repair_count": 2,
+        "missing_repeat_repair_count": 1,
+    }
+
+
+def test_missing_atomic_unit_repair_rejects_unexpected_identifiers() -> None:
+    result = AtomicJudgeResult.model_validate(
+        {
+            "signed_occurrence_assessments": [
+                {
+                    "occurrence_id": "unexpected",
+                    "expected_direction": "context_dependent",
+                    "evidence": "Unexpected provider unit.",
+                }
+            ]
+        }
+    )
+
+    repaired, occurrences, repeats = (
+        result.fill_missing_units_with_insufficient_information(
+            occurrence_ids={"expected"},
+            repeat_pair_ids=set(),
+        )
+    )
+
+    assert repaired is result
+    assert occurrences == ()
+    assert repeats == ()
+    with pytest.raises(ValueError, match="missing_occurrences"):
+        repaired.validate_expected_units(
+            occurrence_ids={"expected"},
+            repeat_pair_ids=set(),
+        )
+
+
 def test_atomic_analyzer_scores_only_mutation_added_units(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

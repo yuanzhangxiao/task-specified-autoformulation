@@ -162,24 +162,56 @@ class MockLLMClient:
         user_prompt: str,
         expected_occurrence_ids: set[str],
         expected_repeat_pair_ids: set[str],
+        repair_missing_units: bool = False,
     ) -> LLMCallResult[AtomicJudgeResult]:
         """Return the next validated sign-blinded atomic response."""
         if not self._atomic_responses:
             raise AssertionError("no mock atomic response remains")
+        role = (
+            "atomic_evidence_judge_missing_unit_repair_v1"
+            if repair_missing_units
+            else "atomic_evidence_judge"
+        )
         self.calls.append(
             {
-                "role": "atomic_evidence_judge",
+                "role": role,
                 "system_prompt": system_prompt,
                 "user_prompt": user_prompt,
             }
         )
         parsed = AtomicJudgeResult.model_validate(self._atomic_responses.popleft())
+        repair: dict[str, object] | None = None
+        if repair_missing_units:
+            parsed, occurrences, repeats = (
+                parsed.fill_missing_units_with_insufficient_information(
+                    occurrence_ids=expected_occurrence_ids,
+                    repeat_pair_ids=expected_repeat_pair_ids,
+                )
+            )
+            repair = {
+                "missing_occurrences_filled": list(occurrences),
+                "missing_repeats_filled": list(repeats),
+                "missing_occurrence_repair_count": len(occurrences),
+                "missing_repeat_repair_count": len(repeats),
+            }
         parsed.validate_expected_units(
             occurrence_ids=expected_occurrence_ids,
             repeat_pair_ids=expected_repeat_pair_ids,
         )
-        return self._result(
-            "atomic_evidence_judge", system_prompt, user_prompt, parsed
+        result = self._result(role, system_prompt, user_prompt, parsed)
+        if repair is None:
+            return result
+        return LLMCallResult(
+            request_hash=result.request_hash,
+            parsed=result.parsed,
+            raw_response={
+                **result.raw_response,
+                "_autoformalism_contract_repair": repair,
+            },
+            cache_hit=result.cache_hit,
+            attempts=result.attempts,
+            latency_ms=result.latency_ms,
+            usage=result.usage,
         )
 
     @staticmethod
