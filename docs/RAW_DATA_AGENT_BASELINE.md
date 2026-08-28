@@ -83,6 +83,12 @@ The six exact pilot runs are reused only if the content-addressed request hash
 matches the full request; otherwise execution fails closed rather than mixing
 protocols.
 
+Provider failures are resumed with a generated retry-only Slurm array. Completed
+and genuine `rollout_failed` models are excluded from that array. Contract
+repairs also use request-hash-suffixed checkpoints, so a preserved legacy repair
+from an older deterministic diagnostic cannot block or overwrite the repair for
+the current diagnostic.
+
 Complete evaluation means more than NMSE, but it does not collapse unlike
 evidence into one opaque score. Each run reports:
 

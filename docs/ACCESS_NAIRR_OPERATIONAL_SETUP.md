@@ -1478,6 +1478,48 @@ FULL_AGENT_JOB="$(
 echo "FULL_AGENT_JOB=$FULL_AGENT_JOB"
 ```
 
+If the array stops because hosted credits are exhausted or a transient provider
+error occurs, do not resubmit all 120 task identifiers. Restore the account
+balance, update the checkout, and generate a retry-only array from recorded run
+statuses. `rollout_failed` models are terminal scientific/numerical outcomes and
+are intentionally excluded; only missing or `failed` tasks are retried:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+git pull --ff-only origin main
+repo=$PWD
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+runs=/work/hdd/bibo/$USER/phase_b/raw-data-agent-fitted-v1
+
+retry_ids="$(
+  "$python_bin" scripts/list_raw_data_agent_retry_task_ids.py \
+    --config configs/raw_data_agent_fitted_model_full_v1.json \
+    --runs-root "$runs"
+)"
+echo "retry_ids=$retry_ids"
+
+if [[ -n "$retry_ids" ]]; then
+  if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+    read -rsp "Paste OPENAI_API_KEY: " OPENAI_API_KEY
+    echo
+    export OPENAI_API_KEY
+  fi
+  FULL_AGENT_RETRY_JOB="$(
+    sbatch --parsable \
+      --array="${retry_ids}%4" \
+      --export=ALL,OPENAI_API_KEY \
+      scripts/hpc/phase_b_raw_data_agent_fitted_model_full.slurm
+  )"
+  echo "FULL_AGENT_RETRY_JOB=$FULL_AGENT_RETRY_JOB"
+else
+  echo "No provider or contract failures require retry."
+fi
+```
+
+Repair checkpoints are content-addressed. A legacy repair file with a different
+request hash is preserved for provenance and ignored instead of blocking a new
+diagnostics-specific repair.
+
 After all 120 tasks reach a terminal state, summarize numerical results, audit
 the hosted tool budget offline, and freeze one identity self-pair per returned
 candidate:

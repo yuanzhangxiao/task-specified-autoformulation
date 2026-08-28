@@ -200,6 +200,38 @@ def test_contract_repair_is_diagnostics_only_and_checkpointed(tmp_path: Path) ->
     assert (output / "repair_result_01.json").is_file()
 
 
+def test_contract_repair_ignores_mismatched_legacy_checkpoint(
+    tmp_path: Path,
+) -> None:
+    adapter = _Adapter()
+    inputs = _inputs(tmp_path)
+    config = _config(RawAgentProvider.OPENAI)
+    output = tmp_path / "run"
+    original = run_raw_data_agent(
+        config=config,
+        inputs=inputs,
+        output_directory=output,
+        adapter=adapter,
+    )
+    (output / "repair_result_01.json").write_text(
+        original.model_dump_json(), encoding="utf-8"
+    )
+
+    repaired = repair_raw_data_agent_candidate(
+        config=config,
+        inputs=inputs,
+        original=original,
+        diagnostics="new deterministic diagnostic",
+        repair_index=1,
+        output_directory=output,
+        adapter=adapter,
+    )
+
+    assert repaired.request_hash != original.request_hash
+    assert adapter.repairs == 1
+    assert len(list(output.glob("repair_result_01_*.json"))) == 1
+
+
 class _OpenAIFiles:
     def __init__(self) -> None:
         self.created: list[str] = []

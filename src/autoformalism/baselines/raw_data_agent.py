@@ -789,8 +789,19 @@ def repair_raw_data_agent_candidate(
             request_payload, sort_keys=True, separators=(",", ":")
         ).encode()
     ).hexdigest()
-    artifact_path = output_directory / f"repair_result_{repair_index:02d}.json"
+    legacy_artifact_path = (
+        output_directory / f"repair_result_{repair_index:02d}.json"
+    )
+    artifact_path = output_directory / (
+        f"repair_result_{repair_index:02d}_{request_hash[:16]}.json"
+    )
     cache_path = output_directory / "cache" / f"{request_hash}.json"
+    if legacy_artifact_path.is_file():
+        restored = RawAgentArtifact.model_validate_json(
+            legacy_artifact_path.read_text(encoding="utf-8")
+        )
+        if restored.request_hash == request_hash:
+            return restored
     if artifact_path.is_file():
         restored = RawAgentArtifact.model_validate_json(
             artifact_path.read_text(encoding="utf-8")
@@ -842,6 +853,11 @@ def repair_raw_data_agent_candidate(
         },
     )
     _atomic_json(artifact_path, artifact.model_dump(mode="json"))
+    if not legacy_artifact_path.exists():
+        _atomic_json(
+            legacy_artifact_path,
+            artifact.model_dump(mode="json"),
+        )
     _append_event(
         output_directory / "events.jsonl",
         {

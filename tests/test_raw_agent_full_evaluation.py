@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from autoformalism.data import BenchmarkRegistry
+from scripts.list_raw_data_agent_retry_task_ids import retry_task_ids
 from scripts.resolve_raw_data_agent_matrix_task import resolve_task
 from scripts.summarize_raw_data_agent_full_evaluation import aggregate, build_rows
 
@@ -127,3 +128,37 @@ def test_combined_summary_keeps_numerical_and_scientific_results_separate(
     assert summary["scientific_audit_coverage"] == 1.0
     assert summary["scientific_absolute_verdict_counts"]["fail"] == 1
     assert summary["scientific_accuracy_claimed"] is False
+
+
+def test_retry_task_ids_exclude_complete_and_rollout_failed_models(
+    tmp_path: Path,
+) -> None:
+    config = {
+        "benchmarks": [
+            {"benchmark_id": "cell_a", "tier": "easy"},
+            {"benchmark_id": "cell_b", "tier": "hard"},
+            {"benchmark_id": "cell_c", "tier": "easy"},
+        ],
+        "repetitions": 1,
+    }
+    for name, benchmark_id, tier, status in (
+        ("a", "cell_a", "easy", "complete"),
+        ("b", "cell_b", "hard", "rollout_failed"),
+    ):
+        run = tmp_path / name
+        run.mkdir()
+        (run / "run_config.json").write_text(
+            json.dumps(
+                {
+                    "benchmark_id": benchmark_id,
+                    "tier": tier,
+                    "repetition": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (run / "status.json").write_text(
+            json.dumps({"status": status}), encoding="utf-8"
+        )
+
+    assert retry_task_ids(config, tmp_path) == (2,)
