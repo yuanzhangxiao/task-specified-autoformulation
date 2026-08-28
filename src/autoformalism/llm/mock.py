@@ -14,6 +14,7 @@ from autoformalism.schemas import (
     ComparativeJudgeResult,
     HybridJudgeResult,
     ScientificJudgeResult,
+    TargetCompletenessJudgeResult,
 )
 
 
@@ -30,12 +31,19 @@ class MockLLMClient:
         ] | None = None,
         hybrid_responses: list[HybridJudgeResult | dict[str, Any]] | None = None,
         atomic_responses: list[AtomicJudgeResult | dict[str, Any]] | None = None,
+        target_completeness_responses: list[
+            TargetCompletenessJudgeResult | dict[str, Any]
+        ]
+        | None = None,
     ) -> None:
         self._proposer_responses = deque(proposer_responses or [])
         self._judge_responses = deque(judge_responses or [])
         self._comparative_responses = deque(comparative_responses or [])
         self._hybrid_responses = deque(hybrid_responses or [])
         self._atomic_responses = deque(atomic_responses or [])
+        self._target_completeness_responses = deque(
+            target_completeness_responses or []
+        )
         self.calls: list[dict[str, str]] = []
 
     def propose(
@@ -214,6 +222,30 @@ class MockLLMClient:
             usage=result.usage,
         )
 
+    def assess_target_completeness(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_target_ids: set[str],
+    ) -> LLMCallResult[TargetCompletenessJudgeResult]:
+        """Return the next validated candidate-specific target assessment."""
+        if not self._target_completeness_responses:
+            raise AssertionError("no mock target-completeness response remains")
+        role = "target_completeness_judge_v1"
+        self.calls.append(
+            {
+                "role": role,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+        )
+        parsed = TargetCompletenessJudgeResult.model_validate(
+            self._target_completeness_responses.popleft()
+        )
+        parsed.validate_expected_targets(expected_target_ids)
+        return self._result(role, system_prompt, user_prompt, parsed)
+
     @staticmethod
     def _result(
         role: str,
@@ -225,6 +257,7 @@ class MockLLMClient:
             | ComparativeJudgeResult
             | AtomicJudgeResult
             | HybridJudgeResult
+            | TargetCompletenessJudgeResult
         ),
     ) -> LLMCallResult[Any]:
         content = "\0".join((role, system_prompt, user_prompt))

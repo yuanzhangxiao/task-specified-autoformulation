@@ -43,6 +43,8 @@ from autoformalism.schemas.judge import (
     RelativeVerdict,
     RepeatedContributionRelation,
     ScientificJudgeResult,
+    TargetCompletenessAssessment,
+    TargetCompletenessJudgeResult,
     parse_judge_assessment,
 )
 from autoformalism.schemas.proposal import (
@@ -121,6 +123,8 @@ __all__ = [
     "StateEquation",
     "StateKind",
     "StateSpec",
+    "TargetCompletenessAssessment",
+    "TargetCompletenessJudgeResult",
     "ValueRange",
     "enrich_proposal",
     "enrich_proposal_v2",

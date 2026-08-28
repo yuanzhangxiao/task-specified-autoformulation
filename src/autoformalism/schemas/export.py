@@ -14,6 +14,7 @@ from autoformalism.schemas.judge import (
     HybridJudgeResult,
     JudgeResult,
     ScientificJudgeResult,
+    TargetCompletenessJudgeResult,
 )
 from autoformalism.schemas.proposal import ProposerCandidate, ProposerCandidateV2
 
@@ -26,6 +27,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "scientific-judge-v2.schema.json": ScientificJudgeResult,
     "comparative-judge-v1.schema.json": ComparativeJudgeResult,
     "hybrid-judge-v1.schema.json": HybridJudgeResult,
+    "target-completeness-judge-v1.schema.json": TargetCompletenessJudgeResult,
 }
 
 

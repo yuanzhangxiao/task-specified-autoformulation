@@ -14,6 +14,7 @@ from autoformalism.schemas import (
     ComparativeJudgeResult,
     HybridJudgeResult,
     ScientificJudgeResult,
+    TargetCompletenessJudgeResult,
 )
 
 StructuredT = TypeVar("StructuredT", bound=BaseModel)
@@ -107,4 +108,14 @@ class LLMClient(Protocol):
         repair_missing_units: bool = False,
     ) -> LLMCallResult[AtomicJudgeResult]:
         """Request sign-blinded occurrence and exact-repeat assessments."""
+        ...
+
+    def assess_target_completeness(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_target_ids: set[str],
+    ) -> LLMCallResult[TargetCompletenessJudgeResult]:
+        """Request absolute target-completeness answers for one candidate."""
         ...

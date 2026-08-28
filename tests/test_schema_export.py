@@ -30,6 +30,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "proposer-candidate.schema.json",
         "proposer-candidate-v2.schema.json",
         "scientific-judge-v2.schema.json",
+        "target-completeness-judge-v1.schema.json",
     }
     assert {path.name: path.read_bytes() for path in second_paths} == first_contents
 

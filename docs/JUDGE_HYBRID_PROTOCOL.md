@@ -839,3 +839,30 @@ response contains only missing runtime-owned units and no unexpected units, the
 runtime fills each omission with `insufficient_public_information`, records the
 exact identifiers and repair counts, and continues. It never invents a direction
 or repeated-flux relation, and any unexpected identifier remains terminal.
+
+## Candidate-specific target completeness
+
+The V6 matched run answered every target-completeness question correctly among
+complete paired trials, but one orientation failed in the unrelated atomic
+stage after returning five repeat identifiers when the runtime requested none.
+This showed that target completeness inherited failure modes from scientific
+questions it did not require. V6 remains frozen and is not retrospectively
+repaired.
+
+`target-completeness-judge-1` separates the mandatory public output contract
+from the paired hybrid residual. Each logical call contains exactly one blinded
+candidate, all public target identifiers, its canonical observation mappings,
+recursively resolvable component definitions, and certified structural facts.
+The LLM returns one `pass`, `fail`, or `indeterminate` assessment per target.
+The runtime validates the exact target-ID set and computes only the conjunctive
+candidate status; it does not infer or repair a scientific verdict.
+
+This endpoint has no Candidate A/B presentation, orientation consensus, atomic
+signed-occurrence call, exact-repeat question, direct comparative question, or
+numeric score. Repeated seeds measure response reliability and verdict
+reproducibility. Pair labels are opened only by the offline analyzer. A matched
+development run reuses the frozen V6 pairs and public prompt, after which the
+same absolute protocol must pass on fresh unseen structures before it may become
+a search-time hard gate. The paired hybrid judge remains responsible only for
+relative scientific questions among candidates that have passed mandatory
+absolute contracts.

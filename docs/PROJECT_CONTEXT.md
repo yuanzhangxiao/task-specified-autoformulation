@@ -327,8 +327,20 @@ The pipeline is iterative:
   Protocol 7 therefore fails hard target contracts when either normalized
   orientation detects a violation and, only after bounded retries, fills missing
   atomic units with logged insufficient-information assessments. Unexpected
-  units are never repaired. These behaviors remain opt-in pending the matched v6
-  result and a subsequent fresh-structure confirmation.
+  units are never repaired. These behaviors remained opt-in for the matched V6
+  evaluation.
+  V6 achieved perfect scientific accuracy, target-mapping accuracy, and
+  stability on all nine complete paired trials, but formally failed because one
+  of twenty orientations returned five unexpected repeat identifiers in an
+  atomic request that expected no repeats. Response success was `0.950`, while
+  requiring both orientations reduced paired coverage to `0.900`. The failure
+  occurred before the absolute target question and does not justify another
+  scientific prompt change. The next versioned milestone removes this inherited
+  coupling: `target-completeness-judge-1` evaluates one blinded candidate per
+  call, answers only absolute pass/fail/indeterminate questions for every public
+  target, and has no atomic, comparative, orientation, or numeric-score stage.
+  Its first matched development run reuses the exact V6 pairs and public prompt;
+  search integration remains disabled until a fresh-structure confirmation.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

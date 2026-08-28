@@ -476,6 +476,58 @@ class AtomicJudgeResult(StrictSchema):
         return repaired, missing_occurrences, missing_repeats
 
 
+class TargetCompletenessAssessment(StrictSchema):
+    """One candidate-specific verdict for one public target channel."""
+
+    target_id: Identifier
+    verdict: AbsoluteVerdict
+    evidence: NonEmptyText
+
+
+class TargetCompletenessJudgeResult(StrictSchema):
+    """Absolute target-completeness answers for exactly one candidate.
+
+    This contract intentionally contains no second candidate, comparative
+    verdict, score, or overall winner. The runtime owns the requested target
+    identifiers and validates that the provider answered each exactly once.
+    """
+
+    schema_version: Literal["target-completeness-judge-1"] = (
+        "target-completeness-judge-1"
+    )
+    target_assessments: tuple[TargetCompletenessAssessment, ...] = Field(
+        max_length=64
+    )
+
+    @model_validator(mode="after")
+    def unique_target_identifiers(self) -> TargetCompletenessJudgeResult:
+        """Reject repeated target identifiers."""
+        target_ids = [item.target_id for item in self.target_assessments]
+        if len(target_ids) != len(set(target_ids)):
+            raise ValueError("target completeness identifiers must be unique")
+        return self
+
+    def validate_expected_targets(self, target_ids: set[str]) -> None:
+        """Require exactly the runtime-requested public target identifiers."""
+        actual = {item.target_id for item in self.target_assessments}
+        if actual != target_ids:
+            raise ValueError(
+                "target completeness units differ; "
+                f"missing_targets={sorted(target_ids - actual)}, "
+                f"extra_targets={sorted(actual - target_ids)}"
+            )
+
+    @property
+    def overall_verdict(self) -> AbsoluteVerdict:
+        """Return the conjunctive verdict over all requested targets."""
+        verdicts = {item.verdict for item in self.target_assessments}
+        if AbsoluteVerdict.FAIL in verdicts:
+            return AbsoluteVerdict.FAIL
+        if verdicts == {AbsoluteVerdict.PASS}:
+            return AbsoluteVerdict.PASS
+        return AbsoluteVerdict.INDETERMINATE
+
+
 class HybridJudgeResult(StrictSchema):
     """Paired absolute assessments plus a separate comparative residual."""
 

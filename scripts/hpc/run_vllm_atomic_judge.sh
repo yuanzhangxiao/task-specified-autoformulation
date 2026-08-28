@@ -32,6 +32,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_TARGET_MAPPING_ENFORCEMENT:=soft}"
 : "${AF_TARGET_MAPPING_CONSENSUS:=indeterminate}"
 : "${AF_REPAIR_MISSING_ATOMIC_UNITS:=false}"
+: "${AF_JUDGE_ENTRYPOINT:=hybrid}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 : "${AF_PAIR_IDS=heldout_55d8026028a90be5 heldout_ee453d8cc6fcb7a2 heldout_70b3222d4736ea1d heldout_cca8883e6ae1b33f}"
 
@@ -44,6 +45,13 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
   echo "atomic comparison requires seed base ${AF_REQUIRED_JUDGE_SEED_BASE}" >&2
   exit 2
 }
+case "${AF_JUDGE_ENTRYPOINT}" in
+  hybrid|target_completeness) ;;
+  *)
+    echo "AF_JUDGE_ENTRYPOINT must be hybrid or target_completeness" >&2
+    exit 2
+    ;;
+esac
 case "${AF_COMPARATIVE_INDETERMINATE_POLICY}" in
   exclude|neutral_fixed_denominator) ;;
   *)
@@ -218,29 +226,48 @@ if [[ "${ready}" != true ]]; then
   exit 1
 fi
 
-flock --exclusive "${shard_root}/hybrid_judge.lock" \
-  "${AF_PYTHON}" scripts/run_hybrid_judge.py \
-  --pairs "${AF_CALIBRATION_PAIRS}" \
-  "${pair_id_args[@]}" \
-  --data-root "${AF_PUBLIC_DATA_ROOT}" \
-  --judge-models "vllm:${AF_LOCAL_MODEL}" \
-  --repetitions "${AF_REPETITIONS}" \
-  --output-root "${shard_root}" \
-  --timeout-seconds 900 \
-  --max-output-tokens 6144 \
-  --max-attempts "${AF_MAX_ATTEMPTS}" \
-  --vllm-base-url "${endpoint}" \
-  --vllm-reasoning-effort low \
-  --vllm-temperature 0.2 \
-  --vllm-seed-base "${AF_JUDGE_SEED_BASE}" \
-  --partial-tiebreak-weight "${AF_PARTIAL_WEIGHT}" \
-  --comparative-weight "${AF_COMPARATIVE_WEIGHT}" \
-  --tie-threshold "${AF_TIE_THRESHOLD}" \
-  --comparative-indeterminate-policy \
-    "${AF_COMPARATIVE_INDETERMINATE_POLICY}" \
-  --atomic-signed-occurrences \
-  "${semantic_contract_args[@]}" \
-  "${target_contract_args[@]}" \
-  --shard-index "${shard_index}" \
-  --shard-count "${AF_SHARD_COUNT}" \
-  --shard-strategy contiguous
+if [[ "${AF_JUDGE_ENTRYPOINT}" == target_completeness ]]; then
+  flock --exclusive "${shard_root}/target_completeness_judge.lock" \
+    "${AF_PYTHON}" scripts/run_target_completeness_judge.py \
+    --pairs "${AF_CALIBRATION_PAIRS}" \
+    --data-root "${AF_PUBLIC_DATA_ROOT}" \
+    --judge-models "vllm:${AF_LOCAL_MODEL}" \
+    --repetitions "${AF_REPETITIONS}" \
+    --output-root "${shard_root}" \
+    --timeout-seconds 900 \
+    --max-output-tokens 3072 \
+    --max-attempts "${AF_MAX_ATTEMPTS}" \
+    --vllm-base-url "${endpoint}" \
+    --vllm-reasoning-effort low \
+    --vllm-temperature 0.2 \
+    --vllm-seed-base "${AF_JUDGE_SEED_BASE}" \
+    --shard-index "${shard_index}" \
+    --shard-count "${AF_SHARD_COUNT}"
+else
+  flock --exclusive "${shard_root}/hybrid_judge.lock" \
+    "${AF_PYTHON}" scripts/run_hybrid_judge.py \
+    --pairs "${AF_CALIBRATION_PAIRS}" \
+    "${pair_id_args[@]}" \
+    --data-root "${AF_PUBLIC_DATA_ROOT}" \
+    --judge-models "vllm:${AF_LOCAL_MODEL}" \
+    --repetitions "${AF_REPETITIONS}" \
+    --output-root "${shard_root}" \
+    --timeout-seconds 900 \
+    --max-output-tokens 6144 \
+    --max-attempts "${AF_MAX_ATTEMPTS}" \
+    --vllm-base-url "${endpoint}" \
+    --vllm-reasoning-effort low \
+    --vllm-temperature 0.2 \
+    --vllm-seed-base "${AF_JUDGE_SEED_BASE}" \
+    --partial-tiebreak-weight "${AF_PARTIAL_WEIGHT}" \
+    --comparative-weight "${AF_COMPARATIVE_WEIGHT}" \
+    --tie-threshold "${AF_TIE_THRESHOLD}" \
+    --comparative-indeterminate-policy \
+      "${AF_COMPARATIVE_INDETERMINATE_POLICY}" \
+    --atomic-signed-occurrences \
+    "${semantic_contract_args[@]}" \
+    "${target_contract_args[@]}" \
+    --shard-index "${shard_index}" \
+    --shard-count "${AF_SHARD_COUNT}" \
+    --shard-strategy contiguous
+fi

@@ -1360,6 +1360,31 @@ the exact neutral fills remain visible in the CSV provenance fields. Do not
 enable either repair in search until v6 passes every unchanged gate and a later
 fresh-structure confirmation passes.
 
+V6 instead isolated one failure in the inherited atomic stage. The
+candidate-specific successor removes atomic and comparative questions, copies
+the frozen V6 pairs and labels, and evaluates each candidate in one absolute
+call:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+git pull --ff-only origin main
+mkdir -p logs
+sbatch --account=bibo-delta-gpu \
+  scripts/hpc/phase_b_target_completeness_absolute_v7_120b.slurm
+```
+
+The job writes its validation report automatically. After completion:
+
+```bash
+root=/work/hdd/bibo/$USER/phase_b/target-completeness-absolute-v7
+cat "$root/target_completeness_validation.md"
+jq . "$root/target_completeness_validation.json"
+```
+
+V6 remains a frozen formal failure. Do not integrate the absolute endpoint into
+search until this matched run and a subsequent fresh-structure confirmation
+both pass.
+
 ## Audit and compare the raw-data frontier-agent pilot
 
 The primary GPT baseline returns a full fitted model. Submit the two-benchmark,

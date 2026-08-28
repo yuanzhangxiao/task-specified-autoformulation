@@ -1,0 +1,82 @@
+{
+  "schema_version": "target-completeness-absolute-validation-1",
+  "status": "frozen_before_candidate_specific_target_calls",
+  "purpose": "replace the inherited paired atomic pipeline with an absolute one-candidate target-completeness assessment",
+  "judge_model": "vllm:openai/gpt-oss-120b",
+  "source_control": {
+    "source_experiment": "judge-hybrid-target-mapping-v6-fail-closed",
+    "pair_bytes_must_match_source": true,
+    "label_bytes_must_match_source": true,
+    "candidate_payloads_unchanged_before_blinding": true,
+    "public_prompt_unchanged": true,
+    "judge_model_unchanged": true,
+    "sampling_seeds_unchanged": true,
+    "provider_attempt_limit_unchanged": true,
+    "intended_changes": [
+      "evaluate one candidate per LLM call",
+      "ask only absolute target-completeness questions",
+      "remove A/B orientations",
+      "remove the signed-occurrence and exact-repeat atomic stage",
+      "remove all direct comparative questions and numeric pair scoring"
+    ]
+  },
+  "public_prompt_contract": {
+    "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+    "proposer_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+  },
+  "pair_construction": {
+    "mutation_type": "omitted_target_component",
+    "target_channel": "U",
+    "valid_total_expression": "Uii + Uid",
+    "mutated_total_expression": "Uid",
+    "mutation_labels_visible_to_judge": false
+  },
+  "protocol": {
+    "protocol_version": "target-completeness-judge-1",
+    "candidate_policy": "one_candidate_per_call",
+    "target_policy": "all_public_targets",
+    "atomic_stage_enabled": false,
+    "comparative_questions_enabled": false,
+    "numeric_score_defined": false,
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 10000,
+    "repetitions": 5,
+    "max_provider_attempts": 10,
+    "response_contract": {
+      "verdicts": [
+        "pass",
+        "fail",
+        "indeterminate"
+      ],
+      "exact_runtime_target_ids_required": true,
+      "missing_or_extra_target_ids": "terminal_after_bounded_retries",
+      "scientific_verdict_repair": false
+    }
+  },
+  "planned": {
+    "baseline_structures": 2,
+    "pairs": 2,
+    "candidates_per_pair": 2,
+    "repetitions": 5,
+    "logical_llm_calls": 20,
+    "llm_stages_per_call": 1,
+    "gpus": 4,
+    "tensor_parallel_size": 4
+  },
+  "validation_gate": {
+    "minimum_response_success": 0.95,
+    "minimum_joint_candidate_coverage": 0.95,
+    "minimum_candidate_verdict_accuracy": 0.90,
+    "minimum_complete_trial_accuracy": 0.90,
+    "minimum_pair_aggregate_accuracy": 1.00,
+    "minimum_all_target_unit_accuracy": 0.90,
+    "minimum_evaluated_target_accuracy": 0.90,
+    "minimum_valid_target_pass_rate": 0.90,
+    "minimum_incomplete_target_fail_rate": 0.90,
+    "minimum_repeat_modal_consistency": 0.90
+  },
+  "decision_rule": "pass only if every predeclared gate passes",
+  "next_if_passed": "confirm the same absolute protocol on fresh unseen candidate structures before search integration",
+  "next_if_failed": "inspect absolute target rationales and structured-response failures without changing V6"
+}

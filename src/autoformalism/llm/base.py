@@ -36,6 +36,7 @@ from autoformalism.schemas import (
     HybridJudgeResult,
     ProposerCandidateV2,
     ScientificJudgeResult,
+    TargetCompletenessJudgeResult,
     enrich_proposal_v2,
 )
 
@@ -232,6 +233,24 @@ class CachedLLMClient(ABC):
             validate_parsed=lambda result: result.validate_expected_units(
                 occurrence_ids=expected_occurrence_ids,
                 repeat_pair_ids=expected_repeat_pair_ids,
+            ),
+        )
+
+    def assess_target_completeness(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_target_ids: set[str],
+    ) -> LLMCallResult[TargetCompletenessJudgeResult]:
+        """Request one candidate's absolute public-target assessment."""
+        return self._structured_call(
+            role="target_completeness_judge_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=TargetCompletenessJudgeResult,
+            validate_parsed=lambda result: result.validate_expected_targets(
+                expected_target_ids
             ),
         )
 

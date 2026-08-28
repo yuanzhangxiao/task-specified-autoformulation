@@ -611,6 +611,19 @@ neutral `insufficient_public_information` value. The repair is permitted only
 when there are no unexpected identifiers, is logged per unit, and does not
 convert missing evidence into a scientific claim.
 
+The successor target-completeness boundary is candidate-specific rather than
+pairwise. One strict LLM call receives one candidate and every public target ID,
+recursively resolves its observation mappings and component definitions, and
+returns an absolute verdict for each target. The runtime validates exact target
+coverage and conjunctively combines the verdicts, but does not supply or repair
+the scientific answer. This boundary has no A/B orientation, atomic
+signed-occurrence stage, comparative residual, or numeric score. It is validated
+as a separate frozen protocol before search integration; legacy Protocols 5--7
+remain reproducible. Once validated, target completeness is a mandatory
+candidate feasibility check, while the paired judge is reserved for relative
+parsimony, unsupported assumptions, and mechanistic interpretability among
+feasible candidates.
+
 ## Failure and security behavior
 
 - Missing `AUTOFORMALISM_DATA_ROOT`, contradictory metadata, unsafe

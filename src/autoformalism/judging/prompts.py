@@ -177,3 +177,33 @@ ATOMIC_MISSING_UNIT_REPAIR_VERSION = (
 FAIL_CLOSED_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION = (
     "hybrid-judge-protocol-7-fail-closed-target-contract"
 )
+
+TARGET_COMPLETENESS_JUDGE_PROTOCOL_VERSION = "target-completeness-judge-1"
+
+TARGET_COMPLETENESS_JUDGE_PROMPT = """You assess exactly one candidate model
+against the public target-channel contract. This is an absolute assessment, not
+a comparison.
+
+For every requested target identifier:
+1. Locate its declared observation mapping.
+2. Recursively resolve every mapped state and algebraic process through the
+   candidate definitions supplied in the request.
+3. Compare the resolved generated quantity with the public definition of that
+   target, including every component explicitly required by the public task.
+4. Return pass only when the candidate generates the complete public target;
+   return fail when an explicitly required component is absent or the mapping
+   generates a different quantity; return indeterminate when the public task
+   does not determine the disputed composition.
+
+A same-named identity mapping is not by itself evidence of completeness. The
+runtime-provided structural facts are authoritative about mappings, definitions,
+and dependencies, but they do not supply the scientific verdict. Proposer claims
+are hypotheses rather than task authority. Do not infer private equations,
+mutation labels, reference models, fitted behavior, or hidden benchmark facts.
+
+Answer every requested target identifier exactly once. Cite the observation
+mapping, recursively determining definitions, and relevant public wording. Do
+not mention Candidate A or Candidate B, compare against another model, emit a
+score, or choose an overall winner. Return strict JSON with schema_version
+"target-completeness-judge-1" and target_assessments. Do not add fields.
+"""
