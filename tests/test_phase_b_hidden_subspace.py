@@ -107,8 +107,8 @@ def test_hidden_subspace_withholds_score_without_structural_recovery() -> None:
 
 def test_nominal_pairing_accepts_small_solver_reproducibility_difference() -> None:
     public, private, contract = _nominal_pairing_case(
-        np.asarray([100.0, 200.0]),
-        np.asarray([100.0 + 5e-6, 200.0 - 5e-6]),
+        np.asarray([25.0, 200.0]),
+        np.asarray([25.0 + 3e-5, 200.0 - 5e-4]),
     )
 
     _validate_private_matches_public(public, private, contract)

@@ -45,8 +45,12 @@ HiddenMode = Literal[
     "not_applicable",
 ]
 
-NOMINAL_PAIR_RELATIVE_TOLERANCE = 1e-7
-NOMINAL_PAIR_ABSOLUTE_TOLERANCE = 1e-8
+# This is only a public/private pairing guard, never an evaluation score.  The
+# released CSVs and fresh simulations can differ across SciPy versions around
+# discontinuous inputs.  A 1e-4 relative envelope is 100 times the loosest
+# private simulator rtol (1e-6), while still rejecting a 1e-3 relative mismatch.
+NOMINAL_PAIR_RELATIVE_TOLERANCE = 1e-4
+NOMINAL_PAIR_ABSOLUTE_TOLERANCE = 1e-7
 
 
 class PhaseBHiddenSubspaceContract(BaseModel):
