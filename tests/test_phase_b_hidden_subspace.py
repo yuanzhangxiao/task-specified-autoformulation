@@ -543,3 +543,19 @@ def test_hidden_contract_audit_confirms_rank_and_semantic_identity(
     assert audit["semantic_pair_identity_pass"] is True
     assert len(audit["semantic_pair_checks"]) == 1
     assert audit["semantic_pair_checks"][0]["identical"] is True
+
+    failed_output = tmp_path / "failed-contract-audit.json"
+    failed_command = [
+        *command[:-4],
+        "--private-data-root",
+        str(tmp_path / "missing-private-root"),
+        "--output",
+        str(failed_output),
+    ]
+    failed = subprocess.run(failed_command, cwd=repository, check=False)
+    failed_audit = json.loads(failed_output.read_text(encoding="utf-8"))
+    assert failed.returncode == 1
+    assert failed_audit["status"] == "fail"
+    assert failed_audit["failed_benchmark_count"] == 2
+    assert len(failed_audit["rows"]) == 2
+    assert all(item["audit_status"] == "failed" for item in failed_audit["rows"])
