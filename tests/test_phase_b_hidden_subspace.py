@@ -107,6 +107,28 @@ def test_hidden_subspace_withholds_score_without_structural_recovery() -> None:
     assert metric.aligned_test_nmse is None
 
 
+def test_hidden_subspace_rejects_nearly_degenerate_candidate_direction() -> None:
+    coordinate = np.linspace(-1.0, 1.0, 100)
+    orthogonal = coordinate**2 - np.mean(coordinate**2)
+    reference = np.column_stack((coordinate, orthogonal))
+    candidate = np.column_stack((coordinate, 1e-4 * orthogonal))
+
+    metric = hidden_subspace_nmse(
+        candidate,
+        reference,
+        candidate,
+        reference,
+        claimed_dimension=2,
+        structurally_recovered=True,
+    )
+
+    assert metric.rank_tolerance == 1e-3
+    assert metric.candidate_rank == 1
+    assert metric.candidate_rank_coverage == 0.5
+    assert metric.recovered is False
+    assert metric.aligned_test_nmse is None
+
+
 def test_nominal_pairing_accepts_small_solver_reproducibility_difference() -> None:
     public, private, contract = _nominal_pairing_case(
         np.asarray([25.0, 200.0]),
@@ -241,6 +263,8 @@ def test_phase_b_contracts_preserve_frozen_private_claims() -> None:
     )
 
     assert t1.mode == "mechanism_response_equivalence"
+    assert t1.schema_version == "phase-b-hidden-subspace-contract-2"
+    assert t1.rank_tolerance == 1e-3
     assert t1.claimed_dimension == 2
     assert t4.mode == "not_applicable"
     assert t4.claimed_dimension == 0
@@ -650,9 +674,15 @@ def test_hidden_contract_audit_confirms_rank_and_semantic_identity(
     subprocess.run(command, cwd=repository, check=True)
 
     audit = json.loads(output.read_text(encoding="utf-8"))
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    assert output.with_name(f"{output.name}.sha256").read_text(
+        encoding="utf-8"
+    ) == f"{digest}  {output.name}\n"
+    assert audit["schema_version"] == "phase-b-hidden-subspace-contract-audit-2"
     assert audit["status"] == "pass"
     assert audit["claimed_rank_pass"] is True
     assert audit["semantic_pair_identity_pass"] is True
+    assert {item["rank_tolerance"] for item in audit["rows"]} == {1e-3}
     assert len(audit["semantic_pair_checks"]) == 1
     assert audit["semantic_pair_checks"][0]["identical"] is True
 

@@ -1,4 +1,4 @@
-"""Post-selection hidden-mechanism affine-alignment metrics."""
+"""Post-selection hidden-mechanism alignment metrics."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ class HiddenSubspaceMetric(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     claimed_dimension: int = Field(gt=0)
+    rank_tolerance: float = Field(gt=0.0)
     reference_rank: int = Field(ge=0)
     candidate_direction_count: int = Field(ge=0)
     candidate_rank: int = Field(ge=0)
@@ -100,7 +101,7 @@ def hidden_subspace_nmse(
     *,
     claimed_dimension: int,
     structurally_recovered: bool,
-    rank_tolerance: float = 1e-8,
+    rank_tolerance: float = 1e-3,
     epsilon: float = 1e-12,
 ) -> HiddenSubspaceMetric:
     """Align candidate mechanism sensitivities on train and score them on test.
@@ -178,6 +179,7 @@ def hidden_subspace_nmse(
         )
     return HiddenSubspaceMetric(
         claimed_dimension=claimed_dimension,
+        rank_tolerance=rank_tolerance,
         reference_rank=reference_rank,
         candidate_direction_count=candidate_count,
         candidate_rank=candidate_rank,

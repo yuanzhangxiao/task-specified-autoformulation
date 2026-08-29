@@ -84,8 +84,8 @@ class PhaseBHiddenSubspaceContract(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["phase-b-hidden-subspace-contract-1"] = (
-        "phase-b-hidden-subspace-contract-1"
+    schema_version: Literal["phase-b-hidden-subspace-contract-2"] = (
+        "phase-b-hidden-subspace-contract-2"
     )
     benchmark_id: str
     family: Family
@@ -95,6 +95,7 @@ class PhaseBHiddenSubspaceContract(BaseModel):
     mode: HiddenMode
     private_mechanism_directions: tuple[str, ...]
     claimed_dimension: int = Field(ge=0)
+    rank_tolerance: Literal[0.001] = 0.001
     target_sources: dict[str, str]
     public_prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     sensitivity_fraction: float = Field(default=1e-3, gt=0.0, le=0.01)
@@ -127,8 +128,8 @@ class PhaseBHiddenSubspaceOutcome(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["phase-b-hidden-subspace-outcome-1"] = (
-        "phase-b-hidden-subspace-outcome-1"
+    schema_version: Literal["phase-b-hidden-subspace-outcome-2"] = (
+        "phase-b-hidden-subspace-outcome-2"
     )
     subject_id: str = Field(min_length=1)
     candidate_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -282,6 +283,7 @@ def evaluate_phase_b_hidden_subspace(
         test_reference,
         claimed_dimension=contract.claimed_dimension,
         structurally_recovered=structurally_recovered,
+        rank_tolerance=contract.rank_tolerance,
     )
     endpoint = HiddenMechanismEndpoint(
         mechanism_id="claimed_mechanism_response_subspace",

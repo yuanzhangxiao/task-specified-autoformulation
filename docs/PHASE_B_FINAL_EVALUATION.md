@@ -23,8 +23,8 @@ test or private-reference access.
 3. **Target behavior:** held-out free-rollout target NMSE and per-target NMSE.
 4. **Mechanism recovery:** fraction of private reference mechanisms represented
    by a compatible declared candidate component.
-5. **Conditional hidden error:** affine-aligned hidden-mechanism test NMSE only
-   for recovered mechanisms, with the alignment fitted on training data.
+5. **Conditional hidden error:** linearly aligned response-subspace test NMSE
+   only for recovered mechanisms, with the alignment fitted on training data.
 6. **Intervention behavior:** private intervention target NMSE, response
    direction, response-shape correlation, and peak-timing error.
 7. **Complexity and reliability:** states, latent states, processes, parameters,
@@ -148,6 +148,12 @@ mechanism contract, the evaluator supplies one candidate direction by
 multiplying that process expression—or the tagged state's complete derivative
 equation—by `1 + 1e-3`. The frozen candidate parameters and initial conditions
 are unchanged.
+
+The same frozen relative singular-value tolerance, `1e-3`, is used for the
+pre-release reference-rank audit, candidate recovery rank, and least-squares
+pseudoinverse truncation. A numerically negligible direction therefore cannot
+pass candidate recovery under a looser scoring threshold than the one used to
+certify the benchmark.
 
 Let `R_train` and `R_test` contain the private response directions and let
 `C_train` and `C_test` contain the candidate directions. The right singular
@@ -300,6 +306,12 @@ last numerical comparison because long-horizon adaptive integration is not
 portable across SciPy versions; its reference directions subtract nominal and
 perturbed rollouts generated together in the same environment. This exception
 does not relax any rank, recovery, or hidden-NMSE threshold.
+
+The audit command writes a standard companion `<audit>.sha256` file after every
+complete run. A passing digest is retained with the final experiment manifest.
+Because the contract and outcome schemas are versioned, changing the rank
+tolerance invalidates older cached hidden outcomes instead of silently mixing
+scoring rules.
 
 The committed public specifications can be regenerated and audited without
 opening test trajectories or using private reference mechanisms in the emitted

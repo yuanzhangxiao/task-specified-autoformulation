@@ -97,8 +97,12 @@ def main() -> None:
             )
             train_singular = np.linalg.svd(train, compute_uv=False)
             test_singular = np.linalg.svd(heldout, compute_uv=False)
-            train_rank = _relative_rank(train_singular)
-            test_rank = _relative_rank(test_singular)
+            train_rank = _relative_rank(
+                train_singular, tolerance=contract.rank_tolerance
+            )
+            test_rank = _relative_rank(
+                test_singular, tolerance=contract.rank_tolerance
+            )
             claimed_index = contract.claimed_dimension - 1
             condition = float(
                 train_singular[0]
@@ -134,7 +138,7 @@ def main() -> None:
             )
     semantic_checks = _semantic_pair_checks(rows, matrices)
     payload = {
-        "schema_version": "phase-b-hidden-subspace-contract-audit-1",
+        "schema_version": "phase-b-hidden-subspace-contract-audit-2",
         "status": "pass"
         if all(item["claimed_rank_pass"] for item in rows)
         and all(item["identical"] for item in semantic_checks)
@@ -155,7 +159,14 @@ def main() -> None:
         args.output,
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
     )
+    audit_sha256 = hashlib.sha256(args.output.read_bytes()).hexdigest()
+    digest_path = args.output.with_name(f"{args.output.name}.sha256")
+    _write_text_atomic(
+        digest_path,
+        f"{audit_sha256}  {args.output.name}\n",
+    )
     print(f"overall hidden contract audit: {payload['status']}")
+    print(f"audit SHA-256: {audit_sha256}")
     if payload["status"] != "pass":
         raise SystemExit(1)
 
@@ -170,6 +181,7 @@ def _contract_identity(
         "tier": contract.tier,
         "dynamics": contract.dynamics,
         "mode": contract.mode,
+        "rank_tolerance": contract.rank_tolerance,
     }
 
 
@@ -189,6 +201,7 @@ def _failure_row(
             "tier": None,
             "dynamics": None,
             "mode": None,
+            "rank_tolerance": None,
         }
     )
     return {
@@ -206,9 +219,9 @@ def _failure_row(
     }
 
 
-def _relative_rank(singular_values: np.ndarray) -> int:
+def _relative_rank(singular_values: np.ndarray, *, tolerance: float) -> int:
     leading = max(float(singular_values[0]), 1e-15)
-    return int(np.count_nonzero(singular_values / leading >= 1e-3))
+    return int(np.count_nonzero(singular_values / leading >= tolerance))
 
 
 def _array_sha256(values: np.ndarray) -> str:
