@@ -1,0 +1,37 @@
+{
+  "schema_version": "phase-b-final-evaluation-pilot-plan-1",
+  "status": "frozen_before_autoformalism_pilot_runs",
+  "purpose": "Development smoke of the complete non-scalar final evaluator on one mechanistic named cell and one opaque unknown-system cell",
+  "development_only": true,
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "methods": [
+    "autoformalism",
+    "raw_data_agent:gpt-5.6-sol"
+  ],
+  "hidden_contract_audit": {
+    "schema_version": "phase-b-hidden-subspace-contract-audit-2",
+    "sha256": "5a57615899fab71fcc5991752267f6569a1ed358b04cc17923f97ae1fe60fddc",
+    "required_status": "pass"
+  },
+  "endpoints": [
+    "source_completion",
+    "runtime_validity",
+    "public_mechanism_compliance",
+    "sealed_target_nmse",
+    "hidden_response_subspace_nmse",
+    "intervention_behavior",
+    "model_complexity"
+  ],
+  "weighted_overall_score_defined": false,
+  "qualitative_llm_requested": false
+}

@@ -246,6 +246,34 @@ scores embedded in legacy source artifacts are deliberately ignored. The
 common post-freeze evaluator is the only component allowed to populate private
 target, hidden-mechanism, or intervention endpoints.
 
+### Two-cell end-to-end development pilot
+
+`configs/phase_b_final_evaluation_pilot_v1.json` freezes a small integration
+matrix before its Autoformalism searches: the named Dalla Man T2 easy cell and
+the opaque alien-system hard cell, three repetitions each, for Autoformalism and
+the primary fitted GPT-5.6 raw-data-agent baseline. The GPT artifacts are reused
+without a new provider call. Autoformalism uses its frozen
+`incumbent_relative_hybrid` search and exactly returned final parameters.
+
+The pilot is explicitly development-only. It verifies the plumbing and failure
+accounting before expanding to 40 cells; it is not a confirmatory benchmark
+claim. `scripts/prepare_phase_b_final_evaluation_pilot.py` resolves the exact 12
+source artifacts, verifies their public run identities, hashes every relevant
+source file, and verifies the exact successful hidden-contract audit v2 plus its
+companion digest. It writes the source-adapter request ledger only when the
+whole planned cross-product exists. This freeze occurs before test replay or
+candidate-specific private evaluation.
+
+`scripts/hpc/phase_b_final_evaluation_pilot_v1.slurm` then runs the existing
+checkpointed stages in order: source adaptation, sealed unseen-condition target
+replay, intervention scoring, private response-subspace evaluation, and final
+assembly. No parameter is refitted and no LLM judge is called during final
+evaluation. `scripts/summarize_phase_b_final_evaluation_pilot.py` reports source
+completion, runtime validity, public mechanism compliance, target NMSE, hidden
+recovery and conditional hidden NMSE, intervention behavior, and complexity as
+separate endpoints. Unavailable endpoints remain missing with explicit coverage;
+there is no penalty imputation or weighted overall score.
+
 For a single process, run the common test replay after source adaptation:
 
 ```bash
