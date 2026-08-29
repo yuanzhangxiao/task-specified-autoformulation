@@ -866,3 +866,16 @@ same absolute protocol must pass on fresh unseen structures before it may become
 a search-time hard gate. The paired hybrid judge remains responsible only for
 relative scientific questions among candidates that have passed mandatory
 absolute contracts.
+
+The fresh confirmation is frozen by
+`configs/target_completeness_fresh_confirmation_v1.json`. Preparation fails
+unless the exact V7 development configuration and pair bytes are certified by
+a passing `target-completeness-judge-analysis-1` artifact. It then selects two
+eligible proposer structures after canonicalizing away the clean-name total
+wrapper and excludes every previously opened structure for the same benchmark.
+This prevents `U`/`Uid` bookkeeping from making an already opened proposer
+structure appear fresh. The confirmation repeats the unchanged one-candidate,
+all-public-target protocol for 20 logical calls and applies the same frozen
+gates. A failure leaves the production target-completeness gate disabled; a
+pass authorizes a separate search-integration milestone rather than silently
+changing the already running paired-judge ablation.

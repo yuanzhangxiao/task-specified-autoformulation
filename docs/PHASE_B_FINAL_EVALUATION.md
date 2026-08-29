@@ -413,3 +413,11 @@ search, a second freeze records every available or
 missing summary with a distinct `autoformalism:paired_question_consensus` or
 `autoformalism:no_judge` method label and verifies the exact successful hidden
 contract audit before the CPU evaluator can open test or private data.
+
+The second milestone is executable but not preemptively enabled.
+`scripts/hpc/prepare_phase_b_target_completeness_fresh_confirmation.sh`
+requires a passing frozen V7 development artifact, inventories prior pair sets,
+and writes a hash-verified two-structure confirmation. The corresponding 120B
+launcher refuses provider calls if any pair, configuration, prerequisite, or
+freshness hash differs. Production search must continue without the hard target
+gate until that confirmation reports `passed: true`.

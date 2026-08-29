@@ -1,0 +1,67 @@
+{
+  "schema_version": "target-completeness-fresh-confirmation-1",
+  "status": "frozen_before_fresh_structure_calls",
+  "purpose": "confirm the unchanged candidate-specific target-completeness protocol on proposer structures absent from every opened target-completeness development set",
+  "judge_model": "vllm:openai/gpt-oss-120b",
+  "development_prerequisite": {
+    "protocol_config_sha256": "560fe16423fc95cd5c2f69a48c6ea21fe2dca6d043a6bb74401a72ae9586a192",
+    "analysis_schema_version": "target-completeness-judge-analysis-1",
+    "required_result": "pass"
+  },
+  "public_prompt_contract": {
+    "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+    "tier": "easy",
+    "proposer_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+  },
+  "pair_construction": {
+    "holdout_unit": "canonical_unwrapped_proposer_structure",
+    "baseline_count": 2,
+    "mutation_type": "omitted_target_component",
+    "target_channel": "U",
+    "total_process": "U",
+    "dependent_process": "Uid",
+    "supplied_component": "Uii",
+    "valid_total_expression": "Uii + Uid",
+    "mutated_total_expression": "Uid",
+    "required_exclusion_scope": "every previously opened pair file for this benchmark and the matched V7 development pairs",
+    "mutation_labels_visible_to_judge": false
+  },
+  "protocol": {
+    "protocol_version": "target-completeness-judge-1",
+    "candidate_policy": "one_candidate_per_call",
+    "target_policy": "all_public_targets",
+    "atomic_stage_enabled": false,
+    "comparative_questions_enabled": false,
+    "numeric_score_defined": false,
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "seed_base": 10000,
+    "repetitions": 5,
+    "max_provider_attempts": 10
+  },
+  "planned": {
+    "baseline_structures": 2,
+    "pairs": 2,
+    "candidates_per_pair": 2,
+    "repetitions": 5,
+    "logical_llm_calls": 20,
+    "llm_stages_per_call": 1,
+    "gpus": 4,
+    "tensor_parallel_size": 4
+  },
+  "validation_gate": {
+    "minimum_response_success": 0.95,
+    "minimum_joint_candidate_coverage": 0.95,
+    "minimum_candidate_verdict_accuracy": 0.90,
+    "minimum_complete_trial_accuracy": 0.90,
+    "minimum_pair_aggregate_accuracy": 1.00,
+    "minimum_all_target_unit_accuracy": 0.90,
+    "minimum_evaluated_target_accuracy": 0.90,
+    "minimum_valid_target_pass_rate": 0.90,
+    "minimum_incomplete_target_fail_rate": 0.90,
+    "minimum_repeat_modal_consistency": 0.90
+  },
+  "decision_rule": "pass only if the frozen V7 development prerequisite and every fresh-structure gate pass",
+  "next_if_passed": "enable candidate-specific target completeness as a mandatory feasibility gate before paired scientific comparison",
+  "next_if_failed": "keep the target-completeness hard gate disabled and report the failed frozen gate without tuning on confirmation outcomes"
+}
