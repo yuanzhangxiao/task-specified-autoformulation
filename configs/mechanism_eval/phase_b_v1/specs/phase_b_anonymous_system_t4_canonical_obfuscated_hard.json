@@ -1,0 +1,32 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_t4_canonical_obfuscated_hard",
+  "public_prompt_sha256": "914dd1c0c490a3b9d467cbfd3a554418414d0cf1337229d3d33edeb258c9481a",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "coupled_flux_portrait",
+      "must_be_generated": true,
+      "public_requirement": "a coherent flux portrait comprising delayed input response, regulator-dependent removal, a regulated internal source, exchange, and secondary-target generation, sufficient to explain the primary target v01(t) and secondary target v02(t)",
+      "required_drivers": [
+        "u01"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01",
+        "v02"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "flux_portrait",
+        "delayed_input_response",
+        "regulator_dependent_removal",
+        "regulated_internal_source",
+        "exchange",
+        "secondary_target_generation"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "hard"
+}

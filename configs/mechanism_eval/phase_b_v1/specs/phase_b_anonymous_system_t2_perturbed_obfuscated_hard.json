@@ -1,0 +1,47 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_t2_perturbed_obfuscated_hard",
+  "public_prompt_sha256": "1d023aa28c361c6155f7f4dacfd02eedc6e86e97a92fe0c1c506545c360fedd9",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "delayed_input_pathway",
+      "must_be_generated": true,
+      "public_requirement": "a causal delayed pathway associated with u01(t) and the primary target v01(t)",
+      "required_drivers": [
+        "u01"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "input_response",
+        "delayed_input_response",
+        "input_memory"
+      ]
+    },
+    {
+      "forbid_current_future_target_input": true,
+      "id": "regulator_dependent_removal",
+      "must_be_generated": true,
+      "public_requirement": "a delayed regulator-dependent removal pathway associated with the regulatory target v02(t)",
+      "required_drivers": [
+        "v02"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "delayed_regulatory_removal",
+        "regulatory_removal",
+        "delayed_removal"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "hard"
+}

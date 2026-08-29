@@ -38,6 +38,11 @@ domains, declared parameters and initial conditions, and explicit public
 constraints that have deterministic implementations. Failure makes a
 candidate ineligible; superior fit cannot compensate for it.
 
+Final evaluation recomputes this endpoint from the frozen candidate and the
+serialized public validation context. It does not trust a validity flag emitted
+by the discovery method. Runtime-invalid candidates retain their diagnostics and
+cannot carry test, hidden-mechanism, intervention, or public-mechanism scores.
+
 ### Public structural compliance
 
 Deterministic task predicates derived only from public requirements may become
@@ -53,10 +58,14 @@ hard gate and does not invent such a score after the fact.
 
 ### LLM mechanistic assessment
 
-An advisory assessment of qualitative properties that are not completely
+A proposed-method component that assesses qualitative properties not completely
 captured by deterministic public rules: mechanistic coherence, plausibility of
 latent-state roles, unsupported shortcuts, and whether complexity is
-scientifically justified. The LLM judge receives no trajectory-fit metric.
+scientifically justified. Its frozen output may guide proposal refinement and
+selection, but it receives no trajectory-fit metric and is not treated as the
+source of private benchmark truth. Final reports retain its influence, call
+budget, response coverage, and ablations separately from deterministic and
+private-reference endpoints.
 
 ### Private structural recovery
 
@@ -155,3 +164,7 @@ error where defined, post-pruning term count, and completion/failure status.
 Use "lower test MSE" rather than "better model" when only prediction improved,
 and report Pareto dominance only when one model is no worse on every applicable
 endpoint and strictly better on at least one.
+
+The prospective typed implementation and conjunctive public-mechanism metric are
+specified in `docs/PHASE_B_FINAL_EVALUATION.md`. The final record deliberately
+defines no weighted overall score.

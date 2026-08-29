@@ -1,0 +1,28 @@
+{
+  "benchmark_id": "phase_b_dalla_man_t1_perturbed_named_easy",
+  "public_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "meal_response",
+      "must_be_generated": true,
+      "public_requirement": "a causal mechanism through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+      "required_drivers": [
+        "meal_event_g"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "Gp"
+      ],
+      "requires_dynamic_memory": false,
+      "tag_aliases": [
+        "meal_pathway",
+        "meal_appearance",
+        "post_meal_response"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "easy"
+}

@@ -1232,6 +1232,9 @@ def _result_summary(
             result.frozen_selection.hybrid_science_weight
         ),
         "final_global_parameters": dict(result.final_fit.global_parameters),
+        "final_global_initial_conditions": dict(
+            result.final_fit.global_initial_conditions
+        ),
         "final_training_normalized_mse": (
             result.final_fit.training_metrics.normalized_mse
         ),

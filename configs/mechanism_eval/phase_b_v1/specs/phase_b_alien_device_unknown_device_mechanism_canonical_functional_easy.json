@@ -1,0 +1,31 @@
+{
+  "benchmark_id": "phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy",
+  "public_prompt_sha256": "7663bba9e84752550781f617b31f5f3391caf9967c77695fcfc5fff5423ab9a9",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "input_memory_output_pathway",
+      "must_be_generated": true,
+      "public_requirement": "input-driven memory and its causal contribution to the observed output",
+      "required_drivers": [
+        "u01"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "input_memory_output_pathway",
+        "input_driven_memory",
+        "dynamic_memory",
+        "persistent_coupling",
+        "nonlinear_feedback",
+        "output_generation"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "easy"
+}

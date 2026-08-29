@@ -1,0 +1,31 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_easy",
+  "public_prompt_sha256": "f09c3bccd48cb1079ae7642cd925af30c85e8e303da8f45643b19b775b426400",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "input_memory_output_pathway",
+      "must_be_generated": true,
+      "public_requirement": "a causal dynamic-memory mechanism linking the declared input u01(t) to the observed target v01(t)",
+      "required_drivers": [
+        "u01"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "input_memory_output_pathway",
+        "input_driven_memory",
+        "dynamic_memory",
+        "persistent_coupling",
+        "nonlinear_feedback",
+        "output_generation"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "easy"
+}

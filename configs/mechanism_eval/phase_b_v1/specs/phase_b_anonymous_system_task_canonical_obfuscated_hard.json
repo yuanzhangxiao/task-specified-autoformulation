@@ -1,0 +1,27 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_task_canonical_obfuscated_hard",
+  "public_prompt_sha256": "873c390306fdcb76983b0af946a37fab11b3a798983a39139c9d7149af653443",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "coupled_balance",
+      "must_be_generated": true,
+      "public_requirement": "a primary-target balance that distinguishes external transport, an internally generated state-dependent source, and exchange with a coupled quantity",
+      "required_drivers": [],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01"
+      ],
+      "requires_dynamic_memory": false,
+      "tag_aliases": [
+        "primary_target_balance",
+        "external_transport",
+        "state_dependent_source",
+        "coupled_exchange"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "hard"
+}

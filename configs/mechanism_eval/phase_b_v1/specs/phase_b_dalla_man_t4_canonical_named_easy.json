@@ -1,0 +1,31 @@
+{
+  "benchmark_id": "phase_b_dalla_man_t4_canonical_named_easy",
+  "public_prompt_sha256": "93ee6056ebc2c5ed971280d248a81d9063bfce38a5d893bbf23298a0fe8d8218",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "coupled_flux_portrait",
+      "must_be_generated": true,
+      "public_requirement": "a coherent flux portrait connecting meal appearance, glucose utilization, endogenous production, and insulin secretion to the observed glucose and insulin trajectories",
+      "required_drivers": [
+        "meal_event_g"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "Gp",
+        "I"
+      ],
+      "requires_dynamic_memory": false,
+      "tag_aliases": [
+        "flux_portrait",
+        "meal_appearance",
+        "glucose_utilization",
+        "endogenous_production",
+        "insulin_secretion"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "easy"
+}

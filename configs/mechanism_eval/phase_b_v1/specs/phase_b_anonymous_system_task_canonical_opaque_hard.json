@@ -1,0 +1,31 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+  "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "input_memory_output_pathway",
+      "must_be_generated": true,
+      "public_requirement": "a causal internal pathway connecting input memory, persistent coupling, nonlinear feedback, and output generation",
+      "required_drivers": [
+        "u01"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "input_memory_output_pathway",
+        "input_driven_memory",
+        "dynamic_memory",
+        "persistent_coupling",
+        "nonlinear_feedback",
+        "output_generation"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "hard"
+}

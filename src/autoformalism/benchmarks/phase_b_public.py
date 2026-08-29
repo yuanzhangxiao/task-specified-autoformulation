@@ -230,7 +230,7 @@ def render_phase_b_prompts(spec: PhaseBPublicSpec) -> tuple[str, str]:
     targets = [item for item in spec.channels if item.role == "target"]
     auxiliaries = [item for item in spec.channels if item.role == "auxiliary"]
     inputs = [item for item in spec.channels if item.role == "external_input"]
-    mechanism_lines = _task_mechanism_lines(spec)
+    mechanism_lines = phase_b_task_mechanism_lines(spec)
     proposer = "\n".join(
         [
             "A. Task specification",
@@ -684,7 +684,7 @@ def _public_intro(spec: PhaseBPublicSpec) -> str:
     )
 
 
-def _task_mechanism_lines(spec: PhaseBPublicSpec) -> list[str]:
+def phase_b_task_mechanism_lines(spec: PhaseBPublicSpec) -> tuple[str, ...]:
     """Describe task obligations naturally without exposing private coordinates."""
 
     target = next(item.public_name for item in spec.channels if item.role == "target")
@@ -692,7 +692,7 @@ def _task_mechanism_lines(spec: PhaseBPublicSpec) -> list[str]:
         item.public_name for item in spec.channels if item.role == "external_input"
     ]
     if spec.semantic_variant == "opaque":
-        return [
+        return (
             (
                 "a causal dynamic-memory mechanism linking the declared input "
                 f"{inputs[0]}(t) to the observed target {target}(t)"
@@ -701,8 +701,8 @@ def _task_mechanism_lines(spec: PhaseBPublicSpec) -> list[str]:
             else (
                 "a causal internal pathway connecting input memory, persistent "
                 "coupling, nonlinear feedback, and output generation"
-            )
-        ]
+            ),
+        )
     if spec.family == "dalla_man":
         if spec.semantic_variant == "named":
             named = {
@@ -729,53 +729,53 @@ def _task_mechanism_lines(spec: PhaseBPublicSpec) -> list[str]:
                     "the observed glucose and insulin trajectories"
                 ],
             }
-            return named[spec.task]
+            return tuple(named[spec.task])
         if spec.task == "T1":
-            return [
+            return (
                 "a causal mechanism through which input timing and magnitude "
-                "contribute to the observed target"
-            ]
+                "contribute to the observed target",
+            )
         if spec.task == "T2":
-            return [
+            return (
                 f"a causal delayed pathway associated with {inputs[0]}(t) and the "
                 "primary target v01(t)",
                 "a delayed regulator-dependent removal pathway associated with "
                 "the regulatory target v02(t)",
-            ]
+            )
         if spec.task == "T3":
-            return [
+            return (
                 f"a causal delayed input-response pathway associated with "
                 f"{inputs[0]}(t) and the primary target v01(t)",
                 "a delayed peripheral regulatory-removal pathway associated with "
                 "the regulatory target v02(t)",
                 "a distinct delayed source-regulation pathway that generates the "
                 "source-rate target v03(t)",
-            ]
-        return [
+            )
+        return (
             "a coherent flux portrait comprising delayed input response, "
             "regulator-dependent removal, a regulated internal source, exchange, "
             "and secondary-target generation, sufficient to explain the primary "
-            "target v01(t) and secondary target v02(t)"
-        ]
+            "target v01(t) and secondary target v02(t)",
+        )
     if spec.family == "cstr":
         if spec.semantic_variant == "named":
-            return [
+            return (
                 "a reactor-temperature balance that distinguishes feed transport, "
-                "reaction heat generation, and heat exchange with the jacket"
-            ]
-        return [
+                "reaction heat generation, and heat exchange with the jacket",
+            )
+        return (
             "a primary-target balance that distinguishes external transport, an "
             "internally generated state-dependent source, and exchange with a "
-            "coupled quantity"
-        ]
-    return [
+            "coupled quantity",
+        )
+    return (
         "input-driven memory and its causal contribution to the observed output"
         if spec.tier == "easy"
         else (
             "a causal internal pathway connecting input memory, persistent "
             "coupling, nonlinear feedback, and output generation"
-        )
-    ]
+        ),
+    )
 
 
 def _channel_line(channel: PublicChannel, spec: PhaseBPublicSpec) -> str:

@@ -48,6 +48,10 @@ def main() -> None:
                 "tier": item.tier,
                 "seed": item.seed,
                 "mechanism_coverage": result.mechanism_coverage,
+                "mechanism_compliance": result.mechanism_compliance,
+                "mechanism_compliance_complete": (
+                    result.mechanism_compliance_complete
+                ),
                 "structural_validity": result.structural_validity,
                 "manual_review_required": result.manual_review_required,
             }

@@ -1,0 +1,28 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_t1_perturbed_obfuscated_easy",
+  "public_prompt_sha256": "a1e89f8846c33085730df3d67708aa45a8412554b3f85df0626e57bc32be36bb",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "input_response",
+      "must_be_generated": true,
+      "public_requirement": "a causal mechanism through which input timing and magnitude contribute to the observed target",
+      "required_drivers": [
+        "u01"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "v01"
+      ],
+      "requires_dynamic_memory": false,
+      "tag_aliases": [
+        "causal_input_response",
+        "delayed_input_response",
+        "input_memory"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "easy"
+}

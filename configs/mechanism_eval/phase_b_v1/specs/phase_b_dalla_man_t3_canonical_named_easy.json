@@ -1,0 +1,61 @@
+{
+  "benchmark_id": "phase_b_dalla_man_t3_canonical_named_easy",
+  "public_prompt_sha256": "625e5bf72d9cd71ea925f4611289f7a451e041d3ead4a4d746ec95f590e0e2cd",
+  "required_mechanisms": [
+    {
+      "forbid_current_future_target_input": true,
+      "id": "meal_appearance",
+      "must_be_generated": true,
+      "public_requirement": "a causal meal-appearance pathway",
+      "required_drivers": [
+        "meal_event_g"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "Gp"
+      ],
+      "requires_dynamic_memory": false,
+      "tag_aliases": [
+        "meal_pathway",
+        "meal_response"
+      ]
+    },
+    {
+      "forbid_current_future_target_input": true,
+      "id": "peripheral_insulin_action",
+      "must_be_generated": true,
+      "public_requirement": "a delayed peripheral insulin-action pathway",
+      "required_drivers": [
+        "I"
+      ],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "Gp"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "delayed_disposal",
+        "insulin_dependent_disposal"
+      ]
+    },
+    {
+      "forbid_current_future_target_input": true,
+      "id": "hepatic_regulation",
+      "must_be_generated": true,
+      "public_requirement": "a distinct delayed hepatic-regulation pathway that generates endogenous glucose production",
+      "required_drivers": [],
+      "required_sign": "unspecified",
+      "required_targets": [
+        "EGP"
+      ],
+      "requires_dynamic_memory": true,
+      "tag_aliases": [
+        "delayed_hepatic_regulation",
+        "endogenous_production"
+      ]
+    }
+  ],
+  "schema_version": "mechanism-evaluation-spec-1",
+  "source": "public_prompt",
+  "tier": "easy"
+}

@@ -444,3 +444,27 @@ separate: public-task compliance does not imply that every descriptive
 scientific predicate passed, and judge output on natural candidates is not
 treated as gold-label accuracy. The full development run does not open test
 data.
+The first full scientific-audit pass accounted for all 240 planned orientations
+but returned only 166 valid responses. Thirty-nine failures were deterministic
+HTTP 400 rejections because general natural candidates produced inputs up to
+about 45,700 tokens while the shared vLLM launcher imposed the 32,768-token
+calibration cap; the remaining failures were bounded JSON or expected-unit
+contract failures. The raw-agent audit wrapper therefore raises only its serving
+capacity to 65,536 tokens. A versioned recovery command archives each original
+failure ledger with its digest, retains every successful score and valid cache,
+and makes only terminal failed keys eligible for fresh generation. No failed
+provider response is cached or silently converted into a judgment.
+
+Final Phase-B evaluation is now being consolidated as a non-scalar endpoint
+vector. The LLM judge remains a real Autoformalism search component, while
+runtime validity, conjunctive public mechanism compliance, target test NMSE,
+private mechanism recovery, conditional hidden-mechanism NMSE, interventions,
+and complexity are reported separately. The typed contract and assembler are in
+`docs/PHASE_B_FINAL_EVALUATION.md` and
+`src/autoformalism/rebuttal/final_evaluation.py`. Historical mechanism coverage
+and atomic structural validity remain reproducible; prospective
+`mechanism_compliance` requires every applicable predicate within each public
+mechanism group to pass. The 40 public Phase-B mechanism specifications,
+common method-source adapters, checkpointed post-freeze target replay, and
+private mechanism-response subspace endpoint are implemented. The private
+contract rank audit must pass on Delta before full method evaluation begins.
