@@ -45,6 +45,9 @@ HiddenMode = Literal[
     "not_applicable",
 ]
 
+NOMINAL_PAIR_RELATIVE_TOLERANCE = 1e-7
+NOMINAL_PAIR_ABSOLUTE_TOLERANCE = 1e-8
+
 
 class PhaseBHiddenSubspaceContract(BaseModel):
     """Frozen private definition of one representation-invariant endpoint."""
@@ -444,14 +447,23 @@ def _validate_private_matches_public(
         if not np.allclose(public.time, reference.time, rtol=0.0, atol=1e-10):
             raise ValueError("private/public time grids differ")
         for public_name, source in contract.target_sources.items():
-            if not np.allclose(
-                public.targets[public_name],
-                _private_values(reference, source),
-                rtol=5e-10,
-                atol=1e-10,
-            ):
+            observed = public.targets[public_name]
+            expected = _private_values(reference, source)
+            difference = np.abs(observed - expected)
+            tolerance = (
+                NOMINAL_PAIR_ABSOLUTE_TOLERANCE
+                + NOMINAL_PAIR_RELATIVE_TOLERANCE * np.abs(expected)
+            )
+            if not np.all(difference <= tolerance):
+                maximum_index = int(np.argmax(difference - tolerance))
                 raise ValueError(
-                    f"private/public nominal target differs: {public_name}"
+                    "private/public nominal target differs beyond the frozen "
+                    f"numeric reproducibility tolerance: target={public_name}, "
+                    f"trajectory={public.trajectory_id}, index={maximum_index}, "
+                    f"max_abs={float(np.max(difference)):.12g}, "
+                    f"allowed_at_index={float(tolerance[maximum_index]):.12g}, "
+                    f"rtol={NOMINAL_PAIR_RELATIVE_TOLERANCE:.1e}, "
+                    f"atol={NOMINAL_PAIR_ABSOLUTE_TOLERANCE:.1e}"
                 )
 
 

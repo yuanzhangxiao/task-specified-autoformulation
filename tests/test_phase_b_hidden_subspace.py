@@ -16,6 +16,7 @@ from autoformalism.benchmarks import (
     simulate_phase_b,
     write_public_production_bundle,
 )
+from autoformalism.benchmarks.phase_b_generation import PrivateTrajectory
 from autoformalism.config import DataConfig
 from autoformalism.data import (
     BenchmarkLoader,
@@ -35,6 +36,7 @@ from autoformalism.rebuttal.hidden import hidden_subspace_nmse
 from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
 from autoformalism.rebuttal.phase_b_hidden_subspace import (
     PhaseBHiddenSubspaceContract,
+    _validate_private_matches_public,
     evaluate_phase_b_hidden_subspace,
     phase_b_hidden_subspace_contract,
 )
@@ -101,6 +103,25 @@ def test_hidden_subspace_withholds_score_without_structural_recovery() -> None:
     assert metric.candidate_rank == 2
     assert metric.recovered is False
     assert metric.aligned_test_nmse is None
+
+
+def test_nominal_pairing_accepts_small_solver_reproducibility_difference() -> None:
+    public, private, contract = _nominal_pairing_case(
+        np.asarray([100.0, 200.0]),
+        np.asarray([100.0 + 5e-6, 200.0 - 5e-6]),
+    )
+
+    _validate_private_matches_public(public, private, contract)
+
+
+def test_nominal_pairing_rejects_scientifically_material_difference() -> None:
+    public, private, contract = _nominal_pairing_case(
+        np.asarray([100.0, 200.0]),
+        np.asarray([100.1, 200.0]),
+    )
+
+    with pytest.raises(ValueError, match=r"max_abs=0\.1"):
+        _validate_private_matches_public(public, private, contract)
 
 
 def test_phase_b_contracts_preserve_frozen_private_claims() -> None:
@@ -262,6 +283,56 @@ def _split(name: SplitName, identifier: str, count: int) -> DatasetSplit:
         ),
         f"{identifier}-fingerprint",
     )
+
+
+def _nominal_pairing_case(
+    public_values: np.ndarray,
+    private_values: np.ndarray,
+) -> tuple[
+    DatasetSplit,
+    tuple[PrivateTrajectory, ...],
+    PhaseBHiddenSubspaceContract,
+]:
+    time = np.arange(float(len(public_values)))
+    public = DatasetSplit(
+        SplitName.TRAIN,
+        (
+            Trajectory(
+                trajectory_id="train_000",
+                time=time,
+                targets={"x": public_values},
+                auxiliaries={},
+                external_inputs={"u": np.zeros(len(time))},
+                fixed_covariates={},
+                derivatives={},
+            ),
+        ),
+        "public-fingerprint",
+    )
+    private = (
+        PrivateTrajectory(
+            protocol_id="train_case",
+            family="cstr",
+            time=time,
+            state_names=("private_x",),
+            states=private_values[:, None],
+            input_names=("u",),
+            inputs=np.zeros((len(time), 1)),
+        ),
+    )
+    contract = PhaseBHiddenSubspaceContract(
+        benchmark_id="synthetic",
+        family="cstr",
+        task="synthetic",
+        tier="easy",
+        dynamics="canonical",
+        mode="mechanism_sensitivity_subspace",
+        private_mechanism_directions=("mechanism",),
+        claimed_dimension=1,
+        target_sources={"x": "private_x"},
+        public_prompt_sha256="a" * 64,
+    )
+    return public, private, contract
 
 
 def test_hidden_cli_and_merge_preserve_not_applicable_t4_contract(
