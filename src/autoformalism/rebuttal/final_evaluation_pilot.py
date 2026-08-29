@@ -94,6 +94,8 @@ class FrozenPilotSource(BaseModel):
     repetition: int
     source_kind: str
     source_path: str
+    artifact_status: Literal["available", "missing"]
+    missing_artifacts: tuple[str, ...] = ()
     artifact_sha256: dict[str, str]
 
 
@@ -140,7 +142,6 @@ def freeze_pilot_sources(
     raw_root = raw_agent_root.expanduser().resolve()
     requests: list[SourceAdapterRequest] = []
     sources: list[FrozenPilotSource] = []
-    missing: list[str] = []
     for cell in plan.cells:
         for repetition in plan.repetitions:
             for method_id in plan.methods:
@@ -169,10 +170,7 @@ def freeze_pilot_sources(
                         )
                     )
                 absent = [str(path) for path in relevant if not path.is_file()]
-                if absent:
-                    missing.extend(absent)
-                    continue
-                if method_id == "autoformalism":
+                if not absent and method_id == "autoformalism":
                     payload = _read_object(source_path)
                     if payload.get("selection_policy") != "incumbent_relative_hybrid":
                         raise ValueError(
@@ -187,7 +185,7 @@ def freeze_pilot_sources(
                             "Autoformalism pilot source is not a development-frozen "
                             f"selection: {source_path}"
                         )
-                else:
+                elif not absent:
                     payload = _read_object(source_path / "run_config.json")
                     if (payload.get("provider"), payload.get("model")) != (
                         "openai",
@@ -205,6 +203,9 @@ def freeze_pilot_sources(
                     request_id=request_id,
                     source_kind=source_kind,
                     source_path=source_path,
+                    expected_benchmark_id=cell.benchmark_id,
+                    expected_tier=cell.tier,
+                    expected_repetition=repetition,
                 )
                 identity = source_identity(request)
                 expected = (cell.benchmark_id, cell.tier, repetition)
@@ -223,14 +224,15 @@ def freeze_pilot_sources(
                         repetition=repetition,
                         source_kind=source_kind,
                         source_path=str(source_path),
+                        artifact_status="missing" if absent else "available",
+                        missing_artifacts=tuple(sorted(absent)),
                         artifact_sha256={
-                            path.name: _sha256(path) for path in relevant
+                            path.name: _sha256(path)
+                            for path in relevant
+                            if path.is_file()
                         },
                     )
                 )
-    if missing:
-        rendered = "\n".join(f"- {item}" for item in sorted(missing))
-        raise ValueError(f"planned source artifacts are missing:\n{rendered}")
     expected_count = len(plan.cells) * len(plan.repetitions) * len(plan.methods)
     if len(requests) != expected_count:
         raise AssertionError("internal pilot source count differs from plan")

@@ -50,6 +50,12 @@ def main() -> None:
         "hidden_contract_audit_path": str(args.hidden_audit.expanduser().resolve()),
         "hidden_contract_audit_sha256": audit_sha256,
         "source_count": len(sources),
+        "available_source_count": sum(
+            item.artifact_status == "available" for item in sources
+        ),
+        "missing_source_count": sum(
+            item.artifact_status == "missing" for item in sources
+        ),
         "expected_source_count": (
             len(plan.cells) * len(plan.repetitions) * len(plan.methods)
         ),

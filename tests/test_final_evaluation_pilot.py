@@ -112,17 +112,22 @@ def test_freeze_pilot_sources_builds_exact_cross_product(tmp_path: Path) -> None
     }
     raw_sources = [item for item in sources if item.source_kind == "raw_data_agent"]
     assert all(len(item.artifact_sha256) == 3 for item in raw_sources)
+    assert all(item.artifact_status == "available" for item in sources)
 
 
-def test_freeze_pilot_sources_fails_before_partial_manifest(tmp_path: Path) -> None:
+def test_freeze_pilot_sources_retains_missing_method_outcomes(tmp_path: Path) -> None:
     plan = _plan("0" * 64)
 
-    with pytest.raises(ValueError, match="planned source artifacts are missing"):
-        freeze_pilot_sources(
-            plan,
-            autoformalism_root=tmp_path / "auto",
-            raw_agent_root=tmp_path / "raw",
-        )
+    requests, sources = freeze_pilot_sources(
+        plan,
+        autoformalism_root=tmp_path / "auto",
+        raw_agent_root=tmp_path / "raw",
+    )
+
+    assert len(requests) == 4
+    assert all(item.expected_benchmark_id == "benchmark" for item in requests)
+    assert all(item.artifact_status == "missing" for item in sources)
+    assert sum(len(item.missing_artifacts) for item in sources) == 8
 
 
 def test_hidden_audit_requires_exact_companion_digest(tmp_path: Path) -> None:

@@ -258,11 +258,13 @@ without a new provider call. Autoformalism uses its frozen
 The pilot is explicitly development-only. It verifies the plumbing and failure
 accounting before expanding to 40 cells; it is not a confirmatory benchmark
 claim. `scripts/prepare_phase_b_final_evaluation_pilot.py` resolves the exact 12
-source artifacts, verifies their public run identities, hashes every relevant
-source file, and verifies the exact successful hidden-contract audit v2 plus its
-companion digest. It writes the source-adapter request ledger only when the
-whole planned cross-product exists. This freeze occurs before test replay or
-candidate-specific private evaluation.
+source paths, verifies the public identity of every available run, hashes every
+available relevant source file, and verifies the exact successful
+hidden-contract audit v2 plus its companion digest. The request ledger always
+contains the whole planned cross-product. A terminal method run without a
+summary remains a content-addressed missing-source outcome rather than being
+retried until success or silently omitted. This freeze occurs before test replay
+or candidate-specific private evaluation.
 
 `scripts/hpc/phase_b_final_evaluation_pilot_v1.slurm` then runs the existing
 checkpointed stages in order: source adaptation, sealed unseen-condition target

@@ -36,6 +36,23 @@ class SourceAdapterRequest(BaseModel):
     request_id: str = Field(min_length=1)
     source_kind: SourceKind
     source_path: Path
+    expected_benchmark_id: str | None = None
+    expected_tier: str | None = None
+    expected_repetition: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def expected_identity_is_complete(self) -> SourceAdapterRequest:
+        """Require either a complete prespecified identity or no identity."""
+        values = (
+            self.expected_benchmark_id,
+            self.expected_tier,
+            self.expected_repetition,
+        )
+        if any(value is not None for value in values) and any(
+            value is None for value in values
+        ):
+            raise ValueError("expected source identity must be complete")
+        return self
 
 
 class SourceAdapterOutcome(BaseModel):
@@ -83,20 +100,42 @@ def adapt_source(
 def source_identity(request: SourceAdapterRequest) -> tuple[str, str, int]:
     """Read only public run identity needed to construct the validation context."""
     path = request.source_path.expanduser().resolve()
+    expected: tuple[str, str, int] | None = None
+    if request.expected_benchmark_id is not None:
+        assert request.expected_tier is not None
+        assert request.expected_repetition is not None
+        expected = (
+            request.expected_benchmark_id,
+            request.expected_tier,
+            request.expected_repetition,
+        )
+    identity_path = (
+        path / "run_config.json" if request.source_kind == "raw_data_agent" else path
+    )
+    if not identity_path.is_file():
+        if expected is None:
+            raise ValueError(f"required source artifact is missing: {identity_path}")
+        return expected
     if request.source_kind == "raw_data_agent":
-        config = _read_object(path / "run_config.json")
-        return (
+        config = _read_object(identity_path)
+        actual = (
             str(config["benchmark_id"]),
             str(config["tier"]),
             int(config["repetition"]),
         )
-    payload = _read_object(path)
-    repetition_key = "seed"
-    return (
-        str(payload["benchmark_id"]),
-        str(payload["tier"]),
-        int(payload.get(repetition_key, 0)),
-    )
+    else:
+        payload = _read_object(identity_path)
+        actual = (
+            str(payload["benchmark_id"]),
+            str(payload["tier"]),
+            int(payload.get("seed", 0)),
+        )
+    if expected is not None and actual != expected:
+        raise ValueError(
+            "source identity differs from the prespecified request; "
+            f"expected={expected}, actual={actual}"
+        )
+    return actual
 
 
 def _adapt_autoformalism(

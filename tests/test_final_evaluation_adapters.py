@@ -179,6 +179,42 @@ def test_raw_agent_adapter_uses_returned_fitted_parameters(tmp_path: Path) -> No
     }
 
 
+def test_prespecified_identity_retains_a_missing_source_as_an_outcome(
+    tmp_path: Path,
+) -> None:
+    request = SourceAdapterRequest(
+        request_id="missing-auto",
+        source_kind="autoformalism",
+        source_path=tmp_path / "missing-summary.json",
+        expected_benchmark_id="benchmark",
+        expected_tier="easy",
+        expected_repetition=2,
+    )
+
+    assert source_identity(request) == ("benchmark", "easy", 2)
+
+
+def test_prespecified_identity_rejects_an_existing_mismatched_source(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "summary.json"
+    _write_json(
+        source,
+        {"benchmark_id": "other", "tier": "easy", "seed": 2},
+    )
+    request = SourceAdapterRequest(
+        request_id="mismatch",
+        source_kind="autoformalism",
+        source_path=source,
+        expected_benchmark_id="benchmark",
+        expected_tier="easy",
+        expected_repetition=2,
+    )
+
+    with pytest.raises(ValueError, match="differs from the prespecified request"):
+        source_identity(request)
+
+
 @pytest.mark.parametrize("method", ["sindy", "pysr"])
 def test_symbolic_adapter_preserves_equation_but_not_embedded_test_metrics(
     method: str,
