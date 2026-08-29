@@ -36,6 +36,11 @@ class SourceAdapterRequest(BaseModel):
     request_id: str = Field(min_length=1)
     source_kind: SourceKind
     source_path: Path
+    method_label: str | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+    )
     expected_benchmark_id: str | None = None
     expected_tier: str | None = None
     expected_repetition: int | None = Field(default=None, ge=0)
@@ -43,6 +48,10 @@ class SourceAdapterRequest(BaseModel):
     @model_validator(mode="after")
     def expected_identity_is_complete(self) -> SourceAdapterRequest:
         """Require either a complete prespecified identity or no identity."""
+        if self.method_label is not None and self.source_kind != "autoformalism":
+            raise ValueError(
+                "method_label is supported only for Autoformalism ablations"
+            )
         values = (
             self.expected_benchmark_id,
             self.expected_tier,
@@ -155,7 +164,7 @@ def _adapt_autoformalism(
     parameterization = _parameterization(candidate, parameters, initials)
     return _subject(
         request=request,
-        method="autoformalism",
+        method=request.method_label or "autoformalism",
         benchmark_id=str(payload["benchmark_id"]),
         tier=str(payload["tier"]),
         repetition=int(payload.get("seed", 0)),

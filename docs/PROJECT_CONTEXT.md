@@ -280,6 +280,17 @@ The pipeline is iterative:
   atomic protocol, 120B model, scientific weight, and tie threshold are unchanged;
   the new policy is versioned in both the frozen config and checkpoints before a
   confirmation search is run.
+  The next search-integration gate is a matched causal ablation rather than an
+  immediate production-default change. Two prespecified Phase-B cells and three
+  repetitions are run under both the frozen paired-question-consensus policy and
+  validation-only search with all judge calls disabled. Proposer model, seed,
+  sampling, beam, fitting budget, iteration budget, shared initial request cache,
+  and post-freeze endpoint vector are identical. All 12 planned outcomes,
+  including terminal source failures, are frozen before test or private
+  evaluation. Passing this plumbing gate permits suite deployment; it does not
+  tune the judge or define a weighted final score. Judge-arm tasks populate the
+  initial-request cache before dependent no-judge tasks begin, eliminating a
+  concurrent cache-miss race from the matched comparison.
 - The fixed-denominator search exposed target-mapping and initialization
   interfaces. The first model-semantic calibration was invalid: its constructed
   complete mapping could double-count a component already inside process `U`,

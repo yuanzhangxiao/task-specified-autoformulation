@@ -385,15 +385,31 @@ listed targets is insufficient.
 
 ## Remaining implementation milestones
 
-1. Analyze the candidate-specific V7 target-completeness run and perform the
+1. Run the frozen two-cell, three-repetition paired-question-consensus versus
+   no-judge search integration ablation. Freeze all 12 planned source outcomes,
+   including failures, before sending both arms through the common evaluator.
+   This experiment attributes the effect of judge-guided selection and feedback;
+   it does not tune the judge or define an overall score.
+2. Analyze the candidate-specific V7 target-completeness run and perform the
    predeclared fresh-structure confirmation before enabling the hard target
    contract in production search.
-2. Run the private mechanism-response implementation on Delta and audit the
+3. Run the private mechanism-response implementation on Delta and audit the
    prespecified ground-truth rank, semantic-pair identity, recovery coverage,
    numerical failures, and runtime before enabling it for the full comparison.
    The legacy coordinate-matching scripts remain excluded.
-3. Run every method through the common source adapter, post-freeze replay,
+4. Run every method through the common source adapter, post-freeze replay,
    hidden-subspace evaluator, and final assembler.
-4. Use the LLM judge only as required by Autoformalism search and a small,
+5. Use the LLM judge only as required by Autoformalism search and a small,
    predeclared qualitative comparison; report its call budget and coverage
    separately.
+
+The integration ablation is frozen by
+`configs/phase_b_search_integration_ablation_v1.json`. Its preparation command
+writes an immutable 12-task ledger before any search call. The GPU array reads
+only that ledger. The judge tasks run first and populate the shared
+content-addressed proposer cache; the dependent no-judge tasks therefore reuse
+identical initial requests before their feedback histories diverge. After
+search, a second freeze records every available or
+missing summary with a distinct `autoformalism:paired_question_consensus` or
+`autoformalism:no_judge` method label and verifies the exact successful hidden
+contract audit before the CPU evaluator can open test or private data.

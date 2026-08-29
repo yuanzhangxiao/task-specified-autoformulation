@@ -1,0 +1,66 @@
+{
+  "schema_version": "phase-b-search-integration-ablation-plan-1",
+  "status": "frozen_before_search_calls",
+  "purpose": "Matched development confirmation of the validated paired-question-consensus judge inside search versus validation-only search without any judge calls",
+  "development_only": true,
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "arms": [
+    {
+      "arm_id": "paired_question_consensus",
+      "selection_policy": "incumbent_relative_hybrid",
+      "use_judge": true,
+      "hybrid_science_weight": 0.5
+    },
+    {
+      "arm_id": "no_judge",
+      "selection_policy": "validation_only",
+      "use_judge": false,
+      "hybrid_science_weight": null
+    }
+  ],
+  "model_contract": {
+    "proposer_model": "vllm:openai/gpt-oss-120b",
+    "judge_model": "vllm:openai/gpt-oss-120b",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "proposer_max_output_tokens": 4096,
+    "request_timeout_seconds": 900
+  },
+  "search_budget": {
+    "iteration_budget": 8,
+    "beam_size": 1,
+    "fit_starts": 1,
+    "fit_max_nfev": 10,
+    "fit_timeout_seconds": 120,
+    "final_fit_max_nfev": 10,
+    "final_fit_timeout_seconds": 120
+  },
+  "hidden_contract_audit": {
+    "schema_version": "phase-b-hidden-subspace-contract-audit-2",
+    "sha256": "5a57615899fab71fcc5991752267f6569a1ed358b04cc17923f97ae1fe60fddc",
+    "required_status": "pass"
+  },
+  "shared_initial_request_cache": true,
+  "test_data_opened_during_search": false,
+  "evaluation_endpoints": [
+    "source_completion",
+    "runtime_validity",
+    "public_mechanism_compliance",
+    "sealed_target_nmse",
+    "hidden_response_subspace_nmse",
+    "intervention_behavior",
+    "model_complexity",
+    "judge_call_budget_and_coverage"
+  ],
+  "weighted_overall_score_defined": false
+}

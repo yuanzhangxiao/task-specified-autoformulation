@@ -353,6 +353,60 @@ def test_incumbent_relative_hybrid_uses_one_common_challenge_and_resumes(
     assert pairwise.calls == 1
 
 
+def test_matched_no_judge_arm_uses_same_candidates_without_pairwise_calls(
+    tmp_path: Path,
+) -> None:
+    incumbent = _candidate("incumbent", "-0.6 * x", ())
+    challenger = _candidate(
+        "challenger",
+        "-0.55 * x",
+        (),
+        parent="incumbent",
+    )
+    hybrid_client = MockLLMClient(
+        proposer_responses=[incumbent, challenger]
+    )
+    no_judge_client = MockLLMClient(
+        proposer_responses=[incumbent, challenger]
+    )
+    pairwise = _FixedPairwiseJudge(decision_for_incumbent=-1.0)
+    base = {
+        "beam_size": 1,
+        "cheap_prefit_judge": False,
+        "evaluate_test": False,
+        "stagnation_iterations": 3,
+    }
+    hybrid_config = _config(tmp_path / "hybrid-arm", 2).model_copy(
+        update={
+            **base,
+            "selection_policy": "incumbent_relative_hybrid",
+            "hybrid_science_weight": 0.75,
+        }
+    )
+    no_judge_config = _config(tmp_path / "no-judge-arm", 2).model_copy(
+        update={
+            **base,
+            "selection_policy": "validation_only",
+            "use_judge": False,
+        }
+    )
+
+    hybrid_result = _controller(
+        hybrid_client,
+        hybrid_config,
+        pairwise_judge=pairwise,
+    ).run()
+    no_judge_result = _controller(no_judge_client, no_judge_config).run()
+
+    assert pairwise.calls == 1
+    assert hybrid_result.frozen_selection.candidate.candidate_id == "challenger"
+    assert no_judge_result.frozen_selection.candidate.candidate_id == "incumbent"
+    assert [call["role"] for call in no_judge_client.calls] == [
+        "proposer",
+        "proposer",
+    ]
+
+
 def test_losing_hybrid_challenge_is_feedback_but_not_an_eligible_parent(
     tmp_path: Path,
 ) -> None:

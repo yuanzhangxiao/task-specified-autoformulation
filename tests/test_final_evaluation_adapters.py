@@ -109,6 +109,60 @@ def test_autoformalism_adapter_freezes_parameters_and_ignores_test(
     assert subject.source_provenance.adapter == "autoformalism_summary"
 
 
+def test_autoformalism_adapter_preserves_prespecified_ablation_label(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "summary.json"
+    _write_json(
+        source,
+        {
+            "status": "complete",
+            "benchmark_id": "benchmark",
+            "tier": "easy",
+            "seed": 2,
+            "selected_candidate": _candidate().model_dump(mode="json"),
+            "final_global_parameters": {"k": 0.4},
+            "final_global_initial_conditions": {},
+        },
+    )
+
+    subject = adapt_source(
+        SourceAdapterRequest(
+            request_id="no-judge-0",
+            source_kind="autoformalism",
+            source_path=source,
+            method_label="autoformalism:no_judge",
+        ),
+        _context(),
+    )
+
+    assert subject.method == "autoformalism:no_judge"
+
+
+def test_method_label_is_rejected_for_non_autoformalism_source(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValidationError, match="only for Autoformalism"):
+        SourceAdapterRequest(
+            request_id="bad-label",
+            source_kind="raw_data_agent",
+            source_path=tmp_path,
+            method_label="raw:renamed",
+        )
+
+
+def test_absent_method_label_does_not_change_frozen_request_bytes(
+    tmp_path: Path,
+) -> None:
+    request = SourceAdapterRequest(
+        request_id="legacy-auto",
+        source_kind="autoformalism",
+        source_path=tmp_path / "summary.json",
+    )
+
+    assert "method_label" not in json.loads(request.model_dump_json())
+
+
 def test_autoformalism_adapter_marks_legacy_missing_initial_as_partial(
     tmp_path: Path,
 ) -> None:

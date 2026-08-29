@@ -293,6 +293,33 @@ Acceptance tests:
 - artifact inspection finds no raw dataset, private/hidden path,
   secret, or unbounded API response.
 
+## M16 — Validated judge integration and matched no-judge ablation
+
+Freeze the selected paired-question-consensus operating point inside the
+incumbent-relative search controller, then run a matched development experiment
+against validation-only search with all judge calls disabled. Hold benchmark
+cells, repetitions, proposer model, sampling settings, fitting budget, beam,
+initial request cache, and post-freeze evaluator fixed. Only the scientific
+selection and feedback path may differ.
+
+Acceptance tests:
+
+- the frozen plan expands to the exact arm-by-cell-by-repetition cross-product;
+- the judge arm uses `incumbent_relative_hybrid`, both candidate orientations,
+  question consensus, the fixed indeterminate denominator, and the frozen
+  science weight;
+- the no-judge arm uses `validation_only` and makes no judge call;
+- both arms use a one-member beam, identical numerical and proposal budgets,
+  deterministic checkpoints, and development-only search without test access;
+- the judge arm populates the content-addressed cache before the no-judge arm,
+  so identical initial proposer requests are reused exactly while later
+  feedback-dependent requests remain independently hashed;
+- terminal method failures remain planned outcomes rather than being omitted;
+- selections are content-frozen before common target, mechanism-compliance,
+  hidden-subspace, intervention, complexity, and reliability evaluation;
+- no weighted overall evaluation score is introduced;
+- deterministic resume does not duplicate completed proposer or judge calls.
+
 ## Baseline runtime controls
 
 Run each baseline in a supervised process group with a configurable hard
