@@ -291,6 +291,16 @@ python scripts/audit_phase_b_hidden_subspace_contracts.py \
   --output /path/to/hidden_contract_audit.json
 ```
 
+The audit separates provenance from numerical sensitivity. CSTR and Alien
+private system files and protocol suites must match committed SHA-256 values.
+Public split manifests and prompt hashes independently identify the released
+inputs. Dalla--Man and CSTR additionally compare fresh nominal rollouts to the
+public release within a frozen cross-solver tolerance. Alien does not use that
+last numerical comparison because long-horizon adaptive integration is not
+portable across SciPy versions; its reference directions subtract nominal and
+perturbed rollouts generated together in the same environment. This exception
+does not relax any rank, recovery, or hidden-NMSE threshold.
+
 The committed public specifications can be regenerated and audited without
 opening test trajectories or using private reference mechanisms in the emitted
 contract:

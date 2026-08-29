@@ -36,7 +36,9 @@ from autoformalism.rebuttal.hidden import hidden_subspace_nmse
 from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
 from autoformalism.rebuttal.phase_b_hidden_subspace import (
     PhaseBHiddenSubspaceContract,
+    _private_directions,
     _validate_private_matches_public,
+    _validate_private_release_identity,
     evaluate_phase_b_hidden_subspace,
     phase_b_hidden_subspace_contract,
 )
@@ -122,6 +124,101 @@ def test_nominal_pairing_rejects_scientifically_material_difference() -> None:
 
     with pytest.raises(ValueError, match=r"max_abs=0\.1"):
         _validate_private_matches_public(public, private, contract)
+
+
+@pytest.mark.parametrize("family", ["cstr", "alien_device"])
+def test_private_release_identity_accepts_frozen_sources(family: str) -> None:
+    contract = _private_release_contract(family)
+
+    _validate_private_release_identity(contract, Path("data_raw"))
+
+
+def test_private_release_identity_rejects_modified_source(tmp_path: Path) -> None:
+    source = Path(
+        "data_raw/benchmark6_alien_device/private/selected_system_spec.json"
+    )
+    destination = (
+        tmp_path
+        / "benchmark6_alien_device/private/selected_system_spec.json"
+    )
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(source.read_bytes() + b"\n")
+
+    with pytest.raises(ValueError, match="private system source SHA-256 differs"):
+        _validate_private_release_identity(
+            _private_release_contract("alien_device"), tmp_path
+        )
+
+
+def test_alien_directions_do_not_use_cross_solver_nominal_comparison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = next(
+        item for item in phase_b_protocols("alien_device") if item.split == "train"
+    )
+    time = np.asarray([0.0, 1.0])
+    split = DatasetSplit(
+        SplitName.TRAIN,
+        (
+            Trajectory(
+                trajectory_id="train_000",
+                time=time,
+                targets={"v01": np.zeros(2)},
+                auxiliaries={},
+                external_inputs={"u01": np.zeros(2)},
+                fixed_covariates={},
+                derivatives={},
+            ),
+        ),
+        "public-fingerprint",
+    )
+    contract = _private_release_contract("alien_device").model_copy(
+        update={
+            "private_mechanism_directions": ("output_core",),
+            "target_sources": {"v01": "y"},
+        }
+    )
+
+    def simulate(*_args: object, **kwargs: object) -> PrivateTrajectory:
+        shifted = bool(kwargs.get("private_mechanism_scales"))
+        values = np.asarray([100.1, 101.2]) if shifted else np.asarray([100.0, 101.0])
+        return PrivateTrajectory(
+            protocol_id=protocol.protocol_id,
+            family="alien_device",
+            time=time,
+            state_names=("y",),
+            states=values[:, None],
+            input_names=("u",),
+            inputs=np.zeros((2, 1)),
+        )
+
+    monkeypatch.setattr(
+        "autoformalism.rebuttal.phase_b_hidden_subspace."
+        "_validate_private_release_identity",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "autoformalism.rebuttal.phase_b_hidden_subspace.phase_b_protocols",
+        lambda *_args, **_kwargs: (protocol,),
+    )
+    monkeypatch.setattr(
+        "autoformalism.rebuttal.phase_b_hidden_subspace.simulate_phase_b",
+        simulate,
+    )
+    monkeypatch.setattr(
+        "autoformalism.rebuttal.phase_b_hidden_subspace."
+        "_validate_private_matches_public",
+        lambda *_args: pytest.fail("Alien must not compare fresh nominal values"),
+    )
+
+    directions = _private_directions(
+        split,
+        contract,
+        {"v01": 1.0},
+        private_data_root=Path("data_raw"),
+    )
+
+    assert directions[:, 0] == pytest.approx([100.0, 200.0])
 
 
 def test_phase_b_contracts_preserve_frozen_private_claims() -> None:
@@ -333,6 +430,21 @@ def _nominal_pairing_case(
         public_prompt_sha256="a" * 64,
     )
     return public, private, contract
+
+
+def _private_release_contract(family: str) -> PhaseBHiddenSubspaceContract:
+    return PhaseBHiddenSubspaceContract(
+        benchmark_id=f"synthetic_{family}",
+        family=family,
+        task="synthetic",
+        tier="easy",
+        dynamics="canonical",
+        mode="mechanism_sensitivity_subspace",
+        private_mechanism_directions=("mechanism",),
+        claimed_dimension=1,
+        target_sources={"x": "private_x"},
+        public_prompt_sha256="a" * 64,
+    )
 
 
 def test_hidden_cli_and_merge_preserve_not_applicable_t4_contract(

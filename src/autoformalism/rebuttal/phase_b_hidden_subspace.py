@@ -52,6 +52,32 @@ HiddenMode = Literal[
 NOMINAL_PAIR_RELATIVE_TOLERANCE = 1e-4
 NOMINAL_PAIR_ABSOLUTE_TOLERANCE = 1e-7
 
+# These byte and protocol commitments identify the private systems used for the
+# frozen Phase-B release.  They are provenance guards, not evaluation targets.
+# In particular, the Alien system is sufficiently sensitive that a fresh
+# solve_ivp rollout is not bitwise/numerically portable across SciPy versions.
+# Its finite-difference directions remain valid because nominal and shifted
+# rollouts are always generated together in the current environment.
+_PRIVATE_SYSTEM_COMMITMENTS: dict[Family, tuple[Path, str]] = {
+    "cstr": (
+        Path(
+            "benchmark5_anonymous_nonlinear_process/private/"
+            "system_specification.json"
+        ),
+        "6a08872658c98ad7040b449a35cd6614b8f15030d04c1695a69e85baccc94a7a",
+    ),
+    "alien_device": (
+        Path("benchmark6_alien_device/private/selected_system_spec.json"),
+        "c984a734127d17e81deff752d0d4a2b3ed4411680ac3638965f6909eeeb0d9c2",
+    ),
+}
+_PRIVATE_PROTOCOL_COMMITMENTS: dict[Family, str] = {
+    "cstr": "e9aeb43f1999a4dcae4bb931af48c2246a970dea22ae26739d79bb04b2c5ed62",
+    "alien_device": (
+        "02cf1224fd8a3b464da8b8ddfb2ccd14c02bc1212885bec3972c9805d6176310"
+    ),
+}
+
 
 class PhaseBHiddenSubspaceContract(BaseModel):
     """Frozen private definition of one representation-invariant endpoint."""
@@ -396,6 +422,7 @@ def _private_directions(
     *,
     private_data_root: Path,
 ) -> NDArray[np.float64]:
+    _validate_private_release_identity(contract, private_data_root)
     protocols = tuple(
         item
         for item in phase_b_protocols(
@@ -414,7 +441,8 @@ def _private_directions(
         )
         for protocol in protocols
     )
-    _validate_private_matches_public(split, nominal, contract)
+    if contract.family != "alien_device":
+        _validate_private_matches_public(split, nominal, contract)
     columns = []
     for mechanism in contract.private_mechanism_directions:
         shifted = tuple(
@@ -440,6 +468,45 @@ def _private_directions(
             values.append(matrix.ravel() / contract.sensitivity_fraction)
         columns.append(np.concatenate(values))
     return np.column_stack(columns)
+
+
+def _validate_private_release_identity(
+    contract: PhaseBHiddenSubspaceContract,
+    private_data_root: Path,
+) -> None:
+    """Verify immutable private source inputs without relying on solver output."""
+
+    commitment = _PRIVATE_SYSTEM_COMMITMENTS.get(contract.family)
+    if commitment is None:
+        return
+    relative_path, expected_source_sha256 = commitment
+    source_path = private_data_root / relative_path
+    if not source_path.is_file():
+        raise FileNotFoundError(
+            f"frozen private system source is missing: {source_path}"
+        )
+    observed_source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if observed_source_sha256 != expected_source_sha256:
+        raise ValueError(
+            "frozen private system source SHA-256 differs: "
+            f"family={contract.family}, observed={observed_source_sha256}, "
+            f"expected={expected_source_sha256}"
+        )
+
+    protocols = phase_b_protocols(contract.family)
+    protocol_payload = json.dumps(
+        [item.model_dump(mode="json") for item in protocols],
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    observed_protocol_sha256 = hashlib.sha256(protocol_payload).hexdigest()
+    expected_protocol_sha256 = _PRIVATE_PROTOCOL_COMMITMENTS[contract.family]
+    if observed_protocol_sha256 != expected_protocol_sha256:
+        raise ValueError(
+            "frozen private protocol-suite SHA-256 differs: "
+            f"family={contract.family}, observed={observed_protocol_sha256}, "
+            f"expected={expected_protocol_sha256}"
+        )
 
 
 def _validate_private_matches_public(
