@@ -374,6 +374,14 @@ The pipeline is iterative:
   `configs/target_eval/phase_b_v1`. Mechanism compliance and scientific
   comparisons remain separate endpoints. Production pairwise judge requests
   also blind candidate identifiers, lineage, and proposer change summaries.
+  The registered external public release still contains the pre-clarification
+  proposer prompt. Production search therefore uses a versioned copy-on-write
+  prompt overlay. Its builder requires all 40 registered cells, preserves every
+  non-proposer file byte-for-byte, permits revisions only for the four reviewed
+  named easy T2/T3 prompts, and requires every resulting prompt SHA-256 to match
+  its committed target contract. Unexpected prompt drift fails closed. Proposal
+  generation and deterministic target evaluation must receive this same overlay;
+  baselines are rerun only for benchmark identifiers whose prompt changed.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and
