@@ -1,0 +1,98 @@
+{
+  "schema_version": "phase-b-search-integration-ablation-plan-2",
+  "status": "frozen_before_search_calls",
+  "purpose": "Matched production-path confirmation of paired-question-consensus scientific guidance versus validation-only search under the same deterministic public-target boundary",
+  "development_only": true,
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "public_target_contract_sha256": "cfbd142e80ee843a0ac674fb3a2daa4dd4187b9c4350de72262fb42bcacafd26"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+      "public_target_contract_sha256": "3656f87507f48ee11fb8ace52afbac1c9186e8c18aaca8d5efc086b348d0d40a"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "arms": [
+    {
+      "arm_id": "paired_question_consensus",
+      "selection_policy": "incumbent_relative_hybrid",
+      "use_judge": true,
+      "hybrid_science_weight": 0.5
+    },
+    {
+      "arm_id": "no_judge",
+      "selection_policy": "validation_only",
+      "use_judge": false,
+      "hybrid_science_weight": null
+    }
+  ],
+  "model_contract": {
+    "proposer_model": "vllm:openai/gpt-oss-120b",
+    "judge_model": "vllm:openai/gpt-oss-120b",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "proposer_max_output_tokens": 4096,
+    "request_timeout_seconds": 900,
+    "judge_protocol_config_sha256": "8823138b1652354f7f577ef0f07fc5c6533813d68cbeddc528cf104bfe9a0fe2"
+  },
+  "search_budget": {
+    "iteration_budget": 8,
+    "beam_size": 1,
+    "fit_starts": 1,
+    "fit_max_nfev": 10,
+    "fit_timeout_seconds": 120,
+    "final_fit_max_nfev": 10,
+    "final_fit_timeout_seconds": 120
+  },
+  "hidden_contract_audit": {
+    "schema_version": "phase-b-hidden-subspace-contract-audit-2",
+    "sha256": "5a57615899fab71fcc5991752267f6569a1ed358b04cc17923f97ae1fe60fddc",
+    "required_status": "pass"
+  },
+  "shared_initial_request_cache": true,
+  "test_data_opened_during_search": false,
+  "evaluation_endpoints": [
+    "source_completion",
+    "runtime_validity",
+    "deterministic_target_contract",
+    "public_mechanism_compliance",
+    "sealed_target_nmse",
+    "hidden_response_subspace_nmse",
+    "intervention_behavior",
+    "model_complexity",
+    "llm_token_attempt_latency_and_cache_usage",
+    "allocated_cpu_and_gpu_time",
+    "monetary_cost_when_priced"
+  ],
+  "weighted_overall_score_defined": false,
+  "public_input_contract": {
+    "suite_version": "phase_b_v1",
+    "prompt_overlay_config_sha256": "399e5b3d24f0ce6750fc4f3953643a9417ecde7c87f499d31188a5e2dc12065b",
+    "target_contract_manifest_sha256": "fd3256398e454860fcdca317bb850390b773dda1243f8fb8d9521bb48e8df005",
+    "expected_cell_count": 40,
+    "require_non_proposer_files_byte_identical": true,
+    "require_production_registered": true,
+    "require_sealed_test": true
+  },
+  "deterministic_runtime_checks": [
+    "schema_and_restricted_expression_validation",
+    "symbol_closure_and_algebraic_acyclicity",
+    "explicit_observation_mapping_for_every_target",
+    "recursive_public_target_dependency_validation",
+    "bounded_parameter_and_initialization_contracts"
+  ],
+  "resource_accounting": {
+    "schema_version": "phase-b-search-resource-ledger-1",
+    "logical_cached_usage_counted": true,
+    "provider_attempts_reported_separately": true,
+    "queue_time_separate_from_execution_time": true,
+    "development_cost_separate_from_marginal_deployment_cost": true,
+    "local_model_monetary_cost_policy": "not_priced_report_hardware_time"
+  }
+}

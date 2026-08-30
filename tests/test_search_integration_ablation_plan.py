@@ -252,6 +252,31 @@ def test_search_audit_verifies_initial_cache_reuse_and_no_judge_calls(
                     "role": "proposer",
                     "request_hash": "same-initial-request",
                     "cache_hit": cache_hit,
+                    "latency_ms": 100.0,
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (run / "task_runtime.json").write_text(
+            json.dumps(
+                {
+                    "task_elapsed_wall_seconds": 60.0,
+                    "search_process_elapsed_seconds": 50.0,
+                    "allocated_cpus": 16,
+                    "allocated_gpus": 4,
+                    "allocated_cpu_core_hours": 16 / 60,
+                    "allocated_gpu_hours": 4 / 60,
+                    "exit_code": 0,
+                    "monetary_cost_usd": None,
+                    "monetary_cost_status": (
+                        "not_priced_local_open_weight_model"
+                    ),
                 }
             )
             + "\n",
@@ -271,6 +296,12 @@ def test_search_audit_verifies_initial_cache_reuse_and_no_judge_calls(
                 "role": "atomic_evidence_judge",
                 "request_hash": "judge-stage",
                 "cache_hit": False,
+                "latency_ms": 200.0,
+                "usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 10,
+                    "total_tokens": 30,
+                },
             }
         )
         + "\n",
@@ -283,3 +314,10 @@ def test_search_audit_verifies_initial_cache_reuse_and_no_judge_calls(
     assert report["matched_source_completion_count"] == 1
     assert report["initial_request_comparable_count"] == 1
     assert report["judge_stage_response_count"] == 1
+    resources = report["resource_accounting"]
+    assert resources["runtime_record_count"] == 2
+    assert resources["logical_response_count"] == 3
+    assert resources["provider_attempt_event_count"] == 2
+    assert resources["logical_total_tokens"] == 60
+    assert resources["provider_total_tokens"] == 45
+    assert resources["allocated_gpu_hours"] == pytest.approx(8 / 60)

@@ -15,6 +15,7 @@ from autoformalism.rebuttal.final_evaluation_pilot import (
     HiddenAuditRequirement,
     validate_hidden_audit,
 )
+from autoformalism.targets import PublicTargetContract
 
 
 class SearchAblationCell(BaseModel):
@@ -24,6 +25,8 @@ class SearchAblationCell(BaseModel):
 
     benchmark_id: str = Field(min_length=1)
     tier: Literal["easy", "medium", "hard"]
+    public_prompt_sha256: str | None = None
+    public_target_contract_sha256: str | None = None
 
 
 class SearchAblationArm(BaseModel):
@@ -77,6 +80,36 @@ class SearchModelContract(BaseModel):
     temperature: float = Field(ge=0.0, le=2.0)
     proposer_max_output_tokens: int = Field(ge=128)
     request_timeout_seconds: float = Field(gt=0.0)
+    judge_protocol_config_sha256: str | None = None
+
+
+class SearchPublicInputContract(BaseModel):
+    """Immutable public prompt-overlay and target-contract boundary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    suite_version: Literal["phase_b_v1"]
+    prompt_overlay_config_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_contract_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_cell_count: Literal[40]
+    require_non_proposer_files_byte_identical: Literal[True]
+    require_production_registered: Literal[True]
+    require_sealed_test: Literal[True]
+
+
+class SearchResourceAccountingContract(BaseModel):
+    """Predeclared resource ledger semantics shared across search arms."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["phase-b-search-resource-ledger-1"]
+    logical_cached_usage_counted: Literal[True]
+    provider_attempts_reported_separately: Literal[True]
+    queue_time_separate_from_execution_time: Literal[True]
+    development_cost_separate_from_marginal_deployment_cost: Literal[True]
+    local_model_monetary_cost_policy: Literal[
+        "not_priced_report_hardware_time"
+    ]
 
 
 class SearchIntegrationAblationPlan(BaseModel):
@@ -84,7 +117,10 @@ class SearchIntegrationAblationPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["phase-b-search-integration-ablation-plan-1"]
+    schema_version: Literal[
+        "phase-b-search-integration-ablation-plan-1",
+        "phase-b-search-integration-ablation-plan-2",
+    ]
     status: Literal["frozen_before_search_calls"]
     purpose: str = Field(min_length=1)
     development_only: Literal[True]
@@ -98,6 +134,9 @@ class SearchIntegrationAblationPlan(BaseModel):
     test_data_opened_during_search: Literal[False]
     evaluation_endpoints: tuple[str, ...] = Field(min_length=1)
     weighted_overall_score_defined: Literal[False]
+    public_input_contract: SearchPublicInputContract | None = None
+    deterministic_runtime_checks: tuple[str, ...] = ()
+    resource_accounting: SearchResourceAccountingContract | None = None
 
     @model_validator(mode="after")
     def matrix_is_complete(self) -> SearchIntegrationAblationPlan:
@@ -117,6 +156,23 @@ class SearchIntegrationAblationPlan(BaseModel):
             )
         if len(self.evaluation_endpoints) != len(set(self.evaluation_endpoints)):
             raise ValueError("evaluation endpoints must be unique")
+        if self.schema_version.endswith("-2"):
+            if self.public_input_contract is None:
+                raise ValueError("version 2 requires a public-input contract")
+            if self.resource_accounting is None:
+                raise ValueError("version 2 requires resource accounting")
+            if not self.deterministic_runtime_checks:
+                raise ValueError("version 2 requires deterministic runtime checks")
+            for cell in self.cells:
+                if (
+                    cell.public_prompt_sha256 is None
+                    or cell.public_target_contract_sha256 is None
+                ):
+                    raise ValueError(
+                        "version 2 cells require prompt and target-contract hashes"
+                    )
+            if self.model_contract.judge_protocol_config_sha256 is None:
+                raise ValueError("version 2 requires a judge-protocol hash")
         return self
 
 
@@ -133,6 +189,8 @@ class SearchIntegrationTask(BaseModel):
     selection_policy: Literal["incumbent_relative_hybrid", "validation_only"]
     use_judge: bool
     hybrid_science_weight: float | None = None
+    public_prompt_sha256: str | None = None
+    public_target_contract_sha256: str | None = None
 
 
 class FrozenSearchAblationSource(BaseModel):
@@ -176,6 +234,10 @@ def build_search_integration_tasks(
                         selection_policy=arm.selection_policy,
                         use_judge=arm.use_judge,
                         hybrid_science_weight=arm.hybrid_science_weight,
+                        public_prompt_sha256=cell.public_prompt_sha256,
+                        public_target_contract_sha256=(
+                            cell.public_target_contract_sha256
+                        ),
                     )
                 )
     expected = len(plan.arms) * len(plan.cells) * len(plan.repetitions)
@@ -187,10 +249,20 @@ def build_search_integration_tasks(
 def freeze_search_integration_plan(
     config_path: Path,
     output_root: Path,
+    *,
+    public_data_root: Path | None = None,
+    target_contract_root: Path | None = None,
+    prompt_overlay_config_path: Path | None = None,
 ) -> dict[str, object]:
     """Write immutable plan, task ledger, hashes, and a no-test manifest."""
     resolved_config = config_path.expanduser().resolve()
     plan = load_search_integration_plan(resolved_config)
+    public_input_validation = _validate_search_public_inputs(
+        plan,
+        public_data_root=public_data_root,
+        target_contract_root=target_contract_root,
+        prompt_overlay_config_path=prompt_overlay_config_path,
+    )
     tasks = build_search_integration_tasks(plan)
     root = output_root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -214,6 +286,12 @@ def freeze_search_integration_plan(
         "development_only": plan.development_only,
         "test_data_opened": False,
         "weighted_overall_score_defined": plan.weighted_overall_score_defined,
+        "public_input_validation": public_input_validation,
+        "resource_accounting_schema_version": (
+            None
+            if plan.resource_accounting is None
+            else plan.resource_accounting.schema_version
+        ),
     }
     manifest_path = root / "freeze_manifest.json"
     _write_once(
@@ -226,6 +304,103 @@ def freeze_search_integration_plan(
             f"{_sha256(path)}  {path.name}\n",
         )
     return manifest
+
+
+def _validate_search_public_inputs(
+    plan: SearchIntegrationAblationPlan,
+    *,
+    public_data_root: Path | None,
+    target_contract_root: Path | None,
+    prompt_overlay_config_path: Path | None,
+) -> dict[str, object] | None:
+    """Bind v2 search cells to the exact prompt overlay and target contracts."""
+    boundary = plan.public_input_contract
+    if boundary is None:
+        return None
+    if (
+        public_data_root is None
+        or target_contract_root is None
+        or prompt_overlay_config_path is None
+    ):
+        raise ValueError(
+            "version 2 freeze requires public data, target contracts, and "
+            "prompt-overlay config"
+        )
+    public_root = public_data_root.expanduser().resolve()
+    contract_root = target_contract_root.expanduser().resolve()
+    overlay_config = prompt_overlay_config_path.expanduser().resolve()
+    if _sha256(overlay_config) != boundary.prompt_overlay_config_sha256:
+        raise ValueError("prompt-overlay config differs from the frozen plan")
+    contract_manifest = contract_root / "manifest.json"
+    if _sha256(contract_manifest) != boundary.target_contract_manifest_sha256:
+        raise ValueError("target-contract manifest differs from the frozen plan")
+
+    overlay_manifest_path = public_root / "prompt_overlay_manifest.json"
+    overlay_manifest = _read_object(overlay_manifest_path)
+    expected_overlay = {
+        "status": "ready",
+        "suite_version": boundary.suite_version,
+        "cell_count": boundary.expected_cell_count,
+        "non_proposer_files_byte_identical": (
+            boundary.require_non_proposer_files_byte_identical
+        ),
+        "target_contract_manifest_sha256": (
+            boundary.target_contract_manifest_sha256
+        ),
+    }
+    for key, expected in expected_overlay.items():
+        if overlay_manifest.get(key) != expected:
+            raise ValueError(
+                f"prompt-overlay manifest field differs: {key}="
+                f"{overlay_manifest.get(key)!r}, expected={expected!r}"
+            )
+
+    suite_root = public_root / boundary.suite_version
+    validated_cells: list[dict[str, str]] = []
+    for cell in plan.cells:
+        prompt_path = suite_root / cell.benchmark_id / "proposer_prompt.txt"
+        cell_manifest_path = suite_root / cell.benchmark_id / "manifest.json"
+        contract_path = contract_root / "specs" / f"{cell.benchmark_id}.json"
+        prompt_sha256 = _sha256(prompt_path)
+        contract_sha256 = _sha256(contract_path)
+        if prompt_sha256 != cell.public_prompt_sha256:
+            raise ValueError(f"public prompt differs for {cell.benchmark_id}")
+        if contract_sha256 != cell.public_target_contract_sha256:
+            raise ValueError(f"target contract differs for {cell.benchmark_id}")
+        contract = PublicTargetContract.model_validate_json(
+            contract_path.read_text(encoding="utf-8")
+        )
+        if (
+            contract.benchmark_id,
+            contract.tier,
+            contract.public_prompt_sha256,
+        ) != (cell.benchmark_id, cell.tier, prompt_sha256):
+            raise ValueError(
+                f"target contract identity differs for {cell.benchmark_id}"
+            )
+        cell_manifest = _read_object(cell_manifest_path)
+        if boundary.require_production_registered and (
+            cell_manifest.get("status") != "production_registered"
+        ):
+            raise ValueError(f"public cell is not registered: {cell.benchmark_id}")
+        if boundary.require_sealed_test and not cell_manifest.get("test_sealed"):
+            raise ValueError(f"public cell has no sealed test: {cell.benchmark_id}")
+        validated_cells.append(
+            {
+                "benchmark_id": cell.benchmark_id,
+                "public_prompt_sha256": prompt_sha256,
+                "public_target_contract_sha256": contract_sha256,
+            }
+        )
+    return {
+        "status": "validated_before_search_calls",
+        "prompt_overlay_manifest_sha256": _sha256(overlay_manifest_path),
+        "prompt_overlay_config_sha256": _sha256(overlay_config),
+        "target_contract_manifest_sha256": _sha256(contract_manifest),
+        "cell_count": len(validated_cells),
+        "cells": validated_cells,
+        "test_data_opened": False,
+    }
 
 
 def freeze_search_ablation_sources(

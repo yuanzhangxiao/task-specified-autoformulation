@@ -383,6 +383,16 @@ The pipeline is iterative:
   its committed target contract. Unexpected prompt drift fails closed. Proposal
   generation and deterministic target evaluation must receive this same overlay;
   baselines are rerun only for benchmark identifiers whose prompt changed.
+  Search-integration protocol v2 is the first matched end-to-end confirmation of
+  this boundary. It reruns two cells and three seeds under both the validated
+  paired-question-consensus policy and a validation-only no-LLM-judge arm. Both
+  arms use the same deterministic target contracts; only the scientific LLM
+  comparison is ablated. Exact prompt, target-contract, judge-protocol, and
+  hidden-audit hashes are frozen before calls. Per-trial accounting separates
+  logical cached token usage from uncached provider attempts and reports process
+  time, CPU core-hours, GPU-hours, memory, retries, and queue timing. Local
+  open-weight inference is reported in hardware units rather than assigned a
+  fictitious zero monetary cost.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and
