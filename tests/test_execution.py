@@ -101,6 +101,7 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.use_derivative_fit_fast_path is True
     assert default.llm_cache_only is False
     assert default.llm_cache_root is None
+    assert default.require_initial_proposer_cache_hit is False
     assert default.development_only is False
     assert default.ollama_base_url == "http://127.0.0.1:11434"
     assert default.ollama_thinking is OllamaThinking.AUTO
@@ -289,6 +290,48 @@ def test_cli_accepts_shared_cache_only_mode(tmp_path: Path) -> None:
 
     assert arguments.llm_cache_only is True
     assert arguments.llm_cache_root == (tmp_path / "resolved").resolve()
+
+
+def test_cli_accepts_initial_cache_precondition_for_no_judge_arm(
+    tmp_path: Path,
+) -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--dry-run",
+                "--proposer-model",
+                "vllm:example",
+                "--no-judge",
+                "--llm-cache-root",
+                str(tmp_path / "shared"),
+                "--require-initial-proposer-cache-hit",
+            ]
+        )
+    )
+
+    assert arguments.use_judge is False
+    assert arguments.require_initial_proposer_cache_hit is True
+
+
+def test_cli_rejects_initial_cache_precondition_without_no_judge(
+    tmp_path: Path,
+) -> None:
+    parser = build_experiment_parser(description="test")
+
+    with pytest.raises(SystemExit, match="only valid with --no-judge"):
+        arguments_from_namespace(
+            parser.parse_args(
+                [
+                    "--dry-run",
+                    "--proposer-model",
+                    "vllm:example",
+                    "--llm-cache-root",
+                    str(tmp_path / "shared"),
+                    "--require-initial-proposer-cache-hit",
+                ]
+            )
+        )
 
 
 def test_cli_accepts_forbid_latent_states() -> None:

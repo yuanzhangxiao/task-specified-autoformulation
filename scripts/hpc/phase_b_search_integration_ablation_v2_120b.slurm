@@ -26,8 +26,9 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_VLLM_IMAGE:=${AF_PROJECT}/containers/vllm-openai-v0.27.1.sif}"
 : "${AF_VLLM_IMAGE_URI:=docker://vllm/vllm-openai:v0.27.1}"
 : "${AF_HF_HOME:=${AF_PROJECT}/huggingface-cache}"
-: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/search-integration-ablation-v2}"
+: "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/search-integration-ablation-v3}"
 : "${AF_TENSOR_PARALLEL_SIZE:=4}"
+: "${AF_VLLM_PORT:=8000}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 : "${AF_TASK_INDEX:=${SLURM_ARRAY_TASK_ID:-0}}"
 
@@ -121,7 +122,7 @@ readonly shared_cache="${AF_OUTPUT_ROOT}/shared-llm-cache/${run_name}"
 readonly process_time="${run_root}/search_process_time.txt"
 readonly gpu_inventory="${run_root}/gpu_inventory.txt"
 readonly task_started_epoch_seconds="$(date +%s.%N)"
-readonly endpoint_port=$((20000 + SLURM_JOB_ID % 20000))
+readonly endpoint_port="${AF_VLLM_PORT}"
 readonly endpoint="http://127.0.0.1:${endpoint_port}"
 readonly server_log="${AF_OUTPUT_ROOT}/vllm-${SLURM_JOB_ID}.log"
 readonly apptainer_cache="${AF_PROJECT}/apptainer-cache"
@@ -233,7 +234,7 @@ if [[ "${use_judge}" == "true" ]]; then
     --hybrid-judge-seed-base "$((12000 + 2 * repetition))"
   )
 else
-  selection_arguments+=(--no-judge)
+  selection_arguments+=(--no-judge --require-initial-proposer-cache-hit)
 fi
 
 /usr/bin/time -o "${process_time}" \

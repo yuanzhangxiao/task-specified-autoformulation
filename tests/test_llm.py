@@ -446,6 +446,40 @@ def test_cache_only_client_fails_closed_on_miss(tmp_path: Path) -> None:
     assert event["event"] == "llm_cache_miss"
 
 
+def test_per_call_cache_only_fails_closed_without_changing_client(
+    tmp_path: Path,
+) -> None:
+    client = StubCachedClient(tmp_path)
+
+    with pytest.raises(LLMCacheMissError, match="cache-only LLM request"):
+        client.propose(
+            system_prompt="system",
+            user_prompt="missing",
+            cache_only=True,
+        )
+
+    assert client.provider_calls == 0
+    event = json.loads((tmp_path / "events.jsonl").read_text(encoding="utf-8"))
+    assert event["event"] == "llm_cache_miss"
+    assert event["per_call_cache_only"] is True
+
+
+def test_per_call_cache_only_restores_populated_entry(tmp_path: Path) -> None:
+    populated = StubCachedClient(tmp_path)
+    expected = populated.propose(system_prompt="system", user_prompt="user")
+    replay = StubCachedClient(tmp_path)
+
+    restored = replay.propose(
+        system_prompt="system",
+        user_prompt="user",
+        cache_only=True,
+    )
+
+    assert restored.parsed == expected.parsed
+    assert restored.cache_hit is True
+    assert replay.provider_calls == 0
+
+
 def test_cache_only_factory_does_not_require_provider_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

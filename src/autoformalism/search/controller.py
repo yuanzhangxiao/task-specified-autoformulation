@@ -209,9 +209,9 @@ class SearchController:
         if stage == "new":
             feedback = self._proposer_feedback(beam, round_index)
             try:
-                proposal = self._client.propose(
-                    system_prompt=self._config.proposer_system_prompt,
-                    user_prompt=json.dumps(
+                proposal_arguments = {
+                    "system_prompt": self._config.proposer_system_prompt,
+                    "user_prompt": json.dumps(
                         {
                             "round": round_index,
                             "proposal_mode": "exploratory",
@@ -219,7 +219,17 @@ class SearchController:
                         },
                         sort_keys=True,
                     ),
-                ).parsed
+                }
+                if (
+                    round_index == 0
+                    and self._config.require_initial_proposer_cache_hit
+                ):
+                    proposal = self._client.propose(
+                        **proposal_arguments,
+                        cache_only=True,
+                    ).parsed
+                else:
+                    proposal = self._client.propose(**proposal_arguments).parsed
             except (LLMProviderError, LLMResponseError) as exc:
                 payload.update(
                     valid=False,

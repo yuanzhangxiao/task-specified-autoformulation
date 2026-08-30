@@ -143,7 +143,9 @@ def collect_search_audit(plan_path: Path, search_root: Path) -> dict[str, object
             == no_judge["initial_proposer_request_hash"]
         )
         if hashes_available and not request_match:
-            raise ValueError(f"initial proposer request differs across arms: {key}")
+            raise ValueError(
+                f"full initial proposer cache key differs across arms: {key}"
+            )
         if request_match and no_judge["initial_proposer_cache_hit"] is not True:
             raise ValueError(f"no-judge arm did not reuse the initial request: {key}")
         matched_rows.append(

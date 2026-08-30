@@ -152,6 +152,7 @@ class ExecutionArguments:
     use_derivative_fit_fast_path: bool = True
     llm_cache_only: bool = False
     llm_cache_root: Path | None = None
+    require_initial_proposer_cache_hit: bool = False
     development_only: bool = False
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_thinking: OllamaThinking = OllamaThinking.AUTO
@@ -177,9 +178,17 @@ class _RoleClient:
         self._proposer = proposer
         self._judge = judge
 
-    def propose(self, *, system_prompt: str, user_prompt: str):
+    def propose(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        cache_only: bool = False,
+    ):
         return self._proposer.propose(
-            system_prompt=system_prompt, user_prompt=user_prompt
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            cache_only=cache_only,
         )
 
     def judge(self, *, system_prompt: str, user_prompt: str):
@@ -377,6 +386,14 @@ def build_experiment_parser(
         help="disable judge calls and feedback for the no-judge ablation",
     )
     parser.add_argument(
+        "--require-initial-proposer-cache-hit",
+        action="store_true",
+        help=(
+            "require round zero to restore the proposer response from the shared "
+            "cache without making a provider request"
+        ),
+    )
+    parser.add_argument(
         "--public-target-contract",
         type=Path,
         help=(
@@ -414,6 +431,17 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--hybrid-science-weight must be in [0, 1]")
     if namespace.selection_policy == "normalized_weighted_sum" and namespace.no_judge:
         raise SystemExit("--selection-policy normalized_weighted_sum requires judge")
+    if namespace.require_initial_proposer_cache_hit and not namespace.no_judge:
+        raise SystemExit(
+            "--require-initial-proposer-cache-hit is only valid with --no-judge"
+        )
+    if (
+        namespace.require_initial_proposer_cache_hit
+        and namespace.llm_cache_root is None
+    ):
+        raise SystemExit(
+            "--require-initial-proposer-cache-hit requires --llm-cache-root"
+        )
     if namespace.selection_policy == "incumbent_relative_hybrid":
         if namespace.no_judge:
             raise SystemExit(
@@ -506,6 +534,9 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
             None
             if namespace.llm_cache_root is None
             else namespace.llm_cache_root.expanduser().resolve()
+        ),
+        require_initial_proposer_cache_hit=(
+            namespace.require_initial_proposer_cache_hit
         ),
         development_only=namespace.development_only,
         ollama_base_url=namespace.ollama_base_url,
@@ -618,6 +649,9 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "llm_cache_root": (
             None if arguments.llm_cache_root is None else str(arguments.llm_cache_root)
         ),
+        "require_initial_proposer_cache_hit": (
+            arguments.require_initial_proposer_cache_hit
+        ),
         "development_only": arguments.development_only,
         "ollama_base_url": arguments.ollama_base_url,
         "ollama_thinking": arguments.ollama_thinking.value,
@@ -674,6 +708,9 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         validation_mse_target=0.0,
         cheap_prefit_judge=False,
         use_judge=arguments.use_judge,
+        require_initial_proposer_cache_hit=(
+            arguments.require_initial_proposer_cache_hit
+        ),
         selection_policy=arguments.selection_policy,
         judge_weight=arguments.judge_weight,
         judge_score_epsilon=arguments.judge_score_epsilon,

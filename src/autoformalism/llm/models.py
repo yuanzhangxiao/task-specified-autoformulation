@@ -66,6 +66,7 @@ class LLMClient(Protocol):
         *,
         system_prompt: str,
         user_prompt: str,
+        cache_only: bool = False,
     ) -> LLMCallResult[CandidateModel]:
         """Request one candidate conforming to ``CandidateModel``."""
         ...

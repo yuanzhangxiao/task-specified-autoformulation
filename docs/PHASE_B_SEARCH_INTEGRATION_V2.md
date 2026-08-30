@@ -52,7 +52,8 @@ export AF_PYTHON="$python_bin"
 export AF_PUBLIC_DATA_ROOT=/work/hdd/bibo/$USER/phase_b/inputs/public-prompt-v3
 export AF_TARGET_CONTRACT_ROOT="$repo/configs/target_eval/phase_b_v1"
 export AF_PROMPT_OVERLAY_CONFIG="$repo/configs/phase_b_public_prompt_overlay_v3.json"
-export AF_OUTPUT_ROOT=/work/hdd/bibo/$USER/phase_b/search-integration-ablation-v2
+export AF_HIDDEN_AUDIT=/work/hdd/bibo/$USER/phase_b/hidden-contract-audit-v2/hidden_contract_audit.json
+export AF_OUTPUT_ROOT=/work/hdd/bibo/$USER/phase_b/search-integration-ablation-v3
 
 scripts/hpc/submit_phase_b_search_integration_ablation_v2.sh
 ```
@@ -61,13 +62,19 @@ The submission command fails if the output root already has a submission
 manifest. Resume or diagnose that frozen launch instead of silently creating a
 second matrix.
 
+The corrected v3 execution uses the same fixed loopback endpoint string in all
+four-GPU tasks. The no-judge round-zero proposer call is cache-only: a missing
+judge-populated entry stops the task before any independent generation can
+contaminate the matched ablation. Submission also verifies the frozen hidden
+audit and its companion digest before launching either search arm.
+
 If full request hashes differ, distinguish ephemeral transport metadata from
 the actual initial candidate before declaring the matched trial invalid:
 
 ```bash
 python scripts/check_phase_b_search_initial_comparability.py \
   --plan /path/to/frozen/plan.json \
-  --search-root /path/to/search-integration-ablation-v2 \
+  --search-root /path/to/search-integration-ablation-v3 \
   --output /path/to/initial_comparability.json
 ```
 

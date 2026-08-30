@@ -12,7 +12,7 @@ from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.expressions import ValidationContext
 from autoformalism.fitting import FitConfig
 from autoformalism.llm import MockLLMClient
-from autoformalism.llm.exceptions import LLMResponseError
+from autoformalism.llm.exceptions import LLMCacheMissError, LLMResponseError
 from autoformalism.pruning import PruningConfig
 from autoformalism.schemas import (
     AbsoluteCriterion,
@@ -693,6 +693,35 @@ def test_proposer_response_failure_checkpoints_round_and_search_continues(
     assert failed_round["error"] == (
         "LLMResponseError: missing required target mapping"
     )
+
+
+def test_round_zero_cache_precondition_fails_before_independent_generation(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(
+        "unused_candidate", "-decay * x", (("decay", 0.2, 1.0),)
+    )
+    client = MockLLMClient(proposer_responses=[candidate])
+    config = SearchConfig(
+        checkpoint_directory=tmp_path / "cache_precondition",
+        maximum_iterations=1,
+        beam_size=1,
+        stagnation_iterations=1,
+        validation_mse_target=0.0,
+        cheap_prefit_judge=False,
+        use_judge=False,
+        require_initial_proposer_cache_hit=True,
+        evaluate_test=False,
+        proposer_system_prompt="Propose one valid model.",
+        judge_system_prompt="Unused.",
+        fit_config=FitConfig(number_of_starts=1),
+        pruning_config=PruningConfig(validation_mse_tolerance=1e-7),
+    )
+
+    with pytest.raises(LLMCacheMissError, match="no persistent cache"):
+        _controller(client, config).run()
+
+    assert not client.calls
 
 
 def test_resume_continues_after_exact_completed_stage_without_repeat(

@@ -6,6 +6,7 @@ import hashlib
 from collections import deque
 from typing import Any
 
+from autoformalism.llm.exceptions import LLMCacheMissError
 from autoformalism.llm.models import LLMCallResult
 from autoformalism.schemas import (
     AbsoluteCriterion,
@@ -59,8 +60,11 @@ class MockLLMClient:
         *,
         system_prompt: str,
         user_prompt: str,
+        cache_only: bool = False,
     ) -> LLMCallResult[CandidateModel]:
         """Return the next validated proposer response."""
+        if cache_only:
+            raise LLMCacheMissError("mock proposer has no persistent cache")
         if not self._proposer_responses:
             raise AssertionError("no mock proposer response remains")
         self.calls.append(

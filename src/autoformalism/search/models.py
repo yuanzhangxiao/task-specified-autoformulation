@@ -52,6 +52,7 @@ class SearchConfig(BaseModel):
     validation_mse_target: float = Field(default=0.0, ge=0.0)
     cheap_prefit_judge: bool = False
     use_judge: bool = True
+    require_initial_proposer_cache_hit: bool = False
     selection_policy: SelectionPolicy = "validation_only"
     judge_weight: float = Field(default=0.25, ge=0.0)
     judge_score_epsilon: float = Field(default=0.05, gt=0.0)
@@ -68,6 +69,10 @@ class SearchConfig(BaseModel):
         """Enforce judge, beam, and split boundaries for selection policies."""
         if self.selection_policy != "validation_only" and not self.use_judge:
             raise ValueError(f"{self.selection_policy} requires use_judge=True")
+        if self.require_initial_proposer_cache_hit and self.use_judge:
+            raise ValueError(
+                "initial proposer cache enforcement is reserved for no-judge arms"
+            )
         if (
             self.selection_policy == "incumbent_relative_hybrid"
             and self.beam_size != 1

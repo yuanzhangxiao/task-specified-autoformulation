@@ -97,6 +97,7 @@ class CachedLLMClient(ABC):
         *,
         system_prompt: str,
         user_prompt: str,
+        cache_only: bool = False,
     ) -> LLMCallResult[CandidateModel]:
         """Request or restore a strict proposer candidate."""
         compact = self._structured_call(
@@ -108,6 +109,7 @@ class CachedLLMClient(ABC):
                 proposal,
                 self._proposal_target_channels,
             ),
+            cache_only=cache_only,
         )
         return LLMCallResult(
             request_hash=compact.request_hash,
@@ -287,6 +289,7 @@ class CachedLLMClient(ABC):
             Callable[[StructuredT], tuple[StructuredT, dict[str, object]]] | None
         ) = None,
         validate_parsed: Callable[[StructuredT], object] | None = None,
+        cache_only: bool = False,
     ) -> LLMCallResult[StructuredT]:
         if not system_prompt.strip() or not user_prompt.strip():
             raise ValueError("system_prompt and user_prompt must not be empty")
@@ -309,7 +312,7 @@ class CachedLLMClient(ABC):
             )
             self._log_success(role, result)
             return result
-        if self._cache_only:
+        if self._cache_only or cache_only:
             self._append_log(
                 {
                     "event": "llm_cache_miss",
@@ -318,6 +321,7 @@ class CachedLLMClient(ABC):
                     "role": role,
                     "request_hash": request_hash,
                     "cache_path": str(self._cache_path(request_hash)),
+                    "per_call_cache_only": cache_only,
                 }
             )
             raise LLMCacheMissError(

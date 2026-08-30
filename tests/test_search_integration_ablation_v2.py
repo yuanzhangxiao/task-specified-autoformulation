@@ -151,8 +151,12 @@ def test_v2_launchers_pin_overlay_contract_and_accounting() -> None:
         "write_phase_b_search_task_runtime.py",
         "/usr/bin/time",
         "--no-judge",
+        "--require-initial-proposer-cache-hit",
+        'AF_VLLM_PORT:=8000',
+        "search-integration-ablation-v3",
     ):
         assert required in search
+    assert "SLURM_JOB_ID %" not in search
     assert "API_KEY" not in search
     assert "--evaluate-test" not in search
 
@@ -167,6 +171,11 @@ def test_v2_launchers_pin_overlay_contract_and_accounting() -> None:
     assert "submission_manifest.json" in submit
     assert "--public-data-root" in submit
     assert "--target-contract-root" in submit
+    assert "AF_HIDDEN_AUDIT" in submit
+    assert "sha256sum -c" in submit
+    assert '--output="${AF_REPO_ROOT}/logs/' in submit
+    assert "required_cache_hit_no_provider_fallback" in submit
+    assert "phase-b-search-integration-submission-2" in submit
 
 
 def test_task_runtime_records_allocation_and_process_metrics(tmp_path: Path) -> None:
