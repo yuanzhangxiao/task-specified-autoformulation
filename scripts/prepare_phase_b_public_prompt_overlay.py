@@ -22,6 +22,7 @@ _OVERLAY_MANIFEST = "prompt_overlay_manifest.json"
 class PromptRevision:
     """One reviewed exact-text revision shared by named benchmark cells."""
 
+    expected_source_sha256: str | None
     expected_sha256: str
     replacements: tuple[tuple[str, str], ...]
 
@@ -64,6 +65,7 @@ def _non_prompt_inventory(inventory: dict[str, str]) -> dict[str, str]:
 def _load_revisions(config: dict[str, Any]) -> dict[str, PromptRevision]:
     revisions: dict[str, PromptRevision] = {}
     for record in config.get("revisions", []):
+        expected_source = record.get("expected_source_prompt_sha256")
         expected = str(record["expected_revised_prompt_sha256"])
         replacements = tuple(
             (str(item["old"]), str(item["new"]))
@@ -75,7 +77,11 @@ def _load_revisions(config: dict[str, Any]) -> dict[str, PromptRevision]:
             identifier = str(benchmark_id)
             if identifier in revisions:
                 raise ValueError(f"duplicate prompt revision: {identifier}")
-            revisions[identifier] = PromptRevision(expected, replacements)
+            revisions[identifier] = PromptRevision(
+                None if expected_source is None else str(expected_source),
+                expected,
+                replacements,
+            )
     return revisions
 
 
@@ -131,6 +137,15 @@ def _apply_revision(
     if revision.expected_sha256 != expected_sha256:
         raise ValueError(
             f"revision and target contract disagree for {benchmark_id}"
+        )
+    if (
+        revision.expected_source_sha256 is not None
+        and source_sha256 != revision.expected_source_sha256
+    ):
+        raise ValueError(
+            "source proposer prompt differs from the frozen reviewed predecessor: "
+            f"benchmark={benchmark_id}, source_sha256={source_sha256}, "
+            f"expected_source_sha256={revision.expected_source_sha256}"
         )
     revised = source.decode("utf-8")
     for old, new in revision.replacements:
@@ -389,7 +404,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/phase_b_public_prompt_overlay_v2.json"),
+        default=Path("configs/phase_b_public_prompt_overlay_v3.json"),
     )
     args = parser.parse_args()
     manifest = prepare_overlay(

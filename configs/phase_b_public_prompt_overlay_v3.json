@@ -1,0 +1,101 @@
+{
+  "schema_version": "phase-b-public-prompt-overlay-config-1",
+  "status": "frozen_before_production_search",
+  "suite_version": "phase_b_v1",
+  "purpose": "supersede v2 by applying the reviewed total-disposal wording to every released named cell whose proposer prompt contains one of the revised phrases",
+  "target_contract_manifest_sha256": "fd3256398e454860fcdca317bb850390b773dda1243f8fb8d9521bb48e8df005",
+  "unchanged_policy": {
+    "numeric_files": "byte_identical",
+    "non_proposer_files": "byte_identical",
+    "judge_prompts": "byte_identical",
+    "unexpected_prompt_mismatch": "fail"
+  },
+  "revisions": [
+    {
+      "benchmark_ids": [
+        "phase_b_dalla_man_t1_canonical_named_easy",
+        "phase_b_dalla_man_t1_perturbed_named_easy"
+      ],
+      "expected_source_prompt_sha256": "85cd4404df92120620ee754cd51cfd8d4828c346b52db30eb0434dbc8b6a6139",
+      "expected_revised_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4",
+      "replacements": [
+        {
+          "old": "Uii(t): insulin-independent utilization rate",
+          "new": "Uii(t): supplied insulin-independent contribution to glucose utilization"
+        }
+      ]
+    },
+    {
+      "benchmark_ids": [
+        "phase_b_dalla_man_t2_canonical_named_easy",
+        "phase_b_dalla_man_t2_perturbed_named_easy"
+      ],
+      "expected_source_prompt_sha256": "56a64c84c0332a08ef050e1fda2d3b5b31d96f792aec65e612c4b6be8285f15d",
+      "expected_revised_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "replacements": [
+        {
+          "old": "regulates insulin-dependent glucose disposal",
+          "new": "regulates the insulin-dependent contribution to total glucose disposal U(t)"
+        },
+        {
+          "old": "U(t): glucose disposal rate",
+          "new": "U(t): total glucose utilization/disposal rate, including insulin-independent and insulin-dependent contributions"
+        },
+        {
+          "old": "Uii(t): insulin-independent utilization rate",
+          "new": "Uii(t): supplied insulin-independent contribution to glucose utilization"
+        }
+      ]
+    },
+    {
+      "benchmark_ids": [
+        "phase_b_dalla_man_t2_canonical_named_hard",
+        "phase_b_dalla_man_t2_perturbed_named_hard"
+      ],
+      "expected_source_prompt_sha256": "b1b7a877a8a3d0772fcf42fa4030169c08343ed338bef9708d8730a9e46c7552",
+      "expected_revised_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210",
+      "replacements": [
+        {
+          "old": "regulates insulin-dependent glucose disposal",
+          "new": "regulates the insulin-dependent contribution to total glucose disposal U(t)"
+        },
+        {
+          "old": "Uii(t): insulin-independent utilization rate",
+          "new": "Uii(t): supplied insulin-independent contribution to glucose utilization"
+        }
+      ]
+    },
+    {
+      "benchmark_ids": [
+        "phase_b_dalla_man_t3_canonical_named_easy",
+        "phase_b_dalla_man_t3_perturbed_named_easy"
+      ],
+      "expected_source_prompt_sha256": "1f128fe72a8f58d982af7b284cd2c1408f279dfa74933480bb6f64d6f36e4115",
+      "expected_revised_prompt_sha256": "625e5bf72d9cd71ea925f4611289f7a451e041d3ead4a4d746ec95f590e0e2cd",
+      "replacements": [
+        {
+          "old": "U(t): glucose disposal rate",
+          "new": "U(t): total glucose utilization/disposal rate, including insulin-independent and insulin-dependent contributions"
+        },
+        {
+          "old": "Uii(t): insulin-independent utilization rate",
+          "new": "Uii(t): supplied insulin-independent contribution to glucose utilization"
+        }
+      ]
+    },
+    {
+      "benchmark_ids": [
+        "phase_b_dalla_man_t4_canonical_named_easy",
+        "phase_b_dalla_man_t4_perturbed_named_easy"
+      ],
+      "expected_source_prompt_sha256": "585f1a4ab97bf50c479a7b2f8f623e785c141aefba54ecb17231c0c016e5bda0",
+      "expected_revised_prompt_sha256": "93ee6056ebc2c5ed971280d248a81d9063bfce38a5d893bbf23298a0fe8d8218",
+      "replacements": [
+        {
+          "old": "Uii(t): insulin-independent utilization rate",
+          "new": "Uii(t): supplied insulin-independent contribution to glucose utilization"
+        }
+      ]
+    }
+  ]
+}

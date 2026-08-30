@@ -16,7 +16,7 @@ from autoformalism.benchmarks import (
 from autoformalism.targets import PublicTargetContract
 from scripts.prepare_phase_b_public_prompt_overlay import prepare_overlay
 
-OVERLAY_CONFIG = Path("configs/phase_b_public_prompt_overlay_v2.json")
+OVERLAY_CONFIG = Path("configs/phase_b_public_prompt_overlay_v3.json")
 TARGET_CONTRACT_ROOT = Path("configs/target_eval/phase_b_v1")
 SUITE_PATH = Path("configs/benchmarks/phase_b_suite_v1.json")
 
@@ -113,6 +113,9 @@ def _write_config(
                 "revisions": [
                     {
                         "benchmark_ids": [revised_id],
+                        "expected_source_prompt_sha256": _sha256(
+                            b"Public task: old target wording.\n"
+                        ),
                         "expected_revised_prompt_sha256": _sha256(
                             revised_prompt.encode()
                         ),
@@ -263,10 +266,16 @@ def test_frozen_overlay_config_matches_target_contract_bundle() -> None:
 
     assert _sha256(manifest) == config["target_contract_manifest_sha256"]
     assert revision_ids == {
+        "phase_b_dalla_man_t1_canonical_named_easy",
+        "phase_b_dalla_man_t1_perturbed_named_easy",
         "phase_b_dalla_man_t2_canonical_named_easy",
         "phase_b_dalla_man_t2_perturbed_named_easy",
+        "phase_b_dalla_man_t2_canonical_named_hard",
+        "phase_b_dalla_man_t2_perturbed_named_hard",
         "phase_b_dalla_man_t3_canonical_named_easy",
         "phase_b_dalla_man_t3_perturbed_named_easy",
+        "phase_b_dalla_man_t4_canonical_named_easy",
+        "phase_b_dalla_man_t4_perturbed_named_easy",
     }
     for revision in config["revisions"]:
         for benchmark_id in revision["benchmark_ids"]:
@@ -281,7 +290,7 @@ def test_frozen_overlay_config_matches_target_contract_bundle() -> None:
             )
 
 
-def test_full_overlay_revises_only_four_reviewed_cells(tmp_path: Path) -> None:
+def test_full_overlay_revises_only_ten_reviewed_cells(tmp_path: Path) -> None:
     config = json.loads(OVERLAY_CONFIG.read_text(encoding="utf-8"))
     revisions = {
         benchmark_id: revision["replacements"]
@@ -329,7 +338,7 @@ def test_full_overlay_revises_only_four_reviewed_cells(tmp_path: Path) -> None:
     )
 
     assert manifest["cell_count"] == 40
-    assert manifest["changed_prompt_count"] == 4
+    assert manifest["changed_prompt_count"] == 10
     assert set(manifest["changed_benchmark_ids"]) == set(revisions)
     for benchmark_id, prompt in expected_prompts.items():
         assert (

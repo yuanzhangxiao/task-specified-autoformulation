@@ -377,8 +377,9 @@ The pipeline is iterative:
   The registered external public release still contains the pre-clarification
   proposer prompt. Production search therefore uses a versioned copy-on-write
   prompt overlay. Its builder requires all 40 registered cells, preserves every
-  non-proposer file byte-for-byte, permits revisions only for the four reviewed
-  named easy T2/T3 prompts, and requires every resulting prompt SHA-256 to match
+  non-proposer file byte-for-byte, permits revisions only for the ten named
+  prompts containing the reviewed phrases, and requires every resulting prompt
+  SHA-256 to match
   its committed target contract. Unexpected prompt drift fails closed. Proposal
   generation and deterministic target evaluation must receive this same overlay;
   baselines are rerun only for benchmark identifiers whose prompt changed.

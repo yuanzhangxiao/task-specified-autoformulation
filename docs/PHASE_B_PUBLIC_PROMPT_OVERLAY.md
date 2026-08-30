@@ -12,7 +12,7 @@ The overlay has deliberately narrow authority:
 - all 40 registered production cells must be present;
 - every non-`proposer_prompt.txt` file is byte-identical to the source release;
 - a prompt already committed by its target contract is copied unchanged;
-- only the four reviewed named easy T2/T3 prompts may be revised;
+- only the ten named prompts containing the reviewed wording may be revised;
 - every revised prompt must equal the SHA-256 committed by its target contract;
 - any other prompt mismatch, staging bundle, missing sealed test, symlink, hidden
   path, altered contract, or altered existing overlay fails closed.
@@ -30,7 +30,7 @@ Run from the checked-out repository:
 repo=/projects/bibo/$USER/repos/autoformalism-v21
 python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
 source_public=/projects/bibo/$USER/phase_b/inputs/public
-overlay=/work/hdd/bibo/$USER/phase_b/inputs/public-prompt-v2
+overlay=/work/hdd/bibo/$USER/phase_b/inputs/public-prompt-v3
 contracts="$repo/configs/target_eval/phase_b_v1"
 
 cd "$repo"
@@ -39,7 +39,7 @@ cd "$repo"
   --source-data-root "$source_public" \
   --output-data-root "$overlay" \
   --target-contract-root "$contracts" \
-  --config configs/phase_b_public_prompt_overlay_v2.json
+  --config configs/phase_b_public_prompt_overlay_v3.json
 
 jq '{status, cell_count, changed_prompt_count, changed_benchmark_ids,
      non_proposer_files_byte_identical,
@@ -48,9 +48,11 @@ jq '{status, cell_count, changed_prompt_count, changed_benchmark_ids,
 ```
 
 The expected result is `status: ready`, `cell_count: 40`,
-`non_proposer_files_byte_identical: true`, and exactly four changed named easy
-T2/T3 identifiers. If a released prompt was already revised, it is valid for the
-changed count to be smaller; every resulting prompt must still match its contract.
+`non_proposer_files_byte_identical: true`, and exactly ten changed named
+identifiers. These are the complete set of released cells containing one or more
+phrases from the reviewed total-disposal clarification. If a released prompt was
+already revised, it is valid for the changed count to be smaller; every resulting
+prompt must still match its contract.
 
 Verify the original release remained unchanged and the clarified T2 prompt is
 active only in the overlay:
@@ -85,7 +87,7 @@ entry point without making an LLM call:
 Every production launcher must set:
 
 ```bash
-export AF_PUBLIC_DATA_ROOT=/work/hdd/bibo/$USER/phase_b/inputs/public-prompt-v2
+export AF_PUBLIC_DATA_ROOT=/work/hdd/bibo/$USER/phase_b/inputs/public-prompt-v3
 export AF_TARGET_CONTRACT_ROOT=/projects/bibo/$USER/repos/autoformalism-v21/configs/target_eval/phase_b_v1
 ```
 
