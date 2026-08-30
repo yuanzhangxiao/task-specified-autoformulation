@@ -1,0 +1,83 @@
+{
+  "schema_version": "raw-data-agent-fitted-model-prompt-v3-refresh-1",
+  "status": "frozen_before_refresh_calls",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "output_contract": "fitted_model",
+  "source_full_protocol_config_sha256": "9477fc750acf456456a649867d6f115ed17f9da5ea3e9647d906c9eb3fd21024",
+  "prompt_overlay_config_sha256": "399e5b3d24f0ce6750fc4f3953643a9417ecde7c87f499d31188a5e2dc12065b",
+  "prompt_overlay_manifest_sha256": "8990806984c323f86146cba08ac2b42acbdcd2996041b0d9ad066bc7cd17e757",
+  "target_contract_manifest_sha256": "fd3256398e454860fcdca317bb850390b773dda1243f8fb8d9521bb48e8df005",
+  "benchmarks": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_perturbed_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_perturbed_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_perturbed_named_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "625e5bf72d9cd71ea925f4611289f7a451e041d3ead4a4d746ec95f590e0e2cd"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_perturbed_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "625e5bf72d9cd71ea925f4611289f7a451e041d3ead4a4d746ec95f590e0e2cd"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "93ee6056ebc2c5ed971280d248a81d9063bfce38a5d893bbf23298a0fe8d8218"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_perturbed_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "93ee6056ebc2c5ed971280d248a81d9063bfce38a5d893bbf23298a0fe8d8218"
+    }
+  ],
+  "repetitions": 3,
+  "agent_budget": {
+    "reasoning_effort": "high",
+    "max_tool_calls": 12,
+    "max_output_tokens": 30000,
+    "timeout_seconds": 1200,
+    "max_attempts": 2,
+    "contract_repair_attempts": 1
+  },
+  "reuse": {
+    "historical_run_root": "raw-data-agent-fitted-v1",
+    "refresh_run_root": "raw-data-agent-fitted-prompt-v3-refresh-v1",
+    "final_composition": "reuse 90 unchanged-prompt runs and replace 30 changed-prompt runs",
+    "unchanged_run_policy": "reuse only after exact public prompt hash verification",
+    "changed_run_policy": "never reuse a pre-v3 request"
+  },
+  "development_only": true,
+  "test_data_opened": false,
+  "parameter_refit_applied": false,
+  "pruning_applied": false
+}
