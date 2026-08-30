@@ -13,6 +13,7 @@ from autoformalism.schemas import (
     CandidateModel,
     ComparativeJudgeResult,
     HybridJudgeResult,
+    PairedTargetCompletenessJudgeResult,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
 )
@@ -118,4 +119,14 @@ class LLMClient(Protocol):
         expected_target_ids: set[str],
     ) -> LLMCallResult[TargetCompletenessJudgeResult]:
         """Request absolute target-completeness answers for one candidate."""
+        ...
+
+    def assess_paired_target_completeness(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_target_ids: set[str],
+    ) -> LLMCallResult[PairedTargetCompletenessJudgeResult]:
+        """Request target-only absolute answers for two visible candidates."""
         ...

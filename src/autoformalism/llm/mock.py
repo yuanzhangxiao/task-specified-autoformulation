@@ -13,6 +13,7 @@ from autoformalism.schemas import (
     CandidateModel,
     ComparativeJudgeResult,
     HybridJudgeResult,
+    PairedTargetCompletenessJudgeResult,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
 )
@@ -35,6 +36,10 @@ class MockLLMClient:
             TargetCompletenessJudgeResult | dict[str, Any]
         ]
         | None = None,
+        paired_target_completeness_responses: list[
+            PairedTargetCompletenessJudgeResult | dict[str, Any]
+        ]
+        | None = None,
     ) -> None:
         self._proposer_responses = deque(proposer_responses or [])
         self._judge_responses = deque(judge_responses or [])
@@ -43,6 +48,9 @@ class MockLLMClient:
         self._atomic_responses = deque(atomic_responses or [])
         self._target_completeness_responses = deque(
             target_completeness_responses or []
+        )
+        self._paired_target_completeness_responses = deque(
+            paired_target_completeness_responses or []
         )
         self.calls: list[dict[str, str]] = []
 
@@ -246,6 +254,30 @@ class MockLLMClient:
         parsed.validate_expected_targets(expected_target_ids)
         return self._result(role, system_prompt, user_prompt, parsed)
 
+    def assess_paired_target_completeness(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_target_ids: set[str],
+    ) -> LLMCallResult[PairedTargetCompletenessJudgeResult]:
+        """Return the next validated paired target-only response."""
+        if not self._paired_target_completeness_responses:
+            raise AssertionError("no mock paired target-completeness response remains")
+        role = "paired_target_completeness_judge_v1"
+        self.calls.append(
+            {
+                "role": role,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+        )
+        parsed = PairedTargetCompletenessJudgeResult.model_validate(
+            self._paired_target_completeness_responses.popleft()
+        )
+        parsed.validate_expected_targets(expected_target_ids)
+        return self._result(role, system_prompt, user_prompt, parsed)
+
     @staticmethod
     def _result(
         role: str,
@@ -258,6 +290,7 @@ class MockLLMClient:
             | AtomicJudgeResult
             | HybridJudgeResult
             | TargetCompletenessJudgeResult
+            | PairedTargetCompletenessJudgeResult
         ),
     ) -> LLMCallResult[Any]:
         content = "\0".join((role, system_prompt, user_prompt))

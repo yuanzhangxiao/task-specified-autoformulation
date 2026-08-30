@@ -390,9 +390,10 @@ listed targets is insufficient.
    including failures, before sending both arms through the common evaluator.
    This experiment attributes the effect of judge-guided selection and feedback;
    it does not tune the judge or define an overall score.
-2. Analyze the candidate-specific V7 target-completeness run and perform the
-   predeclared fresh-structure confirmation before enabling the hard target
-   contract in production search.
+2. Run the paired target-only V8 development gate. If it passes, freeze and run
+   a new unseen-structure confirmation before enabling the hard target contract
+   in production search. V7 and its blocked confirmation remain negative-control
+   artifacts.
 3. Run the private mechanism-response implementation on Delta and audit the
    prespecified ground-truth rank, semantic-pair identity, recovery coverage,
    numerical failures, and runtime before enabling it for the full comparison.

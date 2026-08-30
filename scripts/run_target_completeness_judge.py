@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from autoformalism.config import DataConfig
@@ -244,6 +245,16 @@ def _json(value: object) -> str:
 
 
 def main() -> None:
+    if os.environ.get("AF_TARGET_COMPLETENESS_PROTOCOL") == "paired_v8":
+        if __package__:
+            from scripts.run_paired_target_completeness_judge import (
+                main as paired_main,
+            )
+        else:
+            from run_paired_target_completeness_judge import main as paired_main
+
+        paired_main()
+        return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pairs", type=Path, required=True)
     parser.add_argument("--data-root", type=Path, required=True)

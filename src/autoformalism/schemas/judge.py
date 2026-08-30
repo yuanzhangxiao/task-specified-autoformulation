@@ -528,6 +528,73 @@ class TargetCompletenessJudgeResult(StrictSchema):
         return AbsoluteVerdict.INDETERMINATE
 
 
+class PairedTargetCompletenessAssessment(StrictSchema):
+    """Independent target verdicts for two simultaneously visible candidates."""
+
+    target_id: Identifier
+    candidate_a: CandidateAbsoluteAssessment
+    candidate_b: CandidateAbsoluteAssessment
+
+    @model_validator(mode="after")
+    def disallow_not_applicable(self) -> PairedTargetCompletenessAssessment:
+        """Every requested public target applies to both candidates."""
+        verdicts = (self.candidate_a.verdict, self.candidate_b.verdict)
+        if AbsoluteVerdict.NOT_APPLICABLE in verdicts:
+            raise ValueError(
+                "requested public targets cannot be marked not_applicable"
+            )
+        return self
+
+
+class PairedTargetCompletenessJudgeResult(StrictSchema):
+    """Target-only absolute answers for exactly two blinded candidates.
+
+    The candidates are visible together to preserve the successful V6
+    scientific context, but the response contains no relative question,
+    preference, score, atomic occurrence, or repeat assessment.
+    """
+
+    schema_version: Literal["paired-target-completeness-judge-1"] = (
+        "paired-target-completeness-judge-1"
+    )
+    target_assessments: tuple[PairedTargetCompletenessAssessment, ...] = Field(
+        min_length=1, max_length=64
+    )
+
+    @model_validator(mode="after")
+    def unique_target_identifiers(self) -> PairedTargetCompletenessJudgeResult:
+        """Reject repeated target identifiers."""
+        target_ids = [item.target_id for item in self.target_assessments]
+        if len(target_ids) != len(set(target_ids)):
+            raise ValueError("paired target completeness identifiers must be unique")
+        return self
+
+    def validate_expected_targets(self, target_ids: set[str]) -> None:
+        """Require exactly the runtime-requested public target identifiers."""
+        actual = {item.target_id for item in self.target_assessments}
+        if actual != target_ids:
+            raise ValueError(
+                "paired target completeness units differ; "
+                f"missing_targets={sorted(target_ids - actual)}, "
+                f"extra_targets={sorted(actual - target_ids)}"
+            )
+
+    def candidate_overall_verdict(
+        self,
+        candidate: Literal["a", "b"],
+    ) -> AbsoluteVerdict:
+        """Return the conjunctive target verdict for one presented candidate."""
+        verdicts = {
+            getattr(item, f"candidate_{candidate}").verdict
+            for item in self.target_assessments
+        }
+        if AbsoluteVerdict.FAIL in verdicts:
+            return AbsoluteVerdict.FAIL
+        if verdicts == {AbsoluteVerdict.PASS}:
+            return AbsoluteVerdict.PASS
+        return AbsoluteVerdict.INDETERMINATE
+
+
 class HybridJudgeResult(StrictSchema):
     """Paired absolute assessments plus a separate comparative residual."""
 

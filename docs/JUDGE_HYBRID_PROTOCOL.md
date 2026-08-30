@@ -840,7 +840,7 @@ runtime fills each omission with `insufficient_public_information`, records the
 exact identifiers and repair counts, and continues. It never invents a direction
 or repeated-flux relation, and any unexpected identifier remains terminal.
 
-## Candidate-specific target completeness
+## Target-only completeness protocols
 
 The V6 matched run answered every target-completeness question correctly among
 complete paired trials, but one orientation failed in the unrelated atomic
@@ -849,25 +849,36 @@ This showed that target completeness inherited failure modes from scientific
 questions it did not require. V6 remains frozen and is not retrospectively
 repaired.
 
-`target-completeness-judge-1` separates the mandatory public output contract
-from the paired hybrid residual. Each logical call contains exactly one blinded
-candidate, all public target identifiers, its canonical observation mappings,
-recursively resolvable component definitions, and certified structural facts.
-The LLM returns one `pass`, `fail`, or `indeterminate` assessment per target.
-The runtime validates the exact target-ID set and computes only the conjunctive
-candidate status; it does not infer or repair a scientific verdict.
+`target-completeness-judge-1` tested whether a fully isolated candidate was
+sufficient context. It was not: all 20 structured responses completed, every
+valid target passed, but the incomplete target also passed in all ten mutated-
+candidate calls. Candidate verdict accuracy was `0.500`, so this protocol is a
+frozen negative result and its fresh confirmation remains correctly blocked.
 
-This endpoint has no Candidate A/B presentation, orientation consensus, atomic
-signed-occurrence call, exact-repeat question, direct comparative question, or
-numeric score. Repeated seeds measure response reliability and verdict
-reproducibility. Pair labels are opened only by the offline analyzer. A matched
-development run reuses the frozen V6 pairs and public prompt, after which the
-same absolute protocol must pass on fresh unseen structures before it may become
-a search-time hard gate. The paired hybrid judge remains responsible only for
-relative scientific questions among candidates that have passed mandatory
-absolute contracts.
+`paired-target-completeness-judge-1` is the fair, isolated evaluation of the
+scientific logic that worked in V6. Each call contains both blinded candidates,
+all public target identifiers, canonical observation mappings, recursively
+resolvable definitions, and deterministic structural facts. For each target it
+returns separate absolute `pass`, `fail`, or `indeterminate` answers for A and
+B. It cannot emit atomic occurrence answers, repeat relations, comparative
+criteria, a winner, or a numeric score.
 
-The fresh confirmation is frozen by
+Each repetition is an atomic two-orientation transaction. The same candidate
+pair is presented A/B and B/A at one seed, then normalized to stable baseline
+and mutated identities. For each candidate/target unit, pass/pass becomes pass,
+any fail becomes fail, and every other combination becomes indeterminate. If
+either orientation fails structured validation after bounded provider retries,
+the other orientation is discarded even if valid and both orientations are
+retried at the next seed. Seed blocks are separated by the provider-attempt
+limit so provider repairs and pair-level retries never reuse a sampling seed.
+No missing scientific verdict is repaired.
+
+The matched development run copies the exact V6 pairs and labels and uses the
+same public prompt and model. Pair labels are opened only by the offline
+analyzer. A pass authorizes a separately frozen fresh-structure confirmation;
+it does not itself enable the production search gate.
+
+The earlier one-candidate fresh confirmation is frozen by
 `configs/target_completeness_fresh_confirmation_v1.json`. Preparation fails
 unless the exact V7 development configuration and pair bytes are certified by
 a passing `target-completeness-judge-analysis-1` artifact. It then selects two
@@ -876,6 +887,6 @@ wrapper and excludes every previously opened structure for the same benchmark.
 This prevents `U`/`Uid` bookkeeping from making an already opened proposer
 structure appear fresh. The confirmation repeats the unchanged one-candidate,
 all-public-target protocol for 20 logical calls and applies the same frozen
-gates. A failure leaves the production target-completeness gate disabled; a
-pass authorizes a separate search-integration milestone rather than silently
-changing the already running paired-judge ablation.
+gates. Because its V7 prerequisite failed, it is retained only for
+reproducibility and is not run. V8 requires a new confirmation manifest after
+the matched paired target-only development gate passes.

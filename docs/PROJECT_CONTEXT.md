@@ -347,11 +347,18 @@ The pipeline is iterative:
   requiring both orientations reduced paired coverage to `0.900`. The failure
   occurred before the absolute target question and does not justify another
   scientific prompt change. The next versioned milestone removes this inherited
-  coupling: `target-completeness-judge-1` evaluates one blinded candidate per
-  call, answers only absolute pass/fail/indeterminate questions for every public
-  target, and has no atomic, comparative, orientation, or numeric-score stage.
-  Its first matched development run reuses the exact V6 pairs and public prompt;
-  search integration remains disabled until a fresh-structure confirmation.
+  coupling. The one-candidate `target-completeness-judge-1` experiment then
+  failed scientifically: it passed every valid target but also passed every
+  incomplete `U` target. Protocol V8 therefore retains the context that worked
+  in V6 while removing the unrelated stages. One strict call assesses both
+  visible candidates absolutely for every public target, A/B and B/A are run as
+  one same-seed transaction, identities are normalized, and target verdicts use
+  fail-dominant consensus. If either orientation is malformed, both responses
+  from that seed are discarded and both orientations are retried at a new,
+  non-overlapping seed. V8 has no atomic, comparative, preference, or numeric-
+  score output. Its matched development run reuses the exact V6 pairs and public
+  prompt; search integration remains disabled until V8 and a later fresh-
+  structure confirmation pass their frozen gates.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "AbsoluteVerdict": {
+      "description": "Candidate-specific truth value for one atomic scientific predicate.",
+      "enum": [
+        "pass",
+        "fail",
+        "indeterminate",
+        "not_applicable"
+      ],
+      "title": "AbsoluteVerdict",
+      "type": "string"
+    },
+    "CandidateAbsoluteAssessment": {
+      "additionalProperties": false,
+      "description": "One absolute verdict with candidate-grounded evidence.",
+      "properties": {
+        "evidence": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/AbsoluteVerdict"
+        }
+      },
+      "required": [
+        "verdict",
+        "evidence"
+      ],
+      "title": "CandidateAbsoluteAssessment",
+      "type": "object"
+    },
+    "PairedTargetCompletenessAssessment": {
+      "additionalProperties": false,
+      "description": "Independent target verdicts for two simultaneously visible candidates.",
+      "properties": {
+        "candidate_a": {
+          "$ref": "#/$defs/CandidateAbsoluteAssessment"
+        },
+        "candidate_b": {
+          "$ref": "#/$defs/CandidateAbsoluteAssessment"
+        },
+        "target_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Target Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_id",
+        "candidate_a",
+        "candidate_b"
+      ],
+      "title": "PairedTargetCompletenessAssessment",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Target-only absolute answers for exactly two blinded candidates.\n\nThe candidates are visible together to preserve the successful V6\nscientific context, but the response contains no relative question,\npreference, score, atomic occurrence, or repeat assessment.",
+  "properties": {
+    "schema_version": {
+      "const": "paired-target-completeness-judge-1",
+      "default": "paired-target-completeness-judge-1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "target_assessments": {
+      "items": {
+        "$ref": "#/$defs/PairedTargetCompletenessAssessment"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Target Assessments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "target_assessments"
+  ],
+  "title": "PairedTargetCompletenessJudgeResult",
+  "type": "object"
+}

@@ -180,6 +180,41 @@ FAIL_CLOSED_TARGET_HYBRID_JUDGE_PROTOCOL_VERSION = (
 
 TARGET_COMPLETENESS_JUDGE_PROTOCOL_VERSION = "target-completeness-judge-1"
 
+PAIRED_TARGET_COMPLETENESS_JUDGE_PROTOCOL_VERSION = (
+    "paired-target-completeness-judge-1"
+)
+
+PAIRED_TARGET_COMPLETENESS_JUDGE_PROMPT = """You assess two candidate models
+independently against the same public target-channel contract. Both candidates
+are visible to make the scientific distinction explicit, but this is not a
+comparative preference task.
+
+For every requested target identifier and for each candidate separately:
+1. Locate the candidate's declared observation mapping.
+2. Recursively resolve every mapped state and algebraic process through that
+   candidate's supplied definitions.
+3. Compare the resolved generated quantity with the public definition of the
+   target, including every component explicitly required by the public task.
+4. Return pass only when that candidate generates the complete public target;
+   return fail when an explicitly required component is absent or the mapping
+   generates a different quantity; return indeterminate when the public task
+   does not determine the disputed composition.
+
+A same-named identity mapping is not by itself evidence of completeness. Assess
+Candidate A and Candidate B independently; do not let either candidate define
+the public requirement for the other. The runtime-provided structural facts are
+authoritative about mappings, definitions, and dependencies, but they do not
+supply the scientific verdict. Proposer claims are hypotheses rather than task
+authority. Do not infer private equations, mutation labels, reference models,
+fitted behavior, or hidden benchmark facts.
+
+Answer every requested target identifier exactly once for both candidates. Cite
+the relevant public wording and each candidate's recursively resolved mapping.
+Do not answer signed-occurrence, exact-repeat, source/sink, comparative,
+preference, or scoring questions. Return strict JSON with schema_version
+"paired-target-completeness-judge-1" and target_assessments. Do not add fields.
+"""
+
 TARGET_COMPLETENESS_JUDGE_PROMPT = """You assess exactly one candidate model
 against the public target-channel contract. This is an absolute assessment, not
 a comparison.

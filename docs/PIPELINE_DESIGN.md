@@ -611,18 +611,21 @@ neutral `insufficient_public_information` value. The repair is permitted only
 when there are no unexpected identifiers, is logged per unit, and does not
 convert missing evidence into a scientific claim.
 
-The successor target-completeness boundary is candidate-specific rather than
-pairwise. One strict LLM call receives one candidate and every public target ID,
-recursively resolves its observation mappings and component definitions, and
-returns an absolute verdict for each target. The runtime validates exact target
-coverage and conjunctively combines the verdicts, but does not supply or repair
-the scientific answer. This boundary has no A/B orientation, atomic
-signed-occurrence stage, comparative residual, or numeric score. It is validated
-as a separate frozen protocol before search integration; legacy Protocols 5--7
-remain reproducible. Once validated, target completeness is a mandatory
-candidate feasibility check, while the paired judge is reserved for relative
-parsimony, unsupported assumptions, and mechanistic interpretability among
-feasible candidates.
+The candidate-specific successor was a useful negative control but not a valid
+production boundary: without the other candidate visible it passed the
+incomplete target in every matched call. The next target-completeness boundary
+is therefore paired but target-only. One strict LLM call receives both blinded
+candidates and every public target ID and returns an absolute verdict for each
+candidate/target unit. It contains no winner, comparative question, score,
+signed occurrence, or repeat relation. The pair is presented in A/B and B/A
+order at the same seed. The runtime normalizes candidate identity and applies
+the predeclared mandatory-contract rule independently to each target: pass
+requires two passes, either fail yields fail, and all other cases are
+indeterminate. The two orientations form one transaction; if either structured
+response fails, both are discarded and regenerated at the next frozen seed.
+Legacy Protocols 5--7 and the one-candidate negative control remain
+reproducible. Production integration requires a matched V8 development pass and
+a later fresh-structure confirmation.
 
 ## Failure and security behavior
 

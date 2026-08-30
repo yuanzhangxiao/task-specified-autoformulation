@@ -34,6 +34,7 @@ from autoformalism.schemas import (
     CandidateModel,
     ComparativeJudgeResult,
     HybridJudgeResult,
+    PairedTargetCompletenessJudgeResult,
     ProposerCandidateV2,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
@@ -249,6 +250,24 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=TargetCompletenessJudgeResult,
+            validate_parsed=lambda result: result.validate_expected_targets(
+                expected_target_ids
+            ),
+        )
+
+    def assess_paired_target_completeness(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        expected_target_ids: set[str],
+    ) -> LLMCallResult[PairedTargetCompletenessJudgeResult]:
+        """Request independent public-target verdicts for a visible pair."""
+        return self._structured_call(
+            role="paired_target_completeness_judge_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=PairedTargetCompletenessJudgeResult,
             validate_parsed=lambda result: result.validate_expected_targets(
                 expected_target_ids
             ),

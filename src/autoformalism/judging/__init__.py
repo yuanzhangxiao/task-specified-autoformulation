@@ -23,6 +23,10 @@ from autoformalism.judging.hybrid import (
     semantic_absolute_units,
     structural_facts,
 )
+from autoformalism.judging.target_completeness import (
+    fail_dominant_verdict,
+    paired_target_question_consensus,
+)
 
 __all__ = [
     "ATOMIC_EVIDENCE_SCHEMA_VERSION",
@@ -38,7 +42,9 @@ __all__ = [
     "candidate_claims",
     "deterministic_pair_assessments",
     "extract_public_requirements",
+    "fail_dominant_verdict",
     "merge_atomic_assessments",
+    "paired_target_question_consensus",
     "question_consensus",
     "require_deterministic_orientation_consensus",
     "reverse_hybrid_result",

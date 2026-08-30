@@ -13,6 +13,7 @@ from autoformalism.schemas.judge import (
     ComparativeJudgeResult,
     HybridJudgeResult,
     JudgeResult,
+    PairedTargetCompletenessJudgeResult,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
 )
@@ -28,6 +29,9 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "comparative-judge-v1.schema.json": ComparativeJudgeResult,
     "hybrid-judge-v1.schema.json": HybridJudgeResult,
     "target-completeness-judge-v1.schema.json": TargetCompletenessJudgeResult,
+    "paired-target-completeness-judge-v1.schema.json": (
+        PairedTargetCompletenessJudgeResult
+    ),
 }
 
 

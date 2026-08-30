@@ -8,6 +8,7 @@ from autoformalism.schemas import (
     CandidateModel,
     HybridJudgeResult,
     JudgeResult,
+    PairedTargetCompletenessJudgeResult,
     ProposerCandidate,
     ProposerCandidateV2,
     ScientificJudgeResult,
@@ -27,6 +28,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "comparative-judge-v1.schema.json",
         "judge.schema.json",
         "hybrid-judge-v1.schema.json",
+        "paired-target-completeness-judge-v1.schema.json",
         "proposer-candidate.schema.json",
         "proposer-candidate-v2.schema.json",
         "scientific-judge-v2.schema.json",
@@ -49,6 +51,9 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     hybrid_judge_schema = json.loads(
         first_contents["hybrid-judge-v1.schema.json"]
     )
+    paired_target_schema = json.loads(
+        first_contents["paired-target-completeness-judge-v1.schema.json"]
+    )
     assert candidate_schema == CandidateModel.model_json_schema(mode="validation")
     assert atomic_judge_schema == AtomicJudgeResult.model_json_schema(
         mode="validation"
@@ -64,6 +69,9 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert hybrid_judge_schema == HybridJudgeResult.model_json_schema(
         mode="validation"
     )
+    assert paired_target_schema == (
+        PairedTargetCompletenessJudgeResult.model_json_schema(mode="validation")
+    )
     assert candidate_schema["additionalProperties"] is False
     assert atomic_judge_schema["additionalProperties"] is False
     assert judge_schema["additionalProperties"] is False
@@ -71,6 +79,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert proposer_v2_schema["additionalProperties"] is False
     assert scientific_judge_schema["additionalProperties"] is False
     assert hybrid_judge_schema["additionalProperties"] is False
+    assert paired_target_schema["additionalProperties"] is False
 
 
 def test_checked_in_schemas_match_models() -> None:
@@ -97,6 +106,14 @@ def test_checked_in_schemas_match_models() -> None:
             encoding="utf-8"
         )
     ) == HybridJudgeResult.model_json_schema(mode="validation")
+    assert json.loads(
+        (
+            schema_directory
+            / "paired-target-completeness-judge-v1.schema.json"
+        ).read_text(encoding="utf-8")
+    ) == PairedTargetCompletenessJudgeResult.model_json_schema(
+        mode="validation"
+    )
     assert json.loads(
         (schema_directory / "proposer-candidate.schema.json").read_text(
             encoding="utf-8"

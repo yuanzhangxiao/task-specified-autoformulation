@@ -1381,9 +1381,46 @@ cat "$root/target_completeness_validation.md"
 jq . "$root/target_completeness_validation.json"
 ```
 
-V6 remains a frozen formal failure. Do not integrate the absolute endpoint into
-search until this matched run and a subsequent fresh-structure confirmation
-both pass.
+V7 is a frozen scientific failure: it passed valid targets but did not detect
+the omitted component in the isolated candidate. Do not run its blocked fresh
+confirmation.
+
+Run the paired target-only V8 development experiment to evaluate the V6 target
+logic without its unrelated atomic and comparative stages:
+
+```bash
+cd /projects/bibo/$USER/repos/autoformalism-v21
+git pull --ff-only origin main
+mkdir -p logs
+
+"/projects/bibo/$USER/venvs/autoformalism-v21/bin/python" -m pytest \
+  tests/test_paired_target_completeness_judge.py \
+  tests/test_target_completeness_judge.py \
+  tests/test_schema_export.py -q
+
+sbatch --account=bibo-delta-gpu \
+  scripts/hpc/phase_b_target_completeness_paired_v8_120b.slurm
+```
+
+The job copies and byte-compares the frozen V6 pairs and labels. It runs both
+orientations as one transaction and retries both with one fresh seed if either
+orientation fails. After completion:
+
+```bash
+job_id=REPLACE_WITH_JOB_ID
+sacct -j "$job_id" \
+  --format=JobID,JobName,State,ExitCode,Elapsed,Start,End
+
+root=/work/hdd/bibo/$USER/phase_b/target-completeness-paired-v8
+cat "$root/paired_target_completeness_validation.md"
+jq '{passed, metrics, checks}' \
+  "$root/paired_target_completeness_validation.json"
+jq . \
+  "$root/gpt-oss-120b/shards/shard_0/paired_target_completeness_failures.jsonl"
+```
+
+Do not enable V8 in production search from this development result alone. A
+passing result advances to a separately frozen fresh-structure confirmation.
 
 ## Audit and compare the raw-data frontier-agent pilot
 
