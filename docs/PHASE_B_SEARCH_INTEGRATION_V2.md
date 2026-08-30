@@ -60,3 +60,19 @@ scripts/hpc/submit_phase_b_search_integration_ablation_v2.sh
 The submission command fails if the output root already has a submission
 manifest. Resume or diagnose that frozen launch instead of silently creating a
 second matrix.
+
+If full request hashes differ, distinguish ephemeral transport metadata from
+the actual initial candidate before declaring the matched trial invalid:
+
+```bash
+python scripts/check_phase_b_search_initial_comparability.py \
+  --plan /path/to/frozen/plan.json \
+  --search-root /path/to/search-integration-ablation-v2 \
+  --output /path/to/initial_comparability.json
+```
+
+Equality is evaluated within each benchmark, tier, and repetition. Different
+seeds are neither expected nor required to produce the same candidate. The
+report separately records the full transport-sensitive request hash, exact
+parsed proposer response, identity-insensitive candidate content, and the
+post-validation round-zero structural hash.
