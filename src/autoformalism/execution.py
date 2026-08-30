@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -44,6 +45,7 @@ from autoformalism.pruning import PruningConfig
 from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 from autoformalism.search import FinalEvaluation, SearchConfig, SearchController
 from autoformalism.search.hybrid_pair import PairedHybridJudge
+from autoformalism.targets import PublicTargetContract
 
 _CONTROLLER_PROMPT = """
 Return exactly one complete ProposerCandidateV2. Treat every current target value as a
@@ -161,6 +163,7 @@ class ExecutionArguments:
     judge_score_epsilon: float = 0.05
     hybrid_science_weight: float = 0.5
     hybrid_judge_seed_base: int | None = None
+    public_target_contract: Path | None = None
     vllm_base_url: str = "http://127.0.0.1:8000"
     vllm_reasoning_effort: VLLMReasoningEffort = VLLMReasoningEffort.LOW
     vllm_temperature: float = 0.0
@@ -374,6 +377,14 @@ def build_experiment_parser(
         help="disable judge calls and feedback for the no-judge ablation",
     )
     parser.add_argument(
+        "--public-target-contract",
+        type=Path,
+        help=(
+            "prompt-committed deterministic target contract; candidates that "
+            "violate it are rejected before fitting"
+        ),
+    )
+    parser.add_argument(
         "--forbid-latent-states",
         action="store_true",
         help=(
@@ -507,6 +518,11 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         judge_score_epsilon=namespace.judge_score_epsilon,
         hybrid_science_weight=namespace.hybrid_science_weight,
         hybrid_judge_seed_base=namespace.hybrid_judge_seed_base,
+        public_target_contract=(
+            None
+            if namespace.public_target_contract is None
+            else namespace.public_target_contract.expanduser().resolve()
+        ),
         vllm_base_url=namespace.vllm_base_url,
         vllm_reasoning_effort=VLLMReasoningEffort(
             namespace.vllm_reasoning_effort
@@ -519,6 +535,11 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
 def execute(arguments: ExecutionArguments) -> dict[str, Any]:
     """Validate inputs, optionally dry-run, then execute or resume one run."""
     dataset, test_loader, proposer_prompt, judge_prompt = _load_inputs(arguments)
+    public_target_contract = _load_public_target_contract(
+        arguments,
+        proposer_prompt=proposer_prompt,
+        targets=dataset.roles.targets,
+    )
     benchmark_spec = (
         None
         if arguments.benchmark_id == "synthetic"
@@ -566,6 +587,20 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             }
             if arguments.selection_policy == "incumbent_relative_hybrid"
             else None
+        ),
+        "public_target_contract": (
+            None
+            if public_target_contract is None
+            else {
+                "path": str(arguments.public_target_contract),
+                "schema_version": public_target_contract.schema_version,
+                "public_prompt_sha256": (
+                    public_target_contract.public_prompt_sha256
+                ),
+                "contract_sha256": hashlib.sha256(
+                    arguments.public_target_contract.read_bytes()
+                ).hexdigest(),
+            }
         ),
         "llm_timeout_seconds": arguments.llm_timeout_seconds,
         "llm_max_output_tokens": arguments.llm_max_output_tokens,
@@ -683,6 +718,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         test_loader=test_loader,
         config=search_config,
         pairwise_judge=pairwise_judge,
+        public_target_contract=public_target_contract,
     ).run()
     summary = _result_summary(arguments, result)
     (experiment_directory / "summary.json").write_text(
@@ -694,6 +730,38 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         encoding="utf-8",
     )
     return summary
+
+
+def _load_public_target_contract(
+    arguments: ExecutionArguments,
+    *,
+    proposer_prompt: str,
+    targets: tuple[str, ...],
+) -> PublicTargetContract | None:
+    """Load and bind an optional target contract to the exact public task."""
+    path = arguments.public_target_contract
+    if path is None:
+        return None
+    if not path.is_file():
+        raise SystemExit(f"public target contract is missing: {path}")
+    try:
+        contract = PublicTargetContract.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+    except ValueError as exc:
+        raise SystemExit(f"invalid public target contract: {path}: {exc}") from exc
+    if (contract.benchmark_id, contract.tier) != (
+        arguments.benchmark_id,
+        arguments.tier,
+    ):
+        raise SystemExit("public target contract does not match benchmark/tier")
+    observed_targets = tuple(item.target_channel for item in contract.targets)
+    if set(observed_targets) != set(targets):
+        raise SystemExit("public target contract does not match benchmark targets")
+    prompt_sha256 = hashlib.sha256(proposer_prompt.encode("utf-8")).hexdigest()
+    if contract.public_prompt_sha256 != prompt_sha256:
+        raise SystemExit("public target contract does not match proposer prompt")
+    return contract
 
 
 def _load_inputs(

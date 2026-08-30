@@ -359,6 +359,21 @@ The pipeline is iterative:
   score output. Its matched development run reuses the exact V6 pairs and public
   prompt; search integration remains disabled until V8 and a later fresh-
   structure confirmation pass their frozen gates.
+  V8 completed all 20 orientation calls but failed scientifically: the
+  incomplete total-disposal candidate was rejected in only three of ten paired
+  trials. Candidate accuracy was `0.650` and pair aggregate accuracy was
+  `0.000`. Older V6 identifiers also exposed `baseline`/`omitted` labels, so V6
+  is retained only as a contaminated diagnostic. Target completeness is no
+  longer delegated to the LLM judge.
+  A shared deterministic public-target schema now enforces target generation
+  before fitting. All targets require explicit mappings; benchmark instances add
+  composition dependencies only when the public prompt states them. In the
+  named total-disposal task, recursive graph analysis requires `Uii` to reach
+  target `U` without requiring a particular latent name or functional form.
+  Prompt-committed contracts for all 40 Phase-B cells live under
+  `configs/target_eval/phase_b_v1`. Mechanism compliance and scientific
+  comparisons remain separate endpoints. Production pairwise judge requests
+  also blind candidate identifiers, lineage, and proposer change summaries.
 - Numerical fit is computed deterministically.
 - Raw coefficient magnitude alone is not a valid pruning criterion.
 - Prune whole terms using normalized trajectory contribution and

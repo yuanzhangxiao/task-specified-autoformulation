@@ -1,0 +1,14 @@
+{
+  "benchmark_id": "phase_b_cstr_controlled_reactor_mechanism_canonical_named_easy",
+  "public_prompt_sha256": "0a3b4c055402ed26352363c4d367b791c41460ea21e8ca42043c495ea68eb99c",
+  "schema_version": "public-target-contract-1",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "public_requirement": "generate target T(t): reactor temperature target",
+      "required_dependencies": [],
+      "target_channel": "T"
+    }
+  ],
+  "tier": "easy"
+}

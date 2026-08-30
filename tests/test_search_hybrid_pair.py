@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from autoformalism.judging import (
@@ -177,6 +178,61 @@ def test_paired_hybrid_judge_versions_fixed_denominator_scoring() -> None:
 
     assert result.protocol_version == PAIRWISE_SEARCH_PROTOCOL_VERSION
     assert result.comparative_indeterminate_policy == "neutral_fixed_denominator"
+
+
+def test_paired_hybrid_judge_blinds_candidate_identity_and_lineage() -> None:
+    incumbent = _candidate("gold_baseline_model", "meal_event_g").model_copy(
+        update={
+            "parent_candidate_id": "trusted_parent",
+            "change_summary": "This is the correct incumbent.",
+        }
+    )
+    challenger = _candidate(
+        "known_bad_mutation", "meal_event_g - 0.1 * Gp"
+    ).model_copy(
+        update={
+            "parent_candidate_id": "failed_parent",
+            "change_summary": "This mutation is deliberately wrong.",
+        }
+    )
+    requirements = RequirementRegistry()
+    client = MockLLMClient(
+        atomic_responses=[
+            _atomic(incumbent, challenger),
+            _atomic(challenger, incumbent),
+        ],
+        hybrid_responses=[_hybrid(requirements), _hybrid(requirements)],
+    )
+    judge = PairedHybridJudge(
+        seeded_clients=((100, client),),
+        requirements=requirements,
+        task_inputs=("meal_event_g",),
+        system_prompt="Hybrid prompt.",
+        atomic_system_prompt="Atomic prompt.",
+        identity="test",
+    )
+
+    judgment = judge.compare(incumbent, challenger)
+
+    assert judgment.incumbent_candidate_id == "gold_baseline_model"
+    assert judgment.challenger_candidate_id == "known_bad_mutation"
+    hybrid_payloads = [
+        json.loads(call["user_prompt"])
+        for call in client.calls
+        if call["role"] == "hybrid_judge_atomic_repair_v1"
+    ]
+    assert len(hybrid_payloads) == 2
+    for payload in hybrid_payloads:
+        assert payload["candidate_a"]["candidate_id"] == "candidate_a"
+        assert payload["candidate_b"]["candidate_id"] == "candidate_b"
+        assert payload["candidate_a"]["parent_candidate_id"] is None
+        assert payload["candidate_b"]["parent_candidate_id"] is None
+        encoded = json.dumps(payload)
+        assert "gold_baseline_model" not in encoded
+        assert "known_bad_mutation" not in encoded
+        assert "trusted_parent" not in encoded
+        assert "failed_parent" not in encoded
+        assert "deliberately wrong" not in encoded
 
 
 def test_paired_hybrid_judge_records_exhausted_symmetric_evidence() -> None:

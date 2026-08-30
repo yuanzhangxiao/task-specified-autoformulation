@@ -29,6 +29,7 @@ from autoformalism.schemas import (
 from autoformalism.search import CheckpointError, SearchConfig, SearchController
 from autoformalism.search.controller import _beam, _hybrid_incumbent
 from autoformalism.search.hybrid_pair import HybridPairJudgment
+from autoformalism.targets import PublicTargetContract
 
 
 def _candidate(
@@ -201,6 +202,60 @@ class _FixedPairwiseJudge:
             deterministic_assessments=(),
             request_hashes=("a", "b", "c", "d"),
         )
+
+
+def test_search_rejects_public_target_contract_violation_before_fitting(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(
+        "missing_required_input",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+    )
+    client = MockLLMClient(proposer_responses=[candidate])
+    contract = PublicTargetContract.model_validate(
+        {
+            "benchmark_id": "synthetic_contract_test",
+            "tier": "easy",
+            "public_prompt_sha256": "0" * 64,
+            "targets": [
+                {
+                    "target_channel": "target",
+                    "public_requirement": "generate target",
+                    "required_dependencies": [
+                        {
+                            "dependency_id": "forcing_contribution",
+                            "acceptable_symbols": ["forcing"],
+                            "public_requirement": "forcing contributes to target",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    checkpoint_root = tmp_path / "checkpoints"
+    controller = SearchController(
+        llm_client=client,
+        context=ValidationContext(
+            targets=("target",), external_inputs=("forcing",)
+        ),
+        training=_split(SplitName.TRAIN, "train"),
+        validation=_split(SplitName.VALIDATION, "validation"),
+        test_loader=lambda _frozen: _split(SplitName.TEST, "test"),
+        config=_config(checkpoint_root, 1),
+        public_target_contract=contract,
+    )
+
+    with pytest.raises(RuntimeError, match="no valid fitted candidates"):
+        controller.run()
+
+    checkpoint = json.loads(
+        (checkpoint_root / "round_0000.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["valid"] is False
+    assert checkpoint["error"].startswith("PUBLIC_TARGET_CONTRACT_FAILED")
+    assert checkpoint["public_target_evaluation"]["passed"] is False
+    assert not any(call["role"] == "judge" for call in client.calls)
 
 
 def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(

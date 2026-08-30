@@ -112,10 +112,28 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.judge_score_epsilon == 0.05
     assert default.hybrid_science_weight == 0.5
     assert default.hybrid_judge_seed_base is None
+    assert default.public_target_contract is None
     assert default.vllm_base_url == "http://127.0.0.1:8000"
     assert default.vllm_reasoning_effort is VLLMReasoningEffort.LOW
     assert default.vllm_temperature == 0.0
     assert default.vllm_seed is None
+
+
+def test_cli_accepts_public_target_contract_path(tmp_path: Path) -> None:
+    parser = build_experiment_parser(description="test")
+
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--public-target-contract",
+                str(tmp_path / "contract.json"),
+            ]
+        )
+    )
+
+    assert arguments.public_target_contract == (tmp_path / "contract.json").resolve()
 
 
 def test_cli_accepts_weighted_selection_and_rejects_no_judge() -> None:

@@ -1,0 +1,14 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_task_canonical_obfuscated_easy",
+  "public_prompt_sha256": "9ccb13ffe8d6a76c616805fa7ff663d96eacd5e3af1629f1161ddc8bf80e72e0",
+  "schema_version": "public-target-contract-1",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "public_requirement": "generate target v01(t): primary target quantity",
+      "required_dependencies": [],
+      "target_channel": "v01"
+    }
+  ],
+  "tier": "easy"
+}

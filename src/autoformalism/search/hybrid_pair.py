@@ -38,13 +38,13 @@ from autoformalism.schemas import (
 from autoformalism.schemas.base import StrictSchema
 
 LEGACY_PAIRWISE_SEARCH_PROTOCOL_VERSION = (
-    "incumbent-hybrid-question-consensus-1"
+    "incumbent-hybrid-question-consensus-4-blinded-metadata-legacy-denominator"
 )
 PAIRWISE_SEARCH_PROTOCOL_VERSION = (
-    "incumbent-hybrid-question-consensus-2-fixed-denominator"
+    "incumbent-hybrid-question-consensus-4-blinded-metadata"
 )
 FAIL_CLOSED_TARGET_SEARCH_PROTOCOL_VERSION = (
-    "incumbent-hybrid-question-consensus-3-fail-closed-target"
+    "incumbent-hybrid-question-consensus-4-blinded-metadata-fail-closed-target"
 )
 _REDUNDANT_ATOMIC_ROLE_UNITS = {
     (AbsoluteCriterion.SOURCE_ROLES_CONSISTENT, "candidate"),
@@ -299,8 +299,8 @@ class PairedHybridJudge:
                     include_role_consistency=False,
                 )
             ],
-            "candidate_a": candidate_a.model_dump(mode="json"),
-            "candidate_b": candidate_b.model_dump(mode="json"),
+            "candidate_a": _judge_candidate_payload(candidate_a, "candidate_a"),
+            "candidate_b": _judge_candidate_payload(candidate_b, "candidate_b"),
             "proposer_claims": {
                 "candidate_a": [
                     item.model_dump(mode="json")
@@ -361,3 +361,15 @@ class PairedHybridJudge:
             decision_value_for_a=score.decision_value,
             request_hashes=(atomic_call.request_hash, hybrid_call.request_hash),
         )
+
+
+def _judge_candidate_payload(
+    candidate: CandidateModel,
+    neutral_id: Literal["candidate_a", "candidate_b"],
+) -> dict[str, object]:
+    """Remove search lineage and proposer-authored comparison cues from a payload."""
+    payload = candidate.model_dump(mode="json")
+    payload["candidate_id"] = neutral_id
+    payload["parent_candidate_id"] = None
+    payload["change_summary"] = "withheld from scientific comparison"
+    return payload

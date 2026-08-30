@@ -878,6 +878,50 @@ same public prompt and model. Pair labels are opened only by the offline
 analyzer. A pass authorizes a separately frozen fresh-structure confirmation;
 it does not itself enable the production search gate.
 
+The matched V8 run failed. All 20 orientation calls returned valid structured
+responses, but the incomplete total `U = Uid` failed in only three of the ten
+paired trials. Candidate-verdict accuracy was `0.650`, incomplete-target fail
+rate was `0.300`, and neither pair passed the aggregate gate. The stored
+evidence shows that the model usually treated presence of the requested delayed
+insulin pathway as sufficient and ignored the separately stated fact that total
+`U` includes the supplied `Uii` contribution. This is a scientific
+interpretation failure, not a transport failure.
+
+Post-freeze review also found that the older V6 candidate identifiers contained
+`baseline` and `omitted` labels. V8 correctly blinded those identifiers, so the
+apparent V6 success is not admissible evidence for target-completeness accuracy.
+V6 and V8 remain frozen development diagnostics and are not production gates.
+
+## Deterministic public target contract
+
+Production target feasibility is now owned by a typed, deterministic public
+contract. Every benchmark uses the same schema: each public target must have an
+explicit observation mapping, and a target may list public channels whose
+contribution is explicitly required by the public prompt. Evaluation recursively
+traverses candidate process, state, and mapping definitions. An identity mapping
+therefore proves only that a named quantity is exposed; it does not bypass the
+composition check.
+
+For the named easy Dalla-Man tasks where `U` is publicly defined as total
+disposal and `Uii` is supplied as its insulin-independent contribution, the
+contract requires a directed dependency path `Uii -> ... -> target:U`. Thus
+`U = Uii + Uid` passes and `U = Uid` fails. The contract does not prescribe the
+name or formula of the insulin-dependent component. Required-mechanism
+representation, driver paths, and dynamic memory remain separate mechanism
+compliance predicates, while scientific tradeoffs remain with the paired LLM
+judge.
+
+The 40 Phase-B contract instances are prompt-hash committed under
+`configs/target_eval/phase_b_v1`. They are derived from public specifications,
+contain no private equations or test data, and enter search as a hard feasibility
+gate before fitting. Pruning may not remove a required target dependency; if a
+pruned form violates the contract, search retains the valid unpruned form.
+
+Production pairwise judge payloads now replace proposer candidate identifiers,
+parent identifiers, and change summaries with neutral A/B metadata. Runtime
+checkpoints retain the real lineage outside the provider payload. Frozen
+calibration artifacts are not rewritten.
+
 The earlier one-candidate fresh confirmation is frozen by
 `configs/target_completeness_fresh_confirmation_v1.json`. Preparation fails
 unless the exact V7 development configuration and pair bytes are certified by

@@ -28,6 +28,9 @@ from autoformalism.benchmarks.phase_b_public import (
     write_public_production_bundle,
     write_public_staging_bundle,
 )
+from autoformalism.benchmarks.phase_b_target_specs import (
+    phase_b_public_target_contract,
+)
 from autoformalism.benchmarks.suite import BenchmarkSuiteSpec, load_suite_spec
 
 __all__ = [
@@ -49,6 +52,7 @@ __all__ = [
     "mechanism_gate_definition",
     "phase_b_protocols",
     "phase_b_public_spec",
+    "phase_b_public_target_contract",
     "phase_b_task_mechanism_lines",
     "render_phase_b_prompts",
     "simulate_phase_b",

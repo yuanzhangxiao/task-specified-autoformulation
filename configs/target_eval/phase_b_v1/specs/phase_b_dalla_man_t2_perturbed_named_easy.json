@@ -1,0 +1,32 @@
+{
+  "benchmark_id": "phase_b_dalla_man_t2_perturbed_named_easy",
+  "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+  "schema_version": "public-target-contract-1",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "public_requirement": "generate target Gp(t): primary nonnegative target representing plasma glucose mass",
+      "required_dependencies": [],
+      "target_channel": "Gp"
+    },
+    {
+      "public_requirement": "generate target I(t): insulin concentration",
+      "required_dependencies": [],
+      "target_channel": "I"
+    },
+    {
+      "public_requirement": "generate target U(t): total glucose utilization/disposal rate, including insulin-independent and insulin-dependent contributions",
+      "required_dependencies": [
+        {
+          "acceptable_symbols": [
+            "Uii"
+          ],
+          "dependency_id": "insulin_independent_contribution",
+          "public_requirement": "U(t): total glucose utilization/disposal rate, including insulin-independent and insulin-dependent contributions; Uii(t): supplied insulin-independent contribution to glucose utilization"
+        }
+      ],
+      "target_channel": "U"
+    }
+  ],
+  "tier": "easy"
+}

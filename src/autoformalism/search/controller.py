@@ -46,6 +46,10 @@ from autoformalism.search.models import (
     IncumbentChallenge,
     SearchConfig,
 )
+from autoformalism.targets import (
+    PublicTargetContract,
+    evaluate_public_targets,
+)
 
 StageCallback = Callable[[str, int | None], None]
 
@@ -83,6 +87,7 @@ class SearchController:
         test_loader: Callable[[FrozenSelection], DatasetSplit],
         config: SearchConfig,
         pairwise_judge: PairwiseScientificJudge | None = None,
+        public_target_contract: PublicTargetContract | None = None,
         stage_callback: StageCallback | None = None,
     ) -> None:
         if training.name is not SplitName.TRAIN:
@@ -96,6 +101,28 @@ class SearchController:
         self._test_loader = test_loader
         self._config = config
         self._pairwise_judge = pairwise_judge
+        self._public_target_contract = public_target_contract
+        if public_target_contract is not None:
+            contract_targets = {
+                item.target_channel for item in public_target_contract.targets
+            }
+            if contract_targets != set(context.targets):
+                raise ValueError(
+                    "public target contract channels do not match validation context"
+                )
+            public_symbols = set(context.targets) | set(context.forcing_channels)
+            unknown_dependencies = {
+                symbol
+                for target in public_target_contract.targets
+                for dependency in target.required_dependencies
+                for symbol in dependency.acceptable_symbols
+                if symbol not in public_symbols
+            }
+            if unknown_dependencies:
+                raise ValueError(
+                    "public target contract references unavailable channels: "
+                    f"{sorted(unknown_dependencies)}"
+                )
         if (
             config.selection_policy == "incumbent_relative_hybrid"
             and pairwise_judge is None
@@ -248,6 +275,30 @@ class SearchController:
                 self._store.save_round(round_index, payload)
                 self._callback("complete", round_index)
                 return None
+            if self._public_target_contract is not None:
+                target_evaluation = evaluate_public_targets(
+                    candidate, self._public_target_contract
+                )
+                payload["public_target_evaluation"] = target_evaluation.model_dump(
+                    mode="json"
+                )
+                if not target_evaluation.passed:
+                    failed = [
+                        item.predicate
+                        for item in target_evaluation.predicates
+                        if item.status == "failed"
+                    ]
+                    payload.update(
+                        valid=False,
+                        error=(
+                            "PUBLIC_TARGET_CONTRACT_FAILED: "
+                            + ", ".join(failed)
+                        ),
+                        stage="complete",
+                    )
+                    self._store.save_round(round_index, payload)
+                    self._callback("complete", round_index)
+                    return None
             if compiled.validated.warnings:
                 payload["validation_warnings"] = [
                     {
@@ -321,13 +372,28 @@ class SearchController:
                 pruning_config=self._config.pruning_config,
                 unpruned_fit=fitted,
             )
-            payload["pruned_candidate"] = pruning.selected_candidate.model_dump(
-                mode="json"
-            )
-            payload["pruned_fit"] = _fit_to_dict(pruning.selected_fit)
+            selected_candidate = pruning.selected_candidate
+            selected_fit = pruning.selected_fit
+            removed_terms = pruning.selected_removed_terms
+            removed_parameters = pruning.selected_removed_parameters
+            if self._public_target_contract is not None:
+                pruned_target_evaluation = evaluate_public_targets(
+                    selected_candidate, self._public_target_contract
+                )
+                payload["pruned_public_target_evaluation"] = (
+                    pruned_target_evaluation.model_dump(mode="json")
+                )
+                if not pruned_target_evaluation.passed:
+                    selected_candidate = candidate
+                    selected_fit = fitted
+                    removed_terms = ()
+                    removed_parameters = ()
+                    payload["pruning_target_contract_fallback"] = True
+            payload["pruned_candidate"] = selected_candidate.model_dump(mode="json")
+            payload["pruned_fit"] = _fit_to_dict(selected_fit)
             payload["pruning"] = {
-                "removed_terms": list(pruning.selected_removed_terms),
-                "removed_parameters": list(pruning.selected_removed_parameters),
+                "removed_terms": list(removed_terms),
+                "removed_parameters": list(removed_parameters),
                 "contributions": dict(pruning.contribution_by_term),
                 "persistence_training_mse": pruning.persistence_training_mse,
                 "persistence_validation_mse": pruning.persistence_validation_mse,
@@ -874,6 +940,11 @@ class SearchController:
                 if self._pairwise_judge is None
                 else self._pairwise_judge.fingerprint
             ),
+            "public_target_contract": (
+                None
+                if self._public_target_contract is None
+                else self._public_target_contract.model_dump(mode="json")
+            ),
             "context": self._context.model_dump(mode="json"),
             "splits": {
                 "train": self._training.fingerprint,
@@ -899,6 +970,7 @@ def _implementation_fingerprint() -> str:
         root / "search" / "models.py",
         root / "judging" / "hybrid.py",
         root / "judging" / "prompts.py",
+        root / "targets.py",
         root / "expressions" / "compiler.py",
         root / "fitting" / "fitter.py",
         root / "pruning" / "pruner.py",

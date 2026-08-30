@@ -1,0 +1,14 @@
+{
+  "benchmark_id": "phase_b_alien_device_unknown_device_mechanism_canonical_functional_hard",
+  "public_prompt_sha256": "62d8a31d7d07c064948e13824f0d774ac8f5223e17f8984b115e621c7e0d1301",
+  "schema_version": "public-target-contract-1",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "public_requirement": "generate target v01(t): primary device output",
+      "required_dependencies": [],
+      "target_channel": "v01"
+    }
+  ],
+  "tier": "hard"
+}

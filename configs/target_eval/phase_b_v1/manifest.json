@@ -1,0 +1,369 @@
+{
+  "contract_count": 40,
+  "contracts": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_canonical_named_easy",
+      "contract_sha256": "1499d67903ee04cc80c0525ee52e2a5739bc4c292abbe1888751addda87335f7",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t1_canonical_named_easy.json",
+      "public_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_canonical_obfuscated_easy",
+      "contract_sha256": "337d2d97c58bce5baf293c90c626ae781918eeb5ff32ecdc61bb8e101080613a",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t1_canonical_obfuscated_easy.json",
+      "public_prompt_sha256": "a1e89f8846c33085730df3d67708aa45a8412554b3f85df0626e57bc32be36bb",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_canonical_named_hard",
+      "contract_sha256": "fb787426b0bf1a365c551ae3338f2039a6aa41e1a4f6555070406d7685c15475",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t1_canonical_named_hard.json",
+      "public_prompt_sha256": "ede5a1db0a828a8d6582bb80614d536897941b6e6164f59e2a426b0c905a2fe3",
+      "target_count": 1,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_canonical_obfuscated_hard",
+      "contract_sha256": "4f9d26466c8c1e5cdd4d9d7954b19e39f0a09f05fcda26900ab5469f870a9535",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t1_canonical_obfuscated_hard.json",
+      "public_prompt_sha256": "4ede7b5715d7e59f2418ff9b63c874d718024b756a84d2c8eef986a2c6804950",
+      "target_count": 1,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_perturbed_named_easy",
+      "contract_sha256": "2f18133b47bae30f363bb1503dbbe28dc905b94621c7daf9ea205a3d8dce17f0",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t1_perturbed_named_easy.json",
+      "public_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_perturbed_obfuscated_easy",
+      "contract_sha256": "eb4541a97891a8dccb4ea1a221e14345b1c7d9fddc3da0a2a7a90fdd211d58a7",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t1_perturbed_obfuscated_easy.json",
+      "public_prompt_sha256": "a1e89f8846c33085730df3d67708aa45a8412554b3f85df0626e57bc32be36bb",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_perturbed_named_hard",
+      "contract_sha256": "2475c993371d9b1955cd5ea4c9bd95bab17f9ede9b1544abc6453652c1c83c47",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t1_perturbed_named_hard.json",
+      "public_prompt_sha256": "ede5a1db0a828a8d6582bb80614d536897941b6e6164f59e2a426b0c905a2fe3",
+      "target_count": 1,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_perturbed_obfuscated_hard",
+      "contract_sha256": "5b827ff3d16d6ec2b01d853635faf0528b375437cd78b657cf9c7ef614e77008",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t1_perturbed_obfuscated_hard.json",
+      "public_prompt_sha256": "4ede7b5715d7e59f2418ff9b63c874d718024b756a84d2c8eef986a2c6804950",
+      "target_count": 1,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "contract_sha256": "cfbd142e80ee843a0ac674fb3a2daa4dd4187b9c4350de72262fb42bcacafd26",
+      "dependency_count": 1,
+      "path": "specs/phase_b_dalla_man_t2_canonical_named_easy.json",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "target_count": 3,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_canonical_obfuscated_easy",
+      "contract_sha256": "f46f2ef5ccd24dab0c0bdde03458eac2d3bfb938533026666d9df55cc469149f",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t2_canonical_obfuscated_easy.json",
+      "public_prompt_sha256": "e4ae535427de1e1d9f573214fb3d8252c56dd3a4a80e5cbb71f432b13726ffac",
+      "target_count": 3,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_hard",
+      "contract_sha256": "0efcb714e4132f5ae5e0493ba555cf85eceda3b776a3ecb3cbf01d4dcb19f382",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t2_canonical_named_hard.json",
+      "public_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_canonical_obfuscated_hard",
+      "contract_sha256": "6889589404b7992af964e6e2b79d84c4b9431d4030a90d876ccdec8f11a7410d",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t2_canonical_obfuscated_hard.json",
+      "public_prompt_sha256": "1d023aa28c361c6155f7f4dacfd02eedc6e86e97a92fe0c1c506545c360fedd9",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_perturbed_named_easy",
+      "contract_sha256": "c053091107aa034a7ea12d0f0f61733d8d9b95ddcb3749daf4d29d805b1f0616",
+      "dependency_count": 1,
+      "path": "specs/phase_b_dalla_man_t2_perturbed_named_easy.json",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "target_count": 3,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_perturbed_obfuscated_easy",
+      "contract_sha256": "86820421110d892260ddab7e741795df4b694e7565779db9757ee55c4352a594",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t2_perturbed_obfuscated_easy.json",
+      "public_prompt_sha256": "e4ae535427de1e1d9f573214fb3d8252c56dd3a4a80e5cbb71f432b13726ffac",
+      "target_count": 3,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_perturbed_named_hard",
+      "contract_sha256": "9a413820e5c4edfcda9ab2cec3daa65ba39b26be35b23463fa07deb51085c424",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t2_perturbed_named_hard.json",
+      "public_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_perturbed_obfuscated_hard",
+      "contract_sha256": "6e2b8a3889c17523b274734b6ce3af7dee538daf12de1d6a62471d057a944336",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t2_perturbed_obfuscated_hard.json",
+      "public_prompt_sha256": "1d023aa28c361c6155f7f4dacfd02eedc6e86e97a92fe0c1c506545c360fedd9",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_canonical_named_easy",
+      "contract_sha256": "1344ee18812892a970f3a78ffd8fac597cfd0c30a2c2c2b256806cba871ea0e9",
+      "dependency_count": 1,
+      "path": "specs/phase_b_dalla_man_t3_canonical_named_easy.json",
+      "public_prompt_sha256": "625e5bf72d9cd71ea925f4611289f7a451e041d3ead4a4d746ec95f590e0e2cd",
+      "target_count": 4,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_canonical_obfuscated_easy",
+      "contract_sha256": "4cf1af0088711757c85d63d7871f84651e0fab886016ff01adb626166836f686",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t3_canonical_obfuscated_easy.json",
+      "public_prompt_sha256": "36f6e0ee3be66c75c11d0fe54f1e7922af9c0503da8c8266858a1bc5533fb156",
+      "target_count": 4,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_canonical_named_hard",
+      "contract_sha256": "819665f2738132111ffcde82b68dad564922cf20f9ed682accf2f74ba4e3f091",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t3_canonical_named_hard.json",
+      "public_prompt_sha256": "b7da37c83d300c9594b5f677c6589d81d1e4b66781281ce23eecf2a6e93a75e9",
+      "target_count": 3,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_canonical_obfuscated_hard",
+      "contract_sha256": "91df81448c7dbcd479dc8b4f3783f6e02c6a71cfa0ce9fce92e7cb219df60fcc",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t3_canonical_obfuscated_hard.json",
+      "public_prompt_sha256": "8bd128b529bb5ba8bf41a9001f94be91a7341f3c79f56a60ac162ea84c2178d6",
+      "target_count": 3,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_perturbed_named_easy",
+      "contract_sha256": "01767bf2627a37103cbdb45c2c34b1619c7bfd310af8d9c7a4c94884e2d7c2d1",
+      "dependency_count": 1,
+      "path": "specs/phase_b_dalla_man_t3_perturbed_named_easy.json",
+      "public_prompt_sha256": "625e5bf72d9cd71ea925f4611289f7a451e041d3ead4a4d746ec95f590e0e2cd",
+      "target_count": 4,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_perturbed_obfuscated_easy",
+      "contract_sha256": "fd29c90a585189794e7ca39e7b532284a66a9a9ca6687c8018b499d1d760f2d2",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t3_perturbed_obfuscated_easy.json",
+      "public_prompt_sha256": "36f6e0ee3be66c75c11d0fe54f1e7922af9c0503da8c8266858a1bc5533fb156",
+      "target_count": 4,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_perturbed_named_hard",
+      "contract_sha256": "f69e1aff9201e8902114e0d6a4f5dadedb3c8964f1ac10c47e0539c21a3c51ed",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t3_perturbed_named_hard.json",
+      "public_prompt_sha256": "b7da37c83d300c9594b5f677c6589d81d1e4b66781281ce23eecf2a6e93a75e9",
+      "target_count": 3,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_perturbed_obfuscated_hard",
+      "contract_sha256": "f2940dab23dffa65b77220022b2fd89a18c2d724b69ba50a4207e7b57a35f5f9",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t3_perturbed_obfuscated_hard.json",
+      "public_prompt_sha256": "8bd128b529bb5ba8bf41a9001f94be91a7341f3c79f56a60ac162ea84c2178d6",
+      "target_count": 3,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_canonical_named_easy",
+      "contract_sha256": "ca399ff9cb3a25ec6e4f57375a65e30016ed3af1ffa2dee4d8c9f06a8805f0e9",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t4_canonical_named_easy.json",
+      "public_prompt_sha256": "93ee6056ebc2c5ed971280d248a81d9063bfce38a5d893bbf23298a0fe8d8218",
+      "target_count": 2,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_canonical_obfuscated_easy",
+      "contract_sha256": "ce550ef3de5547aca9c806fd13aa2c6332396387455faa6a79b3e71fe8adf9da",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t4_canonical_obfuscated_easy.json",
+      "public_prompt_sha256": "6461d8f585da57a264b79b0a0ef24cc0d87095b5f5a7bfe709b5db09ce2d929a",
+      "target_count": 2,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_canonical_named_hard",
+      "contract_sha256": "e62107076027c73cad182d5b52921beba2bf60bd7257a84b1a45e95d30f7f356",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t4_canonical_named_hard.json",
+      "public_prompt_sha256": "cc63ed1d7122745473f8219db54dcbc78238208c832121349526fe7419f892de",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_canonical_obfuscated_hard",
+      "contract_sha256": "2559a33043de02acf45109a611f0b81dab0c505671bbb3d78d2c0b622b379719",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t4_canonical_obfuscated_hard.json",
+      "public_prompt_sha256": "914dd1c0c490a3b9d467cbfd3a554418414d0cf1337229d3d33edeb258c9481a",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_perturbed_named_easy",
+      "contract_sha256": "2c8058b72524fe9388ec0db85983e84115beafed6240304d6960a60dbcec6ccd",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t4_perturbed_named_easy.json",
+      "public_prompt_sha256": "93ee6056ebc2c5ed971280d248a81d9063bfce38a5d893bbf23298a0fe8d8218",
+      "target_count": 2,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_perturbed_obfuscated_easy",
+      "contract_sha256": "5e71cf5b65eac1d7e1d95e9415f8a67f2b2dde3f6f31047f49a3f294184e4694",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t4_perturbed_obfuscated_easy.json",
+      "public_prompt_sha256": "6461d8f585da57a264b79b0a0ef24cc0d87095b5f5a7bfe709b5db09ce2d929a",
+      "target_count": 2,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_perturbed_named_hard",
+      "contract_sha256": "a2c3d4903718929eeda71767990a9d1b8c7372091207d2cad81d6c5c6ff325fa",
+      "dependency_count": 0,
+      "path": "specs/phase_b_dalla_man_t4_perturbed_named_hard.json",
+      "public_prompt_sha256": "cc63ed1d7122745473f8219db54dcbc78238208c832121349526fe7419f892de",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_perturbed_obfuscated_hard",
+      "contract_sha256": "75a13d93017422e8258f4db8e3c024ae5143ecda2e65738fb357e84485d49a16",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_t4_perturbed_obfuscated_hard.json",
+      "public_prompt_sha256": "914dd1c0c490a3b9d467cbfd3a554418414d0cf1337229d3d33edeb258c9481a",
+      "target_count": 2,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_cstr_controlled_reactor_mechanism_canonical_named_easy",
+      "contract_sha256": "f94e52fc8d0c2486a8d4b78a5eb82ff182cb501709f0b783b14392f077c41db3",
+      "dependency_count": 0,
+      "path": "specs/phase_b_cstr_controlled_reactor_mechanism_canonical_named_easy.json",
+      "public_prompt_sha256": "0a3b4c055402ed26352363c4d367b791c41460ea21e8ca42043c495ea68eb99c",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_obfuscated_easy",
+      "contract_sha256": "cf588813e94b45f31c8418dcfe022b85e4fe0ad31923fcb520d554c81e89bc57",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_task_canonical_obfuscated_easy.json",
+      "public_prompt_sha256": "9ccb13ffe8d6a76c616805fa7ff663d96eacd5e3af1629f1161ddc8bf80e72e0",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_cstr_controlled_reactor_mechanism_canonical_named_hard",
+      "contract_sha256": "8ec4c0a9fab9ebb75ff99af78c3586f693332f722b1917c5f3b93988fd8ed68c",
+      "dependency_count": 0,
+      "path": "specs/phase_b_cstr_controlled_reactor_mechanism_canonical_named_hard.json",
+      "public_prompt_sha256": "5a593dd3a825d75db3778209d86c54e67cc106ef383a214f6458cea3f3cf0b7f",
+      "target_count": 1,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_obfuscated_hard",
+      "contract_sha256": "4f595e67cf58ca0bf3c83a9e3b2a7d4657ca82a72fc9309b04bcbe75a76f49ab",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_task_canonical_obfuscated_hard.json",
+      "public_prompt_sha256": "873c390306fdcb76983b0af946a37fab11b3a798983a39139c9d7149af653443",
+      "target_count": 1,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy",
+      "contract_sha256": "bf4f82f0c353c1ca3e1f245d814fd7cf150f0b63408f2c4fa12e9710e3e08270",
+      "dependency_count": 0,
+      "path": "specs/phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy.json",
+      "public_prompt_sha256": "7663bba9e84752550781f617b31f5f3391caf9967c77695fcfc5fff5423ab9a9",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_easy",
+      "contract_sha256": "21593423fa4da50f2cc8ff2fe7f611bc5d8ffff8aef58df4f4fb9b89b0d9596b",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_task_canonical_opaque_easy.json",
+      "public_prompt_sha256": "f09c3bccd48cb1079ae7642cd925af30c85e8e303da8f45643b19b775b426400",
+      "target_count": 1,
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_alien_device_unknown_device_mechanism_canonical_functional_hard",
+      "contract_sha256": "f69a1bbd884c1de4ef015b7aa770d7b00b6cf179efae73dede55185bef4fc984",
+      "dependency_count": 0,
+      "path": "specs/phase_b_alien_device_unknown_device_mechanism_canonical_functional_hard.json",
+      "public_prompt_sha256": "62d8a31d7d07c064948e13824f0d774ac8f5223e17f8984b115e621c7e0d1301",
+      "target_count": 1,
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "contract_sha256": "3656f87507f48ee11fb8ace52afbac1c9186e8c18aaca8d5efc086b348d0d40a",
+      "dependency_count": 0,
+      "path": "specs/phase_b_anonymous_system_task_canonical_opaque_hard.json",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+      "target_count": 1,
+      "tier": "hard"
+    }
+  ],
+  "schema_version": "phase-b-public-target-contracts-1",
+  "status": "frozen_public_prompt_derived",
+  "suite_path": "configs/benchmarks/phase_b_suite_v1.json",
+  "suite_sha256": "b5fd71a24ea50e6c5c6929db9f168483df15acc027c99b940eb5ad79254b9123"
+}
