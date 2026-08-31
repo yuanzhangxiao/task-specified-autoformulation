@@ -10,10 +10,20 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, least_squares
 
-from autoformalism.data import DatasetSplit, TrainingScaler, Trajectory
-from autoformalism.expressions import CompiledModel, RuntimeExpressionError
+from autoformalism.data import (
+    DatasetSplit,
+    DerivativeProvenance,
+    TrainingScaler,
+    Trajectory,
+)
+from autoformalism.expressions import (
+    CompiledModel,
+    RuntimeExpressionError,
+    validate_gmm_parameterization,
+)
 from autoformalism.fitting.models import (
     EvaluationMetrics,
+    ExactDerivativeFitError,
     FailureCounter,
     FitConfig,
     FitResult,
@@ -66,6 +76,15 @@ def fit_candidate(
         channel: scaler.scales[f"target:{channel}"].standard_deviation
         for channel in model.validated.context.targets
     }
+    if settings.parameter_fit_strategy == "exact_derivative_linear_ridge":
+        return _fit_exact_derivative_linear_ridge(
+            model,
+            training,
+            validation,
+            settings,
+            target_scales,
+            deadline,
+        )
     variables = _training_variables(model, training)
     lower = np.asarray([item.lower for item in variables])
     upper = np.asarray([item.upper for item in variables])
@@ -232,6 +251,229 @@ def fit_candidate(
     )
 
 
+def _fit_exact_derivative_linear_ridge(
+    model: CompiledModel,
+    training: DatasetSplit,
+    validation: DatasetSplit,
+    config: FitConfig,
+    target_scales: Mapping[str, float],
+    deadline: float | None,
+) -> FitResult:
+    """Fit graph-edge weights once by Eq. (11), then score causal rollouts.
+
+    This is deliberately an oracle first milestone. Every modeled state and its
+    exact derivative must be supplied. Validation derivatives are never used.
+    Nonlinear basis-shape constants belong in the proposer-owned expression as
+    numeric literals; only affine graph weights are solved here.
+    """
+    if not config.allow_derivative_regression:
+        raise ExactDerivativeFitError(
+            "exact_derivative_linear_ridge requires derivative regression"
+        )
+    validate_gmm_parameterization(model.validated)
+    observed = model.direct_state_observation_channels
+    missing_states = sorted(set(model.state_names) - set(observed))
+    if missing_states:
+        raise ExactDerivativeFitError(
+            "exact derivative fitting requires every state to be directly "
+            f"observed; missing={missing_states}"
+        )
+    for trajectory in training.trajectories:
+        if trajectory.derivative_provenance is not DerivativeProvenance.EXACT:
+            raise ExactDerivativeFitError(
+                "exact derivative fitting refuses non-exact derivative labels: "
+                f"{trajectory.trajectory_id} has "
+                f"{trajectory.derivative_provenance.value!r} provenance"
+            )
+        missing = sorted(set(observed.values()) - set(trajectory.derivatives))
+        if missing:
+            raise ExactDerivativeFitError(
+                f"trajectory {trajectory.trajectory_id} lacks exact derivatives: "
+                f"{missing}"
+            )
+    parameter_specs = tuple(model.validated.candidate.parameters)
+    parameter_names = tuple(item.name for item in parameter_specs)
+    variables = tuple(
+        _Variable(
+            f"parameter:{item.name}",
+            item.bounds.lower,
+            item.bounds.upper,
+            item.initialization_range.lower,
+            item.initialization_range.upper,
+        )
+        for item in parameter_specs
+    )
+    anchor = {
+        item.name: (item.bounds.lower + item.bounds.upper) / 2.0
+        for item in parameter_specs
+    }
+    rows: list[NDArray[np.float64]] = []
+    labels: list[float] = []
+    for trajectory in training.trajectories:
+        skipped = 1 if model.validated.context.lagged_targets else 0
+        for index in range(skipped, trajectory.number_of_rows):
+            _check_deadline(deadline)
+            forcing = trajectory_forcing(
+                model,
+                trajectory,
+                causal_index=max(0, index - 1),
+            )
+            state = np.asarray(
+                [
+                    _observed_value(trajectory, observed[name], index)
+                    for name in model.state_names
+                ],
+                dtype=float,
+            )
+            time = float(trajectory.time[index])
+            anchor_rhs = model.rhs(time, state, anchor, forcing)
+            design = np.empty((len(model.state_names), len(parameter_names)))
+            for parameter_index, spec in enumerate(parameter_specs):
+                probe = dict(anchor)
+                probe[spec.name] = float(spec.bounds.lower)
+                delta = probe[spec.name] - anchor[spec.name]
+                if delta == 0.0:  # schema forbids degenerate bounds
+                    raise AssertionError("parameter probe has zero displacement")
+                probe_rhs = model.rhs(time, state, probe, forcing)
+                design[:, parameter_index] = (probe_rhs - anchor_rhs) / delta
+            intercept = anchor_rhs - design @ np.asarray(
+                [anchor[name] for name in parameter_names], dtype=float
+            )
+            for state_index, state_name in enumerate(model.state_names):
+                channel = observed[state_name]
+                rows.append(design[state_index].copy())
+                labels.append(
+                    float(trajectory.derivatives[channel][index])
+                    - float(intercept[state_index])
+                )
+
+    matrix = (
+        np.vstack(rows)
+        if rows
+        else np.empty((0, len(parameter_names)), dtype=float)
+    )
+    response = np.asarray(labels, dtype=float)
+    if parameter_names:
+        gram = matrix.T @ matrix
+        rhs = matrix.T @ response
+        regularized = gram + config.derivative_ridge_regularization * np.eye(
+            len(parameter_names)
+        )
+        try:
+            values = np.linalg.solve(regularized, rhs)
+        except np.linalg.LinAlgError:
+            values = np.linalg.lstsq(regularized, rhs, rcond=None)[0]
+    else:
+        values = np.empty(0, dtype=float)
+    if not np.isfinite(values).all():
+        raise ExactDerivativeFitError("closed-form ridge solution is nonfinite")
+
+    bounds_error = [
+        f"{spec.name}={value:.12g} outside "
+        f"[{spec.bounds.lower:.12g}, {spec.bounds.upper:.12g}]"
+        for spec, value in zip(parameter_specs, values, strict=True)
+        if value < spec.bounds.lower or value > spec.bounds.upper
+    ]
+    if bounds_error:
+        raise ExactDerivativeFitError(
+            "unconstrained Eq. (11) solution violates proposer bounds; "
+            + "; ".join(bounds_error)
+        )
+
+    parameters = dict(zip(parameter_names, values, strict=True))
+    training_initials = _direct_observed_initials(model, training, observed)
+    decoded = _Decoded(parameters, {}, training_initials)
+    residual = matrix @ values - response
+    result = OptimizeResult(
+        x=values,
+        success=True,
+        status=1,
+        message="closed-form exact-derivative ridge solution",
+        cost=float(0.5 * np.dot(residual, residual)),
+        nfev=1,
+    )
+    diagnostic = _diagnostic(
+        0,
+        result,
+        FailureCounter(),
+        variables,
+        config,
+        backend="exact_derivative_linear_ridge",
+    )
+    train_metrics = _evaluate(
+        model,
+        training,
+        decoded.parameters,
+        decoded.global_initials,
+        decoded.trajectory_initials,
+        target_scales,
+        config,
+    )
+    validation_initials = _direct_observed_initials(model, validation, observed)
+    validation_metrics = _evaluate(
+        model,
+        validation,
+        decoded.parameters,
+        decoded.global_initials,
+        validation_initials,
+        target_scales,
+        config,
+    )
+    succeeded = bool(
+        not train_metrics.failed_trajectories
+        and not validation_metrics.failed_trajectories
+        and np.isfinite(train_metrics.normalized_mse)
+        and np.isfinite(validation_metrics.normalized_mse)
+    )
+    return FitResult(
+        success=succeeded,
+        global_parameters=decoded.parameters,
+        global_initial_conditions=decoded.global_initials,
+        training_trajectory_initial_conditions=decoded.trajectory_initials,
+        validation_trajectory_initial_conditions=validation_initials,
+        training_metrics=train_metrics,
+        validation_metrics=validation_metrics,
+        diagnostics=(diagnostic,),
+        best_start_index=0,
+        target_scales=target_scales,
+        message=(
+            None
+            if succeeded
+            else "closed-form parameters produced an invalid rollout"
+        ),
+    )
+
+
+def _observed_value(
+    trajectory: Trajectory,
+    channel: str,
+    index: int,
+) -> float:
+    if channel in trajectory.targets:
+        return float(trajectory.targets[channel][index])
+    if channel in trajectory.auxiliaries:
+        return float(trajectory.auxiliaries[channel][index])
+    raise ExactDerivativeFitError(
+        f"directly observed state channel is unavailable: {channel}"
+    )
+
+
+def _direct_observed_initials(
+    model: CompiledModel,
+    split: DatasetSplit,
+    observed: Mapping[str, str],
+) -> Mapping[str, Mapping[str, float]]:
+    """Use measured initial states directly; these are data, not fit variables."""
+    return {
+        trajectory.trajectory_id: {
+            state_name: _observed_value(trajectory, channel, 0)
+            for state_name, channel in observed.items()
+            if state_name not in model.observed_state_channels
+        }
+        for trajectory in split.trajectories
+    }
+
+
 def evaluate_fitted_candidate(
     model: CompiledModel,
     split: DatasetSplit,
@@ -244,18 +486,27 @@ def evaluate_fitted_candidate(
 ) -> tuple[Mapping[str, Mapping[str, float]], EvaluationMetrics]:
     """Evaluate frozen globals with fitted or target-free local initials."""
     settings = config or FitConfig()
-    local_initials = (
-        _fit_validation_initials(
-            model,
-            split,
-            global_parameters,
-            global_initial_conditions,
-            target_scales,
-            settings,
+    if settings.parameter_fit_strategy == "exact_derivative_linear_ridge":
+        observed = model.direct_state_observation_channels
+        if set(observed) != set(model.state_names):
+            raise ExactDerivativeFitError(
+                "exact derivative evaluation requires every state to be "
+                "directly observed"
+            )
+        local_initials = _direct_observed_initials(model, split, observed)
+    else:
+        local_initials = (
+            _fit_validation_initials(
+                model,
+                split,
+                global_parameters,
+                global_initial_conditions,
+                target_scales,
+                settings,
+            )
+            if fit_trajectory_initial_conditions
+            else _midpoint_trajectory_initials(model, split)
         )
-        if fit_trajectory_initial_conditions
-        else _midpoint_trajectory_initials(model, split)
-    )
     metrics = _evaluate(
         model,
         split,

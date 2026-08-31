@@ -19,6 +19,7 @@ from autoformalism.data import (
     BenchmarkLoader,
     BenchmarkRegistry,
     DatasetSplit,
+    DerivativeProvenance,
     DevelopmentDataset,
     FrozenTestAccess,
     SplitName,
@@ -95,6 +96,24 @@ structural sign.
 Natural-language concepts in the benchmark prompt are descriptions, not expression
 identifiers. Every expression symbol must exactly match a name in the runtime
 symbol contract below or a state, process, or parameter declared in this proposal.
+Beam feedback includes structured deterministic-runtime findings and, when the
+judge is enabled, question-level scientific assessments with evidence. Repair the
+specific failed predicates and scientific concerns; do not respond only to the
+aggregate NMSE or final preference.
+""".strip()
+
+_EXACT_DERIVATIVE_GMM_PROMPT = """
+This run uses the graph-meta-model parameterization from Eqs. (10)-(11).
+Every declared parameter is an unknown edge weight theta and, after algebraic
+process expansion, every state RHS must be affine in all declared parameters.
+A parameter may multiply a nonlinear parameter-free basis function phi, but it
+must never occur in a denominator, exponent, nonlinear function argument, or a
+product with another parameter. Put nonlinear shape choices inside phi as
+numeric literals chosen in this proposal. For example, use
+`theta_decay * exp(-0.7 * x)`, not `theta_decay * exp(-a * x)` with fitted `a`.
+Parameters may not occur in observation mappings or initial conditions. The
+runtime deterministically rejects violations and computes all theta values once
+by ridge regression on exact training derivatives; do not propose their values.
 """.strip()
 
 _JUDGE_CONTROLLER_PROMPT = """
@@ -163,6 +182,10 @@ class ExecutionArguments:
     use_judge: bool = True
     forbid_latent_states: bool = False
     use_derivative_fit_fast_path: bool = True
+    parameter_fit_strategy: Literal[
+        "bounded_nonlinear", "exact_derivative_linear_ridge"
+    ] = "bounded_nonlinear"
+    derivative_ridge_regularization: float = 1e-8
     llm_cache_only: bool = False
     llm_cache_root: Path | None = None
     require_initial_proposer_cache_hit: bool = False
@@ -476,6 +499,21 @@ def build_experiment_parser(
         action="store_true",
         help="force generic rollout fitting even when derivative regression applies",
     )
+    parser.add_argument(
+        "--parameter-fit-strategy",
+        choices=("bounded_nonlinear", "exact_derivative_linear_ridge"),
+        default="bounded_nonlinear",
+        help=(
+            "continuous-parameter backend; exact_derivative_linear_ridge is "
+            "an oracle experiment requiring exact derivative provenance"
+        ),
+    )
+    parser.add_argument(
+        "--derivative-ridge-regularization",
+        type=float,
+        default=1e-8,
+        help="nonnegative Eq. (11) ridge coefficient for the oracle GMM backend",
+    )
     return parser
 
 
@@ -557,6 +595,16 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--fit-max-nfev must be at least 1")
     if namespace.fit_timeout_seconds <= 0:
         raise SystemExit("--fit-timeout-seconds must be positive")
+    if namespace.derivative_ridge_regularization < 0.0:
+        raise SystemExit("--derivative-ridge-regularization must be nonnegative")
+    if (
+        namespace.parameter_fit_strategy == "exact_derivative_linear_ridge"
+        and namespace.disable_derivative_fit_fast_path
+    ):
+        raise SystemExit(
+            "--parameter-fit-strategy exact_derivative_linear_ridge conflicts "
+            "with --disable-derivative-fit-fast-path"
+        )
     _validate_optional_fit_retry(
         starts=namespace.fit_retry_starts,
         maximum_function_evaluations=namespace.fit_retry_max_nfev,
@@ -609,6 +657,10 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         use_judge=not namespace.no_judge,
         forbid_latent_states=namespace.forbid_latent_states,
         use_derivative_fit_fast_path=(not namespace.disable_derivative_fit_fast_path),
+        parameter_fit_strategy=namespace.parameter_fit_strategy,
+        derivative_ridge_regularization=(
+            namespace.derivative_ridge_regularization
+        ),
         llm_cache_only=namespace.llm_cache_only,
         llm_cache_root=(
             None
@@ -683,6 +735,9 @@ def _validate_optional_fit_retry(
 def execute(arguments: ExecutionArguments) -> dict[str, Any]:
     """Validate inputs, optionally dry-run, then execute or resume one run."""
     dataset, test_loader, proposer_prompt, judge_prompt = _load_inputs(arguments)
+    _validate_exact_derivative_experiment(
+        arguments, (dataset.train, dataset.validation)
+    )
     public_target_contract = _load_public_target_contract(
         arguments,
         proposer_prompt=proposer_prompt,
@@ -693,9 +748,15 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         if arguments.benchmark_id == "synthetic"
         else BenchmarkRegistry().get(arguments.benchmark_id)
     )
-    use_derivative_fit_fast_path = arguments.use_derivative_fit_fast_path and (
-        benchmark_spec is None
-        or benchmark_spec.data_layout == "legacy_split_files"
+    use_derivative_fit_fast_path = (
+        arguments.parameter_fit_strategy == "exact_derivative_linear_ridge"
+        or (
+            arguments.use_derivative_fit_fast_path
+            and (
+                benchmark_spec is None
+                or benchmark_spec.data_layout == "legacy_split_files"
+            )
+        )
     )
     experiment_directory = _experiment_directory(arguments)
     checkpoint_directory = experiment_directory / "checkpoints"
@@ -798,6 +859,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "use_judge": arguments.use_judge,
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
+        "parameter_fit_strategy": arguments.parameter_fit_strategy,
+        "derivative_ridge_regularization": (
+            arguments.derivative_ridge_regularization
+        ),
         "experiment_directory": str(experiment_directory),
         "split_fingerprints": {
             "train": dataset.train.fingerprint,
@@ -850,6 +915,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             f"{proposer_prompt}\n\n{protocol_prompt}\n\n{symbol_contract}\n\n"
             f"Controller requirements:\n{_CONTROLLER_PROMPT}"
             f"{_latent_ablation_prompt(arguments)}"
+            f"{_gmm_parameterization_prompt(arguments)}"
         ),
         judge_system_prompt=(
             f"Configured judge model: {arguments.judge_model or 'mock'}\n\n"
@@ -865,6 +931,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             maximum_function_evaluations=arguments.fit_max_nfev,
             maximum_wall_time_seconds=arguments.fit_timeout_seconds,
             allow_derivative_regression=use_derivative_fit_fast_path,
+            parameter_fit_strategy=arguments.parameter_fit_strategy,
+            derivative_ridge_regularization=(
+                arguments.derivative_ridge_regularization
+            ),
         ),
         fit_retry_config=_optional_fit_config(
             starts=arguments.fit_retry_starts,
@@ -873,6 +943,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             random_seed=arguments.seed,
             integration_backend="fixed_rk4",
             allow_derivative_regression=use_derivative_fit_fast_path,
+            parameter_fit_strategy=arguments.parameter_fit_strategy,
+            derivative_ridge_regularization=(
+                arguments.derivative_ridge_regularization
+            ),
         ),
         final_fit_config=FitConfig(
             number_of_starts=arguments.fit_starts,
@@ -881,6 +955,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             maximum_function_evaluations=arguments.final_fit_max_nfev,
             maximum_wall_time_seconds=arguments.final_fit_timeout_seconds,
             allow_derivative_regression=use_derivative_fit_fast_path,
+            parameter_fit_strategy=arguments.parameter_fit_strategy,
+            derivative_ridge_regularization=(
+                arguments.derivative_ridge_regularization
+            ),
         ),
         final_fit_retry_config=_optional_fit_config(
             starts=arguments.final_fit_retry_starts,
@@ -889,6 +967,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             random_seed=arguments.seed,
             integration_backend="solve_ivp",
             allow_derivative_regression=use_derivative_fit_fast_path,
+            parameter_fit_strategy=arguments.parameter_fit_strategy,
+            derivative_ridge_regularization=(
+                arguments.derivative_ridge_regularization
+            ),
         ),
         pruning_config=PruningConfig(),
     )
@@ -922,6 +1004,10 @@ def _optional_fit_config(
     random_seed: int,
     integration_backend: Literal["fixed_rk4", "solve_ivp"],
     allow_derivative_regression: bool,
+    parameter_fit_strategy: Literal[
+        "bounded_nonlinear", "exact_derivative_linear_ridge"
+    ] = "bounded_nonlinear",
+    derivative_ridge_regularization: float = 1e-8,
 ) -> FitConfig | None:
     """Construct one fully specified retry profile, or preserve no-retry mode."""
     values = (starts, maximum_function_evaluations, maximum_wall_time_seconds)
@@ -939,6 +1025,8 @@ def _optional_fit_config(
         maximum_function_evaluations=maximum_function_evaluations,
         maximum_wall_time_seconds=maximum_wall_time_seconds,
         allow_derivative_regression=allow_derivative_regression,
+        parameter_fit_strategy=parameter_fit_strategy,
+        derivative_ridge_regularization=derivative_ridge_regularization,
     )
 
 
@@ -1065,6 +1153,37 @@ def _latent_ablation_prompt(arguments: ExecutionArguments) -> str:
         "remain allowed. External inputs and fixed covariates remain supplied "
         "forcing and must not be redeclared."
     )
+
+
+def _gmm_parameterization_prompt(arguments: ExecutionArguments) -> str:
+    """Render the opt-in linear graph-edge-weight contract."""
+    if arguments.parameter_fit_strategy != "exact_derivative_linear_ridge":
+        return ""
+    return f"\n\n{_EXACT_DERIVATIVE_GMM_PROMPT}"
+
+
+def _validate_exact_derivative_experiment(
+    arguments: ExecutionArguments,
+    splits: tuple[DatasetSplit, ...],
+) -> None:
+    """Fail before LLM calls if the oracle derivative contract is unavailable."""
+    if arguments.parameter_fit_strategy != "exact_derivative_linear_ridge":
+        return
+    invalid = [
+        f"{split.name.value}:{trajectory.trajectory_id}="
+        f"{trajectory.derivative_provenance.value}"
+        for split in splits
+        for trajectory in split.trajectories
+        if trajectory.derivative_provenance is not DerivativeProvenance.EXACT
+    ]
+    if invalid:
+        preview = ", ".join(invalid[:5])
+        suffix = "" if len(invalid) <= 5 else f", ... ({len(invalid)} total)"
+        raise SystemExit(
+            "exact_derivative_linear_ridge is an oracle-only milestone and "
+            "requires derivatives tagged with exact provenance; found "
+            f"{preview}{suffix}"
+        )
 
 
 def _numeric_declared_channels(
@@ -1373,7 +1492,8 @@ def _synthetic_split(
         {},
         {},
         {},
-        {},
+        {"target": -0.55 * target},
+        DerivativeProvenance.EXACT,
     )
     return DatasetSplit(name, (trajectory,), f"synthetic-{name.value}")
 

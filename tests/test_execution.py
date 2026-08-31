@@ -8,6 +8,7 @@ import pytest
 
 from autoformalism.execution import (
     ExecutionArguments,
+    _gmm_parameterization_prompt,
     _latent_ablation_prompt,
     _numeric_declared_channels,
     _prediction_protocol_prompt,
@@ -102,6 +103,8 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.final_fit_timeout_seconds == 300.0
     assert default.forbid_latent_states is False
     assert default.use_derivative_fit_fast_path is True
+    assert default.parameter_fit_strategy == "bounded_nonlinear"
+    assert default.derivative_ridge_regularization == 1e-8
     assert default.llm_cache_only is False
     assert default.llm_cache_root is None
     assert default.require_initial_proposer_cache_hit is False
@@ -360,6 +363,34 @@ def test_cli_can_disable_derivative_fit_fast_path() -> None:
     )
 
     assert arguments.use_derivative_fit_fast_path is False
+
+
+def test_cli_enables_oracle_gmm_parameterization_explicitly(
+    tmp_path: Path,
+) -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--benchmark-id",
+                "synthetic",
+                "--data-root",
+                str(tmp_path),
+                "--parameter-fit-strategy",
+                "exact_derivative_linear_ridge",
+                "--derivative-ridge-regularization",
+                "0.001",
+            ]
+        )
+    )
+
+    assert arguments.parameter_fit_strategy == "exact_derivative_linear_ridge"
+    assert arguments.derivative_ridge_regularization == 0.001
+    assert "shape choices" in _gmm_parameterization_prompt(arguments)
+    plan = execute(arguments)
+    assert plan["parameter_fit_strategy"] == "exact_derivative_linear_ridge"
 
 
 def test_cli_rejects_nonpositive_timeout() -> None:

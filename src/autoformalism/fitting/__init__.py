@@ -3,6 +3,7 @@
 from autoformalism.fitting.fitter import evaluate_fitted_candidate, fit_candidate
 from autoformalism.fitting.models import (
     EvaluationMetrics,
+    ExactDerivativeFitError,
     FitConfig,
     FitResult,
     OptimizationDiagnostic,
@@ -12,6 +13,7 @@ from autoformalism.fitting.simulation import simulate_trajectory
 
 __all__ = [
     "EvaluationMetrics",
+    "ExactDerivativeFitError",
     "FitConfig",
     "FitResult",
     "OptimizationDiagnostic",

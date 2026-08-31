@@ -7,9 +7,20 @@ from collections.abc import Mapping
 import numpy as np
 import pytest
 
-from autoformalism.data import DatasetSplit, SplitName, Trajectory
-from autoformalism.expressions import ValidationContext, compile_candidate
+from autoformalism.data import (
+    DatasetSplit,
+    DerivativeProvenance,
+    SplitName,
+    Trajectory,
+)
+from autoformalism.expressions import (
+    ModelValidationError,
+    ValidationContext,
+    compile_candidate,
+    validate_gmm_parameterization,
+)
 from autoformalism.fitting import (
+    ExactDerivativeFitError,
     FitConfig,
     evaluate_fitted_candidate,
     fit_candidate,
@@ -684,6 +695,104 @@ def test_derivative_fast_path_can_be_disabled() -> None:
     assert fit.success
     assert {item.backend for item in fit.diagnostics} == {
         "rollout_least_squares"
+    }
+
+
+def test_exact_derivative_linear_ridge_recovers_graph_weights_once() -> None:
+    time = np.linspace(0.0, 3.0, 61)
+    source = 0.35
+    decay = 0.7
+    initial = 1.4
+    target = source / decay + (initial - source / decay) * np.exp(-decay * time)
+    trajectory = Trajectory(
+        "oracle",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {"target": source - decay * target},
+        DerivativeProvenance.EXACT,
+    )
+    model = compile_candidate(
+        _candidate(
+            {"x": "source - decay * x"},
+            "x",
+            (("source", 0.0, 1.0), ("decay", 0.1, 1.5)),
+        ),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    config = FitConfig(
+        parameter_fit_strategy="exact_derivative_linear_ridge",
+        derivative_ridge_regularization=0.0,
+    )
+
+    fit = fit_candidate(
+        model,
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+        config,
+    )
+
+    assert fit.success
+    assert fit.global_parameters == pytest.approx(
+        {"source": source, "decay": decay}, abs=1e-10
+    )
+    assert fit.diagnostics[0].backend == "exact_derivative_linear_ridge"
+    assert fit.diagnostics[0].function_evaluations == 1
+
+
+def test_exact_derivative_linear_ridge_refuses_estimated_derivatives() -> None:
+    time = np.linspace(0.0, 1.0, 11)
+    target = np.exp(-time)
+    trajectory = Trajectory(
+        "estimated",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {"target": -target},
+        DerivativeProvenance.ESTIMATED,
+    )
+    model = compile_candidate(
+        _candidate({"x": "-decay * x"}, "x", (("decay", 0.1, 2.0),)),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+
+    with pytest.raises(ExactDerivativeFitError, match="refuses non-exact"):
+        fit_candidate(
+            model,
+            _split(SplitName.TRAIN, (trajectory,)),
+            _split(SplitName.VALIDATION, (trajectory,)),
+            FitConfig(parameter_fit_strategy="exact_derivative_linear_ridge"),
+        )
+
+
+def test_gmm_parameterization_accepts_fixed_shape_and_rejects_fitted_shape() -> None:
+    fixed_shape = compile_candidate(
+        _candidate(
+            {"x": "theta * exp(-0.7 * x)"},
+            "x",
+            (("theta", 0.1, 2.0),),
+        ),
+        ValidationContext(targets=("target",)),
+    )
+    report = validate_gmm_parameterization(fixed_shape.validated)
+    assert report.rhs_parameters == {"theta"}
+
+    fitted_shape = compile_candidate(
+        _candidate(
+            {"x": "theta * exp(-shape * x)"},
+            "x",
+            (("theta", 0.1, 2.0), ("shape", 0.1, 2.0)),
+        ),
+        ValidationContext(targets=("target",)),
+    )
+    with pytest.raises(ModelValidationError) as caught:
+        validate_gmm_parameterization(fitted_shape.validated)
+    assert "PARAMETER_IN_NONLINEAR_FUNCTION" in {
+        item.code for item in caught.value.diagnostics
     }
 
 

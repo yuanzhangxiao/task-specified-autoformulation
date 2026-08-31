@@ -137,6 +137,11 @@ class CompiledModel:
         """Map resettable model states to directly observed data channels."""
         if not self.validated.context.lagged_targets:
             return {}
+        return self.direct_state_observation_channels
+
+    @property
+    def direct_state_observation_channels(self) -> Mapping[str, str]:
+        """Map every state that is an identity observation to its data channel."""
         available = set(self.validated.context.targets) | set(
             self.validated.context.auxiliaries
         )

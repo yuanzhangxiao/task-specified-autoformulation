@@ -10,6 +10,10 @@ from autoformalism.expressions.diagnostics import (
     RuntimeExpressionError,
     ValidationDiagnostic,
 )
+from autoformalism.expressions.parameter_linearity import (
+    ParameterLinearityReport,
+    validate_gmm_parameterization,
+)
 from autoformalism.expressions.parser import ParsedExpression, RestrictedParser
 from autoformalism.expressions.validation import (
     CandidateValidator,
@@ -22,6 +26,7 @@ __all__ = [
     "CandidateValidator",
     "CompiledModel",
     "ModelValidationError",
+    "ParameterLinearityReport",
     "ParsedExpression",
     "PiecewiseLinearForcing",
     "RestrictedParser",
@@ -31,4 +36,5 @@ __all__ = [
     "ValidationDiagnostic",
     "compile_candidate",
     "repair_protected_declarations",
+    "validate_gmm_parameterization",
 ]

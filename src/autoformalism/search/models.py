@@ -102,6 +102,17 @@ class SearchConfig(BaseModel):
                 raise ValueError(
                     f"{stage} fit retry must retain the primary fit objective"
                 )
+            if retry.parameter_fit_strategy != primary.parameter_fit_strategy:
+                raise ValueError(
+                    f"{stage} fit retry must retain the parameter-fit strategy"
+                )
+            if (
+                retry.derivative_ridge_regularization
+                != primary.derivative_ridge_regularization
+            ):
+                raise ValueError(
+                    f"{stage} fit retry must retain the derivative ridge value"
+                )
             if (
                 retry.maximum_function_evaluations
                 < primary.maximum_function_evaluations

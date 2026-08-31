@@ -319,6 +319,7 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
     for required in (
         "equations",
         "fitted_parameters",
+        "deterministic_runtime",
         "training_normalized_mse",
         "validation_normalized_mse",
         "judge_category_scores",
@@ -567,6 +568,10 @@ def test_prefit_rejection_is_feedback_for_next_proposal(tmp_path: Path) -> None:
     assert rejection["candidate_id"] == "invalid_one"
     assert rejection["eligible_parent"] is True
     assert rejection["rejected_before_fit"] is True
+    assert rejection["deterministic_runtime"]["candidate_validation"] == "failed"
+    assert rejection["deterministic_runtime"]["validation_diagnostics"][0][
+        "code"
+    ] == "UNDEFINED_SYMBOL"
     assert "UNDEFINED_SYMBOL" in rejection["numerical_failures"][
         "deterministic_validation"
     ][0]

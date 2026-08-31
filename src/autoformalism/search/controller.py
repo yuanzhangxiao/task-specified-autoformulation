@@ -17,6 +17,7 @@ from autoformalism.expressions import (
     ModelValidationError,
     compile_candidate,
     repair_protected_declarations,
+    validate_gmm_parameterization,
 )
 from autoformalism.fitting import (
     EvaluationMetrics,
@@ -277,10 +278,23 @@ class SearchController:
                 return None
             try:
                 compiled = compile_candidate(candidate, self._context)
+                if (
+                    self._config.fit_config.parameter_fit_strategy
+                    == "exact_derivative_linear_ridge"
+                ):
+                    validate_gmm_parameterization(compiled.validated)
             except ModelValidationError as exc:
                 payload.update(
                     valid=False,
                     error=str(exc),
+                    deterministic_validation_diagnostics=[
+                        {
+                            "code": item.code,
+                            "location": item.location,
+                            "message": item.message,
+                        }
+                        for item in exc.diagnostics
+                    ],
                     stage="complete",
                 )
                 self._store.save_round(round_index, payload)
@@ -555,6 +569,11 @@ class SearchController:
                         for item in record.pruned_candidate.state_equations
                     },
                     "fitted_parameters": dict(fit.global_parameters),
+                    "deterministic_runtime": _deterministic_runtime_feedback(
+                        record.pruned_candidate,
+                        fit,
+                        self._public_target_contract,
+                    ),
                     "training_normalized_mse": (
                         fit.training_metrics.normalized_mse
                     ),
@@ -642,6 +661,12 @@ class SearchController:
                 feedback[0]["recent_rejected_candidate"] = {
                     "candidate_id": candidate.candidate_id,
                     "error": error,
+                    "deterministic_validation_diagnostics": list(
+                        payload.get("deterministic_validation_diagnostics", [])
+                    ),
+                    "public_target_evaluation": payload.get(
+                        "public_target_evaluation"
+                    ),
                     "equations": {
                         item.state: item.rhs
                         for item in candidate.state_equations
@@ -706,6 +731,19 @@ class SearchController:
                             else None
                         ),
                         "judge_category_scores": {},
+                        "deterministic_runtime": {
+                            "candidate_validation": (
+                                "failed" if rejected_fit is None else "passed"
+                            ),
+                            "validation_diagnostics": list(
+                                payload.get(
+                                    "deterministic_validation_diagnostics", []
+                                )
+                            ),
+                            "public_target_evaluation": payload.get(
+                                "public_target_evaluation"
+                            ),
+                        },
                         "numerical_failures": {
                             (
                                 "deterministic_validation"
@@ -1174,6 +1212,53 @@ def _fit_preference_for_challenger(
     if denominator <= np.finfo(float).tiny:
         return 0.0
     return float(np.clip((incumbent_loss - challenger_loss) / denominator, -1, 1))
+
+
+def _deterministic_runtime_feedback(
+    candidate: CandidateModel,
+    fit: FitResult,
+    public_target_contract: PublicTargetContract | None,
+) -> dict[str, object]:
+    """Expose actionable certified facts without test data or hidden contracts."""
+    target_evaluation = (
+        None
+        if public_target_contract is None
+        else evaluate_public_targets(candidate, public_target_contract).model_dump(
+            mode="json"
+        )
+    )
+    return {
+        "candidate_validation": "passed",
+        "public_target_evaluation": target_evaluation,
+        "fit": {
+            "success": fit.success,
+            "message": fit.message,
+            "backends": sorted({item.backend for item in fit.diagnostics}),
+            "optimizer_messages": [
+                item.message for item in fit.diagnostics if item.message
+            ],
+            "parameters_at_lower_bound": sorted(
+                {
+                    parameter
+                    for item in fit.diagnostics
+                    for parameter in item.parameters_at_lower_bound
+                }
+            ),
+            "parameters_at_upper_bound": sorted(
+                {
+                    parameter
+                    for item in fit.diagnostics
+                    for parameter in item.parameters_at_upper_bound
+                }
+            ),
+            "training_failed_trajectories": list(
+                fit.training_metrics.failed_trajectories
+            ),
+            "validation_failed_trajectories": list(
+                fit.validation_metrics.failed_trajectories
+            ),
+        },
+    }
 
 
 def _incumbent_challenge_feedback(

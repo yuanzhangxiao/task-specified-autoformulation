@@ -119,10 +119,15 @@ The pipeline is iterative:
 
 ## Important implementation decisions
 
-- Do not require all parameters to be linear.
-- Do not require closed-form least-squares fitting.
-- The graph representation is an expression/dependency graph, not a
-  restriction to linear-in-parameter models.
+- The production/default backend does not require all parameters to be linear
+  and retains bounded rollout least squares.
+- An opt-in oracle milestone implements the paper's graph-meta-model contract:
+  proposer-owned nonlinear basis functions, runtime-owned affine graph weights,
+  and one closed-form ridge solve using derivatives explicitly tagged exact.
+  This mode is separate from production experiments until derivative estimation
+  and latent-state handling are validated.
+- The general graph representation remains an expression/dependency graph; the
+  linear-in-parameter restriction is enforced only by the oracle GMM profile.
 - The LLM proposes parameter identities, locations, bounds, and roles.
 - Numerical optimization determines final parameter values.
 - Never ask the LLM to numerically tune continuous parameters from

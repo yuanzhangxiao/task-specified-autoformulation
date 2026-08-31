@@ -20,6 +20,7 @@ from autoformalism.data.models import (
     BenchmarkDataset,
     BenchmarkSpec,
     DatasetSplit,
+    DerivativeProvenance,
     DevelopmentDataset,
     FrozenTestAccess,
     SplitName,
@@ -460,6 +461,7 @@ class BenchmarkLoader:
             },
             fixed_covariates={},
             derivatives=derivatives,
+            derivative_provenance=DerivativeProvenance.ESTIMATED,
         )
 
     @staticmethod
@@ -574,6 +576,7 @@ class BenchmarkLoader:
             external_inputs=external_values,
             fixed_covariates=fixed_values,
             derivatives=derivative_values,
+            derivative_provenance=DerivativeProvenance.ESTIMATED,
         )
 
     @staticmethod

@@ -33,6 +33,14 @@ class ChannelRole(str, Enum):
     FIXED_COVARIATE = "fixed_covariate"
 
 
+class DerivativeProvenance(str, Enum):
+    """How derivative labels attached to a trajectory were obtained."""
+
+    UNAVAILABLE = "unavailable"
+    ESTIMATED = "estimated"
+    EXACT = "exact"
+
+
 class TierRoles(BaseModel):
     """Channel roles for one observability tier."""
 
@@ -116,6 +124,7 @@ class Trajectory:
     external_inputs: Mapping[str, NDArray[np.float64]]
     fixed_covariates: Mapping[str, Any]
     derivatives: Mapping[str, NDArray[np.float64]]
+    derivative_provenance: DerivativeProvenance = DerivativeProvenance.UNAVAILABLE
 
     def __post_init__(self) -> None:
         """Freeze mappings and arrays to prevent accidental split mutation."""
