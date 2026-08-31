@@ -319,7 +319,6 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
     for required in (
         "equations",
         "fitted_parameters",
-        "deterministic_runtime",
         "training_normalized_mse",
         "validation_normalized_mse",
         "judge_category_scores",
@@ -327,6 +326,7 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
         "pruning_diagnostics",
     ):
         assert required in second_proposal_prompt
+    assert "deterministic_runtime" not in second_proposal_prompt
     assert "test_metrics" not in second_proposal_prompt
     assert "test_normalized_mse" not in second_proposal_prompt
     assert second.parent_candidate_id == first.candidate_id
@@ -556,7 +556,10 @@ def test_prefit_rejection_is_feedback_for_next_proposal(tmp_path: Path) -> None:
         judge_responses=[_judge()] * 3,
     )
 
-    result = _controller(client, _config(tmp_path / "recovery", 2)).run()
+    config = _config(tmp_path / "recovery", 2).model_copy(
+        update={"proposer_feedback_mode": "structured"}
+    )
+    result = _controller(client, config).run()
 
     proposer_prompts = [
         json.loads(call["user_prompt"])

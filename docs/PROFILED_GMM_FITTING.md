@@ -79,15 +79,27 @@ variable projection over a small set of nonlinear shape parameters is warranted.
 
 ## Proposer feedback milestone
 
-The controller does not send only NMSE and a final judge score. Active-beam
-feedback now contains a `deterministic_runtime` block with public-target
-predicates, fit backend and status, optimizer diagnostics, bound hits, and failed
-trajectories. Deterministically rejected proposals retain structured diagnostic
-codes, locations, and messages. Under paired-question consensus, the existing
+Structured proposer feedback is a separate, opt-in search treatment:
+
+```text
+--proposer-feedback-mode structured
+```
+
+The default `legacy` mode preserves the earlier feedback payload. In
+`structured` mode, active-beam feedback additionally contains a
+`deterministic_runtime` block with public-target predicates, fit backend and
+status, optimizer diagnostics, bound hits, and failed trajectories.
+Deterministically rejected proposals retain structured diagnostic codes,
+locations, and messages. Under paired-question consensus, the existing
 incumbent-relative block continues to include every absolute and comparative
-judge answer, evidence, and orientation disagreement. The controller prompt
-explicitly tells the proposer to repair those individual findings rather than
-react only to aggregate scores.
+judge answer, evidence, and orientation disagreement in either mode. The
+structured-mode controller prompt explicitly tells the proposer to repair
+individual findings rather than react only to aggregate scores.
+
+This switch is independent of `--parameter-fit-strategy`; experiments can use
+either feedback mode with either fitting backend. This separation avoids
+confounding the exact-derivative fitting milestone with the later feedback
+milestone.
 
 ## Known limitations
 

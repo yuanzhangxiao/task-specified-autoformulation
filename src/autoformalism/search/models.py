@@ -19,6 +19,7 @@ SelectionPolicy = Literal[
     "normalized_weighted_sum",
     "incumbent_relative_hybrid",
 ]
+ProposerFeedbackMode = Literal["legacy", "structured"]
 
 
 class IncumbentChallenge(StrictSchema):
@@ -52,6 +53,7 @@ class SearchConfig(BaseModel):
     validation_mse_target: float = Field(default=0.0, ge=0.0)
     cheap_prefit_judge: bool = False
     use_judge: bool = True
+    proposer_feedback_mode: ProposerFeedbackMode = "legacy"
     require_initial_proposer_cache_hit: bool = False
     selection_policy: SelectionPolicy = "validation_only"
     judge_weight: float = Field(default=0.25, ge=0.0)

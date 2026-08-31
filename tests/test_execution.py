@@ -12,6 +12,7 @@ from autoformalism.execution import (
     _latent_ablation_prompt,
     _numeric_declared_channels,
     _prediction_protocol_prompt,
+    _structured_proposer_feedback_prompt,
     _symbol_contract,
     arguments_from_namespace,
     build_experiment_parser,
@@ -391,6 +392,49 @@ def test_cli_enables_oracle_gmm_parameterization_explicitly(
     assert "shape choices" in _gmm_parameterization_prompt(arguments)
     plan = execute(arguments)
     assert plan["parameter_fit_strategy"] == "exact_derivative_linear_ridge"
+
+
+def test_structured_proposer_feedback_is_independent_and_opt_in(
+    tmp_path: Path,
+) -> None:
+    parser = build_experiment_parser(description="test")
+    default = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--benchmark-id",
+                "synthetic",
+                "--data-root",
+                str(tmp_path),
+            ]
+        )
+    )
+    structured = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--benchmark-id",
+                "synthetic",
+                "--data-root",
+                str(tmp_path),
+                "--proposer-feedback-mode",
+                "structured",
+            ]
+        )
+    )
+
+    assert default.proposer_feedback_mode == "legacy"
+    assert default.parameter_fit_strategy == "bounded_nonlinear"
+    assert _structured_proposer_feedback_prompt(default) == ""
+    assert structured.proposer_feedback_mode == "structured"
+    assert structured.parameter_fit_strategy == "bounded_nonlinear"
+    assert "specific failed predicates" in _structured_proposer_feedback_prompt(
+        structured
+    )
+    plan = execute(structured)
+    assert plan["proposer_feedback_mode"] == "structured"
 
 
 def test_cli_rejects_nonpositive_timeout() -> None:

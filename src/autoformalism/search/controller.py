@@ -569,11 +569,6 @@ class SearchController:
                         for item in record.pruned_candidate.state_equations
                     },
                     "fitted_parameters": dict(fit.global_parameters),
-                    "deterministic_runtime": _deterministic_runtime_feedback(
-                        record.pruned_candidate,
-                        fit,
-                        self._public_target_contract,
-                    ),
                     "training_normalized_mse": (
                         fit.training_metrics.normalized_mse
                     ),
@@ -625,6 +620,14 @@ class SearchController:
                     ),
                 }
             )
+            if self._config.proposer_feedback_mode == "structured":
+                feedback[-1]["deterministic_runtime"] = (
+                    _deterministic_runtime_feedback(
+                        record.pruned_candidate,
+                        fit,
+                        self._public_target_contract,
+                    )
+                )
             if (
                 not self._config.use_judge
                 or self._config.selection_policy == "incumbent_relative_hybrid"
@@ -677,6 +680,13 @@ class SearchController:
                         "operators, state set, or algebraic mechanisms."
                     ),
                 }
+                if self._config.proposer_feedback_mode != "structured":
+                    feedback[0]["recent_rejected_candidate"].pop(
+                        "deterministic_validation_diagnostics"
+                    )
+                    feedback[0]["recent_rejected_candidate"].pop(
+                        "public_target_evaluation"
+                    )
                 break
         if remaining > 0:
             for rejected_round in range(round_index - 1, -1, -1):
@@ -764,6 +774,8 @@ class SearchController:
                         "rejected_before_fit": rejected_fit is None,
                     }
                 )
+                if self._config.proposer_feedback_mode != "structured":
+                    feedback[-1].pop("deterministic_runtime")
                 remaining -= 1
                 if remaining == 0:
                     break

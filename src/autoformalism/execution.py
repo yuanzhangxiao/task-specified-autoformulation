@@ -96,6 +96,9 @@ structural sign.
 Natural-language concepts in the benchmark prompt are descriptions, not expression
 identifiers. Every expression symbol must exactly match a name in the runtime
 symbol contract below or a state, process, or parameter declared in this proposal.
+""".strip()
+
+_STRUCTURED_PROPOSER_FEEDBACK_PROMPT = """
 Beam feedback includes structured deterministic-runtime findings and, when the
 judge is enabled, question-level scientific assessments with evidence. Repair the
 specific failed predicates and scientific concerns; do not respond only to the
@@ -180,6 +183,7 @@ class ExecutionArguments:
     final_fit_retry_max_nfev: int | None = None
     final_fit_retry_timeout_seconds: float | None = None
     use_judge: bool = True
+    proposer_feedback_mode: Literal["legacy", "structured"] = "legacy"
     forbid_latent_states: bool = False
     use_derivative_fit_fast_path: bool = True
     parameter_fit_strategy: Literal[
@@ -471,6 +475,15 @@ def build_experiment_parser(
         help="disable judge calls and feedback for the no-judge ablation",
     )
     parser.add_argument(
+        "--proposer-feedback-mode",
+        choices=("legacy", "structured"),
+        default="legacy",
+        help=(
+            "feedback payload supplied to proposals after round zero; "
+            "structured adds deterministic-runtime findings"
+        ),
+    )
+    parser.add_argument(
         "--require-initial-proposer-cache-hit",
         action="store_true",
         help=(
@@ -655,6 +668,7 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         final_fit_retry_max_nfev=namespace.final_fit_retry_max_nfev,
         final_fit_retry_timeout_seconds=namespace.final_fit_retry_timeout_seconds,
         use_judge=not namespace.no_judge,
+        proposer_feedback_mode=namespace.proposer_feedback_mode,
         forbid_latent_states=namespace.forbid_latent_states,
         use_derivative_fit_fast_path=(not namespace.disable_derivative_fit_fast_path),
         parameter_fit_strategy=namespace.parameter_fit_strategy,
@@ -857,6 +871,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             else max(2, min(5, arguments.iteration_budget))
         ),
         "use_judge": arguments.use_judge,
+        "proposer_feedback_mode": arguments.proposer_feedback_mode,
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
         "parameter_fit_strategy": arguments.parameter_fit_strategy,
@@ -902,6 +917,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         validation_mse_target=0.0,
         cheap_prefit_judge=False,
         use_judge=arguments.use_judge,
+        proposer_feedback_mode=arguments.proposer_feedback_mode,
         require_initial_proposer_cache_hit=(
             arguments.require_initial_proposer_cache_hit
         ),
@@ -916,6 +932,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             f"Controller requirements:\n{_CONTROLLER_PROMPT}"
             f"{_latent_ablation_prompt(arguments)}"
             f"{_gmm_parameterization_prompt(arguments)}"
+            f"{_structured_proposer_feedback_prompt(arguments)}"
         ),
         judge_system_prompt=(
             f"Configured judge model: {arguments.judge_model or 'mock'}\n\n"
@@ -1160,6 +1177,13 @@ def _gmm_parameterization_prompt(arguments: ExecutionArguments) -> str:
     if arguments.parameter_fit_strategy != "exact_derivative_linear_ridge":
         return ""
     return f"\n\n{_EXACT_DERIVATIVE_GMM_PROMPT}"
+
+
+def _structured_proposer_feedback_prompt(arguments: ExecutionArguments) -> str:
+    """Explain the opt-in structured feedback fields to the proposer."""
+    if arguments.proposer_feedback_mode != "structured":
+        return ""
+    return f"\n\n{_STRUCTURED_PROPOSER_FEEDBACK_PROMPT}"
 
 
 def _validate_exact_derivative_experiment(
