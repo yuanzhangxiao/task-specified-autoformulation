@@ -18,6 +18,7 @@ from autoformalism.rebuttal.search_integration_ablation import (
 from scripts.write_phase_b_search_task_runtime import write_runtime_record
 
 CONFIG = Path("configs/phase_b_search_integration_ablation_v2.json")
+V3_CONFIG = Path("configs/phase_b_search_integration_ablation_v3.json")
 OVERLAY_CONFIG = Path("configs/phase_b_public_prompt_overlay_v3.json")
 CONTRACT_ROOT = Path("configs/target_eval/phase_b_v1")
 SEARCH_SLURM = Path(
@@ -135,6 +136,24 @@ def test_v2_plan_freezes_exact_public_inputs_and_resource_policy(
             target_contract_root=contracts,
             prompt_overlay_config_path=OVERLAY_CONFIG,
         )
+
+
+def test_v3_plan_freezes_the_same_public_boundary_with_new_fit_ladder(
+    tmp_path: Path,
+) -> None:
+    public, contracts = _public_fixture(tmp_path)
+    manifest = freeze_search_integration_plan(
+        V3_CONFIG,
+        tmp_path / "v3-frozen",
+        public_data_root=public,
+        target_contract_root=contracts,
+        prompt_overlay_config_path=OVERLAY_CONFIG,
+    )
+
+    assert manifest["task_count"] == 12
+    plan = load_search_integration_plan(V3_CONFIG)
+    assert plan.search_budget.fit_retry_starts == 2
+    assert plan.model_contract.effective_proposer_reasoning_effort == "high"
 
 
 def test_v2_launchers_pin_overlay_contract_and_accounting() -> None:

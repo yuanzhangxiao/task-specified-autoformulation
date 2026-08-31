@@ -27,13 +27,14 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_VLLM_IMAGE_URI:=docker://vllm/vllm-openai:v0.27.1}"
 : "${AF_HF_HOME:=${AF_PROJECT}/huggingface-cache}"
 : "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/search-integration-ablation-v3}"
+: "${AF_SEARCH_CONFIG:=${AF_REPO_ROOT}/configs/phase_b_search_integration_ablation_v2.json}"
 : "${AF_TENSOR_PARALLEL_SIZE:=4}"
 : "${AF_VLLM_PORT:=8000}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 : "${AF_TASK_INDEX:=${SLURM_ARRAY_TASK_ID:-0}}"
 
 readonly frozen_root="${AF_OUTPUT_ROOT}/frozen"
-readonly config_source="${AF_REPO_ROOT}/configs/phase_b_search_integration_ablation_v2.json"
+readonly config_source="${AF_SEARCH_CONFIG}"
 readonly judge_protocol="${AF_REPO_ROOT}/configs/hybrid_judge_consensus_operating_point_v1.json"
 readonly plan="${frozen_root}/plan.json"
 readonly task_plan="${frozen_root}/task_plan.jsonl"
@@ -90,6 +91,9 @@ readonly beam_size="$(jq -r '.search_budget.beam_size' "${plan}")"
 readonly fit_starts="$(jq -r '.search_budget.fit_starts' "${plan}")"
 readonly fit_max_nfev="$(jq -r '.search_budget.fit_max_nfev' "${plan}")"
 readonly fit_timeout="$(jq -r '.search_budget.fit_timeout_seconds' "${plan}")"
+readonly fit_retry_starts="$(jq -r '.search_budget.fit_retry_starts // empty' "${plan}")"
+readonly fit_retry_max_nfev="$(jq -r '.search_budget.fit_retry_max_nfev // empty' "${plan}")"
+readonly fit_retry_timeout="$(jq -r '.search_budget.fit_retry_timeout_seconds // empty' "${plan}")"
 readonly final_fit_max_nfev="$(jq -r '.search_budget.final_fit_max_nfev' "${plan}")"
 readonly final_fit_timeout="$(jq -r '.search_budget.final_fit_timeout_seconds' "${plan}")"
 
@@ -238,6 +242,19 @@ else
   selection_arguments+=(--no-judge --require-initial-proposer-cache-hit)
 fi
 
+fit_retry_arguments=()
+if [[ -n "${fit_retry_starts}" || -n "${fit_retry_max_nfev}" || -n "${fit_retry_timeout}" ]]; then
+  [[ -n "${fit_retry_starts}" && -n "${fit_retry_max_nfev}" && -n "${fit_retry_timeout}" ]] || {
+    echo "frozen plan has an incomplete screening retry budget" >&2
+    exit 2
+  }
+  fit_retry_arguments=(
+    --fit-retry-starts "${fit_retry_starts}"
+    --fit-retry-max-nfev "${fit_retry_max_nfev}"
+    --fit-retry-timeout-seconds "${fit_retry_timeout}"
+  )
+fi
+
 /usr/bin/time -o "${process_time}" \
   -f $'elapsed_seconds=%e\nuser_cpu_seconds=%U\nsystem_cpu_seconds=%S\nmax_rss_kib=%M\nexit_code=%x' \
   "${AF_PYTHON}" scripts/run_experiment.py \
@@ -261,6 +278,7 @@ fi
     --fit-starts "${fit_starts}" \
     --fit-max-nfev "${fit_max_nfev}" \
     --fit-timeout-seconds "${fit_timeout}" \
+    "${fit_retry_arguments[@]}" \
     --final-fit-max-nfev "${final_fit_max_nfev}" \
     --final-fit-timeout-seconds "${final_fit_timeout}" \
     --public-target-contract "${target_contract}" \

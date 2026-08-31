@@ -95,6 +95,9 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.fit_starts == 1
     assert default.fit_max_nfev == 50
     assert default.fit_timeout_seconds == 300.0
+    assert default.fit_retry_starts is None
+    assert default.fit_retry_max_nfev is None
+    assert default.fit_retry_timeout_seconds is None
     assert default.final_fit_max_nfev == 150
     assert default.final_fit_timeout_seconds == 300.0
     assert default.forbid_latent_states is False
@@ -367,6 +370,33 @@ def test_cli_rejects_nonpositive_timeout() -> None:
 
     with pytest.raises(SystemExit, match="must be positive"):
         arguments_from_namespace(namespace)
+
+
+def test_cli_requires_complete_optional_fit_retry_budget() -> None:
+    parser = build_experiment_parser(description="test")
+    accepted = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--fit-retry-starts",
+                "2",
+                "--fit-retry-max-nfev",
+                "150",
+                "--fit-retry-timeout-seconds",
+                "600",
+            ]
+        )
+    )
+    incomplete = parser.parse_args(
+        ["--mock-llm", "--dry-run", "--fit-retry-starts", "2"]
+    )
+
+    assert accepted.fit_retry_starts == 2
+    assert accepted.fit_retry_max_nfev == 150
+    assert accepted.fit_retry_timeout_seconds == 600.0
+    with pytest.raises(SystemExit, match="must be supplied together"):
+        arguments_from_namespace(incomplete)
 
 
 def test_cli_accepts_and_validates_max_output_tokens() -> None:

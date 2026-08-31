@@ -93,5 +93,14 @@ sacct -P -n -j "${judge_job},${no_judge_job}" \
   --source-outcomes "${adapted_root}/source_adapter_outcomes.jsonl" \
   --output-root "${final_root}"
 
+if [[ "${AF_WRITE_ARM_ENDPOINT_REPORT:-false}" == "true" ]]; then
+  "${AF_PYTHON}" scripts/summarize_phase_b_search_ablation_evaluation.py \
+    --sources "${freeze_root}/frozen_search_sources.jsonl" \
+    --source-outcomes "${adapted_root}/source_adapter_outcomes.jsonl" \
+    --records "${final_root}/final_evaluation_records.jsonl" \
+    --output-root "${final_root}"
+  cat "${final_root}/search_ablation_endpoint_report.md"
+fi
+
 cat "${final_root}/final_evaluation_summary.md"
 cat "${search_audit_root}/search_integration_audit.md"

@@ -15,10 +15,14 @@ readonly af_user="${USER:-}"
 : "${AF_HIDDEN_AUDIT:=${AF_WORK}/phase_b/hidden-contract-audit-v2/hidden_contract_audit.json}"
 : "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/search-integration-ablation-v3}"
 : "${AF_VLLM_PORT:=8000}"
+: "${AF_SEARCH_CONFIG:=${AF_REPO_ROOT}/configs/phase_b_search_integration_ablation_v2.json}"
+: "${AF_SEARCH_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_search_integration_ablation_v2_120b.slurm}"
+: "${AF_EVALUATION_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_search_ablation_evaluation_v2.slurm}"
+: "${AF_SUBMISSION_SCHEMA:=phase-b-search-integration-submission-2}"
 
-readonly config="${AF_REPO_ROOT}/configs/phase_b_search_integration_ablation_v2.json"
-readonly search_job="${AF_REPO_ROOT}/scripts/hpc/phase_b_search_integration_ablation_v2_120b.slurm"
-readonly evaluation_job="${AF_REPO_ROOT}/scripts/hpc/phase_b_search_ablation_evaluation_v2.slurm"
+readonly config="${AF_SEARCH_CONFIG}"
+readonly search_job="${AF_SEARCH_JOB}"
+readonly evaluation_job="${AF_EVALUATION_JOB}"
 readonly submission_manifest="${AF_OUTPUT_ROOT}/submission_manifest.json"
 
 [[ -x "${AF_PYTHON}" ]] || { echo "missing Python: ${AF_PYTHON}" >&2; exit 2; }
@@ -55,7 +59,7 @@ readonly actual_hidden_audit_sha256="$(sha256sum "${AF_HIDDEN_AUDIT}" | awk '{pr
   --target-contract-root "${AF_TARGET_CONTRACT_ROOT}" \
   --prompt-overlay-config "${AF_PROMPT_OVERLAY_CONFIG}"
 
-readonly common_export="ALL,AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_VLLM_PORT=${AF_VLLM_PORT}"
+readonly common_export="ALL,AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_VLLM_PORT=${AF_VLLM_PORT},AF_SEARCH_CONFIG=${AF_SEARCH_CONFIG}"
 judge_submission="$(
   sbatch --parsable \
     --array=0-5%2 \
@@ -98,8 +102,9 @@ jq -n \
   --arg vllm_endpoint "http://127.0.0.1:${AF_VLLM_PORT}" \
   --arg hidden_audit "${AF_HIDDEN_AUDIT}" \
   --arg hidden_audit_sha256 "${actual_hidden_audit_sha256}" \
+  --arg submission_schema "${AF_SUBMISSION_SCHEMA}" \
   '{
-    schema_version: "phase-b-search-integration-submission-2",
+    schema_version: $submission_schema,
     submitted_at_utc: $submitted_at_utc,
     judge_search_job_id: $judge_search_job_id,
     no_judge_search_job_id: $no_judge_search_job_id,

@@ -10,7 +10,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -152,8 +152,14 @@ class ExecutionArguments:
     fit_starts: int = 1
     fit_max_nfev: int = 50
     fit_timeout_seconds: float = 300.0
+    fit_retry_starts: int | None = None
+    fit_retry_max_nfev: int | None = None
+    fit_retry_timeout_seconds: float | None = None
     final_fit_max_nfev: int = 150
     final_fit_timeout_seconds: float = 300.0
+    final_fit_retry_starts: int | None = None
+    final_fit_retry_max_nfev: int | None = None
+    final_fit_retry_timeout_seconds: float | None = None
     use_judge: bool = True
     forbid_latent_states: bool = False
     use_derivative_fit_fast_path: bool = True
@@ -306,6 +312,24 @@ def build_experiment_parser(
         ),
     )
     parser.add_argument(
+        "--fit-retry-starts",
+        type=int,
+        help=(
+            "optional deterministic retry starts for a candidate rejected by "
+            "the primary screening fit"
+        ),
+    )
+    parser.add_argument(
+        "--fit-retry-max-nfev",
+        type=int,
+        help="optional maximum residual evaluations per retry fitting start",
+    )
+    parser.add_argument(
+        "--fit-retry-timeout-seconds",
+        type=float,
+        help="optional wall-clock limit for the screening retry",
+    )
+    parser.add_argument(
         "--final-fit-max-nfev",
         type=int,
         default=150,
@@ -316,6 +340,21 @@ def build_experiment_parser(
         type=float,
         default=300.0,
         help="wall-clock limit for the adaptive final refit",
+    )
+    parser.add_argument(
+        "--final-fit-retry-starts",
+        type=int,
+        help="optional deterministic retry starts for a rejected final refit",
+    )
+    parser.add_argument(
+        "--final-fit-retry-max-nfev",
+        type=int,
+        help="optional maximum residual evaluations per final-retry start",
+    )
+    parser.add_argument(
+        "--final-fit-retry-timeout-seconds",
+        type=float,
+        help="optional wall-clock limit for the final-fit retry",
     )
     parser.add_argument("--output-root", type=Path, default=Path("artifacts/runs"))
     parser.add_argument(
@@ -518,10 +557,22 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--fit-max-nfev must be at least 1")
     if namespace.fit_timeout_seconds <= 0:
         raise SystemExit("--fit-timeout-seconds must be positive")
+    _validate_optional_fit_retry(
+        starts=namespace.fit_retry_starts,
+        maximum_function_evaluations=namespace.fit_retry_max_nfev,
+        timeout_seconds=namespace.fit_retry_timeout_seconds,
+        prefix="--fit-retry",
+    )
     if namespace.final_fit_max_nfev < 1:
         raise SystemExit("--final-fit-max-nfev must be at least 1")
     if namespace.final_fit_timeout_seconds <= 0:
         raise SystemExit("--final-fit-timeout-seconds must be positive")
+    _validate_optional_fit_retry(
+        starts=namespace.final_fit_retry_starts,
+        maximum_function_evaluations=namespace.final_fit_retry_max_nfev,
+        timeout_seconds=namespace.final_fit_retry_timeout_seconds,
+        prefix="--final-fit-retry",
+    )
     if (
         not namespace.mock_llm
         and not namespace.dry_run
@@ -547,8 +598,14 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         fit_starts=namespace.fit_starts,
         fit_max_nfev=namespace.fit_max_nfev,
         fit_timeout_seconds=namespace.fit_timeout_seconds,
+        fit_retry_starts=namespace.fit_retry_starts,
+        fit_retry_max_nfev=namespace.fit_retry_max_nfev,
+        fit_retry_timeout_seconds=namespace.fit_retry_timeout_seconds,
         final_fit_max_nfev=namespace.final_fit_max_nfev,
         final_fit_timeout_seconds=namespace.final_fit_timeout_seconds,
+        final_fit_retry_starts=namespace.final_fit_retry_starts,
+        final_fit_retry_max_nfev=namespace.final_fit_retry_max_nfev,
+        final_fit_retry_timeout_seconds=namespace.final_fit_retry_timeout_seconds,
         use_judge=not namespace.no_judge,
         forbid_latent_states=namespace.forbid_latent_states,
         use_derivative_fit_fast_path=(not namespace.disable_derivative_fit_fast_path),
@@ -594,6 +651,33 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         vllm_temperature=namespace.vllm_temperature,
         vllm_seed=namespace.vllm_seed,
     )
+
+
+def _validate_optional_fit_retry(
+    *,
+    starts: int | None,
+    maximum_function_evaluations: int | None,
+    timeout_seconds: float | None,
+    prefix: str,
+) -> None:
+    """Require complete and positive optional retry-budget triples."""
+    values = (starts, maximum_function_evaluations, timeout_seconds)
+    if all(value is None for value in values):
+        return
+    if any(value is None for value in values):
+        raise SystemExit(
+            f"{prefix}-starts, {prefix}-max-nfev, and "
+            f"{prefix}-timeout-seconds must be supplied together"
+        )
+    assert starts is not None
+    assert maximum_function_evaluations is not None
+    assert timeout_seconds is not None
+    if starts < 1:
+        raise SystemExit(f"{prefix}-starts must be at least 1")
+    if maximum_function_evaluations < 1:
+        raise SystemExit(f"{prefix}-max-nfev must be at least 1")
+    if timeout_seconds <= 0:
+        raise SystemExit(f"{prefix}-timeout-seconds must be positive")
 
 
 def execute(arguments: ExecutionArguments) -> dict[str, Any]:
@@ -671,8 +755,16 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "fit_starts": arguments.fit_starts,
         "fit_max_nfev": arguments.fit_max_nfev,
         "fit_timeout_seconds": arguments.fit_timeout_seconds,
+        "fit_retry_starts": arguments.fit_retry_starts,
+        "fit_retry_max_nfev": arguments.fit_retry_max_nfev,
+        "fit_retry_timeout_seconds": arguments.fit_retry_timeout_seconds,
         "final_fit_max_nfev": arguments.final_fit_max_nfev,
         "final_fit_timeout_seconds": arguments.final_fit_timeout_seconds,
+        "final_fit_retry_starts": arguments.final_fit_retry_starts,
+        "final_fit_retry_max_nfev": arguments.final_fit_retry_max_nfev,
+        "final_fit_retry_timeout_seconds": (
+            arguments.final_fit_retry_timeout_seconds
+        ),
         "screening_integrator": "fixed_rk4",
         "final_integrator": "solve_ivp",
         "proposer_model": arguments.proposer_model,
@@ -774,12 +866,28 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             maximum_wall_time_seconds=arguments.fit_timeout_seconds,
             allow_derivative_regression=use_derivative_fit_fast_path,
         ),
+        fit_retry_config=_optional_fit_config(
+            starts=arguments.fit_retry_starts,
+            maximum_function_evaluations=arguments.fit_retry_max_nfev,
+            maximum_wall_time_seconds=arguments.fit_retry_timeout_seconds,
+            random_seed=arguments.seed,
+            integration_backend="fixed_rk4",
+            allow_derivative_regression=use_derivative_fit_fast_path,
+        ),
         final_fit_config=FitConfig(
             number_of_starts=arguments.fit_starts,
             random_seed=arguments.seed,
             integration_backend="solve_ivp",
             maximum_function_evaluations=arguments.final_fit_max_nfev,
             maximum_wall_time_seconds=arguments.final_fit_timeout_seconds,
+            allow_derivative_regression=use_derivative_fit_fast_path,
+        ),
+        final_fit_retry_config=_optional_fit_config(
+            starts=arguments.final_fit_retry_starts,
+            maximum_function_evaluations=arguments.final_fit_retry_max_nfev,
+            maximum_wall_time_seconds=arguments.final_fit_retry_timeout_seconds,
+            random_seed=arguments.seed,
+            integration_backend="solve_ivp",
             allow_derivative_regression=use_derivative_fit_fast_path,
         ),
         pruning_config=PruningConfig(),
@@ -804,6 +912,34 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         encoding="utf-8",
     )
     return summary
+
+
+def _optional_fit_config(
+    *,
+    starts: int | None,
+    maximum_function_evaluations: int | None,
+    maximum_wall_time_seconds: float | None,
+    random_seed: int,
+    integration_backend: Literal["fixed_rk4", "solve_ivp"],
+    allow_derivative_regression: bool,
+) -> FitConfig | None:
+    """Construct one fully specified retry profile, or preserve no-retry mode."""
+    values = (starts, maximum_function_evaluations, maximum_wall_time_seconds)
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise AssertionError("retry arguments were not validated as a complete triple")
+    assert starts is not None
+    assert maximum_function_evaluations is not None
+    assert maximum_wall_time_seconds is not None
+    return FitConfig(
+        number_of_starts=starts,
+        random_seed=random_seed,
+        integration_backend=integration_backend,
+        maximum_function_evaluations=maximum_function_evaluations,
+        maximum_wall_time_seconds=maximum_wall_time_seconds,
+        allow_derivative_regression=allow_derivative_regression,
+    )
 
 
 def _load_public_target_contract(

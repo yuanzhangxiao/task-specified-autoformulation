@@ -65,8 +65,34 @@ class SearchBudget(BaseModel):
     fit_starts: int = Field(ge=1)
     fit_max_nfev: int = Field(ge=1)
     fit_timeout_seconds: float = Field(gt=0.0)
+    fit_retry_starts: int | None = Field(default=None, ge=1)
+    fit_retry_max_nfev: int | None = Field(default=None, ge=1)
+    fit_retry_timeout_seconds: float | None = Field(default=None, gt=0.0)
     final_fit_max_nfev: int = Field(ge=1)
     final_fit_timeout_seconds: float = Field(gt=0.0)
+
+    @model_validator(mode="after")
+    def retry_budget_is_complete_and_non_decreasing(self) -> SearchBudget:
+        """Require a complete, genuinely expanded retry budget when present."""
+        retry = (
+            self.fit_retry_starts,
+            self.fit_retry_max_nfev,
+            self.fit_retry_timeout_seconds,
+        )
+        if all(value is None for value in retry):
+            return self
+        if any(value is None for value in retry):
+            raise ValueError("fit retry budget fields must be supplied together")
+        assert self.fit_retry_starts is not None
+        assert self.fit_retry_max_nfev is not None
+        assert self.fit_retry_timeout_seconds is not None
+        if self.fit_retry_starts < self.fit_starts:
+            raise ValueError("fit retry starts must not be lower than the primary")
+        if self.fit_retry_max_nfev < self.fit_max_nfev:
+            raise ValueError("fit retry nfev must not be lower than the primary")
+        if self.fit_retry_timeout_seconds < self.fit_timeout_seconds:
+            raise ValueError("fit retry timeout must not be lower than the primary")
+        return self
 
 
 class SearchModelContract(BaseModel):
@@ -212,6 +238,11 @@ class SearchIntegrationAblationPlan(BaseModel):
             and self.model_contract.reasoning_effort is not None
         ):
             raise ValueError("version 3 requires role-specific reasoning")
+        if (
+            self.schema_version.endswith("-3")
+            and self.search_budget.fit_retry_starts is None
+        ):
+            raise ValueError("version 3 requires a deterministic screening fit retry")
         return self
 
 

@@ -61,7 +61,9 @@ class SearchConfig(BaseModel):
     proposer_system_prompt: str
     judge_system_prompt: str
     fit_config: FitConfig = FitConfig()
+    fit_retry_config: FitConfig | None = None
     final_fit_config: FitConfig = FitConfig()
+    final_fit_retry_config: FitConfig | None = None
     pruning_config: PruningConfig = PruningConfig()
 
     @model_validator(mode="after")
@@ -86,6 +88,35 @@ class SearchConfig(BaseModel):
                 "incumbent_relative_hybrid is development-only and requires "
                 "evaluate_test=False"
             )
+        for stage, primary, retry in (
+            ("screening", self.fit_config, self.fit_retry_config),
+            ("final", self.final_fit_config, self.final_fit_retry_config),
+        ):
+            if retry is None:
+                continue
+            if retry.integration_backend != primary.integration_backend:
+                raise ValueError(
+                    f"{stage} fit retry must retain the primary integration backend"
+                )
+            if retry.allow_derivative_regression != primary.allow_derivative_regression:
+                raise ValueError(
+                    f"{stage} fit retry must retain the primary fit objective"
+                )
+            if (
+                retry.maximum_function_evaluations
+                < primary.maximum_function_evaluations
+            ):
+                raise ValueError(
+                    f"{stage} fit retry must not reduce maximum function evaluations"
+                )
+            if retry.number_of_starts < primary.number_of_starts:
+                raise ValueError(
+                    f"{stage} fit retry must not reduce the number of starts"
+                )
+            if retry.maximum_wall_time_seconds < primary.maximum_wall_time_seconds:
+                raise ValueError(
+                    f"{stage} fit retry must not reduce the wall-clock limit"
+                )
         return self
 
 

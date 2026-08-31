@@ -20,6 +20,7 @@ from autoformalism.expressions import (
 )
 from autoformalism.fitting import (
     EvaluationMetrics,
+    FitConfig,
     FitResult,
     OptimizationDiagnostic,
     evaluate_fitted_candidate,
@@ -347,12 +348,14 @@ class SearchController:
             stage = "prefit_judged"
 
         if stage == "prefit_judged":
-            fitted = fit_candidate(
+            fitted, fit_attempts = _fit_with_retry(
                 compiled,
                 self._training,
                 self._validation,
-                self._config.fit_config,
+                primary_config=self._config.fit_config,
+                retry_config=self._config.fit_retry_config,
             )
+            payload["fit_attempts"] = fit_attempts
             if not fitted.success:
                 payload.update(
                     valid=False,
@@ -854,24 +857,18 @@ class SearchController:
 
         if existing["stage"] == "frozen":
             combined = _combined_training(self._training, self._validation)
-            final_fit = fit_candidate(
+            final_fit, final_fit_attempts = _fit_with_retry(
                 compiled,
                 combined,
                 self._validation,
-                self._config.final_fit_config,
+                primary_config=self._config.final_fit_config,
+                retry_config=self._config.final_fit_retry_config,
                 initial_global_parameters=selected.pruned_fit.global_parameters,
             )
-            if not final_fit.success and _fit_timed_out(final_fit):
-                final_fit = fit_candidate(
-                    compiled,
-                    combined,
-                    self._validation,
-                    self._config.fit_config,
-                    initial_global_parameters=selected.pruned_fit.global_parameters,
-                )
             if not final_fit.success:
                 raise RuntimeError("train-plus-validation final refit failed")
             existing["final_fit"] = _fit_to_dict(final_fit)
+            existing["final_fit_attempts"] = final_fit_attempts
             existing["stage"] = "refitted"
             self._store.save_final(existing)
             self._callback("refitted", None)
@@ -966,9 +963,59 @@ class SearchController:
         ).hexdigest()
 
 
-def _fit_timed_out(fit: FitResult) -> bool:
-    """Identify a recoverable wall-clock exhaustion from fit diagnostics."""
-    return any(diagnostic.status == -2 for diagnostic in fit.diagnostics)
+def _fit_with_retry(
+    model: Any,
+    training: DatasetSplit,
+    validation: DatasetSplit,
+    *,
+    primary_config: FitConfig,
+    retry_config: FitConfig | None,
+    initial_global_parameters: Mapping[str, float] | None = None,
+) -> tuple[FitResult, list[dict[str, Any]]]:
+    """Fit once, then deterministically retry any rejected candidate if enabled.
+
+    The caller checkpoints both the selected fit and the compact attempt ledger.
+    Retrying never changes the candidate, splits, objective, or initial warm start;
+    it only enlarges a predeclared numerical budget.
+    """
+    attempts: list[dict[str, Any]] = []
+    settings = (primary_config, retry_config)
+    final: FitResult | None = None
+    for attempt_index, config in enumerate(settings):
+        if config is None:
+            continue
+        fitted = fit_candidate(
+            model,
+            training,
+            validation,
+            config,
+            initial_global_parameters=initial_global_parameters,
+        )
+        attempts.append(_fit_attempt_to_dict(attempt_index, config, fitted))
+        final = fitted
+        if fitted.success:
+            break
+    if final is None:
+        raise AssertionError("a primary fit configuration is required")
+    return final, attempts
+
+
+def _fit_attempt_to_dict(
+    attempt_index: int,
+    config: FitConfig,
+    fit: FitResult,
+) -> dict[str, Any]:
+    """Serialize compact, deterministic provenance for one fit attempt."""
+    return {
+        "attempt_index": attempt_index,
+        "fit_config": config.model_dump(mode="json"),
+        "success": fit.success,
+        "message": fit.message,
+        "diagnostic_statuses": [item.status for item in fit.diagnostics],
+        "diagnostic_function_evaluations": [
+            item.function_evaluations for item in fit.diagnostics
+        ],
+    }
 
 
 def _implementation_fingerprint() -> str:

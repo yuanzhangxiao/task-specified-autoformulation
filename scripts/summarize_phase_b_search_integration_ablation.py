@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -49,12 +49,36 @@ def collect_search_audit(plan_path: Path, search_root: Path) -> dict[str, object
         rounds = sorted((run / "checkpoints").glob("round_*.json"))
         challenge_count = 0
         valid_round_count = 0
+        fit_attempt_count = 0
+        fit_retry_activation_count = 0
+        fit_retry_recovered_count = 0
+        fit_primary_failure_count = 0
         for path in rounds:
             payload = _read_object(path)
             if payload.get("stage") == "complete" and payload.get("valid") is True:
                 valid_round_count += 1
             if payload.get("incumbent_challenge") is not None:
                 challenge_count += 1
+            attempts = payload.get("fit_attempts")
+            if isinstance(attempts, list):
+                fit_attempt_count += len(attempts)
+                if len(attempts) > 1:
+                    fit_retry_activation_count += 1
+                    primary = attempts[0]
+                    final = attempts[-1]
+                    if (
+                        isinstance(primary, dict)
+                        and isinstance(final, dict)
+                        and primary.get("success") is False
+                        and final.get("success") is True
+                    ):
+                        fit_retry_recovered_count += 1
+                if (
+                    attempts
+                    and isinstance(attempts[0], dict)
+                    and attempts[0].get("success") is False
+                ):
+                    fit_primary_failure_count += 1
         summary = _read_object(summary_path) if summary_path.is_file() else None
         row = {
             "arm_id": task.arm_id,
@@ -76,6 +100,10 @@ def collect_search_audit(plan_path: Path, search_root: Path) -> dict[str, object
             "attempted_round_count": len(rounds),
             "valid_round_count": valid_round_count,
             "challenge_count": challenge_count,
+            "fit_attempt_count": fit_attempt_count,
+            "fit_primary_failure_count": fit_primary_failure_count,
+            "fit_retry_activation_count": fit_retry_activation_count,
+            "fit_retry_recovered_count": fit_retry_recovered_count,
             "proposer_response_count": len(proposer_successes),
             "proposer_cache_hit_count": sum(
                 item.get("cache_hit") is True for item in proposer_successes
@@ -97,6 +125,7 @@ def collect_search_audit(plan_path: Path, search_root: Path) -> dict[str, object
             "judge_failure_event_count": sum(
                 item.get("event") == "llm_failure" for item in hybrid_events
             ),
+            "judge_failure_classes": _failure_classes(hybrid_events),
             **_event_accounting(proposer_events, "proposer"),
             **_event_accounting(hybrid_events, "judge"),
             "task_elapsed_wall_seconds": runtime.get(
@@ -160,6 +189,17 @@ def collect_search_audit(plan_path: Path, search_root: Path) -> dict[str, object
             }
         )
     resource_summary = _resource_summary(rows)
+    judge_failure_classes: Counter[str] = Counter()
+    for row in rows:
+        classes = row["judge_failure_classes"]
+        assert isinstance(classes, dict)
+        judge_failure_classes.update(
+            {
+                str(key): int(value)
+                for key, value in classes.items()
+                if isinstance(value, int) and not isinstance(value, bool)
+            }
+        )
     return {
         "schema_version": "phase-b-search-integration-ablation-audit-1",
         "development_only": True,
@@ -178,6 +218,17 @@ def collect_search_audit(plan_path: Path, search_root: Path) -> dict[str, object
         ),
         "judge_failure_event_count": sum(
             int(item["judge_failure_event_count"]) for item in rows
+        ),
+        "judge_failure_classes": dict(sorted(judge_failure_classes.items())),
+        "fit_attempt_count": sum(int(item["fit_attempt_count"]) for item in rows),
+        "fit_primary_failure_count": sum(
+            int(item["fit_primary_failure_count"]) for item in rows
+        ),
+        "fit_retry_activation_count": sum(
+            int(item["fit_retry_activation_count"]) for item in rows
+        ),
+        "fit_retry_recovered_count": sum(
+            int(item["fit_retry_recovered_count"]) for item in rows
         ),
         "resource_accounting": resource_summary,
         "tasks": rows,
@@ -223,6 +274,11 @@ def write_search_audit(report: dict[str, object], output_root: Path) -> None:
         f"- matched initial requests: {report['initial_request_comparable_count']}",
         f"- successful judge stages: {report['judge_stage_response_count']}",
         f"- judge failure events: {report['judge_failure_event_count']}",
+        f"- judge failure classes: {report['judge_failure_classes']}",
+        f"- deterministic fit attempts: {report['fit_attempt_count']}",
+        f"- primary fit rejections: {report['fit_primary_failure_count']}",
+        f"- retry activations: {report['fit_retry_activation_count']}",
+        f"- retry recoveries: {report['fit_retry_recovered_count']}",
         f"- logical LLM responses: {resource_summary['logical_response_count']}",
         (
             "- observed provider attempts: "
@@ -296,6 +352,23 @@ def _event_accounting(
             isinstance(item.get("usage"), dict) for item in responses
         ),
     }
+
+
+def _failure_classes(events: list[dict[str, Any]]) -> dict[str, int]:
+    """Normalize only logged judge failure metadata, never raw model text."""
+    counts: Counter[str] = Counter()
+    for event in events:
+        if event.get("event") != "llm_failure":
+            continue
+        error_type = str(event.get("error_type", "unknown_error"))
+        category = str(event.get("failure_category", "unknown_category"))
+        counts[f"{error_type}:{category}"] += 1
+        diagnostics = event.get("repair_diagnostics")
+        if isinstance(diagnostics, list):
+            for diagnostic in diagnostics:
+                if isinstance(diagnostic, dict) and diagnostic.get("code"):
+                    counts[f"repair:{diagnostic['code']}"] += 1
+    return dict(sorted(counts.items()))
 
 
 def _resource_summary(rows: list[dict[str, object]]) -> dict[str, object]:
