@@ -76,11 +76,42 @@ class SearchModelContract(BaseModel):
 
     proposer_model: str = Field(min_length=1)
     judge_model: str = Field(min_length=1)
-    reasoning_effort: Literal["low"]
+    reasoning_effort: Literal["low"] | None = None
+    proposer_reasoning_effort: Literal["low", "medium", "high"] | None = None
+    judge_reasoning_effort: Literal["low", "medium", "high"] | None = None
     temperature: float = Field(ge=0.0, le=2.0)
     proposer_max_output_tokens: int = Field(ge=128)
     request_timeout_seconds: float = Field(gt=0.0)
     judge_protocol_config_sha256: str | None = None
+
+    @model_validator(mode="after")
+    def reasoning_contract_is_unambiguous(self) -> SearchModelContract:
+        """Require either the legacy shared effort or both role-specific efforts."""
+        split = (
+            self.proposer_reasoning_effort,
+            self.judge_reasoning_effort,
+        )
+        if self.reasoning_effort is not None:
+            if any(value is not None for value in split):
+                raise ValueError(
+                    "shared and role-specific reasoning efforts cannot be mixed"
+                )
+            return self
+        if any(value is None for value in split):
+            raise ValueError(
+                "both proposer and judge reasoning efforts are required"
+            )
+        return self
+
+    @property
+    def effective_proposer_reasoning_effort(self) -> str:
+        """Return the proposer effort for legacy and split configurations."""
+        return self.proposer_reasoning_effort or self.reasoning_effort or "low"
+
+    @property
+    def effective_judge_reasoning_effort(self) -> str:
+        """Return the judge effort for legacy and split configurations."""
+        return self.judge_reasoning_effort or self.reasoning_effort or "low"
 
 
 class SearchPublicInputContract(BaseModel):
@@ -120,6 +151,7 @@ class SearchIntegrationAblationPlan(BaseModel):
     schema_version: Literal[
         "phase-b-search-integration-ablation-plan-1",
         "phase-b-search-integration-ablation-plan-2",
+        "phase-b-search-integration-ablation-plan-3",
     ]
     status: Literal["frozen_before_search_calls"]
     purpose: str = Field(min_length=1)
@@ -156,23 +188,30 @@ class SearchIntegrationAblationPlan(BaseModel):
             )
         if len(self.evaluation_endpoints) != len(set(self.evaluation_endpoints)):
             raise ValueError("evaluation endpoints must be unique")
-        if self.schema_version.endswith("-2"):
+        if self.schema_version.endswith(("-2", "-3")):
             if self.public_input_contract is None:
-                raise ValueError("version 2 requires a public-input contract")
+                raise ValueError("version 2+ requires a public-input contract")
             if self.resource_accounting is None:
-                raise ValueError("version 2 requires resource accounting")
+                raise ValueError("version 2+ requires resource accounting")
             if not self.deterministic_runtime_checks:
-                raise ValueError("version 2 requires deterministic runtime checks")
+                raise ValueError(
+                    "version 2+ requires deterministic runtime checks"
+                )
             for cell in self.cells:
                 if (
                     cell.public_prompt_sha256 is None
                     or cell.public_target_contract_sha256 is None
                 ):
                     raise ValueError(
-                        "version 2 cells require prompt and target-contract hashes"
+                        "version 2+ cells require prompt and target-contract hashes"
                     )
             if self.model_contract.judge_protocol_config_sha256 is None:
-                raise ValueError("version 2 requires a judge-protocol hash")
+                raise ValueError("version 2+ requires a judge-protocol hash")
+        if (
+            self.schema_version.endswith("-3")
+            and self.model_contract.reasoning_effort is not None
+        ):
+            raise ValueError("version 3 requires role-specific reasoning")
         return self
 
 

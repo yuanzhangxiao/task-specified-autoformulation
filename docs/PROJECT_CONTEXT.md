@@ -520,3 +520,18 @@ mechanism group to pass. The 40 public Phase-B mechanism specifications,
 common method-source adapters, checkpointed post-freeze target replay, and
 private mechanism-response subspace endpoint are implemented. The private
 contract rank audit must pass on Delta before full method evaluation begins.
+
+The local vLLM search runtime now separates proposer and judge reasoning effort.
+Legacy plans may retain one shared setting; prospective plans must pin both roles
+explicitly so proposal-capability experiments can use high reasoning while the
+validated paired-question-consensus judge remains at low reasoning. The proposer
+controller also states the exact restricted expression functions, power syntax,
+reserved-name rule, protected-channel rule, and single-target-mapping rule.
+
+Before choosing a larger production fitting budget, the frozen two-cell search
+failures are evaluated by a development-only recovery ladder. This diagnostic
+reuses candidates and data already available to search, performs no LLM calls,
+does not open test data, stops at the first successful predeclared budget per
+candidate, and binds its inputs to the exact frozen search-plan digest. Its
+result selects a numerical budget for the subsequent matched high-proposer /
+low-judge experiment; it is not itself a method-performance result.

@@ -79,7 +79,8 @@ readonly expected_prompt_sha256="$(jq -r '.public_prompt_sha256' <<<"${task_json
 readonly expected_contract_sha256="$(jq -r '.public_target_contract_sha256' <<<"${task_json}")"
 readonly model="$(jq -r '.model_contract.proposer_model | sub("^vllm:"; "")' "${plan}")"
 readonly judge_model="$(jq -r '.model_contract.judge_model | sub("^vllm:"; "")' "${plan}")"
-readonly reasoning_effort="$(jq -r '.model_contract.reasoning_effort' "${plan}")"
+readonly proposer_reasoning_effort="$(jq -r '.model_contract.proposer_reasoning_effort // .model_contract.reasoning_effort' "${plan}")"
+readonly judge_reasoning_effort="$(jq -r '.model_contract.judge_reasoning_effort // .model_contract.reasoning_effort' "${plan}")"
 readonly temperature="$(jq -r '.model_contract.temperature' "${plan}")"
 readonly max_output_tokens="$(jq -r '.model_contract.proposer_max_output_tokens' "${plan}")"
 readonly request_timeout="$(jq -r '.model_contract.request_timeout_seconds' "${plan}")"
@@ -171,7 +172,7 @@ cd "${AF_REPO_ROOT}"
 readonly available_tmp_kib="$(df -Pk "${apptainer_tmp}" | awk 'NR == 2 {print $4}')"
 readonly required_tmp_kib=$((AF_APPTAINER_TMP_MIN_GIB * 1024 * 1024))
 echo "task=${AF_TASK_INDEX} arm=${arm_id} benchmark=${benchmark_id} tier=${tier} repetition=${repetition}"
-echo "model=${model} reasoning=${reasoning_effort} selection_policy=${selection_policy}"
+echo "model=${model} proposer_reasoning=${proposer_reasoning_effort} judge_reasoning=${judge_reasoning_effort} selection_policy=${selection_policy}"
 if ((available_tmp_kib < required_tmp_kib)); then
   echo "Apptainer temp has less than ${AF_APPTAINER_TMP_MIN_GIB} GiB free" >&2
   exit 1
@@ -246,7 +247,8 @@ fi
     --seed "${repetition}" \
     --proposer-model "vllm:${model}" \
     --vllm-base-url "${endpoint}" \
-    --vllm-reasoning-effort "${reasoning_effort}" \
+    --vllm-proposer-reasoning-effort "${proposer_reasoning_effort}" \
+    --vllm-judge-reasoning-effort "${judge_reasoning_effort}" \
     --vllm-temperature "${temperature}" \
     --vllm-seed "${repetition}" \
     --development-only \

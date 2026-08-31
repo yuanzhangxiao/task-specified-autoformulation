@@ -74,6 +74,13 @@ initialization expression; omit declarations that are not used. Refer to modeled
 states and parameters as bare symbols such as `I`, not as calls such as `I(t)`.
 Named function calls must have explicit safe mathematical runtime support; never
 use a function call as an undeclared mechanism or as a substitute for a state.
+The only function names are `abs`, `exp`, `log`, `max`, `min`, `sigmoid`,
+`softplus`, `sqrt`, and `tanh`. These names and the runtime time symbol are
+reserved and cannot be state, process, or parameter names. Use Python `**` for
+powers; `^` is forbidden. Do not use undeclared aliases such as `sigma`.
+Do not redeclare supplied auxiliary, external-input, or fixed-covariate channel
+names as states, processes, or parameters. Map each observed target exactly once:
+never create both an observed state and a same-named algebraic for one target.
 Do not invent numeric bounds for states or other variables. Parameter bounds are
 required; `initialization_range` is optional and defaults to the parameter bounds.
 For states, use qualitative `nonnegative` or `positive` constraints
@@ -167,6 +174,8 @@ class ExecutionArguments:
     public_target_contract: Path | None = None
     vllm_base_url: str = "http://127.0.0.1:8000"
     vllm_reasoning_effort: VLLMReasoningEffort = VLLMReasoningEffort.LOW
+    vllm_proposer_reasoning_effort: VLLMReasoningEffort | None = None
+    vllm_judge_reasoning_effort: VLLMReasoningEffort | None = None
     vllm_temperature: float = 0.0
     vllm_seed: int | None = None
 
@@ -368,6 +377,20 @@ def build_experiment_parser(
         "--vllm-reasoning-effort",
         choices=tuple(item.value for item in VLLMReasoningEffort),
         default=VLLMReasoningEffort.LOW.value,
+        help=(
+            "legacy shared vLLM reasoning effort; role-specific options "
+            "override it"
+        ),
+    )
+    parser.add_argument(
+        "--vllm-proposer-reasoning-effort",
+        choices=tuple(item.value for item in VLLMReasoningEffort),
+        help="vLLM reasoning effort used only for proposer calls",
+    )
+    parser.add_argument(
+        "--vllm-judge-reasoning-effort",
+        choices=tuple(item.value for item in VLLMReasoningEffort),
+        help="vLLM reasoning effort used only for judge calls",
     )
     parser.add_argument("--vllm-temperature", type=float, default=0.0)
     parser.add_argument("--vllm-seed", type=int)
@@ -558,6 +581,16 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         vllm_reasoning_effort=VLLMReasoningEffort(
             namespace.vllm_reasoning_effort
         ),
+        vllm_proposer_reasoning_effort=(
+            None
+            if namespace.vllm_proposer_reasoning_effort is None
+            else VLLMReasoningEffort(namespace.vllm_proposer_reasoning_effort)
+        ),
+        vllm_judge_reasoning_effort=(
+            None
+            if namespace.vllm_judge_reasoning_effort is None
+            else VLLMReasoningEffort(namespace.vllm_judge_reasoning_effort)
+        ),
         vllm_temperature=namespace.vllm_temperature,
         vllm_seed=namespace.vllm_seed,
     )
@@ -607,7 +640,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "hybrid_judge_contract": (
             {
                 "model": arguments.judge_model,
-                "reasoning_effort": "low",
+                "reasoning_effort": _judge_reasoning_effort(arguments).value,
                 "temperature": 0.2,
                 "max_output_tokens": 6144,
                 "max_provider_attempts_per_stage": 10,
@@ -659,6 +692,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "ollama_seed": arguments.ollama_seed,
         "vllm_base_url": arguments.vllm_base_url,
         "vllm_reasoning_effort": arguments.vllm_reasoning_effort.value,
+        "vllm_proposer_reasoning_effort": (
+            _proposer_reasoning_effort(arguments).value
+        ),
+        "vllm_judge_reasoning_effort": _judge_reasoning_effort(arguments).value,
         "vllm_temperature": arguments.vllm_temperature,
         "vllm_seed": arguments.vllm_seed,
         "stagnation_iterations": (
@@ -988,6 +1025,23 @@ def _prediction_protocol_prompt(context: ValidationContext) -> str:
     )
 
 
+def _proposer_reasoning_effort(
+    arguments: ExecutionArguments,
+) -> VLLMReasoningEffort:
+    """Resolve the proposer effort while preserving the legacy shared option."""
+    return (
+        arguments.vllm_proposer_reasoning_effort
+        or arguments.vllm_reasoning_effort
+    )
+
+
+def _judge_reasoning_effort(
+    arguments: ExecutionArguments,
+) -> VLLMReasoningEffort:
+    """Resolve the judge effort while preserving the legacy shared option."""
+    return arguments.vllm_judge_reasoning_effort or arguments.vllm_reasoning_effort
+
+
 def _make_client(
     arguments: ExecutionArguments,
     dataset: DevelopmentDataset,
@@ -1026,7 +1080,7 @@ def _make_client(
             ollama_temperature=arguments.ollama_temperature,
             ollama_seed=arguments.ollama_seed,
             vllm_base_url=arguments.vllm_base_url,
-            vllm_reasoning_effort=arguments.vllm_reasoning_effort,
+            vllm_reasoning_effort=_proposer_reasoning_effort(arguments),
             vllm_temperature=arguments.vllm_temperature,
             vllm_seed=arguments.vllm_seed,
         )
@@ -1047,7 +1101,7 @@ def _make_client(
             ollama_temperature=arguments.ollama_temperature,
             ollama_seed=arguments.ollama_seed,
             vllm_base_url=arguments.vllm_base_url,
-            vllm_reasoning_effort=arguments.vllm_reasoning_effort,
+            vllm_reasoning_effort=_judge_reasoning_effort(arguments),
             vllm_temperature=arguments.vllm_temperature,
             vllm_seed=arguments.vllm_seed,
         )
@@ -1094,7 +1148,7 @@ def _make_pairwise_judge(
                     jitter_fraction=0.0,
                     cache_only=arguments.llm_cache_only,
                     vllm_base_url=arguments.vllm_base_url,
-                    vllm_reasoning_effort=VLLMReasoningEffort.LOW,
+                    vllm_reasoning_effort=_judge_reasoning_effort(arguments),
                     vllm_temperature=0.2,
                     vllm_seed=seed,
                     timeout_seconds=900.0,
@@ -1123,7 +1177,7 @@ def _make_pairwise_judge(
         {
             "judge_model": arguments.judge_model,
             "provider": provider.value,
-            "reasoning_effort": "low",
+            "reasoning_effort": _judge_reasoning_effort(arguments).value,
             "temperature": 0.2,
             "max_provider_attempts": 10,
             "max_output_tokens": 6144,

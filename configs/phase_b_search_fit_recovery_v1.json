@@ -1,0 +1,73 @@
+{
+  "schema_version": "phase-b-search-fit-recovery-plan-1",
+  "status": "frozen_before_refits",
+  "development_only": true,
+  "new_llm_calls": false,
+  "test_data_opened": false,
+  "source_plan_sha256": "fefdbff094d490f7a8d04723cc244ba47a9e5e9131501cd76f410de964b22ff8",
+  "source_plan_path": "frozen/plan.json",
+  "stop_after_first_success": true,
+  "cases": [
+    {
+      "case_id": "dalla_t2_easy_seed0_final",
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "seed": 0,
+      "mode": "final_refit",
+      "run_directory": "searches/paired_question_consensus/runs/phase_b_dalla_man_t2_canonical_named_easy_easy_seed0",
+      "round_indices": [3]
+    },
+    {
+      "case_id": "opaque_hard_seed0_screening",
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "seed": 0,
+      "mode": "screening",
+      "run_directory": "searches/paired_question_consensus/runs/phase_b_anonymous_system_task_canonical_opaque_hard_hard_seed0",
+      "round_indices": [1, 2, 3, 4, 5]
+    },
+    {
+      "case_id": "opaque_hard_seed2_screening",
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "seed": 2,
+      "mode": "screening",
+      "run_directory": "searches/paired_question_consensus/runs/phase_b_anonymous_system_task_canonical_opaque_hard_hard_seed2",
+      "round_indices": [0, 1, 2, 5, 6, 7]
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "screen_50x1_300s",
+      "mode": "screening",
+      "integration_backend": "fixed_rk4",
+      "number_of_starts": 1,
+      "maximum_function_evaluations": 50,
+      "maximum_wall_time_seconds": 300
+    },
+    {
+      "profile_id": "screen_150x2_600s",
+      "mode": "screening",
+      "integration_backend": "fixed_rk4",
+      "number_of_starts": 2,
+      "maximum_function_evaluations": 150,
+      "maximum_wall_time_seconds": 600
+    },
+    {
+      "profile_id": "final_50x1_300s",
+      "mode": "final_refit",
+      "integration_backend": "solve_ivp",
+      "number_of_starts": 1,
+      "maximum_function_evaluations": 50,
+      "maximum_wall_time_seconds": 300
+    },
+    {
+      "profile_id": "final_150x2_600s",
+      "mode": "final_refit",
+      "integration_backend": "solve_ivp",
+      "number_of_starts": 2,
+      "maximum_function_evaluations": 150,
+      "maximum_wall_time_seconds": 600
+    }
+  ]
+}
