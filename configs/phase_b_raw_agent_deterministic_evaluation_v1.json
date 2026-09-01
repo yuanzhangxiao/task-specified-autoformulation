@@ -1,0 +1,31 @@
+{
+  "schema_version": "phase-b-raw-agent-deterministic-evaluation-plan-1",
+  "status": "frozen_before_test_or_private_evaluation",
+  "method_id": "raw_data_agent:gpt-5.6-sol",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "full_protocol_config_sha256": "9477fc750acf456456a649867d6f115ed17f9da5ea3e9647d906c9eb3fd21024",
+  "prompt_refresh_config_sha256": "af8307ca4a290247ebbd8f66fe5727a1846c0aab617ea0798f8ef8b26e64d21b",
+  "hidden_contract_audit": {
+    "schema_version": "phase-b-hidden-subspace-contract-audit-2",
+    "sha256": "5a57615899fab71fcc5991752267f6569a1ed358b04cc17923f97ae1fe60fddc",
+    "required_status": "pass"
+  },
+  "repetitions": [0, 1, 2],
+  "postfreeze_shard_count": 24,
+  "hidden_shard_count": 24,
+  "endpoints": [
+    "source_completion",
+    "runtime_validity",
+    "public_mechanism_compliance",
+    "sealed_target_nmse",
+    "hidden_response_subspace_nmse",
+    "intervention_behavior",
+    "model_complexity",
+    "resource_usage"
+  ],
+  "weighted_overall_score_defined": false,
+  "qualitative_llm_requested": false,
+  "parameter_refit_applied": false,
+  "test_data_opened": false
+}
