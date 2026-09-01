@@ -926,13 +926,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         judge_score_epsilon=arguments.judge_score_epsilon,
         hybrid_science_weight=arguments.hybrid_science_weight,
         evaluate_test=not arguments.development_only,
-        proposer_system_prompt=(
-            f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
-            f"{proposer_prompt}\n\n{protocol_prompt}\n\n{symbol_contract}\n\n"
-            f"Controller requirements:\n{_CONTROLLER_PROMPT}"
-            f"{_latent_ablation_prompt(arguments)}"
-            f"{_gmm_parameterization_prompt(arguments)}"
-            f"{_structured_proposer_feedback_prompt(arguments)}"
+        proposer_system_prompt=proposer_system_prompt(
+            arguments,
+            public_prompt=proposer_prompt,
+            context=context,
         ),
         judge_system_prompt=(
             f"Configured judge model: {arguments.judge_model or 'mock'}\n\n"
@@ -1011,6 +1008,25 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         encoding="utf-8",
     )
     return summary
+
+
+def proposer_system_prompt(
+    arguments: ExecutionArguments,
+    *,
+    public_prompt: str,
+    context: ValidationContext,
+) -> str:
+    """Build the exact production proposer prompt for search and calibration."""
+    symbol_contract = _symbol_contract(context)
+    protocol_prompt = _prediction_protocol_prompt(context)
+    return (
+        f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
+        f"{public_prompt}\n\n{protocol_prompt}\n\n{symbol_contract}\n\n"
+        f"Controller requirements:\n{_CONTROLLER_PROMPT}"
+        f"{_latent_ablation_prompt(arguments)}"
+        f"{_gmm_parameterization_prompt(arguments)}"
+        f"{_structured_proposer_feedback_prompt(arguments)}"
+    )
 
 
 def _optional_fit_config(
