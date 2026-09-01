@@ -13,4 +13,4 @@ export AF_PREREQUISITE_ANALYSIS
 export AF_CALIBRATION_CONFIG="${AF_REPO_ROOT}/configs/phase_b_proposer_transport_calibration_v2.json"
 export AF_OUTPUT_ROOT="${SCRATCH}/phase_b/proposer-transport-calibration-v2-aces-h100x2"
 
-exec "${AF_REPO_ROOT}/scripts/hpc/submit_phase_b_proposer_transport_calibration_aces.sh"
+exec bash "${AF_REPO_ROOT}/scripts/hpc/submit_phase_b_proposer_transport_calibration_aces.sh"
