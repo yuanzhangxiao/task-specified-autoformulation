@@ -246,6 +246,15 @@ def _run_budget(
         provider_input_tokens=accounting["input_tokens"],
         provider_output_tokens=accounting["output_tokens"],
         provider_total_tokens=accounting["total_tokens"],
+        successful_attempt_input_tokens=accounting[
+            "successful_input_tokens"
+        ],
+        successful_attempt_output_tokens=accounting[
+            "successful_output_tokens"
+        ],
+        successful_attempt_total_tokens=accounting[
+            "successful_total_tokens"
+        ],
         latency_ms=latency_ms,
         length_exhausted_attempt_count=accounting["length_exhausted"],
         reasoning_character_count=accounting["reasoning_characters"],
@@ -304,8 +313,9 @@ def _attempt_accounting(
             if isinstance(item.get("attempt"), int)
         )
     raw_attempts = [item.get("raw_response") for item in failures]
+    successful_raw = response.get("raw_response") if response is not None else None
     if response is not None and not response.get("cache_hit"):
-        raw_attempts.append(response.get("raw_response"))
+        raw_attempts.append(successful_raw)
     input_tokens = 0
     output_tokens = 0
     observed_usage = False
@@ -337,6 +347,7 @@ def _attempt_accounting(
             )
             if isinstance(reasoning, str):
                 reasoning_characters += len(reasoning)
+    successful_usage = _token_usage(successful_raw)
     return {
         "attempt_count": attempts,
         "input_tokens": input_tokens if observed_usage else None,
@@ -344,9 +355,36 @@ def _attempt_accounting(
         "total_tokens": (
             input_tokens + output_tokens if observed_usage else None
         ),
+        "successful_input_tokens": successful_usage[0],
+        "successful_output_tokens": successful_usage[1],
+        "successful_total_tokens": (
+            None
+            if successful_usage[0] is None and successful_usage[1] is None
+            else (successful_usage[0] or 0) + (successful_usage[1] or 0)
+        ),
         "length_exhausted": length_exhausted,
         "reasoning_characters": reasoning_characters,
     }
+
+
+def _token_usage(raw: object) -> tuple[int | None, int | None]:
+    """Return prompt/completion usage for one provider attempt."""
+    if not isinstance(raw, dict):
+        return None, None
+    usage = raw.get("usage")
+    if not isinstance(usage, dict):
+        return None, None
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    input_tokens = (
+        prompt if isinstance(prompt, int) and not isinstance(prompt, bool) else None
+    )
+    output_tokens = (
+        completion
+        if isinstance(completion, int) and not isinstance(completion, bool)
+        else None
+    )
+    return input_tokens, output_tokens
 
 
 def _atomic_json(path: Path, payload: dict[str, object]) -> None:

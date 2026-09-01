@@ -80,6 +80,17 @@ class GPT56ReferenceContext(BaseModel):
     exact_reasoning_tokens_status: Literal["pending_raw_cache_audit"]
 
 
+class ProposerCalibrationPrerequisite(BaseModel):
+    """Required result from an earlier frozen calibration stage."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    experiment_id: str = Field(min_length=1)
+    required_status: Literal["fail"]
+    required_selected_max_output_tokens: None = None
+    required_evaluated_budgets: tuple[int, ...] = Field(min_length=1)
+
+
 class ProposerTransportCalibrationPlan(BaseModel):
     """Immutable matrix for selecting a GPT-OSS proposer output budget."""
 
@@ -95,6 +106,7 @@ class ProposerTransportCalibrationPlan(BaseModel):
     model_contract: ProposerCalibrationModelContract
     gates: ProposerCalibrationGates
     selection_rule: Literal["smallest_budget_passing_all_gates"]
+    prerequisite: ProposerCalibrationPrerequisite | None = None
     gpt_5_6_reference_context: GPT56ReferenceContext
     test_data_opened: Literal[False]
     scientific_judge_called: Literal[False]
@@ -150,6 +162,9 @@ class ProposerCalibrationResult(BaseModel):
     provider_input_tokens: int | None = Field(default=None, ge=0)
     provider_output_tokens: int | None = Field(default=None, ge=0)
     provider_total_tokens: int | None = Field(default=None, ge=0)
+    successful_attempt_input_tokens: int | None = Field(default=None, ge=0)
+    successful_attempt_output_tokens: int | None = Field(default=None, ge=0)
+    successful_attempt_total_tokens: int | None = Field(default=None, ge=0)
     latency_ms: float | None = Field(default=None, ge=0.0)
     length_exhausted_attempt_count: int = Field(ge=0)
     reasoning_character_count: int = Field(ge=0)
@@ -201,6 +216,7 @@ def freeze_proposer_calibration(
     *,
     public_data_root: Path,
     target_contract_root: Path,
+    prerequisite_analysis_path: Path | None = None,
 ) -> dict[str, object]:
     """Validate public inputs and freeze the matched calibration matrix."""
     plan = load_proposer_calibration_plan(config_path)
@@ -234,6 +250,10 @@ def freeze_proposer_calibration(
         if contract.public_prompt_sha256 != cell.public_prompt_sha256:
             raise ValueError(f"target contract prompt differs: {cell.benchmark_id}")
 
+    prerequisite_record = _validate_prerequisite_analysis(
+        plan,
+        prerequisite_analysis_path,
+    )
     root = output_root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     frozen_plan = root / "plan.json"
@@ -257,6 +277,8 @@ def freeze_proposer_calibration(
         "scientific_judge_called": False,
         "parameter_fitting_performed": False,
     }
+    if prerequisite_record is not None:
+        manifest["prerequisite"] = prerequisite_record
     manifest_path = root / "freeze_manifest.json"
     _write_or_validate(
         manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n"
@@ -295,9 +317,10 @@ def analyze_proposer_calibration(
         items = grouped[budget]
         attempt_count = sum(item.provider_attempt_count for item in items)
         successful_utilization = [
-            item.provider_output_tokens / budget
+            item.successful_attempt_output_tokens / budget
             for item in items
-            if item.response_success and item.provider_output_tokens is not None
+            if item.response_success
+            and item.successful_attempt_output_tokens is not None
         ]
         metrics = {
             "response_success": mean(item.response_success for item in items),
@@ -390,6 +413,54 @@ def analyze_proposer_calibration(
 def _optional_mean(values: object) -> float | None:
     numeric = [float(value) for value in values if value is not None]
     return None if not numeric else mean(numeric)
+
+
+def _validate_prerequisite_analysis(
+    plan: ProposerTransportCalibrationPlan,
+    path: Path | None,
+) -> dict[str, object] | None:
+    """Bind a continuation plan to its immutable failed predecessor."""
+    required = plan.prerequisite
+    if required is None:
+        if path is not None:
+            raise ValueError("plan does not declare a prerequisite analysis")
+        return None
+    if path is None:
+        raise ValueError("plan requires a prerequisite analysis")
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        raise ValueError(f"missing prerequisite analysis: {resolved}")
+    payload = json.loads(resolved.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("prerequisite analysis must be a JSON object")
+    if payload.get("schema_version") != (
+        "phase-b-proposer-transport-calibration-analysis-1"
+    ):
+        raise ValueError("prerequisite analysis schema differs")
+    if payload.get("status") != required.required_status:
+        raise ValueError("prerequisite analysis status differs")
+    if (
+        payload.get("selected_max_output_tokens")
+        is not required.required_selected_max_output_tokens
+    ):
+        raise ValueError("prerequisite selected operating point differs")
+    rows = payload.get("operating_points")
+    if not isinstance(rows, list):
+        raise ValueError("prerequisite operating points are missing")
+    budgets = tuple(
+        row.get("max_output_tokens")
+        for row in rows
+        if isinstance(row, dict)
+    )
+    if budgets != required.required_evaluated_budgets:
+        raise ValueError("prerequisite evaluated budgets differ")
+    return {
+        "experiment_id": required.experiment_id,
+        "analysis_sha256": _sha256(resolved),
+        "status": payload["status"],
+        "selected_max_output_tokens": payload["selected_max_output_tokens"],
+        "evaluated_budgets": list(budgets),
+    }
 
 
 def _sha256(path: Path) -> str:

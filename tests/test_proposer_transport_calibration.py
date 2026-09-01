@@ -25,6 +25,9 @@ from scripts.run_phase_b_proposer_transport_calibration import (
 )
 
 CONFIG = Path("configs/phase_b_proposer_transport_calibration_v1.json")
+CONTINUATION_CONFIG = Path(
+    "configs/phase_b_proposer_transport_calibration_v2.json"
+)
 GPU_JOB = Path(
     "scripts/hpc/phase_b_proposer_transport_calibration_120b.slurm"
 )
@@ -61,6 +64,20 @@ def test_calibration_plan_is_matched_and_budget_ordered() -> None:
     payload["model_contract"]["max_output_token_budgets"] = [4096, 4096]
     with pytest.raises(ValidationError, match="unique and increasing"):
         ProposerTransportCalibrationPlan.model_validate(payload)
+
+    continuation = load_proposer_calibration_plan(CONTINUATION_CONFIG)
+    assert continuation.model_contract.max_output_token_budgets == (
+        16384,
+        24576,
+        30000,
+    )
+    assert continuation.model_contract.served_context_tokens == 32768
+    assert continuation.prerequisite is not None
+    assert continuation.prerequisite.required_evaluated_budgets == (
+        4096,
+        8192,
+        12288,
+    )
 
 
 def test_freeze_validates_prompt_and_target_contract(tmp_path: Path) -> None:
@@ -136,6 +153,94 @@ def test_freeze_validates_prompt_and_target_contract(tmp_path: Path) -> None:
         )
 
 
+def test_continuation_freeze_binds_failed_prerequisite(tmp_path: Path) -> None:
+    payload = json.loads(CONTINUATION_CONFIG.read_text(encoding="utf-8"))
+    prompt = "Public continuation prompt.\n"
+    prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
+    benchmark = "fixture_continuation"
+    public = tmp_path / "public"
+    prompt_path = public / "phase_b_v1" / benchmark / "proposer_prompt.txt"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text(prompt, encoding="utf-8")
+    contracts = tmp_path / "contracts"
+    contract_path = contracts / "specs" / f"{benchmark}.json"
+    contract_path.parent.mkdir(parents=True)
+    contract_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "public-target-contract-1",
+                "benchmark_id": benchmark,
+                "tier": "easy",
+                "public_prompt_sha256": prompt_sha,
+                "source": "public_prompt",
+                "targets": [
+                    {
+                        "target_channel": "y",
+                        "public_requirement": "generate y",
+                        "required_dependencies": [],
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    payload["cells"] = [
+        {
+            "benchmark_id": benchmark,
+            "tier": "easy",
+            "public_prompt_sha256": prompt_sha,
+            "public_target_contract_sha256": hashlib.sha256(
+                contract_path.read_bytes()
+            ).hexdigest(),
+        }
+    ]
+    payload["repetitions"] = [0]
+    config = tmp_path / "continuation.json"
+    config.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    prerequisite = tmp_path / "v1_analysis.json"
+    prerequisite.write_text(
+        json.dumps(
+            {
+                "schema_version": (
+                    "phase-b-proposer-transport-calibration-analysis-1"
+                ),
+                "status": "fail",
+                "selected_max_output_tokens": None,
+                "operating_points": [
+                    {"max_output_tokens": value}
+                    for value in (4096, 8192, 12288)
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="requires a prerequisite"):
+        freeze_proposer_calibration(
+            config,
+            tmp_path / "missing",
+            public_data_root=public,
+            target_contract_root=contracts,
+        )
+    manifest = freeze_proposer_calibration(
+        config,
+        tmp_path / "frozen",
+        public_data_root=public,
+        target_contract_root=contracts,
+        prerequisite_analysis_path=prerequisite,
+    )
+    assert manifest["prerequisite"] == {
+        "experiment_id": "phase_b/proposer-transport-calibration-v1",
+        "analysis_sha256": hashlib.sha256(prerequisite.read_bytes()).hexdigest(),
+        "status": "fail",
+        "selected_max_output_tokens": None,
+        "evaluated_budgets": [4096, 8192, 12288],
+    }
+
+
 def _result(
     *,
     task_index: int,
@@ -164,6 +269,11 @@ def _result(
         provider_input_tokens=1000,
         provider_output_tokens=(budget // 2 if response else budget * 3),
         provider_total_tokens=(1000 + budget // 2 if response else 3000 + budget * 3),
+        successful_attempt_input_tokens=1000 if response else None,
+        successful_attempt_output_tokens=budget // 2 if response else None,
+        successful_attempt_total_tokens=(
+            1000 + budget // 2 if response else None
+        ),
         latency_ms=1000.0,
         length_exhausted_attempt_count=length,
         reasoning_character_count=100,
@@ -242,9 +352,48 @@ def test_attempt_accounting_detects_length_and_reasoning() -> None:
         "input_tokens": 10,
         "output_tokens": 4096,
         "total_tokens": 4106,
+        "successful_input_tokens": None,
+        "successful_output_tokens": None,
+        "successful_total_tokens": None,
         "length_exhausted": 1,
         "reasoning_characters": 3,
     }
+
+
+def test_attempt_accounting_separates_retry_and_success_usage() -> None:
+    failed_raw = {
+        "usage": {"prompt_tokens": 2000, "completion_tokens": 12000},
+        "choices": [{"finish_reason": "length", "message": {"content": None}}],
+    }
+    successful_raw = {
+        "usage": {"prompt_tokens": 2000, "completion_tokens": 10500},
+        "choices": [{"finish_reason": "stop", "message": {"content": "{}"}}],
+    }
+    accounting = _attempt_accounting(
+        [
+            {
+                "event": "llm_failure",
+                "request_hash": "request",
+                "attempt": 1,
+                "raw_response": failed_raw,
+            },
+            {
+                "event": "llm_response",
+                "request_hash": "request",
+                "attempts": 2,
+                "cache_hit": False,
+                "raw_response": successful_raw,
+            },
+        ],
+        request_hash="request",
+    )
+    assert accounting["attempt_count"] == 2
+    assert accounting["input_tokens"] == 4000
+    assert accounting["output_tokens"] == 22500
+    assert accounting["successful_input_tokens"] == 2000
+    assert accounting["successful_output_tokens"] == 10500
+    assert accounting["successful_total_tokens"] == 12500
+    assert accounting["length_exhausted"] == 1
 
 
 def test_calibration_uses_the_production_proposer_prompt_builder(

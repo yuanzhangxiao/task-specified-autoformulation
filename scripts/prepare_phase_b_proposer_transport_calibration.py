@@ -18,12 +18,14 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--public-data-root", type=Path, required=True)
     parser.add_argument("--target-contract-root", type=Path, required=True)
+    parser.add_argument("--prerequisite-analysis", type=Path)
     args = parser.parse_args()
     manifest = freeze_proposer_calibration(
         args.config,
         args.output_root,
         public_data_root=args.public_data_root,
         target_contract_root=args.target_contract_root,
+        prerequisite_analysis_path=args.prerequisite_analysis,
     )
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

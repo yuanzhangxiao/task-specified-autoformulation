@@ -54,6 +54,29 @@ the independently frozen low-reasoning scientific judge. A failure at all three
 budgets means the experiment selects no operating point; thresholds are not
 relaxed after observing the calls.
 
+## Frozen v1 outcome and continuation
+
+V1 selected no operating point. All 4,096-token attempts exhausted their
+budget; 15 of 16 attempts at 8,192 tokens and 11 of 14 attempts at 12,288
+tokens did the same. Response success at 12,288 tokens was `0.500`. Every
+completed 12,288-token response nevertheless passed deterministic candidate
+validation and the public target contract, isolating the observed failure to
+structured-response transport rather than completed-candidate validity.
+
+The original report's successful-budget utilization could exceed one because
+it divided output tokens aggregated across retries by one attempt's budget.
+Provider-resource totals remain aggregate, but prospective results additionally
+record the successful attempt's input and output tokens. Selection now uses
+only the successful attempt for budget utilization.
+
+V2 is a predeclared continuation, not a relaxation of the v1 gates. It binds
+its freeze manifest to the SHA-256 of the failed v1 analysis and retains the
+same six public requests, high reasoning, temperature, retry limit, 32,768-token
+served context, response schema, and gates. Only the candidate output budgets
+change to 16,384, 24,576, and 30,000 tokens. The largest observed v1 prompt was
+2,056 tokens per attempt, so the 30,000-token condition fits the existing
+context ceiling. No fitting or scientific-judge call is introduced.
+
 ## ACES replication
 
 The same frozen matrix can run independently on two ACES H100 GPUs per task.

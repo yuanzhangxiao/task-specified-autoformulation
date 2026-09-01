@@ -13,6 +13,7 @@ readonly af_user="${USER:-}"
 : "${AF_TARGET_CONTRACT_ROOT:=${AF_REPO_ROOT}/configs/target_eval/phase_b_v1}"
 : "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/proposer-transport-calibration-v1}"
 : "${AF_CALIBRATION_CONFIG:=${AF_REPO_ROOT}/configs/phase_b_proposer_transport_calibration_v1.json}"
+: "${AF_PREREQUISITE_ANALYSIS:=}"
 : "${AF_CALIBRATION_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_proposer_transport_calibration_120b.slurm}"
 : "${AF_ANALYSIS_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_proposer_transport_calibration_analysis.slurm}"
 
@@ -21,6 +22,10 @@ readonly submission_manifest="${AF_OUTPUT_ROOT}/submission_manifest.json"
 [[ -d "${AF_PUBLIC_DATA_ROOT}" ]] || { echo "missing public data overlay" >&2; exit 2; }
 [[ -d "${AF_TARGET_CONTRACT_ROOT}" ]] || { echo "missing target contracts" >&2; exit 2; }
 [[ -f "${AF_CALIBRATION_CONFIG}" ]] || { echo "missing calibration config" >&2; exit 2; }
+if [[ -n "${AF_PREREQUISITE_ANALYSIS}" && ! -f "${AF_PREREQUISITE_ANALYSIS}" ]]; then
+  echo "missing prerequisite analysis: ${AF_PREREQUISITE_ANALYSIS}" >&2
+  exit 2
+fi
 [[ -f "${AF_CALIBRATION_JOB}" ]] || { echo "missing GPU job" >&2; exit 2; }
 [[ -f "${AF_ANALYSIS_JOB}" ]] || { echo "missing analysis job" >&2; exit 2; }
 [[ ! -e "${submission_manifest}" ]] || {
@@ -30,11 +35,17 @@ readonly submission_manifest="${AF_OUTPUT_ROOT}/submission_manifest.json"
 
 mkdir -p "${AF_REPO_ROOT}/logs" "${AF_OUTPUT_ROOT}"
 cd "${AF_REPO_ROOT}"
-"${AF_PYTHON}" scripts/prepare_phase_b_proposer_transport_calibration.py \
-  --config "${AF_CALIBRATION_CONFIG}" \
-  --output-root "${AF_OUTPUT_ROOT}/frozen" \
-  --public-data-root "${AF_PUBLIC_DATA_ROOT}" \
+prepare_arguments=(
+  --config "${AF_CALIBRATION_CONFIG}"
+  --output-root "${AF_OUTPUT_ROOT}/frozen"
+  --public-data-root "${AF_PUBLIC_DATA_ROOT}"
   --target-contract-root "${AF_TARGET_CONTRACT_ROOT}"
+)
+if [[ -n "${AF_PREREQUISITE_ANALYSIS}" ]]; then
+  prepare_arguments+=(--prerequisite-analysis "${AF_PREREQUISITE_ANALYSIS}")
+fi
+"${AF_PYTHON}" scripts/prepare_phase_b_proposer_transport_calibration.py \
+  "${prepare_arguments[@]}"
 
 readonly common_export="ALL,AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_CALIBRATION_CONFIG=${AF_CALIBRATION_CONFIG}"
 calibration_submission="$(
@@ -62,12 +73,19 @@ jq -n \
   --arg calibration_job_id "${calibration_job_id}" \
   --arg analysis_job_id "${analysis_job_id}" \
   --arg config_sha256 "$(sha256sum "${AF_CALIBRATION_CONFIG}" | awk '{print $1}')" \
+  --arg prerequisite_analysis_sha256 "$(jq -r '.prerequisite.analysis_sha256 // ""' "${AF_OUTPUT_ROOT}/frozen/freeze_manifest.json")" \
   '{
     schema_version: "phase-b-proposer-transport-calibration-submission-1",
     submitted_at_utc: $submitted_at_utc,
     calibration_job_id: $calibration_job_id,
     analysis_job_id: $analysis_job_id,
     config_sha256: $config_sha256,
+    prerequisite_analysis_sha256: (
+      if $prerequisite_analysis_sha256 == ""
+      then null
+      else $prerequisite_analysis_sha256
+      end
+    ),
     test_data_opened: false,
     scientific_judge_called: false,
     parameter_fitting_performed: false
