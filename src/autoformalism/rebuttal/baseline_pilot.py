@@ -34,7 +34,7 @@ class BaselinePilotMethod(BaseModel):
         "classical_partial_observability_control",
         "matched_llm_discovery_agent",
     ]
-    platform: Literal["aces_cpu", "aces_h100x2"]
+    platform: Literal["aces_cpu", "delta_cpu", "aces_h100x2"]
     cpus_per_task: int = Field(ge=1)
     gpu_type: Literal["none", "h100"]
     gpu_count: int = Field(ge=0, le=2)
@@ -68,7 +68,7 @@ class BaselinePilotMethod(BaseModel):
                 raise ValueError("D3 method must not define PySR settings")
             return self
         if (
-            self.platform != "aces_cpu"
+            self.platform not in {"aces_cpu", "delta_cpu"}
             or self.gpu_type != "none"
             or self.gpu_count != 0
             or self.model is not None
@@ -154,7 +154,7 @@ class BaselinePilotTask(BaseModel):
     task_index: int = Field(ge=0)
     method: Literal["sindy", "pysr", "d3_native_no_tools"]
     comparison_role: str
-    platform: Literal["aces_cpu", "aces_h100x2"]
+    platform: Literal["aces_cpu", "delta_cpu", "aces_h100x2"]
     benchmark_id: str
     tier: Literal["easy", "medium", "hard"]
     repetition: int = Field(ge=0)
@@ -307,7 +307,7 @@ def freeze_baseline_pilot(
         "task_plan_sha256": _sha256(task_path),
         "planned_resource_ledger_sha256": _sha256(resource_path),
         "task_count": len(tasks),
-        "cpu_task_count": sum(task.platform == "aces_cpu" for task in tasks),
+        "cpu_task_count": sum(task.gpu_count == 0 for task in tasks),
         "d3_task_count": sum(task.method == "d3_native_no_tools" for task in tasks),
         "matched_trial_count": len(plan.cells) * len(plan.repetitions),
         "test_data_opened": False,

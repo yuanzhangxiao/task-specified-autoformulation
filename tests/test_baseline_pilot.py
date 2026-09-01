@@ -21,10 +21,25 @@ from autoformalism.rebuttal.baseline_pilot import (
 )
 
 CONFIG = Path("configs/phase_b_public_baseline_pilot_v1.json")
+DELTA_CONFIG = Path(
+    "configs/phase_b_public_baseline_pilot_delta_cpu_v1.json"
+)
 CPU_JOB = Path("scripts/hpc/phase_b_public_baseline_pilot_aces_cpu.slurm")
 CPU_SUBMIT = Path("scripts/hpc/submit_phase_b_public_baseline_pilot_aces_cpu.sh")
 D3_JOB = Path("scripts/hpc/phase_b_public_baseline_pilot_aces_d3.slurm")
 D3_SUBMIT = Path("scripts/hpc/submit_phase_b_public_baseline_pilot_aces_d3.sh")
+DELTA_PREPARE_JOB = Path(
+    "scripts/hpc/phase_b_public_baseline_pilot_delta_pysr_prepare.slurm"
+)
+DELTA_CPU_JOB = Path(
+    "scripts/hpc/phase_b_public_baseline_pilot_delta_cpu.slurm"
+)
+DELTA_SUMMARY_JOB = Path(
+    "scripts/hpc/phase_b_public_baseline_pilot_delta_summary.slurm"
+)
+DELTA_SUBMIT = Path(
+    "scripts/hpc/submit_phase_b_public_baseline_pilot_delta_cpu.sh"
+)
 
 
 def _sha(path: Path) -> str:
@@ -51,6 +66,29 @@ def test_committed_baseline_pilot_is_two_cells_three_seeds() -> None:
     payload["methods"][2]["d3_generations"] = 6
     with pytest.raises(ValueError, match="inconsistent LLM/compute"):
         BaselinePilotPlan.model_validate(payload)
+
+
+def test_delta_cpu_plan_preserves_cells_and_classical_settings() -> None:
+    aces = load_baseline_pilot_plan(CONFIG)
+    delta = load_baseline_pilot_plan(DELTA_CONFIG)
+    tasks = build_baseline_pilot_tasks(delta)
+
+    assert delta.cells == aces.cells
+    assert delta.repetitions == aces.repetitions
+    assert [method.method for method in delta.methods] == ["sindy", "pysr"]
+    for delta_method, aces_method in zip(
+        delta.methods,
+        aces.methods[:2],
+        strict=True,
+    ):
+        assert delta_method.model_dump(exclude={"platform"}) == (
+            aces_method.model_dump(exclude={"platform"})
+        )
+    assert len(tasks) == 12
+    assert {task.platform for task in tasks} == {"delta_cpu"}
+    assert {task.maximum_llm_calls for task in tasks} == {0}
+    assert delta.test_data_opened is False
+    assert delta.private_reference_opened is False
 
 
 def test_freeze_validates_public_inputs_and_resource_ledger(tmp_path: Path) -> None:
@@ -186,6 +224,30 @@ def test_aces_baseline_launchers_are_public_only() -> None:
     assert "AF_PYTHON_MODULE=${AF_PYTHON_MODULE}" in submit
     assert "freeze_phase_b_baseline_llm_operating_point.py" in submit
     assert 'dependency="afterok:${image_job_id}"' in submit
+
+
+def test_delta_baseline_launchers_are_cpu_only_and_dependency_safe() -> None:
+    paths = (
+        DELTA_PREPARE_JOB,
+        DELTA_CPU_JOB,
+        DELTA_SUMMARY_JOB,
+        DELTA_SUBMIT,
+    )
+    for path in paths:
+        subprocess.run(["bash", "-n", str(path)], check=True)
+        text = path.read_text(encoding="utf-8")
+        assert "API_KEY" not in text
+        assert "/private" not in text.lower()
+        assert "bibo-delta-cpu" in text
+        assert "--partition=cpu" in text or "submit" in path.name
+
+    worker = DELTA_CPU_JOB.read_text(encoding="utf-8")
+    assert '== "delta_cpu"' in worker
+    assert "--development-only" in worker
+    submit = DELTA_SUBMIT.read_text(encoding="utf-8")
+    assert 'dependency="afterok:${prepare_job_id}"' in submit
+    assert 'dependency="afterany:${sindy_job_id}:${pysr_job_id}"' in submit
+    assert "phase_b_public_baseline_pilot_delta_cpu_v1.json" in submit
 
 
 def test_public_baseline_summary_and_handoff_exclude_test(tmp_path: Path) -> None:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from itertools import product
+from math import prod
 
 from autoformalism.baselines.core import (
     evaluate_equations,
@@ -315,15 +317,17 @@ def _select_sindy(
 
 
 def _select_pysr(candidates, dataset, context, scales):
-    """Select PySR's Pareto candidate by validation one-step rollout MSE."""
-    if len(context.targets) != 1:
-        raise ValueError(
-            "PySR validation selection currently requires one target output"
-        )
-    target = context.targets[0]
+    """Select a bounded joint Pareto combination by validation rollout MSE."""
+    missing = [target for target in context.targets if not candidates.get(target)]
+    if missing:
+        raise ValueError(f"PySR returned no candidates for targets: {missing}")
+    candidate_lists = _bounded_pysr_candidate_lists(
+        tuple(tuple(candidates[target]) for target in context.targets),
+        maximum_joint_candidates=256,
+    )
     outcomes = []
-    for index, expression in enumerate(candidates[target]):
-        equations = {target: expression}
+    for index, expressions in enumerate(product(*candidate_lists)):
+        equations = dict(zip(context.targets, expressions, strict=True))
         try:
             metrics = evaluate_equations(
                 equations,
@@ -342,10 +346,47 @@ def _select_pysr(candidates, dataset, context, scales):
         ):
             continue
         if not metrics.failed_trajectories:
-            outcomes.append((metrics.normalized_mse, expression))
+            outcomes.append((metrics.normalized_mse, expressions, equations))
     if not outcomes:
-        raise ValueError("no PySR expression passed safe validation rollout")
-    return {target: min(outcomes, key=lambda item: item[0])[1]}
+        raise ValueError("no PySR equation combination passed safe validation rollout")
+    return min(outcomes, key=lambda item: (item[0], item[1]))[2]
+
+
+def _bounded_pysr_candidate_lists(
+    candidate_lists: tuple[tuple[str, ...], ...],
+    *,
+    maximum_joint_candidates: int,
+) -> tuple[tuple[str, ...], ...]:
+    """Bound a Cartesian Pareto search while retaining the full range."""
+    unique = tuple(tuple(dict.fromkeys(items)) for items in candidate_lists)
+    if not unique or any(not items for items in unique):
+        raise ValueError("PySR candidate lists must be nonempty")
+    if prod(len(items) for items in unique) <= maximum_joint_candidates:
+        return unique
+    per_target = max(
+        1,
+        int(maximum_joint_candidates ** (1.0 / len(unique))),
+    )
+    bounded = tuple(_evenly_spaced_candidates(items, per_target) for items in unique)
+    if prod(len(items) for items in bounded) > maximum_joint_candidates:
+        raise RuntimeError("bounded PySR candidate search exceeds its declared cap")
+    return bounded
+
+
+def _evenly_spaced_candidates(
+    candidates: tuple[str, ...],
+    limit: int,
+) -> tuple[str, ...]:
+    """Retain endpoints and evenly spaced points from one ordered Pareto front."""
+    if len(candidates) <= limit:
+        return candidates
+    if limit == 1:
+        return (candidates[-1],)
+    indices = tuple(
+        round(index * (len(candidates) - 1) / (limit - 1))
+        for index in range(limit)
+    )
+    return tuple(candidates[index] for index in dict.fromkeys(indices))
 
 
 def _combine(train: DatasetSplit, validation: DatasetSplit) -> DatasetSplit:

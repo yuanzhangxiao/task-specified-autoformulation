@@ -29,6 +29,7 @@ from autoformalism.baselines.d3_native import (
 from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
 from autoformalism.baselines.pysr import _restore_feature_names, fit_pysr
 from autoformalism.baselines.runner import (
+    _bounded_pysr_candidate_lists,
     _select_pysr,
     _select_sindy,
     run_baseline,
@@ -72,6 +73,22 @@ def _dataset() -> DevelopmentDataset:
         _split(SplitName.TRAIN),
         _split(SplitName.VALIDATION),
     )
+
+
+def _two_target_split(name: SplitName) -> DatasetSplit:
+    time = np.linspace(0.0, 2.0, 41)
+    x = np.exp(-0.4 * time)
+    z = 2.0 * np.exp(-0.2 * time)
+    trajectory = Trajectory(
+        trajectory_id=name.value,
+        time=time,
+        targets={"x": x, "z": z},
+        auxiliaries={},
+        external_inputs={},
+        fixed_covariates={},
+        derivatives={"x": -0.4 * x, "z": -0.2 * z},
+    )
+    return DatasetSplit(name, (trajectory,), f"two-{name.value}-fingerprint")
 
 
 def test_persistence_opens_test_exactly_once() -> None:
@@ -297,6 +314,48 @@ def test_pysr_pareto_expression_is_selected_on_validation_rollout() -> None:
     )
 
     assert selected == {"x": "-0.4 * x"}
+
+
+def test_pysr_jointly_selects_multiple_target_equations() -> None:
+    dataset = DevelopmentDataset(
+        "synthetic_two_target",
+        "easy",
+        TierRoles(targets=("x", "z")),
+        _two_target_split(SplitName.TRAIN),
+        _two_target_split(SplitName.VALIDATION),
+    )
+    context = ValidationContext(
+        targets=("x", "z"),
+        lagged_targets=("x", "z"),
+    )
+
+    selected = _select_pysr(
+        {
+            "x": ("0", "-0.4 * x"),
+            "z": ("0", "-0.2 * z"),
+        },
+        dataset,
+        context,
+        target_scales(dataset.train, context.targets),
+    )
+
+    assert selected == {"x": "-0.4 * x", "z": "-0.2 * z"}
+
+
+def test_pysr_joint_candidate_search_is_bounded_and_keeps_endpoints() -> None:
+    candidates = tuple(
+        tuple(f"{target}_{index}" for index in range(20))
+        for target in range(3)
+    )
+
+    bounded = _bounded_pysr_candidate_lists(
+        candidates,
+        maximum_joint_candidates=256,
+    )
+
+    assert np.prod([len(items) for items in bounded]) <= 256
+    assert all(items[0].endswith("_0") for items in bounded)
+    assert all(items[-1].endswith("_19") for items in bounded)
 
 
 def test_pysr_cli_options_are_propagated() -> None:

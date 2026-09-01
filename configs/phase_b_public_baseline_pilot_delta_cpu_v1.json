@@ -1,0 +1,73 @@
+{
+  "schema_version": "phase-b-public-baseline-pilot-plan-1",
+  "status": "frozen_before_baseline_calls",
+  "purpose": "Run the two-cell, three-seed public-only SINDy and PySR development pilot on Delta CPUs while proposer calibration proceeds independently on ACES",
+  "development_only": true,
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "public_target_contract_sha256": "cfbd142e80ee843a0ac674fb3a2daa4dd4187b9c4350de72262fb42bcacafd26"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+      "public_target_contract_sha256": "3656f87507f48ee11fb8ace52afbac1c9186e8c18aaca8d5efc086b348d0d40a"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "methods": [
+    {
+      "method": "sindy",
+      "comparison_role": "classical_partial_observability_control",
+      "platform": "delta_cpu",
+      "cpus_per_task": 16,
+      "gpu_type": "none",
+      "gpu_count": 0,
+      "wall_timeout_seconds": 1800,
+      "maximum_llm_calls": 0,
+      "model": null,
+      "reasoning_effort": null,
+      "requires_selected_proposer_operating_point": false,
+      "pysr_iterations": null,
+      "maximum_expression_size": null,
+      "d3_generations": null,
+      "d3_patience": null
+    },
+    {
+      "method": "pysr",
+      "comparison_role": "classical_partial_observability_control",
+      "platform": "delta_cpu",
+      "cpus_per_task": 16,
+      "gpu_type": "none",
+      "gpu_count": 0,
+      "wall_timeout_seconds": 3600,
+      "maximum_llm_calls": 0,
+      "model": null,
+      "reasoning_effort": null,
+      "requires_selected_proposer_operating_point": false,
+      "pysr_iterations": 40,
+      "maximum_expression_size": 30,
+      "d3_generations": null,
+      "d3_patience": null
+    }
+  ],
+  "proposer_transport_plan_sha256": "57aaf7f682485fd8ef5d5122e44946c7547f2161da4b7e508cda3ee577b59b1a",
+  "prompt_overlay_config_sha256": "399e5b3d24f0ce6750fc4f3953643a9417ecde7c87f499d31188a5e2dc12065b",
+  "target_contract_manifest_sha256": "fd3256398e454860fcdca317bb850390b773dda1243f8fb8d9521bb48e8df005",
+  "resource_accounting": {
+    "schema_version": "phase-b-baseline-resource-ledger-1",
+    "process_wall_time_required": true,
+    "slurm_elapsed_and_queue_time_required": true,
+    "cpu_core_hours_required": true,
+    "gpu_hours_required": true,
+    "logical_llm_tokens_required_when_applicable": true,
+    "provider_attempts_required_when_applicable": true,
+    "local_model_monetary_cost_policy": "not_priced_report_hardware_time"
+  },
+  "test_data_opened": false,
+  "private_reference_opened": false,
+  "weighted_overall_score_defined": false
+}

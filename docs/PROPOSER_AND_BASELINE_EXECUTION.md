@@ -64,6 +64,16 @@ SINDy and PySR may run before proposer calibration finishes. D3 cannot be
 submitted until the passing proposer analysis is frozen into
 `d3_llm_operating_point.json`.
 
+The first classical pilot is executed on Delta CPUs using
+`configs/phase_b_public_baseline_pilot_delta_cpu_v1.json`. It preserves the
+same two cells, three seeds, algorithms, and budgets as the ACES plan, but
+records `delta_cpu` in the frozen task and resource ledgers. SINDy starts
+independently. A small CPU prerequisite initializes one shared PySR/Julia depot
+before the PySR array starts, preventing six array tasks from racing during
+Julia package initialization. PySR performs a deterministic, bounded joint
+validation-rollout search over per-target Pareto candidates, so multi-target
+Phase-B cells are supported without opening test data.
+
 All ACES baseline runs use `--development-only`. Their result schema contains
 train and validation metrics but no test field. The handoff tool rejects a
 selection unless `test_data_opened` is explicitly false and excludes data,
@@ -73,6 +83,7 @@ The relevant entry points are:
 
 - `scripts/hpc/submit_phase_b_public_baseline_pilot_aces_cpu.sh`
 - `scripts/hpc/submit_phase_b_public_baseline_pilot_aces_d3.sh`
+- `scripts/hpc/submit_phase_b_public_baseline_pilot_delta_cpu.sh`
 - `scripts/summarize_phase_b_public_baseline_pilot.py`
 - `scripts/freeze_phase_b_public_baseline_handoff.py`
 
