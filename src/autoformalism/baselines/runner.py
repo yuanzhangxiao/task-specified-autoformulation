@@ -11,7 +11,11 @@ from autoformalism.baselines.core import (
     regression_table,
     target_scales,
 )
-from autoformalism.baselines.models import BaselineConfig, BaselineResult
+from autoformalism.baselines.models import (
+    BaselineConfig,
+    BaselineDevelopmentResult,
+    BaselineResult,
+)
 from autoformalism.baselines.pysr import fit_pysr
 from autoformalism.baselines.sindy import fit_sindy
 from autoformalism.data import DatasetSplit, DevelopmentDataset, SplitName, Trajectory
@@ -34,15 +38,68 @@ def run_baseline(
     proposer_prompt: str = "",
 ) -> BaselineResult:
     """Run one baseline without opening test until selection is frozen."""
+    result = _run_baseline_selection(
+        config,
+        dataset,
+        context,
+        test_loader=test_loader,
+        llm_client=llm_client,
+        proposer_prompt=proposer_prompt,
+    )
+    assert isinstance(result, BaselineResult)
+    return result
+
+
+def run_baseline_development(
+    config: BaselineConfig,
+    dataset: DevelopmentDataset,
+    context: ValidationContext,
+    *,
+    llm_client: LLMClient | None = None,
+    proposer_prompt: str = "",
+) -> BaselineDevelopmentResult:
+    """Select a baseline using train/validation without loading sealed test."""
+    result = _run_baseline_selection(
+        config,
+        dataset,
+        context,
+        test_loader=None,
+        llm_client=llm_client,
+        proposer_prompt=proposer_prompt,
+    )
+    assert isinstance(result, BaselineDevelopmentResult)
+    return result
+
+
+def _run_baseline_selection(
+    config: BaselineConfig,
+    dataset: DevelopmentDataset,
+    context: ValidationContext,
+    *,
+    test_loader: Callable[[], DatasetSplit] | None,
+    llm_client: LLMClient | None,
+    proposer_prompt: str,
+) -> BaselineResult | BaselineDevelopmentResult:
+    """Share leakage-safe selection between development and final evaluation."""
     scales = target_scales(dataset.train, context.targets)
     if config.method == "persistence":
         train_metrics = persistence_metrics(dataset.train, scales)
         validation_metrics = persistence_metrics(dataset.validation, scales)
+        equations = {target: target for target in context.targets}
+        if test_loader is None:
+            return _development_result(
+                config,
+                dataset,
+                equations,
+                {},
+                train_metrics.normalized_mse,
+                validation_metrics.normalized_mse,
+            )
         test_metrics = persistence_metrics(test_loader(), scales)
         return _result(
             config,
             dataset,
-            {target: target for target in context.targets},
+            equations,
             {},
             train_metrics.normalized_mse,
             validation_metrics.normalized_mse,
@@ -92,6 +149,20 @@ def run_baseline(
                 len(names) if proposed_expressions else None
             ),
         )
+        hyperparameters = {
+            "threshold": selected_threshold,
+            "proposed_feature_count": len(proposed_expressions),
+            "rejected_proposed_feature_count": rejected_feature_count,
+        }
+        if test_loader is None:
+            return _development_result(
+                config,
+                dataset,
+                equations,
+                hyperparameters,
+                train_mse,
+                validation_mse,
+            )
         combined = _combine(dataset.train, dataset.validation)
         combined_extras = _feature_functions(proposed_expressions, context)
         x_combined, y_combined, combined_names = regression_table(
@@ -126,11 +197,7 @@ def run_baseline(
             config,
             dataset,
             equations,
-            {
-                "threshold": selected_threshold,
-                "proposed_feature_count": len(proposed_expressions),
-                "rejected_proposed_feature_count": rejected_feature_count,
-            },
+            hyperparameters,
             train_mse,
             validation_mse,
             test_metrics,
@@ -158,6 +225,19 @@ def run_baseline(
             scales,
             identifier="pysr_validation",
         )
+        hyperparameters = {
+            "iterations": config.pysr_iterations,
+            "metadata": str(metadata),
+        }
+        if test_loader is None:
+            return _development_result(
+                config,
+                dataset,
+                equations,
+                hyperparameters,
+                train_metrics.normalized_mse,
+                validation_metrics.normalized_mse,
+            )
         test_metrics = evaluate_equations(
             equations, context, test_loader(), scales, identifier="pysr_test"
         )
@@ -165,7 +245,7 @@ def run_baseline(
             config,
             dataset,
             equations,
-            {"iterations": config.pysr_iterations, "metadata": str(metadata)},
+            hyperparameters,
             train_metrics.normalized_mse,
             validation_metrics.normalized_mse,
             test_metrics,
@@ -360,4 +440,26 @@ def _result(config, dataset, equations, hyperparameters, train_mse,
         validation_normalized_mse=validation_mse,
         test_normalized_mse=test_metrics.normalized_mse,
         test_per_target_normalized_mse=dict(test_metrics.per_target_normalized_mse),
+    )
+
+
+def _development_result(
+    config,
+    dataset,
+    equations,
+    hyperparameters,
+    train_mse,
+    validation_mse,
+):
+    """Build a train/validation artifact with an explicit no-test contract."""
+    return BaselineDevelopmentResult(
+        method=config.method,
+        benchmark_id=dataset.benchmark_id,
+        tier=dataset.tier,
+        seed=config.seed,
+        equations=dict(equations),
+        selected_hyperparameters=dict(hyperparameters),
+        training_normalized_mse=train_mse,
+        validation_normalized_mse=validation_mse,
+        test_data_opened=False,
     )

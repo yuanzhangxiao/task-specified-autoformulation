@@ -34,7 +34,7 @@ class ProposerCalibrationModelContract(BaseModel):
     model: str = Field(min_length=1)
     reasoning_effort: Literal["low", "medium", "high"]
     temperature: float = Field(ge=0.0, le=2.0)
-    max_output_token_budgets: tuple[int, ...] = Field(min_length=2)
+    max_output_token_budgets: tuple[int, ...] = Field(min_length=1)
     request_timeout_seconds: float = Field(gt=0.0)
     maximum_provider_attempts: int = Field(ge=1, le=10)
     served_context_tokens: int = Field(ge=8192)
@@ -408,6 +408,174 @@ def analyze_proposer_calibration(
         "scientific_judge_called": False,
         "parameter_fitting_performed": False,
     }
+
+
+def prepare_selected_proposer_confirmation(
+    source_plan_path: Path,
+    source_analysis_path: Path,
+    output_config_path: Path,
+    *,
+    primary_platform: str,
+    confirmation_platform: str,
+) -> dict[str, object]:
+    """Freeze a one-budget cross-cluster confirmation from a passing analysis.
+
+    The confirmation repeats the source plan's public request matrix and every
+    model setting except the already selected output budget. Candidate text is
+    not required to be identical across accelerator types; both platforms must
+    independently pass the same transport and deterministic-validity gates.
+    """
+    source_plan = load_proposer_calibration_plan(source_plan_path)
+    source_analysis = _load_analysis(source_analysis_path)
+    selected = source_analysis.get("selected_max_output_tokens")
+    if source_analysis.get("status") != "pass" or not isinstance(selected, int):
+        raise ValueError(
+            "source proposer calibration did not select an operating point"
+        )
+    if selected not in source_plan.model_contract.max_output_token_budgets:
+        raise ValueError("selected output budget is absent from the source plan")
+    selected_rows = [
+        row
+        for row in source_analysis["operating_points"]
+        if row.get("max_output_tokens") == selected
+    ]
+    if len(selected_rows) != 1 or selected_rows[0].get("passed") is not True:
+        raise ValueError("selected source operating point did not pass every gate")
+    if source_analysis.get("selected_reasoning_effort") != (
+        source_plan.model_contract.reasoning_effort
+    ):
+        raise ValueError("source analysis reasoning effort differs from its plan")
+    if not primary_platform or not confirmation_platform:
+        raise ValueError("both cluster platform labels must be nonempty")
+    if primary_platform == confirmation_platform:
+        raise ValueError("confirmation must use a distinct serving platform")
+
+    payload = source_plan.model_dump(mode="json")
+    payload["purpose"] = (
+        "Confirm the selected GPT-OSS-120B proposer operating point on a "
+        "distinct accelerator platform using the unchanged public requests and gates"
+    )
+    payload["model_contract"]["max_output_token_budgets"] = [selected]
+    payload["prerequisite"] = None
+    output = output_config_path.expanduser().resolve()
+    _write_or_validate(
+        output,
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+    )
+    generated = load_proposer_calibration_plan(output)
+    if generated.model_contract.max_output_token_budgets != (selected,):
+        raise AssertionError("generated confirmation plan has the wrong budget")
+    manifest = {
+        "schema_version": "phase-b-proposer-cross-cluster-handoff-1",
+        "status": "frozen_before_confirmation_calls",
+        "primary_platform": primary_platform,
+        "confirmation_platform": confirmation_platform,
+        "source_plan_sha256": _sha256(source_plan_path.expanduser().resolve()),
+        "source_analysis_sha256": _sha256(
+            source_analysis_path.expanduser().resolve()
+        ),
+        "confirmation_plan_sha256": _sha256(output),
+        "selected_max_output_tokens": selected,
+        "selected_reasoning_effort": source_plan.model_contract.reasoning_effort,
+        "model": source_plan.model_contract.model,
+        "matched_request_count": len(build_proposer_calibration_tasks(source_plan)),
+        "candidate_identity_match_required": False,
+        "same_public_requests_and_gates_required": True,
+        "test_data_opened": False,
+        "scientific_judge_called": False,
+        "parameter_fitting_performed": False,
+    }
+    manifest_path = output.parent / "cross_cluster_handoff.json"
+    _write_or_validate(
+        manifest_path,
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+    )
+    _write_or_validate(
+        manifest_path.with_name(f"{manifest_path.name}.sha256"),
+        f"{_sha256(manifest_path)}  {manifest_path.name}\n",
+    )
+    return manifest
+
+
+def verify_proposer_cross_cluster_confirmation(
+    source_analysis_path: Path,
+    confirmation_analysis_path: Path,
+    handoff_path: Path,
+) -> dict[str, object]:
+    """Verify a selected-budget confirmation without comparing generated text."""
+    source_analysis = _load_analysis(source_analysis_path)
+    confirmation_analysis = _load_analysis(confirmation_analysis_path)
+    handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+    if not isinstance(handoff, dict) or handoff.get("schema_version") != (
+        "phase-b-proposer-cross-cluster-handoff-1"
+    ):
+        raise ValueError("cross-cluster handoff schema differs")
+    if _sha256(source_analysis_path.expanduser().resolve()) != handoff.get(
+        "source_analysis_sha256"
+    ):
+        raise ValueError("source analysis differs from the frozen handoff")
+    selected = source_analysis.get("selected_max_output_tokens")
+    if selected != handoff.get("selected_max_output_tokens"):
+        raise ValueError("source selected budget differs from the frozen handoff")
+    confirmation_rows = confirmation_analysis.get("operating_points")
+    if not isinstance(confirmation_rows, list) or len(confirmation_rows) != 1:
+        raise ValueError("confirmation must contain exactly one operating point")
+    row = confirmation_rows[0]
+    if not isinstance(row, dict) or row.get("max_output_tokens") != selected:
+        raise ValueError("confirmation evaluated a different output budget")
+    checks = {
+        "source_calibration_passed": source_analysis.get("status") == "pass",
+        "confirmation_passed": confirmation_analysis.get("status") == "pass",
+        "selected_budget_matched": (
+            confirmation_analysis.get("selected_max_output_tokens") == selected
+        ),
+        "reasoning_effort_matched": (
+            confirmation_analysis.get("selected_reasoning_effort")
+            == source_analysis.get("selected_reasoning_effort")
+            == handoff.get("selected_reasoning_effort")
+        ),
+        "confirmation_gate_row_passed": row.get("passed") is True,
+    }
+    return {
+        "schema_version": "phase-b-proposer-cross-cluster-confirmation-1",
+        "status": "pass" if all(checks.values()) else "fail",
+        "primary_platform": handoff.get("primary_platform"),
+        "confirmation_platform": handoff.get("confirmation_platform"),
+        "selected_max_output_tokens": selected,
+        "checks": checks,
+        "confirmation_metrics": {
+            key: row.get(key)
+            for key in (
+                "response_success",
+                "first_attempt_response_success",
+                "deterministic_validity",
+                "public_target_pass_rate",
+                "length_exhausted_attempt_rate",
+                "mean_successful_budget_utilization",
+                "mean_latency_ms",
+            )
+        },
+        "candidate_identity_match_required": False,
+        "test_data_opened": False,
+        "scientific_judge_called": False,
+        "parameter_fitting_performed": False,
+    }
+
+
+def _load_analysis(path: Path) -> dict[str, object]:
+    """Load one strict proposer-calibration analysis object."""
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        raise ValueError(f"missing proposer calibration analysis: {resolved}")
+    payload = json.loads(resolved.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != (
+        "phase-b-proposer-transport-calibration-analysis-1"
+    ):
+        raise ValueError("proposer calibration analysis schema differs")
+    rows = payload.get("operating_points")
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ValueError("proposer calibration operating points are invalid")
+    return payload
 
 
 def _optional_mean(values: object) -> float | None:

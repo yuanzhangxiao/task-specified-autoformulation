@@ -540,3 +540,13 @@ does not open test data, stops at the first successful predeclared budget per
 candidate, and binds its inputs to the exact frozen search-plan digest. Its
 result selects a numerical budget for the subsequent matched high-proposer /
 low-judge experiment; it is not itself a method-performance result.
+
+Proposer transport now uses a proposer-first dual-cluster promotion boundary.
+ACES H100s evaluate the frozen high-reasoning continuation budgets, while Delta
+reruns only the selected setting against the same six public requests and gates.
+Candidate text need not be identical across accelerators. In parallel, ACES CPU
+may run public-only SINDy/PySR development controls; the five-generation D3
+control remains blocked on the selected proposer operating point. Every ACES
+baseline artifact is train/validation-only and moves to Delta through a
+hash-recorded selection handoff. The complete protocol and deferred baseline
+rationale are in `docs/PROPOSER_AND_BASELINE_EXECUTION.md`.

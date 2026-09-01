@@ -15,7 +15,11 @@ from autoformalism.baselines.d3_native import (
     fit_native_d3,
     validate_native_candidate,
 )
-from autoformalism.baselines.models import BaselineConfig, BaselineResult
+from autoformalism.baselines.models import (
+    BaselineConfig,
+    BaselineDevelopmentResult,
+    BaselineResult,
+)
 from autoformalism.data import DatasetSplit, DevelopmentDataset
 from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.llm import LLMClient
@@ -52,16 +56,41 @@ def run_d3_native_no_tools(
         work_directory=work_directory,
     )
 
+
+def run_d3_native_no_tools_development(
+    config: BaselineConfig,
+    dataset: DevelopmentDataset,
+    context: ValidationContext,
+    *,
+    task_prompt: str,
+    work_directory: Path,
+    llm_client: LLMClient | None = None,
+) -> BaselineDevelopmentResult:
+    """Run D3 selection using train/validation while leaving test sealed."""
+    if llm_client is None:
+        raise D3AdapterError("D3-native-no-tools requires --model")
+    result = _run_native_d3(
+        config,
+        dataset,
+        None,
+        context,
+        task_prompt=task_prompt,
+        llm_client=llm_client,
+        work_directory=work_directory,
+    )
+    assert isinstance(result, BaselineDevelopmentResult)
+    return result
+
 def _run_native_d3(
     config: BaselineConfig,
     dataset: DevelopmentDataset,
-    test_loader: Callable[[], DatasetSplit],
+    test_loader: Callable[[], DatasetSplit] | None,
     context: ValidationContext,
     *,
     task_prompt: str,
     llm_client: LLMClient,
     work_directory: Path,
-) -> BaselineResult:
+) -> BaselineResult | BaselineDevelopmentResult:
     """Run D3's propose-fit-reflect loop with native Adam/Euler fitting."""
     work_directory.mkdir(parents=True, exist_ok=True)
     checkpoint_path = work_directory / "d3_checkpoint.json"
@@ -166,6 +195,47 @@ def _run_native_d3(
         )
     selected = min(eligible, key=lambda item: float(item["validation_mse"]))
     candidate = CandidateModel.model_validate(selected["candidate"])
+    equations = {
+        equation.state: equation.rhs for equation in candidate.state_equations
+    }
+    hyperparameters: dict[str, float | int | str] = {
+        "generations_completed": len(records),
+        "selected_generation": int(selected["generation"]),
+        "external_tools_enabled": "false",
+        "adaptation": "native_adam_teacher_forced_euler",
+        "upstream_revision": D3_UPSTREAM_REVISION,
+        "selected_parameters": json.dumps(
+            dict(selected["parameters"]), sort_keys=True
+        ),
+        "parameter_fitting": "pytorch_adam",
+        "state_update": "teacher_forced_forward_euler",
+        "learning_rate": 1e-2,
+        "maximum_epochs": 2_000,
+        "validation_interval": 10,
+        "early_stopping_patience_checks": 100,
+        "optimizer_device": "cpu",
+        "parameter_initialization": "midpoint_of_declared_initialization_range",
+        "modeled_observed_channels": json.dumps(observed_channels),
+        "selected_epochs_completed": int(selected["epochs_completed"]),
+    }
+    if test_loader is None:
+        return BaselineDevelopmentResult(
+            method=config.method,
+            benchmark_id=dataset.benchmark_id,
+            tier=dataset.tier,
+            seed=config.seed,
+            equations=equations,
+            selected_hyperparameters=hyperparameters,
+            selection_payload={
+                "candidate": candidate.model_dump(mode="json"),
+                "parameters": dict(selected["parameters"]),
+                "target_scales": dict(selected["target_scales"]),
+                "selected_generation": int(selected["generation"]),
+            },
+            training_normalized_mse=float(selected["training_mse"]),
+            validation_normalized_mse=float(selected["validation_mse"]),
+            test_data_opened=False,
+        )
     test_mse, test_per_target = evaluate_native_d3(
         candidate,
         test_loader(),
@@ -173,35 +243,13 @@ def _run_native_d3(
         context.targets,
         dict(selected["target_scales"]),
     )
-    equations = {
-        equation.state: equation.rhs for equation in candidate.state_equations
-    }
     return BaselineResult(
         method=config.method,
         benchmark_id=dataset.benchmark_id,
         tier=dataset.tier,
         seed=config.seed,
         equations=equations,
-        selected_hyperparameters={
-            "generations_completed": len(records),
-            "selected_generation": int(selected["generation"]),
-            "external_tools_enabled": "false",
-            "adaptation": "native_adam_teacher_forced_euler",
-            "upstream_revision": D3_UPSTREAM_REVISION,
-            "selected_parameters": json.dumps(
-                dict(selected["parameters"]), sort_keys=True
-            ),
-            "parameter_fitting": "pytorch_adam",
-            "state_update": "teacher_forced_forward_euler",
-            "learning_rate": 1e-2,
-            "maximum_epochs": 2_000,
-            "validation_interval": 10,
-            "early_stopping_patience_checks": 100,
-            "optimizer_device": "cpu",
-            "parameter_initialization": "midpoint_of_declared_initialization_range",
-            "modeled_observed_channels": json.dumps(observed_channels),
-            "selected_epochs_completed": int(selected["epochs_completed"]),
-        },
+        selected_hyperparameters=hyperparameters,
         training_normalized_mse=float(selected["training_mse"]),
         validation_normalized_mse=float(selected["validation_mse"]),
         test_normalized_mse=test_mse,

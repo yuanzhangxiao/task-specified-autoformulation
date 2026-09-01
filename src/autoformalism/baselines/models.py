@@ -56,6 +56,29 @@ class BaselineResult(BaseModel):
     status: Literal["complete"] = "complete"
 
 
+class BaselineDevelopmentResult(BaseModel):
+    """Train/validation-only baseline selection before sealed test access."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["phase-b-baseline-development-result-1"] = (
+        "phase-b-baseline-development-result-1"
+    )
+    method: str
+    benchmark_id: str
+    tier: str
+    seed: int
+    equations: dict[str, str]
+    selected_hyperparameters: dict[str, float | int | str]
+    selection_payload: dict[str, object] = Field(default_factory=dict)
+    training_normalized_mse: float
+    validation_normalized_mse: float
+    elapsed_wall_seconds: float | None = Field(default=None, ge=0.0)
+    wall_timeout_seconds: float | None = Field(default=None, gt=0.0)
+    status: Literal["development_complete"] = "development_complete"
+    test_data_opened: Literal[False] = False
+
+
 class BaselineRunStatus(BaseModel):
     """Always-written process-level completion, failure, or timeout status."""
 

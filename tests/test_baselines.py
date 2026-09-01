@@ -19,6 +19,7 @@ from autoformalism.baselines.d3 import (
     _d3_system_prompt,
     _numeric_available_inputs,
     run_d3_native_no_tools,
+    run_d3_native_no_tools_development,
 )
 from autoformalism.baselines.d3_native import (
     NativeD3Error,
@@ -27,7 +28,12 @@ from autoformalism.baselines.d3_native import (
 )
 from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
 from autoformalism.baselines.pysr import _restore_feature_names, fit_pysr
-from autoformalism.baselines.runner import _select_pysr, _select_sindy, run_baseline
+from autoformalism.baselines.runner import (
+    _select_pysr,
+    _select_sindy,
+    run_baseline,
+    run_baseline_development,
+)
 from autoformalism.baselines.sindy import library
 from autoformalism.data import (
     DatasetSplit,
@@ -105,6 +111,19 @@ def test_sindy_recovers_derivative_and_evaluates_test_once() -> None:
     assert calls == 1
     assert "x" in result.equations["x"]
     assert result.test_normalized_mse < 1e-8
+
+
+def test_sindy_development_selection_has_no_test_endpoint() -> None:
+    result = run_baseline_development(
+        BaselineConfig(method="sindy", sindy_thresholds=(1e-3, 1e-2)),
+        _dataset(),
+        ValidationContext(targets=("x",), lagged_targets=("x",)),
+    )
+
+    assert result.status == "development_complete"
+    assert result.test_data_opened is False
+    assert "test_normalized_mse" not in result.model_dump()
+    assert result.validation_normalized_mse < 1e-8
 
 
 def test_sindy_rejects_penalized_failed_rollouts(
@@ -401,6 +420,41 @@ def test_native_d3_iterates_without_judge_or_test_feedback(tmp_path: Path) -> No
 
     assert [call["role"] for call in client.calls] == ["proposer"]
     assert resumed.validation_normalized_mse == result.validation_normalized_mse
+
+
+def test_native_d3_development_result_leaves_test_sealed(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
+    proposal = CandidateModel.model_validate(
+        {
+            "candidate_id": "d3_development",
+            "parent_candidate_id": None,
+            "change_summary": "Public-only D3 proposal.",
+            "states": [{"name": "x", "kind": "observed"}],
+            "state_equations": [
+                {"state": "x", "rhs": "(exp(-0.4 * 0.05) - 1) * x"}
+            ],
+            "observation_mappings": [{"channel": "x", "expression": "x"}],
+            "parameters": [],
+            "initial_conditions": [
+                {"state": "x", "scope": "global", "expression": "x"}
+            ],
+        }
+    )
+    result = run_d3_native_no_tools_development(
+        BaselineConfig(method="d3_native_no_tools", d3_generations=1),
+        _dataset(),
+        ValidationContext(targets=("x",), lagged_targets=("x",)),
+        task_prompt="Discover x dynamics.",
+        llm_client=MockLLMClient(proposer_responses=[proposal]),
+        work_directory=tmp_path,
+    )
+
+    assert result.status == "development_complete"
+    assert result.test_data_opened is False
+    assert "test_normalized_mse" not in result.model_dump()
+    assert result.selection_payload["candidate"]["candidate_id"] == (
+        "d3_development"
+    )
 
 
 def test_native_d3_requires_all_observed_channels_as_states() -> None:

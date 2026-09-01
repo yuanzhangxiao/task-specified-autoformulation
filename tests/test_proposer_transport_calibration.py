@@ -19,6 +19,8 @@ from autoformalism.rebuttal.proposer_transport_calibration import (
     build_proposer_calibration_tasks,
     freeze_proposer_calibration,
     load_proposer_calibration_plan,
+    prepare_selected_proposer_confirmation,
+    verify_proposer_cross_cluster_confirmation,
 )
 from scripts.run_phase_b_proposer_transport_calibration import (
     _attempt_accounting,
@@ -46,6 +48,15 @@ ACES_ANALYSIS_JOB = Path(
 )
 ACES_SUBMIT = Path(
     "scripts/hpc/submit_phase_b_proposer_transport_calibration_aces.sh"
+)
+ACES_V2_SUBMIT = Path(
+    "scripts/hpc/submit_phase_b_proposer_transport_calibration_v2_aces.sh"
+)
+DELTA_CONFIRM_SUBMIT = Path(
+    "scripts/hpc/submit_phase_b_proposer_transport_confirmation_delta.sh"
+)
+DELTA_CONFIRM_ANALYSIS = Path(
+    "scripts/hpc/phase_b_proposer_transport_confirmation_analysis.slurm"
 )
 
 
@@ -326,6 +337,112 @@ def test_analysis_selects_smallest_budget_passing_all_gates() -> None:
     assert analysis["operating_points"][1]["passed"] is True
 
 
+def test_selected_operating_point_is_frozen_for_another_cluster(
+    tmp_path: Path,
+) -> None:
+    source_analysis = tmp_path / "source_analysis.json"
+    source_analysis.write_text(
+        json.dumps(
+            {
+                "schema_version": (
+                    "phase-b-proposer-transport-calibration-analysis-1"
+                ),
+                "status": "pass",
+                "selected_max_output_tokens": 8192,
+                "selected_reasoning_effort": "high",
+                "operating_points": [
+                    {"max_output_tokens": 4096, "passed": False},
+                    {"max_output_tokens": 8192, "passed": True},
+                    {"max_output_tokens": 12288, "passed": True},
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    confirmation_plan = tmp_path / "selected_plan.json"
+    manifest = prepare_selected_proposer_confirmation(
+        CONFIG,
+        source_analysis,
+        confirmation_plan,
+        primary_platform="aces-h100x2",
+        confirmation_platform="delta-a40x4",
+    )
+
+    derived = load_proposer_calibration_plan(confirmation_plan)
+    assert derived.model_contract.max_output_token_budgets == (8192,)
+    assert derived.cells == load_proposer_calibration_plan(CONFIG).cells
+    assert derived.gates == load_proposer_calibration_plan(CONFIG).gates
+    assert derived.prerequisite is None
+    assert manifest["candidate_identity_match_required"] is False
+    assert manifest["same_public_requests_and_gates_required"] is True
+
+    confirmation_analysis = tmp_path / "confirmation_analysis.json"
+    confirmation_analysis.write_text(
+        json.dumps(
+            {
+                "schema_version": (
+                    "phase-b-proposer-transport-calibration-analysis-1"
+                ),
+                "status": "pass",
+                "selected_max_output_tokens": 8192,
+                "selected_reasoning_effort": "high",
+                "operating_points": [
+                    {
+                        "max_output_tokens": 8192,
+                        "passed": True,
+                        "response_success": 1.0,
+                        "first_attempt_response_success": 1.0,
+                        "deterministic_validity": 1.0,
+                        "public_target_pass_rate": 1.0,
+                        "length_exhausted_attempt_rate": 0.0,
+                        "mean_successful_budget_utilization": 0.5,
+                        "mean_latency_ms": 10.0,
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    report = verify_proposer_cross_cluster_confirmation(
+        source_analysis,
+        confirmation_analysis,
+        tmp_path / "cross_cluster_handoff.json",
+    )
+    assert report["status"] == "pass"
+    assert report["selected_max_output_tokens"] == 8192
+
+
+def test_selected_confirmation_rejects_failed_source(tmp_path: Path) -> None:
+    source_analysis = tmp_path / "source_analysis.json"
+    source_analysis.write_text(
+        json.dumps(
+            {
+                "schema_version": (
+                    "phase-b-proposer-transport-calibration-analysis-1"
+                ),
+                "status": "fail",
+                "selected_max_output_tokens": None,
+                "selected_reasoning_effort": None,
+                "operating_points": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="did not select"):
+        prepare_selected_proposer_confirmation(
+            CONFIG,
+            source_analysis,
+            tmp_path / "selected.json",
+            primary_platform="aces-h100x2",
+            confirmation_platform="delta-a40x4",
+        )
+
+
 def test_attempt_accounting_detects_length_and_reasoning() -> None:
     raw = {
         "usage": {"prompt_tokens": 10, "completion_tokens": 4096},
@@ -473,3 +590,21 @@ def test_aces_launchers_are_valid_and_keep_calibration_sealed() -> None:
     assert '--dependency="afterok:${image_job_id}"' in submit
     assert '--dependency="afterany:${calibration_job_id}"' in submit
     assert "platform: $platform" in submit
+
+
+def test_cross_cluster_launchers_are_valid_and_confirmation_only() -> None:
+    for path in (ACES_V2_SUBMIT, DELTA_CONFIRM_SUBMIT, DELTA_CONFIRM_ANALYSIS):
+        subprocess.run(["bash", "-n", str(path)], check=True)
+        assert "API_KEY" not in path.read_text(encoding="utf-8")
+
+    aces = ACES_V2_SUBMIT.read_text(encoding="utf-8")
+    assert "phase_b_proposer_transport_calibration_v2.json" in aces
+    assert "AF_PREREQUISITE_ANALYSIS" in aces
+    delta = DELTA_CONFIRM_SUBMIT.read_text(encoding="utf-8")
+    assert "prepare_phase_b_proposer_transport_confirmation.py" in delta
+    assert "--primary-platform aces-h100x2" in delta
+    assert "--confirmation-platform delta-a40x4" in delta
+    assert '--array="0-${task_max}%2"' in delta
+    analysis = DELTA_CONFIRM_ANALYSIS.read_text(encoding="utf-8")
+    assert "verify_phase_b_proposer_transport_confirmation.py" in analysis
+    assert "bibo-delta-cpu" in analysis

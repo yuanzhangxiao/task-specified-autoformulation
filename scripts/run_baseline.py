@@ -12,14 +12,21 @@ import sys
 import time
 from pathlib import Path
 
-from autoformalism.baselines.d3 import run_d3_native_no_tools
+from autoformalism.baselines.d3 import (
+    run_d3_native_no_tools,
+    run_d3_native_no_tools_development,
+)
 from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
-from autoformalism.baselines.runner import run_baseline
+from autoformalism.baselines.runner import run_baseline, run_baseline_development
 from autoformalism.config import DataConfig
 from autoformalism.data import BenchmarkLoader, BenchmarkRegistry
 from autoformalism.execution import _development_forcing_bounds, _parse_model
 from autoformalism.expressions import ValidationContext
-from autoformalism.llm import LLMConfig, create_llm_client
+from autoformalism.llm import (
+    LLMConfig,
+    VLLMReasoningEffort,
+    create_llm_client,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model")
     parser.add_argument(
+        "--development-only",
+        action="store_true",
+        help="select on train/validation and leave the test split unopened",
+    )
+    parser.add_argument(
         "--llm-cache-only",
         action="store_true",
         help="fail closed on an LLM cache miss without contacting a provider",
@@ -55,6 +67,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="shared flat cache directory for cache-only baseline replay",
     )
+    parser.add_argument("--llm-max-output-tokens", type=int, default=2048)
+    parser.add_argument("--llm-timeout-seconds", type=float, default=900.0)
+    parser.add_argument("--llm-max-attempts", type=int, default=3)
+    parser.add_argument(
+        "--vllm-base-url", default="http://127.0.0.1:8000"
+    )
+    parser.add_argument(
+        "--vllm-reasoning-effort",
+        choices=("low", "medium", "high"),
+        default="low",
+    )
+    parser.add_argument("--vllm-temperature", type=float, default=0.0)
     parser.add_argument("--output-root", type=Path, default=Path("artifacts/baselines"))
     parser.add_argument(
         "--pysr-iterations",
@@ -156,7 +180,8 @@ def _execute_baseline(
     loader = BenchmarkLoader(registry)
     data_config = DataConfig(root=root, benchmark_id=args.benchmark_id, tier=args.tier)
     dataset = loader.load_development(data_config)
-    loader.validate_test_paths(data_config)
+    if not args.development_only:
+        loader.validate_test_paths(data_config)
     context = ValidationContext(
         targets=dataset.roles.targets,
         auxiliaries=dataset.roles.auxiliaries,
@@ -189,19 +214,37 @@ def _execute_baseline(
                 cache_directory=cache_directory,
                 log_path=output / "llm_events.jsonl",
                 proposal_target_channels=dataset.roles.targets,
-                timeout_seconds=900.0,
+                timeout_seconds=args.llm_timeout_seconds,
+                max_attempts=args.llm_max_attempts,
+                max_output_tokens=args.llm_max_output_tokens,
+                vllm_base_url=args.vllm_base_url,
+                vllm_reasoning_effort=VLLMReasoningEffort(
+                    args.vllm_reasoning_effort
+                ),
+                vllm_temperature=args.vllm_temperature,
+                vllm_seed=args.seed,
                 cache_only=args.llm_cache_only,
             )
         )
-        result = run_d3_native_no_tools(
-            config,
-            dataset,
-            lambda: loader.load_test(data_config),
-            context,
-            task_prompt=prompt,
-            work_directory=output,
-            llm_client=client,
-        )
+        if args.development_only:
+            result = run_d3_native_no_tools_development(
+                config,
+                dataset,
+                context,
+                task_prompt=prompt,
+                work_directory=output,
+                llm_client=client,
+            )
+        else:
+            result = run_d3_native_no_tools(
+                config,
+                dataset,
+                lambda: loader.load_test(data_config),
+                context,
+                task_prompt=prompt,
+                work_directory=output,
+                llm_client=client,
+            )
     else:
         client = None
         if args.method == "llm_feature_sindy":
@@ -216,18 +259,35 @@ def _execute_baseline(
                     cache_directory=cache_directory,
                     log_path=output / "llm_events.jsonl",
                     proposal_target_channels=dataset.roles.targets,
-                    timeout_seconds=900.0,
+                    timeout_seconds=args.llm_timeout_seconds,
+                    max_attempts=args.llm_max_attempts,
+                    max_output_tokens=args.llm_max_output_tokens,
+                    vllm_base_url=args.vllm_base_url,
+                    vllm_reasoning_effort=VLLMReasoningEffort(
+                        args.vllm_reasoning_effort
+                    ),
+                    vllm_temperature=args.vllm_temperature,
+                    vllm_seed=args.seed,
                     cache_only=args.llm_cache_only,
                 )
             )
-        result = run_baseline(
-            config,
-            dataset,
-            lambda: loader.load_test(data_config),
-            context,
-            llm_client=client,
-            proposer_prompt=prompt,
-        )
+        if args.development_only:
+            result = run_baseline_development(
+                config,
+                dataset,
+                context,
+                llm_client=client,
+                proposer_prompt=prompt,
+            )
+        else:
+            result = run_baseline(
+                config,
+                dataset,
+                lambda: loader.load_test(data_config),
+                context,
+                llm_client=client,
+                proposer_prompt=prompt,
+            )
     return result
 
 
