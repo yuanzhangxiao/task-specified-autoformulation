@@ -32,6 +32,18 @@ ANALYSIS_JOB = Path(
     "scripts/hpc/phase_b_proposer_transport_calibration_analysis.slurm"
 )
 SUBMIT = Path("scripts/hpc/submit_phase_b_proposer_transport_calibration.sh")
+ACES_IMAGE_JOB = Path(
+    "scripts/hpc/phase_b_proposer_transport_calibration_aces_image.slurm"
+)
+ACES_GPU_JOB = Path(
+    "scripts/hpc/phase_b_proposer_transport_calibration_aces_h100.slurm"
+)
+ACES_ANALYSIS_JOB = Path(
+    "scripts/hpc/phase_b_proposer_transport_calibration_analysis_aces.slurm"
+)
+ACES_SUBMIT = Path(
+    "scripts/hpc/submit_phase_b_proposer_transport_calibration_aces.sh"
+)
 
 
 def test_calibration_plan_is_matched_and_budget_ordered() -> None:
@@ -281,3 +293,34 @@ def test_delta_launchers_are_valid_and_keep_calibration_sealed() -> None:
     submit = SUBMIT.read_text(encoding="utf-8")
     assert "--array=0-5%2" in submit
     assert '--dependency="afterany:${calibration_job_id}"' in submit
+
+
+def test_aces_launchers_are_valid_and_keep_calibration_sealed() -> None:
+    for path in (
+        ACES_IMAGE_JOB,
+        ACES_GPU_JOB,
+        ACES_ANALYSIS_JOB,
+        ACES_SUBMIT,
+    ):
+        subprocess.run(["bash", "-n", str(path)], check=True)
+        text = path.read_text(encoding="utf-8")
+        assert "API_KEY" not in text
+
+    image = ACES_IMAGE_JOB.read_text(encoding="utf-8")
+    assert "module load WebProxy" in image
+    assert '"${container_runtime}" build' in image
+    assert "snapshot_download" in image
+    gpu = ACES_GPU_JOB.read_text(encoding="utf-8")
+    assert "#SBATCH --partition=gpu" in gpu
+    assert "#SBATCH --gres=gpu:h100:2" in gpu
+    assert "#SBATCH --time=02:00:00" in gpu
+    assert "AF_TENSOR_PARALLEL_SIZE:=2" in gpu
+    assert "run_phase_b_proposer_transport_calibration.py" in gpu
+    analysis = ACES_ANALYSIS_JOB.read_text(encoding="utf-8")
+    assert "#SBATCH --partition=cpu" in analysis
+    submit = ACES_SUBMIT.read_text(encoding="utf-8")
+    assert "AF_ACES_ACCOUNT:=156264627414" in submit
+    assert "--array=0-5%2" in submit
+    assert '--dependency="afterok:${image_job_id}"' in submit
+    assert '--dependency="afterany:${calibration_job_id}"' in submit
+    assert "platform: $platform" in submit

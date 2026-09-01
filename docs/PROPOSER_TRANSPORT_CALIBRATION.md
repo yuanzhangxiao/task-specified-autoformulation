@@ -53,3 +53,39 @@ includes feedback-rich rounds, fitting, deterministic target enforcement, and
 the independently frozen low-reasoning scientific judge. A failure at all three
 budgets means the experiment selects no operating point; thresholds are not
 relaxed after observing the calls.
+
+## ACES replication
+
+The same frozen matrix can run independently on two ACES H100 GPUs per task.
+The ACES path changes only the serving hardware and tensor-parallel topology;
+the public prompts, target contracts, proposer model, high reasoning level,
+sampling seeds, output budgets, retry limit, schema, and analysis gates are
+unchanged. The result is an independent transport replication, not a bitwise
+duplicate of the four-A40 Delta run. Wall time and GPU-hours must therefore be
+reported by platform.
+
+The launcher uses the ordinary ACES `gpu` partition, requests
+`--gres=gpu:h100:2`, and permits two array elements at once. A dependent CPU
+job first creates or verifies the pinned vLLM image in project storage and
+prefetches the model into a shared scratch Hugging Face cache. The array thus
+does not race to download the 120B weights. A final dependent CPU job runs the
+unchanged analyzer.
+
+From the ACES repository checkout:
+
+```bash
+git pull --ff-only
+export AF_REPO_ROOT="$PWD"
+export AF_PYTHON="$PWD/.venv/bin/python"
+export AF_PUBLIC_DATA_ROOT="$PROJECT/phase_b/inputs/public-prompt-v3"
+export AF_OUTPUT_ROOT="$SCRATCH/phase_b/proposer-transport-calibration-v1-aces-h100x2"
+
+test -x "$AF_PYTHON"
+test -d "$AF_PUBLIC_DATA_ROOT"
+bash scripts/hpc/submit_phase_b_proposer_transport_calibration_aces.sh
+```
+
+If `sbatch` reports an ACES controller socket timeout, inspect `squeue` before
+resubmitting; the scheduler may have accepted the job despite the client-side
+timeout. The submitter refuses to overwrite an existing submission manifest,
+which also protects against accidental duplicate launches.
