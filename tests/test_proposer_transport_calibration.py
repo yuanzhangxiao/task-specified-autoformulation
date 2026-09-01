@@ -575,6 +575,8 @@ def test_aces_launchers_are_valid_and_keep_calibration_sealed() -> None:
     image = ACES_IMAGE_JOB.read_text(encoding="utf-8")
     assert "module load WebProxy" in image
     assert '"${container_runtime}" build' in image
+    assert "command -v python3 || command -v python" in image
+    assert '"${container_python}" -c' in image
     assert "snapshot_download" in image
     gpu = ACES_GPU_JOB.read_text(encoding="utf-8")
     assert "#SBATCH --partition=gpu" in gpu

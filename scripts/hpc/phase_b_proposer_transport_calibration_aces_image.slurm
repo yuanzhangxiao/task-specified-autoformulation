@@ -54,9 +54,17 @@ printf '%s\n' "${container_runtime}" \
   >"${AF_OUTPUT_ROOT}/runtime/container_runtime.txt"
 
 readonly model="$(jq -r '.model_contract.model' "${AF_CALIBRATION_CONFIG}")"
+readonly container_python="$(
+  "${container_runtime}" exec "${AF_VLLM_IMAGE}" sh -c \
+    'command -v python3 || command -v python'
+)"
+[[ -n "${container_python}" ]] || {
+  echo "container exposes neither python3 nor python" >&2
+  exit 2
+}
 "${container_runtime}" exec \
   --bind "${AF_HF_HOME}:${AF_HF_HOME}" \
   --env "AF_MODEL=${model},HF_HOME=${AF_HF_HOME}" \
   "${AF_VLLM_IMAGE}" \
-  python -c \
+  "${container_python}" -c \
   'import os; from huggingface_hub import snapshot_download; snapshot_download(os.environ["AF_MODEL"])'
