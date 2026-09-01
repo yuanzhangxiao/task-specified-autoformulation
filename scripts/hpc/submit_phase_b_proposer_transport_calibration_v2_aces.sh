@@ -11,6 +11,7 @@ set -euo pipefail
 export AF_REPO_ROOT
 export AF_PREREQUISITE_ANALYSIS
 export AF_CALIBRATION_CONFIG="${AF_REPO_ROOT}/configs/phase_b_proposer_transport_calibration_v2.json"
-export AF_OUTPUT_ROOT="${SCRATCH}/phase_b/proposer-transport-calibration-v2-aces-h100x2"
+: "${AF_OUTPUT_ROOT:=${SCRATCH}/phase_b/proposer-transport-calibration-v2-aces-h100x2}"
+export AF_OUTPUT_ROOT
 
 exec bash "${AF_REPO_ROOT}/scripts/hpc/submit_phase_b_proposer_transport_calibration_aces.sh"

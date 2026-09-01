@@ -611,6 +611,8 @@ def test_cross_cluster_launchers_are_valid_and_confirmation_only() -> None:
     aces = ACES_V2_SUBMIT.read_text(encoding="utf-8")
     assert "phase_b_proposer_transport_calibration_v2.json" in aces
     assert "AF_PREREQUISITE_ANALYSIS" in aces
+    assert 'AF_OUTPUT_ROOT:=${SCRATCH}/phase_b/' in aces
+    assert "export AF_OUTPUT_ROOT" in aces
     delta = DELTA_CONFIRM_SUBMIT.read_text(encoding="utf-8")
     assert "prepare_phase_b_proposer_transport_confirmation.py" in delta
     assert "--primary-platform aces-h100x2" in delta
