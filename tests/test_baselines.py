@@ -37,6 +37,7 @@ from autoformalism.baselines.runner import (
 )
 from autoformalism.baselines.sindy import library
 from autoformalism.data import (
+    BenchmarkRegistry,
     DatasetSplit,
     DevelopmentDataset,
     SplitName,
@@ -47,7 +48,7 @@ from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.fitting import EvaluationMetrics
 from autoformalism.llm import MockLLMClient
 from autoformalism.schemas import CandidateModel
-from scripts.run_baseline import build_parser
+from scripts.run_baseline import _baseline_validation_context, build_parser
 
 
 def _split(name: SplitName, rate: float = 0.4) -> DatasetSplit:
@@ -108,6 +109,19 @@ def test_persistence_opens_test_exactly_once() -> None:
 
     assert calls == 1
     assert result.test_normalized_mse > 0.0
+
+
+def test_phase_b_baseline_context_does_not_treat_targets_as_forcing() -> None:
+    spec = BenchmarkRegistry().get(
+        "phase_b_dalla_man_t2_canonical_named_easy"
+    )
+
+    context = _baseline_validation_context(_dataset(), spec)
+
+    assert context.targets == ("x",)
+    assert context.lagged_targets == ()
+    assert context.forcing_bounds == {}
+    assert context.external_inputs == ()
 
 
 def test_sindy_recovers_derivative_and_evaluates_test_once() -> None:

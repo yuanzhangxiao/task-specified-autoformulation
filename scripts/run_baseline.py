@@ -19,8 +19,17 @@ from autoformalism.baselines.d3 import (
 from autoformalism.baselines.models import BaselineConfig, BaselineRunStatus
 from autoformalism.baselines.runner import run_baseline, run_baseline_development
 from autoformalism.config import DataConfig
-from autoformalism.data import BenchmarkLoader, BenchmarkRegistry
-from autoformalism.execution import _development_forcing_bounds, _parse_model
+from autoformalism.data import (
+    BenchmarkLoader,
+    BenchmarkRegistry,
+    BenchmarkSpec,
+    DevelopmentDataset,
+)
+from autoformalism.execution import (
+    _development_forcing_bounds,
+    _numeric_declared_channels,
+    _parse_model,
+)
 from autoformalism.expressions import ValidationContext
 from autoformalism.llm import (
     LLMConfig,
@@ -182,14 +191,7 @@ def _execute_baseline(
     dataset = loader.load_development(data_config)
     if not args.development_only:
         loader.validate_test_paths(data_config)
-    context = ValidationContext(
-        targets=dataset.roles.targets,
-        auxiliaries=dataset.roles.auxiliaries,
-        external_inputs=spec.external_inputs,
-        fixed_covariates=spec.fixed_covariates,
-        lagged_targets=dataset.roles.targets if spec.one_step_target_history else (),
-        forcing_bounds=_development_forcing_bounds(dataset, include_targets=True),
-    )
+    context = _baseline_validation_context(dataset, spec)
     prompt_path = root / spec.relative_root / args.tier / "proposer_prompt.txt"
     prompt = prompt_path.read_text(encoding="utf-8")
     config = BaselineConfig(
@@ -289,6 +291,31 @@ def _execute_baseline(
                 proposer_prompt=prompt,
             )
     return result
+
+
+def _baseline_validation_context(
+    dataset: DevelopmentDataset,
+    spec: BenchmarkSpec,
+) -> ValidationContext:
+    """Build the same leakage-safe numeric channel context as search."""
+    forcing_bounds = _development_forcing_bounds(
+        dataset,
+        include_targets=spec.one_step_target_history,
+    )
+    return ValidationContext(
+        targets=dataset.roles.targets,
+        auxiliaries=dataset.roles.auxiliaries,
+        external_inputs=_numeric_declared_channels(
+            spec.external_inputs,
+            forcing_bounds,
+        ),
+        fixed_covariates=_numeric_declared_channels(
+            spec.fixed_covariates,
+            forcing_bounds,
+        ),
+        lagged_targets=dataset.roles.targets if spec.one_step_target_history else (),
+        forcing_bounds=forcing_bounds,
+    )
 
 
 def _supervise(args: argparse.Namespace) -> None:
