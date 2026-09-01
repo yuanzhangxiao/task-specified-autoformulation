@@ -12,6 +12,7 @@ set -euo pipefail
 
 : "${AF_REPO_ROOT:?AF_REPO_ROOT is required}"
 : "${AF_PYTHON:?AF_PYTHON is required}"
+: "${AF_PYTHON_MODULE:=Python/3.11.5-GCCcore-13.2.0}"
 : "${AF_PUBLIC_DATA_ROOT:?AF_PUBLIC_DATA_ROOT is required}"
 : "${AF_OUTPUT_ROOT:?AF_OUTPUT_ROOT is required}"
 : "${AF_TASK_INDEX:=${SLURM_ARRAY_TASK_ID:-0}}"
@@ -29,6 +30,7 @@ readonly tier="$(jq -r '.tier' <<<"${task}")"
 readonly repetition="$(jq -r '.repetition' <<<"${task}")"
 readonly timeout="$(jq -r '.wall_timeout_seconds' <<<"${task}")"
 
+module load "${AF_PYTHON_MODULE}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK}"

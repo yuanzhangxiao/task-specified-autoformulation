@@ -16,6 +16,7 @@ set -euo pipefail
 
 : "${AF_REPO_ROOT:?AF_REPO_ROOT is required}"
 : "${AF_PYTHON:?AF_PYTHON is required}"
+: "${AF_PYTHON_MODULE:=Python/3.11.5-GCCcore-13.2.0}"
 : "${AF_PUBLIC_DATA_ROOT:?AF_PUBLIC_DATA_ROOT is required}"
 : "${AF_TARGET_CONTRACT_ROOT:?AF_TARGET_CONTRACT_ROOT is required}"
 : "${AF_OUTPUT_ROOT:?AF_OUTPUT_ROOT is required}"
@@ -36,6 +37,7 @@ readonly served_context="$(jq -r '.model_contract.served_context_tokens' "${plan
 readonly server_log="${AF_OUTPUT_ROOT}/vllm-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID}}-${AF_TASK_INDEX}.log"
 readonly gpu_inventory="${AF_OUTPUT_ROOT}/runtime/task_${AF_TASK_INDEX}_gpu_inventory.txt"
 
+module load "${AF_PYTHON_MODULE}"
 [[ -x "${AF_PYTHON}" ]] || { echo "missing Python: ${AF_PYTHON}" >&2; exit 2; }
 [[ -d "${AF_PUBLIC_DATA_ROOT}" ]] || { echo "missing public data: ${AF_PUBLIC_DATA_ROOT}" >&2; exit 2; }
 [[ -d "${AF_TARGET_CONTRACT_ROOT}" ]] || { echo "missing target contracts: ${AF_TARGET_CONTRACT_ROOT}" >&2; exit 2; }
