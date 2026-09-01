@@ -13,10 +13,11 @@ set -euo pipefail
 
 : "${AF_REPO_ROOT:?AF_REPO_ROOT is required}"
 : "${AF_PYTHON:?AF_PYTHON is required}"
-: "${AF_PYTHON_MODULE:=Python/3.11.5-GCCcore-13.2.0}"
+: "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
+: "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_OUTPUT_ROOT:?AF_OUTPUT_ROOT is required}"
 
-module load "${AF_PYTHON_MODULE}"
+module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
 cd "${AF_REPO_ROOT}"
 "${AF_PYTHON}" scripts/analyze_phase_b_proposer_transport_calibration.py \
   --plan "${AF_OUTPUT_ROOT}/frozen/plan.json" \

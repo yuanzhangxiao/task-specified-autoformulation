@@ -8,7 +8,8 @@ set -euo pipefail
 : "${AF_ACES_ACCOUNT:=156264627414}"
 : "${AF_REPO_ROOT:=$(pwd)}"
 : "${AF_PYTHON:=${AF_REPO_ROOT}/.venv/bin/python}"
-: "${AF_PYTHON_MODULE:=Python/3.11.5-GCCcore-13.2.0}"
+: "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
+: "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_PUBLIC_DATA_ROOT:=${PROJECT}/phase_b/inputs/public-prompt-v3}"
 : "${AF_TARGET_CONTRACT_ROOT:=${AF_REPO_ROOT}/configs/target_eval/phase_b_v1}"
 : "${AF_BASELINE_CONFIG:=${AF_REPO_ROOT}/configs/phase_b_public_baseline_pilot_v1.json}"
@@ -18,7 +19,7 @@ set -euo pipefail
 : "${AF_CPU_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_public_baseline_pilot_aces_cpu.slurm}"
 
 readonly submission_manifest="${AF_OUTPUT_ROOT}/cpu_submission_manifest.json"
-module load "${AF_PYTHON_MODULE}"
+module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
 [[ -x "${AF_PYTHON}" ]] || { echo "missing Python: ${AF_PYTHON}" >&2; exit 2; }
 [[ -d "${AF_PUBLIC_DATA_ROOT}" ]] || { echo "missing public data" >&2; exit 2; }
 [[ -f "${AF_CPU_JOB}" ]] || { echo "missing CPU job" >&2; exit 2; }
@@ -48,7 +49,7 @@ submission="$(
     --array="${cpu_indices}%4" \
     --output="${AF_REPO_ROOT}/logs/phase-b-baseline-cpu-%A_%a.out" \
     --error="${AF_REPO_ROOT}/logs/phase-b-baseline-cpu-%A_%a.err" \
-    --export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT}" \
+    --export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT}" \
     "${AF_CPU_JOB}"
 )"
 readonly job_id="${submission%%;*}"

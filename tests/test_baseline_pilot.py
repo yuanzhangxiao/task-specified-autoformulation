@@ -167,7 +167,11 @@ def test_aces_baseline_launchers_are_public_only() -> None:
         assert "--development-only" in text or "submit" in path.name
 
     assert "#SBATCH --partition=cpu" in CPU_JOB.read_text(encoding="utf-8")
-    assert 'module load "${AF_PYTHON_MODULE}"' in CPU_JOB.read_text(
+    assert (
+        'module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"'
+        in CPU_JOB.read_text(encoding="utf-8")
+    )
+    assert "AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE}" in CPU_SUBMIT.read_text(
         encoding="utf-8"
     )
     assert "AF_PYTHON_MODULE=${AF_PYTHON_MODULE}" in CPU_SUBMIT.read_text(
@@ -175,9 +179,10 @@ def test_aces_baseline_launchers_are_public_only() -> None:
     )
     d3 = D3_JOB.read_text(encoding="utf-8")
     assert "#SBATCH --gres=gpu:h100:2" in d3
-    assert 'module load "${AF_PYTHON_MODULE}"' in d3
+    assert 'module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"' in d3
     assert "d3_llm_operating_point.json" in d3
     submit = D3_SUBMIT.read_text(encoding="utf-8")
+    assert "AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE}" in submit
     assert "AF_PYTHON_MODULE=${AF_PYTHON_MODULE}" in submit
     assert "freeze_phase_b_baseline_llm_operating_point.py" in submit
     assert 'dependency="afterok:${image_job_id}"' in submit

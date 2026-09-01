@@ -581,14 +581,19 @@ def test_aces_launchers_are_valid_and_keep_calibration_sealed() -> None:
     assert "#SBATCH --gres=gpu:h100:2" in gpu
     assert "#SBATCH --time=02:00:00" in gpu
     assert "AF_TENSOR_PARALLEL_SIZE:=2" in gpu
-    assert 'module load "${AF_PYTHON_MODULE}"' in gpu
+    assert 'module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"' in gpu
     assert "run_phase_b_proposer_transport_calibration.py" in gpu
     analysis = ACES_ANALYSIS_JOB.read_text(encoding="utf-8")
     assert "#SBATCH --partition=cpu" in analysis
-    assert 'module load "${AF_PYTHON_MODULE}"' in analysis
+    assert (
+        'module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"'
+        in analysis
+    )
     submit = ACES_SUBMIT.read_text(encoding="utf-8")
     assert "AF_ACES_ACCOUNT:=156264627414" in submit
-    assert "Python/3.11.5-GCCcore-13.2.0" in submit
+    assert "GCCcore/13.2.0" in submit
+    assert "Python/3.11.5" in submit
+    assert "AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE}" in submit
     assert "AF_PYTHON_MODULE=${AF_PYTHON_MODULE}" in submit
     assert "--array=0-5%2" in submit
     assert '--dependency="afterok:${image_job_id}"' in submit

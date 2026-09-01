@@ -8,7 +8,8 @@ set -euo pipefail
 : "${AF_ACES_ACCOUNT:=156264627414}"
 : "${AF_REPO_ROOT:=$(pwd)}"
 : "${AF_PYTHON:=${AF_REPO_ROOT}/.venv/bin/python}"
-: "${AF_PYTHON_MODULE:=Python/3.11.5-GCCcore-13.2.0}"
+: "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
+: "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_PUBLIC_DATA_ROOT:=${PROJECT}/phase_b/inputs/public-prompt-v3}"
 : "${AF_TARGET_CONTRACT_ROOT:=${AF_REPO_ROOT}/configs/target_eval/phase_b_v1}"
 : "${AF_BASELINE_CONFIG:=${AF_REPO_ROOT}/configs/phase_b_public_baseline_pilot_v1.json}"
@@ -23,7 +24,7 @@ set -euo pipefail
 : "${AF_D3_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_public_baseline_pilot_aces_d3.slurm}"
 
 readonly submission_manifest="${AF_OUTPUT_ROOT}/d3_submission_manifest.json"
-module load "${AF_PYTHON_MODULE}"
+module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
 [[ -x "${AF_PYTHON}" ]] || { echo "missing Python: ${AF_PYTHON}" >&2; exit 2; }
 [[ -f "${AF_PROPOSER_ANALYSIS}" ]] || { echo "missing proposer analysis" >&2; exit 2; }
 [[ -f "${AF_D3_JOB}" ]] || { echo "missing D3 job" >&2; exit 2; }
@@ -52,7 +53,7 @@ readonly d3_indices="$(
     "${AF_OUTPUT_ROOT}/frozen/task_plan.jsonl" | paste -sd, -
 )"
 [[ -n "${d3_indices}" ]] || { echo "baseline plan has no D3 tasks" >&2; exit 2; }
-readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_CALIBRATION_CONFIG=${AF_PROPOSER_PLAN},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_VLLM_IMAGE_URI=${AF_VLLM_IMAGE_URI},AF_HF_HOME=${AF_HF_HOME}"
+readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_CALIBRATION_CONFIG=${AF_PROPOSER_PLAN},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_VLLM_IMAGE_URI=${AF_VLLM_IMAGE_URI},AF_HF_HOME=${AF_HF_HOME}"
 image_submission="$(
   sbatch --parsable \
     --account="${AF_ACES_ACCOUNT}" \

@@ -8,7 +8,8 @@ set -euo pipefail
 : "${AF_ACES_ACCOUNT:=156264627414}"
 : "${AF_REPO_ROOT:=$(pwd)}"
 : "${AF_PYTHON:=${AF_REPO_ROOT}/.venv/bin/python}"
-: "${AF_PYTHON_MODULE:=Python/3.11.5-GCCcore-13.2.0}"
+: "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
+: "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_PUBLIC_DATA_ROOT:=${PROJECT}/phase_b/inputs/public-prompt-v3}"
 : "${AF_TARGET_CONTRACT_ROOT:=${AF_REPO_ROOT}/configs/target_eval/phase_b_v1}"
 : "${AF_OUTPUT_ROOT:=${SCRATCH}/phase_b/proposer-transport-calibration-v1-aces-h100x2}"
@@ -22,7 +23,7 @@ set -euo pipefail
 : "${AF_ANALYSIS_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_proposer_transport_calibration_analysis_aces.slurm}"
 
 readonly submission_manifest="${AF_OUTPUT_ROOT}/submission_manifest.json"
-module load "${AF_PYTHON_MODULE}"
+module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
 [[ -x "${AF_PYTHON}" ]] || { echo "missing Python: ${AF_PYTHON}" >&2; exit 2; }
 [[ -d "${AF_PUBLIC_DATA_ROOT}" ]] || { echo "missing public data overlay: ${AF_PUBLIC_DATA_ROOT}" >&2; exit 2; }
 [[ -d "${AF_TARGET_CONTRACT_ROOT}" ]] || { echo "missing target contracts: ${AF_TARGET_CONTRACT_ROOT}" >&2; exit 2; }
@@ -53,7 +54,7 @@ fi
 "${AF_PYTHON}" scripts/prepare_phase_b_proposer_transport_calibration.py \
   "${prepare_arguments[@]}"
 
-readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_CALIBRATION_CONFIG=${AF_CALIBRATION_CONFIG},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_VLLM_IMAGE_URI=${AF_VLLM_IMAGE_URI},AF_HF_HOME=${AF_HF_HOME}"
+readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_CALIBRATION_CONFIG=${AF_CALIBRATION_CONFIG},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_VLLM_IMAGE_URI=${AF_VLLM_IMAGE_URI},AF_HF_HOME=${AF_HF_HOME}"
 image_submission="$(
   sbatch --parsable \
     --account="${AF_ACES_ACCOUNT}" \
@@ -80,7 +81,7 @@ analysis_submission="$(
     --dependency="afterany:${calibration_job_id}" \
     --output="${AF_REPO_ROOT}/logs/proposer-cal-analysis-%j.out" \
     --error="${AF_REPO_ROOT}/logs/proposer-cal-analysis-%j.err" \
-    --export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT}" \
+    --export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT}" \
     "${AF_ANALYSIS_JOB}"
 )"
 readonly analysis_job_id="${analysis_submission%%;*}"

@@ -13,7 +13,8 @@ set -euo pipefail
 
 : "${AF_REPO_ROOT:?AF_REPO_ROOT is required}"
 : "${AF_PYTHON:?AF_PYTHON is required}"
-: "${AF_PYTHON_MODULE:=Python/3.11.5-GCCcore-13.2.0}"
+: "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
+: "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_PUBLIC_DATA_ROOT:?AF_PUBLIC_DATA_ROOT is required}"
 : "${AF_OUTPUT_ROOT:?AF_OUTPUT_ROOT is required}"
 : "${AF_VLLM_IMAGE:?AF_VLLM_IMAGE is required}"
@@ -43,7 +44,7 @@ readonly endpoint_port="${AF_VLLM_PORT:-$((8300 + AF_TASK_INDEX))}"
 readonly endpoint="http://127.0.0.1:${endpoint_port}"
 readonly server_log="${AF_OUTPUT_ROOT}/vllm-d3-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID}}-${AF_TASK_INDEX}.log"
 
-module load "${AF_PYTHON_MODULE}"
+module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
 module load WebProxy
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS=1
