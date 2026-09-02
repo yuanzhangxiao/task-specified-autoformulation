@@ -9,6 +9,9 @@ set -euo pipefail
 : "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
 : "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_ACES_ACCOUNT:=156264627414}"
+: "${AF_ACES_GRES:=gpu:h100:2}"
+: "${AF_TENSOR_PARALLEL_SIZE:=2}"
+: "${AF_REFINEMENT_DEPENDENCY:=afterany}"
 : "${AF_PUBLIC_DATA_ROOT:=${SCRATCH}/phase_b/inputs/public-prompt-v3}"
 : "${AF_OUTPUT_ROOT:=${SCRATCH}/phase_b/proposer-refinement-pilot-v1-aces-h100x2}"
 : "${AF_REFINEMENT_CONFIG:=${AF_REPO_ROOT}/configs/phase_b_proposer_refinement_pilot_v1.json}"
@@ -21,6 +24,18 @@ set -euo pipefail
 : "${AF_SUMMARY_JOB:=${AF_REPO_ROOT}/scripts/hpc/phase_b_proposer_refinement_pilot_summary_aces.slurm}"
 
 readonly submission_manifest="${AF_OUTPUT_ROOT}/submission_manifest.json"
+[[ "${AF_TENSOR_PARALLEL_SIZE}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "invalid tensor-parallel size: ${AF_TENSOR_PARALLEL_SIZE}" >&2
+  exit 2
+}
+[[ "${AF_ACES_GRES}" == "gpu:h100:${AF_TENSOR_PARALLEL_SIZE}" ]] || {
+  echo "GPU request and tensor-parallel size differ" >&2
+  exit 2
+}
+[[ "${AF_REFINEMENT_DEPENDENCY}" =~ ^after(any|ok)$ ]] || {
+  echo "invalid refinement dependency: ${AF_REFINEMENT_DEPENDENCY}" >&2
+  exit 2
+}
 module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
 for path in \
   "${AF_PYTHON}" \
@@ -66,10 +81,11 @@ readonly exploratory_end=$((matched_count - 1))
 readonly refinement_start="${matched_count}"
 readonly refinement_end=$((task_count - 1))
 
-readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_MECHANISM_SPEC_ROOT=${AF_MECHANISM_SPEC_ROOT},AF_JUDGE_PROTOCOL=${AF_JUDGE_PROTOCOL},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_REFINEMENT_CONFIG=${AF_REFINEMENT_CONFIG},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_HF_HOME=${AF_HF_HOME}"
+readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_MECHANISM_SPEC_ROOT=${AF_MECHANISM_SPEC_ROOT},AF_JUDGE_PROTOCOL=${AF_JUDGE_PROTOCOL},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_REFINEMENT_CONFIG=${AF_REFINEMENT_CONFIG},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_HF_HOME=${AF_HF_HOME},AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}"
 exploratory_submission="$(
   sbatch --parsable \
     --account="${AF_ACES_ACCOUNT}" \
+    --gres="${AF_ACES_GRES}" \
     --array="0-${exploratory_end}%2" \
     --output="${AF_REPO_ROOT}/logs/proposer-refinement-explore-%A_%a.out" \
     --error="${AF_REPO_ROOT}/logs/proposer-refinement-explore-%A_%a.err" \
@@ -80,8 +96,9 @@ readonly exploratory_job="${exploratory_submission%%;*}"
 refinement_submission="$(
   sbatch --parsable \
     --account="${AF_ACES_ACCOUNT}" \
+    --gres="${AF_ACES_GRES}" \
     --array="${refinement_start}-${refinement_end}%2" \
-    --dependency="afterany:${exploratory_job}" \
+    --dependency="${AF_REFINEMENT_DEPENDENCY}:${exploratory_job}" \
     --output="${AF_REPO_ROOT}/logs/proposer-refinement-incumbent-%A_%a.out" \
     --error="${AF_REPO_ROOT}/logs/proposer-refinement-incumbent-%A_%a.err" \
     --export="${common_export}" \
@@ -106,10 +123,16 @@ jq -n \
   --arg refinement_job "${refinement_job}" \
   --arg summary_job "${summary_job}" \
   --arg plan_sha256 "$(sha256sum "${AF_OUTPUT_ROOT}/frozen/plan.json" | awk '{print $1}')" \
+  --arg requested_gres "${AF_ACES_GRES}" \
+  --arg tensor_parallel_size "${AF_TENSOR_PARALLEL_SIZE}" \
+  --arg refinement_dependency "${AF_REFINEMENT_DEPENDENCY}" \
   '{
     schema_version: "phase-b-proposer-refinement-pilot-submission-1",
     submitted_at_utc: $submitted_at_utc,
-    platform: "aces-h100x2",
+    platform: ("aces-h100x" + $tensor_parallel_size),
+    requested_gres: $requested_gres,
+    tensor_parallel_size: ($tensor_parallel_size | tonumber),
+    refinement_dependency: $refinement_dependency,
     exploratory_job: $exploratory_job,
     refinement_job: $refinement_job,
     summary_job: $summary_job,

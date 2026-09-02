@@ -37,6 +37,25 @@ def test_repository_refinement_plan_is_matched_and_public_only() -> None:
     assert plan.private_reference_opened is False
 
 
+def test_repository_refinement_smoke_is_one_matched_two_round_trial() -> None:
+    plan = load_refinement_pilot_plan(
+        Path("configs/phase_b_proposer_refinement_smoke_v1.json")
+    )
+    tasks = build_refinement_pilot_tasks(plan)
+
+    assert len(tasks) == 2
+    assert [item.arm_id for item in tasks] == [
+        "rich_exploratory",
+        "rich_incumbent_refinement",
+    ]
+    assert [item.task_index for item in tasks] == [0, 1]
+    assert plan.repetitions == (0,)
+    assert plan.search_budget.iteration_budget == 2
+    assert plan.development_only is True
+    assert plan.test_data_opened is False
+    assert plan.private_reference_opened is False
+
+
 def test_freeze_validates_public_inputs_and_writes_hash_ledger(
     tmp_path: Path,
 ) -> None:
@@ -110,3 +129,17 @@ def test_aces_worker_uses_portable_resource_timing() -> None:
     text = worker.read_text(encoding="utf-8")
     assert "scripts/run_with_resource_timing.py" in text
     assert "/usr/bin/time" not in text
+
+
+def test_aces_submitter_supports_consistent_single_gpu_smoke() -> None:
+    submitter = Path(
+        "scripts/hpc/submit_phase_b_proposer_refinement_pilot_aces.sh"
+    )
+    subprocess.run(["bash", "-n", str(submitter)], check=True)
+    text = submitter.read_text(encoding="utf-8")
+
+    assert 'AF_ACES_GRES:=gpu:h100:2' in text
+    assert 'AF_TENSOR_PARALLEL_SIZE:=2' in text
+    assert '--gres="${AF_ACES_GRES}"' in text
+    assert 'AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}' in text
+    assert '${AF_REFINEMENT_DEPENDENCY}:${exploratory_job}' in text
