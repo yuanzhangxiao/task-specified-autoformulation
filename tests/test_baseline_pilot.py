@@ -340,6 +340,7 @@ def test_delta_baseline_launchers_are_cpu_only_and_dependency_safe() -> None:
     assert '== "delta_cpu"' in worker
     assert "--development-only" in worker
     assert "--sindy-thresholds" in worker
+    assert "AF_SOURCE_CODE_COMMIT" in worker
     submit = DELTA_SUBMIT.read_text(encoding="utf-8")
     assert 'dependency="afterok:${prepare_job_id}"' in submit
     assert 'dependency="afterany:${sindy_job_id}:${pysr_job_id}"' in submit

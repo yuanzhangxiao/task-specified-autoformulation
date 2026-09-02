@@ -81,7 +81,7 @@ readonly pysr_indices="$(
   exit 2
 }
 
-readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_JULIA_DEPOT=${AF_JULIA_DEPOT}"
+readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_JULIA_DEPOT=${AF_JULIA_DEPOT},AF_SOURCE_CODE_COMMIT=${source_code_commit}"
 prepare_submission="$(
   sbatch --parsable \
     --account=bibo-delta-cpu \

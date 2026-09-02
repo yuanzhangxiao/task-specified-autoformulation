@@ -53,7 +53,7 @@ mv "${retry_audit}.tmp" "${retry_audit}"
 readonly persistence_indices="$(jq -r '.incomplete_indices_by_method.persistence | join(",")' "${retry_audit}")"
 readonly sindy_indices="$(jq -r '.incomplete_indices_by_method.sindy | join(",")' "${retry_audit}")"
 readonly pysr_indices="$(jq -r '.incomplete_indices_by_method.pysr | join(",")' "${retry_audit}")"
-readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_JULIA_DEPOT=${AF_JULIA_DEPOT}"
+readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_JULIA_DEPOT=${AF_JULIA_DEPOT},AF_SOURCE_CODE_COMMIT=${source_code_commit}"
 
 dependency_ids=()
 prepare_job_id=""

@@ -18,6 +18,18 @@ set -euo pipefail
 : "${AF_JULIA_DEPOT:?AF_JULIA_DEPOT is required}"
 : "${AF_TASK_INDEX:=${SLURM_ARRAY_TASK_ID:-0}}"
 
+if [[ -n "${AF_SOURCE_CODE_COMMIT:-}" ]]; then
+  [[ "$(git -C "${AF_REPO_ROOT}" rev-parse HEAD)" == "${AF_SOURCE_CODE_COMMIT}" ]] || {
+    echo "worker checkout differs from submitted commit ${AF_SOURCE_CODE_COMMIT}" >&2
+    exit 2
+  }
+  git -C "${AF_REPO_ROOT}" diff --quiet && \
+    git -C "${AF_REPO_ROOT}" diff --cached --quiet || {
+      echo "worker checkout has tracked changes" >&2
+      exit 2
+    }
+fi
+
 readonly task_plan="${AF_OUTPUT_ROOT}/frozen/task_plan.jsonl"
 readonly task="$(sed -n "$((AF_TASK_INDEX + 1))p" "${task_plan}")"
 [[ -n "${task}" ]] || { echo "missing baseline task ${AF_TASK_INDEX}" >&2; exit 2; }
