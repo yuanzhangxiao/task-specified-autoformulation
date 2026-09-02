@@ -1,0 +1,77 @@
+{
+  "schema_version": "phase-b-proposer-refinement-pilot-plan-1",
+  "status": "frozen_before_search_calls",
+  "purpose": "Matched public-only comparison of feedback-rich exploratory proposals and feedback-rich incumbent refinement under identical round-zero candidates, judge guidance, seeds, and bounded nonlinear fitting",
+  "development_only": true,
+  "test_data_opened": false,
+  "private_reference_opened": false,
+  "weighted_overall_score_defined": false,
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "public_target_contract_sha256": "cfbd142e80ee843a0ac674fb3a2daa4dd4187b9c4350de72262fb42bcacafd26",
+      "public_mechanism_spec_sha256": "842b072657cbc0c8740d9b995e320218746e4bf759a34da0b94cfb6d6eaad399"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+      "public_target_contract_sha256": "3656f87507f48ee11fb8ace52afbac1c9186e8c18aaca8d5efc086b348d0d40a",
+      "public_mechanism_spec_sha256": "ba56c7ed208f7015bb173321e15f4734669c6ad918facaaa16413ab5e360f080"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "arms": [
+    {
+      "arm_id": "rich_exploratory",
+      "proposer_feedback_mode": "rich_v1",
+      "proposal_policy": "exploratory",
+      "require_shared_round_zero_cache_hit": false
+    },
+    {
+      "arm_id": "rich_incumbent_refinement",
+      "proposer_feedback_mode": "rich_v1",
+      "proposal_policy": "incumbent_refinement_v1",
+      "require_shared_round_zero_cache_hit": true
+    }
+  ],
+  "model_contract": {
+    "model": "openai/gpt-oss-120b",
+    "proposer_reasoning_effort": "medium",
+    "judge_reasoning_effort": "low",
+    "temperature": 0.2,
+    "proposer_max_output_tokens": 24576,
+    "served_context_tokens": 65536,
+    "request_timeout_seconds": 1200,
+    "judge_protocol_config_sha256": "8823138b1652354f7f577ef0f07fc5c6533813d68cbeddc528cf104bfe9a0fe2"
+  },
+  "search_budget": {
+    "iteration_budget": 4,
+    "beam_size": 1,
+    "fit_starts": 1,
+    "fit_max_nfev": 50,
+    "fit_timeout_seconds": 300,
+    "fit_retry_starts": 2,
+    "fit_retry_max_nfev": 150,
+    "fit_retry_timeout_seconds": 600,
+    "final_fit_max_nfev": 150,
+    "final_fit_timeout_seconds": 600,
+    "parameter_fit_strategy": "bounded_nonlinear"
+  },
+  "reported_endpoints": [
+    "source_completion",
+    "round_zero_cache_identity",
+    "proposal_transport",
+    "runtime_validity",
+    "public_target_completeness",
+    "public_mechanism_compliance",
+    "fit_success_and_recovery",
+    "public_training_nmse",
+    "public_validation_nmse",
+    "incumbent_replacement_path",
+    "model_complexity",
+    "llm_and_hardware_resource_use"
+  ]
+}

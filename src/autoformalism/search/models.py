@@ -19,7 +19,8 @@ SelectionPolicy = Literal[
     "normalized_weighted_sum",
     "incumbent_relative_hybrid",
 ]
-ProposerFeedbackMode = Literal["legacy", "structured"]
+ProposerFeedbackMode = Literal["legacy", "structured", "rich_v1"]
+ProposalPolicy = Literal["exploratory", "incumbent_refinement_v1"]
 
 
 class IncumbentChallenge(StrictSchema):
@@ -54,6 +55,7 @@ class SearchConfig(BaseModel):
     cheap_prefit_judge: bool = False
     use_judge: bool = True
     proposer_feedback_mode: ProposerFeedbackMode = "legacy"
+    proposal_policy: ProposalPolicy = "exploratory"
     require_initial_proposer_cache_hit: bool = False
     selection_policy: SelectionPolicy = "validation_only"
     judge_weight: float = Field(default=0.25, ge=0.0)
@@ -73,10 +75,13 @@ class SearchConfig(BaseModel):
         """Enforce judge, beam, and split boundaries for selection policies."""
         if self.selection_policy != "validation_only" and not self.use_judge:
             raise ValueError(f"{self.selection_policy} requires use_judge=True")
-        if self.require_initial_proposer_cache_hit and self.use_judge:
-            raise ValueError(
-                "initial proposer cache enforcement is reserved for no-judge arms"
-            )
+        if self.proposal_policy == "incumbent_refinement_v1":
+            if self.proposer_feedback_mode != "rich_v1":
+                raise ValueError(
+                    "incumbent_refinement_v1 requires proposer_feedback_mode=rich_v1"
+                )
+            if self.beam_size != 1:
+                raise ValueError("incumbent_refinement_v1 requires beam_size=1")
         if (
             self.selection_policy == "incumbent_relative_hybrid"
             and self.beam_size != 1

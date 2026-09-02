@@ -30,6 +30,10 @@ from autoformalism.fitting import (
 from autoformalism.llm import LLMClient
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.pruning import prune_candidate
+from autoformalism.rebuttal.mechanisms import (
+    MechanismEvaluationSpec,
+    evaluate_mechanisms,
+)
 from autoformalism.schemas import (
     CandidateModel,
     JudgeAssessment,
@@ -90,6 +94,7 @@ class SearchController:
         config: SearchConfig,
         pairwise_judge: PairwiseScientificJudge | None = None,
         public_target_contract: PublicTargetContract | None = None,
+        public_mechanism_spec: MechanismEvaluationSpec | None = None,
         stage_callback: StageCallback | None = None,
     ) -> None:
         if training.name is not SplitName.TRAIN:
@@ -104,6 +109,7 @@ class SearchController:
         self._config = config
         self._pairwise_judge = pairwise_judge
         self._public_target_contract = public_target_contract
+        self._public_mechanism_spec = public_mechanism_spec
         if public_target_contract is not None:
             contract_targets = {
                 item.target_channel for item in public_target_contract.targets
@@ -210,17 +216,24 @@ class SearchController:
 
         if stage == "new":
             feedback = self._proposer_feedback(beam, round_index)
+            proposal_mode = _proposal_mode(self._config, round_index, beam)
+            request_payload: dict[str, object] = {
+                "round": round_index,
+                "proposal_mode": proposal_mode,
+                "beam_feedback": feedback,
+            }
+            if self._config.proposer_feedback_mode == "rich_v1":
+                request_payload["feedback_schema_version"] = (
+                    "proposer-feedback-rich-1"
+                )
+            if proposal_mode == "incumbent_refinement":
+                request_payload["refinement_contract"] = (
+                    _refinement_contract(beam[0])
+                )
             try:
                 proposal_arguments = {
                     "system_prompt": self._config.proposer_system_prompt,
-                    "user_prompt": json.dumps(
-                        {
-                            "round": round_index,
-                            "proposal_mode": "exploratory",
-                            "beam_feedback": feedback,
-                        },
-                        sort_keys=True,
-                    ),
+                    "user_prompt": json.dumps(request_payload, sort_keys=True),
                 }
                 if (
                     round_index == 0
@@ -245,9 +258,23 @@ class SearchController:
             proposal, repairs = repair_protected_declarations(
                 raw_proposal, self._context
             )
-            if repairs:
+            repair_messages = list(repairs)
+            if (
+                self._config.proposal_policy == "incumbent_refinement_v1"
+                and beam
+            ):
+                expected_parent = beam[0].pruned_candidate.candidate_id
+                if proposal.parent_candidate_id != expected_parent:
+                    proposal = proposal.model_copy(
+                        update={"parent_candidate_id": expected_parent}
+                    )
+                    repair_messages.append(
+                        "bound refinement lineage to active incumbent: "
+                        f"{expected_parent}"
+                    )
+            if repair_messages:
                 payload["raw_candidate"] = raw_proposal.model_dump(mode="json")
-                payload["deterministic_repairs"] = list(repairs)
+                payload["deterministic_repairs"] = repair_messages
             payload["candidate"] = proposal.model_dump(mode="json")
             stage = self._save_stage(round_index, payload, "proposed")
         candidate = CandidateModel.model_validate(payload["candidate"])
@@ -620,14 +647,44 @@ class SearchController:
                     ),
                 }
             )
-            if self._config.proposer_feedback_mode == "structured":
+            if self._config.proposer_feedback_mode in {"structured", "rich_v1"}:
                 feedback[-1]["deterministic_runtime"] = (
                     _deterministic_runtime_feedback(
                         record.pruned_candidate,
                         fit,
                         self._public_target_contract,
+                        self._public_mechanism_spec,
                     )
                 )
+            if self._config.proposer_feedback_mode == "rich_v1":
+                feedback[-1]["feedback_schema_version"] = (
+                    "proposer-feedback-rich-1"
+                )
+                feedback[-1]["incumbent_snapshot"] = (
+                    _candidate_refinement_snapshot(record.pruned_candidate)
+                )
+                feedback[-1]["per_target_error"] = {
+                    "training_normalized_mse": dict(
+                        fit.training_metrics.per_target_normalized_mse
+                    ),
+                    "validation_normalized_mse": dict(
+                        fit.validation_metrics.per_target_normalized_mse
+                    ),
+                }
+                feedback[-1]["soft_constraint_violations"] = {
+                    "training": {
+                        key: dict(value)
+                        for key, value in (
+                            fit.training_metrics.soft_constraint_violations.items()
+                        )
+                    },
+                    "validation": {
+                        key: dict(value)
+                        for key, value in (
+                            fit.validation_metrics.soft_constraint_violations.items()
+                        )
+                    },
+                }
             if (
                 not self._config.use_judge
                 or self._config.selection_policy == "incumbent_relative_hybrid"
@@ -680,7 +737,11 @@ class SearchController:
                         "operators, state set, or algebraic mechanisms."
                     ),
                 }
-                if self._config.proposer_feedback_mode != "structured":
+                if self._config.proposer_feedback_mode == "rich_v1":
+                    feedback[0]["recent_rejected_candidate"][
+                        "candidate_snapshot"
+                    ] = _candidate_refinement_snapshot(candidate)
+                if self._config.proposer_feedback_mode == "legacy":
                     feedback[0]["recent_rejected_candidate"].pop(
                         "deterministic_validation_diagnostics"
                     )
@@ -774,8 +835,15 @@ class SearchController:
                         "rejected_before_fit": rejected_fit is None,
                     }
                 )
-                if self._config.proposer_feedback_mode != "structured":
+                if self._config.proposer_feedback_mode == "legacy":
                     feedback[-1].pop("deterministic_runtime")
+                elif self._config.proposer_feedback_mode == "rich_v1":
+                    feedback[-1]["feedback_schema_version"] = (
+                        "proposer-feedback-rich-1"
+                    )
+                    feedback[-1]["candidate_snapshot"] = (
+                        _candidate_refinement_snapshot(candidate)
+                    )
                 remaining -= 1
                 if remaining == 0:
                     break
@@ -807,7 +875,7 @@ class SearchController:
                 challenge.selected_hash == incumbent_hash
                 and record.structural_hash != incumbent_hash
             ):
-                return {
+                feedback: dict[str, object] = {
                     "candidate_id": record.pruned_candidate.candidate_id,
                     "eligible_parent": False,
                     "equations": {
@@ -821,6 +889,27 @@ class SearchController:
                         "not an eligible parent."
                     ),
                 }
+                if self._config.proposer_feedback_mode == "rich_v1":
+                    feedback["candidate_snapshot"] = (
+                        _candidate_refinement_snapshot(record.pruned_candidate)
+                    )
+                    feedback["per_target_error"] = {
+                        "training_normalized_mse": dict(
+                            record.pruned_fit.training_metrics.per_target_normalized_mse
+                        ),
+                        "validation_normalized_mse": dict(
+                            record.pruned_fit.validation_metrics.per_target_normalized_mse
+                        ),
+                    }
+                    feedback["deterministic_runtime"] = (
+                        _deterministic_runtime_feedback(
+                            record.pruned_candidate,
+                            record.pruned_fit,
+                            self._public_target_contract,
+                            self._public_mechanism_spec,
+                        )
+                    )
+                return feedback
             return None
         return None
 
@@ -1001,6 +1090,11 @@ class SearchController:
                 None
                 if self._public_target_contract is None
                 else self._public_target_contract.model_dump(mode="json")
+            ),
+            "public_mechanism_spec": (
+                None
+                if self._public_mechanism_spec is None
+                else self._public_mechanism_spec.model_dump(mode="json")
             ),
             "context": self._context.model_dump(mode="json"),
             "splits": {
@@ -1230,6 +1324,7 @@ def _deterministic_runtime_feedback(
     candidate: CandidateModel,
     fit: FitResult,
     public_target_contract: PublicTargetContract | None,
+    public_mechanism_spec: MechanismEvaluationSpec | None,
 ) -> dict[str, object]:
     """Expose actionable certified facts without test data or hidden contracts."""
     target_evaluation = (
@@ -1239,9 +1334,17 @@ def _deterministic_runtime_feedback(
             mode="json"
         )
     )
+    mechanism_evaluation = (
+        None
+        if public_mechanism_spec is None
+        else evaluate_mechanisms(candidate, public_mechanism_spec).model_dump(
+            mode="json"
+        )
+    )
     return {
         "candidate_validation": "passed",
         "public_target_evaluation": target_evaluation,
+        "public_mechanism_evaluation": mechanism_evaluation,
         "fit": {
             "success": fit.success,
             "message": fit.message,
@@ -1249,6 +1352,19 @@ def _deterministic_runtime_feedback(
             "optimizer_messages": [
                 item.message for item in fit.diagnostics if item.message
             ],
+            "function_evaluations": sum(
+                item.function_evaluations for item in fit.diagnostics
+            ),
+            "integration_failures": sum(
+                item.integration_failures for item in fit.diagnostics
+            ),
+            "integration_failure_messages": sorted(
+                {
+                    message
+                    for item in fit.diagnostics
+                    for message in item.integration_failure_messages
+                }
+            )[:10],
             "parameters_at_lower_bound": sorted(
                 {
                     parameter
@@ -1270,6 +1386,88 @@ def _deterministic_runtime_feedback(
                 fit.validation_metrics.failed_trajectories
             ),
         },
+    }
+
+
+def _candidate_refinement_snapshot(candidate: CandidateModel) -> dict[str, object]:
+    """Render the complete bounded structure needed for an informed revision."""
+    equations = {item.state: item.rhs for item in candidate.state_equations}
+    initials = {
+        item.state: item.model_dump(mode="json")
+        for item in candidate.initial_conditions
+    }
+    constraints: dict[str, list[dict[str, object]]] = {}
+    for constraint in candidate.constraints:
+        constraints.setdefault(constraint.subject, []).append(
+            constraint.model_dump(mode="json")
+        )
+    return {
+        "candidate_id": candidate.candidate_id,
+        "parent_candidate_id": candidate.parent_candidate_id,
+        "change_summary": candidate.change_summary,
+        "states": [
+            {
+                **item.model_dump(mode="json"),
+                "rhs": equations[item.name],
+                "initial": initials.get(item.name),
+                "constraints": constraints.get(item.name, []),
+            }
+            for item in candidate.states
+        ],
+        "algebraics": [
+            {
+                **item.model_dump(mode="json"),
+                "constraints": constraints.get(item.name, []),
+            }
+            for item in candidate.processes
+        ],
+        "observation_mappings": [
+            item.model_dump(mode="json") for item in candidate.observation_mappings
+        ],
+        "parameters": [
+            item.model_dump(mode="json") for item in candidate.parameters
+        ],
+    }
+
+
+def _proposal_mode(
+    config: SearchConfig,
+    round_index: int,
+    beam: Sequence[CandidateRecord],
+) -> str:
+    """Choose a request mode without changing the shared round-zero request."""
+    if (
+        config.proposal_policy == "incumbent_refinement_v1"
+        and round_index > 0
+        and beam
+    ):
+        return "incumbent_refinement"
+    if round_index > 0 and not beam:
+        return "feedback_guided_recovery"
+    return "exploratory"
+
+
+def _refinement_contract(record: CandidateRecord) -> dict[str, object]:
+    """Describe a relaxed, feedback-motivated refinement of one incumbent."""
+    return {
+        "schema_version": "incumbent-refinement-contract-1",
+        "required_parent_candidate_id": record.pruned_candidate.candidate_id,
+        "output_contract": "return_one_complete_candidate_not_a_patch",
+        "edit_policy": (
+            "Make the smallest coherent set of structural edits that addresses "
+            "the supplied failures. Multiple related edits are allowed. Preserve "
+            "validated mechanisms and equations unless changing them is necessary "
+            "for the stated repair, and explain every intentional change in "
+            "change_summary. Numeric parameter values are still fitted by runtime."
+        ),
+        "priority_order": [
+            "deterministic_contract_failures",
+            "integration_or_optimizer_failures",
+            "worst_validation_target",
+            "public_mechanism_predicate_failures",
+            "question_level_scientific_feedback",
+            "parsimony",
+        ],
     }
 
 

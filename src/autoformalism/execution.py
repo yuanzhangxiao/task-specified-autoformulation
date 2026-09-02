@@ -43,6 +43,7 @@ from autoformalism.llm import (
     create_llm_client,
 )
 from autoformalism.pruning import PruningConfig
+from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
 from autoformalism.schemas import CandidateModel, ScientificJudgeResult
 from autoformalism.search import FinalEvaluation, SearchConfig, SearchController
 from autoformalism.search.hybrid_pair import PairedHybridJudge
@@ -103,6 +104,21 @@ Beam feedback includes structured deterministic-runtime findings and, when the
 judge is enabled, question-level scientific assessments with evidence. Repair the
 specific failed predicates and scientific concerns; do not respond only to the
 aggregate NMSE or final preference.
+""".strip()
+
+_RICH_PROPOSER_FEEDBACK_PROMPT = """
+Beam feedback follows `proposer-feedback-rich-1`. It includes a complete compact
+snapshot of the current candidate, per-target train/validation errors,
+deterministic target and public-mechanism predicates, numerical diagnostics,
+pruning outcomes, and question-level paired scientific evidence when available.
+Use the specific evidence rather than responding only to aggregate NMSE.
+
+Follow the request's `proposal_mode`. In `incumbent_refinement` mode, return one
+complete candidate (not a patch), set `parent_candidate_id` to the required
+incumbent, and make a coherent feedback-motivated revision. Multiple related
+edits are allowed. Preserve validated components unless their modification is
+needed for the repair, and enumerate intentional changes in `change_summary`.
+The runtime—not the proposer—continues to fit numeric parameter values.
 """.strip()
 
 _EXACT_DERIVATIVE_GMM_PROMPT = """
@@ -183,7 +199,10 @@ class ExecutionArguments:
     final_fit_retry_max_nfev: int | None = None
     final_fit_retry_timeout_seconds: float | None = None
     use_judge: bool = True
-    proposer_feedback_mode: Literal["legacy", "structured"] = "legacy"
+    proposer_feedback_mode: Literal["legacy", "structured", "rich_v1"] = "legacy"
+    proposal_policy: Literal["exploratory", "incumbent_refinement_v1"] = (
+        "exploratory"
+    )
     forbid_latent_states: bool = False
     use_derivative_fit_fast_path: bool = True
     parameter_fit_strategy: Literal[
@@ -205,6 +224,7 @@ class ExecutionArguments:
     hybrid_science_weight: float = 0.5
     hybrid_judge_seed_base: int | None = None
     public_target_contract: Path | None = None
+    public_mechanism_spec: Path | None = None
     vllm_base_url: str = "http://127.0.0.1:8000"
     vllm_reasoning_effort: VLLMReasoningEffort = VLLMReasoningEffort.LOW
     vllm_proposer_reasoning_effort: VLLMReasoningEffort | None = None
@@ -476,11 +496,21 @@ def build_experiment_parser(
     )
     parser.add_argument(
         "--proposer-feedback-mode",
-        choices=("legacy", "structured"),
+        choices=("legacy", "structured", "rich_v1"),
         default="legacy",
         help=(
             "feedback payload supplied to proposals after round zero; "
-            "structured adds deterministic-runtime findings"
+            "structured adds deterministic-runtime findings and rich_v1 adds "
+            "complete incumbent, per-target, mechanism, and numerical evidence"
+        ),
+    )
+    parser.add_argument(
+        "--proposal-policy",
+        choices=("exploratory", "incumbent_refinement_v1"),
+        default="exploratory",
+        help=(
+            "how rounds after round zero use feedback; incumbent_refinement_v1 "
+            "binds each complete proposal to the active beam-one incumbent"
         ),
     )
     parser.add_argument(
@@ -497,6 +527,14 @@ def build_experiment_parser(
         help=(
             "prompt-committed deterministic target contract; candidates that "
             "violate it are rejected before fitting"
+        ),
+    )
+    parser.add_argument(
+        "--public-mechanism-spec",
+        type=Path,
+        help=(
+            "prompt-committed deterministic public-mechanism specification used "
+            "only to provide predicate-level proposer feedback"
         ),
     )
     parser.add_argument(
@@ -544,10 +582,6 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--hybrid-science-weight must be in [0, 1]")
     if namespace.selection_policy == "normalized_weighted_sum" and namespace.no_judge:
         raise SystemExit("--selection-policy normalized_weighted_sum requires judge")
-    if namespace.require_initial_proposer_cache_hit and not namespace.no_judge:
-        raise SystemExit(
-            "--require-initial-proposer-cache-hit is only valid with --no-judge"
-        )
     if (
         namespace.require_initial_proposer_cache_hit
         and namespace.llm_cache_root is None
@@ -610,6 +644,16 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--fit-timeout-seconds must be positive")
     if namespace.derivative_ridge_regularization < 0.0:
         raise SystemExit("--derivative-ridge-regularization must be nonnegative")
+    if namespace.proposal_policy == "incumbent_refinement_v1":
+        if namespace.proposer_feedback_mode != "rich_v1":
+            raise SystemExit(
+                "--proposal-policy incumbent_refinement_v1 requires "
+                "--proposer-feedback-mode rich_v1"
+            )
+        if namespace.beam_size != 1:
+            raise SystemExit(
+                "--proposal-policy incumbent_refinement_v1 requires --beam-size 1"
+            )
     if (
         namespace.parameter_fit_strategy == "exact_derivative_linear_ridge"
         and namespace.disable_derivative_fit_fast_path
@@ -669,6 +713,7 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         final_fit_retry_timeout_seconds=namespace.final_fit_retry_timeout_seconds,
         use_judge=not namespace.no_judge,
         proposer_feedback_mode=namespace.proposer_feedback_mode,
+        proposal_policy=namespace.proposal_policy,
         forbid_latent_states=namespace.forbid_latent_states,
         use_derivative_fit_fast_path=(not namespace.disable_derivative_fit_fast_path),
         parameter_fit_strategy=namespace.parameter_fit_strategy,
@@ -699,6 +744,11 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
             None
             if namespace.public_target_contract is None
             else namespace.public_target_contract.expanduser().resolve()
+        ),
+        public_mechanism_spec=(
+            None
+            if namespace.public_mechanism_spec is None
+            else namespace.public_mechanism_spec.expanduser().resolve()
         ),
         vllm_base_url=namespace.vllm_base_url,
         vllm_reasoning_effort=VLLMReasoningEffort(
@@ -756,6 +806,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         arguments,
         proposer_prompt=proposer_prompt,
         targets=dataset.roles.targets,
+    )
+    public_mechanism_spec = _load_public_mechanism_spec(
+        arguments,
+        proposer_prompt=proposer_prompt,
     )
     benchmark_spec = (
         None
@@ -825,6 +879,18 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
                 ).hexdigest(),
             }
         ),
+        "public_mechanism_spec": (
+            None
+            if public_mechanism_spec is None
+            else {
+                "path": str(arguments.public_mechanism_spec),
+                "schema_version": public_mechanism_spec.schema_version,
+                "public_prompt_sha256": public_mechanism_spec.public_prompt_sha256,
+                "contract_sha256": hashlib.sha256(
+                    arguments.public_mechanism_spec.read_bytes()
+                ).hexdigest(),
+            }
+        ),
         "llm_timeout_seconds": arguments.llm_timeout_seconds,
         "llm_max_output_tokens": arguments.llm_max_output_tokens,
         "fit_starts": arguments.fit_starts,
@@ -872,6 +938,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         ),
         "use_judge": arguments.use_judge,
         "proposer_feedback_mode": arguments.proposer_feedback_mode,
+        "proposal_policy": arguments.proposal_policy,
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
         "parameter_fit_strategy": arguments.parameter_fit_strategy,
@@ -918,6 +985,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         cheap_prefit_judge=False,
         use_judge=arguments.use_judge,
         proposer_feedback_mode=arguments.proposer_feedback_mode,
+        proposal_policy=arguments.proposal_policy,
         require_initial_proposer_cache_hit=(
             arguments.require_initial_proposer_cache_hit
         ),
@@ -997,6 +1065,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         config=search_config,
         pairwise_judge=pairwise_judge,
         public_target_contract=public_target_contract,
+        public_mechanism_spec=public_mechanism_spec,
     ).run()
     summary = _result_summary(arguments, result)
     (experiment_directory / "summary.json").write_text(
@@ -1093,6 +1162,40 @@ def _load_public_target_contract(
     if contract.public_prompt_sha256 != prompt_sha256:
         raise SystemExit("public target contract does not match proposer prompt")
     return contract
+
+
+def _load_public_mechanism_spec(
+    arguments: ExecutionArguments,
+    *,
+    proposer_prompt: str,
+) -> MechanismEvaluationSpec | None:
+    """Load public-only mechanism predicates for proposer feedback."""
+    path = arguments.public_mechanism_spec
+    if path is None:
+        return None
+    if not path.is_file():
+        raise SystemExit(f"public mechanism specification is missing: {path}")
+    try:
+        spec = MechanismEvaluationSpec.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+    except ValueError as exc:
+        raise SystemExit(
+            f"invalid public mechanism specification: {path}: {exc}"
+        ) from exc
+    if (spec.benchmark_id, spec.tier) != (
+        arguments.benchmark_id,
+        arguments.tier,
+    ):
+        raise SystemExit(
+            "public mechanism specification does not match benchmark/tier"
+        )
+    prompt_sha256 = hashlib.sha256(proposer_prompt.encode("utf-8")).hexdigest()
+    if spec.public_prompt_sha256 != prompt_sha256:
+        raise SystemExit(
+            "public mechanism specification does not match proposer prompt"
+        )
+    return spec
 
 
 def _load_inputs(
@@ -1197,9 +1300,11 @@ def _gmm_parameterization_prompt(arguments: ExecutionArguments) -> str:
 
 def _structured_proposer_feedback_prompt(arguments: ExecutionArguments) -> str:
     """Explain the opt-in structured feedback fields to the proposer."""
-    if arguments.proposer_feedback_mode != "structured":
-        return ""
-    return f"\n\n{_STRUCTURED_PROPOSER_FEEDBACK_PROMPT}"
+    if arguments.proposer_feedback_mode == "structured":
+        return f"\n\n{_STRUCTURED_PROPOSER_FEEDBACK_PROMPT}"
+    if arguments.proposer_feedback_mode == "rich_v1":
+        return f"\n\n{_RICH_PROPOSER_FEEDBACK_PROMPT}"
+    return ""
 
 
 def _validate_exact_derivative_experiment(

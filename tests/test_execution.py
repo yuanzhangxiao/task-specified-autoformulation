@@ -321,24 +321,25 @@ def test_cli_accepts_initial_cache_precondition_for_no_judge_arm(
     assert arguments.require_initial_proposer_cache_hit is True
 
 
-def test_cli_rejects_initial_cache_precondition_without_no_judge(
+def test_cli_accepts_initial_cache_precondition_with_judge(
     tmp_path: Path,
 ) -> None:
     parser = build_experiment_parser(description="test")
-
-    with pytest.raises(SystemExit, match="only valid with --no-judge"):
-        arguments_from_namespace(
-            parser.parse_args(
-                [
-                    "--dry-run",
-                    "--proposer-model",
-                    "vllm:example",
-                    "--llm-cache-root",
-                    str(tmp_path / "shared"),
-                    "--require-initial-proposer-cache-hit",
-                ]
-            )
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--dry-run",
+                "--proposer-model",
+                "vllm:example",
+                "--llm-cache-root",
+                str(tmp_path / "shared"),
+                "--require-initial-proposer-cache-hit",
+            ]
         )
+    )
+
+    assert arguments.use_judge is True
+    assert arguments.require_initial_proposer_cache_hit is True
 
 
 def test_cli_accepts_forbid_latent_states() -> None:
@@ -435,6 +436,62 @@ def test_structured_proposer_feedback_is_independent_and_opt_in(
     )
     plan = execute(structured)
     assert plan["proposer_feedback_mode"] == "structured"
+
+
+def test_rich_incumbent_refinement_is_separate_from_fitting_strategy(
+    tmp_path: Path,
+) -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--benchmark-id",
+                "synthetic",
+                "--data-root",
+                str(tmp_path),
+                "--beam-size",
+                "1",
+                "--proposer-feedback-mode",
+                "rich_v1",
+                "--proposal-policy",
+                "incumbent_refinement_v1",
+            ]
+        )
+    )
+
+    assert arguments.proposal_policy == "incumbent_refinement_v1"
+    assert arguments.parameter_fit_strategy == "bounded_nonlinear"
+    prompt = _structured_proposer_feedback_prompt(arguments)
+    assert "proposer-feedback-rich-1" in prompt
+    assert "return one\ncomplete candidate" in prompt
+    plan = execute(arguments)
+    assert plan["proposal_policy"] == "incumbent_refinement_v1"
+
+
+def test_incumbent_refinement_requires_rich_feedback_and_beam_one(
+    tmp_path: Path,
+) -> None:
+    parser = build_experiment_parser(description="test")
+    common = [
+        "--mock-llm",
+        "--dry-run",
+        "--benchmark-id",
+        "synthetic",
+        "--data-root",
+        str(tmp_path),
+        "--proposal-policy",
+        "incumbent_refinement_v1",
+    ]
+    with pytest.raises(SystemExit, match="requires --proposer-feedback-mode rich_v1"):
+        arguments_from_namespace(parser.parse_args([*common, "--beam-size", "1"]))
+    with pytest.raises(SystemExit, match="requires --beam-size 1"):
+        arguments_from_namespace(
+            parser.parse_args(
+                [*common, "--proposer-feedback-mode", "rich_v1"]
+            )
+        )
 
 
 def test_cli_rejects_nonpositive_timeout() -> None:

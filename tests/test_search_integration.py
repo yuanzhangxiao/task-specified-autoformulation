@@ -14,6 +14,10 @@ from autoformalism.fitting import FitConfig
 from autoformalism.llm import MockLLMClient
 from autoformalism.llm.exceptions import LLMCacheMissError, LLMResponseError
 from autoformalism.pruning import PruningConfig
+from autoformalism.rebuttal.mechanisms import (
+    MechanismEvaluationSpec,
+    MechanismRequirement,
+)
 from autoformalism.schemas import (
     AbsoluteCriterion,
     AbsoluteVerdict,
@@ -136,6 +140,7 @@ def _controller(
     callback=None,
     test_loader=None,
     pairwise_judge=None,
+    public_mechanism_spec=None,
 ) -> SearchController:
     return SearchController(
         llm_client=client,
@@ -149,7 +154,25 @@ def _controller(
         ),
         config=config,
         pairwise_judge=pairwise_judge,
+        public_mechanism_spec=public_mechanism_spec,
         stage_callback=callback,
+    )
+
+
+def _mechanism_spec() -> MechanismEvaluationSpec:
+    return MechanismEvaluationSpec(
+        source="public_prompt",
+        benchmark_id="synthetic",
+        tier="easy",
+        public_prompt_sha256="0" * 64,
+        required_mechanisms=(
+            MechanismRequirement(
+                id="decay",
+                public_requirement="a generated decay pathway",
+                tag_aliases=("decay",),
+                required_targets=("target",),
+            ),
+        ),
     )
 
 
@@ -579,6 +602,104 @@ def test_prefit_rejection_is_feedback_for_next_proposal(tmp_path: Path) -> None:
         "deterministic_validation"
     ][0]
     assert "test" not in json.dumps(rejection).lower()
+
+
+def test_rich_incumbent_refinement_binds_lineage_and_exposes_actionable_feedback(
+    tmp_path: Path,
+) -> None:
+    incumbent = _candidate(
+        "incumbent",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+    )
+    proposed_without_parent = _candidate(
+        "refined",
+        "-decay * x + offset",
+        (("decay", 0.2, 1.0), ("offset", -0.1, 0.1)),
+    )
+    client = MockLLMClient(
+        proposer_responses=[incumbent, proposed_without_parent],
+        judge_responses=[],
+    )
+    config = _config(tmp_path / "rich-refinement", 2).model_copy(
+        update={
+            "beam_size": 1,
+            "cheap_prefit_judge": False,
+            "use_judge": False,
+            "evaluate_test": False,
+            "proposer_feedback_mode": "rich_v1",
+            "proposal_policy": "incumbent_refinement_v1",
+        }
+    )
+
+    result = _controller(
+        client,
+        config,
+        public_mechanism_spec=_mechanism_spec(),
+    ).run()
+
+    prompts = [
+        json.loads(call["user_prompt"])
+        for call in client.calls
+        if call["role"] == "proposer"
+    ]
+    assert prompts[0]["proposal_mode"] == "exploratory"
+    assert prompts[1]["proposal_mode"] == "incumbent_refinement"
+    assert prompts[1]["feedback_schema_version"] == "proposer-feedback-rich-1"
+    assert prompts[1]["refinement_contract"][
+        "required_parent_candidate_id"
+    ] == "incumbent"
+    incumbent_feedback = prompts[1]["beam_feedback"][0]
+    assert incumbent_feedback["incumbent_snapshot"]["states"][0]["rhs"] == (
+        "-decay * x"
+    )
+    assert incumbent_feedback["per_target_error"][
+        "validation_normalized_mse"
+    ]["target"] >= 0.0
+    mechanism = incumbent_feedback["deterministic_runtime"][
+        "public_mechanism_evaluation"
+    ]
+    assert mechanism["mechanism_results"][0]["status"] == "failed"
+    assert "test" not in json.dumps(prompts[1]).lower()
+    second_checkpoint = json.loads(
+        (tmp_path / "rich-refinement" / "round_0001.json").read_text()
+    )
+    assert second_checkpoint["candidate"]["parent_candidate_id"] == "incumbent"
+    assert second_checkpoint["raw_candidate"]["parent_candidate_id"] is None
+    assert any(
+        "bound refinement lineage" in item
+        for item in second_checkpoint["deterministic_repairs"]
+    )
+    assert result.completed_iterations == 2
+
+
+def test_refinement_policy_preserves_identical_round_zero_request(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate("initial", "-0.6 * x", ())
+    prompts = []
+    for policy in ("exploratory", "incumbent_refinement_v1"):
+        client = MockLLMClient(proposer_responses=[candidate], judge_responses=[])
+        config = _config(tmp_path / policy, 1).model_copy(
+            update={
+                "beam_size": 1,
+                "cheap_prefit_judge": False,
+                "use_judge": False,
+                "evaluate_test": False,
+                "proposer_feedback_mode": "rich_v1",
+                "proposal_policy": policy,
+            }
+        )
+        _controller(client, config).run()
+        prompts.append(
+            next(
+                call["user_prompt"]
+                for call in client.calls
+                if call["role"] == "proposer"
+            )
+        )
+
+    assert prompts[0] == prompts[1]
 
 
 def test_no_judge_ablation_makes_no_judge_calls(tmp_path: Path) -> None:
