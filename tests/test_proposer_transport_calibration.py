@@ -584,6 +584,9 @@ def test_aces_launchers_are_valid_and_keep_calibration_sealed() -> None:
     assert "#SBATCH --time=02:00:00" in gpu
     assert "AF_TENSOR_PARALLEL_SIZE:=2" in gpu
     assert 'module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"' in gpu
+    assert 'NO_PROXY="127.0.0.1,localhost' in gpu
+    assert 'no_proxy="${NO_PROXY}"' in gpu
+    assert 'curl --noproxy "*"' in gpu
     assert "run_phase_b_proposer_transport_calibration.py" in gpu
     analysis = ACES_ANALYSIS_JOB.read_text(encoding="utf-8")
     assert "#SBATCH --partition=cpu" in analysis

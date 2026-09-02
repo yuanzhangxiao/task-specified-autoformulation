@@ -70,6 +70,11 @@ else
 fi
 
 module load WebProxy
+# ACES's WebProxy module configures outbound HTTP(S) proxies.  Both the
+# readiness probe and the OpenAI-compatible client below talk to the vLLM
+# server over loopback, so explicitly keep those requests off the proxy.
+export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
+export no_proxy="${NO_PROXY}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -108,7 +113,7 @@ server_pid=$!
 
 ready=false
 for _ in $(seq 1 1200); do
-  if curl --silent --fail "${endpoint}/v1/models" >/dev/null; then
+  if curl --noproxy "*" --silent --fail "${endpoint}/v1/models" >/dev/null; then
     ready=true
     break
   fi
