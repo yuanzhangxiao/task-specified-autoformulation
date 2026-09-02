@@ -71,6 +71,7 @@ class LLMConfig(StrictSchema):
     timeout_seconds: float = Field(default=120.0, gt=0.0)
     max_output_tokens: int = Field(default=2048, ge=128, le=32768)
     proposal_target_channels: tuple[str, ...] = ()
+    proposal_protected_parameter_names: tuple[str, ...] = ()
     cache_only: bool = False
 
 
@@ -82,6 +83,9 @@ def create_llm_client(config: LLMConfig) -> LLMClient:
         "max_backoff_seconds": config.max_backoff_seconds,
         "jitter_fraction": config.jitter_fraction,
         "proposal_target_channels": config.proposal_target_channels,
+        "proposal_protected_parameter_names": (
+            config.proposal_protected_parameter_names
+        ),
         "cache_only": config.cache_only,
     }
     if config.provider is LLMProvider.OPENAI:

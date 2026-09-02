@@ -19,6 +19,11 @@ from autoformalism.llm.exceptions import (
 )
 from autoformalism.llm.models import StructuredT, TokenUsage
 from autoformalism.llm.ollama import _ollama_compatible_schema
+from autoformalism.schemas import (
+    ProposerCandidateV2,
+    ProposerPreSchemaRepair,
+    normalize_proposer_candidate_v2_payload,
+)
 
 VLLMTransport = Callable[[str, dict[str, object], float], dict[str, object]]
 
@@ -90,7 +95,7 @@ class VLLMClient(CachedLLMClient):
                 if self._continuation_max_output_tokens is not None
                 else "openai_chat_json_schema"
             ),
-            "schema_compatibility": "bounded-compact-provider-schema-v4",
+            "schema_compatibility": "bounded-compact-provider-schema-v5",
         }
 
     def _call_provider(
@@ -226,8 +231,18 @@ class VLLMClient(CachedLLMClient):
                 raw_response=raw_response,
                 diagnostic_code=RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT,
             )
+        validation_content, repairs = self._normalize_proposer_content(
+            content,
+            response_model,
+        )
+        if repairs:
+            raw_response["_autoformalism_pre_schema_repair"] = {
+                "schema_version": "proposer-pre-schema-repair-1",
+                "repairs": [item.as_json() for item in repairs],
+                "repair_count": len(repairs),
+            }
         try:
-            parsed = self._parse_json(content, response_model)
+            parsed = self._parse_json(validation_content, response_model)
         except LLMResponseError as exc:
             exc.raw_response = raw_response
             raise
@@ -366,8 +381,18 @@ class VLLMClient(CachedLLMClient):
                 raw_response=aggregate,
                 diagnostic_code=RepairDiagnosticCode.EMPTY_PROVIDER_CONTENT,
             )
+        validation_content, repairs = self._normalize_proposer_content(
+            content,
+            response_model,
+        )
+        if repairs:
+            aggregate["_autoformalism_pre_schema_repair"] = {
+                "schema_version": "proposer-pre-schema-repair-1",
+                "repairs": [item.as_json() for item in repairs],
+                "repair_count": len(repairs),
+            }
         try:
-            parsed = self._parse_json(content, response_model)
+            parsed = self._parse_json(validation_content, response_model)
         except LLMResponseError as exc:
             exc.raw_response = aggregate
             raise
@@ -378,6 +403,31 @@ class VLLMClient(CachedLLMClient):
             usage,
             latency_ms,
             provider_attempts=len(segments),
+        )
+
+    def _normalize_proposer_content(
+        self,
+        content: str,
+        response_model: type[StructuredT],
+    ) -> tuple[str, tuple[ProposerPreSchemaRepair, ...]]:
+        """Apply the versioned lossless proposer normalization when relevant."""
+        if response_model is not ProposerCandidateV2:
+            return content, ()
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return content, ()
+        normalized, repairs = normalize_proposer_candidate_v2_payload(
+            payload,
+            protected_parameter_names=(
+                self._proposal_protected_parameter_names
+            ),
+        )
+        if not repairs:
+            return content, ()
+        return (
+            json.dumps(normalized, ensure_ascii=False, separators=(",", ":")),
+            repairs,
         )
 
     @staticmethod

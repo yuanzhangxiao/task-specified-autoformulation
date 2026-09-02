@@ -1369,6 +1369,16 @@ def _make_client(
             timeout_seconds=arguments.llm_timeout_seconds,
             max_output_tokens=arguments.llm_max_output_tokens,
             proposal_target_channels=dataset.roles.targets,
+            proposal_protected_parameter_names=tuple(
+                sorted(
+                    {
+                        *dataset.roles.targets,
+                        *dataset.roles.auxiliaries,
+                        *dataset.roles.external_inputs,
+                        *dataset.roles.fixed_covariates,
+                    }
+                )
+            ),
             cache_only=arguments.llm_cache_only,
             ollama_base_url=arguments.ollama_base_url,
             ollama_thinking=arguments.ollama_thinking,

@@ -14,6 +14,7 @@ from autoformalism.execution import ExecutionArguments, proposer_system_prompt
 from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal.proposer_transport_calibration import (
     ProposerCalibrationResult,
+    ProposerRepairReplayPlan,
     ProposerTransportCalibrationPlan,
     analyze_proposer_calibration,
     build_proposer_calibration_tasks,
@@ -32,6 +33,9 @@ CONTINUATION_CONFIG = Path(
 )
 REASONING_CONFIG = Path(
     "configs/phase_b_proposer_reasoning_calibration_v3.json"
+)
+REPAIR_REPLAY_CONFIG = Path(
+    "configs/phase_b_proposer_repair_replay_v4.json"
 )
 GPU_JOB = Path(
     "scripts/hpc/phase_b_proposer_transport_calibration_120b.slurm"
@@ -111,6 +115,18 @@ def test_calibration_plan_is_matched_and_budget_ordered() -> None:
     assert reasoning.selection_rule == (
         "lowest_effort_then_smallest_budget_passing_all_gates"
     )
+
+    replay = ProposerRepairReplayPlan.model_validate_json(
+        REPAIR_REPLAY_CONFIG.read_text(encoding="utf-8")
+    )
+    assert replay.source_plan_sha256 == hashlib.sha256(
+        REASONING_CONFIG.read_bytes()
+    ).hexdigest()
+    assert [
+        (item.reasoning_effort, item.max_output_tokens)
+        for item in replay.conditions
+    ] == [("low", 16384), ("medium", 24576)]
+    assert replay.new_llm_calls_permitted is False
 
 
 def test_freeze_validates_prompt_and_target_contract(tmp_path: Path) -> None:
@@ -309,6 +325,7 @@ def _result(
             1000 + budget // 2 if response else None
         ),
         latency_ms=1000.0,
+        logical_latency_ms=1250.0,
         length_exhausted_attempt_count=length,
         reasoning_character_count=100,
         deterministic_valid=valid,
@@ -358,6 +375,7 @@ def test_analysis_selects_smallest_budget_passing_all_gates() -> None:
     assert analysis["selected_max_output_tokens"] == 8192
     assert analysis["operating_points"][0]["passed"] is False
     assert analysis["operating_points"][1]["passed"] is True
+    assert analysis["operating_points"][1]["mean_logical_latency_ms"] == 1250.0
 
 
 def test_reasoning_factorial_selects_lowest_passing_effort_then_budget() -> None:

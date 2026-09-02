@@ -228,6 +228,16 @@ def _execute_baseline(
                 cache_directory=cache_directory,
                 log_path=output / "llm_events.jsonl",
                 proposal_target_channels=dataset.roles.targets,
+                proposal_protected_parameter_names=tuple(
+                    sorted(
+                        {
+                            *dataset.roles.targets,
+                            *dataset.roles.auxiliaries,
+                            *dataset.roles.external_inputs,
+                            *dataset.roles.fixed_covariates,
+                        }
+                    )
+                ),
                 timeout_seconds=args.llm_timeout_seconds,
                 max_attempts=args.llm_max_attempts,
                 max_output_tokens=args.llm_max_output_tokens,
@@ -273,6 +283,16 @@ def _execute_baseline(
                     cache_directory=cache_directory,
                     log_path=output / "llm_events.jsonl",
                     proposal_target_channels=dataset.roles.targets,
+                    proposal_protected_parameter_names=tuple(
+                        sorted(
+                            {
+                                *dataset.roles.targets,
+                                *dataset.roles.auxiliaries,
+                                *dataset.roles.external_inputs,
+                                *dataset.roles.fixed_covariates,
+                            }
+                        )
+                    ),
                     timeout_seconds=args.llm_timeout_seconds,
                     max_attempts=args.llm_max_attempts,
                     max_output_tokens=args.llm_max_output_tokens,

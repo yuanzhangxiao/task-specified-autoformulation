@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,105 @@ def _judge() -> ScientificJudgeResult:
             "actionable_edits": [],
         }
     )
+
+
+def _proposal_payload() -> dict[str, object]:
+    return {
+        "schema_version": "2",
+        "candidate_id": "candidate_1",
+        "change_summary": "Test candidate.",
+        "states": [
+            {
+                "name": "target",
+                "kind": "observed",
+                "observed_channel": "target",
+                "rhs": "-k * target + aux",
+            }
+        ],
+        "algebraics": [],
+        "parameters": [
+            {
+                "name": "k",
+                "bounds": {"lower": 0.0, "upper": 2.0},
+            }
+        ],
+    }
+
+
+def test_vllm_losslessly_repairs_proposer_parameters_before_schema_validation(
+    tmp_path: Path,
+) -> None:
+    payload = _proposal_payload()
+    parameter = payload["parameters"][0]
+    payload["parameters"] = [
+        parameter,
+        dict(parameter),
+        {"name": "aux", "bounds": {"lower": 0.0, "upper": 1.0}},
+        {"name": "aux", "bounds": {"lower": -1.0, "upper": 1.0}},
+    ]
+    client = VLLMClient(
+        model="openai/gpt-oss-20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        max_attempts=1,
+        proposal_target_channels=("target",),
+        proposal_protected_parameter_names=("target", "aux"),
+        transport=lambda _url, _body, _timeout: {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": json.dumps(payload)},
+                }
+            ]
+        },
+    )
+
+    result = client.propose(system_prompt="system", user_prompt="user")
+
+    assert [item.name for item in result.parsed.parameters] == ["k"]
+    repair = result.raw_response["_autoformalism_pre_schema_repair"]
+    assert repair["repair_count"] == 2
+    assert repair["repairs"] == [
+        {
+            "code": "removed_protected_parameter",
+            "parameter_name": "aux",
+            "removed_count": 2,
+        },
+        {
+            "code": "removed_exact_duplicate_parameter",
+            "parameter_name": "k",
+            "removed_count": 1,
+        },
+    ]
+
+
+def test_vllm_rejects_conflicting_learnable_parameter_duplicates(
+    tmp_path: Path,
+) -> None:
+    payload = _proposal_payload()
+    payload["parameters"] = [
+        {"name": "k", "bounds": {"lower": 0.0, "upper": 2.0}},
+        {"name": "k", "bounds": {"lower": 0.0, "upper": 3.0}},
+    ]
+    client = VLLMClient(
+        model="openai/gpt-oss-20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        max_attempts=1,
+        proposal_target_channels=("target",),
+        proposal_protected_parameter_names=("target", "aux"),
+        transport=lambda _url, _body, _timeout: {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": json.dumps(payload)},
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(LLMResponseError, match="duplicate parameter"):
+        client.propose(system_prompt="system", user_prompt="user")
 
 
 def test_vllm_client_sends_strict_schema_reasoning_and_seed(tmp_path: Path) -> None:

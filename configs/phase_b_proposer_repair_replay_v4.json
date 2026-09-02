@@ -1,0 +1,21 @@
+{
+  "schema_version": "phase-b-proposer-repair-replay-plan-1",
+  "status": "frozen_before_offline_replay",
+  "source_plan_sha256": "edca1f5a6b94445a0d429d2aee8ecfeeee8a2479524932ed30bcf3aa5eda087b",
+  "conditions": [
+    {
+      "reasoning_effort": "low",
+      "max_output_tokens": 16384
+    },
+    {
+      "reasoning_effort": "medium",
+      "max_output_tokens": 24576
+    }
+  ],
+  "selection_rule": "first_declared_condition_with_complete_replay_validity",
+  "repair_policy": "remove_protected_parameters_and_exact_duplicate_parameters_only",
+  "new_llm_calls_permitted": false,
+  "parameter_fitting_performed": false,
+  "scientific_judge_called": false,
+  "test_data_opened": false
+}

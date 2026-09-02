@@ -57,12 +57,17 @@ def _markdown(analysis: dict[str, object]) -> str:
         "",
         "| Reasoning | Max output tokens | Response success | First-attempt success | "
         "Deterministic validity | Public-target pass | Length exhaustion | "
-        "Continuation rate | Mean utilization | Mean latency (s) | Result |",
+        "Continuation rate | Mean utilization | Mean successful-attempt latency "
+        "(s) | Mean logical-call latency (s) | Result |",
         "|:---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|",
     ]
     for row in analysis["operating_points"]:
         utilization = row["mean_successful_budget_utilization"]
         latency = row["mean_latency_ms"]
+        logical_latency = row["mean_logical_latency_ms"]
+        logical_latency_seconds = (
+            None if logical_latency is None else logical_latency / 1000
+        )
         lines.append(
             f"| {row['reasoning_effort']} | {row['max_output_tokens']} | "
             f"{row['response_success']:.3f} | "
@@ -73,6 +78,7 @@ def _markdown(analysis: dict[str, object]) -> str:
             f"{row['continuation_request_rate']:.3f} | "
             f"{_format_optional(utilization)} | "
             f"{_format_optional(None if latency is None else latency / 1000)} | "
+            f"{_format_optional(logical_latency_seconds)} | "
             f"{'pass' if row['passed'] else 'fail'} |"
         )
     lines.extend(

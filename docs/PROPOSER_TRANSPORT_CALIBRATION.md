@@ -91,6 +91,40 @@ This experiment deliberately retains whole-request retries. Mixing a new retry
 mechanism into the same matrix would make reasoning effort and retry behavior
 inseparable.
 
+The completed ACES matrix selected no formal operating point because every
+condition missed at least one frozen gate. Its two strongest conditions were
+low reasoning at 16,384 tokens and medium reasoning at 24,576 tokens. Both
+eventually produced six of six deterministic-valid, public-target-complete
+candidates with no length exhaustion, but only four of six responses were valid
+on the first provider attempt. All four first-attempt failures were duplicate
+parameter declarations and were classified as repairable contract failures.
+
+## Lossless first-attempt repair replay
+
+V4 does not reinterpret the V3 outcome or make new LLM calls. It replays the
+frozen first response from the two strongest V3 conditions through a separately
+versioned pre-schema normalizer. The normalizer may perform only two repairs:
+
+1. remove a parameter declaration whose name is a public target, supplied
+   auxiliary, external input, or fixed covariate, because those symbols can
+   never be fitted parameters;
+2. collapse repeated parameter records only when their complete canonical JSON
+   values are identical.
+
+Conflicting declarations for a learnable parameter remain unchanged and fail
+strict schema validation. Every repaired response is then enriched, compiled,
+and checked against the deterministic public-target contract. The replay copies
+and hash-binds its source result, exact first-attempt event, replay result, and
+any valid canonical finalist. The original V3 analysis remains `FAIL`; V4 is a
+new deterministic repair protocol.
+
+The vLLM cache identity includes the protected-parameter symbol contract and a
+new schema-compatibility version, preventing repaired calls from colliding with
+old caches. Prospective calibration records also distinguish successful-attempt
+provider latency from total logical-call wall time across validation retries and
+backoff. The frozen V3 logs predate total logical-call timing, so that field is
+reported as unavailable rather than reconstructed.
+
 ## Incomplete-response continuation
 
 The vLLM client also supports an explicit `continue_once` strategy through the

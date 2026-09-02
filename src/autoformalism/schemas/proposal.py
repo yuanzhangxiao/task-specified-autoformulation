@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -288,6 +290,85 @@ class ProposerCandidateV2(StrictSchema):
         if collisions:
             raise ValueError(f"declaration names collide: {collisions}")
         return self
+
+
+@dataclass(frozen=True)
+class ProposerPreSchemaRepair:
+    """One lossless normalization applied before strict V2 validation."""
+
+    code: Literal[
+        "removed_exact_duplicate_parameter",
+        "removed_protected_parameter",
+    ]
+    parameter_name: str
+    removed_count: int
+
+    def as_json(self) -> dict[str, object]:
+        """Return a stable JSON record for logs and frozen replay reports."""
+        return asdict(self)
+
+
+def normalize_proposer_candidate_v2_payload(
+    payload: object,
+    *,
+    protected_parameter_names: tuple[str, ...] = (),
+) -> tuple[object, tuple[ProposerPreSchemaRepair, ...]]:
+    """Remove only semantically predetermined or byte-equivalent parameters.
+
+    A protected public channel can never be a fitted parameter. Repeated
+    parameter declarations are removed only when their complete JSON values are
+    identical. Conflicting declarations remain untouched so strict validation
+    can reject them and request a targeted repair.
+    """
+    if not isinstance(payload, dict):
+        return payload, ()
+    parameters = payload.get("parameters")
+    if not isinstance(parameters, list):
+        return payload, ()
+
+    protected = set(protected_parameter_names)
+    retained: list[object] = []
+    protected_counts: dict[str, int] = {}
+    exact_duplicate_counts: dict[str, int] = {}
+    seen: set[str] = set()
+    for item in parameters:
+        name = item.get("name") if isinstance(item, dict) else None
+        if isinstance(name, str) and name in protected:
+            protected_counts[name] = protected_counts.get(name, 0) + 1
+            continue
+        canonical = json.dumps(
+            item,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        if canonical in seen:
+            label = name if isinstance(name, str) else "<invalid>"
+            exact_duplicate_counts[label] = exact_duplicate_counts.get(label, 0) + 1
+            continue
+        seen.add(canonical)
+        retained.append(item)
+
+    if not protected_counts and not exact_duplicate_counts:
+        return payload, ()
+    normalized = dict(payload)
+    normalized["parameters"] = retained
+    repairs = tuple(
+        ProposerPreSchemaRepair(
+            code="removed_protected_parameter",
+            parameter_name=name,
+            removed_count=count,
+        )
+        for name, count in sorted(protected_counts.items())
+    ) + tuple(
+        ProposerPreSchemaRepair(
+            code="removed_exact_duplicate_parameter",
+            parameter_name=name,
+            removed_count=count,
+        )
+        for name, count in sorted(exact_duplicate_counts.items())
+    )
+    return normalized, repairs
 
 
 def enrich_proposal_v2(

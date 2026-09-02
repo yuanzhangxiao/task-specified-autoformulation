@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -188,6 +189,16 @@ def _run_budget(
         seed=task.repetition,
         max_attempts=plan.model_contract.maximum_provider_attempts,
         proposal_target_channels=dataset.roles.targets,
+        proposal_protected_parameter_names=tuple(
+            sorted(
+                {
+                    *context.targets,
+                    *context.auxiliaries,
+                    *context.external_inputs,
+                    *context.fixed_covariates,
+                }
+            )
+        ),
     )
 
     response_success = False
@@ -201,8 +212,16 @@ def _run_budget(
     diagnostics: list[dict[str, object]] = []
     error_type: str | None = None
     error: str | None = None
+    logical_latency_ms: float | None = None
+    logical_started = time.perf_counter()
     try:
-        call = client.propose(system_prompt=system_prompt, user_prompt=user_prompt)
+        try:
+            call = client.propose(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+        finally:
+            logical_latency_ms = (time.perf_counter() - logical_started) * 1000.0
         response_success = True
         request_hash = call.request_hash
         cache_hit = call.cache_hit
@@ -212,6 +231,18 @@ def _run_budget(
             {"code": "DETERMINISTIC_REPAIR", "message": item}
             for item in repairs
         )
+        pre_schema = call.raw_response.get("_autoformalism_pre_schema_repair")
+        if isinstance(pre_schema, dict):
+            pre_schema_repairs = pre_schema.get("repairs")
+            if isinstance(pre_schema_repairs, list):
+                diagnostics.extend(
+                    {
+                        "code": "PRE_SCHEMA_REPAIR",
+                        "repair": item,
+                    }
+                    for item in pre_schema_repairs
+                    if isinstance(item, dict)
+                )
         try:
             compile_candidate(candidate, context)
             deterministic_valid = True
@@ -243,6 +274,8 @@ def _run_budget(
         if isinstance(raw, dict):
             request_hash = _request_hash_from_events(event_log)
     events = _events(event_log)
+    if logical_latency_ms is None:
+        logical_latency_ms = (time.perf_counter() - logical_started) * 1000.0
     accounting = _attempt_accounting(events, request_hash=request_hash)
     first_attempt_response_success = bool(
         response_success and accounting["attempt_count"] == 1
@@ -280,6 +313,7 @@ def _run_budget(
             "successful_total_tokens"
         ],
         latency_ms=latency_ms,
+        logical_latency_ms=logical_latency_ms,
         length_exhausted_attempt_count=accounting["length_exhausted"],
         reasoning_character_count=accounting["reasoning_characters"],
         deterministic_valid=deterministic_valid,

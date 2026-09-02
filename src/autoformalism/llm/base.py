@@ -81,6 +81,7 @@ class CachedLLMClient(ABC):
         max_backoff_seconds: float = 30.0,
         jitter_fraction: float = 0.25,
         proposal_target_channels: tuple[str, ...] = (),
+        proposal_protected_parameter_names: tuple[str, ...] = (),
         cache_only: bool = False,
         sleep: Callable[[float], None] = time.sleep,
         random_value: Callable[[], float] = random.random,
@@ -104,6 +105,9 @@ class CachedLLMClient(ABC):
         self._sleep = sleep
         self._random_value = random_value
         self._proposal_target_channels = proposal_target_channels
+        self._proposal_protected_parameter_names = (
+            proposal_protected_parameter_names
+        )
         self._cache_only = cache_only
 
     def propose(
@@ -483,6 +487,9 @@ class CachedLLMClient(ABC):
             "response_schema": response_model.model_json_schema(mode="validation"),
             "provider_options": self._hashable_provider_options(),
             "proposal_target_channels": self._proposal_target_channels,
+            "proposal_protected_parameter_names": (
+                self._proposal_protected_parameter_names
+            ),
         }
         canonical = json.dumps(
             request,

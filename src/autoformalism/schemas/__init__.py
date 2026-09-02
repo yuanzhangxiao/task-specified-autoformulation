@@ -60,8 +60,10 @@ from autoformalism.schemas.proposal import (
     ProposedStateV2,
     ProposerCandidate,
     ProposerCandidateV2,
+    ProposerPreSchemaRepair,
     enrich_proposal,
     enrich_proposal_v2,
+    normalize_proposer_candidate_v2_payload,
 )
 from autoformalism.schemas.requirements import (
     ProposerClaim,
@@ -115,6 +117,7 @@ __all__ = [
     "ProposerCandidate",
     "ProposerCandidateV2",
     "ProposerClaim",
+    "ProposerPreSchemaRepair",
     "RelativeAssessment",
     "RelativeCriterion",
     "RelativeVerdict",
@@ -133,5 +136,6 @@ __all__ = [
     "enrich_proposal",
     "enrich_proposal_v2",
     "export_json_schemas",
+    "normalize_proposer_candidate_v2_payload",
     "parse_judge_assessment",
 ]

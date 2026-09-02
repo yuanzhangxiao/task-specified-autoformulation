@@ -134,6 +134,46 @@ class ProposerCalibrationPrerequisite(BaseModel):
     required_evaluated_budgets: tuple[int, ...] = Field(min_length=1)
 
 
+class ProposerRepairReplayCondition(BaseModel):
+    """One frozen transport condition selected for no-call replay."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reasoning_effort: Literal["low", "medium", "high"]
+    max_output_tokens: int = Field(ge=128)
+
+
+class ProposerRepairReplayPlan(BaseModel):
+    """Immutable plan for replaying first attempts through a new repair."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["phase-b-proposer-repair-replay-plan-1"]
+    status: Literal["frozen_before_offline_replay"]
+    source_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    conditions: tuple[ProposerRepairReplayCondition, ...] = Field(min_length=1)
+    selection_rule: Literal[
+        "first_declared_condition_with_complete_replay_validity"
+    ]
+    repair_policy: Literal[
+        "remove_protected_parameters_and_exact_duplicate_parameters_only"
+    ]
+    new_llm_calls_permitted: Literal[False]
+    parameter_fitting_performed: Literal[False]
+    scientific_judge_called: Literal[False]
+    test_data_opened: Literal[False]
+
+    @model_validator(mode="after")
+    def conditions_are_unique(self) -> ProposerRepairReplayPlan:
+        identities = [
+            (item.reasoning_effort, item.max_output_tokens)
+            for item in self.conditions
+        ]
+        if len(identities) != len(set(identities)):
+            raise ValueError("repair replay conditions must be unique")
+        return self
+
+
 class ProposerTransportCalibrationPlan(BaseModel):
     """Immutable matrix for selecting a GPT-OSS proposer output budget."""
 
@@ -224,6 +264,7 @@ class ProposerCalibrationResult(BaseModel):
     successful_attempt_output_tokens: int | None = Field(default=None, ge=0)
     successful_attempt_total_tokens: int | None = Field(default=None, ge=0)
     latency_ms: float | None = Field(default=None, ge=0.0)
+    logical_latency_ms: float | None = Field(default=None, ge=0.0)
     length_exhausted_attempt_count: int = Field(ge=0)
     reasoning_character_count: int = Field(ge=0)
     deterministic_valid: bool
@@ -457,6 +498,9 @@ def _operating_point_row(
             else mean(successful_utilization)
         ),
         "mean_latency_ms": _optional_mean(item.latency_ms for item in items),
+        "mean_logical_latency_ms": _optional_mean(
+            item.logical_latency_ms for item in items
+        ),
         "mean_provider_output_tokens": _optional_mean(
             item.provider_output_tokens for item in items
         ),
