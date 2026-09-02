@@ -118,6 +118,40 @@ and hash-binds its source result, exact first-attempt event, replay result, and
 any valid canonical finalist. The original V3 analysis remains `FAIL`; V4 is a
 new deterministic repair protocol.
 
+The completed offline replay passed for both retained conditions. Low reasoning
+at 16,384 tokens and medium reasoning at 24,576 tokens each produced six of six
+schema-valid, deterministic-valid, public-target-complete finalists after the
+narrow repair; repair activated on two of six first attempts in each condition.
+The transport selection rule therefore chose low/16,384 as the first passing
+condition. This transport result does not establish that its scientific models
+are as useful or as fit-stable as the medium-reasoning models.
+
+## Public finalist comparison
+
+The next versioned experiment reuses all twelve repaired finalists without new
+LLM calls. It compares the two conditions on the same public train/validation
+data using separate endpoints:
+
+- deterministic runtime validity and public target completeness;
+- public-prompt mechanism coverage and compliance;
+- state, latent-state, process, parameter, additive-term, and AST-node counts;
+- common-budget bounded fitting success and numerical failures;
+- public training and validation normalized MSE, conditional on fit success;
+- optimizer evaluations, wall time, process CPU time, and allocated core-hours.
+
+Every candidate receives the same ordered screening ladder: fixed-step RK4 with
+50 evaluations, one start, and a 300-second limit, followed only after failure
+by 150 evaluations, two starts, and a 600-second limit. The retry does not
+change the candidate, data, objective, seed, or initial warm start. No test data,
+private reference, hidden metric, or scientific judge is opened. Results are
+paired by benchmark and repetition and are not combined into a weighted score;
+the experiment intentionally makes no automatic production selection.
+
+The freeze is bound to the successful V4 replay artifact-ledger SHA-256. Each
+array task revalidates that ledger and its finalist candidate before fitting,
+writes an immutable checkpoint, and can be resumed deterministically. The
+summary refuses to run on a partial matrix.
+
 The vLLM cache identity includes the protected-parameter symbol contract and a
 new schema-compatibility version, preventing repaired calls from colliding with
 old caches. Prospective calibration records also distinguish successful-attempt

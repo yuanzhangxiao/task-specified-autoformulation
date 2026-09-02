@@ -1,0 +1,74 @@
+{
+  "schema_version": "phase-b-proposer-finalist-public-evaluation-plan-1",
+  "status": "frozen_before_public_fits",
+  "development_only": true,
+  "new_llm_calls_permitted": false,
+  "scientific_judge_called": false,
+  "test_data_opened": false,
+  "private_reference_opened": false,
+  "weighted_overall_score_defined": false,
+  "automatic_operating_point_selection": false,
+  "source_replay": {
+    "manifest_schema_version": "phase-b-proposer-repair-replay-manifest-1",
+    "required_status": "pass",
+    "source_plan_sha256": "edca1f5a6b94445a0d429d2aee8ecfeeee8a2479524932ed30bcf3aa5eda087b",
+    "replay_plan_sha256": "07dfd2ef5687b9f4e6e25c7b50ac15947e7098d6bbf4f5a38016ec1533f23af4",
+    "artifact_ledger_sha256": "8a6bf544f2db51e1b0dea0020f86edafacb0820244e67652b9da7d0644601951",
+    "replay_result_count": 12
+  },
+  "conditions": [
+    {
+      "reasoning_effort": "low",
+      "max_output_tokens": 16384
+    },
+    {
+      "reasoning_effort": "medium",
+      "max_output_tokens": 24576
+    }
+  ],
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "public_target_contract_sha256": "cfbd142e80ee843a0ac674fb3a2daa4dd4187b9c4350de72262fb42bcacafd26",
+      "public_mechanism_spec_sha256": "842b072657cbc0c8740d9b995e320218746e4bf759a34da0b94cfb6d6eaad399"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+      "public_target_contract_sha256": "3656f87507f48ee11fb8ace52afbac1c9186e8c18aaca8d5efc086b348d0d40a",
+      "public_mechanism_spec_sha256": "ba56c7ed208f7015bb173321e15f4734669c6ad918facaaa16413ab5e360f080"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "fit_profiles": [
+    {
+      "profile_id": "screen_50x1_300s",
+      "integration_backend": "fixed_rk4",
+      "number_of_starts": 1,
+      "maximum_function_evaluations": 50,
+      "maximum_wall_time_seconds": 300
+    },
+    {
+      "profile_id": "screen_150x2_600s",
+      "integration_backend": "fixed_rk4",
+      "number_of_starts": 2,
+      "maximum_function_evaluations": 150,
+      "maximum_wall_time_seconds": 600
+    }
+  ],
+  "stop_after_first_success": true,
+  "reported_endpoints": [
+    "runtime_validity",
+    "public_target_completeness",
+    "public_mechanism_compliance",
+    "model_complexity",
+    "public_training_nmse",
+    "public_validation_nmse",
+    "fit_success",
+    "numerical_failures",
+    "fit_resource_use"
+  ]
+}
