@@ -48,7 +48,11 @@ from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.fitting import EvaluationMetrics
 from autoformalism.llm import MockLLMClient
 from autoformalism.schemas import CandidateModel
-from scripts.run_baseline import _baseline_validation_context, build_parser
+from scripts.run_baseline import (
+    _baseline_prompt_path,
+    _baseline_validation_context,
+    build_parser,
+)
 
 
 def _split(name: SplitName, rate: float = 0.4) -> DatasetSplit:
@@ -122,6 +126,19 @@ def test_phase_b_baseline_context_does_not_treat_targets_as_forcing() -> None:
     assert context.lagged_targets == ()
     assert context.forcing_bounds == {}
     assert context.external_inputs == ()
+
+
+def test_phase_b_baseline_prompt_uses_tidy_benchmark_root(tmp_path: Path) -> None:
+    spec = BenchmarkRegistry().get(
+        "phase_b_dalla_man_t2_canonical_named_easy"
+    )
+    expected = tmp_path / spec.relative_root / "proposer_prompt.txt"
+    expected.parent.mkdir(parents=True)
+    expected.write_text("Public Phase-B prompt.\n", encoding="utf-8")
+
+    resolved = _baseline_prompt_path(tmp_path.resolve(), spec, "easy")
+
+    assert resolved == expected.resolve()
 
 
 def test_sindy_recovers_derivative_and_evaluates_test_once() -> None:

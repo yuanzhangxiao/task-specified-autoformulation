@@ -192,7 +192,7 @@ def _execute_baseline(
     if not args.development_only:
         loader.validate_test_paths(data_config)
     context = _baseline_validation_context(dataset, spec)
-    prompt_path = root / spec.relative_root / args.tier / "proposer_prompt.txt"
+    prompt_path = _baseline_prompt_path(root, spec, args.tier)
     prompt = prompt_path.read_text(encoding="utf-8")
     config = BaselineConfig(
         method=args.method,
@@ -316,6 +316,21 @@ def _baseline_validation_context(
         lagged_targets=dataset.roles.targets if spec.one_step_target_history else (),
         forcing_bounds=forcing_bounds,
     )
+
+
+def _baseline_prompt_path(root: Path, spec: BenchmarkSpec, tier: str) -> Path:
+    """Resolve prompts for both legacy tiered and Phase-B tidy layouts."""
+    prompt_root = (root / spec.relative_root).resolve()
+    if spec.data_layout == "legacy_split_files":
+        prompt_root = (
+            prompt_root / spec.tier_directory_template.format(tier=tier)
+        ).resolve()
+    if not prompt_root.is_relative_to(root):
+        raise ValueError("benchmark prompt path escapes the public data root")
+    prompt_path = prompt_root / "proposer_prompt.txt"
+    if not prompt_path.is_file():
+        raise FileNotFoundError(f"benchmark prompt is missing: {prompt_path}")
+    return prompt_path
 
 
 def _supervise(args: argparse.Namespace) -> None:
