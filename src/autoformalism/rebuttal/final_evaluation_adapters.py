@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from autoformalism.baselines.models import BaselineResult
 from autoformalism.expressions import ValidationContext
+from autoformalism.rebuttal.baseline_postfreeze import FrozenBaselineModel
 from autoformalism.rebuttal.final_evaluation import (
     FrozenEvaluationSubject,
     FrozenParameterization,
@@ -229,12 +230,21 @@ def _adapt_symbolic_baseline(
     context: ValidationContext,
 ) -> FrozenEvaluationSubject:
     path = _required_file(request.source_path)
-    result = BaselineResult.model_validate_json(path.read_text(encoding="utf-8"))
+    raw = path.read_text(encoding="utf-8")
+    payload = _read_object(path)
+    if payload.get("schema_version") == "phase-b-frozen-baseline-model-1":
+        result: BaselineResult | FrozenBaselineModel = (
+            FrozenBaselineModel.model_validate_json(raw)
+        )
+        if result.test_data_opened is not False:
+            raise ValueError("frozen symbolic source has opened test data")
+    else:
+        result = BaselineResult.model_validate_json(raw)
     if result.method != request.source_kind:
         raise ValueError(
             f"baseline method {result.method!r} does not match {request.source_kind!r}"
         )
-    candidate = _equation_candidate(result, context)
+    candidate = _equation_candidate(result.method, result.equations, context)
     return _subject(
         request=request,
         method=result.method,
@@ -289,26 +299,27 @@ def _adapt_d3(
 
 
 def _equation_candidate(
-    result: BaselineResult,
+    method: str,
+    equations: dict[str, str],
     context: ValidationContext,
 ) -> CandidateModel:
-    if set(result.equations) != set(context.targets):
+    if set(equations) != set(context.targets):
         raise ValueError(
             "symbolic baseline equations differ from public targets; "
-            f"expected={sorted(context.targets)}, actual={sorted(result.equations)}"
+            f"expected={sorted(context.targets)}, actual={sorted(equations)}"
         )
     suffix = hashlib.sha256(
-        json.dumps(result.equations, sort_keys=True).encode("utf-8")
+        json.dumps(equations, sort_keys=True).encode("utf-8")
     ).hexdigest()[:12]
     return CandidateModel.model_validate(
         {
-            "candidate_id": f"{result.method}_{suffix}",
+            "candidate_id": f"{method}_{suffix}",
             "parent_candidate_id": None,
             "states": [
                 {"name": target, "kind": "observed"} for target in context.targets
             ],
             "state_equations": [
-                {"state": target, "rhs": result.equations[target]}
+                {"state": target, "rhs": equations[target]}
                 for target in context.targets
             ],
             "observation_mappings": [

@@ -7,6 +7,7 @@ from itertools import product
 from math import prod
 
 from autoformalism.baselines.core import (
+    combine_development_splits,
     evaluate_equations,
     numeric_feature_names,
     persistence_metrics,
@@ -20,7 +21,7 @@ from autoformalism.baselines.models import (
 )
 from autoformalism.baselines.pysr import fit_pysr
 from autoformalism.baselines.sindy import fit_sindy
-from autoformalism.data import DatasetSplit, DevelopmentDataset, SplitName, Trajectory
+from autoformalism.data import DatasetSplit, DevelopmentDataset, Trajectory
 from autoformalism.expressions import (
     ModelValidationError,
     RestrictedParser,
@@ -165,7 +166,7 @@ def _run_baseline_selection(
                 train_mse,
                 validation_mse,
             )
-        combined = _combine(dataset.train, dataset.validation)
+        combined = combine_development_splits(dataset.train, dataset.validation)
         combined_extras = _feature_functions(proposed_expressions, context)
         x_combined, y_combined, combined_names = regression_table(
             combined, names, context.targets, combined_extras
@@ -387,14 +388,6 @@ def _evenly_spaced_candidates(
         for index in range(limit)
     )
     return tuple(candidates[index] for index in dict.fromkeys(indices))
-
-
-def _combine(train: DatasetSplit, validation: DatasetSplit) -> DatasetSplit:
-    return DatasetSplit(
-        SplitName.TRAIN,
-        (*train.trajectories, *validation.trajectories),
-        f"{train.fingerprint}+{validation.fingerprint}",
-    )
 
 
 def _propose_features(

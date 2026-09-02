@@ -8,10 +8,63 @@ from collections.abc import Callable, Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from autoformalism.data import DatasetSplit, Trajectory
+from autoformalism.data import (
+    BenchmarkSpec,
+    DatasetSplit,
+    DevelopmentDataset,
+    SplitName,
+    Trajectory,
+)
+from autoformalism.execution import (
+    _development_forcing_bounds,
+    _numeric_declared_channels,
+)
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.fitting import EvaluationMetrics, evaluate_fitted_candidate
 from autoformalism.schemas import CandidateModel
+
+
+def baseline_validation_context(
+    dataset: DevelopmentDataset,
+    spec: BenchmarkSpec,
+) -> ValidationContext:
+    """Build the leakage-safe numeric context shared by baseline stages."""
+    forcing_bounds = _development_forcing_bounds(
+        dataset,
+        include_targets=spec.one_step_target_history,
+    )
+    return ValidationContext(
+        targets=dataset.roles.targets,
+        auxiliaries=dataset.roles.auxiliaries,
+        external_inputs=_numeric_declared_channels(
+            spec.external_inputs,
+            forcing_bounds,
+        ),
+        fixed_covariates=_numeric_declared_channels(
+            spec.fixed_covariates,
+            forcing_bounds,
+        ),
+        lagged_targets=(
+            dataset.roles.targets if spec.one_step_target_history else ()
+        ),
+        forcing_bounds=forcing_bounds,
+    )
+
+
+def combine_development_splits(
+    train: DatasetSplit,
+    validation: DatasetSplit,
+) -> DatasetSplit:
+    """Combine public train and validation after hyperparameter selection."""
+    if train.name is not SplitName.TRAIN:
+        raise ValueError("combined development data requires the train split")
+    if validation.name is not SplitName.VALIDATION:
+        raise ValueError("combined development data requires the validation split")
+    return DatasetSplit(
+        SplitName.TRAIN,
+        (*train.trajectories, *validation.trajectories),
+        f"{train.fingerprint}+{validation.fingerprint}",
+    )
 
 
 def feature_names(context: ValidationContext) -> tuple[str, ...]:

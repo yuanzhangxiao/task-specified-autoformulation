@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 
+from autoformalism.baselines.core import baseline_validation_context
 from autoformalism.baselines.d3 import (
     run_d3_native_no_tools,
     run_d3_native_no_tools_development,
@@ -23,19 +24,16 @@ from autoformalism.data import (
     BenchmarkLoader,
     BenchmarkRegistry,
     BenchmarkSpec,
-    DevelopmentDataset,
 )
-from autoformalism.execution import (
-    _development_forcing_bounds,
-    _numeric_declared_channels,
-    _parse_model,
-)
-from autoformalism.expressions import ValidationContext
+from autoformalism.execution import _parse_model
 from autoformalism.llm import (
     LLMConfig,
     VLLMReasoningEffort,
     create_llm_client,
 )
+
+# Retain the private import used by older tests and external experiment scripts.
+_baseline_validation_context = baseline_validation_context
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -200,7 +198,7 @@ def _execute_baseline(
     dataset = loader.load_development(data_config)
     if not args.development_only:
         loader.validate_test_paths(data_config)
-    context = _baseline_validation_context(dataset, spec)
+    context = baseline_validation_context(dataset, spec)
     prompt_path = _baseline_prompt_path(root, spec, args.tier)
     prompt = prompt_path.read_text(encoding="utf-8")
     config_values: dict[str, object] = {
@@ -323,31 +321,6 @@ def _execute_baseline(
                 proposer_prompt=prompt,
             )
     return result
-
-
-def _baseline_validation_context(
-    dataset: DevelopmentDataset,
-    spec: BenchmarkSpec,
-) -> ValidationContext:
-    """Build the same leakage-safe numeric channel context as search."""
-    forcing_bounds = _development_forcing_bounds(
-        dataset,
-        include_targets=spec.one_step_target_history,
-    )
-    return ValidationContext(
-        targets=dataset.roles.targets,
-        auxiliaries=dataset.roles.auxiliaries,
-        external_inputs=_numeric_declared_channels(
-            spec.external_inputs,
-            forcing_bounds,
-        ),
-        fixed_covariates=_numeric_declared_channels(
-            spec.fixed_covariates,
-            forcing_bounds,
-        ),
-        lagged_targets=dataset.roles.targets if spec.one_step_target_history else (),
-        forcing_bounds=forcing_bounds,
-    )
 
 
 def _baseline_prompt_path(root: Path, spec: BenchmarkSpec, tier: str) -> Path:
