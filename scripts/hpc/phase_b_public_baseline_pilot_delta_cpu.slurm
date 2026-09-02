@@ -26,7 +26,7 @@ readonly task="$(sed -n "$((AF_TASK_INDEX + 1))p" "${task_plan}")"
   exit 2
 }
 readonly method="$(jq -r '.method' <<<"${task}")"
-[[ "${method}" == "sindy" || "${method}" == "pysr" ]] || {
+[[ "${method}" == "persistence" || "${method}" == "sindy" || "${method}" == "pysr" ]] || {
   echo "unsupported Delta CPU method: ${method}" >&2
   exit 2
 }

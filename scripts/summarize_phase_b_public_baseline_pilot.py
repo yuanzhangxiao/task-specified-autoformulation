@@ -179,7 +179,7 @@ def _summary(rows: list[dict[str, object]]) -> dict[str, object]:
         "schema_version": "phase-b-public-baseline-development-summary-1",
         "status": (
             "complete"
-            if all(row["status"] != "missing" for row in rows)
+            if all(row["status"] == "development_complete" for row in rows)
             else "partial"
         ),
         "planned_task_count": len(rows),

@@ -15,7 +15,7 @@ from autoformalism.targets import PublicTargetContract
 
 
 class BaselinePilotCell(BaseModel):
-    """One public train/validation cell in the matched pilot."""
+    """One public train/validation cell in a frozen baseline matrix."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -30,7 +30,7 @@ class BaselinePilotMethod(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    method: Literal["sindy", "pysr", "d3_native_no_tools"]
+    method: Literal["persistence", "sindy", "pysr", "d3_native_no_tools"]
     comparison_role: Literal[
         "classical_partial_observability_control",
         "matched_llm_discovery_agent",
@@ -100,6 +100,15 @@ class BaselinePilotMethod(BaseModel):
                     "SINDy requires positive, unique, increasing thresholds and "
                     "no PySR settings"
                 )
+        if self.method == "persistence" and any(
+            value is not None
+            for value in (
+                self.sindy_thresholds,
+                self.pysr_iterations,
+                self.maximum_expression_size,
+            )
+        ):
+            raise ValueError("persistence must not define symbolic-fit settings")
         return self
 
 
@@ -121,7 +130,7 @@ class BaselinePilotResourceAccounting(BaseModel):
 
 
 class BaselinePilotPlan(BaseModel):
-    """Immutable two-cell baseline development matrix."""
+    """Immutable public-only baseline development matrix."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -164,7 +173,7 @@ class BaselinePilotTask(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task_index: int = Field(ge=0)
-    method: Literal["sindy", "pysr", "d3_native_no_tools"]
+    method: Literal["persistence", "sindy", "pysr", "d3_native_no_tools"]
     comparison_role: str
     platform: Literal["aces_cpu", "delta_cpu", "aces_h100x2"]
     benchmark_id: str

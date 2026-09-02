@@ -108,6 +108,36 @@ one-step observed-state resetting, and neither oracle derivatives nor oracle
 latent states were used. A repeated freeze fails if any copied source artifact
 has changed.
 
+### Full public classical matrix on Delta
+
+`configs/phase_b_public_baseline_full_delta_cpu_v1.json` promotes the validated
+classical pilot settings to all 40 registered Phase-B cells, three repetitions,
+and three public predictive controls: persistence, SINDy, and PySR. The frozen
+method-major task plan contains 360 tasks (120 per method). All tasks remain
+development-only and use the prompt-v3 public overlay; neither test data nor a
+private reference is opened.
+
+The launcher
+`scripts/hpc/submit_phase_b_public_baseline_full_delta_cpu.sh` starts the three
+CPU arrays independently, except that PySR waits for its Julia-runtime
+preflight. The summary runs after all arrays reach a terminal state. A final
+readiness job succeeds only if every frozen task has a typed complete result and
+terminal status; it then invokes the immutable development-result freeze. If
+any task fails or times out,
+`scripts/hpc/submit_phase_b_public_baseline_full_delta_resume.sh` audits the
+same task ledger and resubmits only incomplete identities. Resume is refused if
+the repository no longer points at the source commit recorded by the original
+submission.
+
+The common freeze records method-specific semantics. SINDy and PySR estimate
+observed-channel derivatives with `numpy.gradient`, learn explicit symbolic
+dynamics, and are eligible for the later common structural evaluator.
+Persistence does not use derivatives or claim an autonomous ODE; it carries
+the previous observed target forward for causal one-step prediction and is
+frozen as a required predictive reference. All three remain in the same
+resource and validation ledger, but persistence is not misrepresented as a
+mechanistic candidate.
+
 ### Interpretation of the glucose-disposal target
 
 In the named Dalla Man tasks, `U` is an observed derived process rather than a
@@ -137,12 +167,14 @@ artificial zero monetary cost.
 
 ## Promotion and deferred adapters
 
-This two-cell pilot is a plumbing and feasibility check, not the paper's final
-baseline table. Full suite execution waits for:
+The two-cell pilot is a plumbing and feasibility check, not the paper's final
+baseline table. The full public SINDy/PySR/persistence matrix can now run while
+the LLM-based baselines continue. Opening sealed test or oracle-state data still
+waits for:
 
-1. a proposer operating point that passes on ACES and Delta;
-2. complete, hash-verified pilot outcomes;
-3. sealed Delta evaluation through the common endpoint vector;
+1. a successful common readiness freeze of all 360 public classical tasks;
+2. a proposer operating point that passes on ACES and Delta for LLM methods;
+3. a prespecified sealed Delta evaluation through the common endpoint vector;
 4. confirmation that the D3 comparison label and compute budget remain accurate.
 
 HDTwinGen and a controlled latent neural ODE require new partially observed

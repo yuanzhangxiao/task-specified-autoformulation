@@ -79,6 +79,10 @@ def freeze_development_results(
     if (
         submission.get("test_data_opened") is not False
         or submission.get("private_reference_opened") is not False
+        or (
+            submission.get("source_code_commit") is not None
+            and submission.get("source_code_commit") != source_code_commit
+        )
     ):
         raise ValueError("submission manifest is not public-only")
 
@@ -115,6 +119,43 @@ def freeze_development_results(
             role="submission_manifest",
         )
     )
+    for retry_manifest in sorted(
+        experiment.glob("resume_submission_manifest_*.json")
+    ):
+        retry = _read_object(retry_manifest)
+        if (
+            retry.get("schema_version")
+            != "phase-b-public-baseline-full-resume-submission-1"
+            or retry.get("source_code_commit") != source_code_commit
+            or retry.get("test_data_opened") is not False
+            or retry.get("private_reference_opened") is not False
+        ):
+            raise ValueError(f"invalid resume manifest: {retry_manifest}")
+        audit_relative = retry.get("retry_audit_path")
+        if not isinstance(audit_relative, str):
+            raise ValueError(f"resume manifest lacks an audit: {retry_manifest}")
+        retry_audit = (experiment / audit_relative).resolve()
+        if (
+            not retry_audit.is_relative_to(experiment)
+            or _sha256(retry_audit) != retry.get("retry_audit_sha256")
+        ):
+            raise ValueError(f"resume audit differs: {retry_manifest}")
+        copied.append(
+            _copy_artifact(
+                retry_manifest,
+                output / "inputs" / retry_manifest.name,
+                output,
+                role="resume_submission_manifest",
+            )
+        )
+        copied.append(
+            _copy_artifact(
+                retry_audit,
+                output / "inputs" / "resume_audits" / retry_audit.name,
+                output,
+                role="resume_audit",
+            )
+        )
     for name in _SUMMARY_FILES:
         copied.append(
             _copy_artifact(
@@ -194,11 +235,28 @@ def freeze_development_results(
         "selected_result_count": len(tasks),
         "methods": sorted(methods),
         "benchmark_ids": sorted(benchmarks),
-        "derivative_provenance": "estimated",
+        "derivative_provenance": (
+            "estimated"
+            if "persistence" not in methods
+            else "mixed_estimated_and_not_used"
+        ),
         "derivative_estimator": "numpy.gradient",
         "derivative_edge_order": "2_if_at_least_3_samples_else_1",
-        "target_representation": "each_target_as_observed_dynamic_state",
+        "target_representation": (
+            "method_specific_public_observed_target_protocol"
+            if "persistence" in methods
+            else "each_target_as_observed_dynamic_state"
+        ),
         "validation_protocol": "causal_one_step_observed_state_reset",
+        "method_protocols": {
+            method: _method_protocol(method) for method in sorted(methods)
+        },
+        "common_structural_evaluation_eligible_methods": sorted(
+            methods & {"sindy", "pysr"}
+        ),
+        "predictive_reference_methods": sorted(
+            methods & {"persistence"}
+        ),
         "artifact_count": len(copied),
         "artifact_ledger_sha256": _sha256(artifact_ledger),
         "source_freeze_manifest_sha256": _sha256(
@@ -280,6 +338,30 @@ def _sha256(path: Path) -> str:
 
 def _integer(value: object) -> int:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _method_protocol(method: str) -> dict[str, object]:
+    """Describe what each frozen public baseline actually predicts."""
+    if method == "persistence":
+        return {
+            "derivative_provenance": "not_used",
+            "target_representation": "causal_previous_observation",
+            "common_structural_evaluation_eligible": False,
+            "role": "predictive_reference",
+        }
+    if method in {"sindy", "pysr"}:
+        return {
+            "derivative_provenance": "estimated_numpy_gradient",
+            "target_representation": "each_target_as_observed_dynamic_state",
+            "common_structural_evaluation_eligible": True,
+            "role": "symbolic_partial_observability_control",
+        }
+    return {
+        "derivative_provenance": "method_specific",
+        "target_representation": "method_specific",
+        "common_structural_evaluation_eligible": False,
+        "role": "other_baseline",
+    }
 
 
 if __name__ == "__main__":

@@ -24,6 +24,9 @@ CONFIG = Path("configs/phase_b_public_baseline_pilot_v1.json")
 DELTA_CONFIG = Path(
     "configs/phase_b_public_baseline_pilot_delta_cpu_v1.json"
 )
+FULL_DELTA_CONFIG = Path(
+    "configs/phase_b_public_baseline_full_delta_cpu_v1.json"
+)
 CPU_JOB = Path("scripts/hpc/phase_b_public_baseline_pilot_aces_cpu.slurm")
 CPU_SUBMIT = Path("scripts/hpc/submit_phase_b_public_baseline_pilot_aces_cpu.sh")
 D3_JOB = Path("scripts/hpc/phase_b_public_baseline_pilot_aces_d3.slurm")
@@ -39,6 +42,15 @@ DELTA_SUMMARY_JOB = Path(
 )
 DELTA_SUBMIT = Path(
     "scripts/hpc/submit_phase_b_public_baseline_pilot_delta_cpu.sh"
+)
+FULL_DELTA_READINESS_JOB = Path(
+    "scripts/hpc/phase_b_public_baseline_full_delta_readiness.slurm"
+)
+FULL_DELTA_SUBMIT = Path(
+    "scripts/hpc/submit_phase_b_public_baseline_full_delta_cpu.sh"
+)
+FULL_DELTA_RESUME = Path(
+    "scripts/hpc/submit_phase_b_public_baseline_full_delta_resume.sh"
 )
 
 
@@ -107,6 +119,63 @@ def test_delta_cpu_plan_preserves_cells_and_classical_settings() -> None:
     }
     assert delta.test_data_opened is False
     assert delta.private_reference_opened is False
+
+
+def test_full_delta_plan_covers_all_40_cells_and_three_methods() -> None:
+    plan = load_baseline_pilot_plan(FULL_DELTA_CONFIG)
+    tasks = build_baseline_pilot_tasks(plan)
+    manifest = json.loads(
+        Path("configs/target_eval/phase_b_v1/manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    expected = {
+        (
+            item["benchmark_id"],
+            item["tier"],
+            item["public_prompt_sha256"],
+            item["contract_sha256"],
+        )
+        for item in manifest["contracts"]
+    }
+    actual = {
+        (
+            cell.benchmark_id,
+            cell.tier,
+            cell.public_prompt_sha256,
+            cell.public_target_contract_sha256,
+        )
+        for cell in plan.cells
+    }
+
+    assert len(plan.cells) == 40
+    assert actual == expected
+    assert plan.repetitions == (0, 1, 2)
+    assert [method.method for method in plan.methods] == [
+        "persistence",
+        "sindy",
+        "pysr",
+    ]
+    assert len(tasks) == 360
+    assert [task.task_index for task in tasks if task.method == "persistence"] == (
+        list(range(0, 120))
+    )
+    assert [task.task_index for task in tasks if task.method == "sindy"] == (
+        list(range(120, 240))
+    )
+    assert [task.task_index for task in tasks if task.method == "pysr"] == (
+        list(range(240, 360))
+    )
+    assert {task.maximum_llm_calls for task in tasks} == {0}
+    assert {task.platform for task in tasks} == {"delta_cpu"}
+
+
+def test_persistence_plan_forbids_symbolic_fit_settings() -> None:
+    payload = json.loads(FULL_DELTA_CONFIG.read_text(encoding="utf-8"))
+    payload["methods"][0]["pysr_iterations"] = 40
+
+    with pytest.raises(ValueError, match="must not define symbolic-fit"):
+        BaselinePilotPlan.model_validate(payload)
 
 
 def test_sindy_pilot_requires_a_strictly_increasing_threshold_grid() -> None:
@@ -275,6 +344,101 @@ def test_delta_baseline_launchers_are_cpu_only_and_dependency_safe() -> None:
     assert 'dependency="afterok:${prepare_job_id}"' in submit
     assert 'dependency="afterany:${sindy_job_id}:${pysr_job_id}"' in submit
     assert "phase_b_public_baseline_pilot_delta_cpu_v1.json" in submit
+
+
+def test_full_delta_launchers_freeze_readiness_and_support_resume() -> None:
+    for path in (FULL_DELTA_READINESS_JOB, FULL_DELTA_SUBMIT, FULL_DELTA_RESUME):
+        subprocess.run(["bash", "-n", str(path)], check=True)
+        text = path.read_text(encoding="utf-8")
+        assert "API_KEY" not in text
+        assert "/private" not in text.lower()
+        assert "bibo-delta-cpu" in text
+
+    submit = FULL_DELTA_SUBMIT.read_text(encoding="utf-8")
+    assert "phase_b_public_baseline_full_delta_cpu_v1.json" in submit
+    assert 'method == "persistence"' in submit
+    assert 'afterany:${persistence_job_id}:${sindy_job_id}:${pysr_job_id}' in submit
+    assert "AF_SOURCE_CODE_COMMIT=${source_code_commit}" in submit
+    readiness = FULL_DELTA_READINESS_JOB.read_text(encoding="utf-8")
+    assert "length == 360" in readiness
+    assert "freeze_phase_b_public_baseline_development_results.py" in readiness
+    resume = FULL_DELTA_RESUME.read_text(encoding="utf-8")
+    assert "find_incomplete_phase_b_public_baseline_tasks.py" in resume
+    assert 'git rev-parse HEAD)" == "${source_code_commit}' in resume
+
+
+def test_incomplete_baseline_audit_selects_only_invalid_tasks(
+    tmp_path: Path,
+) -> None:
+    tasks = [
+        BaselinePilotTask(
+            task_index=index,
+            method=method,
+            comparison_role="classical_partial_observability_control",
+            platform="delta_cpu",
+            benchmark_id="fixture",
+            tier="easy",
+            repetition=0,
+            cpus_per_task=2,
+            gpu_type="none",
+            gpu_count=0,
+            wall_timeout_seconds=60.0,
+            maximum_llm_calls=0,
+        )
+        for index, method in enumerate(("persistence", "sindy"))
+    ]
+    task_plan = tmp_path / "task_plan.jsonl"
+    task_plan.write_text(
+        "".join(task.model_dump_json() + "\n" for task in tasks),
+        encoding="utf-8",
+    )
+    run = tmp_path / "runs" / "persistence" / "fixture_easy_seed0"
+    run.mkdir(parents=True)
+    result = BaselineDevelopmentResult(
+        method="persistence",
+        benchmark_id="fixture",
+        tier="easy",
+        seed=0,
+        equations={"y": "y"},
+        selected_hyperparameters={},
+        training_normalized_mse=0.1,
+        validation_normalized_mse=0.2,
+        elapsed_wall_seconds=1.0,
+        wall_timeout_seconds=60.0,
+    )
+    (run / "result.json").write_text(result.model_dump_json(), encoding="utf-8")
+    (run / "run_status.json").write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "elapsed_wall_seconds": 1.0,
+                "wall_timeout_seconds": 60.0,
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/find_incomplete_phase_b_public_baseline_tasks.py",
+            "--task-plan",
+            str(task_plan),
+            "--runs-root",
+            str(tmp_path / "runs"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(completed.stdout)
+    assert report["complete_task_count"] == 1
+    assert report["incomplete_task_count"] == 1
+    assert report["incomplete_indices_by_method"] == {
+        "persistence": [],
+        "sindy": [1],
+    }
+    assert report["test_data_opened"] is False
 
 
 def test_public_baseline_summary_and_handoff_exclude_test(tmp_path: Path) -> None:
