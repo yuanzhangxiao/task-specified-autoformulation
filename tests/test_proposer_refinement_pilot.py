@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -99,3 +100,13 @@ def test_freeze_rejects_prompt_drift(tmp_path: Path) -> None:
             mechanism_spec_root=tmp_path,
             judge_protocol_path=tmp_path / "missing.json",
         )
+
+
+def test_aces_worker_uses_portable_resource_timing() -> None:
+    worker = Path(
+        "scripts/hpc/phase_b_proposer_refinement_pilot_aces_h100.slurm"
+    )
+    subprocess.run(["bash", "-n", str(worker)], check=True)
+    text = worker.read_text(encoding="utf-8")
+    assert "scripts/run_with_resource_timing.py" in text
+    assert "/usr/bin/time" not in text

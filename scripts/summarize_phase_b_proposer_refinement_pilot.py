@@ -208,17 +208,20 @@ def collect_report(
         by_trial[(task.benchmark_id, task.tier, task.repetition)].append(row)
     matched = [_matched_pair(key, value) for key, value in sorted(by_trial.items())]
     groups = [_group(arm.arm_id, rows) for arm in plan.arms]
+    source_completion_count = sum(
+        item["source_complete"] is True for item in rows
+    )
     return {
         "schema_version": "phase-b-proposer-refinement-pilot-report-1",
-        "status": "complete",
+        "status": (
+            "complete" if source_completion_count == len(rows) else "incomplete"
+        ),
         "development_only": True,
         "test_data_opened": False,
         "private_reference_opened": False,
         "weighted_overall_score_defined": False,
         "task_count": len(rows),
-        "source_completion_count": sum(
-            item["source_complete"] is True for item in rows
-        ),
+        "source_completion_count": source_completion_count,
         "matched_round_zero_count": sum(
             item["round_zero_request_match"] is True for item in matched
         ),

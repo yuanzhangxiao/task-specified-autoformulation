@@ -166,6 +166,7 @@ def test_refinement_summary_enforces_round_zero_and_reports_public_metrics(
 
     assert report["matched_round_zero_count"] == 1
     assert report["source_completion_count"] == 2
+    assert report["status"] == "complete"
     assert all(item["public_target_pass"] for item in report["tasks"])
     assert all(
         item["public_mechanism_compliance"] == 1.0
@@ -196,3 +197,19 @@ def test_refinement_summary_rejects_nonmatched_round_zero(tmp_path: Path) -> Non
             target_contract_root=targets,
             mechanism_spec_root=mechanisms,
         )
+
+
+def test_refinement_summary_marks_missing_sources_incomplete(tmp_path: Path) -> None:
+    plan, search, targets, mechanisms = _write_fixture(tmp_path)
+    for summary in search.glob("searches/*/runs/*/summary.json"):
+        summary.unlink()
+
+    report = collect_report(
+        plan,
+        search,
+        target_contract_root=targets,
+        mechanism_spec_root=mechanisms,
+    )
+
+    assert report["status"] == "incomplete"
+    assert report["source_completion_count"] == 0

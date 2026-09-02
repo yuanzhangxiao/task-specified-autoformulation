@@ -226,8 +226,9 @@ if [[ "${require_cache}" == true ]]; then
   cache_arguments=(--require-initial-proposer-cache-hit)
 fi
 
-/usr/bin/time -o "${process_time}" \
-  -f $'elapsed_seconds=%e\nuser_cpu_seconds=%U\nsystem_cpu_seconds=%S\nmax_rss_kib=%M\nexit_code=%x' \
+"${AF_PYTHON}" scripts/run_with_resource_timing.py \
+  --output "${process_time}" \
+  -- \
   "${AF_PYTHON}" scripts/run_experiment.py \
     --data-root "${AF_PUBLIC_DATA_ROOT}" \
     --benchmark-id "${benchmark_id}" \
