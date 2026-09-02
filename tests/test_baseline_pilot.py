@@ -87,8 +87,34 @@ def test_delta_cpu_plan_preserves_cells_and_classical_settings() -> None:
     assert len(tasks) == 12
     assert {task.platform for task in tasks} == {"delta_cpu"}
     assert {task.maximum_llm_calls for task in tasks} == {0}
+    assert {
+        task.sindy_thresholds for task in tasks if task.method == "sindy"
+    } == {
+        (
+            1e-4,
+            1e-3,
+            1e-2,
+            1e-1,
+            1.0,
+            10.0,
+            30.0,
+            100.0,
+            300.0,
+            1_000.0,
+            3_000.0,
+            10_000.0,
+        )
+    }
     assert delta.test_data_opened is False
     assert delta.private_reference_opened is False
+
+
+def test_sindy_pilot_requires_a_strictly_increasing_threshold_grid() -> None:
+    payload = json.loads(DELTA_CONFIG.read_text(encoding="utf-8"))
+    payload["methods"][0]["sindy_thresholds"] = [1.0, 0.1]
+
+    with pytest.raises(ValueError, match="positive, unique, increasing"):
+        BaselinePilotPlan.model_validate(payload)
 
 
 def test_freeze_validates_public_inputs_and_resource_ledger(tmp_path: Path) -> None:
@@ -244,6 +270,7 @@ def test_delta_baseline_launchers_are_cpu_only_and_dependency_safe() -> None:
     worker = DELTA_CPU_JOB.read_text(encoding="utf-8")
     assert '== "delta_cpu"' in worker
     assert "--development-only" in worker
+    assert "--sindy-thresholds" in worker
     submit = DELTA_SUBMIT.read_text(encoding="utf-8")
     assert 'dependency="afterok:${prepare_job_id}"' in submit
     assert 'dependency="afterany:${sindy_job_id}:${pysr_job_id}"' in submit

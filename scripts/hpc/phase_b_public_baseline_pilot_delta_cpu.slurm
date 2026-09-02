@@ -55,7 +55,16 @@ arguments=(
   --wall-timeout-seconds "${timeout}"
   --development-only
 )
-if [[ "${method}" == "pysr" ]]; then
+if [[ "${method}" == "sindy" ]]; then
+  mapfile -t sindy_thresholds < <(
+    jq -r '.sindy_thresholds[]' <<<"${task}"
+  )
+  [[ "${#sindy_thresholds[@]}" -gt 0 ]] || {
+    echo "SINDy task has no frozen threshold grid" >&2
+    exit 2
+  }
+  arguments+=(--sindy-thresholds "${sindy_thresholds[@]}")
+elif [[ "${method}" == "pysr" ]]; then
   (
     cd "${AF_OUTPUT_ROOT}/runtime"
     sha256sum -c pysr_runtime.json.sha256

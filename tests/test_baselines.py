@@ -411,6 +411,26 @@ def test_pysr_cli_options_are_propagated() -> None:
     assert config.maximum_expression_size == 12
 
 
+def test_sindy_cli_threshold_grid_is_propagated() -> None:
+    args = build_parser().parse_args(
+        [
+            "--method",
+            "sindy",
+            "--sindy-thresholds",
+            "0.1",
+            "10",
+            "1000",
+        ]
+    )
+
+    config = BaselineConfig(
+        method=args.method,
+        sindy_thresholds=tuple(args.sindy_thresholds),
+    )
+
+    assert config.sindy_thresholds == (0.1, 10.0, 1_000.0)
+
+
 def test_pysr_receives_native_timeout(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

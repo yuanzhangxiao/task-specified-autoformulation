@@ -96,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of PySR evolutionary iterations per target (default: 40).",
     )
     parser.add_argument(
+        "--sindy-thresholds",
+        type=float,
+        nargs="+",
+        help=(
+            "Sequential-thresholded least-squares grid selected by validation "
+            "rollout (default: the versioned BaselineConfig grid)."
+        ),
+    )
+    parser.add_argument(
         "--maximum-expression-size",
         type=int,
         default=30,
@@ -194,16 +203,19 @@ def _execute_baseline(
     context = _baseline_validation_context(dataset, spec)
     prompt_path = _baseline_prompt_path(root, spec, args.tier)
     prompt = prompt_path.read_text(encoding="utf-8")
-    config = BaselineConfig(
-        method=args.method,
-        seed=args.seed,
-        llm_model=args.model,
-        pysr_iterations=args.pysr_iterations,
-        maximum_expression_size=args.maximum_expression_size,
-        d3_generations=args.d3_generations,
-        d3_patience=args.d3_patience,
-        wall_timeout_seconds=args.wall_timeout_seconds,
-    )
+    config_values: dict[str, object] = {
+        "method": args.method,
+        "seed": args.seed,
+        "llm_model": args.model,
+        "pysr_iterations": args.pysr_iterations,
+        "maximum_expression_size": args.maximum_expression_size,
+        "d3_generations": args.d3_generations,
+        "d3_patience": args.d3_patience,
+        "wall_timeout_seconds": args.wall_timeout_seconds,
+    }
+    if args.sindy_thresholds is not None:
+        config_values["sindy_thresholds"] = tuple(args.sindy_thresholds)
+    config = BaselineConfig(**config_values)
     if args.method == "d3_native_no_tools":
         if not args.model:
             parser.error("--model is required for d3_native_no_tools")

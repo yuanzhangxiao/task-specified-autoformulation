@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BaselineConfig(BaseModel):
@@ -28,12 +29,34 @@ class BaselineConfig(BaseModel):
         1e-1,
         1.0,
         10.0,
+        30.0,
+        100.0,
+        300.0,
+        1_000.0,
+        3_000.0,
+        10_000.0,
     )
     pysr_iterations: int = Field(default=40, ge=1)
     maximum_expression_size: int = Field(default=30, ge=3)
     d3_generations: int = Field(default=20, ge=1)
     d3_patience: int = Field(default=20, ge=1)
     wall_timeout_seconds: float = Field(default=1_800.0, gt=0.0)
+
+    @field_validator("sindy_thresholds")
+    @classmethod
+    def thresholds_are_increasing(
+        cls, values: tuple[float, ...]
+    ) -> tuple[float, ...]:
+        """Require one finite positive threshold grid with stable ordering."""
+        if (
+            not values
+            or any(not isfinite(value) or value <= 0.0 for value in values)
+            or tuple(sorted(set(values))) != values
+        ):
+            raise ValueError(
+                "SINDy thresholds must be positive, unique, and increasing"
+            )
+        return values
 
 
 class BaselineResult(BaseModel):

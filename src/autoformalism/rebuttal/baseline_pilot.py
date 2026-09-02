@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
+from math import isfinite
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +44,7 @@ class BaselinePilotMethod(BaseModel):
     model: str | None = None
     reasoning_effort: Literal["high"] | None = None
     requires_selected_proposer_operating_point: bool
+    sindy_thresholds: tuple[float, ...] | None = None
     pysr_iterations: int | None = Field(default=None, ge=1)
     maximum_expression_size: int | None = Field(default=None, ge=3)
     d3_generations: int | None = Field(default=None, ge=1)
@@ -64,8 +66,8 @@ class BaselinePilotMethod(BaseModel):
                 or self.d3_patience is None
             ):
                 raise ValueError("D3 method has an inconsistent LLM/compute contract")
-            if self.pysr_iterations is not None:
-                raise ValueError("D3 method must not define PySR settings")
+            if self.pysr_iterations is not None or self.sindy_thresholds is not None:
+                raise ValueError("D3 method must not define classical settings")
             return self
         if (
             self.platform not in {"aces_cpu", "delta_cpu"}
@@ -83,11 +85,21 @@ class BaselinePilotMethod(BaseModel):
             self.pysr_iterations is None or self.maximum_expression_size is None
         ):
             raise ValueError("PySR method requires iteration and expression budgets")
-        if self.method == "sindy" and (
-            self.pysr_iterations is not None
-            or self.maximum_expression_size is not None
-        ):
-            raise ValueError("SINDy method must not define PySR settings")
+        if self.method == "pysr" and self.sindy_thresholds is not None:
+            raise ValueError("PySR method must not define SINDy settings")
+        if self.method == "sindy":
+            thresholds = self.sindy_thresholds
+            if (
+                not thresholds
+                or any(not isfinite(value) or value <= 0.0 for value in thresholds)
+                or tuple(sorted(set(thresholds))) != thresholds
+                or self.pysr_iterations is not None
+                or self.maximum_expression_size is not None
+            ):
+                raise ValueError(
+                    "SINDy requires positive, unique, increasing thresholds and "
+                    "no PySR settings"
+                )
         return self
 
 
@@ -165,6 +177,7 @@ class BaselinePilotTask(BaseModel):
     maximum_llm_calls: int = Field(ge=0)
     model: str | None = None
     reasoning_effort: str | None = None
+    sindy_thresholds: tuple[float, ...] | None = None
     pysr_iterations: int | None = None
     maximum_expression_size: int | None = None
     d3_generations: int | None = None
@@ -200,6 +213,7 @@ def build_baseline_pilot_tasks(
                         maximum_llm_calls=method.maximum_llm_calls,
                         model=method.model,
                         reasoning_effort=method.reasoning_effort,
+                        sindy_thresholds=method.sindy_thresholds,
                         pysr_iterations=method.pysr_iterations,
                         maximum_expression_size=method.maximum_expression_size,
                         d3_generations=method.d3_generations,

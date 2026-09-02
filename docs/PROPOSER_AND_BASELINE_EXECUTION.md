@@ -74,6 +74,14 @@ Julia package initialization. PySR performs a deterministic, bounded joint
 validation-rollout search over per-target Pareto candidates, so multi-target
 Phase-B cells are supported without opening test data.
 
+The public SINDy control uses the finite-difference derivatives attached by the
+public tidy-split loader. Its sequential-thresholded least-squares grid is
+explicitly frozen in the pilot plan and selected only by causal validation
+rollout. The development grid spans `1e-4` through `1e4` because normalized
+library coefficients can be large when public channels have heterogeneous
+units. This wider grid permits genuinely sparse or null supports; it does not
+raise the restricted parser's 512-node safety limit.
+
 All ACES baseline runs use `--development-only`. Their result schema contains
 train and validation metrics but no test field. The handoff tool rejects a
 selection unless `test_data_opened` is explicitly false and excludes data,
