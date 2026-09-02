@@ -368,3 +368,92 @@ def test_public_baseline_summary_and_handoff_exclude_test(tmp_path: Path) -> Non
     copied = json.loads((handoff / "tasks" / "task_000.json").read_text())
     assert copied["test_data_opened"] is False
     assert "test_normalized_mse" not in copied
+
+    frozen_inputs = tmp_path / "frozen"
+    frozen_inputs.mkdir()
+    (frozen_inputs / "task_plan.jsonl").write_text(
+        task_plan.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    frozen_plan = frozen_inputs / "plan.json"
+    frozen_plan.write_text("{}\n", encoding="utf-8")
+    planned_resources = frozen_inputs / "planned_resource_ledger.jsonl"
+    planned_resources.write_text(
+        "{}\n", encoding="utf-8"
+    )
+    frozen_tasks = frozen_inputs / "task_plan.jsonl"
+    (frozen_inputs / "freeze_manifest.json").write_text(
+        json.dumps(
+            {
+                "task_count": 1,
+                "plan_sha256": _sha(frozen_plan),
+                "task_plan_sha256": _sha(frozen_tasks),
+                "planned_resource_ledger_sha256": _sha(planned_resources),
+                "test_data_opened": False,
+                "private_reference_opened": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "submission_manifest.json").write_text(
+        json.dumps(
+            {
+                "test_data_opened": False,
+                "private_reference_opened": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result_freeze = tmp_path / "development-result-freeze"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/freeze_phase_b_public_baseline_development_results.py",
+            "--experiment-root",
+            str(tmp_path),
+            "--output-root",
+            str(result_freeze),
+            "--source-code-commit",
+            "5a9a2fc",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    frozen = json.loads(completed.stdout)
+    assert frozen["task_count"] == 1
+    assert frozen["artifact_count"] == 10
+    assert frozen["derivative_provenance"] == "estimated"
+    assert frozen["oracle_derivatives_used"] is False
+    assert frozen["test_data_opened"] is False
+    subprocess.run(
+        ["sha256sum", "-c", "development_result_freeze.json.sha256"],
+        cwd=result_freeze,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    changed = json.loads((run / "result.json").read_text(encoding="utf-8"))
+    changed["validation_normalized_mse"] = 0.3
+    (run / "result.json").write_text(
+        json.dumps(changed, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    mismatch = subprocess.run(
+        [
+            sys.executable,
+            "scripts/freeze_phase_b_public_baseline_development_results.py",
+            "--experiment-root",
+            str(tmp_path),
+            "--output-root",
+            str(result_freeze),
+            "--source-code-commit",
+            "5a9a2fc",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert mismatch.returncode != 0
+    assert "frozen artifact differs" in mismatch.stderr

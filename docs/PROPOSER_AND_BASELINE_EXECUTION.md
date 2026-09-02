@@ -95,6 +95,37 @@ The relevant entry points are:
 - `scripts/summarize_phase_b_public_baseline_pilot.py`
 - `scripts/freeze_phase_b_public_baseline_handoff.py`
 
+### Freezing completed development results
+
+Before any sealed-test or oracle-state evaluation, the completed public
+train/validation pilot is frozen with
+`scripts/freeze_phase_b_public_baseline_development_results.py`. The freeze
+copies and hash-binds the frozen plan and task ledger, submission manifest, all
+selected result and terminal-status files, and all development-summary/resource
+files. It also records that derivatives came from `numpy.gradient`, every
+target was represented as an observed dynamic state, validation used causal
+one-step observed-state resetting, and neither oracle derivatives nor oracle
+latent states were used. A repeated freeze fails if any copied source artifact
+has changed.
+
+### Interpretation of the glucose-disposal target
+
+In the named Dalla Man tasks, `U` is an observed derived process rather than a
+native simulator state. The private simulator computes insulin-independent
+utilization `Uii`, insulin-dependent tissue utilization `Uid`, and reports
+`U = Uii + Uid`. Delayed plasma-insulin action is carried by the dynamic state
+`X`; in the canonical simulator, `Uid = (Vm0 + Vmx*X)*Gt/(Km0 + Gt)`.
+
+The components enter different compartment balances: `Uii` is removed from
+the plasma-glucose balance and `Uid` is removed from the tissue-glucose balance.
+Consequently, the simulator does not integrate a separate equation for `U`.
+A mechanistic reduced model can generate the public target algebraically as
+`Uii + Uid`. The public SINDy/PySR control instead embeds every target,
+including `U`, as an observed dynamic state and fits `dU/dt` estimated from its
+sampled trajectory. That is a valid black-box trajectory representation, but it
+does not by itself establish the required total-disposal decomposition or
+delayed insulin-action mechanism.
+
 ## Resource accounting
 
 The frozen plan records CPUs, GPU type/count, wall-time limits, and maximum LLM
