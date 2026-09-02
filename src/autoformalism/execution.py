@@ -963,7 +963,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         raise SystemExit(f"run already exists at {experiment_directory}; pass --resume")
     experiment_directory.mkdir(parents=True, exist_ok=True)
     context = _context(arguments, dataset)
-    client = _make_client(arguments, dataset, experiment_directory)
+    client = _make_client(arguments, dataset, context, experiment_directory)
     pairwise_judge = _make_pairwise_judge(
         arguments,
         experiment_directory,
@@ -1445,6 +1445,7 @@ def _judge_reasoning_effort(
 def _make_client(
     arguments: ExecutionArguments,
     dataset: DevelopmentDataset,
+    context: ValidationContext,
     experiment_directory: Path,
 ) -> LLMClient:
     if arguments.mock_llm:
@@ -1473,14 +1474,14 @@ def _make_client(
             log_path=experiment_directory / "proposer_events.jsonl",
             timeout_seconds=arguments.llm_timeout_seconds,
             max_output_tokens=arguments.llm_max_output_tokens,
-            proposal_target_channels=dataset.roles.targets,
+            proposal_target_channels=context.targets,
             proposal_protected_parameter_names=tuple(
                 sorted(
                     {
-                        *dataset.roles.targets,
-                        *dataset.roles.auxiliaries,
-                        *dataset.roles.external_inputs,
-                        *dataset.roles.fixed_covariates,
+                        *context.targets,
+                        *context.auxiliaries,
+                        *context.external_inputs,
+                        *context.fixed_covariates,
                     }
                 )
             ),

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import autoformalism.execution as execution_module
 from autoformalism.execution import (
     ExecutionArguments,
     _gmm_parameterization_prompt,
     _latent_ablation_prompt,
+    _make_client,
     _numeric_declared_channels,
     _prediction_protocol_prompt,
     _structured_proposer_feedback_prompt,
@@ -74,6 +78,46 @@ def test_mock_development_only_execution_omits_test_metrics(tmp_path: Path) -> N
     assert result["status"] == "complete"
     assert result["evaluation_stage"] == "development_selection_frozen"
     assert not any(key.startswith("test_") for key in result)
+
+
+def test_nonmock_client_protects_all_validation_context_channels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments = replace(
+        _arguments(tmp_path, dry_run=False),
+        proposer_model="vllm:fixture",
+        judge_model="vllm:fixture",
+        mock_llm=False,
+        selection_policy="incumbent_relative_hybrid",
+    )
+    dataset = SimpleNamespace(roles=SimpleNamespace(targets=("target",)))
+    context = ValidationContext(
+        targets=("target",),
+        auxiliaries=("auxiliary",),
+        external_inputs=("input_u",),
+        fixed_covariates=("subject_mass",),
+    )
+    configurations = []
+
+    def fake_create_client(config):
+        configurations.append(config)
+        return object()
+
+    monkeypatch.setattr(
+        execution_module, "create_llm_client", fake_create_client
+    )
+
+    _make_client(arguments, dataset, context, tmp_path / "experiment")
+
+    assert len(configurations) == 1
+    assert configurations[0].proposal_target_channels == ("target",)
+    assert configurations[0].proposal_protected_parameter_names == (
+        "auxiliary",
+        "input_u",
+        "subject_mass",
+        "target",
+    )
 
 
 def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
