@@ -30,6 +30,9 @@ CONFIG = Path("configs/phase_b_proposer_transport_calibration_v1.json")
 CONTINUATION_CONFIG = Path(
     "configs/phase_b_proposer_transport_calibration_v2.json"
 )
+REASONING_CONFIG = Path(
+    "configs/phase_b_proposer_reasoning_calibration_v3.json"
+)
 GPU_JOB = Path(
     "scripts/hpc/phase_b_proposer_transport_calibration_120b.slurm"
 )
@@ -51,6 +54,9 @@ ACES_SUBMIT = Path(
 )
 ACES_V2_SUBMIT = Path(
     "scripts/hpc/submit_phase_b_proposer_transport_calibration_v2_aces.sh"
+)
+ACES_V3_REASONING_SUBMIT = Path(
+    "scripts/hpc/submit_phase_b_proposer_reasoning_calibration_v3_aces.sh"
 )
 DELTA_CONFIRM_SUBMIT = Path(
     "scripts/hpc/submit_phase_b_proposer_transport_confirmation_delta.sh"
@@ -88,6 +94,22 @@ def test_calibration_plan_is_matched_and_budget_ordered() -> None:
         4096,
         8192,
         12288,
+    )
+
+    reasoning = load_proposer_calibration_plan(REASONING_CONFIG)
+    assert reasoning.model_contract.reasoning_effort is None
+    assert reasoning.model_contract.evaluated_reasoning_efforts == (
+        "low",
+        "medium",
+    )
+    assert reasoning.model_contract.max_output_token_budgets == (
+        16384,
+        24576,
+        30000,
+    )
+    assert reasoning.model_contract.incomplete_response_strategy == "restart"
+    assert reasoning.selection_rule == (
+        "lowest_effort_then_smallest_budget_passing_all_gates"
     )
 
 
@@ -260,6 +282,7 @@ def _result(
     valid: bool,
     target: bool,
     length: int = 0,
+    reasoning_effort: str = "high",
 ) -> ProposerCalibrationResult:
     return ProposerCalibrationResult(
         plan_sha256="0" * 64,
@@ -272,7 +295,7 @@ def _result(
         tier="easy" if task_index < 3 else "hard",
         repetition=task_index % 3,
         model="openai/gpt-oss-120b",
-        reasoning_effort="high",
+        reasoning_effort=reasoning_effort,
         max_output_tokens=budget,
         response_success=response,
         first_attempt_response_success=response,
@@ -335,6 +358,43 @@ def test_analysis_selects_smallest_budget_passing_all_gates() -> None:
     assert analysis["selected_max_output_tokens"] == 8192
     assert analysis["operating_points"][0]["passed"] is False
     assert analysis["operating_points"][1]["passed"] is True
+
+
+def test_reasoning_factorial_selects_lowest_passing_effort_then_budget() -> None:
+    plan = load_proposer_calibration_plan(REASONING_CONFIG)
+    results: list[ProposerCalibrationResult] = []
+    for task in build_proposer_calibration_tasks(plan):
+        for effort in ("low", "medium"):
+            for budget in (16384, 24576, 30000):
+                passes = effort == "medium" and budget >= 24576
+                results.append(
+                    _result(
+                        task_index=task.task_index,
+                        budget=budget,
+                        response=passes,
+                        valid=passes,
+                        target=passes,
+                        length=0 if passes else 3,
+                        reasoning_effort=effort,
+                    )
+                )
+
+    analysis = analyze_proposer_calibration(plan, tuple(results))
+
+    assert analysis["status"] == "pass"
+    assert analysis["selected_reasoning_effort"] == "medium"
+    assert analysis["selected_max_output_tokens"] == 24576
+    assert [
+        (row["reasoning_effort"], row["max_output_tokens"])
+        for row in analysis["operating_points"]
+    ] == [
+        ("low", 16384),
+        ("low", 24576),
+        ("low", 30000),
+        ("medium", 16384),
+        ("medium", 24576),
+        ("medium", 30000),
+    ]
 
 
 def test_selected_operating_point_is_frozen_for_another_cluster(
@@ -474,6 +534,7 @@ def test_attempt_accounting_detects_length_and_reasoning() -> None:
         "successful_total_tokens": None,
         "length_exhausted": 1,
         "reasoning_characters": 3,
+        "continuation_requests": 0,
     }
 
 
@@ -511,6 +572,92 @@ def test_attempt_accounting_separates_retry_and_success_usage() -> None:
     assert accounting["successful_output_tokens"] == 10500
     assert accounting["successful_total_tokens"] == 12500
     assert accounting["length_exhausted"] == 1
+
+
+def test_attempt_accounting_expands_responses_continuation_requests() -> None:
+    segments = [
+        {
+            "status": "incomplete",
+            "usage": {"input_tokens": 100, "output_tokens": 1000},
+            "output": [
+                {
+                    "type": "reasoning",
+                    "summary": [{"text": "abc"}],
+                }
+            ],
+        },
+        {
+            "status": "completed",
+            "usage": {"input_tokens": 1100, "output_tokens": 200},
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "{}"}],
+                }
+            ],
+        },
+    ]
+    aggregate = {
+        **segments[-1],
+        "_autoformalism_continuation": {
+            "request_count": 2,
+            "continuation_request_count": 1,
+            "segments": segments,
+        },
+    }
+    accounting = _attempt_accounting(
+        [
+            {
+                "event": "llm_response",
+                "request_hash": "request",
+                "attempts": 1,
+                "cache_hit": False,
+                "raw_response": aggregate,
+            }
+        ],
+        request_hash="request",
+    )
+
+    assert accounting["attempt_count"] == 2
+    assert accounting["continuation_requests"] == 1
+    assert accounting["input_tokens"] == 1200
+    assert accounting["output_tokens"] == 1200
+    assert accounting["successful_input_tokens"] == 1200
+    assert accounting["successful_output_tokens"] == 1200
+    assert accounting["length_exhausted"] == 1
+    assert accounting["reasoning_characters"] == 3
+
+
+def test_attempt_accounting_counts_failed_continuation_request() -> None:
+    aggregate = {
+        "_autoformalism_continuation": {
+            "request_count": 2,
+            "continuation_request_count": 1,
+            "segments": [
+                {
+                    "status": "incomplete",
+                    "usage": {"input_tokens": 100, "output_tokens": 1000},
+                    "output": [],
+                }
+            ],
+        }
+    }
+    accounting = _attempt_accounting(
+        [
+            {
+                "event": "llm_failure",
+                "request_hash": "request",
+                "attempt": 1,
+                "raw_response": aggregate,
+            }
+        ],
+        request_hash="request",
+    )
+
+    assert accounting["attempt_count"] == 2
+    assert accounting["continuation_requests"] == 1
+    assert accounting["input_tokens"] == 100
+    assert accounting["output_tokens"] == 1000
 
 
 def test_calibration_uses_the_production_proposer_prompt_builder(
@@ -600,14 +747,21 @@ def test_aces_launchers_are_valid_and_keep_calibration_sealed() -> None:
     assert "Python/3.11.5" in submit
     assert "AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE}" in submit
     assert "AF_PYTHON_MODULE=${AF_PYTHON_MODULE}" in submit
-    assert "--array=0-5%2" in submit
+    assert 'task_count_raw="$(wc -l <' in submit
+    assert 'task_count="${task_count_raw//[[:space:]]/}"' in submit
+    assert '--array="0-${task_max}%2"' in submit
     assert '--dependency="afterok:${image_job_id}"' in submit
     assert '--dependency="afterany:${calibration_job_id}"' in submit
     assert "platform: $platform" in submit
 
 
 def test_cross_cluster_launchers_are_valid_and_confirmation_only() -> None:
-    for path in (ACES_V2_SUBMIT, DELTA_CONFIRM_SUBMIT, DELTA_CONFIRM_ANALYSIS):
+    for path in (
+        ACES_V2_SUBMIT,
+        ACES_V3_REASONING_SUBMIT,
+        DELTA_CONFIRM_SUBMIT,
+        DELTA_CONFIRM_ANALYSIS,
+    ):
         subprocess.run(["bash", "-n", str(path)], check=True)
         assert "API_KEY" not in path.read_text(encoding="utf-8")
 
@@ -616,6 +770,9 @@ def test_cross_cluster_launchers_are_valid_and_confirmation_only() -> None:
     assert "AF_PREREQUISITE_ANALYSIS" in aces
     assert 'AF_OUTPUT_ROOT:=${SCRATCH}/phase_b/' in aces
     assert "export AF_OUTPUT_ROOT" in aces
+    reasoning = ACES_V3_REASONING_SUBMIT.read_text(encoding="utf-8")
+    assert "phase_b_proposer_reasoning_calibration_v3.json" in reasoning
+    assert "proposer-reasoning-calibration-v3-aces-h100x2" in reasoning
     delta = DELTA_CONFIRM_SUBMIT.read_text(encoding="utf-8")
     assert "prepare_phase_b_proposer_transport_confirmation.py" in delta
     assert "--primary-platform aces-h100x2" in delta

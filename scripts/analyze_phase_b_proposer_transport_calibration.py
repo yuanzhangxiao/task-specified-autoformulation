@@ -22,7 +22,7 @@ def main() -> None:
     args = parser.parse_args()
 
     plan = load_proposer_calibration_plan(args.plan)
-    result_paths = sorted(args.results_root.glob("task_*/budget_*.json"))
+    result_paths = sorted(args.results_root.rglob("budget_*.json"))
     results = tuple(
         ProposerCalibrationResult.model_validate_json(
             path.read_text(encoding="utf-8")
@@ -55,20 +55,22 @@ def _markdown(analysis: dict[str, object]) -> str:
         "are evaluated. No fitting, scientific judge, test data, or private "
         "reference is used.",
         "",
-        "| Max output tokens | Response success | First-attempt success | "
+        "| Reasoning | Max output tokens | Response success | First-attempt success | "
         "Deterministic validity | Public-target pass | Length exhaustion | "
-        "Mean utilization | Mean latency (s) | Result |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|:---:|",
+        "Continuation rate | Mean utilization | Mean latency (s) | Result |",
+        "|:---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|",
     ]
     for row in analysis["operating_points"]:
         utilization = row["mean_successful_budget_utilization"]
         latency = row["mean_latency_ms"]
         lines.append(
-            f"| {row['max_output_tokens']} | {row['response_success']:.3f} | "
+            f"| {row['reasoning_effort']} | {row['max_output_tokens']} | "
+            f"{row['response_success']:.3f} | "
             f"{row['first_attempt_response_success']:.3f} | "
             f"{row['deterministic_validity']:.3f} | "
             f"{row['public_target_pass_rate']:.3f} | "
             f"{row['length_exhausted_attempt_rate']:.3f} | "
+            f"{row['continuation_request_rate']:.3f} | "
             f"{_format_optional(utilization)} | "
             f"{_format_optional(None if latency is None else latency / 1000)} | "
             f"{'pass' if row['passed'] else 'fail'} |"
@@ -80,7 +82,8 @@ def _markdown(analysis: dict[str, object]) -> str:
                 "Selected operating point: **none**."
                 if selected is None
                 else "Selected operating point: "
-                f"**high reasoning with {selected} max output tokens**."
+                f"**{analysis['selected_reasoning_effort']} reasoning with "
+                f"{selected} max output tokens**."
             ),
             "",
             "The GPT-5.6 resource figures are descriptive context only and do "

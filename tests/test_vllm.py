@@ -161,6 +161,133 @@ def test_vllm_terminal_empty_content_reports_reasoning_metadata(
         client.judge(system_prompt="system", user_prompt="user")
 
 
+def test_vllm_responses_continues_incomplete_reasoning_once(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def transport(
+        url: str,
+        body: dict[str, object],
+        _timeout: float,
+    ) -> dict[str, object]:
+        calls.append((url, body))
+        if len(calls) == 1:
+            return {
+                "status": "incomplete",
+                "output": [
+                    {
+                        "id": "reasoning_1",
+                        "type": "reasoning",
+                        "status": "incomplete",
+                        "summary": [
+                            {"type": "summary_text", "text": "Planning."}
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 8, "output_tokens": 128},
+            }
+        return {
+            "status": "completed",
+            "output": [
+                {
+                    "id": "message_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": _judge().model_dump_json(),
+                            "annotations": [],
+                        }
+                    ],
+                }
+            ],
+            "usage": {"input_tokens": 136, "output_tokens": 64},
+        }
+
+    client = VLLMClient(
+        model="openai/gpt-oss-20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        max_attempts=1,
+        max_output_tokens=128,
+        continuation_max_output_tokens=256,
+        reasoning_effort=VLLMReasoningEffort.MEDIUM,
+        seed=42,
+        transport=transport,
+    )
+
+    result = client.judge(system_prompt="system", user_prompt="user")
+
+    assert [item[0] for item in calls] == [
+        "http://127.0.0.1:8000/v1/responses",
+        "http://127.0.0.1:8000/v1/responses",
+    ]
+    assert calls[0][1]["max_output_tokens"] == 128
+    assert calls[1][1]["max_output_tokens"] == 256
+    assert calls[0][1]["reasoning"] == {"effort": "medium"}
+    continued_input = calls[1][1]["input"]
+    assert isinstance(continued_input, list)
+    assert continued_input[-1]["status"] == "incomplete"
+    assert result.parsed == _judge()
+    assert result.usage == TokenUsage(144, 192, 336)
+    assert result.attempts == 1
+    assert result.provider_attempts == 2
+    assert result.raw_response["_autoformalism_continuation"][
+        "continuation_request_count"
+    ] == 1
+
+
+def test_vllm_responses_joins_partial_json_with_continuation(
+    tmp_path: Path,
+) -> None:
+    serialized = _judge().model_dump_json()
+    split = len(serialized) // 2
+    responses = [
+        {
+            "status": "incomplete",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "incomplete",
+                    "content": [
+                        {"type": "output_text", "text": serialized[:split]}
+                    ],
+                }
+            ],
+        },
+        {
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {"type": "output_text", "text": serialized[split:]}
+                    ],
+                }
+            ],
+        },
+    ]
+    client = VLLMClient(
+        model="openai/gpt-oss-20b",
+        cache_directory=tmp_path / "cache",
+        log_path=tmp_path / "events.jsonl",
+        max_attempts=1,
+        continuation_max_output_tokens=256,
+        transport=lambda _url, _body, _timeout: responses.pop(0),
+    )
+
+    result = client.judge(system_prompt="system", user_prompt="user")
+
+    assert result.parsed == _judge()
+    assert result.provider_attempts == 2
+
+
 def test_vllm_factory_uses_provider_specific_configuration(tmp_path: Path) -> None:
     client = create_llm_client(
         LLMConfig(

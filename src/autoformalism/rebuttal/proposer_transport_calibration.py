@@ -32,18 +32,35 @@ class ProposerCalibrationModelContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     model: str = Field(min_length=1)
-    reasoning_effort: Literal["low", "medium", "high"]
+    reasoning_effort: Literal["low", "medium", "high"] | None = None
+    reasoning_efforts: tuple[Literal["low", "medium", "high"], ...] = ()
     temperature: float = Field(ge=0.0, le=2.0)
     max_output_token_budgets: tuple[int, ...] = Field(min_length=1)
     request_timeout_seconds: float = Field(gt=0.0)
     maximum_provider_attempts: int = Field(ge=1, le=10)
     served_context_tokens: int = Field(ge=8192)
+    incomplete_response_strategy: Literal["restart", "continue_once"] = "restart"
+    continuation_max_output_tokens: int | None = Field(default=None, ge=128)
 
     @model_validator(mode="after")
     def budgets_are_strictly_increasing_and_fit_context(
         self,
     ) -> ProposerCalibrationModelContract:
         """Prevent duplicated conditions and impossible output-only budgets."""
+        if (self.reasoning_effort is None) == (not self.reasoning_efforts):
+            raise ValueError(
+                "declare exactly one of reasoning_effort or reasoning_efforts"
+            )
+        if self.reasoning_efforts:
+            expected = tuple(
+                effort
+                for effort in ("low", "medium", "high")
+                if effort in self.reasoning_efforts
+            )
+            if expected != self.reasoning_efforts:
+                raise ValueError(
+                    "reasoning efforts must be unique and ordered low, medium, high"
+                )
         budgets = self.max_output_token_budgets
         if tuple(sorted(set(budgets))) != budgets:
             raise ValueError("output-token budgets must be unique and increasing")
@@ -51,7 +68,33 @@ class ProposerCalibrationModelContract(BaseModel):
             raise ValueError("every output-token budget must be at least 128")
         if budgets[-1] >= self.served_context_tokens:
             raise ValueError("output-token budget must be smaller than context")
+        if self.incomplete_response_strategy == "restart":
+            if self.continuation_max_output_tokens is not None:
+                raise ValueError(
+                    "restart strategy cannot declare continuation output tokens"
+                )
+        elif self.continuation_max_output_tokens is None:
+            raise ValueError(
+                "continue_once strategy requires continuation output tokens"
+            )
+        elif (
+            budgets[-1] + self.continuation_max_output_tokens
+            >= self.served_context_tokens
+        ):
+            raise ValueError(
+                "initial and continuation output budgets must fit the context"
+            )
         return self
+
+    @property
+    def evaluated_reasoning_efforts(
+        self,
+    ) -> tuple[Literal["low", "medium", "high"], ...]:
+        """Return frozen reasoning-effort conditions in evaluation order."""
+        if self.reasoning_efforts:
+            return self.reasoning_efforts
+        assert self.reasoning_effort is not None
+        return (self.reasoning_effort,)
 
 
 class ProposerCalibrationGates(BaseModel):
@@ -105,7 +148,10 @@ class ProposerTransportCalibrationPlan(BaseModel):
     repetitions: tuple[int, ...] = Field(min_length=1)
     model_contract: ProposerCalibrationModelContract
     gates: ProposerCalibrationGates
-    selection_rule: Literal["smallest_budget_passing_all_gates"]
+    selection_rule: Literal[
+        "smallest_budget_passing_all_gates",
+        "lowest_effort_then_smallest_budget_passing_all_gates",
+    ]
     prerequisite: ProposerCalibrationPrerequisite | None = None
     gpt_5_6_reference_context: GPT56ReferenceContext
     test_data_opened: Literal[False]
@@ -122,6 +168,16 @@ class ProposerTransportCalibrationPlan(BaseModel):
             value < 0 for value in self.repetitions
         ):
             raise ValueError("repetitions must be unique and nonnegative")
+        multiple_efforts = (
+            len(self.model_contract.evaluated_reasoning_efforts) > 1
+        )
+        if multiple_efforts != (
+            self.selection_rule
+            == "lowest_effort_then_smallest_budget_passing_all_gates"
+        ):
+            raise ValueError(
+                "reasoning-effort matrix and selection rule are inconsistent"
+            )
         return self
 
 
@@ -154,6 +210,8 @@ class ProposerCalibrationResult(BaseModel):
     model: str
     reasoning_effort: Literal["low", "medium", "high"]
     max_output_tokens: int = Field(ge=128)
+    incomplete_response_strategy: Literal["restart", "continue_once"] = "restart"
+    continuation_request_count: int = Field(default=0, ge=0)
     request_hash: str | None = None
     cache_hit: bool = False
     response_success: bool
@@ -269,9 +327,14 @@ def freeze_proposer_calibration(
         "plan_sha256": _sha256(frozen_plan),
         "task_plan_sha256": _sha256(task_plan),
         "matched_request_count": len(tasks),
+        "reasoning_effort_count": len(
+            plan.model_contract.evaluated_reasoning_efforts
+        ),
         "token_budget_count": len(plan.model_contract.max_output_token_budgets),
         "planned_result_count": (
-            len(tasks) * len(plan.model_contract.max_output_token_budgets)
+            len(tasks)
+            * len(plan.model_contract.evaluated_reasoning_efforts)
+            * len(plan.model_contract.max_output_token_budgets)
         ),
         "test_data_opened": False,
         "scientific_judge_called": False,
@@ -295,13 +358,17 @@ def analyze_proposer_calibration(
     plan: ProposerTransportCalibrationPlan,
     results: tuple[ProposerCalibrationResult, ...],
 ) -> dict[str, object]:
-    """Apply the frozen gates and select the least costly passing budget."""
+    """Apply frozen gates and select the least costly passing condition."""
     expected = {
-        (task.task_index, budget)
+        (task.task_index, effort, budget)
         for task in build_proposer_calibration_tasks(plan)
+        for effort in plan.model_contract.evaluated_reasoning_efforts
         for budget in plan.model_contract.max_output_token_budgets
     }
-    observed = {(item.task_index, item.max_output_tokens) for item in results}
+    observed = {
+        (item.task_index, item.reasoning_effort, item.max_output_tokens)
+        for item in results
+    }
     if observed != expected or len(observed) != len(results):
         missing = sorted(expected - observed)
         extra = sorted(observed - expected)
@@ -309,95 +376,32 @@ def analyze_proposer_calibration(
             f"calibration result keys differ; missing={missing}, extra={extra}"
         )
 
-    grouped: dict[int, list[ProposerCalibrationResult]] = defaultdict(list)
+    grouped: dict[
+        tuple[str, int], list[ProposerCalibrationResult]
+    ] = defaultdict(list)
     for result in results:
-        grouped[result.max_output_tokens].append(result)
+        grouped[(result.reasoning_effort, result.max_output_tokens)].append(result)
     rows: list[dict[str, object]] = []
-    for budget in plan.model_contract.max_output_token_budgets:
-        items = grouped[budget]
-        attempt_count = sum(item.provider_attempt_count for item in items)
-        successful_utilization = [
-            item.successful_attempt_output_tokens / budget
-            for item in items
-            if item.response_success
-            and item.successful_attempt_output_tokens is not None
-        ]
-        metrics = {
-            "response_success": mean(item.response_success for item in items),
-            "first_attempt_response_success": mean(
-                item.first_attempt_response_success for item in items
-            ),
-            "deterministic_validity": mean(
-                item.deterministic_valid for item in items
-            ),
-            "public_target_pass_rate": mean(
-                item.public_target_passed for item in items
-            ),
-            "length_exhausted_attempt_rate": (
-                0.0
-                if attempt_count == 0
-                else sum(item.length_exhausted_attempt_count for item in items)
-                / attempt_count
-            ),
-            "mean_successful_budget_utilization": (
-                None
-                if not successful_utilization
-                else mean(successful_utilization)
-            ),
-            "mean_latency_ms": _optional_mean(
-                item.latency_ms for item in items
-            ),
-            "mean_provider_output_tokens": _optional_mean(
-                item.provider_output_tokens for item in items
-            ),
-            "provider_attempt_count": attempt_count,
-            "requested_result_count": len(items),
-        }
-        utilization = metrics["mean_successful_budget_utilization"]
-        checks = {
-            "minimum_response_success": (
-                metrics["response_success"] >= plan.gates.minimum_response_success
-            ),
-            "minimum_first_attempt_response_success": (
-                metrics["first_attempt_response_success"]
-                >= plan.gates.minimum_first_attempt_response_success
-            ),
-            "minimum_deterministic_validity": (
-                metrics["deterministic_validity"]
-                >= plan.gates.minimum_deterministic_validity
-            ),
-            "minimum_public_target_pass_rate": (
-                metrics["public_target_pass_rate"]
-                >= plan.gates.minimum_public_target_pass_rate
-            ),
-            "maximum_length_exhausted_attempt_rate": (
-                metrics["length_exhausted_attempt_rate"]
-                <= plan.gates.maximum_length_exhausted_attempt_rate
-            ),
-            "maximum_mean_successful_budget_utilization": (
-                utilization is not None
-                and utilization
-                <= plan.gates.maximum_mean_successful_budget_utilization
-            ),
-        }
-        rows.append(
-            {
-                "max_output_tokens": budget,
-                **metrics,
-                "checks": checks,
-                "passed": all(checks.values()),
-            }
-        )
-    selected = next(
-        (row["max_output_tokens"] for row in rows if row["passed"]), None
-    )
+    for effort in plan.model_contract.evaluated_reasoning_efforts:
+        for budget in plan.model_contract.max_output_token_budgets:
+            rows.append(
+                _operating_point_row(
+                    plan,
+                    effort,
+                    budget,
+                    grouped[(effort, budget)],
+                )
+            )
+    selected = next((row for row in rows if row["passed"]), None)
     return {
         "schema_version": "phase-b-proposer-transport-calibration-analysis-1",
         "status": "pass" if selected is not None else "fail",
         "selection_rule": plan.selection_rule,
-        "selected_max_output_tokens": selected,
+        "selected_max_output_tokens": (
+            None if selected is None else selected["max_output_tokens"]
+        ),
         "selected_reasoning_effort": (
-            plan.model_contract.reasoning_effort if selected is not None else None
+            None if selected is None else selected["reasoning_effort"]
         ),
         "operating_points": rows,
         "gates": plan.gates.model_dump(mode="json"),
@@ -407,6 +411,91 @@ def analyze_proposer_calibration(
         "test_data_opened": False,
         "scientific_judge_called": False,
         "parameter_fitting_performed": False,
+    }
+
+
+def _operating_point_row(
+    plan: ProposerTransportCalibrationPlan,
+    effort: str,
+    budget: int,
+    items: list[ProposerCalibrationResult],
+) -> dict[str, object]:
+    """Aggregate one reasoning-effort and output-budget condition."""
+    attempt_count = sum(item.provider_attempt_count for item in items)
+    successful_utilization = [
+        item.successful_attempt_output_tokens / budget
+        for item in items
+        if item.response_success
+        and item.successful_attempt_output_tokens is not None
+    ]
+    metrics = {
+        "response_success": mean(item.response_success for item in items),
+        "first_attempt_response_success": mean(
+            item.first_attempt_response_success for item in items
+        ),
+        "deterministic_validity": mean(
+            item.deterministic_valid for item in items
+        ),
+        "public_target_pass_rate": mean(
+            item.public_target_passed for item in items
+        ),
+        "length_exhausted_attempt_rate": (
+            0.0
+            if attempt_count == 0
+            else sum(item.length_exhausted_attempt_count for item in items)
+            / attempt_count
+        ),
+        "continuation_request_rate": (
+            0.0
+            if attempt_count == 0
+            else sum(item.continuation_request_count for item in items)
+            / attempt_count
+        ),
+        "mean_successful_budget_utilization": (
+            None
+            if not successful_utilization
+            else mean(successful_utilization)
+        ),
+        "mean_latency_ms": _optional_mean(item.latency_ms for item in items),
+        "mean_provider_output_tokens": _optional_mean(
+            item.provider_output_tokens for item in items
+        ),
+        "provider_attempt_count": attempt_count,
+        "requested_result_count": len(items),
+    }
+    utilization = metrics["mean_successful_budget_utilization"]
+    checks = {
+        "minimum_response_success": (
+            metrics["response_success"] >= plan.gates.minimum_response_success
+        ),
+        "minimum_first_attempt_response_success": (
+            metrics["first_attempt_response_success"]
+            >= plan.gates.minimum_first_attempt_response_success
+        ),
+        "minimum_deterministic_validity": (
+            metrics["deterministic_validity"]
+            >= plan.gates.minimum_deterministic_validity
+        ),
+        "minimum_public_target_pass_rate": (
+            metrics["public_target_pass_rate"]
+            >= plan.gates.minimum_public_target_pass_rate
+        ),
+        "maximum_length_exhausted_attempt_rate": (
+            metrics["length_exhausted_attempt_rate"]
+            <= plan.gates.maximum_length_exhausted_attempt_rate
+        ),
+        "maximum_mean_successful_budget_utilization": (
+            utilization is not None
+            and utilization
+            <= plan.gates.maximum_mean_successful_budget_utilization
+        ),
+    }
+    return {
+        "reasoning_effort": effort,
+        "max_output_tokens": budget,
+        **metrics,
+        "checks": checks,
+        "passed": all(checks.values()),
     }
 
 
@@ -434,17 +523,17 @@ def prepare_selected_proposer_confirmation(
         )
     if selected not in source_plan.model_contract.max_output_token_budgets:
         raise ValueError("selected output budget is absent from the source plan")
+    selected_effort = source_analysis.get("selected_reasoning_effort")
+    if selected_effort not in source_plan.model_contract.evaluated_reasoning_efforts:
+        raise ValueError("selected reasoning effort is absent from the source plan")
     selected_rows = [
         row
         for row in source_analysis["operating_points"]
         if row.get("max_output_tokens") == selected
+        and row.get("reasoning_effort", selected_effort) == selected_effort
     ]
     if len(selected_rows) != 1 or selected_rows[0].get("passed") is not True:
         raise ValueError("selected source operating point did not pass every gate")
-    if source_analysis.get("selected_reasoning_effort") != (
-        source_plan.model_contract.reasoning_effort
-    ):
-        raise ValueError("source analysis reasoning effort differs from its plan")
     if not primary_platform or not confirmation_platform:
         raise ValueError("both cluster platform labels must be nonempty")
     if primary_platform == confirmation_platform:
@@ -456,6 +545,9 @@ def prepare_selected_proposer_confirmation(
         "distinct accelerator platform using the unchanged public requests and gates"
     )
     payload["model_contract"]["max_output_token_budgets"] = [selected]
+    payload["model_contract"]["reasoning_effort"] = selected_effort
+    payload["model_contract"]["reasoning_efforts"] = []
+    payload["selection_rule"] = "smallest_budget_passing_all_gates"
     payload["prerequisite"] = None
     output = output_config_path.expanduser().resolve()
     _write_or_validate(
@@ -476,7 +568,7 @@ def prepare_selected_proposer_confirmation(
         ),
         "confirmation_plan_sha256": _sha256(output),
         "selected_max_output_tokens": selected,
-        "selected_reasoning_effort": source_plan.model_contract.reasoning_effort,
+        "selected_reasoning_effort": selected_effort,
         "model": source_plan.model_contract.model,
         "matched_request_count": len(build_proposer_calibration_tasks(source_plan)),
         "candidate_identity_match_required": False,

@@ -77,6 +77,44 @@ change to 16,384, 24,576, and 30,000 tokens. The largest observed v1 prompt was
 2,056 tokens per attempt, so the 30,000-token condition fits the existing
 context ceiling. No fitting or scientific-judge call is introduced.
 
+## Matched reasoning calibration
+
+The v3 calibration crosses `low` and `medium` reasoning effort with the same
+three output-token budgets used by the completed high-reasoning calibration.
+All conditions reuse the same public prompts, task repetitions, sampling
+parameters, schema, deterministic validation, target-contract checks, restart
+policy, and served context ceiling. The selected operating point is the lowest
+reasoning effort and then the smallest output budget that passes every frozen
+gate.
+
+This experiment deliberately retains whole-request retries. Mixing a new retry
+mechanism into the same matrix would make reasoning effort and retry behavior
+inseparable.
+
+## Incomplete-response continuation
+
+The vLLM client also supports an explicit `continue_once` strategy through the
+Responses API. When a response ends with status `incomplete`, the client sends
+the returned reasoning/message items back as partial assistant output and asks
+the model to continue, instead of discarding the work and restarting from the
+original prompt. Visible JSON fragments from the two response segments are
+joined before schema validation.
+
+Continuation is opt-in because it changes the transport protocol and requires
+reserved context for the extra segment. Every physical continuation request is
+recorded in provider-attempt, token, latency, and length-exhaustion accounting.
+It should be evaluated after the matched reasoning calibration at the selected
+reasoning/budget condition.
+
+## Deferred proposer refinements
+
+Candidate repair and incumbent refinement remain separate ablations. The
+intended design gives the proposer the incumbent plus deterministic validation,
+fit, and judge feedback and asks for feedback-motivated edits. It does not yet
+impose a universal limit of one or two changes or require every unmentioned
+equation to be preserved; those restrictions should be compared experimentally
+instead of being built into the primary proposer contract.
+
 ## ACES replication
 
 The same frozen matrix can run independently on two ACES H100 GPUs per task.

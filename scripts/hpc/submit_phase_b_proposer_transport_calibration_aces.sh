@@ -53,6 +53,13 @@ if [[ -n "${AF_PREREQUISITE_ANALYSIS}" ]]; then
 fi
 "${AF_PYTHON}" scripts/prepare_phase_b_proposer_transport_calibration.py \
   "${prepare_arguments[@]}"
+readonly task_count_raw="$(wc -l <"${AF_OUTPUT_ROOT}/frozen/task_plan.jsonl")"
+readonly task_count="${task_count_raw//[[:space:]]/}"
+if [[ ! "${task_count}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "invalid frozen task count: ${task_count}" >&2
+  exit 2
+fi
+readonly task_max="$((task_count - 1))"
 
 readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_CALIBRATION_CONFIG=${AF_CALIBRATION_CONFIG},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_VLLM_IMAGE_URI=${AF_VLLM_IMAGE_URI},AF_HF_HOME=${AF_HF_HOME}"
 image_submission="$(
@@ -67,7 +74,7 @@ readonly image_job_id="${image_submission%%;*}"
 calibration_submission="$(
   sbatch --parsable \
     --account="${AF_ACES_ACCOUNT}" \
-    --array=0-5%2 \
+    --array="0-${task_max}%2" \
     --dependency="afterok:${image_job_id}" \
     --output="${AF_REPO_ROOT}/logs/phase-b-proposer-cal-%A_%a.out" \
     --error="${AF_REPO_ROOT}/logs/phase-b-proposer-cal-%A_%a.err" \

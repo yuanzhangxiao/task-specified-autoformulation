@@ -42,6 +42,19 @@ from autoformalism.schemas import (
 )
 
 
+def _provider_request_count(raw_response: object) -> int:
+    """Count physical requests represented by one provider response payload."""
+    if not isinstance(raw_response, dict):
+        return 1
+    continuation = raw_response.get("_autoformalism_continuation")
+    if not isinstance(continuation, dict):
+        return 1
+    count = continuation.get("request_count")
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 1:
+        return count
+    return 1
+
+
 @dataclass(frozen=True)
 class ProviderResponse(Generic[StructuredT]):
     """Normalized result returned by a concrete provider adapter."""
@@ -50,6 +63,7 @@ class ProviderResponse(Generic[StructuredT]):
     raw_response: dict[str, object]
     usage: TokenUsage | None = None
     latency_ms: float | None = None
+    provider_attempts: int = 1
 
 
 class CachedLLMClient(ABC):
@@ -122,6 +136,7 @@ class CachedLLMClient(ABC):
             attempts=compact.attempts,
             latency_ms=compact.latency_ms,
             usage=compact.usage,
+            actual_provider_attempts=compact.provider_attempts,
         )
 
     def judge(
@@ -309,6 +324,7 @@ class CachedLLMClient(ABC):
                 attempts=0,
                 latency_ms=cached.latency_ms,
                 usage=cached.usage,
+                actual_provider_attempts=0,
             )
             self._log_success(role, result)
             return result
@@ -331,10 +347,12 @@ class CachedLLMClient(ABC):
 
         started = time.perf_counter()
         attempts = 0
+        provider_attempts = 0
         attempt_user_prompt = user_prompt
         repair_diagnostic_codes: tuple[RepairDiagnosticCode, ...] = ()
         while attempts < self._max_attempts:
             attempts += 1
+            current_provider_counted = False
             try:
                 provider_response = self._call_provider(
                     role=role,
@@ -344,6 +362,8 @@ class CachedLLMClient(ABC):
                     attempt_number=attempts,
                     repair_diagnostic_codes=repair_diagnostic_codes,
                 )
+                provider_attempts += provider_response.provider_attempts
+                current_provider_counted = True
                 if normalize_parsed is not None:
                     parsed, repair = normalize_parsed(provider_response.parsed)
                     raw_response = dict(provider_response.raw_response)
@@ -353,6 +373,7 @@ class CachedLLMClient(ABC):
                         raw_response=raw_response,
                         usage=provider_response.usage,
                         latency_ms=provider_response.latency_ms,
+                        provider_attempts=provider_response.provider_attempts,
                     )
                 if validate_parsed is not None:
                     try:
@@ -385,6 +406,9 @@ class CachedLLMClient(ABC):
                                 raw_response=raw_response,
                                 usage=provider_response.usage,
                                 latency_ms=provider_response.latency_ms,
+                                provider_attempts=(
+                                    provider_response.provider_attempts
+                                ),
                             )
                         else:
                             raise LLMResponseError(
@@ -397,6 +421,10 @@ class CachedLLMClient(ABC):
                             ) from exc
                 break
             except (LLMProviderError, LLMResponseError) as exc:
+                if not current_provider_counted:
+                    provider_attempts += _provider_request_count(
+                        getattr(exc, "raw_response", None)
+                    )
                 self._log_failure(role, request_hash, attempts, exc)
                 if not exc.retryable or attempts >= self._max_attempts:
                     raise
@@ -421,6 +449,7 @@ class CachedLLMClient(ABC):
             raw_response=provider_response.raw_response,
             usage=provider_response.usage,
             latency_ms=latency_ms,
+            provider_attempts=provider_response.provider_attempts,
         )
         self._write_cache(request_hash, normalized)
         result = LLMCallResult(
@@ -431,6 +460,7 @@ class CachedLLMClient(ABC):
             attempts=attempts,
             latency_ms=normalized.latency_ms,
             usage=normalized.usage,
+            actual_provider_attempts=provider_attempts,
         )
         self._log_success(role, result)
         return result

@@ -51,50 +51,60 @@ def main() -> None:
     output_root = args.output_root.expanduser().resolve()
     plan_sha256 = hashlib.sha256(plan_path.read_bytes()).hexdigest()
 
-    for budget in plan.model_contract.max_output_token_budgets:
-        result_path = (
-            output_root
-            / "results"
-            / f"task_{task.task_index:03d}"
-            / f"budget_{budget:06d}.json"
-        )
-        if result_path.is_file():
-            restored = ProposerCalibrationResult.model_validate_json(
-                result_path.read_text(encoding="utf-8")
+    efforts = plan.model_contract.evaluated_reasoning_efforts
+    for effort in efforts:
+        for budget in plan.model_contract.max_output_token_budgets:
+            result_path = _condition_path(
+                output_root / "results",
+                task_index=task.task_index,
+                effort=effort,
+                budget=budget,
+                multiple_efforts=len(efforts) > 1,
+            ).with_suffix(".json")
+            if result_path.is_file():
+                restored = ProposerCalibrationResult.model_validate_json(
+                    result_path.read_text(encoding="utf-8")
+                )
+                if (
+                    restored.plan_sha256 != plan_sha256
+                    or restored.task_index != task.task_index
+                    or restored.reasoning_effort != effort
+                    or restored.max_output_tokens != budget
+                ):
+                    raise ValueError(
+                        f"calibration checkpoint differs: {result_path}"
+                    )
+                print(
+                    f"restored task={task.task_index} effort={effort} "
+                    f"budget={budget} success={restored.response_success}"
+                )
+                continue
+            result = _run_budget(
+                plan_path=plan_path,
+                task=task,
+                reasoning_effort=effort,
+                budget=budget,
+                data_root=args.data_root.expanduser().resolve(),
+                target_contract_root=(
+                    args.target_contract_root.expanduser().resolve()
+                ),
+                output_root=output_root,
+                vllm_base_url=args.vllm_base_url,
             )
-            if (
-                restored.plan_sha256 != plan_sha256
-                or restored.task_index != task.task_index
-                or restored.max_output_tokens != budget
-            ):
-                raise ValueError(f"calibration checkpoint differs: {result_path}")
+            _atomic_json(result_path, result.model_dump(mode="json"))
             print(
-                f"restored task={task.task_index} budget={budget} "
-                f"success={restored.response_success}"
+                f"completed task={task.task_index} effort={effort} "
+                f"budget={budget} response={result.response_success} "
+                f"valid={result.deterministic_valid} "
+                f"target={result.public_target_passed}"
             )
-            continue
-        result = _run_budget(
-            plan_path=plan_path,
-            task=task,
-            budget=budget,
-            data_root=args.data_root.expanduser().resolve(),
-            target_contract_root=args.target_contract_root.expanduser().resolve(),
-            output_root=output_root,
-            vllm_base_url=args.vllm_base_url,
-        )
-        _atomic_json(result_path, result.model_dump(mode="json"))
-        print(
-            f"completed task={task.task_index} budget={budget} "
-            f"response={result.response_success} "
-            f"valid={result.deterministic_valid} "
-            f"target={result.public_target_passed}"
-        )
 
 
 def _run_budget(
     *,
     plan_path: Path,
     task: Any,
+    reasoning_effort: str,
     budget: int,
     data_root: Path,
     target_contract_root: Path,
@@ -102,11 +112,14 @@ def _run_budget(
     vllm_base_url: str,
 ) -> ProposerCalibrationResult:
     plan = load_proposer_calibration_plan(plan_path)
-    condition_root = (
-        output_root
-        / "conditions"
-        / f"task_{task.task_index:03d}"
-        / f"budget_{budget:06d}"
+    condition_root = _condition_path(
+        output_root / "conditions",
+        task_index=task.task_index,
+        effort=reasoning_effort,
+        budget=budget,
+        multiple_efforts=(
+            len(plan.model_contract.evaluated_reasoning_efforts) > 1
+        ),
     )
     target_contract_path = (
         target_contract_root / "specs" / f"{task.benchmark_id}.json"
@@ -132,7 +145,7 @@ def _run_budget(
         public_target_contract=target_contract_path,
         vllm_base_url=vllm_base_url,
         vllm_proposer_reasoning_effort=VLLMReasoningEffort(
-            plan.model_contract.reasoning_effort
+            reasoning_effort
         ),
         vllm_judge_reasoning_effort=VLLMReasoningEffort.LOW,
         vllm_temperature=plan.model_contract.temperature,
@@ -162,10 +175,15 @@ def _run_budget(
         log_path=event_log,
         base_url=vllm_base_url,
         reasoning_effort=VLLMReasoningEffort(
-            plan.model_contract.reasoning_effort
+            reasoning_effort
         ),
         timeout_seconds=plan.model_contract.request_timeout_seconds,
         max_output_tokens=budget,
+        continuation_max_output_tokens=(
+            plan.model_contract.continuation_max_output_tokens
+            if plan.model_contract.incomplete_response_strategy == "continue_once"
+            else None
+        ),
         temperature=plan.model_contract.temperature,
         seed=task.repetition,
         max_attempts=plan.model_contract.maximum_provider_attempts,
@@ -189,7 +207,6 @@ def _run_budget(
         request_hash = call.request_hash
         cache_hit = call.cache_hit
         latency_ms = call.latency_ms
-        first_attempt_response_success = call.attempts in (0, 1)
         candidate, repairs = repair_protected_declarations(call.parsed, context)
         diagnostics.extend(
             {"code": "DETERMINISTIC_REPAIR", "message": item}
@@ -227,6 +244,9 @@ def _run_budget(
             request_hash = _request_hash_from_events(event_log)
     events = _events(event_log)
     accounting = _attempt_accounting(events, request_hash=request_hash)
+    first_attempt_response_success = bool(
+        response_success and accounting["attempt_count"] == 1
+    )
     if response_success and request_hash is None:
         request_hash = _request_hash_from_events(event_log)
     return ProposerCalibrationResult(
@@ -236,8 +256,12 @@ def _run_budget(
         tier=task.tier,
         repetition=task.repetition,
         model=plan.model_contract.model,
-        reasoning_effort=plan.model_contract.reasoning_effort,
+        reasoning_effort=reasoning_effort,
         max_output_tokens=budget,
+        incomplete_response_strategy=(
+            plan.model_contract.incomplete_response_strategy
+        ),
+        continuation_request_count=accounting["continuation_requests"],
         request_hash=request_hash,
         cache_hit=cache_hit,
         response_success=response_success,
@@ -268,6 +292,21 @@ def _run_budget(
         scientific_judge_called=False,
         parameter_fitting_performed=False,
     )
+
+
+def _condition_path(
+    root: Path,
+    *,
+    task_index: int,
+    effort: str,
+    budget: int,
+    multiple_efforts: bool,
+) -> Path:
+    """Keep legacy single-effort paths while separating factorial conditions."""
+    path = root / f"task_{task_index:03d}"
+    if multiple_efforts:
+        path /= f"effort_{effort}"
+    return path / f"budget_{budget:06d}"
 
 
 def _events(path: Path) -> list[dict[str, object]]:
@@ -316,18 +355,26 @@ def _attempt_accounting(
     successful_raw = response.get("raw_response") if response is not None else None
     if response is not None and not response.get("cache_hit"):
         raw_attempts.append(successful_raw)
+    physical_attempts: list[dict[str, object]] = []
+    continuation_requests = 0
+    for raw in raw_attempts:
+        segments = _physical_responses(raw)
+        physical_attempts.extend(segments)
+        continuation_requests += max(0, len(segments) - 1)
+    if physical_attempts:
+        attempts = len(physical_attempts)
     input_tokens = 0
     output_tokens = 0
     observed_usage = False
     length_exhausted = 0
     reasoning_characters = 0
-    for raw in raw_attempts:
-        if not isinstance(raw, dict):
-            continue
+    for raw in physical_attempts:
         usage = raw.get("usage")
         if isinstance(usage, dict):
-            prompt = usage.get("prompt_tokens")
-            completion = usage.get("completion_tokens")
+            prompt = usage.get("prompt_tokens", usage.get("input_tokens"))
+            completion = usage.get(
+                "completion_tokens", usage.get("output_tokens")
+            )
             if isinstance(prompt, int) and not isinstance(prompt, bool):
                 input_tokens += prompt
                 observed_usage = True
@@ -338,6 +385,8 @@ def _attempt_accounting(
         choice = choices[0] if isinstance(choices, list) and choices else None
         if isinstance(choice, dict) and choice.get("finish_reason") == "length":
             length_exhausted += 1
+        if raw.get("status") == "incomplete":
+            length_exhausted += 1
         message = choice.get("message") if isinstance(choice, dict) else None
         if isinstance(message, dict):
             reasoning = (
@@ -347,7 +396,10 @@ def _attempt_accounting(
             )
             if isinstance(reasoning, str):
                 reasoning_characters += len(reasoning)
-    successful_usage = _token_usage(successful_raw)
+        reasoning_characters += _responses_reasoning_characters(raw)
+    successful_usage = _summed_token_usage(
+        _physical_responses(successful_raw)
+    )
     return {
         "attempt_count": attempts,
         "input_tokens": input_tokens if observed_usage else None,
@@ -364,6 +416,7 @@ def _attempt_accounting(
         ),
         "length_exhausted": length_exhausted,
         "reasoning_characters": reasoning_characters,
+        "continuation_requests": continuation_requests,
     }
 
 
@@ -374,8 +427,8 @@ def _token_usage(raw: object) -> tuple[int | None, int | None]:
     usage = raw.get("usage")
     if not isinstance(usage, dict):
         return None, None
-    prompt = usage.get("prompt_tokens")
-    completion = usage.get("completion_tokens")
+    prompt = usage.get("prompt_tokens", usage.get("input_tokens"))
+    completion = usage.get("completion_tokens", usage.get("output_tokens"))
     input_tokens = (
         prompt if isinstance(prompt, int) and not isinstance(prompt, bool) else None
     )
@@ -385,6 +438,61 @@ def _token_usage(raw: object) -> tuple[int | None, int | None]:
         else None
     )
     return input_tokens, output_tokens
+
+
+def _physical_responses(raw: object) -> list[dict[str, object]]:
+    """Expand a Responses continuation aggregate into physical requests."""
+    if not isinstance(raw, dict):
+        return []
+    continuation = raw.get("_autoformalism_continuation")
+    if isinstance(continuation, dict):
+        segments = continuation.get("segments")
+        if isinstance(segments, list) and all(
+            isinstance(item, dict) for item in segments
+        ):
+            expanded = list(segments)
+            request_count = continuation.get("request_count")
+            if (
+                isinstance(request_count, int)
+                and not isinstance(request_count, bool)
+                and request_count > len(expanded)
+            ):
+                expanded.extend({} for _ in range(request_count - len(expanded)))
+            return expanded
+    return [raw]
+
+
+def _summed_token_usage(
+    responses: list[dict[str, object]],
+) -> tuple[int | None, int | None]:
+    """Sum input/output usage for one successful restart or continuation chain."""
+    usages = [_token_usage(item) for item in responses]
+    inputs = [item[0] for item in usages if item[0] is not None]
+    outputs = [item[1] for item in usages if item[1] is not None]
+    return (
+        sum(inputs) if inputs else None,
+        sum(outputs) if outputs else None,
+    )
+
+
+def _responses_reasoning_characters(raw: dict[str, object]) -> int:
+    """Count returned reasoning text in one Responses API segment."""
+    output = raw.get("output")
+    if not isinstance(output, list):
+        return 0
+    total = 0
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "reasoning":
+            continue
+        for key in ("content", "summary"):
+            value = item.get(key)
+            if isinstance(value, str):
+                total += len(value)
+            elif isinstance(value, list):
+                for part in value:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        total += len(part["text"])
+    return total
 
 
 def _atomic_json(path: Path, payload: dict[str, object]) -> None:

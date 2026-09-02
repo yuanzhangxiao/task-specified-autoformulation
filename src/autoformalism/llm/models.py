@@ -41,6 +41,7 @@ class LLMCallResult(Generic[StructuredT]):
     attempts: int
     latency_ms: float | None
     usage: TokenUsage | None
+    actual_provider_attempts: int | None = None
 
     @property
     def logical_calls(self) -> int:
@@ -50,6 +51,8 @@ class LLMCallResult(Generic[StructuredT]):
     @property
     def provider_attempts(self) -> int:
         """Actual provider generations; cache hits require no provider attempt."""
+        if self.actual_provider_attempts is not None:
+            return self.actual_provider_attempts
         return self.attempts
 
     @property
