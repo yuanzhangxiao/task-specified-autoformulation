@@ -56,6 +56,33 @@ def test_repository_refinement_smoke_is_one_matched_two_round_trial() -> None:
     assert plan.private_reference_opened is False
 
 
+def test_matched_arm_tasks_share_worker_endpoint_slots() -> None:
+    plan = load_refinement_pilot_plan(
+        Path("configs/phase_b_proposer_refinement_pilot_v1.json")
+    )
+    tasks = build_refinement_pilot_tasks(plan)
+    matched_trial_count = len(tasks) // 2
+
+    for exploratory, refinement in zip(
+        tasks[:matched_trial_count],
+        tasks[matched_trial_count:],
+        strict=True,
+    ):
+        assert (
+            exploratory.benchmark_id,
+            exploratory.tier,
+            exploratory.repetition,
+        ) == (
+            refinement.benchmark_id,
+            refinement.tier,
+            refinement.repetition,
+        )
+        assert (
+            exploratory.task_index % matched_trial_count
+            == refinement.task_index % matched_trial_count
+        )
+
+
 def test_freeze_validates_public_inputs_and_writes_hash_ledger(
     tmp_path: Path,
 ) -> None:
@@ -129,6 +156,18 @@ def test_aces_worker_uses_portable_resource_timing() -> None:
     text = worker.read_text(encoding="utf-8")
     assert "scripts/run_with_resource_timing.py" in text
     assert "/usr/bin/time" not in text
+
+
+def test_aces_worker_uses_matched_endpoint_identity_across_arms() -> None:
+    worker = Path(
+        "scripts/hpc/phase_b_proposer_refinement_pilot_aces_h100.slurm"
+    )
+    text = worker.read_text(encoding="utf-8")
+
+    assert 'matched_trial_count=$((task_count / 2))' in text
+    assert 'matched_trial_index=$((AF_TASK_INDEX % matched_trial_count))' in text
+    assert 'endpoint_port="$((8100 + matched_trial_index))"' in text
+    assert 'endpoint_port="$((8100 + AF_TASK_INDEX))"' not in text
 
 
 def test_aces_submitter_supports_consistent_single_gpu_smoke() -> None:

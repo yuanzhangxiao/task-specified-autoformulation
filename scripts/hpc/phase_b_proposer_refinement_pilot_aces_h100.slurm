@@ -53,6 +53,14 @@ for directory in \
     exit 2
   }
 done
+readonly task_count_raw="$(wc -l <"${task_plan}")"
+readonly task_count="${task_count_raw//[[:space:]]/}"
+[[ "${task_count}" =~ ^[1-9][0-9]*$ ]] \
+  && ((task_count >= 2 && task_count % 2 == 0)) || {
+  echo "invalid matched task count: ${task_count}" >&2
+  exit 2
+}
+readonly matched_trial_count=$((task_count / 2))
 cmp --silent "${AF_REFINEMENT_CONFIG}" "${plan}" || {
   echo "repository refinement plan differs from frozen plan" >&2
   exit 2
@@ -131,7 +139,11 @@ readonly shared_cache="${AF_OUTPUT_ROOT}/shared-round-zero-cache/${run_name}"
 readonly process_time="${run_root}/search_process_time.txt"
 readonly gpu_inventory="${run_root}/gpu_inventory.txt"
 readonly started_epoch_seconds="$(date +%s.%N)"
-readonly endpoint_port="$((8100 + AF_TASK_INDEX))"
+# The vLLM endpoint is part of the exact cache identity. Matched tasks in the
+# two arm-major halves must therefore use the same local endpoint port even
+# though they run in separate dependent allocations.
+readonly matched_trial_index=$((AF_TASK_INDEX % matched_trial_count))
+readonly endpoint_port="$((8100 + matched_trial_index))"
 readonly endpoint="http://127.0.0.1:${endpoint_port}"
 readonly server_log="${AF_OUTPUT_ROOT}/vllm-${SLURM_JOB_ID}.log"
 
