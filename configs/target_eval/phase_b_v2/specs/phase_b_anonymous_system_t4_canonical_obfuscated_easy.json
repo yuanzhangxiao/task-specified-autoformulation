@@ -1,0 +1,23 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_t4_canonical_obfuscated_easy",
+  "public_prompt_sha256": "6461d8f585da57a264b79b0a0ef24cc0d87095b5f5a7bfe709b5db09ce2d929a",
+  "schema_version": "public-target-contract-2",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "expected_representation": "dynamic_state",
+      "public_requirement": "generate target v01(t): primary nonnegative stored-quantity target",
+      "representation_requirement": "v01(t): primary nonnegative stored-quantity target",
+      "required_dependencies": [],
+      "target_channel": "v01"
+    },
+    {
+      "expected_representation": "unspecified",
+      "public_requirement": "generate target v02(t): regulatory target quantity",
+      "representation_requirement": null,
+      "required_dependencies": [],
+      "target_channel": "v02"
+    }
+  ],
+  "tier": "easy"
+}

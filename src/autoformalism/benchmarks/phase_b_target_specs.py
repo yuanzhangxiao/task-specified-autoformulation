@@ -12,6 +12,7 @@ from autoformalism.targets import (
     PublicTargetContract,
     PublicTargetRequirement,
     RequiredTargetDependency,
+    TargetRepresentation,
 )
 
 
@@ -26,6 +27,7 @@ def phase_b_public_target_contract(
         if item.role == "target"
     )
     return PublicTargetContract(
+        schema_version="public-target-contract-2",
         benchmark_id=public_spec.benchmark_id,
         tier=public_spec.tier,
         public_prompt_sha256=hashlib.sha256(
@@ -41,6 +43,12 @@ def _target_requirement(
     description: str,
 ) -> PublicTargetRequirement:
     dependencies: tuple[RequiredTargetDependency, ...] = ()
+    representation = _public_target_representation(description)
+    representation_requirement = (
+        None
+        if representation is TargetRepresentation.UNSPECIFIED
+        else f"{target}(t): {description}"
+    )
     public_symbols = {item.public_name for item in spec.channels}
     if (
         spec.family == "dalla_man"
@@ -64,4 +72,18 @@ def _target_requirement(
         target_channel=target,
         public_requirement=f"generate target {target}(t): {description}",
         required_dependencies=dependencies,
+        expected_representation=representation,
+        representation_requirement=representation_requirement,
     )
+
+
+def _public_target_representation(
+    public_description: str,
+) -> TargetRepresentation:
+    """Return only roles stated unambiguously by the rendered public prompt."""
+    normalized = public_description.casefold()
+    if "stored-quantity" in normalized or "mass" in normalized:
+        return TargetRepresentation.DYNAMIC_STATE
+    if "rate" in normalized:
+        return TargetRepresentation.INSTANTANEOUS_PROCESS
+    return TargetRepresentation.UNSPECIFIED

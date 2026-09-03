@@ -1,0 +1,30 @@
+{
+  "benchmark_id": "phase_b_dalla_man_t3_perturbed_named_hard",
+  "public_prompt_sha256": "b7da37c83d300c9594b5f677c6589d81d1e4b66781281ce23eecf2a6e93a75e9",
+  "schema_version": "public-target-contract-2",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "expected_representation": "dynamic_state",
+      "public_requirement": "generate target Gp(t): primary nonnegative target representing plasma glucose mass",
+      "representation_requirement": "Gp(t): primary nonnegative target representing plasma glucose mass",
+      "required_dependencies": [],
+      "target_channel": "Gp"
+    },
+    {
+      "expected_representation": "unspecified",
+      "public_requirement": "generate target I(t): insulin concentration",
+      "representation_requirement": null,
+      "required_dependencies": [],
+      "target_channel": "I"
+    },
+    {
+      "expected_representation": "instantaneous_process",
+      "public_requirement": "generate target EGP(t): endogenous glucose production rate",
+      "representation_requirement": "EGP(t): endogenous glucose production rate",
+      "required_dependencies": [],
+      "target_channel": "EGP"
+    }
+  ],
+  "tier": "hard"
+}

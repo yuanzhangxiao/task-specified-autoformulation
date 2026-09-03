@@ -2,6 +2,7 @@
 
 from autoformalism.search.checkpoints import CheckpointError, CheckpointStore
 from autoformalism.search.controller import SearchController
+from autoformalism.search.identity import CandidateIdentity, candidate_identity
 from autoformalism.search.models import (
     CandidateRecord,
     FinalEvaluation,
@@ -11,6 +12,7 @@ from autoformalism.search.models import (
 )
 
 __all__ = [
+    "CandidateIdentity",
     "CandidateRecord",
     "CheckpointError",
     "CheckpointStore",
@@ -19,4 +21,5 @@ __all__ = [
     "IncumbentChallenge",
     "SearchConfig",
     "SearchController",
+    "candidate_identity",
 ]

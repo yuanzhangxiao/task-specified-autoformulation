@@ -1116,6 +1116,148 @@ def test_previously_failed_structure_is_not_fit_again_and_is_explained(
     assert failed_memory[0]["fit"]["message"] == "synthetic fit failure"
 
 
+def test_numerical_failure_allows_changed_executable_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _candidate("failed", "-decay * x", (("decay", 0.2, 1.0),))
+    repeated = _candidate(
+        "repeated",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+        parent="failed",
+    )
+    revised_bounds = _candidate(
+        "rebounded",
+        "-decay * x",
+        (("decay", 0.1, 2.0),),
+        parent="repeated",
+    )
+    client = MockLLMClient(
+        proposer_responses=[first, repeated, revised_bounds],
+        judge_responses=[_judge()] * 4,
+    )
+    config = _config(tmp_path / "numerical-repair", 3).model_copy(
+        update={"beam_size": 1, "proposer_feedback_mode": "rich_v1"}
+    )
+
+    from autoformalism.search import controller as controller_module
+
+    real_fit = controller_module.fit_candidate
+
+    def controlled_fit(model, *args, **kwargs):
+        fitted = real_fit(model, *args, **kwargs)
+        if model.validated.candidate.candidate_id == "failed":
+            return replace(fitted, success=False, message="synthetic fit failure")
+        return fitted
+
+    monkeypatch.setattr(controller_module, "fit_candidate", controlled_fit)
+    result = _controller(client, config).run()
+    failed = json.loads(
+        (config.checkpoint_directory / "round_0000.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    recovered = json.loads(
+        (config.checkpoint_directory / "round_0002.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    duplicate = json.loads(
+        (config.checkpoint_directory / "round_0001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert result.completed_iterations == 1
+    assert failed["failure_class"] == "numerical_fit"
+    assert duplicate["failure_class"] == "duplicate"
+    assert duplicate["prior_structural_failure"]["duplicate_match_level"] == (
+        "executable"
+    )
+    assert recovered["valid"] is True
+    assert (
+        failed["candidate_identity"]["functional_sha256"]
+        == recovered["candidate_identity"]["functional_sha256"]
+    )
+    assert (
+        failed["candidate_identity"]["executable_sha256"]
+        != recovered["candidate_identity"]["executable_sha256"]
+    )
+
+
+def test_lineage_metadata_failure_does_not_blacklist_functional_identity(
+    tmp_path: Path,
+) -> None:
+    bad_parent = _candidate(
+        "bad_parent",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+        parent="missing",
+    )
+    corrected = _candidate(
+        "corrected",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+    )
+    client = MockLLMClient(
+        proposer_responses=[bad_parent, corrected],
+        judge_responses=[_judge()] * 3,
+    )
+    config = _config(tmp_path / "lineage-metadata", 2).model_copy(
+        update={"beam_size": 1, "proposer_feedback_mode": "rich_v1"}
+    )
+
+    result = _controller(client, config).run()
+    rejected = json.loads(
+        (config.checkpoint_directory / "round_0000.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    accepted = json.loads(
+        (config.checkpoint_directory / "round_0001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert result.completed_iterations == 1
+    assert rejected["failure_class"] == "lineage_contract"
+    assert accepted["valid"] is True
+
+
+def test_unparseable_failed_candidate_does_not_break_failure_memory(
+    tmp_path: Path,
+) -> None:
+    malformed = _candidate(
+        "malformed",
+        "(",
+        (("decay", 0.2, 1.0),),
+    )
+    corrected = _candidate(
+        "corrected",
+        "-decay * x",
+        (("decay", 0.2, 1.0),),
+        parent="malformed",
+    )
+    client = MockLLMClient(
+        proposer_responses=[malformed, corrected],
+        judge_responses=[_judge()] * 3,
+    )
+    config = _config(tmp_path / "unparseable-memory", 2).model_copy(
+        update={"beam_size": 1, "proposer_feedback_mode": "rich_v1"}
+    )
+
+    result = _controller(client, config).run()
+    rejected = json.loads(
+        (config.checkpoint_directory / "round_0000.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert result.completed_iterations == 1
+    assert rejected["failure_class"] == "deterministic_contract"
+
+
 def test_nonexistent_lineage_parent_is_rejected(tmp_path: Path) -> None:
     candidate = _candidate(
         "bad_lineage",

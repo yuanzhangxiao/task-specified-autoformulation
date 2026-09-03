@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
@@ -46,6 +45,7 @@ from autoformalism.search.hybrid_pair import (
     HybridPairJudgment,
     PairwiseScientificJudge,
 )
+from autoformalism.search.identity import CandidateIdentity, candidate_identity
 from autoformalism.search.models import (
     CandidateRecord,
     FinalEvaluation,
@@ -253,6 +253,7 @@ class SearchController:
                 payload.update(
                     valid=False,
                     error=f"{type(exc).__name__}: {str(exc)[:1000]}",
+                    failure_class="proposal_transport",
                     stage="complete",
                 )
                 self._store.save_round(round_index, payload)
@@ -302,6 +303,7 @@ class SearchController:
                 payload.update(
                     valid=False,
                     error="candidate parent is not present in the active lineage",
+                    failure_class="lineage_contract",
                     stage="complete",
                 )
                 self._store.save_round(round_index, payload)
@@ -325,6 +327,7 @@ class SearchController:
                 payload.update(
                     valid=False,
                     error=str(exc),
+                    failure_class="deterministic_contract",
                     deterministic_validation_diagnostics=[
                         {
                             "code": item.code,
@@ -338,15 +341,19 @@ class SearchController:
                 self._store.save_round(round_index, payload)
                 self._callback("complete", round_index)
                 return None
-            structural_hash = _structural_hash(candidate)
+            identity = candidate_identity(candidate)
+            payload["candidate_identity"] = identity.model_dump(mode="json")
+            structural_hash = identity.functional_sha256
             payload["structural_hash"] = structural_hash
             prior_failure = self._prior_failed_structure(
-                round_index, structural_hash
+                round_index,
+                identity,
             )
             if prior_failure is not None:
                 payload.update(
                     valid=False,
                     error="previously failed structural duplicate",
+                    failure_class="duplicate",
                     prior_structural_failure=prior_failure,
                     stage="complete",
                 )
@@ -360,6 +367,10 @@ class SearchController:
                 payload["public_target_evaluation"] = target_evaluation.model_dump(
                     mode="json"
                 )
+                if self._public_mechanism_spec is not None:
+                    payload["public_mechanism_evaluation"] = evaluate_mechanisms(
+                        candidate, self._public_mechanism_spec
+                    ).model_dump(mode="json")
                 if not target_evaluation.passed:
                     failed = [
                         item.predicate
@@ -372,11 +383,16 @@ class SearchController:
                             "PUBLIC_TARGET_CONTRACT_FAILED: "
                             + ", ".join(failed)
                         ),
+                        failure_class="public_contract",
                         stage="complete",
                     )
                     self._store.save_round(round_index, payload)
                     self._callback("complete", round_index)
                     return None
+            elif self._public_mechanism_spec is not None:
+                payload["public_mechanism_evaluation"] = evaluate_mechanisms(
+                    candidate, self._public_mechanism_spec
+                ).model_dump(mode="json")
             if compiled.validated.warnings:
                 payload["validation_warnings"] = [
                     {
@@ -397,6 +413,7 @@ class SearchController:
                 payload.update(
                     valid=False,
                     error="structural duplicate",
+                    failure_class="duplicate",
                     stage="complete",
                 )
                 self._store.save_round(round_index, payload)
@@ -425,6 +442,7 @@ class SearchController:
                 payload.update(
                     valid=False,
                     error="numerical fit failed",
+                    failure_class="numerical_fit",
                     fit=_fit_to_dict(fitted),
                     stage="complete",
                 )
@@ -468,6 +486,15 @@ class SearchController:
                     removed_parameters = ()
                     payload["pruning_target_contract_fallback"] = True
             payload["pruned_candidate"] = selected_candidate.model_dump(mode="json")
+            payload["pruned_candidate_identity"] = candidate_identity(
+                selected_candidate
+            ).model_dump(mode="json")
+            if self._public_mechanism_spec is not None:
+                payload["pruned_public_mechanism_evaluation"] = (
+                    evaluate_mechanisms(
+                        selected_candidate, self._public_mechanism_spec
+                    ).model_dump(mode="json")
+                )
             payload["pruned_fit"] = _fit_to_dict(selected_fit)
             payload["pruning"] = {
                 "removed_terms": list(removed_terms),
@@ -744,7 +771,9 @@ class SearchController:
                 error = str(payload.get("error", "candidate was rejected"))
                 feedback[0]["recent_rejected_candidate"] = {
                     "candidate_id": candidate.candidate_id,
+                    "candidate_identity": payload.get("candidate_identity"),
                     "structural_hash": payload.get("structural_hash"),
+                    "failure_class": payload.get("failure_class"),
                     "error": error,
                     "prior_structural_failure": payload.get(
                         "prior_structural_failure"
@@ -754,6 +783,9 @@ class SearchController:
                     ),
                     "public_target_evaluation": payload.get(
                         "public_target_evaluation"
+                    ),
+                    "public_mechanism_evaluation": payload.get(
+                        "public_mechanism_evaluation"
                     ),
                     "equations": {
                         item.state: item.rhs
@@ -776,6 +808,9 @@ class SearchController:
                     feedback[0]["recent_rejected_candidate"].pop(
                         "public_target_evaluation"
                     )
+                    feedback[0]["recent_rejected_candidate"].pop(
+                        "public_mechanism_evaluation"
+                    )
                 break
         if remaining > 0:
             for rejected_round in range(round_index - 1, -1, -1):
@@ -794,6 +829,9 @@ class SearchController:
                     if isinstance(payload.get("fit"), dict)
                     else None
                 )
+                rejected_fit_valid = bool(
+                    rejected_fit is not None and rejected_fit.success
+                )
                 failure_messages = (
                     sorted(
                         {
@@ -808,7 +846,9 @@ class SearchController:
                 feedback.append(
                     {
                         "candidate_id": candidate.candidate_id,
+                        "candidate_identity": payload.get("candidate_identity"),
                         "structural_hash": payload.get("structural_hash"),
+                        "failure_class": payload.get("failure_class"),
                         "eligible_parent": True,
                         "lineage_parent": candidate.parent_candidate_id,
                         "equations": {
@@ -817,17 +857,18 @@ class SearchController:
                         },
                         "fitted_parameters": (
                             dict(rejected_fit.global_parameters)
-                            if rejected_fit is not None
-                            else {}
+                            if rejected_fit_valid and rejected_fit is not None
+                            else None
                         ),
+                        "parameter_estimates_valid": rejected_fit_valid,
                         "training_normalized_mse": (
                             rejected_fit.training_metrics.normalized_mse
-                            if rejected_fit is not None
+                            if rejected_fit_valid and rejected_fit is not None
                             else None
                         ),
                         "validation_normalized_mse": (
                             rejected_fit.validation_metrics.normalized_mse
-                            if rejected_fit is not None
+                            if rejected_fit_valid and rejected_fit is not None
                             else None
                         ),
                         "judge_category_scores": {},
@@ -842,6 +883,9 @@ class SearchController:
                                 ),
                                 "public_target_evaluation": payload.get(
                                     "public_target_evaluation"
+                                ),
+                                "public_mechanism_evaluation": payload.get(
+                                    "public_mechanism_evaluation"
                                 ),
                             }
                             if rejected_fit is None
@@ -874,11 +918,10 @@ class SearchController:
                             "prior_structural_failure"
                         ),
                         "required_edit": (
-                            "Do not resubmit this executable structure. Address "
-                            "the recorded failure by changing at least one "
-                            "dependency, operator, state, process, or algebraic "
-                            "mechanism; renaming or bound-only edits are not new "
-                            "structure."
+                            "Address the recorded failure at its stated identity "
+                            "level. Renaming is never a change; numerical-only "
+                            "failures may instead revise executable bounds or "
+                            "initialization without claiming scientific novelty."
                         ),
                     }
                 )
@@ -979,9 +1022,15 @@ class SearchController:
     def _prior_failed_structure(
         self,
         round_index: int,
-        structural_hash: str,
+        identity: CandidateIdentity,
     ) -> dict[str, object] | None:
-        """Return bounded provenance for an already rejected structure."""
+        """Return a prior failure that makes this retry non-informative.
+
+        Public or deterministic structural failures apply to the
+        alpha-invariant functional identity. Numerical failures apply only to
+        the complete executable identity, so a scientifically unchanged model
+        may still repair bounds or initial conditions and receive a new fit.
+        """
         for previous_round in range(round_index - 1, -1, -1):
             payload = self._store.load_round(previous_round)
             if (
@@ -991,14 +1040,36 @@ class SearchController:
                 or not isinstance(payload.get("candidate"), dict)
             ):
                 continue
-            previous_hash = payload.get("structural_hash")
-            if previous_hash is None:
-                previous = CandidateModel.model_validate(payload["candidate"])
-                previous_hash = _structural_hash(previous)
-            if previous_hash != structural_hash:
-                continue
             previous = CandidateModel.model_validate(payload["candidate"])
+            previous_identity = _identity_from_payload(payload, previous)
+            if previous_identity is None:
+                continue
+            failure_class = _failure_class_from_payload(payload)
+            if failure_class in {"lineage_contract", "proposal_transport"}:
+                continue
             inherited = payload.get("prior_structural_failure")
+            inherited_match_level = (
+                inherited.get("duplicate_match_level")
+                if isinstance(inherited, Mapping)
+                else None
+            )
+            if (
+                failure_class == "numerical_fit"
+                or inherited_match_level == "executable"
+            ):
+                match_level = "executable"
+                matches = (
+                    previous_identity.executable_sha256
+                    == identity.executable_sha256
+                )
+            else:
+                match_level = "functional"
+                matches = (
+                    previous_identity.functional_sha256
+                    == identity.functional_sha256
+                )
+            if not matches:
+                continue
             if isinstance(inherited, dict):
                 return {
                     **inherited,
@@ -1008,25 +1079,41 @@ class SearchController:
             fit = payload.get("fit")
             fit_summary = None
             if isinstance(fit, dict):
+                fit_success = bool(fit.get("success", False))
                 training_metrics = fit.get("training_metrics", {})
                 validation_metrics = fit.get("validation_metrics", {})
                 fit_summary = {
-                    "success": bool(fit.get("success", False)),
+                    "success": fit_success,
                     "message": fit.get("message"),
-                    "global_parameters": dict(
-                        fit.get("global_parameters", {})
+                    "parameter_estimates_valid": fit_success,
+                    "global_parameters": (
+                        dict(fit.get("global_parameters", {}))
+                        if fit_success
+                        else None
                     ),
-                    "training_normalized_mse": training_metrics.get(
-                        "normalized_mse"
+                    "training_normalized_mse": (
+                        training_metrics.get("normalized_mse")
+                        if fit_success
+                        else None
                     ),
-                    "validation_normalized_mse": validation_metrics.get(
-                        "normalized_mse"
+                    "validation_normalized_mse": (
+                        validation_metrics.get("normalized_mse")
+                        if fit_success
+                        else None
                     ),
-                    "training_per_target_normalized_mse": dict(
-                        training_metrics.get("per_target_normalized_mse", {})
+                    "training_per_target_normalized_mse": (
+                        dict(training_metrics.get("per_target_normalized_mse", {}))
+                        if fit_success
+                        else None
                     ),
-                    "validation_per_target_normalized_mse": dict(
-                        validation_metrics.get("per_target_normalized_mse", {})
+                    "validation_per_target_normalized_mse": (
+                        dict(
+                            validation_metrics.get(
+                                "per_target_normalized_mse", {}
+                            )
+                        )
+                        if fit_success
+                        else None
                     ),
                     "diagnostics": [
                         {
@@ -1049,7 +1136,10 @@ class SearchController:
             return {
                 "round_index": previous_round,
                 "candidate_id": previous.candidate_id,
-                "structural_hash": structural_hash,
+                "failure_class": failure_class,
+                "duplicate_match_level": match_level,
+                "candidate_identity": previous_identity.model_dump(mode="json"),
+                "structural_hash": previous_identity.functional_sha256,
                 "error": str(payload.get("error", "candidate was rejected")),
                 "fit_attempts": list(payload.get("fit_attempts", [])),
                 "fit": fit_summary,
@@ -1061,8 +1151,16 @@ class SearchController:
                     item.name: item.expression for item in previous.processes
                 },
                 "instruction": (
-                    "This executable structure has already failed and will not "
-                    "be fit again. Revise its scientific or dynamic structure."
+                    "This retry matches a previously failed candidate at the "
+                    f"{match_level} level and will not be fit again. "
+                    + (
+                        "Revise its scientific or dynamic structure."
+                        if match_level == "functional"
+                        else (
+                            "Change executable numerical metadata or choose a "
+                            "different predeclared fitting strategy."
+                        )
+                    )
                 ),
             }
         return None
@@ -1075,22 +1173,29 @@ class SearchController:
     ) -> list[dict[str, object]]:
         """Expose a bounded, deduplicated memory of expensive failed structures."""
         remembered: list[dict[str, object]] = []
-        seen: set[str] = set()
+        seen: set[tuple[int, str]] = set()
         for previous_round in range(round_index - 1, -1, -1):
             payload = self._store.load_round(previous_round)
             if (
                 payload is None
                 or payload.get("stage") != "complete"
                 or payload.get("valid")
-                or not isinstance(payload.get("structural_hash"), str)
+                or not isinstance(payload.get("candidate"), dict)
             ):
                 continue
-            structural_hash = str(payload["structural_hash"])
-            if structural_hash in seen:
+            candidate = CandidateModel.model_validate(payload["candidate"])
+            identity = _identity_from_payload(payload, candidate)
+            if identity is None:
                 continue
-            seen.add(structural_hash)
-            entry = self._prior_failed_structure(round_index, structural_hash)
+            entry = self._prior_failed_structure(round_index, identity)
             if entry is not None:
+                memory_key = (
+                    int(entry["round_index"]),
+                    str(entry["candidate_id"]),
+                )
+                if memory_key in seen:
+                    continue
+                seen.add(memory_key)
                 remembered.append(entry)
             if len(remembered) == limit:
                 break
@@ -1335,6 +1440,7 @@ def _implementation_fingerprint() -> str:
         Path(__file__).resolve(),
         root / "search" / "checkpoints.py",
         root / "search" / "hybrid_pair.py",
+        root / "search" / "identity.py",
         root / "search" / "models.py",
         root / "judging" / "hybrid.py",
         root / "judging" / "prompts.py",
@@ -1353,83 +1459,38 @@ def _implementation_fingerprint() -> str:
 
 
 def _structural_hash(candidate: CandidateModel) -> str:
-    state_map = {
-        name: f"s{index}"
-        for index, name in enumerate(sorted(item.name for item in candidate.states))
-    }
-    process_map = {
-        name: f"q{index}"
-        for index, name in enumerate(sorted(item.name for item in candidate.processes))
-    }
-    parameter_map = {
-        name: f"p{index}"
-        for index, name in enumerate(
-            sorted(item.name for item in candidate.parameters)
-        )
-    }
-    names = {**state_map, **process_map, **parameter_map}
-    payload = {
-        "states": sorted(
-            (state_map[item.name], item.kind.value) for item in candidate.states
-        ),
-        "processes": sorted(
-            (
-                process_map[item.name],
-                _canonical_expression(item.expression, names),
-            )
-            for item in candidate.processes
-        ),
-        "equations": sorted(
-            (
-                state_map[item.state],
-                _canonical_expression(item.rhs, names),
-            )
-            for item in candidate.state_equations
-        ),
-        "observations": sorted(
-            (
-                item.channel,
-                _canonical_expression(item.expression, names),
-            )
-            for item in candidate.observation_mappings
-        ),
-        "parameters": sorted(
-            (parameter_map[item.name], item.scope.value)
-            for item in candidate.parameters
-        ),
-        "initial_conditions": sorted(
-            (state_map[item.state], item.scope.value)
-            for item in candidate.initial_conditions
-        ),
-        "constraints": sorted(
-            (
-                names.get(item.subject, item.subject),
-                item.kind.value,
-                (
-                    None
-                    if item.bounds is None
-                    else (item.bounds.lower, item.bounds.upper)
-                ),
-            )
-            for item in candidate.constraints
-        ),
-    }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    """Return the backward-compatible functional-identity fingerprint."""
+
+    return candidate_identity(candidate).functional_sha256
 
 
-def _canonical_expression(source: str, names: Mapping[str, str]) -> str:
-    class Rename(ast.NodeTransformer):
-        def visit_Name(self, node: ast.Name) -> ast.Name:
-            return ast.copy_location(
-                ast.Name(id=names.get(node.id, node.id), ctx=node.ctx),
-                node,
-            )
+def _identity_from_payload(
+    payload: Mapping[str, Any],
+    candidate: CandidateModel,
+) -> CandidateIdentity | None:
+    """Read an identity or derive one when every expression is parseable."""
 
-    parsed = ast.parse(source, mode="eval")
-    renamed = Rename().visit(parsed)
-    return ast.unparse(ast.fix_missing_locations(renamed))
+    stored = payload.get("candidate_identity")
+    if isinstance(stored, Mapping):
+        return CandidateIdentity.model_validate(stored)
+    try:
+        return candidate_identity(candidate)
+    except SyntaxError:
+        return None
+
+
+def _failure_class_from_payload(payload: Mapping[str, Any]) -> str:
+    """Classify old checkpoints that predate explicit failure classes."""
+
+    stored = payload.get("failure_class")
+    if isinstance(stored, str):
+        return stored
+    if payload.get("error") == "numerical fit failed":
+        return "numerical_fit"
+    fit = payload.get("fit")
+    if isinstance(fit, Mapping) and not bool(fit.get("success", False)):
+        return "numerical_fit"
+    return "legacy_failure"
 
 
 def _beam(

@@ -1,0 +1,16 @@
+{
+  "benchmark_id": "phase_b_anonymous_system_t1_canonical_obfuscated_hard",
+  "public_prompt_sha256": "4ede7b5715d7e59f2418ff9b63c874d718024b756a84d2c8eef986a2c6804950",
+  "schema_version": "public-target-contract-2",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "expected_representation": "unspecified",
+      "public_requirement": "generate target v01(t): supplied public channel",
+      "representation_requirement": null,
+      "required_dependencies": [],
+      "target_channel": "v01"
+    }
+  ],
+  "tier": "hard"
+}

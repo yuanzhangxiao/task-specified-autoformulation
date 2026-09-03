@@ -1,0 +1,23 @@
+{
+  "benchmark_id": "phase_b_dalla_man_t2_canonical_named_hard",
+  "public_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210",
+  "schema_version": "public-target-contract-2",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "expected_representation": "dynamic_state",
+      "public_requirement": "generate target Gp(t): primary nonnegative target representing plasma glucose mass",
+      "representation_requirement": "Gp(t): primary nonnegative target representing plasma glucose mass",
+      "required_dependencies": [],
+      "target_channel": "Gp"
+    },
+    {
+      "expected_representation": "unspecified",
+      "public_requirement": "generate target I(t): insulin concentration",
+      "representation_requirement": null,
+      "required_dependencies": [],
+      "target_channel": "I"
+    }
+  ],
+  "tier": "hard"
+}

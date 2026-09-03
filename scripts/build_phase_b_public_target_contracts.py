@@ -79,6 +79,10 @@ def write_bundle(
                 "dependency_count": sum(
                     len(item.required_dependencies) for item in contract.targets
                 ),
+                "representation_count": sum(
+                    item.expected_representation.value != "unspecified"
+                    for item in contract.targets
+                ),
                 "public_prompt_sha256": contract.public_prompt_sha256,
                 "contract_sha256": hashlib.sha256(
                     payload.encode("utf-8")
@@ -86,12 +90,20 @@ def write_bundle(
                 "path": str(path.relative_to(output_root)),
             }
         )
+    contract_versions = {item.schema_version for item in contracts}
+    if len(contract_versions) != 1:
+        raise ValueError(
+            f"target-contract bundle mixes schema versions: {contract_versions}"
+        )
+    contract_version = next(iter(contract_versions))
+    manifest_version = contract_version.rsplit("-", maxsplit=1)[-1]
     manifest = {
-        "schema_version": "phase-b-public-target-contracts-1",
+        "schema_version": f"phase-b-public-target-contracts-{manifest_version}",
         "status": "frozen_public_prompt_derived",
         "suite_path": str(suite_path),
         "suite_sha256": hashlib.sha256(suite_path.read_bytes()).hexdigest(),
         "contract_count": len(contracts),
+        "contract_schema_version": contract_version,
         "contracts": records,
     }
     (output_root / "manifest.json").write_text(
@@ -111,7 +123,7 @@ def main() -> None:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("configs/target_eval/phase_b_v1"),
+        default=Path("configs/target_eval/phase_b_v2"),
     )
     args = parser.parse_args()
     contracts = build_contracts(args.suite, args.data_root)

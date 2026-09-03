@@ -1,0 +1,16 @@
+{
+  "benchmark_id": "phase_b_cstr_controlled_reactor_mechanism_canonical_named_hard",
+  "public_prompt_sha256": "5a593dd3a825d75db3778209d86c54e67cc106ef383a214f6458cea3f3cf0b7f",
+  "schema_version": "public-target-contract-2",
+  "source": "public_prompt",
+  "targets": [
+    {
+      "expected_representation": "unspecified",
+      "public_requirement": "generate target T(t): reactor temperature target",
+      "representation_requirement": null,
+      "required_dependencies": [],
+      "target_channel": "T"
+    }
+  ],
+  "tier": "hard"
+}
