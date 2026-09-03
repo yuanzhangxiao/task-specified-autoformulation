@@ -72,6 +72,16 @@ from autoformalism.schemas.requirements import (
     RequirementSource,
     ScientificRequirement,
 )
+from autoformalism.schemas.staged import (
+    FunctionalCandidate,
+    InteractionFunction,
+    InteractionPolarity,
+    InteractionTargetKind,
+    TopologyCandidate,
+    TopologyInteraction,
+    TopologyObservationMapping,
+    TopologyProcessSpec,
+)
 
 __all__ = [
     "AbsoluteCriterion",
@@ -94,9 +104,13 @@ __all__ = [
     "ConstraintSpec",
     "EmbeddedConstraint",
     "ExpectedContributionDirection",
+    "FunctionalCandidate",
     "HardRedFlag",
     "HybridJudgeResult",
     "InitialConditionSpec",
+    "InteractionFunction",
+    "InteractionPolarity",
+    "InteractionTargetKind",
     "JudgeAssessment",
     "JudgeResult",
     "ObservationMapping",
@@ -132,6 +146,10 @@ __all__ = [
     "StateSpec",
     "TargetCompletenessAssessment",
     "TargetCompletenessJudgeResult",
+    "TopologyCandidate",
+    "TopologyInteraction",
+    "TopologyObservationMapping",
+    "TopologyProcessSpec",
     "ValueRange",
     "enrich_proposal",
     "enrich_proposal_v2",

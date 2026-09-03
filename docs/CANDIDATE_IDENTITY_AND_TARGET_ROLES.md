@@ -74,10 +74,12 @@ and does not assume a fixed list of biological mechanisms.
 
 ## Next representation milestones
 
-The following work remains deliberately separate so its effects can be tested
-independently:
+The first item below is now implemented in
+`STAGED_CANDIDATE_REPRESENTATION.md`. The remaining work stays separate so its
+effects can be tested independently:
 
-1. immutable topology and functional candidate schemas for staged proposal;
+1. immutable topology and functional candidate schemas for staged proposal
+   (implemented; not yet enabled in search);
 2. graph-mechanism and annotation-compliance outputs as separate metrics;
 3. profiled affine-weight fitting with latent basis or collocation variables;
 4. routed local-revision actions and, after those primitives are stable, a

@@ -1,0 +1,316 @@
+{
+  "$defs": {
+    "InteractionPolarity": {
+      "description": "How an interaction term enters its target definition.",
+      "enum": [
+        "additive",
+        "subtractive"
+      ],
+      "title": "InteractionPolarity",
+      "type": "string"
+    },
+    "InteractionTargetKind": {
+      "description": "Kind of definition assembled from an interaction hyperedge.",
+      "enum": [
+        "state_derivative",
+        "algebraic_process"
+      ],
+      "title": "InteractionTargetKind",
+      "type": "string"
+    },
+    "StateKind": {
+      "description": "Whether a modeled state is measured or inferred.",
+      "enum": [
+        "observed",
+        "latent"
+      ],
+      "title": "StateKind",
+      "type": "string"
+    },
+    "StateSpec": {
+      "additionalProperties": false,
+      "description": "Observed or latent dynamic state declaration.",
+      "properties": {
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/StateKind"
+        },
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "unit": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "title": "StateSpec",
+      "type": "object"
+    },
+    "TopologyInteraction": {
+      "additionalProperties": false,
+      "description": "One signed dependency hyperedge in a staged topology.",
+      "properties": {
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
+        },
+        "polarity": {
+          "$ref": "#/$defs/InteractionPolarity",
+          "default": "additive"
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Sources",
+          "type": "array"
+        },
+        "target": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Target",
+          "type": "string"
+        },
+        "target_kind": {
+          "$ref": "#/$defs/InteractionTargetKind"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "target",
+        "target_kind"
+      ],
+      "title": "TopologyInteraction",
+      "type": "object"
+    },
+    "TopologyObservationMapping": {
+      "additionalProperties": false,
+      "description": "Direct mapping from a generated topology node to a public channel.",
+      "properties": {
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Source",
+          "type": "string"
+        },
+        "unit": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "source"
+      ],
+      "title": "TopologyObservationMapping",
+      "type": "object"
+    },
+    "TopologyProcessSpec": {
+      "additionalProperties": false,
+      "description": "An instantaneous generated quantity without a functional form yet.",
+      "properties": {
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "unit": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "TopologyProcessSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Immutable graph-stage candidate with no interaction functions.",
+  "properties": {
+    "candidate_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "change_summary": {
+      "default": "unspecified",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Change Summary",
+      "type": "string"
+    },
+    "external_symbols": {
+      "default": [],
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+        "type": "string"
+      },
+      "maxItems": 256,
+      "title": "External Symbols",
+      "type": "array"
+    },
+    "interactions": {
+      "items": {
+        "$ref": "#/$defs/TopologyInteraction"
+      },
+      "maxItems": 512,
+      "minItems": 1,
+      "title": "Interactions",
+      "type": "array"
+    },
+    "observation_mappings": {
+      "items": {
+        "$ref": "#/$defs/TopologyObservationMapping"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Observation Mappings",
+      "type": "array"
+    },
+    "parent_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Candidate Id"
+    },
+    "processes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TopologyProcessSpec"
+      },
+      "maxItems": 256,
+      "title": "Processes",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "topology-candidate-1",
+      "default": "topology-candidate-1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "states": {
+      "items": {
+        "$ref": "#/$defs/StateSpec"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "States",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "states",
+    "interactions",
+    "observation_mappings"
+  ],
+  "title": "TopologyCandidate",
+  "type": "object"
+}

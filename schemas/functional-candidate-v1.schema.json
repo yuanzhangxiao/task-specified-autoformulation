@@ -1,0 +1,331 @@
+{
+  "$defs": {
+    "ConstraintEnforcement": {
+      "description": "Whether violation blocks execution or contributes soft evidence.",
+      "enum": [
+        "hard",
+        "soft"
+      ],
+      "title": "ConstraintEnforcement",
+      "type": "string"
+    },
+    "ConstraintKind": {
+      "description": "Machine-readable constraint categories.",
+      "enum": [
+        "nonnegative",
+        "positive",
+        "bounded",
+        "monotone_increasing",
+        "monotone_decreasing",
+        "conservation",
+        "custom"
+      ],
+      "title": "ConstraintKind",
+      "type": "string"
+    },
+    "ConstraintSource": {
+      "description": "Runtime-owned provenance for a constraint declaration.",
+      "enum": [
+        "unspecified",
+        "proposer",
+        "benchmark",
+        "runtime",
+        "deterministic"
+      ],
+      "title": "ConstraintSource",
+      "type": "string"
+    },
+    "ConstraintSpec": {
+      "additionalProperties": false,
+      "description": "Constraint attached to a declared model symbol.",
+      "properties": {
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/ConstraintEnforcement",
+          "default": "hard"
+        },
+        "kind": {
+          "$ref": "#/$defs/ConstraintKind"
+        },
+        "source": {
+          "$ref": "#/$defs/ConstraintSource",
+          "default": "unspecified"
+        },
+        "subject": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "kind"
+      ],
+      "title": "ConstraintSpec",
+      "type": "object"
+    },
+    "InitialConditionSpec": {
+      "additionalProperties": false,
+      "description": "One explicit initialization rule for a modeled state.",
+      "properties": {
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expression"
+        },
+        "fixed_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixed Value"
+        },
+        "initialization_range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scope": {
+          "$ref": "#/$defs/ParameterScope"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "scope"
+      ],
+      "title": "InitialConditionSpec",
+      "type": "object"
+    },
+    "InteractionFunction": {
+      "additionalProperties": false,
+      "description": "Restricted expression assigned to one topology interaction.",
+      "properties": {
+        "expression": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "expression"
+      ],
+      "title": "InteractionFunction",
+      "type": "object"
+    },
+    "ParameterScope": {
+      "description": "Sharing scope for a fitted scalar.",
+      "enum": [
+        "global",
+        "trajectory_specific"
+      ],
+      "title": "ParameterScope",
+      "type": "string"
+    },
+    "ParameterSpec": {
+      "additionalProperties": false,
+      "description": "Bounded scalar parameter and its initialization interval.",
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/ValueRange"
+        },
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "initialization_range": {
+          "$ref": "#/$defs/ValueRange"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ParameterScope"
+        },
+        "unit": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "scope",
+        "bounds",
+        "initialization_range"
+      ],
+      "title": "ParameterSpec",
+      "type": "object"
+    },
+    "ValueRange": {
+      "additionalProperties": false,
+      "description": "Closed finite numeric interval.",
+      "properties": {
+        "lower": {
+          "title": "Lower",
+          "type": "number"
+        },
+        "upper": {
+          "title": "Upper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper"
+      ],
+      "title": "ValueRange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Functional assignment that references an immutable topology artifact.",
+  "properties": {
+    "candidate_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "change_summary": {
+      "default": "unspecified",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Change Summary",
+      "type": "string"
+    },
+    "constraints": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ConstraintSpec"
+      },
+      "maxItems": 256,
+      "title": "Constraints",
+      "type": "array"
+    },
+    "initial_conditions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/InitialConditionSpec"
+      },
+      "maxItems": 64,
+      "title": "Initial Conditions",
+      "type": "array"
+    },
+    "interaction_functions": {
+      "items": {
+        "$ref": "#/$defs/InteractionFunction"
+      },
+      "maxItems": 512,
+      "minItems": 1,
+      "title": "Interaction Functions",
+      "type": "array"
+    },
+    "parameters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ParameterSpec"
+      },
+      "maxItems": 256,
+      "title": "Parameters",
+      "type": "array"
+    },
+    "parent_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Candidate Id"
+    },
+    "schema_version": {
+      "const": "functional-candidate-1",
+      "default": "functional-candidate-1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "topology_commitment_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Topology Commitment Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "topology_commitment_sha256",
+    "interaction_functions"
+  ],
+  "title": "FunctionalCandidate",
+  "type": "object"
+}

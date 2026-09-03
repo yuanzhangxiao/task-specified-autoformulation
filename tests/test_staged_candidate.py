@@ -1,0 +1,241 @@
+"""Staged topology, functional assignment, and expansion tests."""
+
+from __future__ import annotations
+
+import copy
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from autoformalism.expressions import ValidationContext
+from autoformalism.schemas import FunctionalCandidate, TopologyCandidate
+from autoformalism.search import candidate_identity
+from autoformalism.staging import (
+    expand_staged_candidate,
+    topology_commitment_sha256,
+)
+
+
+def _topology_payload() -> dict[str, Any]:
+    return {
+        "candidate_id": "topology_0",
+        "parent_candidate_id": None,
+        "change_summary": "A driven latent response controls a measured state.",
+        "states": [
+            {
+                "name": "x",
+                "kind": "observed",
+                "unit": "relative",
+                "description": "Measured storage.",
+            },
+            {
+                "name": "z",
+                "kind": "latent",
+                "unit": "relative",
+                "description": "Delayed response.",
+            },
+        ],
+        "processes": [
+            {
+                "name": "flux",
+                "unit": "relative/time",
+                "description": "Generated response flux.",
+            }
+        ],
+        "external_symbols": ["input_u"],
+        "interactions": [
+            {
+                "interaction_id": "latent_drive",
+                "target": "z",
+                "target_kind": "state_derivative",
+                "sources": ["input_u"],
+            },
+            {
+                "interaction_id": "latent_relaxation",
+                "target": "z",
+                "target_kind": "state_derivative",
+                "sources": ["z"],
+                "polarity": "subtractive",
+            },
+            {
+                "interaction_id": "flux_generation",
+                "target": "flux",
+                "target_kind": "algebraic_process",
+                "sources": ["z"],
+            },
+            {
+                "interaction_id": "storage_source",
+                "target": "x",
+                "target_kind": "state_derivative",
+                "sources": ["flux"],
+            },
+            {
+                "interaction_id": "storage_sink",
+                "target": "x",
+                "target_kind": "state_derivative",
+                "sources": ["x"],
+                "polarity": "subtractive",
+            },
+        ],
+        "observation_mappings": [
+            {"channel": "target", "source": "x", "unit": "relative"}
+        ],
+    }
+
+
+def _functional_payload(topology: TopologyCandidate) -> dict[str, Any]:
+    return {
+        "candidate_id": "functional_0",
+        "parent_candidate_id": None,
+        "change_summary": "Assign linear response and relaxation functions.",
+        "topology_commitment_sha256": topology_commitment_sha256(topology),
+        "interaction_functions": [
+            {"interaction_id": "latent_drive", "expression": "input_u"},
+            {
+                "interaction_id": "latent_relaxation",
+                "expression": "latent_decay * z",
+            },
+            {
+                "interaction_id": "flux_generation",
+                "expression": "gain * z",
+            },
+            {"interaction_id": "storage_source", "expression": "flux"},
+            {
+                "interaction_id": "storage_sink",
+                "expression": "storage_decay * x",
+            },
+        ],
+        "parameters": [
+            {
+                "name": name,
+                "scope": "global",
+                "bounds": {"lower": 0.01, "upper": 5.0},
+                "initialization_range": {"lower": 0.1, "upper": 1.0},
+            }
+            for name in ("latent_decay", "gain", "storage_decay")
+        ],
+        "initial_conditions": [
+            {"state": "x", "scope": "global", "expression": "target"},
+            {"state": "z", "scope": "global", "fixed_value": 0.0},
+        ],
+    }
+
+
+def _context() -> ValidationContext:
+    return ValidationContext(targets=("target",), external_inputs=("input_u",))
+
+
+def test_staged_expansion_builds_valid_executable_and_identity_link() -> None:
+    topology = TopologyCandidate.model_validate(_topology_payload())
+    functional = FunctionalCandidate.model_validate(_functional_payload(topology))
+
+    result = expand_staged_candidate(topology, functional, _context())
+
+    assert result.topology_commitment_sha256 == topology_commitment_sha256(topology)
+    assert result.candidate_identity == candidate_identity(result.candidate)
+    assert result.candidate.parent_candidate_id is None
+    assert {item.name: item.expression for item in result.candidate.processes} == {
+        "flux": "(gain * z)"
+    }
+    assert {item.state: item.rhs for item in result.candidate.state_equations} == {
+        "x": "(flux) - (storage_decay * x)",
+        "z": "(input_u) - (latent_decay * z)",
+    }
+
+
+def test_topology_commitment_is_stable_across_json_round_trip() -> None:
+    topology = TopologyCandidate.model_validate(_topology_payload())
+    restored = TopologyCandidate.model_validate_json(topology.model_dump_json())
+
+    assert topology_commitment_sha256(restored) == topology_commitment_sha256(
+        topology
+    )
+
+
+def test_functional_candidate_must_reference_exact_topology() -> None:
+    topology = TopologyCandidate.model_validate(_topology_payload())
+    payload = _functional_payload(topology)
+    payload["topology_commitment_sha256"] = "0" * 64
+    functional = FunctionalCandidate.model_validate(payload)
+
+    with pytest.raises(ValueError, match="different topology commitment"):
+        expand_staged_candidate(topology, functional, _context())
+
+
+def test_function_binding_cannot_change_declared_sources() -> None:
+    topology = TopologyCandidate.model_validate(_topology_payload())
+    payload = _functional_payload(topology)
+    payload["interaction_functions"][0]["expression"] = "input_u + z"
+    functional = FunctionalCandidate.model_validate(payload)
+
+    with pytest.raises(ValueError, match="changes topology"):
+        expand_staged_candidate(topology, functional, _context())
+
+
+def test_function_bindings_must_cover_topology_exactly() -> None:
+    topology = TopologyCandidate.model_validate(_topology_payload())
+    payload = _functional_payload(topology)
+    payload["interaction_functions"].pop()
+    functional = FunctionalCandidate.model_validate(payload)
+
+    with pytest.raises(ValueError, match="bindings differ from topology"):
+        expand_staged_candidate(topology, functional, _context())
+
+
+def test_algebraic_cycle_is_rejected_before_function_assignment() -> None:
+    payload = _topology_payload()
+    payload["processes"].append(
+        {"name": "feedback", "description": "Cyclic helper."}
+    )
+    for interaction in payload["interactions"]:
+        if interaction["interaction_id"] == "flux_generation":
+            interaction["sources"] = ["feedback"]
+    payload["interactions"].append(
+        {
+            "interaction_id": "feedback_generation",
+            "target": "feedback",
+            "target_kind": "algebraic_process",
+            "sources": ["flux"],
+        }
+    )
+
+    with pytest.raises(ValidationError, match="cyclic algebraic process"):
+        TopologyCandidate.model_validate(payload)
+
+
+def test_dynamic_feedback_loop_is_allowed() -> None:
+    payload = _topology_payload()
+    for interaction in payload["interactions"]:
+        if interaction["interaction_id"] == "latent_drive":
+            interaction["sources"] = ["x"]
+    payload["external_symbols"] = []
+
+    topology = TopologyCandidate.model_validate(payload)
+
+    assert topology.states[0].name == "x"
+
+
+def test_topology_rejects_undefined_source_and_uncovered_node() -> None:
+    undefined = _topology_payload()
+    undefined["interactions"][0]["sources"] = ["typo"]
+    with pytest.raises(ValidationError, match="undefined sources"):
+        TopologyCandidate.model_validate(undefined)
+
+    uncovered = copy.deepcopy(_topology_payload())
+    uncovered["interactions"] = [
+        item
+        for item in uncovered["interactions"]
+        if item["target"] != "flux"
+    ]
+    with pytest.raises(ValidationError, match="without defining interactions"):
+        TopologyCandidate.model_validate(uncovered)
+
+
+def test_topology_external_symbols_must_be_available_at_runtime() -> None:
+    topology = TopologyCandidate.model_validate(_topology_payload())
+    functional = FunctionalCandidate.model_validate(_functional_payload(topology))
+    context = ValidationContext(targets=("target",))
+
+    with pytest.raises(ValueError, match="unavailable external symbols"):
+        expand_staged_candidate(topology, functional, context)

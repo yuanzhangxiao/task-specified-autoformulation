@@ -6,12 +6,14 @@ from pathlib import Path
 from autoformalism.schemas import (
     AtomicJudgeResult,
     CandidateModel,
+    FunctionalCandidate,
     HybridJudgeResult,
     JudgeResult,
     PairedTargetCompletenessJudgeResult,
     ProposerCandidate,
     ProposerCandidateV2,
     ScientificJudgeResult,
+    TopologyCandidate,
     export_json_schemas,
 )
 
@@ -26,6 +28,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "atomic-judge-v1.schema.json",
         "candidate.schema.json",
         "comparative-judge-v1.schema.json",
+        "functional-candidate-v1.schema.json",
         "judge.schema.json",
         "hybrid-judge-v1.schema.json",
         "paired-target-completeness-judge-v1.schema.json",
@@ -33,6 +36,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "proposer-candidate-v2.schema.json",
         "scientific-judge-v2.schema.json",
         "target-completeness-judge-v1.schema.json",
+        "topology-candidate-v1.schema.json",
     }
     assert {path.name: path.read_bytes() for path in second_paths} == first_contents
 
@@ -51,8 +55,14 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     hybrid_judge_schema = json.loads(
         first_contents["hybrid-judge-v1.schema.json"]
     )
+    functional_candidate_schema = json.loads(
+        first_contents["functional-candidate-v1.schema.json"]
+    )
     paired_target_schema = json.loads(
         first_contents["paired-target-completeness-judge-v1.schema.json"]
+    )
+    topology_candidate_schema = json.loads(
+        first_contents["topology-candidate-v1.schema.json"]
     )
     assert candidate_schema == CandidateModel.model_json_schema(mode="validation")
     assert atomic_judge_schema == AtomicJudgeResult.model_json_schema(
@@ -72,6 +82,12 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert paired_target_schema == (
         PairedTargetCompletenessJudgeResult.model_json_schema(mode="validation")
     )
+    assert functional_candidate_schema == FunctionalCandidate.model_json_schema(
+        mode="validation"
+    )
+    assert topology_candidate_schema == TopologyCandidate.model_json_schema(
+        mode="validation"
+    )
     assert candidate_schema["additionalProperties"] is False
     assert atomic_judge_schema["additionalProperties"] is False
     assert judge_schema["additionalProperties"] is False
@@ -80,6 +96,8 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert scientific_judge_schema["additionalProperties"] is False
     assert hybrid_judge_schema["additionalProperties"] is False
     assert paired_target_schema["additionalProperties"] is False
+    assert functional_candidate_schema["additionalProperties"] is False
+    assert topology_candidate_schema["additionalProperties"] is False
 
 
 def test_checked_in_schemas_match_models() -> None:
@@ -93,6 +111,11 @@ def test_checked_in_schemas_match_models() -> None:
     assert json.loads(
         (schema_directory / "candidate.schema.json").read_text(encoding="utf-8")
     ) == CandidateModel.model_json_schema(mode="validation")
+    assert json.loads(
+        (schema_directory / "functional-candidate-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    ) == FunctionalCandidate.model_json_schema(mode="validation")
     assert json.loads(
         (schema_directory / "judge.schema.json").read_text(encoding="utf-8")
     ) == JudgeResult.model_json_schema(mode="validation")
@@ -124,3 +147,8 @@ def test_checked_in_schemas_match_models() -> None:
             encoding="utf-8"
         )
     ) == ProposerCandidateV2.model_json_schema(mode="validation")
+    assert json.loads(
+        (schema_directory / "topology-candidate-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    ) == TopologyCandidate.model_json_schema(mode="validation")
