@@ -327,7 +327,7 @@ class FrozenEvaluationSubject(BaseModel):
             )
         for name, value in self.parameterization.global_parameters.items():
             bounds = expected_parameters[name].bounds
-            if not bounds.lower <= value <= bounds.upper:
+            if bounds is not None and not bounds.lower <= value <= bounds.upper:
                 raise ValueError(f"frozen parameter {name} lies outside bounds")
         for state, value in self.parameterization.global_initial_conditions.items():
             bounds = expected_initials[state].initialization_range

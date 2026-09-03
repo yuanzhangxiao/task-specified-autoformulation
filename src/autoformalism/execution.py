@@ -87,10 +87,10 @@ powers; `^` is forbidden. Do not use undeclared aliases such as `sigma`.
 Do not redeclare supplied auxiliary, external-input, or fixed-covariate channel
 names as states, processes, or parameters. Map each observed target exactly once:
 never create both an observed state and a same-named algebraic for one target.
-Do not invent numeric bounds for states or other variables. Parameter ranges are
-required by the transport schema as initialization/search suggestions; do not
-present them as scientific hard constraints unless the benchmark supplies the
-range. `initialization_range` is optional and defaults to the parameter range.
+Do not propose numeric parameter bounds or initialization ranges. Declare only
+each fitted parameter's name and global scope; the runtime owns numerical search
+initialization and any trusted benchmark constraints. Do not invent numeric
+bounds for states or other variables.
 For states, use qualitative `nonnegative` or `positive` constraints
 without `bounds`; use a `bounded` constraint only when the benchmark supplies the
 numeric range explicitly.
@@ -202,7 +202,8 @@ not require governing equations.
 
 The request contains a list of deterministic certifications. Treat those facts as
 authoritative and do not rescore syntax, closure, symbol availability, mappings,
-causal channel access, parameter bounds, or runtime executability. Evaluate only:
+causal channel access, trusted parameter constraints, or runtime executability.
+Evaluate only:
 mechanistic coherence; source/sink and balance semantics; dynamic plausibility;
 mechanism coupling and task sufficiency; nonredundancy and accounting; and the
 scientific justification of latent states and complexity.

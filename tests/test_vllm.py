@@ -93,11 +93,21 @@ def test_vllm_losslessly_repairs_proposer_parameters_before_schema_validation(
 
     assert [item.name for item in result.parsed.parameters] == ["k"]
     repair = result.raw_response["_autoformalism_pre_schema_repair"]
-    assert repair["repair_count"] == 2
+    assert repair["repair_count"] == 4
     assert repair["repairs"] == [
         {
             "code": "removed_protected_parameter",
             "parameter_name": "aux",
+            "removed_count": 2,
+        },
+        {
+            "code": "removed_legacy_parameter_ranges",
+            "parameter_name": "aux",
+            "removed_count": 2,
+        },
+        {
+            "code": "removed_legacy_parameter_ranges",
+            "parameter_name": "k",
             "removed_count": 2,
         },
         {
@@ -108,7 +118,7 @@ def test_vllm_losslessly_repairs_proposer_parameters_before_schema_validation(
     ]
 
 
-def test_vllm_rejects_conflicting_learnable_parameter_duplicates(
+def test_vllm_ignores_obsolete_range_only_parameter_differences(
     tmp_path: Path,
 ) -> None:
     payload = _proposal_payload()
@@ -133,8 +143,9 @@ def test_vllm_rejects_conflicting_learnable_parameter_duplicates(
         },
     )
 
-    with pytest.raises(LLMResponseError, match="duplicate parameter"):
-        client.propose(system_prompt="system", user_prompt="user")
+    result = client.propose(system_prompt="system", user_prompt="user")
+
+    assert [item.name for item in result.parsed.parameters] == ["k"]
 
 
 def test_vllm_client_sends_strict_schema_reasoning_and_seed(tmp_path: Path) -> None:

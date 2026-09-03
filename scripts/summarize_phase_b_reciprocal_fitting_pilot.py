@@ -27,14 +27,21 @@ def summarize(experiment_root: Path) -> dict[str, object]:
         experiment_root / "frozen" / "plan.json"
     )
     plan_sha256 = canonical_reciprocal_fitting_plan_sha256(plan)
+    range_ownership = (
+        plan.schema_version == "phase-b-parameter-range-ownership-pilot-1"
+    )
+    task_schema_version = (
+        "phase-b-parameter-range-ownership-pilot-task-1"
+        if range_ownership
+        else "phase-b-reciprocal-fitting-pilot-task-1"
+    )
     rows: list[dict[str, Any]] = []
     task_artifacts: list[dict[str, object]] = []
     for index in range(reciprocal_fitting_task_count(plan)):
         path = experiment_root / "tasks" / f"task_{index:03d}.json"
         row = _read_object(path)
         if (
-            row.get("schema_version")
-            != "phase-b-reciprocal-fitting-pilot-task-1"
+            row.get("schema_version") != task_schema_version
             or row.get("status") != "complete"
             or row.get("task_index") != index
             or row.get("plan_sha256") != plan_sha256
@@ -52,7 +59,11 @@ def summarize(experiment_root: Path) -> dict[str, object]:
     for row in rows:
         grouped[str(row["condition"]["condition_id"])].append(row)
     groups = [_group(name, items) for name, items in sorted(grouped.items())]
-    matched = _matched(rows)
+    matched = (
+        _matched_parameter_ranges(rows)
+        if range_ownership
+        else _matched_reciprocal_coordinates(rows)
+    )
     output = experiment_root / "summary"
     output.mkdir(parents=True, exist_ok=True)
     task_ledger_path = output / "task_artifact_ledger.jsonl"
@@ -63,7 +74,11 @@ def summarize(experiment_root: Path) -> dict[str, object]:
         ).encode(),
     )
     summary = {
-        "schema_version": "phase-b-reciprocal-fitting-pilot-summary-1",
+        "schema_version": (
+            "phase-b-parameter-range-ownership-pilot-summary-1"
+            if range_ownership
+            else "phase-b-reciprocal-fitting-pilot-summary-1"
+        ),
         "status": "complete",
         "development_only": True,
         "test_data_opened": False,
@@ -78,7 +93,11 @@ def summarize(experiment_root: Path) -> dict[str, object]:
         "task_artifact_ledger_sha256": _sha256(task_ledger_path),
         "task_count": len(rows),
         "groups": groups,
-        "matched_profiled_coordinate_trials": matched,
+        (
+            "matched_parameter_range_trials"
+            if range_ownership
+            else "matched_profiled_coordinate_trials"
+        ): matched,
     }
     json_path = output / "reciprocal_fitting_pilot_summary.json"
     markdown_path = output / "reciprocal_fitting_pilot_summary.md"
@@ -86,7 +105,10 @@ def summarize(experiment_root: Path) -> dict[str, object]:
         json_path,
         (json.dumps(summary, indent=2, sort_keys=True) + "\n").encode(),
     )
-    _write_once(markdown_path, _markdown(groups, matched).encode())
+    _write_once(
+        markdown_path,
+        _markdown(groups, matched, range_ownership=range_ownership).encode(),
+    )
     manifest = {
         "schema_version": "phase-b-reciprocal-fitting-pilot-run-1",
         "status": "complete",
@@ -146,7 +168,9 @@ def _group(condition_id: str, rows: list[dict[str, Any]]) -> dict[str, object]:
     }
 
 
-def _matched(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
+def _matched_reciprocal_coordinates(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, object]]:
     indexed = {
         (
             str(row["condition"]["condition_id"]),
@@ -201,11 +225,88 @@ def _matched(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
     return result
 
 
+def _matched_parameter_ranges(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, object]]:
+    indexed = {
+        (
+            str(row["condition"]["condition_id"]),
+            str(row["benchmark_id"]),
+            int(row["repetition"]),
+        ): row
+        for row in rows
+    }
+    result: list[dict[str, object]] = []
+    identities = sorted(
+        {(str(row["benchmark_id"]), int(row["repetition"])) for row in rows}
+    )
+    for benchmark_id, repetition in identities:
+        legacy = indexed[
+            ("legacy_profiled_suggestions", benchmark_id, repetition)
+        ]
+        range_free = indexed[("range_free_profiled", benchmark_id, repetition)]
+        if legacy["candidate_sha256"] != range_free["candidate_sha256"]:
+            raise ValueError("parameter-range arms used different source candidates")
+        legacy_identity = legacy["fit_candidate_identity"]
+        range_free_identity = range_free["fit_candidate_identity"]
+        same_scientific_structure = (
+            legacy_identity["topology_sha256"]
+            == range_free_identity["topology_sha256"]
+            and legacy_identity["functional_sha256"]
+            == range_free_identity["functional_sha256"]
+        )
+        if not same_scientific_structure:
+            raise ValueError("removing ranges changed scientific candidate identity")
+        both_successful = bool(legacy["fit_success"] and range_free["fit_success"])
+        result.append(
+            {
+                "benchmark_id": benchmark_id,
+                "repetition": repetition,
+                "candidate_sha256": legacy["candidate_sha256"],
+                "same_scientific_structure": True,
+                "executable_identity_changed": (
+                    legacy_identity["executable_sha256"]
+                    != range_free_identity["executable_sha256"]
+                ),
+                "removed_range_field_count": range_free[
+                    "legacy_parameter_range_field_count_removed"
+                ],
+                "both_profiled_fits_successful": both_successful,
+                "validation_nmse_range_free_minus_legacy": (
+                    float(range_free["validation_normalized_mse"])
+                    - float(legacy["validation_normalized_mse"])
+                    if both_successful
+                    else None
+                ),
+                "function_evaluations_range_free_minus_legacy": (
+                    int(range_free["function_evaluations"])
+                    - int(legacy["function_evaluations"])
+                    if both_successful
+                    else None
+                ),
+                "wall_seconds_range_free_minus_legacy": (
+                    float(range_free["fit_wall_seconds"])
+                    - float(legacy["fit_wall_seconds"])
+                    if both_successful
+                    else None
+                ),
+            }
+        )
+    return result
+
+
 def _markdown(
-    groups: list[dict[str, object]], matched: list[dict[str, object]]
+    groups: list[dict[str, object]],
+    matched: list[dict[str, object]],
+    *,
+    range_ownership: bool,
 ) -> str:
     lines = [
-        "# Certified reciprocal-coordinate fitting pilot",
+        (
+            "# Runtime-owned parameter-range fitting pilot"
+            if range_ownership
+            else "# Certified reciprocal-coordinate fitting pilot"
+        ),
         "",
         "This development-only comparison uses the same frozen candidate in each "
         "fitting arm. Exact derivatives are supplied only for observed public "
@@ -227,6 +328,23 @@ def _markdown(
             f"{float(row['total_fit_wall_seconds']):.3f} | "
             f"{float(row['reciprocal_certificate_rate']):.3f} |"
         )
+    if range_ownership:
+        covered = sum(
+            bool(row["both_profiled_fits_successful"]) for row in matched
+        )
+        lines.extend(
+            [
+                "",
+                "Matched legacy/range-free profiled comparisons with two "
+                f"successful fits: {covered}/{len(matched)}.",
+                "All matched pairs preserve topology and functional identity; "
+                "only executable range metadata changes.",
+                "",
+                "No weighted score or automatic winner is defined.",
+                "",
+            ]
+        )
+        return "\n".join(lines)
     covered = sum(bool(row["both_successful"]) for row in matched)
     certified = sum(bool(row["reciprocal_certificate_available"]) for row in matched)
     lines.extend(

@@ -93,7 +93,7 @@ def _fitted_model() -> RawAgentFittedModel:
     )
 
 
-def test_fitted_model_contract_requires_exact_in_bounds_values() -> None:
+def test_fitted_model_contract_requires_exact_finite_values() -> None:
     assert _fitted_model().fitted_parameter_values == {"k": 0.25}
     with pytest.raises(ValidationError, match=r"missing=\['k'\]"):
         RawAgentFittedModel(
@@ -101,12 +101,12 @@ def test_fitted_model_contract_requires_exact_in_bounds_values() -> None:
             fitted_parameters=(),
             fit_method_summary="Train fit.",
         )
-    with pytest.raises(ValidationError, match="outside declared bounds"):
-        RawAgentFittedModel(
-            candidate=_proposal(),
-            fitted_parameters=(RawAgentFittedParameter(name="k", value=3.0),),
-            fit_method_summary="Train fit.",
-        )
+    result = RawAgentFittedModel(
+        candidate=_proposal(),
+        fitted_parameters=(RawAgentFittedParameter(name="k", value=3.0),),
+        fit_method_summary="Train fit.",
+    )
+    assert result.fitted_parameter_values == {"k": 3.0}
 
 
 class _Adapter:

@@ -835,7 +835,7 @@ class CandidateValidator:
 
         for constraint in candidate.constraints:
             parameter = parameter_by_name.get(constraint.subject)
-            if parameter is None:
+            if parameter is None or parameter.bounds is None:
                 continue
             lower = parameter.bounds.lower
             upper = parameter.bounds.upper
@@ -1036,8 +1036,12 @@ class CandidateValidator:
                 for name in context.forcing_channels
             },
             **{
-                parameter.name: Interval(
-                    parameter.bounds.lower, parameter.bounds.upper
+                parameter.name: (
+                    UNKNOWN_INTERVAL
+                    if parameter.bounds is None
+                    else Interval(
+                        parameter.bounds.lower, parameter.bounds.upper
+                    )
                 )
                 for parameter in candidate.parameters
             },

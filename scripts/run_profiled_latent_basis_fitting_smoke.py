@@ -20,11 +20,11 @@ from autoformalism.fitting import FitConfig, evaluate_fitted_candidate, fit_cand
 from autoformalism.schemas import CandidateModel
 
 
-def run_smoke(output: Path) -> dict[str, object]:
+def run_smoke(output: Path, *, range_free: bool = False) -> dict[str, object]:
     """Recover one latent relaxation rate and one affine response weight."""
     truth = {"weight": 2.5, "tau": 1.4}
     model = compile_candidate(
-        _candidate(), ValidationContext(targets=("target",))
+        _candidate(range_free=range_free), ValidationContext(targets=("target",))
     )
     training = _split(SplitName.TRAIN, "train", 0.2, truth)
     validation = _split(SplitName.VALIDATION, "validation", -0.3, truth)
@@ -64,6 +64,7 @@ def run_smoke(output: Path) -> dict[str, object]:
         "exact_observed_derivatives_supplied": True,
         "latent_values_supplied_to_fitter": False,
         "latent_derivatives_supplied_to_fitter": False,
+        "proposer_parameter_ranges_supplied": not range_free,
         "true_parameters": truth,
         "fitted_parameters": dict(fitted.global_parameters),
         "absolute_parameter_errors": errors,
@@ -86,61 +87,64 @@ def run_smoke(output: Path) -> dict[str, object]:
     return result
 
 
-def _candidate() -> CandidateModel:
-    return CandidateModel.model_validate(
-        {
-            "candidate_id": "profiled_latent_basis_smoke",
-            "parent_candidate_id": None,
-            "change_summary": "A fitted hidden relaxation basis drives y.",
-            "states": [
-                {
-                    "name": "y",
-                    "kind": "observed",
-                    "unit": "unit",
-                    "description": "Observed response.",
-                },
-                {
-                    "name": "z",
-                    "kind": "latent",
-                    "unit": "unit",
-                    "description": "Unobserved relaxation memory.",
-                },
-            ],
-            "state_equations": [
-                {"state": "y", "rhs": "weight * z"},
-                {"state": "z", "rhs": "-z / tau"},
-            ],
-            "observation_mappings": [
-                {"channel": "target", "expression": "y", "unit": "unit"}
-            ],
-            "parameters": [
-                {
-                    "name": "weight",
-                    "scope": "global",
-                    "bounds": {"lower": 0.0, "upper": 4.0},
-                    "initialization_range": {"lower": 0.0, "upper": 4.0},
-                    "unit": "1/time",
-                    "description": "Affine latent-to-observed weight.",
-                },
-                {
-                    "name": "tau",
-                    "scope": "global",
-                    "bounds": {"lower": 0.1, "upper": 2.0},
-                    "initialization_range": {"lower": 0.1, "upper": 2.0},
-                    "unit": "1/time",
-                    "description": "Latent relaxation time.",
-                },
-            ],
-            "initial_conditions": [
-                {
-                    "state": "y",
-                    "scope": "global",
-                    "initialization_range": {"lower": -1.0, "upper": 1.0},
-                },
-                {"state": "z", "scope": "global", "fixed_value": 1.0},
-            ],
-        }
-    )
+def _candidate(*, range_free: bool = False) -> CandidateModel:
+    payload = {
+        "candidate_id": "profiled_latent_basis_smoke",
+        "parent_candidate_id": None,
+        "change_summary": "A fitted hidden relaxation basis drives y.",
+        "states": [
+            {
+                "name": "y",
+                "kind": "observed",
+                "unit": "unit",
+                "description": "Observed response.",
+            },
+            {
+                "name": "z",
+                "kind": "latent",
+                "unit": "unit",
+                "description": "Unobserved relaxation memory.",
+            },
+        ],
+        "state_equations": [
+            {"state": "y", "rhs": "weight * z"},
+            {"state": "z", "rhs": "-z / tau"},
+        ],
+        "observation_mappings": [
+            {"channel": "target", "expression": "y", "unit": "unit"}
+        ],
+        "parameters": [
+            {
+                "name": "weight",
+                "scope": "global",
+                "bounds": {"lower": 0.0, "upper": 4.0},
+                "initialization_range": {"lower": 0.0, "upper": 4.0},
+                "unit": "1/time",
+                "description": "Affine latent-to-observed weight.",
+            },
+            {
+                "name": "tau",
+                "scope": "global",
+                "bounds": {"lower": 0.1, "upper": 2.0},
+                "initialization_range": {"lower": 0.1, "upper": 2.0},
+                "unit": "1/time",
+                "description": "Latent relaxation time.",
+            },
+        ],
+        "initial_conditions": [
+            {
+                "state": "y",
+                "scope": "global",
+                "initialization_range": {"lower": -1.0, "upper": 1.0},
+            },
+            {"state": "z", "scope": "global", "fixed_value": 1.0},
+        ],
+    }
+    if range_free:
+        for parameter in payload["parameters"]:
+            parameter.pop("bounds")
+            parameter.pop("initialization_range")
+    return CandidateModel.model_validate(payload)
 
 
 def _split(
@@ -151,9 +155,7 @@ def _split(
 ) -> DatasetSplit:
     time = np.linspace(0.0, 3.0, 61)
     hidden_truth = np.exp(-time / truth["tau"])
-    target = observed_initial + (
-        truth["weight"] * truth["tau"] * (1.0 - hidden_truth)
-    )
+    target = observed_initial + (truth["weight"] * truth["tau"] * (1.0 - hidden_truth))
     trajectory = Trajectory(
         trajectory_id=identifier,
         time=time,
@@ -170,7 +172,9 @@ def _split(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    result = run_smoke(parser.parse_args().output)
+    parser.add_argument("--range-free", action="store_true")
+    arguments = parser.parse_args()
+    result = run_smoke(arguments.output, range_free=arguments.range_free)
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

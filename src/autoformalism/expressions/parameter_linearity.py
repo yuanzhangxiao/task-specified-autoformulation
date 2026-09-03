@@ -437,7 +437,12 @@ def certify_reciprocal_transformations(
     transformations: list[ReciprocalParameterTransformation] = []
     for spec in validated.candidate.parameters:
         name = spec.name
-        if name not in eligible or spec.bounds.lower <= 0.0:
+        if (
+            name not in eligible
+            or spec.bounds is None
+            or spec.initialization_range is None
+            or spec.bounds.lower <= 0.0
+        ):
             continue
         if any(
             not _all_parameter_occurrences_are_direct_divisors(

@@ -84,6 +84,16 @@ def test_replay_repairs_protected_and_exact_duplicate_parameters() -> None:
             "removed_count": 2,
         },
         {
+            "code": "removed_legacy_parameter_ranges",
+            "parameter_name": "aux",
+            "removed_count": 2,
+        },
+        {
+            "code": "removed_legacy_parameter_ranges",
+            "parameter_name": "k",
+            "removed_count": 2,
+        },
+        {
             "code": "removed_exact_duplicate_parameter",
             "parameter_name": "k",
             "removed_count": 1,
@@ -91,7 +101,7 @@ def test_replay_repairs_protected_and_exact_duplicate_parameters() -> None:
     )
 
 
-def test_replay_rejects_conflicting_learnable_parameter_duplicates() -> None:
+def test_replay_ignores_obsolete_range_only_parameter_differences() -> None:
     payload = _payload()
     payload["parameters"] = [
         {"name": "k", "bounds": {"lower": 0.0, "upper": 2.0}},
@@ -106,11 +116,14 @@ def test_replay_rejects_conflicting_learnable_parameter_duplicates() -> None:
         target_contract=_contract(),
     )
 
-    assert candidate is None
-    assert replay.schema_valid_after_repair is False
-    assert replay.deterministic_valid is False
-    assert replay.error_type == "ValidationError"
-    assert "duplicate parameter" in replay.error
+    assert candidate is not None
+    assert replay.schema_valid_after_repair is True
+    assert replay.deterministic_valid is True
+    assert [item.name for item in candidate.parameters] == ["k"]
+    assert {item["code"] for item in replay.pre_schema_repairs} == {
+        "removed_exact_duplicate_parameter",
+        "removed_legacy_parameter_ranges",
+    }
 
 
 def test_frozen_replay_selects_low_condition_without_new_calls(

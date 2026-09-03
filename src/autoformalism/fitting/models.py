@@ -34,6 +34,15 @@ class FitConfig(BaseModel):
     derivative_ridge_regularization: float = Field(default=1e-8, ge=0.0)
     use_certified_reciprocal_coordinates: bool = True
     affine_parameter_bound_policy: Literal["suggested", "hard"] = "suggested"
+    runtime_parameter_start_center: float = Field(
+        default=1.0,
+        allow_inf_nan=False,
+    )
+    runtime_parameter_start_half_width: float = Field(
+        default=2.0,
+        gt=0.0,
+        allow_inf_nan=False,
+    )
     integration_method: str = "RK45"
     fixed_step_substeps: int = Field(default=1, ge=1)
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
@@ -97,7 +106,7 @@ class EvaluationMetrics:
 
 @dataclass(frozen=True)
 class OptimizationDiagnostic:
-    """Optimizer outcome and proximity to declared parameter bounds."""
+    """Optimizer outcome and proximity to active runtime constraints."""
 
     start_index: int
     success: bool

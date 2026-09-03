@@ -31,7 +31,7 @@ Each latent initial value is fixed or parameter-free.
 
 ## Variable-projection solver
 
-At each bounded outer-optimizer step, the runtime:
+At each outer-optimizer step, the runtime:
 
 1. integrates only the candidate's latent subsystem while conditioning it on
    measured public observed-state paths;
@@ -45,16 +45,22 @@ deviation before the joint solve, preventing a high-magnitude channel from
 silently dominating a multi-output fit.
 
 This is separable nonlinear least squares, or variable projection. It avoids
-sending affine weights through the nonlinear optimizer. Across the affine
-linear backends, proposer-supplied ranges are initialization/search suggestions
-and diagnostic reference ranges by default. Inner weights use the direct ridge
-solution and may leave those suggestions; every such estimate is reported. A
-`hard` compatibility policy retains rejection or bounded linear least squares
-for frozen comparisons. The ordinary bounded-rollout backend is unchanged and
-continues to enforce all declared bounds.
-Independently supplied hard benchmark, runtime, or deterministic constraints
-remain binding under the suggested-range policy; only proposer ranges are
-relaxed.
+sending affine weights through the nonlinear optimizer. New proposer contracts
+declare only parameter names and scopes: numeric bounds and initialization
+ranges are runtime policy, not part of the proposed scientific model. The
+runtime solves unconstrained affine ridge problems in closed form unless a hard
+benchmark, runtime, or deterministic constraint is present. Those trusted
+constraints remain binding and switch the affected affine solve to bounded
+linear least squares.
+
+For nonlinear outer parameters, a range-free declaration gives an unbounded
+optimizer domain and a deterministic finite start window. Its default center is
+`1` and half-width is `2`; both are logged `FitConfig` values rather than LLM
+output. Trusted hard constraints intersect that domain and start window. Old
+cached canonical candidates with ranges remain readable for deterministic
+replay, and the `hard` compatibility policy preserves old bounded experiments.
+New proposer payloads cannot emit those fields; legacy proposer responses have
+them removed before schema validation and record that repair.
 
 The diagnostic separately reports derivative-equation rows,
 observation-mapping rows, linear-system rank and condition number, inferred
@@ -66,19 +72,24 @@ A positive time constant can be represented one-to-one by a positive rate:
 `k = 1 / tau`. The runtime now certifies this transformation only when all of
 the following hold:
 
-- the declared parameter bounds and initialization range are strictly positive;
+- a trusted or legacy finite parameter domain and start interval are strictly
+  positive;
 - every occurrence of the parameter is the complete denominator of a division,
   such as `x / tau` rather than `x / (tau + 1)`; and
 - after replacing each division by multiplication with the reciprocal, the
   expanded state RHS is affine in the reciprocal coordinate.
 
 The outer optimizer then uses bounds `[1 / tau_upper, 1 / tau_lower]`, maps each
-trial point back to the candidate's declared `tau`, and reports the
+trial point back to the candidate's physical `tau`, and reports the
 transformation in the fitting diagnostic. Original- and reciprocal-coordinate
 conditions draw the same starts in physical parameter space before the latter
 is transformed, so their multistart comparison is matched. Unsafe or ambiguous
 uses are not rewritten. The feature is separately switchable so its effect can
 be measured against optimization in the original coordinate.
+
+Without a finite positive trusted domain, no reciprocal certificate is issued;
+the original range-free coordinate remains supported. This conservative rule
+avoids claiming a one-to-one positive transform over all real values.
 
 This reparameterization does not turn a partially observed latent-dynamics fit
 into a closed-form linear solve. Even when `dZ/dt = -k * Z` is affine in `k` at
@@ -108,6 +119,16 @@ is scored by causal rollout, and test remains closed.
 The report keeps fit compatibility, success, train/validation NMSE, function
 evaluations, integration failures, wall time, bound contacts, and reciprocal
 certification separate. It declares no weighted score or automatic winner.
+
+`configs/phase_b_parameter_range_ownership_pilot_v1.json` is the immediate
+follow-up on the same two benchmarks and three seeds. It compares the profiled
+backend with historical range metadata, the same profiled backend after that
+metadata is removed, and range-free rollout fitting. Topology and functional
+identity must remain equal across the matched profiled pair. The report records
+the executable-identity change, number of removed legacy fields, fit coverage,
+NMSE, evaluations, failures, and time separately. This is a development test of
+range ownership; it does not choose the final scientific method or open test
+data.
 
 ## Limitations and next step
 

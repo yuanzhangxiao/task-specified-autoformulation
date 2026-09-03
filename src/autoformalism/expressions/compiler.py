@@ -23,6 +23,7 @@ from autoformalism.schemas import (
     CandidateModel,
     ConstraintEnforcement,
     ConstraintKind,
+    ConstraintSource,
 )
 
 # ODE solvers can cross an invariant boundary by a few units of floating-point
@@ -30,6 +31,15 @@ from autoformalism.schemas import (
 # This tolerance is deliberately absolute and small so it cannot hide a
 # scientifically meaningful negative state on any benchmark scale.
 STATE_CONSTRAINT_ATOL = 1e-12
+
+_TRUSTED_PARAMETER_CONSTRAINT_SOURCES = frozenset(
+    {
+        ConstraintSource.UNSPECIFIED,
+        ConstraintSource.BENCHMARK,
+        ConstraintSource.RUNTIME,
+        ConstraintSource.DETERMINISTIC,
+    }
+)
 
 SAFE_DIVISION_EPSILON = 1e-12
 
@@ -267,25 +277,29 @@ class CompiledModel:
                 parameters[parameter.name],
                 f"parameter {parameter.name}",
             )
-            if parameter.name in self.nonbinding_parameter_bounds:
+            if (
+                parameter.name in self.nonbinding_parameter_bounds
+                or parameter.bounds is None
+            ):
                 parameter_values[parameter.name] = value
-                continue
-            lower = parameter.bounds.lower
-            upper = parameter.bounds.upper
-            width = upper - lower
-            scale = max(abs(lower), abs(upper), abs(value), np.finfo(float).tiny)
-            tolerance = max(
-                width * 1e-12,
-                scale * np.finfo(float).eps * 32.0,
-            )
-            if value < lower - tolerance or value > upper + tolerance:
-                raise RuntimeExpressionError(
-                    f"parameter {parameter.name}={value} is outside "
-                    f"[{lower}, {upper}]"
+            else:
+                lower = parameter.bounds.lower
+                upper = parameter.bounds.upper
+                width = upper - lower
+                scale = max(abs(lower), abs(upper), abs(value), np.finfo(float).tiny)
+                tolerance = max(
+                    width * 1e-12,
+                    scale * np.finfo(float).eps * 32.0,
                 )
-            # SciPy finite differences can land a few ULPs outside an active
-            # bound. Admit only that numerical fuzz and evaluate at the bound.
-            parameter_values[parameter.name] = min(max(value, lower), upper)
+                if value < lower - tolerance or value > upper + tolerance:
+                    raise RuntimeExpressionError(
+                        f"parameter {parameter.name}={value} is outside "
+                        f"[{lower}, {upper}]"
+                    )
+                # SciPy finite differences can land a few ULPs outside an active
+                # bound. Admit only that numerical fuzz and evaluate at the bound.
+                parameter_values[parameter.name] = min(max(value, lower), upper)
+            self._validate_hard_parameter_constraints(parameter.name, value)
 
         environment = {
             self.validated.context.time_symbol: float(time),
@@ -310,6 +324,34 @@ class CompiledModel:
                 environment,
             )
         return environment
+
+    def _validate_hard_parameter_constraints(
+        self,
+        parameter_name: str,
+        value: float,
+    ) -> None:
+        """Enforce trusted and legacy hard constraints on fitted parameters."""
+        for constraint in self.validated.candidate.constraints:
+            if (
+                constraint.subject != parameter_name
+                or constraint.enforcement is not ConstraintEnforcement.HARD
+                or constraint.source not in _TRUSTED_PARAMETER_CONSTRAINT_SOURCES
+            ):
+                continue
+            invalid = False
+            if constraint.kind is ConstraintKind.NONNEGATIVE:
+                invalid = value < 0.0
+            elif constraint.kind is ConstraintKind.POSITIVE:
+                invalid = value <= 0.0
+            if constraint.bounds is not None:
+                invalid = invalid or not (
+                    constraint.bounds.lower <= value <= constraint.bounds.upper
+                )
+            if invalid:
+                raise RuntimeExpressionError(
+                    f"parameter {parameter_name}={value} violates trusted "
+                    f"{constraint.kind.value} constraint"
+                )
 
     def validate_state_constraints(
         self,

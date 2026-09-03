@@ -179,11 +179,19 @@ def _declaration_bases(
             }
             if mode == "executable":
                 payload.update(
-                    bounds=[item.bounds.lower, item.bounds.upper],
-                    initialization_range=[
-                        item.initialization_range.lower,
-                        item.initialization_range.upper,
-                    ],
+                    bounds=(
+                        None
+                        if item.bounds is None
+                        else [item.bounds.lower, item.bounds.upper]
+                    ),
+                    initialization_range=(
+                        None
+                        if item.initialization_range is None
+                        else [
+                            item.initialization_range.lower,
+                            item.initialization_range.upper,
+                        ]
+                    ),
                 )
             bases[item.name] = payload
     return bases

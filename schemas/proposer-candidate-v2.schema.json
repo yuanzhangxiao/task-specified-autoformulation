@@ -137,22 +137,8 @@
     },
     "ProposedParameter": {
       "additionalProperties": false,
-      "description": "A bounded fitted parameter with defaults for routine metadata.",
+      "description": "A fitted scalar identity; numerical values belong to the runtime.",
       "properties": {
-        "bounds": {
-          "$ref": "#/$defs/ValueRange"
-        },
-        "initialization_range": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ValueRange"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "name": {
           "maxLength": 128,
           "minLength": 1,
@@ -166,8 +152,7 @@
         }
       },
       "required": [
-        "name",
-        "bounds"
+        "name"
       ],
       "title": "ProposedParameter",
       "type": "object"

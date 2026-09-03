@@ -74,8 +74,10 @@ The pipeline is iterative:
    - algebraic processes;
    - component-level target mappings, constraints, and mechanism tags;
    - free parameters;
-   - parameter bounds and optional initialization ranges;
    - global versus trajectory-specific parameter scope.
+
+   Numeric parameter domains and start ranges are deliberately absent from the
+   proposer contract. They are runtime policy or trusted benchmark constraints.
 
 3. The runtime deterministically enriches the proposal into the complete
    internal candidate schema, then validation checks:
@@ -108,7 +110,7 @@ The pipeline is iterative:
    scores in [0,1] plus advisory red flags and edits. The runtime supplies its
    deterministic validity checks as certified facts, so the judge does not
    rescore syntax, closure, symbol availability, mappings, causal channel
-   access, parameter bounds, or expression executability. Only deterministic
+   access, trusted parameter constraints, or expression executability. Only deterministic
    or numerical checks may block a candidate.
 
 9. A beam-search controller chooses candidates for refinement.
@@ -128,7 +130,8 @@ The pipeline is iterative:
   and latent-state handling are validated.
 - The general graph representation remains an expression/dependency graph; the
   linear-in-parameter restriction is enforced only by the oracle GMM profile.
-- The LLM proposes parameter identities, locations, bounds, and roles.
+- The LLM proposes parameter identities, locations, and roles. The numerical
+  runtime owns start distributions and any trusted constraints.
 - Numerical optimization determines final parameter values.
 - Never ask the LLM to numerically tune continuous parameters from
   prose feedback.

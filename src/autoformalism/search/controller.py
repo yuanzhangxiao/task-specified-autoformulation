@@ -77,7 +77,7 @@ _DETERMINISTIC_CERTIFICATIONS = (
     "target mappings exist",
     "algebraic definitions are acyclic",
     "only causally available public channels are used",
-    "parameter declarations and bounds are valid",
+    "parameter declarations are valid",
     "restricted expressions are executable",
 )
 

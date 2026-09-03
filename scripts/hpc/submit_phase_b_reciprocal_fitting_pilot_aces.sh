@@ -22,6 +22,12 @@ for path in \
   "${AF_PRIVATE_DATA_ROOT}/benchmark6_alien_device/private/selected_system_spec.json"; do
   [[ -e "${path}" ]] || { echo "missing reciprocal pilot input: ${path}" >&2; exit 2; }
 done
+if jq -e '.schema_version == "phase-b-parameter-range-ownership-pilot-1"' \
+  "${AF_CONFIG}" >/dev/null; then
+  readonly result_prefix="ACES_PARAMETER_RANGE"
+else
+  readonly result_prefix="ACES_RECIPROCAL"
+fi
 [[ -d "${AF_PUBLIC_DATA_ROOT}" ]] || {
   echo "missing public data: ${AF_PUBLIC_DATA_ROOT}" >&2
   exit 2
@@ -65,7 +71,7 @@ jq -n \
   --arg summary_job "${summary_job}" \
   '{schema_version:"phase-b-reciprocal-fitting-submission-1",prepare_job:$prepare_job,fit_job:$fit_job,summary_job:$summary_job,test_data_opened:false}' \
   >"${AF_OUTPUT_ROOT}/submission_manifest.json"
-echo "ACES_RECIPROCAL_PREPARE_JOB=${prepare_job}"
-echo "ACES_RECIPROCAL_FIT_JOB=${fit_job}"
-echo "ACES_RECIPROCAL_SUMMARY_JOB=${summary_job}"
-echo "ACES_RECIPROCAL_ROOT=${AF_OUTPUT_ROOT}"
+echo "${result_prefix}_PREPARE_JOB=${prepare_job}"
+echo "${result_prefix}_FIT_JOB=${fit_job}"
+echo "${result_prefix}_SUMMARY_JOB=${summary_job}"
+echo "${result_prefix}_ROOT=${AF_OUTPUT_ROOT}"

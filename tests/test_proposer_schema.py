@@ -41,10 +41,8 @@ def test_compact_proposal_round_trip_and_enrichment() -> None:
     assert candidate.initial_conditions[0].expression == "u"
     assert candidate.constraints[0].subject == "x"
     assert candidate.constraints[0].kind.value == "nonnegative"
-    assert (
-        candidate.parameters[0].initialization_range
-        == candidate.parameters[0].bounds
-    )
+    assert candidate.parameters[0].bounds is None
+    assert candidate.parameters[0].initialization_range is None
 
 
 def test_state_without_rhs_cannot_be_proposed() -> None:
@@ -121,6 +119,16 @@ def test_v2_round_trip_and_enrichment() -> None:
     assert candidate.constraints[0].enforcement.value == "soft"
     assert candidate.states[0].mechanisms == ("glucose_balance",)
     assert candidate.states[1].mechanisms == ("meal_appearance",)
+    assert candidate.parameters[0].bounds is None
+    assert candidate.parameters[0].initialization_range is None
+
+
+def test_proposer_parameter_schema_omits_numeric_ranges() -> None:
+    schema = ProposerCandidateV2.model_json_schema(mode="validation")
+    parameter = schema["$defs"]["ProposedParameter"]
+
+    assert set(parameter["properties"]) == {"name", "scope"}
+    assert parameter["required"] == ["name"]
 
 
 @pytest.mark.parametrize(

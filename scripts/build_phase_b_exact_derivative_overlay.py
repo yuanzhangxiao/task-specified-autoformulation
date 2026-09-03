@@ -45,8 +45,11 @@ def build_overlay(
     private_data_root = private_data_root.expanduser().resolve()
     output_root = output_root.expanduser().resolve()
     config = _read_object(config_path)
-    if config.get("schema_version") != "phase-b-reciprocal-fitting-pilot-1":
-        raise ValueError("unexpected reciprocal fitting pilot schema")
+    if config.get("schema_version") not in {
+        "phase-b-reciprocal-fitting-pilot-1",
+        "phase-b-parameter-range-ownership-pilot-1",
+    }:
+        raise ValueError("unexpected exact-derivative fitting pilot schema")
     results: list[dict[str, object]] = []
     for cell in config["cells"]:
         if not isinstance(cell, dict):

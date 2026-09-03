@@ -75,7 +75,7 @@ class RawAgentFittedModel(StrictSchema):
 
     @model_validator(mode="after")
     def parameter_values_match_candidate(self) -> RawAgentFittedModel:
-        """Require one in-bounds value for every and only global parameter."""
+        """Require one finite value for every and only global parameter."""
         expected = {item.name for item in self.candidate.parameters}
         names = [item.name for item in self.fitted_parameters]
         if len(names) != len(set(names)):
@@ -95,7 +95,10 @@ class RawAgentFittedModel(StrictSchema):
                     f"{item.name}"
                 )
             value = values[item.name]
-            if not item.bounds.lower <= value <= item.bounds.upper:
+            if (
+                item.bounds is not None
+                and not item.bounds.lower <= value <= item.bounds.upper
+            ):
                 raise ValueError(
                     f"fitted value for {item.name} lies outside declared bounds"
                 )
@@ -176,7 +179,10 @@ class RawAgentArtifact(StrictSchema):
                         f"parameters: {item.name}"
                     )
                 value = self.fitted_parameter_values[item.name]
-                if not item.bounds.lower <= value <= item.bounds.upper:
+                if (
+                    item.bounds is not None
+                    and not item.bounds.lower <= value <= item.bounds.upper
+                ):
                     raise ValueError(
                         f"artifact fitted value for {item.name} lies outside bounds"
                     )

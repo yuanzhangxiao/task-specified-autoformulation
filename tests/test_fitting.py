@@ -797,6 +797,9 @@ def test_exact_derivative_affine_ranges_are_suggestions_by_default() -> None:
         )
 
     constrained_payload = model.validated.candidate.model_dump(mode="json")
+    for parameter in constrained_payload["parameters"]:
+        parameter["bounds"] = None
+        parameter["initialization_range"] = None
     constrained_payload["constraints"] = [
         {
             "subject": "source",
@@ -822,6 +825,90 @@ def test_exact_derivative_affine_ranges_are_suggestions_by_default() -> None:
     assert constrained_fit.diagnostics[0].parameters_at_upper_bound == (
         "parameter:source",
     )
+
+
+def test_exact_derivative_affine_fit_needs_no_parameter_ranges() -> None:
+    time = np.linspace(0.0, 2.0, 41)
+    truth = {"source": 0.35, "decay": 0.7}
+    target = truth["source"] / truth["decay"] + (
+        1.4 - truth["source"] / truth["decay"]
+    ) * np.exp(-truth["decay"] * time)
+    trajectory = Trajectory(
+        "range_free",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {"target": truth["source"] - truth["decay"] * target},
+        DerivativeProvenance.EXACT,
+    )
+    payload = _candidate(
+        {"x": "source - decay * x"},
+        "x",
+        (("source", -1.0, 1.0), ("decay", -1.0, 1.0)),
+    ).model_dump(mode="json")
+    for parameter in payload["parameters"]:
+        parameter["bounds"] = None
+        parameter["initialization_range"] = None
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+
+    fit = fit_candidate(
+        model,
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+        FitConfig(
+            parameter_fit_strategy="exact_derivative_linear_ridge",
+            derivative_ridge_regularization=0.0,
+        ),
+    )
+
+    assert fit.success
+    assert fit.global_parameters == pytest.approx(truth, abs=1e-10)
+    assert fit.diagnostics[0].affine_parameters_outside_suggested_bounds == ()
+
+
+def test_rollout_fit_uses_runtime_starts_without_parameter_ranges() -> None:
+    time = np.linspace(0.0, 2.0, 41)
+    truth = 0.55
+    target = 1.4 * np.exp(-truth * time)
+    trajectory = Trajectory(
+        "range_free_rollout",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {},
+    )
+    payload = _candidate(
+        {"x": "-decay * x"},
+        "x",
+        (("decay", 0.0, 1.0),),
+    ).model_dump(mode="json")
+    payload["parameters"][0]["bounds"] = None
+    payload["parameters"][0]["initialization_range"] = None
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+
+    fit = fit_candidate(
+        model,
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+        FitConfig(
+            parameter_fit_strategy="bounded_nonlinear",
+            number_of_starts=2,
+            maximum_function_evaluations=50,
+        ),
+    )
+
+    assert fit.success
+    assert fit.global_parameters["decay"] == pytest.approx(truth, abs=1e-5)
 
 
 def test_exact_derivative_linear_ridge_refuses_estimated_derivatives() -> None:
@@ -1120,6 +1207,62 @@ def test_profiled_latent_basis_can_disable_reciprocal_optimizer_coordinate() -> 
         not item.certified_parameter_transformations for item in fit.diagnostics
     )
     assert fit.global_parameters["tau"] == pytest.approx(truth["tau"], rel=1e-5)
+
+
+def test_profiled_latent_basis_uses_runtime_starts_without_parameter_ranges(
+) -> None:
+    truth = {"weight": 2.5, "tau": 1.4}
+
+    def split(name: SplitName, identifier: str, initial: float) -> DatasetSplit:
+        time = np.linspace(0.0, 3.0, 61)
+        latent = np.exp(-time / truth["tau"])
+        target = initial + truth["weight"] * truth["tau"] * (1.0 - latent)
+        return _split(
+            name,
+            (
+                Trajectory(
+                    identifier,
+                    time,
+                    {"target": target},
+                    {},
+                    {},
+                    {},
+                    {"target": truth["weight"] * latent},
+                    DerivativeProvenance.EXACT,
+                ),
+            ),
+        )
+
+    payload = _profiled_latent_candidate("weight * z").model_dump(mode="json")
+    for parameter in payload["parameters"]:
+        parameter["bounds"] = None
+        parameter["initialization_range"] = None
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",)),
+    )
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+    assert report.reciprocal_transformations == ()
+
+    fit = fit_candidate(
+        model,
+        split(SplitName.TRAIN, "train", 0.2),
+        split(SplitName.VALIDATION, "validation", -0.3),
+        FitConfig(
+            parameter_fit_strategy="profiled_latent_basis_linear_ridge",
+            number_of_starts=2,
+            maximum_function_evaluations=100,
+            derivative_ridge_regularization=0.0,
+            relative_tolerance=1e-9,
+            absolute_tolerance=1e-11,
+        ),
+    )
+
+    assert fit.success
+    assert fit.global_parameters == pytest.approx(truth, abs=2e-5)
+    assert all(
+        not item.certified_parameter_transformations for item in fit.diagnostics
+    )
 
 
 def test_profiled_reciprocal_coordinates_share_physical_multistarts() -> None:

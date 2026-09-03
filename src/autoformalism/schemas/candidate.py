@@ -126,21 +126,30 @@ class ObservationMapping(StrictSchema):
 
 
 class ParameterSpec(StrictSchema):
-    """Bounded scalar parameter and its initialization interval."""
+    """Scalar fitted parameter with optional legacy numerical ranges.
+
+    New proposer outputs omit ranges.  The optional fields remain readable so
+    historical candidates and externally supplied runtime contracts retain
+    deterministic replay compatibility.
+    """
 
     name: Identifier
     scope: ParameterScope
-    bounds: ValueRange
-    initialization_range: ValueRange
+    bounds: ValueRange | None = None
+    initialization_range: ValueRange | None = None
     unit: NonEmptyText = "unspecified"
     description: NonEmptyText = "unspecified"
 
     @model_validator(mode="after")
     def initialization_is_within_bounds(self) -> ParameterSpec:
-        """Keep every proposed optimizer start inside declared bounds."""
-        if self.bounds.lower == self.bounds.upper:
+        """Validate legacy ranges when either one is present."""
+        if self.bounds is not None and self.bounds.lower == self.bounds.upper:
             raise ValueError("parameter bounds must be nondegenerate")
-        if not self.bounds.contains(self.initialization_range):
+        if (
+            self.bounds is not None
+            and self.initialization_range is not None
+            and not self.bounds.contains(self.initialization_range)
+        ):
             raise ValueError("parameter initialization_range must lie within bounds")
         return self
 

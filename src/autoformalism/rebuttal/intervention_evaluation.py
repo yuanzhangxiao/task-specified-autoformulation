@@ -521,8 +521,13 @@ def _load_d3_checkpoint_model(path: Path, payload: dict[str, Any]) -> FrozenMode
         value = parameters.get(parameter["name"])
         if value is None:
             continue
-        parameter["bounds"]["lower"] = min(parameter["bounds"]["lower"], value)
-        parameter["bounds"]["upper"] = max(parameter["bounds"]["upper"], value)
+        if parameter.get("bounds") is not None:
+            parameter["bounds"]["lower"] = min(
+                parameter["bounds"]["lower"], value
+            )
+            parameter["bounds"]["upper"] = max(
+                parameter["bounds"]["upper"], value
+            )
         initialization = parameter.get("initialization_range")
         if initialization is not None:
             initialization["lower"] = min(initialization["lower"], value)

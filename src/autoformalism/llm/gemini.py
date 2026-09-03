@@ -173,12 +173,6 @@ def _compact_proposer_schema() -> dict[str, object]:
     text = {"type": "string"}
     number = {"type": "number"}
     string_list = {"type": "array", "items": text}
-    value_range = {
-        "type": "object",
-        "properties": {"lower": number, "upper": number},
-        "required": ["lower", "upper"],
-        "additionalProperties": False,
-    }
     initial = {
         "type": "object",
         "properties": {
@@ -214,11 +208,9 @@ def _compact_proposer_schema() -> dict[str, object]:
         "type": "object",
         "properties": {
             "name": text,
-            "bounds": value_range,
-            "initialization_range": _nullable(value_range),
             "scope": {"type": "string", "enum": ["global"]},
         },
-        "required": ["name", "bounds"],
+        "required": ["name"],
         "additionalProperties": False,
     }
     return {

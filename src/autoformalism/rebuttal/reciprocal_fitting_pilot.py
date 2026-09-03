@@ -101,29 +101,117 @@ class ReciprocalFittingPilotPlan(BaseModel):
         return self
 
 
-def load_reciprocal_fitting_pilot_plan(path: Path) -> ReciprocalFittingPilotPlan:
-    """Load the strict pilot plan."""
-    return ReciprocalFittingPilotPlan.model_validate_json(
-        path.read_text(encoding="utf-8")
-    )
+class ParameterRangeFittingCondition(BaseModel):
+    """One runtime-owned-range comparison condition."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    condition_id: Literal[
+        "legacy_profiled_suggestions",
+        "range_free_profiled",
+        "range_free_rollout",
+    ]
+    parameter_fit_strategy: Literal[
+        "bounded_nonlinear", "profiled_latent_basis_linear_ridge"
+    ]
+    allow_derivative_regression: bool
+    remove_legacy_parameter_ranges: bool
+    affine_parameter_bound_policy: Literal["suggested", "hard"]
+    use_certified_reciprocal_coordinates: Literal[False]
+    runtime_parameter_start_center: float = Field(allow_inf_nan=False)
+    runtime_parameter_start_half_width: float = Field(gt=0.0, allow_inf_nan=False)
+    number_of_starts: int = Field(ge=1)
+    maximum_function_evaluations: int = Field(ge=1)
+    maximum_wall_time_seconds: float = Field(gt=0.0)
+
+    @model_validator(mode="after")
+    def condition_is_coherent(self) -> ParameterRangeFittingCondition:
+        if self.condition_id.startswith("range_free_"):
+            if not self.remove_legacy_parameter_ranges:
+                raise ValueError("range-free condition must remove legacy ranges")
+        elif self.remove_legacy_parameter_ranges:
+            raise ValueError("legacy condition must preserve legacy ranges")
+        profiled = self.parameter_fit_strategy == "profiled_latent_basis_linear_ridge"
+        if profiled != self.allow_derivative_regression:
+            raise ValueError("only the profiled condition uses derivative regression")
+        return self
+
+
+class ParameterRangeOwnershipPilotPlan(BaseModel):
+    """Frozen two-cell, three-seed parameter-range ownership comparison."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["phase-b-parameter-range-ownership-pilot-1"]
+    status: Literal["planned_before_derivative_overlay_or_fit"]
+    development_only: Literal[True]
+    test_data_opened: Literal[False]
+    private_reference_available_to_fitter: Literal[False]
+    exact_training_observed_derivatives_supplied: Literal[True]
+    latent_values_supplied: Literal[False]
+    latent_derivatives_supplied: Literal[False]
+    weighted_overall_score_defined: Literal[False]
+    source_replay: ProposerFinalistSourceContract
+    source_candidate_condition: ProposerFinalistCondition
+    cells: tuple[ReciprocalFittingCell, ...] = Field(min_length=1)
+    repetitions: tuple[int, ...] = Field(min_length=1)
+    fit_conditions: tuple[ParameterRangeFittingCondition, ...] = Field(min_length=3)
+    reported_endpoints: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def matrix_is_unique(self) -> ParameterRangeOwnershipPilotPlan:
+        cells = [item.benchmark_id for item in self.cells]
+        conditions = [item.condition_id for item in self.fit_conditions]
+        if len(cells) != len(set(cells)):
+            raise ValueError("parameter-range pilot cells must be unique")
+        if len(self.repetitions) != len(set(self.repetitions)) or any(
+            item < 0 for item in self.repetitions
+        ):
+            raise ValueError("repetitions must be unique and nonnegative")
+        required = {
+            "legacy_profiled_suggestions",
+            "range_free_profiled",
+            "range_free_rollout",
+        }
+        if set(conditions) != required:
+            raise ValueError("parameter-range pilot conditions differ")
+        return self
+
+
+FittingPilotPlan = ReciprocalFittingPilotPlan | ParameterRangeOwnershipPilotPlan
+FittingCondition = ReciprocalFittingCondition | ParameterRangeFittingCondition
+
+
+def load_reciprocal_fitting_pilot_plan(path: Path) -> FittingPilotPlan:
+    """Load either version of the strict shared-candidate fitting pilot."""
+    raw = path.read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    if payload.get("schema_version") == "phase-b-reciprocal-fitting-pilot-1":
+        return ReciprocalFittingPilotPlan.model_validate_json(raw)
+    if (
+        payload.get("schema_version")
+        == "phase-b-parameter-range-ownership-pilot-1"
+    ):
+        return ParameterRangeOwnershipPilotPlan.model_validate_json(raw)
+    raise ValueError("unexpected fitting pilot schema")
 
 
 def canonical_reciprocal_fitting_plan_sha256(
-    plan: ReciprocalFittingPilotPlan,
+    plan: FittingPilotPlan,
 ) -> str:
     """Hash the semantic plan independently of JSON whitespace."""
     payload = json.dumps(plan.model_dump(mode="json"), sort_keys=True).encode()
     return hashlib.sha256(payload).hexdigest()
 
 
-def reciprocal_fitting_task_count(plan: ReciprocalFittingPilotPlan) -> int:
+def reciprocal_fitting_task_count(plan: FittingPilotPlan) -> int:
     """Return the number of independently runnable condition/cell/seed fits."""
     return len(plan.fit_conditions) * len(plan.cells) * len(plan.repetitions)
 
 
 def reciprocal_fitting_task_identity(
-    plan: ReciprocalFittingPilotPlan, task_index: int
-) -> tuple[ReciprocalFittingCondition, ReciprocalFittingCell, int, int]:
+    plan: FittingPilotPlan, task_index: int
+) -> tuple[FittingCondition, ReciprocalFittingCell, int, int]:
     """Map task index to condition, cell, repetition, and shared candidate index."""
     per_condition = len(plan.cells) * len(plan.repetitions)
     if not 0 <= task_index < reciprocal_fitting_task_count(plan):

@@ -55,6 +55,84 @@ class _Variable:
     start_upper: float
 
 
+_TRUSTED_PARAMETER_CONSTRAINT_SOURCES = frozenset(
+    {
+        ConstraintSource.UNSPECIFIED,
+        ConstraintSource.BENCHMARK,
+        ConstraintSource.RUNTIME,
+        ConstraintSource.DETERMINISTIC,
+    }
+)
+
+
+def _parameter_variable(
+    model: CompiledModel,
+    spec: ParameterSpec,
+    config: FitConfig,
+) -> _Variable:
+    """Build a numerical search domain without asking the proposer for one."""
+    lower = -float("inf") if spec.bounds is None else spec.bounds.lower
+    upper = float("inf") if spec.bounds is None else spec.bounds.upper
+    for constraint in model.validated.candidate.constraints:
+        if (
+            constraint.subject != spec.name
+            or constraint.enforcement is not ConstraintEnforcement.HARD
+            or constraint.source not in _TRUSTED_PARAMETER_CONSTRAINT_SOURCES
+        ):
+            continue
+        if constraint.kind is ConstraintKind.NONNEGATIVE:
+            lower = max(lower, 0.0)
+        elif constraint.kind is ConstraintKind.POSITIVE:
+            lower = max(lower, np.finfo(float).eps)
+        if constraint.bounds is not None:
+            lower = max(lower, constraint.bounds.lower)
+            upper = min(upper, constraint.bounds.upper)
+    if not lower < upper:
+        raise ExactDerivativeFitError(
+            f"parameter {spec.name} has an empty or fixed runtime search domain"
+        )
+
+    if spec.initialization_range is not None:
+        start_lower = spec.initialization_range.lower
+        start_upper = spec.initialization_range.upper
+    else:
+        half_width = config.runtime_parameter_start_half_width
+        start_lower = config.runtime_parameter_start_center - half_width
+        start_upper = config.runtime_parameter_start_center + half_width
+    start_lower = max(start_lower, lower)
+    start_upper = min(start_upper, upper)
+    if start_lower > start_upper:
+        if np.isfinite(lower) and np.isfinite(upper):
+            start_lower = start_upper = (lower + upper) / 2.0
+        elif np.isfinite(lower):
+            start_lower = lower
+            start_upper = lower + config.runtime_parameter_start_half_width
+        else:
+            start_upper = upper
+            start_lower = upper - config.runtime_parameter_start_half_width
+    return _Variable(
+        f"parameter:{spec.name}",
+        lower,
+        upper,
+        start_lower,
+        start_upper,
+    )
+
+
+def _affine_anchor_and_probe(variable: _Variable) -> tuple[float, float]:
+    """Choose two finite in-domain values for one affine design column."""
+    anchor = (variable.start_lower + variable.start_upper) / 2.0
+    step = max(1.0, abs(anchor) * 0.1)
+    probe = min(variable.upper, anchor + step)
+    if probe == anchor:
+        probe = max(variable.lower, anchor - step)
+    if probe == anchor:
+        raise ExactDerivativeFitError(
+            f"cannot form an affine probe for {variable.name}"
+        )
+    return float(anchor), float(probe)
+
+
 @dataclass(frozen=True)
 class _Decoded:
     parameters: Mapping[str, float]
@@ -130,7 +208,7 @@ def fit_candidate(
             deadline,
             initial_global_parameters,
         )
-    variables = _training_variables(model, training)
+    variables = _training_variables(model, training, settings)
     lower = np.asarray([item.lower for item in variables])
     upper = np.asarray([item.upper for item in variables])
     rng = np.random.default_rng(settings.random_seed)
@@ -349,19 +427,13 @@ def _fit_exact_derivative_linear_ridge(
                 f"{missing}"
             )
     variables = tuple(
-        _Variable(
-            f"parameter:{item.name}",
-            item.bounds.lower,
-            item.bounds.upper,
-            item.initialization_range.lower,
-            item.initialization_range.upper,
-        )
-        for item in parameter_specs
+        _parameter_variable(fit_model, item, config) for item in parameter_specs
     )
-    anchor = {
-        item.name: (item.bounds.lower + item.bounds.upper) / 2.0
-        for item in parameter_specs
+    anchor_and_probe = {
+        spec.name: _affine_anchor_and_probe(variable)
+        for spec, variable in zip(parameter_specs, variables, strict=True)
     }
+    anchor = {name: values[0] for name, values in anchor_and_probe.items()}
     rows: list[NDArray[np.float64]] = []
     labels: list[float] = []
     for trajectory in training.trajectories:
@@ -385,7 +457,7 @@ def _fit_exact_derivative_linear_ridge(
             design = np.empty((len(fit_model.state_names), len(parameter_names)))
             for parameter_index, spec in enumerate(parameter_specs):
                 probe = dict(anchor)
-                probe[spec.name] = float(spec.bounds.lower)
+                probe[spec.name] = anchor_and_probe[spec.name][1]
                 delta = probe[spec.name] - anchor[spec.name]
                 if delta == 0.0:  # schema forbids degenerate bounds
                     raise AssertionError("parameter probe has zero displacement")
@@ -428,6 +500,7 @@ def _fit_exact_derivative_linear_ridge(
             matrix_for_solve,
             response_for_solve,
             parameter_specs,
+            variables,
             nonbinding_parameter_names=(
                 frozenset(parameter_names)
                 if config.affine_parameter_bound_policy == "hard"
@@ -444,7 +517,8 @@ def _fit_exact_derivative_linear_ridge(
         f"{spec.name}={value:.12g} outside "
         f"[{spec.bounds.lower:.12g}, {spec.bounds.upper:.12g}]"
         for spec, value in zip(parameter_specs, values, strict=True)
-        if value < spec.bounds.lower or value > spec.bounds.upper
+        if spec.bounds is not None
+        and (value < spec.bounds.lower or value > spec.bounds.upper)
     ]
     if bounds_error and config.affine_parameter_bound_policy == "hard":
         raise ExactDerivativeFitError(
@@ -576,19 +650,13 @@ def _fit_fixed_latent_basis_linear_ridge(
             )
 
     variables = tuple(
-        _Variable(
-            f"parameter:{item.name}",
-            item.bounds.lower,
-            item.bounds.upper,
-            item.initialization_range.lower,
-            item.initialization_range.upper,
-        )
-        for item in parameter_specs
+        _parameter_variable(fit_model, item, config) for item in parameter_specs
     )
-    anchor = {
-        item.name: (item.bounds.lower + item.bounds.upper) / 2.0
-        for item in parameter_specs
+    anchor_and_probe = {
+        spec.name: _affine_anchor_and_probe(variable)
+        for spec, variable in zip(parameter_specs, variables, strict=True)
     }
+    anchor = {name: values[0] for name, values in anchor_and_probe.items()}
     rows: list[NDArray[np.float64]] = []
     labels: list[float] = []
     for trajectory in training.trajectories:
@@ -613,7 +681,7 @@ def _fit_fixed_latent_basis_linear_ridge(
             design = np.empty((len(fit_model.state_names), len(parameter_names)))
             for parameter_index, spec in enumerate(parameter_specs):
                 probe = dict(anchor)
-                probe[spec.name] = float(spec.bounds.lower)
+                probe[spec.name] = anchor_and_probe[spec.name][1]
                 delta = probe[spec.name] - anchor[spec.name]
                 if delta == 0.0:
                     raise AssertionError("parameter probe has zero displacement")
@@ -657,6 +725,7 @@ def _fit_fixed_latent_basis_linear_ridge(
             matrix_for_solve,
             response_for_solve,
             parameter_specs,
+            variables,
             nonbinding_parameter_names=(
                 frozenset(parameter_names)
                 if config.affine_parameter_bound_policy == "hard"
@@ -672,7 +741,8 @@ def _fit_fixed_latent_basis_linear_ridge(
         f"{spec.name}={value:.12g} outside "
         f"[{spec.bounds.lower:.12g}, {spec.bounds.upper:.12g}]"
         for spec, value in zip(parameter_specs, values, strict=True)
-        if value < spec.bounds.lower or value > spec.bounds.upper
+        if spec.bounds is not None
+        and (value < spec.bounds.lower or value > spec.bounds.upper)
     ]
     if bounds_error and config.affine_parameter_bound_policy == "hard":
         raise ExactDerivativeFitError(
@@ -826,19 +896,21 @@ def _fit_profiled_latent_basis_linear_ridge(
     reciprocal_by_name = {
         item.parameter_name: item for item in active_transformations
     }
+    outer_physical_variables = tuple(
+        _parameter_variable(profiled_model, item, config) for item in outer_specs
+    )
     outer_variables = tuple(
-        _profiled_outer_variable(item, reciprocal_by_name.get(item.name))
-        for item in outer_specs
+        _profiled_outer_variable(variable, reciprocal_by_name.get(item.name))
+        for item, variable in zip(
+            outer_specs, outer_physical_variables, strict=True
+        )
     )
     all_variables = tuple(
-        _Variable(
-            f"parameter:{item.name}",
-            item.bounds.lower,
-            item.bounds.upper,
-            item.initialization_range.lower,
-            item.initialization_range.upper,
-        )
+        _parameter_variable(profiled_model, item, config)
         for item in model.validated.candidate.parameters
+    )
+    inner_variables = tuple(
+        _parameter_variable(profiled_model, item, config) for item in inner_specs
     )
     lower = np.asarray([item.lower for item in outer_variables], dtype=float)
     upper = np.asarray([item.upper for item in outer_variables], dtype=float)
@@ -846,6 +918,7 @@ def _fit_profiled_latent_basis_linear_ridge(
         outer_specs,
         config.number_of_starts,
         np.random.default_rng(config.random_seed),
+        physical_variables=outer_physical_variables,
         preferred_parameters=initial_global_parameters,
         reciprocal_by_name=reciprocal_by_name,
     )
@@ -878,6 +951,7 @@ def _fit_profiled_latent_basis_linear_ridge(
                     derivative_scales,
                     outer_specs,
                     inner_specs,
+                    inner_variables,
                     outer_values,
                     reciprocal_by_name,
                     deadline,
@@ -922,6 +996,7 @@ def _fit_profiled_latent_basis_linear_ridge(
                 derivative_scales,
                 outer_specs,
                 inner_specs,
+                inner_variables,
                 np.asarray(outer_result.x, dtype=float),
                 reciprocal_by_name,
                 deadline,
@@ -946,8 +1021,10 @@ def _fit_profiled_latent_basis_linear_ridge(
                     reciprocal_by_name,
                 ),
                 **{
-                    item.name: (item.bounds.lower + item.bounds.upper) / 2.0
-                    for item in inner_specs
+                    item.name: _affine_anchor_and_probe(variable)[0]
+                    for item, variable in zip(
+                        inner_specs, inner_variables, strict=True
+                    )
                 },
             }
             cost = 0.5 * residual_size * config.failure_penalty**2
@@ -1110,6 +1187,7 @@ def _profile_affine_latent_basis_weights(
     derivative_scales: Mapping[str, float],
     outer_specs: Sequence[ParameterSpec],
     inner_specs: Sequence[ParameterSpec],
+    inner_variables: Sequence[_Variable],
     outer_values: NDArray[np.float64],
     reciprocal_by_name: Mapping[str, ReciprocalParameterTransformation],
     deadline: float | None,
@@ -1120,9 +1198,12 @@ def _profile_affine_latent_basis_weights(
         outer_values,
         reciprocal_by_name,
     )
+    inner_anchor_and_probe = {
+        spec.name: _affine_anchor_and_probe(variable)
+        for spec, variable in zip(inner_specs, inner_variables, strict=True)
+    }
     inner_anchor = {
-        item.name: (item.bounds.lower + item.bounds.upper) / 2.0
-        for item in inner_specs
+        name: values[0] for name, values in inner_anchor_and_probe.items()
     }
     anchor = {**outer, **inner_anchor}
     inner_names = tuple(item.name for item in inner_specs)
@@ -1157,7 +1238,7 @@ def _profile_affine_latent_basis_weights(
             }
             for parameter_index, spec in enumerate(inner_specs):
                 probe = dict(anchor)
-                probe[spec.name] = float(spec.bounds.lower)
+                probe[spec.name] = inner_anchor_and_probe[spec.name][1]
                 delta = probe[spec.name] - anchor[spec.name]
                 if delta == 0.0:
                     raise AssertionError("parameter probe has zero displacement")
@@ -1223,6 +1304,7 @@ def _profile_affine_latent_basis_weights(
         matrix_for_solve,
         response_for_solve,
         inner_specs,
+        inner_variables,
         nonbinding_parameter_names=model.nonbinding_parameter_bounds,
         backend_label="profiled affine",
     )
@@ -1244,20 +1326,14 @@ def _profile_affine_latent_basis_weights(
 
 
 def _profiled_outer_variable(
-    spec: ParameterSpec,
+    physical_variable: _Variable,
     transformation: ReciprocalParameterTransformation | None,
 ) -> _Variable:
     """Represent one outer parameter in its certified optimizer coordinate."""
     if transformation is None:
-        return _Variable(
-            f"parameter:{spec.name}",
-            spec.bounds.lower,
-            spec.bounds.upper,
-            spec.initialization_range.lower,
-            spec.initialization_range.upper,
-        )
+        return physical_variable
     return _Variable(
-        f"parameter:{spec.name}",
+        physical_variable.name,
         transformation.coordinate_lower,
         transformation.coordinate_upper,
         transformation.coordinate_start_lower,
@@ -1270,6 +1346,7 @@ def _profiled_outer_starts(
     count: int,
     rng: np.random.Generator,
     *,
+    physical_variables: Sequence[_Variable] | None = None,
     preferred_parameters: Mapping[str, float] | None,
     reciprocal_by_name: Mapping[str, ReciprocalParameterTransformation],
 ) -> tuple[tuple[NDArray[np.float64], ...], tuple[Mapping[str, float], ...]]:
@@ -1278,16 +1355,25 @@ def _profiled_outer_starts(
     This gives original and reciprocal-coordinate experiments the same physical
     multistarts for a fixed seed.
     """
-    physical_variables = tuple(
-        _Variable(
-            f"parameter:{spec.name}",
-            spec.bounds.lower,
-            spec.bounds.upper,
-            spec.initialization_range.lower,
-            spec.initialization_range.upper,
+    if physical_variables is None:
+        if any(
+            spec.bounds is None or spec.initialization_range is None
+            for spec in specs
+        ):
+            raise ValueError(
+                "range-free profiled starts require runtime physical variables"
+            )
+        physical_variables = tuple(
+            _Variable(
+                f"parameter:{spec.name}",
+                spec.bounds.lower,
+                spec.bounds.upper,
+                spec.initialization_range.lower,
+                spec.initialization_range.upper,
+            )
+            for spec in specs
+            if spec.bounds is not None and spec.initialization_range is not None
         )
-        for spec in specs
-    )
     names = frozenset(spec.name for spec in specs)
     preferred = (
         None
@@ -1348,6 +1434,8 @@ def _parameters_outside_suggested_bounds(
     """Report affine estimates outside proposer-supplied suggested ranges."""
     outside: list[str] = []
     for spec in specs:
+        if spec.bounds is None:
+            continue
         value = float(parameters[spec.name])
         width = spec.bounds.upper - spec.bounds.lower
         tolerance = tolerance_fraction * max(1.0, width)
@@ -1372,11 +1460,7 @@ def _nonbinding_affine_parameter_names(
         for constraint in model.validated.candidate.constraints
         if constraint.enforcement is ConstraintEnforcement.HARD
         and constraint.source
-        in {
-            ConstraintSource.BENCHMARK,
-            ConstraintSource.RUNTIME,
-            ConstraintSource.DETERMINISTIC,
-        }
+        in _TRUSTED_PARAMETER_CONSTRAINT_SOURCES
     }
     return parameter_names - trusted_hard
 
@@ -1385,6 +1469,7 @@ def _solve_affine_system(
     matrix: NDArray[np.float64],
     response: NDArray[np.float64],
     specs: Sequence[ParameterSpec],
+    variables: Sequence[_Variable],
     *,
     nonbinding_parameter_names: frozenset[str],
     backend_label: str,
@@ -1398,15 +1483,15 @@ def _solve_affine_system(
     else:
         lower = np.asarray(
             [
-                spec.bounds.lower if spec.name in binding else -np.inf
-                for spec in specs
+                variable.lower if spec.name in binding else -np.inf
+                for spec, variable in zip(specs, variables, strict=True)
             ],
             dtype=float,
         )
         upper = np.asarray(
             [
-                spec.bounds.upper if spec.name in binding else np.inf
-                for spec in specs
+                variable.upper if spec.name in binding else np.inf
+                for spec, variable in zip(specs, variables, strict=True)
             ],
             dtype=float,
         )
@@ -1760,18 +1845,11 @@ def _validate_splits(
 def _training_variables(
     model: CompiledModel,
     split: DatasetSplit,
+    config: FitConfig,
 ) -> tuple[_Variable, ...]:
     result: list[_Variable] = []
     for parameter in model.validated.candidate.parameters:
-        result.append(
-            _Variable(
-                f"parameter:{parameter.name}",
-                parameter.bounds.lower,
-                parameter.bounds.upper,
-                parameter.initialization_range.lower,
-                parameter.initialization_range.upper,
-            )
-        )
+        result.append(_parameter_variable(model, parameter, config))
     initials = {
         item.state: item for item in model.validated.candidate.initial_conditions
     }
@@ -2234,11 +2312,16 @@ def _diagnostic(
             in nonbinding_parameter_names
         ):
             continue
+        if not np.isfinite(variable.lower) and not np.isfinite(variable.upper):
+            continue
         width = variable.upper - variable.lower
-        tolerance = config.bound_tolerance * max(1.0, width)
-        if value - variable.lower <= tolerance:
+        tolerance = config.bound_tolerance * max(
+            1.0,
+            width if np.isfinite(width) else abs(value),
+        )
+        if np.isfinite(variable.lower) and value - variable.lower <= tolerance:
             lower_hits.append(variable.name)
-        if variable.upper - value <= tolerance:
+        if np.isfinite(variable.upper) and variable.upper - value <= tolerance:
             upper_hits.append(variable.name)
     return OptimizationDiagnostic(
         start_index=index,

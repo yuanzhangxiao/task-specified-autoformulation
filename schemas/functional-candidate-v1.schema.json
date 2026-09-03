@@ -178,10 +178,18 @@
     },
     "ParameterSpec": {
       "additionalProperties": false,
-      "description": "Bounded scalar parameter and its initialization interval.",
+      "description": "Scalar fitted parameter with optional legacy numerical ranges.\n\nNew proposer outputs omit ranges.  The optional fields remain readable so\nhistorical candidates and externally supplied runtime contracts retain\ndeterministic replay compatibility.",
       "properties": {
         "bounds": {
-          "$ref": "#/$defs/ValueRange"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "description": {
           "default": "unspecified",
@@ -191,7 +199,15 @@
           "type": "string"
         },
         "initialization_range": {
-          "$ref": "#/$defs/ValueRange"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "name": {
           "maxLength": 128,
@@ -213,9 +229,7 @@
       },
       "required": [
         "name",
-        "scope",
-        "bounds",
-        "initialization_range"
+        "scope"
       ],
       "title": "ParameterSpec",
       "type": "object"

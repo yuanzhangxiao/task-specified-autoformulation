@@ -96,8 +96,15 @@ def fit_native_d3(
     parameters = {
         item.name: torch.nn.Parameter(
             torch.tensor(
-                (item.initialization_range.lower + item.initialization_range.upper)
-                / 2.0,
+                (
+                    1.0
+                    if item.initialization_range is None
+                    else (
+                        item.initialization_range.lower
+                        + item.initialization_range.upper
+                    )
+                    / 2.0
+                ),
                 dtype=torch.float64,
             )
         )

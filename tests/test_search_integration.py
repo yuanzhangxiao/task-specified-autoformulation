@@ -327,7 +327,7 @@ def test_end_to_end_mock_search_feedback_lineage_and_one_time_test(
         "target mappings exist",
         "algebraic definitions are acyclic",
         "only causally available public channels are used",
-        "parameter declarations and bounds are valid",
+        "parameter declarations are valid",
         "restricted expressions are executable",
     ]
     assert judge_request["candidate"]["candidate_id"] == "candidate_one"

@@ -44,6 +44,9 @@ def prepare_pilot(
     ) = (item.expanduser().resolve() for item in paths)
     plan = load_reciprocal_fitting_pilot_plan(config_path)
     plan_sha256 = canonical_reciprocal_fitting_plan_sha256(plan)
+    range_ownership = (
+        plan.schema_version == "phase-b-parameter-range-ownership-pilot-1"
+    )
     source_manifest_path = source_replay_root / "proposer_repair_replay.json"
     source_ledger_path = source_replay_root / "artifact_ledger.jsonl"
     source_manifest = _read_object(source_manifest_path)
@@ -167,7 +170,11 @@ def prepare_pilot(
         )
     _write_once_jsonl(frozen / "task_plan.jsonl", task_rows)
     freeze = {
-        "schema_version": "phase-b-reciprocal-fitting-pilot-freeze-1",
+        "schema_version": (
+            "phase-b-parameter-range-ownership-pilot-freeze-1"
+            if range_ownership
+            else "phase-b-reciprocal-fitting-pilot-freeze-1"
+        ),
         "status": "frozen_before_fitting",
         "development_only": True,
         "plan_sha256": plan_sha256,

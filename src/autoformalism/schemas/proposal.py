@@ -83,24 +83,50 @@ class ProposedObservation(StrictSchema):
 
 
 class ProposedParameter(StrictSchema):
-    """A bounded fitted parameter with defaults for routine metadata."""
+    """A fitted scalar identity; numerical values belong to the runtime."""
 
     name: Identifier
-    bounds: ValueRange
-    initialization_range: ValueRange | None = None
     scope: ParameterScope = ParameterScope.GLOBAL
+    # Accepted only so historical stored responses remain readable. These are
+    # excluded from serialization, enrichment, and the provider-facing schema.
+    bounds: ValueRange | None = Field(default=None, exclude=True, repr=False)
+    initialization_range: ValueRange | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+    )
 
-    @model_validator(mode="after")
-    def valid_optimizer_ranges(self) -> ProposedParameter:
-        """Keep deterministic enrichment from introducing schema failures."""
-        if self.bounds.lower == self.bounds.upper:
-            raise ValueError("parameter bounds must be nondegenerate")
-        if (
-            self.initialization_range is not None
-            and not self.bounds.contains(self.initialization_range)
-        ):
-            raise ValueError("parameter initialization_range must lie within bounds")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_ranges(cls, value: Any) -> Any:
+        """Read old payloads without preserving obsolete proposer metadata."""
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        normalized.pop("bounds", None)
+        normalized.pop("initialization_range", None)
+        return normalized
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema: Any,
+        handler: Any,
+    ) -> dict[str, Any]:
+        """Hide obsolete numeric ranges from every structured-output provider."""
+        schema = handler(core_schema)
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            properties.pop("bounds", None)
+            properties.pop("initialization_range", None)
+        required = schema.get("required")
+        if isinstance(required, list):
+            schema["required"] = [
+                item
+                for item in required
+                if item not in {"bounds", "initialization_range"}
+            ]
+        return schema
 
 
 class ProposerCandidate(StrictSchema):
@@ -148,17 +174,10 @@ def enrich_proposal(proposal: ProposerCandidate) -> CandidateModel:
                 expression=state.initial_expression,
             )
         )
-    parameters = []
-    for parameter in proposal.parameters:
-        initialization = parameter.initialization_range or parameter.bounds
-        parameters.append(
-            ParameterSpec(
-                name=parameter.name,
-                scope=parameter.scope,
-                bounds=parameter.bounds,
-                initialization_range=initialization,
-            )
-        )
+    parameters = [
+        ParameterSpec(name=parameter.name, scope=parameter.scope)
+        for parameter in proposal.parameters
+    ]
     return CandidateModel(
         candidate_id=proposal.candidate_id,
         parent_candidate_id=proposal.parent_candidate_id,
@@ -298,6 +317,7 @@ class ProposerPreSchemaRepair:
 
     code: Literal[
         "removed_exact_duplicate_parameter",
+        "removed_legacy_parameter_ranges",
         "removed_protected_parameter",
     ]
     parameter_name: str
@@ -329,9 +349,20 @@ def normalize_proposer_candidate_v2_payload(
     protected = set(protected_parameter_names)
     retained: list[object] = []
     protected_counts: dict[str, int] = {}
+    range_counts: dict[str, int] = {}
     exact_duplicate_counts: dict[str, int] = {}
     seen: set[str] = set()
     for item in parameters:
+        if isinstance(item, dict):
+            item = dict(item)
+            removed_ranges = sum(
+                key in item for key in ("bounds", "initialization_range")
+            )
+            if removed_ranges:
+                label = str(item.get("name", "<invalid>"))
+                range_counts[label] = range_counts.get(label, 0) + removed_ranges
+                item.pop("bounds", None)
+                item.pop("initialization_range", None)
         name = item.get("name") if isinstance(item, dict) else None
         if isinstance(name, str) and name in protected:
             protected_counts[name] = protected_counts.get(name, 0) + 1
@@ -349,7 +380,7 @@ def normalize_proposer_candidate_v2_payload(
         seen.add(canonical)
         retained.append(item)
 
-    if not protected_counts and not exact_duplicate_counts:
+    if not protected_counts and not exact_duplicate_counts and not range_counts:
         return payload, ()
     normalized = dict(payload)
     normalized["parameters"] = retained
@@ -360,6 +391,13 @@ def normalize_proposer_candidate_v2_payload(
             removed_count=count,
         )
         for name, count in sorted(protected_counts.items())
+    ) + tuple(
+        ProposerPreSchemaRepair(
+            code="removed_legacy_parameter_ranges",
+            parameter_name=name,
+            removed_count=count,
+        )
+        for name, count in sorted(range_counts.items())
     ) + tuple(
         ProposerPreSchemaRepair(
             code="removed_exact_duplicate_parameter",
@@ -453,10 +491,6 @@ def enrich_proposal_v2(
             ParameterSpec(
                 name=parameter.name,
                 scope=parameter.scope,
-                bounds=parameter.bounds,
-                initialization_range=(
-                    parameter.initialization_range or parameter.bounds
-                ),
             )
             for parameter in proposal.parameters
         ),

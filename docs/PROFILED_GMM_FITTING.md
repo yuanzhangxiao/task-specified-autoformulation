@@ -60,8 +60,12 @@ theta = solve(Phi.T @ Phi + lambda * I, Phi.T @ y_adjusted)
 
 with a least-squares fallback only if the linear solve is singular. This is one
 solve (`function_evaluations = 1`), not iterative nonlinear optimization.
-The solution is rejected if it is nonfinite or outside proposer-declared bounds;
-it is not clipped because clipping would no longer be Eq. (11).
+The solution is rejected if it is nonfinite. New proposer outputs contain no
+numeric parameter ranges, so the ordinary affine solve is the direct Eq. (11)
+ridge solution. A trusted hard benchmark/runtime constraint switches the
+affected solve to bounded linear least squares. Historical proposer ranges can
+still be enforced by an explicit compatibility policy when replaying old
+experiments; they are suggestions under the current default.
 
 Only training derivatives determine `theta`. Candidate selection still uses
 causal train/validation rollout NMSE, and test data remains sealed until the

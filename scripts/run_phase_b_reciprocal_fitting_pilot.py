@@ -25,6 +25,7 @@ from autoformalism.rebuttal.reciprocal_fitting_pilot import (
     reciprocal_fitting_task_identity,
 )
 from autoformalism.schemas import CandidateModel
+from autoformalism.search.identity import candidate_identity
 
 
 def run_task(
@@ -39,11 +40,16 @@ def run_task(
     plan_path = experiment_root / "frozen" / "plan.json"
     plan = load_reciprocal_fitting_pilot_plan(plan_path)
     plan_sha256 = canonical_reciprocal_fitting_plan_sha256(plan)
+    task_schema_version = (
+        "phase-b-parameter-range-ownership-pilot-task-1"
+        if plan.schema_version == "phase-b-parameter-range-ownership-pilot-1"
+        else "phase-b-reciprocal-fitting-pilot-task-1"
+    )
     if output.is_file():
         payload = _read_object(output)
         if (
             payload.get("schema_version")
-            != "phase-b-reciprocal-fitting-pilot-task-1"
+            != task_schema_version
             or payload.get("status") != "complete"
             or payload.get("task_index") != task_index
             or payload.get("plan_sha256") != plan_sha256
@@ -79,6 +85,14 @@ def run_task(
     candidate = CandidateModel.model_validate_json(
         candidate_path.read_text(encoding="utf-8")
     )
+    source_identity = candidate_identity(candidate)
+    remove_legacy_ranges = bool(
+        getattr(condition, "remove_legacy_parameter_ranges", False)
+    )
+    removed_range_field_count = 0
+    if remove_legacy_ranges:
+        candidate, removed_range_field_count = _without_parameter_ranges(candidate)
+    fit_identity = candidate_identity(candidate)
     arguments = ExecutionArguments(
         data_root=public_data_root,
         benchmark_id=cell.benchmark_id,
@@ -124,9 +138,17 @@ def run_task(
         allow_derivative_regression=condition.allow_derivative_regression,
         parameter_fit_strategy=condition.parameter_fit_strategy,
         derivative_ridge_regularization=1e-8,
-        # Preserve the frozen v1 pilot's bounded inner solve. Later profiled
-        # experiments use the new suggested-range policy explicitly.
-        affine_parameter_bound_policy="hard",
+        # The v1 plan has no policy field and retains its original hard-bound
+        # behavior. The range-ownership plan declares its policy explicitly.
+        affine_parameter_bound_policy=getattr(
+            condition, "affine_parameter_bound_policy", "hard"
+        ),
+        runtime_parameter_start_center=getattr(
+            condition, "runtime_parameter_start_center", 1.0
+        ),
+        runtime_parameter_start_half_width=getattr(
+            condition, "runtime_parameter_start_half_width", 2.0
+        ),
         maximum_function_evaluations=condition.maximum_function_evaluations,
         maximum_wall_time_seconds=condition.maximum_wall_time_seconds,
         use_certified_reciprocal_coordinates=(
@@ -168,7 +190,7 @@ def run_task(
             ],
         }
     payload = {
-        "schema_version": "phase-b-reciprocal-fitting-pilot-task-1",
+        "schema_version": task_schema_version,
         "status": "complete",
         "development_only": True,
         "test_data_opened": False,
@@ -181,6 +203,9 @@ def run_task(
         "task_index": task_index,
         "candidate_index": candidate_index,
         "candidate_sha256": _sha256(candidate_path),
+        "source_candidate_identity": source_identity.model_dump(mode="json"),
+        "fit_candidate_identity": fit_identity.model_dump(mode="json"),
+        "legacy_parameter_range_field_count_removed": removed_range_field_count,
         "condition": condition.model_dump(mode="json"),
         "benchmark_id": cell.benchmark_id,
         "tier": cell.tier,
@@ -196,6 +221,21 @@ def run_task(
         output, (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
     )
     return payload
+
+
+def _without_parameter_ranges(
+    candidate: CandidateModel,
+) -> tuple[CandidateModel, int]:
+    """Remove legacy proposer-owned numerical ranges without changing structure."""
+    removed = sum(
+        int(item.bounds is not None) + int(item.initialization_range is not None)
+        for item in candidate.parameters
+    )
+    parameters = tuple(
+        item.model_copy(update={"bounds": None, "initialization_range": None})
+        for item in candidate.parameters
+    )
+    return candidate.model_copy(update={"parameters": parameters}), removed
 
 
 def _read_object(path: Path) -> dict[str, Any]:

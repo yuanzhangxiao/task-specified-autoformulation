@@ -181,6 +181,9 @@ def collect_candidates(
 def initial_parameters(candidate: CandidateModel, profile: str) -> dict[str, float]:
     values = {}
     for parameter in candidate.parameters:
+        if parameter.initialization_range is None:
+            values[parameter.name] = 1.0
+            continue
         lower = parameter.initialization_range.lower
         upper = parameter.initialization_range.upper
         if profile == "declared_midpoint":
