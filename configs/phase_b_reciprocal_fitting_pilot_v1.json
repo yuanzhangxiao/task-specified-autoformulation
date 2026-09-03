@@ -1,0 +1,84 @@
+{
+  "schema_version": "phase-b-reciprocal-fitting-pilot-1",
+  "status": "planned_before_derivative_overlay_or_fit",
+  "development_only": true,
+  "test_data_opened": false,
+  "private_reference_available_to_fitter": false,
+  "exact_training_observed_derivatives_supplied": true,
+  "latent_values_supplied": false,
+  "latent_derivatives_supplied": false,
+  "weighted_overall_score_defined": false,
+  "source_replay": {
+    "manifest_schema_version": "phase-b-proposer-repair-replay-manifest-1",
+    "required_status": "pass",
+    "source_plan_sha256": "edca1f5a6b94445a0d429d2aee8ecfeeee8a2479524932ed30bcf3aa5eda087b",
+    "replay_plan_sha256": "07dfd2ef5687b9f4e6e25c7b50ac15947e7098d6bbf4f5a38016ec1533f23af4",
+    "artifact_ledger_sha256": "8a6bf544f2db51e1b0dea0020f86edafacb0820244e67652b9da7d0644601951",
+    "replay_result_count": 12
+  },
+  "source_candidate_condition": {
+    "reasoning_effort": "low",
+    "max_output_tokens": 16384
+  },
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "family": "dalla_man",
+      "task": "T2",
+      "tier": "easy",
+      "dynamics": "canonical",
+      "semantic_variant": "named",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "family": "alien_device",
+      "task": "unknown_device_mechanism",
+      "tier": "hard",
+      "dynamics": "canonical",
+      "semantic_variant": "opaque",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "fit_conditions": [
+    {
+      "condition_id": "bounded_rollout",
+      "parameter_fit_strategy": "bounded_nonlinear",
+      "allow_derivative_regression": false,
+      "use_certified_reciprocal_coordinates": false,
+      "number_of_starts": 2,
+      "maximum_function_evaluations": 150,
+      "maximum_wall_time_seconds": 900
+    },
+    {
+      "condition_id": "profiled_original_coordinate",
+      "parameter_fit_strategy": "profiled_latent_basis_linear_ridge",
+      "allow_derivative_regression": true,
+      "use_certified_reciprocal_coordinates": false,
+      "number_of_starts": 2,
+      "maximum_function_evaluations": 100,
+      "maximum_wall_time_seconds": 900
+    },
+    {
+      "condition_id": "profiled_certified_reciprocal",
+      "parameter_fit_strategy": "profiled_latent_basis_linear_ridge",
+      "allow_derivative_regression": true,
+      "use_certified_reciprocal_coordinates": true,
+      "number_of_starts": 2,
+      "maximum_function_evaluations": 100,
+      "maximum_wall_time_seconds": 900
+    }
+  ],
+  "reported_endpoints": [
+    "fit_contract_compatibility",
+    "fit_success",
+    "training_nmse",
+    "validation_nmse",
+    "function_evaluations",
+    "wall_seconds",
+    "integration_failures",
+    "bound_contacts",
+    "certified_reciprocal_transformations"
+  ]
+}

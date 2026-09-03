@@ -66,6 +66,7 @@ class PrivateTrajectory(BaseModel):
     input_names: tuple[str, ...]
     inputs: NDArray[np.float64]
     derived: dict[str, NDArray[np.float64]] = Field(default_factory=dict)
+    derivatives: dict[str, NDArray[np.float64]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def arrays_are_aligned(self) -> PrivateTrajectory:
@@ -75,7 +76,15 @@ class PrivateTrajectory(BaseModel):
             raise ValueError("state array does not match time/state names")
         if self.inputs.shape != (len(self.time), len(self.input_names)):
             raise ValueError("input array does not match time/input names")
-        arrays = [self.time, self.states, self.inputs, *self.derived.values()]
+        arrays = [
+            self.time,
+            self.states,
+            self.inputs,
+            *self.derived.values(),
+            *self.derivatives.values(),
+        ]
+        if any(value.shape != self.time.shape for value in self.derivatives.values()):
+            raise ValueError("private derivative array does not match time")
         if not all(np.all(np.isfinite(value)) for value in arrays):
             raise ValueError("private trajectory contains nonfinite values")
         if len(self.time) < 2 or not np.all(np.diff(self.time) > 0.0):
@@ -574,6 +583,7 @@ def _simulate_dalla(
         input_names=protocol.input_names,
         inputs=inputs,
         derived=result.derived,
+        derivatives=result.derivatives,
     )
 
 
@@ -624,6 +634,9 @@ def _simulate_cstr(
 
     states = _integrate(rhs, time, initial)
     inputs = np.vstack([physical_inputs(float(value)) for value in time])
+    derivatives = np.vstack(
+        [rhs(float(value), state) for value, state in zip(time, states, strict=True)]
+    )
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="cstr",
@@ -632,6 +645,10 @@ def _simulate_cstr(
         states=states,
         input_names=protocol.input_names,
         inputs=inputs,
+        derivatives={
+            name: derivatives[:, index]
+            for index, name in enumerate(("C", "T", "Tj"))
+        },
     )
 
 
@@ -694,14 +711,22 @@ def _simulate_alien(
     inputs = np.asarray(
         [[_scalar_input(float(value), protocol.specification)] for value in time]
     )
+    derivatives = np.vstack(
+        [rhs(float(value), state) for value, state in zip(time, states, strict=True)]
+    )
+    state_names = (*(f"z{index + 1}" for index in range(count)), "y")
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="alien_device",
         time=time,
-        state_names=(*(f"z{index + 1}" for index in range(count)), "y"),
+        state_names=state_names,
         states=states,
         input_names=protocol.input_names,
         inputs=inputs,
+        derivatives={
+            name: derivatives[:, index]
+            for index, name in enumerate(state_names)
+        },
     )
 
 

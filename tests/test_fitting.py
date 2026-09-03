@@ -960,6 +960,12 @@ def test_profiled_latent_basis_recovers_shape_and_affine_weight_without_oracle(
     report = validate_profiled_latent_basis_parameterization(model.validated)
     assert report.affine_parameter_names == ("weight",)
     assert report.latent_shape_parameter_names == ("tau",)
+    assert len(report.reciprocal_transformations) == 1
+    reciprocal = report.reciprocal_transformations[0]
+    assert reciprocal.parameter_name == "tau"
+    assert reciprocal.coordinate_name == "reciprocal:tau"
+    assert reciprocal.coordinate_lower == pytest.approx(0.5)
+    assert reciprocal.coordinate_upper == pytest.approx(10.0)
     config = FitConfig(
         parameter_fit_strategy="profiled_latent_basis_linear_ridge",
         number_of_starts=2,
@@ -983,7 +989,81 @@ def test_profiled_latent_basis_recovers_shape_and_affine_weight_without_oracle(
     assert {
         item.backend for item in fit.diagnostics
     } == {"profiled_latent_basis_linear_ridge"}
+    assert {
+        item.certified_parameter_transformations for item in fit.diagnostics
+    } == {("reciprocal:tau=1/tau",)}
     assert fit.validation_metrics.normalized_mse < 1e-9
+
+
+def test_profiled_latent_basis_can_disable_reciprocal_optimizer_coordinate() -> None:
+    truth = {"weight": 2.5, "tau": 1.4}
+
+    def split(name: SplitName, identifier: str, initial: float) -> DatasetSplit:
+        time = np.linspace(0.0, 3.0, 61)
+        latent = np.exp(-time / truth["tau"])
+        target = initial + truth["weight"] * truth["tau"] * (1.0 - latent)
+        trajectory = Trajectory(
+            identifier,
+            time,
+            {"target": target},
+            {},
+            {},
+            {},
+            {"target": truth["weight"] * latent},
+            DerivativeProvenance.EXACT,
+        )
+        return _split(name, (trajectory,))
+
+    model = compile_candidate(
+        _profiled_latent_candidate("weight * z"),
+        ValidationContext(targets=("target",)),
+    )
+    training = split(SplitName.TRAIN, "train", 0.2)
+    validation = split(SplitName.VALIDATION, "validation", -0.3)
+
+    fit = fit_candidate(
+        model,
+        training,
+        validation,
+        FitConfig(
+            parameter_fit_strategy="profiled_latent_basis_linear_ridge",
+            number_of_starts=2,
+            maximum_function_evaluations=100,
+            derivative_ridge_regularization=0.0,
+            use_certified_reciprocal_coordinates=False,
+        ),
+    )
+
+    assert fit.success
+    assert all(
+        not item.certified_parameter_transformations for item in fit.diagnostics
+    )
+    assert fit.global_parameters["tau"] == pytest.approx(truth["tau"], rel=1e-5)
+
+
+@pytest.mark.parametrize(
+    "latent_rhs",
+    (
+        "-z / tau + tau",
+        "(-z / tau) / tau",
+        "-z / (2 * tau)",
+        "-z / (tau + 1)",
+    ),
+)
+def test_profiled_latent_basis_does_not_certify_unsafe_reciprocals(
+    latent_rhs: str,
+) -> None:
+    candidate = _profiled_latent_candidate("weight * z")
+    payload = candidate.model_dump(mode="json")
+    payload["state_equations"][1]["rhs"] = latent_rhs
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",)),
+    )
+
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+
+    assert report.reciprocal_transformations == ()
 
 
 def test_profiled_latent_basis_rejects_nonlinear_inner_weight() -> None:

@@ -1,5 +1,6 @@
 """Benchmark registry, loading, and scaling."""
 
+from autoformalism.data.derivative_overlay import attach_exact_derivative_overlay
 from autoformalism.data.loader import BenchmarkLoader
 from autoformalism.data.models import (
     BenchmarkDataset,
@@ -28,4 +29,5 @@ __all__ = [
     "SplitName",
     "TrainingScaler",
     "Trajectory",
+    "attach_exact_derivative_overlay",
 ]

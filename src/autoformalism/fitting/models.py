@@ -32,6 +32,7 @@ class FitConfig(BaseModel):
         "profiled_latent_basis_linear_ridge",
     ] = "bounded_nonlinear"
     derivative_ridge_regularization: float = Field(default=1e-8, ge=0.0)
+    use_certified_reciprocal_coordinates: bool = True
     integration_method: str = "RK45"
     fixed_step_substeps: int = Field(default=1, ge=1)
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
@@ -108,6 +109,7 @@ class OptimizationDiagnostic:
     integration_failure_messages: tuple[str, ...] = ()
     parameters_at_lower_bound: tuple[str, ...] = ()
     parameters_at_upper_bound: tuple[str, ...] = ()
+    certified_parameter_transformations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

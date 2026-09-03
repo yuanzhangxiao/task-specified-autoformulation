@@ -70,6 +70,11 @@ def run_smoke(output: Path) -> dict[str, object]:
         "outer_function_evaluations": fitted.diagnostics[
             fitted.best_start_index
         ].function_evaluations,
+        "certified_parameter_transformations": list(
+            fitted.diagnostics[
+                fitted.best_start_index
+            ].certified_parameter_transformations
+        ),
         "training_normalized_mse": fitted.training_metrics.normalized_mse,
         "validation_normalized_mse": fitted.validation_metrics.normalized_mse,
         "test_normalized_mse": test_metrics.normalized_mse,

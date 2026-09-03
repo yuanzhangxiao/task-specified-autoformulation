@@ -19,6 +19,7 @@ from autoformalism.data import (
 )
 from autoformalism.expressions import (
     CompiledModel,
+    ReciprocalParameterTransformation,
     RuntimeExpressionError,
     validate_fixed_latent_basis_parameterization,
     validate_gmm_parameterization,
@@ -734,14 +735,16 @@ def _fit_profiled_latent_basis_linear_ridge(
     inner_specs = tuple(
         specs_by_name[name] for name in report.affine_parameter_names
     )
+    active_transformations = (
+        report.reciprocal_transformations
+        if config.use_certified_reciprocal_coordinates
+        else ()
+    )
+    reciprocal_by_name = {
+        item.parameter_name: item for item in active_transformations
+    }
     outer_variables = tuple(
-        _Variable(
-            f"parameter:{item.name}",
-            item.bounds.lower,
-            item.bounds.upper,
-            item.initialization_range.lower,
-            item.initialization_range.upper,
-        )
+        _profiled_outer_variable(item, reciprocal_by_name.get(item.name))
         for item in outer_specs
     )
     all_variables = tuple(
@@ -756,14 +759,10 @@ def _fit_profiled_latent_basis_linear_ridge(
     )
     lower = np.asarray([item.lower for item in outer_variables], dtype=float)
     upper = np.asarray([item.upper for item in outer_variables], dtype=float)
-    preferred_outer = (
-        None
-        if initial_global_parameters is None
-        else {
-            name: value
-            for name, value in initial_global_parameters.items()
-            if name in report.latent_shape_parameter_names
-        }
+    preferred_outer = _profiled_outer_warm_start(
+        initial_global_parameters,
+        report.latent_shape_parameter_names,
+        reciprocal_by_name,
     )
     starts = _starts(
         outer_variables,
@@ -799,6 +798,7 @@ def _fit_profiled_latent_basis_linear_ridge(
                     outer_specs,
                     inner_specs,
                     outer_values,
+                    reciprocal_by_name,
                     deadline,
                 )
                 return values
@@ -840,6 +840,7 @@ def _fit_profiled_latent_basis_linear_ridge(
                 outer_specs,
                 inner_specs,
                 np.asarray(outer_result.x, dtype=float),
+                reciprocal_by_name,
                 deadline,
             )
             cost = float(0.5 * np.dot(profiled_residual, profiled_residual))
@@ -853,12 +854,10 @@ def _fit_profiled_latent_basis_linear_ridge(
         ) as exc:
             failures.record(str(exc))
             parameters = {
-                **dict(
-                    zip(
-                        report.latent_shape_parameter_names,
-                        np.asarray(outer_result.x, dtype=float),
-                        strict=True,
-                    )
+                **_decode_profiled_outer_parameters(
+                    outer_specs,
+                    np.asarray(outer_result.x, dtype=float),
+                    reciprocal_by_name,
                 ),
                 **{
                     item.name: (item.bounds.lower + item.bounds.upper) / 2.0
@@ -900,6 +899,10 @@ def _fit_profiled_latent_basis_linear_ridge(
             all_variables,
             config,
             backend="profiled_latent_basis_linear_ridge",
+            certified_parameter_transformations=tuple(
+                f"{item.coordinate_name}=1/{item.parameter_name}"
+                for item in active_transformations
+            ),
         )
         for index, outcome in enumerate(outcomes)
     )
@@ -974,11 +977,14 @@ def _profile_affine_latent_basis_weights(
     outer_specs: Sequence[ParameterSpec],
     inner_specs: Sequence[ParameterSpec],
     outer_values: NDArray[np.float64],
+    reciprocal_by_name: Mapping[str, ReciprocalParameterTransformation],
     deadline: float | None,
 ) -> tuple[Mapping[str, float], NDArray[np.float64]]:
     """Solve bounded affine weights conditional on one latent-shape vector."""
-    outer = dict(
-        zip((item.name for item in outer_specs), outer_values, strict=True)
+    outer = _decode_profiled_outer_parameters(
+        outer_specs,
+        outer_values,
+        reciprocal_by_name,
     )
     inner_anchor = {
         item.name: (item.bounds.lower + item.bounds.upper) / 2.0
@@ -1066,6 +1072,61 @@ def _profile_affine_latent_basis_weights(
         )
     )
     return parameters, residual
+
+
+def _profiled_outer_variable(
+    spec: ParameterSpec,
+    transformation: ReciprocalParameterTransformation | None,
+) -> _Variable:
+    """Represent one outer parameter in its certified optimizer coordinate."""
+    if transformation is None:
+        return _Variable(
+            f"parameter:{spec.name}",
+            spec.bounds.lower,
+            spec.bounds.upper,
+            spec.initialization_range.lower,
+            spec.initialization_range.upper,
+        )
+    return _Variable(
+        f"parameter:{spec.name}",
+        transformation.coordinate_lower,
+        transformation.coordinate_upper,
+        transformation.coordinate_start_lower,
+        transformation.coordinate_start_upper,
+    )
+
+
+def _profiled_outer_warm_start(
+    initial_parameters: Mapping[str, float] | None,
+    outer_names: Sequence[str],
+    reciprocal_by_name: Mapping[str, ReciprocalParameterTransformation],
+) -> Mapping[str, float] | None:
+    """Map an original-parameter warm start into outer optimizer coordinates."""
+    if initial_parameters is None:
+        return None
+    result: dict[str, float] = {}
+    for name in outer_names:
+        if name not in initial_parameters:
+            continue
+        value = float(initial_parameters[name])
+        result[name] = 1.0 / value if name in reciprocal_by_name else value
+    return result
+
+
+def _decode_profiled_outer_parameters(
+    specs: Sequence[ParameterSpec],
+    coordinate_values: NDArray[np.float64],
+    reciprocal_by_name: Mapping[str, ReciprocalParameterTransformation],
+) -> dict[str, float]:
+    """Map optimizer coordinates back to the candidate's declared parameters."""
+    parameters: dict[str, float] = {}
+    for spec, value in zip(specs, coordinate_values, strict=True):
+        parameters[spec.name] = (
+            1.0 / float(value)
+            if spec.name in reciprocal_by_name
+            else float(value)
+        )
+    return parameters
 
 
 def _validate_partial_exact_derivative_contract(
@@ -1830,6 +1891,7 @@ def _diagnostic(
     config: FitConfig,
     *,
     backend: str = "rollout_least_squares",
+    certified_parameter_transformations: tuple[str, ...] = (),
 ) -> OptimizationDiagnostic:
     lower_hits: list[str] = []
     upper_hits: list[str] = []
@@ -1852,6 +1914,7 @@ def _diagnostic(
         integration_failure_messages=tuple(failures.messages),
         parameters_at_lower_bound=tuple(lower_hits),
         parameters_at_upper_bound=tuple(upper_hits),
+        certified_parameter_transformations=certified_parameter_transformations,
     )
 
 

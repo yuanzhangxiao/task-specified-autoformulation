@@ -97,6 +97,7 @@ class DallaManTrajectory:
     states: np.ndarray
     meal_event_g: np.ndarray
     derived: dict[str, np.ndarray]
+    derivatives: dict[str, np.ndarray]
 
 
 @dataclass(frozen=True)
@@ -431,7 +432,7 @@ def simulate_dalla_man(
         matches = np.flatnonzero(np.isclose(time, event_time, atol=1e-9))
         if len(matches):
             meal_event[matches[0]] += amount / 1000.0
-    derived_rows = [
+    evaluated_rows = [
         _rhs_and_derived(
             row,
             p,
@@ -439,14 +440,88 @@ def simulate_dalla_man(
             _meal_reference_at(t, events),
             variant,
             forcing.values_at(float(t)),
-        )[1]
+        )
         for t, row in zip(time, states, strict=True)
     ]
+    state_derivatives = np.vstack([item[0] for item in evaluated_rows])
+    derived_rows = [item[1] for item in evaluated_rows]
     derived = {
         name: np.asarray([row[name] for row in derived_rows], dtype=float)
         for name in derived_rows[0]
     }
-    return DallaManTrajectory(time, states, meal_event, derived)
+    derivatives = {
+        name: state_derivatives[:, index]
+        for index, name in enumerate(STATE_NAMES)
+    }
+    derivatives.update(
+        _dalla_derived_derivatives(states, state_derivatives, p, basal)
+    )
+    return DallaManTrajectory(time, states, meal_event, derived, derivatives)
+
+
+def _dalla_derived_derivatives(
+    states: np.ndarray,
+    state_derivatives: np.ndarray,
+    parameters: DallaManParameters,
+    basal: DallaManBasal,
+) -> dict[str, np.ndarray]:
+    """Return exact derivatives for public derived channels.
+
+    These values remain trusted simulator output. They are not included in the
+    ordinary public bundle and are used only by explicitly labeled oracle-
+    derivative experiments.
+    """
+    p = parameters
+    gp = states[:, STATE_INDEX["Gp"]]
+    gt = states[:, STATE_INDEX["Gt"]]
+    ip = states[:, STATE_INDEX["Ip"]]
+    ipo = states[:, STATE_INDEX["Ipo"]]
+    insulin_delay = states[:, STATE_INDEX["Id"]]
+    action = states[:, STATE_INDEX["X"]]
+    dgp = state_derivatives[:, STATE_INDEX["Gp"]]
+    dgt = state_derivatives[:, STATE_INDEX["Gt"]]
+    dip = state_derivatives[:, STATE_INDEX["Ip"]]
+    dipo = state_derivatives[:, STATE_INDEX["Ipo"]]
+    dinsulin_delay = state_derivatives[:, STATE_INDEX["Id"]]
+    daction = state_derivatives[:, STATE_INDEX["X"]]
+
+    positive_gp = gp > 0.0
+    positive_gt = gt > 0.0
+    positive_ip = ip > 0.0
+    gp0 = np.maximum(gp, 0.0)
+    gt0 = np.maximum(gt, 0.0)
+    production_raw = (
+        p.kp1 - p.kp2 * gp0 - p.kp3 * insulin_delay - p.kp4 * np.maximum(ipo, 0.0)
+    )
+    production_derivative = np.where(
+        production_raw > 0.0,
+        -p.kp2 * np.where(positive_gp, dgp, 0.0)
+        - p.kp3 * dinsulin_delay
+        - p.kp4 * np.where(ipo > 0.0, dipo, 0.0),
+        0.0,
+    )
+    capacity = p.Vm0 + p.Vmx * action
+    denominator = p.Km0 + gt0
+    utilization_raw = capacity * gt0 / denominator
+    utilization_derivative = np.where(
+        utilization_raw > 0.0,
+        p.Vmx * daction * gt0 / denominator
+        + capacity
+        * p.Km0
+        * np.where(positive_gt, dgt, 0.0)
+        / denominator**2,
+        0.0,
+    )
+    excretion_derivative = np.where(gp0 > p.ke2, p.ke1 * dgp, 0.0)
+    return {
+        "G": np.where(positive_gp, dgp / p.VG, 0.0),
+        "I": np.where(positive_ip, dip / p.VI, 0.0),
+        "EGP": production_derivative,
+        "Uii": np.zeros_like(dgp),
+        "Uid": utilization_derivative,
+        "U": utilization_derivative,
+        "E": excretion_derivative,
+    }
 
 
 def dalla_man_hidden_trajectory(

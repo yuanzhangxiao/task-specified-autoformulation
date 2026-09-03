@@ -172,6 +172,13 @@ parameter-free analytic initial condition. The runtime generates latent paths
 while conditioning on measured observed-state paths, profiles the bounded inner
 weights by ridge least squares at each outer step, and is never given latent
 values or latent derivatives. Final selection uses causal validation rollouts.
+Prefer a direct positive rate parameterization such as `-k_x * X` when it is
+scientifically natural. If a positive time constant occurs only as a complete
+direct divisor, such as `-X / tau_x`, the runtime may certify the one-to-one
+coordinate `k_x = 1 / tau_x` and optimize in rate coordinates while preserving
+the candidate's declared time constant. Because the latent path still depends
+on that rate, the coordinate remains in the outer solve under partial
+observation; it is not treated as an inner closed-form weight.
 """.strip()
 
 _JUDGE_CONTROLLER_PROMPT = """

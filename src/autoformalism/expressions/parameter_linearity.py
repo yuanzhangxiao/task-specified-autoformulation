@@ -31,7 +31,20 @@ class ProfiledLatentBasisParameterizationReport:
     parameter_names: tuple[str, ...]
     affine_parameter_names: tuple[str, ...]
     latent_shape_parameter_names: tuple[str, ...]
+    reciprocal_transformations: tuple[ReciprocalParameterTransformation, ...]
     state_rhs_parameters: Mapping[str, frozenset[str]]
+
+
+@dataclass(frozen=True)
+class ReciprocalParameterTransformation:
+    """One certified positive reciprocal coordinate ``k = 1 / tau``."""
+
+    parameter_name: str
+    coordinate_name: str
+    coordinate_lower: float
+    coordinate_upper: float
+    coordinate_start_lower: float
+    coordinate_start_upper: float
 
 
 def validate_gmm_parameterization(
@@ -325,6 +338,10 @@ def validate_profiled_latent_basis_parameterization(
             affine_parameter_set=affine_parameters,
         )
     )
+    reciprocal_transformations = certify_reciprocal_transformations(
+        validated,
+        eligible_parameter_names=latent_shape_parameters,
+    )
     initials = {
         item.state: item for item in validated.candidate.initial_conditions
     }
@@ -351,8 +368,162 @@ def validate_profiled_latent_basis_parameterization(
         latent_shape_parameter_names=tuple(
             name for name in parameters if name in latent_shape_parameters
         ),
+        reciprocal_transformations=reciprocal_transformations,
         state_rhs_parameters=MappingProxyType(dict(state_rhs_parameters)),
     )
+
+
+def certify_reciprocal_transformations(
+    validated: ValidatedCandidate,
+    *,
+    eligible_parameter_names: frozenset[str] | None = None,
+) -> tuple[ReciprocalParameterTransformation, ...]:
+    """Certify positive parameters whose RHS use is affine in ``1 / p``.
+
+    The certificate is intentionally narrow. Every occurrence must be the
+    complete right operand of division, such as ``x / tau``. After replacing
+    each such division by multiplication with the reciprocal coordinate, the
+    expanded state RHSs must be affine in that coordinate. Bounds and start
+    ranges must be strictly positive, making the mapping one-to-one.
+
+    This certificate describes RHS parameterization only. A reciprocal used in
+    latent dynamics still changes the integrated latent path and therefore is
+    not automatically eligible for an inner linear solve under partial
+    observation.
+    """
+    eligible = (
+        frozenset(item.name for item in validated.candidate.parameters)
+        if eligible_parameter_names is None
+        else eligible_parameter_names
+    )
+    expressions = (
+        *validated.equation_expressions.values(),
+        *validated.process_expressions.values(),
+    )
+    transformations: list[ReciprocalParameterTransformation] = []
+    for spec in validated.candidate.parameters:
+        name = spec.name
+        if name not in eligible or spec.bounds.lower <= 0.0:
+            continue
+        if any(
+            not _all_parameter_occurrences_are_direct_divisors(
+                expression.tree.body, name
+            )
+            for expression in expressions
+        ):
+            continue
+        if not any(
+            _tree_contains_name(expression.tree.body, name)
+            for expression in expressions
+        ):
+            continue
+        if not _expanded_rhs_is_affine_in_reciprocal(validated, name):
+            continue
+        start = spec.initialization_range
+        transformations.append(
+            ReciprocalParameterTransformation(
+                parameter_name=name,
+                coordinate_name=f"reciprocal:{name}",
+                coordinate_lower=1.0 / spec.bounds.upper,
+                coordinate_upper=1.0 / spec.bounds.lower,
+                coordinate_start_lower=1.0 / start.upper,
+                coordinate_start_upper=1.0 / start.lower,
+            )
+        )
+    return tuple(transformations)
+
+
+def _all_parameter_occurrences_are_direct_divisors(
+    node: ast.AST,
+    parameter_name: str,
+) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id != parameter_name
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        if not _all_parameter_occurrences_are_direct_divisors(
+            node.left, parameter_name
+        ):
+            return False
+        if isinstance(node.right, ast.Name) and node.right.id == parameter_name:
+            return True
+        return _all_parameter_occurrences_are_direct_divisors(
+            node.right, parameter_name
+        )
+    return all(
+        _all_parameter_occurrences_are_direct_divisors(child, parameter_name)
+        for child in ast.iter_child_nodes(node)
+    )
+
+
+def _tree_contains_name(node: ast.AST, name: str) -> bool:
+    return any(
+        isinstance(child, ast.Name) and child.id == name
+        for child in ast.walk(node)
+    )
+
+
+def _expanded_rhs_is_affine_in_reciprocal(
+    validated: ValidatedCandidate,
+    parameter_name: str,
+) -> bool:
+    """Return whether expanded RHSs are affine after ``1 / p -> k``."""
+    processes = validated.process_expressions
+    cache: dict[str, bool] = {}
+
+    def process_dependency(name: str) -> bool:
+        cached = cache.get(name)
+        if cached is not None:
+            return cached
+        dependency = analyze(processes[name].tree.body)
+        cache[name] = dependency
+        return dependency
+
+    def analyze(node: ast.AST) -> bool:
+        if isinstance(node, ast.Constant):
+            return False
+        if isinstance(node, ast.Name):
+            if node.id == parameter_name:
+                raise ValueError("uncertified direct parameter occurrence")
+            return process_dependency(node.id) if node.id in processes else False
+        if isinstance(node, ast.UnaryOp):
+            return analyze(node.operand)
+        if isinstance(node, ast.BinOp):
+            if (
+                isinstance(node.op, ast.Div)
+                and isinstance(node.right, ast.Name)
+                and node.right.id == parameter_name
+            ):
+                if analyze(node.left):
+                    raise ValueError("reciprocal coordinates multiply")
+                return True
+            left = analyze(node.left)
+            right = analyze(node.right)
+            if isinstance(node.op, (ast.Add, ast.Sub)):
+                return left or right
+            if isinstance(node.op, ast.Mult):
+                if left and right:
+                    raise ValueError("reciprocal coordinates multiply")
+                return left or right
+            if isinstance(node.op, ast.Div):
+                if right:
+                    raise ValueError("reciprocal coordinate is in a denominator")
+                return left
+            if isinstance(node.op, ast.Pow):
+                if right or (left and not _is_literal_one(node.right)):
+                    raise ValueError("reciprocal coordinate has nonlinear power")
+                return left
+        if isinstance(node, ast.Call):
+            if any(analyze(argument) for argument in node.args):
+                raise ValueError("reciprocal coordinate is in a nonlinear call")
+            return False
+        raise AssertionError(f"unexpected restricted AST node: {type(node).__name__}")
+
+    try:
+        for expression in validated.equation_expressions.values():
+            analyze(expression.tree.body)
+    except ValueError:
+        return False
+    return True
 
 
 def _affine_subset_diagnostics(

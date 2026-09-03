@@ -14,6 +14,7 @@ from autoformalism.benchmarks import (
 from autoformalism.rebuttal.dalla_man import (
     STATE_INDEX,
     DallaManExternalForcing,
+    DallaManParameters,
     simulate_dalla_man,
 )
 
@@ -47,6 +48,20 @@ def test_dalla_external_forcing_is_explicit_and_changes_trajectory() -> None:
     assert forced.derived["glucose_forcing"][15] == pytest.approx(0.8)
     assert forced.derived["insulin_forcing"][15] == pytest.approx(0.3)
     assert not np.allclose(baseline.states, forced.states)
+
+
+def test_private_simulators_expose_exact_derivatives_only_in_memory() -> None:
+    protocols = phase_b_protocols("dalla_man", task="T2")
+    trajectory = simulate_phase_b(protocols[0], data_root=DATA_ROOT)
+
+    assert set(trajectory.state_names).issubset(trajectory.derivatives)
+    assert {"Gp", "I", "U"}.issubset(trajectory.derivatives)
+    for values in trajectory.derivatives.values():
+        assert values.shape == trajectory.time.shape
+        assert np.isfinite(values).all()
+    assert trajectory.derivatives["G"] == pytest.approx(
+        trajectory.derivatives["Gp"] / DallaManParameters().VG
+    )
 
 
 def test_dalla_glucose_initial_shift_conserves_gp_plus_gt() -> None:
