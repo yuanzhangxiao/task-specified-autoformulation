@@ -48,6 +48,19 @@ def main() -> None:
                 "tier": item.tier,
                 "seed": item.seed,
                 "mechanism_coverage": result.mechanism_coverage,
+                "graph_mechanism_compliance": (
+                    result.graph_mechanism_compliance
+                ),
+                "graph_mechanism_compliance_complete": (
+                    result.graph_mechanism_compliance_complete
+                ),
+                "mechanism_annotation_compliance": (
+                    result.mechanism_annotation_compliance
+                ),
+                "mechanism_annotation_compliance_complete": (
+                    result.mechanism_annotation_compliance_complete
+                ),
+                # Retained as aliases for existing consumers.
                 "mechanism_compliance": result.mechanism_compliance,
                 "mechanism_compliance_complete": (
                     result.mechanism_compliance_complete

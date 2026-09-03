@@ -20,7 +20,7 @@ def _candidate() -> CandidateModel:
                 {
                     "name": "target",
                     "kind": "observed",
-                    "mechanisms": ["input_response"],
+                    "mechanisms": [],
                 }
             ],
             "state_equations": [
@@ -171,6 +171,19 @@ def test_refinement_summary_enforces_round_zero_and_reports_public_metrics(
     assert all(
         item["public_mechanism_compliance"] == 1.0
         for item in report["tasks"]
+    )
+    assert all(
+        item["public_graph_mechanism_compliance"] == 1.0
+        for item in report["tasks"]
+    )
+    assert all(
+        item["public_mechanism_annotation_compliance"] == 0.0
+        for item in report["tasks"]
+    )
+    assert report["groups"][0]["mean_public_graph_mechanism_compliance"] == 1.0
+    assert (
+        report["groups"][0]["mean_public_mechanism_annotation_compliance"]
+        == 0.0
     )
     assert report["groups"][0]["proposer_provider_attempts"] == 1
     assert report["groups"][1]["proposer_provider_attempts"] == 0

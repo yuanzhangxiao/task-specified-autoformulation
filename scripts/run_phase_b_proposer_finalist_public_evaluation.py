@@ -218,7 +218,10 @@ def main() -> None:
     print(
         f"{condition.directory_name} {cell.benchmark_id} rep={repetition} "
         f"fit_success={payload['fit_success']} "
-        f"mechanism_compliance={mechanism_evaluation.mechanism_compliance:.3f}",
+        "graph_mechanism_compliance="
+        f"{mechanism_evaluation.graph_mechanism_compliance:.3f} "
+        "annotation_compliance="
+        f"{mechanism_evaluation.mechanism_annotation_compliance:.3f}",
         flush=True,
     )
 

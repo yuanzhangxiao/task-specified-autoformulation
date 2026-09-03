@@ -71,6 +71,10 @@ def test_report_retains_each_arm_when_all_sources_fail_adaptation(
             "no_judge_target_test_nmse": None,
             "judge_mechanism_compliance": None,
             "no_judge_mechanism_compliance": None,
+            "judge_graph_mechanism_compliance": None,
+            "no_judge_graph_mechanism_compliance": None,
+            "judge_mechanism_annotation_compliance": None,
+            "no_judge_mechanism_annotation_compliance": None,
         }
     ]
     assert (tmp_path / "search_ablation_endpoint_report.json").is_file()

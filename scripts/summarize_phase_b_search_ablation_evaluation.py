@@ -147,6 +147,18 @@ def _paired_trial_row(
         "no_judge_target_test_nmse": no_judge.get("target_test_nmse"),
         "judge_mechanism_compliance": judge.get("mechanism_compliance"),
         "no_judge_mechanism_compliance": no_judge.get("mechanism_compliance"),
+        "judge_graph_mechanism_compliance": judge.get(
+            "graph_mechanism_compliance"
+        ),
+        "no_judge_graph_mechanism_compliance": no_judge.get(
+            "graph_mechanism_compliance"
+        ),
+        "judge_mechanism_annotation_compliance": judge.get(
+            "mechanism_annotation_compliance"
+        ),
+        "no_judge_mechanism_annotation_compliance": no_judge.get(
+            "mechanism_annotation_compliance"
+        ),
     }
 
 
@@ -159,18 +171,19 @@ def render_markdown(report: dict[str, Any]) -> str:
         "arm winner is defined.",
         "",
         (
-            "| Benchmark | Arm | Source | Runtime | Mechanism | Target replay | "
-            "Target NMSE | Hidden recovery | Hidden NMSE | Intervention | "
-            "States | Parameters |"
+            "| Benchmark | Arm | Source | Runtime | Graph mechanism | "
+            "Annotation metadata | Target replay | Target NMSE | "
+            "Hidden recovery | Hidden NMSE | Intervention | States | Parameters |"
         ),
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for group in report["groups"]:
         formatted = {key: _format(value) for key, value in group.items()}
         lines.append(
             "| {benchmark_id} ({tier}) | {method_id} | {source_completion_rate} | "
-            "{runtime_valid_rate} | {mechanism_compliance_mean} | "
-            "{target_replay_coverage} | {target_test_nmse_mean} | "
+            "{runtime_valid_rate} | {graph_mechanism_compliance_mean} | "
+            "{mechanism_annotation_compliance_mean} | {target_replay_coverage} | "
+            "{target_test_nmse_mean} | "
             "{hidden_mechanism_recovery_rate} | {hidden_nmse_conditional_mean} | "
             "{intervention_coverage} | {state_count_mean} | "
             "{parameter_count_mean} |".format(**formatted)

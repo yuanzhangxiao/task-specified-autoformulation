@@ -74,13 +74,15 @@ and does not assume a fixed list of biological mechanisms.
 
 ## Next representation milestones
 
-The first item below is now implemented in
-`STAGED_CANDIDATE_REPRESENTATION.md`. The remaining work stays separate so its
+The first two items below are now implemented; the staged representation is
+described in `STAGED_CANDIDATE_REPRESENTATION.md`, and the mechanism endpoints
+in `MECHANISM_COMPLIANCE_SIGNALS.md`. The remaining work stays separate so its
 effects can be tested independently:
 
 1. immutable topology and functional candidate schemas for staged proposal
    (implemented; not yet enabled in search);
-2. graph-mechanism and annotation-compliance outputs as separate metrics;
+2. graph-mechanism and annotation-compliance outputs as separate metrics
+   (implemented; the legacy mechanism-compliance field aliases the graph score);
 3. profiled affine-weight fitting with latent basis or collocation variables;
 4. routed local-revision actions and, after those primitives are stable, a
    small-budget tree-search policy.

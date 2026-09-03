@@ -123,6 +123,25 @@ def _flat_row(record: FinalEvaluationRecord) -> dict[str, Any]:
         "mechanism_coverage": (
             "" if mechanism is None else mechanism.mechanism_coverage
         ),
+        "graph_mechanism_compliance": (
+            "" if mechanism is None else mechanism.graph_mechanism_compliance
+        ),
+        "graph_mechanism_compliance_complete": (
+            ""
+            if mechanism is None
+            else mechanism.graph_mechanism_compliance_complete
+        ),
+        "mechanism_annotation_compliance": (
+            ""
+            if mechanism is None
+            else mechanism.mechanism_annotation_compliance
+        ),
+        "mechanism_annotation_compliance_complete": (
+            ""
+            if mechanism is None
+            else mechanism.mechanism_annotation_compliance_complete
+        ),
+        # Retained as graph-compliance aliases for existing consumers.
         "mechanism_compliance": (
             "" if mechanism is None else mechanism.mechanism_compliance
         ),
@@ -232,7 +251,22 @@ def _write_markdown(path: Path, summary: dict[str, object]) -> None:
         ("Target-trajectory success rate", "target_trajectory_success_rate"),
         ("Mean target test NMSE", "mean_target_test_nmse"),
         ("Public-mechanism coverage", "public_mechanism_coverage"),
-        ("Mean public mechanism compliance", "mean_public_mechanism_compliance"),
+        (
+            "Mean public graph-mechanism compliance",
+            "mean_public_graph_mechanism_compliance",
+        ),
+        (
+            "Graph-mechanism complete-assessment rate",
+            "public_graph_mechanism_complete_assessment_rate",
+        ),
+        (
+            "Mean mechanism-annotation compliance",
+            "mean_public_mechanism_annotation_compliance",
+        ),
+        (
+            "Mechanism-annotation complete-assessment rate",
+            "public_mechanism_annotation_complete_assessment_rate",
+        ),
         ("Hidden mechanism recovery rate", "hidden_mechanism_recovery_rate"),
         (
             "Mean hidden NMSE conditional on recovery",

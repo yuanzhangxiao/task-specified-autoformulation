@@ -500,8 +500,23 @@ def evaluation_summary(records: tuple[FinalEvaluationRecord, ...]) -> dict[str, 
         if item.target_prediction.status == "available"
         and item.target_prediction.normalized_mse is not None
     ]
-    compliance = [
-        item.public_mechanism.evaluation.mechanism_compliance
+    graph_compliance = [
+        item.public_mechanism.evaluation.graph_mechanism_compliance
+        for item in records
+        if item.public_mechanism.evaluation is not None
+    ]
+    graph_complete = [
+        item.public_mechanism.evaluation.graph_mechanism_compliance_complete
+        for item in records
+        if item.public_mechanism.evaluation is not None
+    ]
+    annotation_compliance = [
+        item.public_mechanism.evaluation.mechanism_annotation_compliance
+        for item in records
+        if item.public_mechanism.evaluation is not None
+    ]
+    annotation_complete = [
+        item.public_mechanism.evaluation.mechanism_annotation_compliance_complete
         for item in records
         if item.public_mechanism.evaluation is not None
     ]
@@ -560,8 +575,24 @@ def evaluation_summary(records: tuple[FinalEvaluationRecord, ...]) -> dict[str, 
             else None
         ),
         "mean_target_test_nmse": _mean(target),
-        "public_mechanism_coverage": _rate(len(compliance), records),
-        "mean_public_mechanism_compliance": _mean(compliance),
+        "public_mechanism_coverage": _rate(len(graph_compliance), records),
+        "public_graph_mechanism_coverage": _rate(len(graph_compliance), records),
+        "mean_public_graph_mechanism_compliance": _mean(graph_compliance),
+        "public_graph_mechanism_complete_assessment_rate": _mean(
+            [float(value) for value in graph_complete]
+        ),
+        "public_mechanism_annotation_coverage": _rate(
+            len(annotation_compliance), records
+        ),
+        "mean_public_mechanism_annotation_compliance": _mean(
+            annotation_compliance
+        ),
+        "public_mechanism_annotation_complete_assessment_rate": _mean(
+            [float(value) for value in annotation_complete]
+        ),
+        # Backward-compatible aggregate name: graph compliance is the primary
+        # scientific endpoint, not a blend with annotation quality.
+        "mean_public_mechanism_compliance": _mean(graph_compliance),
         "hidden_mechanism_recovery_rate": (
             sum(item.recovered for item in hidden_required) / len(hidden_required)
             if hidden_required

@@ -73,8 +73,10 @@ def collect_report(
             else CandidateModel.model_validate(candidate_payload)
         )
         target_pass = None
-        mechanism_compliance = None
-        mechanism_complete = None
+        graph_mechanism_compliance = None
+        graph_mechanism_complete = None
+        mechanism_annotation_compliance = None
+        mechanism_annotation_complete = None
         if candidate is not None:
             target_contract = PublicTargetContract.model_validate_json(
                 (
@@ -92,8 +94,16 @@ def collect_report(
             )
             target_pass = evaluate_public_targets(candidate, target_contract).passed
             mechanism = evaluate_mechanisms(candidate, mechanism_spec)
-            mechanism_compliance = mechanism.mechanism_compliance
-            mechanism_complete = mechanism.mechanism_compliance_complete
+            graph_mechanism_compliance = mechanism.graph_mechanism_compliance
+            graph_mechanism_complete = (
+                mechanism.graph_mechanism_compliance_complete
+            )
+            mechanism_annotation_compliance = (
+                mechanism.mechanism_annotation_compliance
+            )
+            mechanism_annotation_complete = (
+                mechanism.mechanism_annotation_compliance_complete
+            )
         fit_attempts = [
             attempt
             for round_payload in rounds
@@ -200,8 +210,19 @@ def collect_report(
                 None if selected_round is None else selected_round["round_index"]
             ),
             "public_target_pass": target_pass,
-            "public_mechanism_compliance": mechanism_compliance,
-            "public_mechanism_compliance_complete": mechanism_complete,
+            "public_graph_mechanism_compliance": graph_mechanism_compliance,
+            "public_graph_mechanism_compliance_complete": (
+                graph_mechanism_complete
+            ),
+            "public_mechanism_annotation_compliance": (
+                mechanism_annotation_compliance
+            ),
+            "public_mechanism_annotation_compliance_complete": (
+                mechanism_annotation_complete
+            ),
+            # Retained as graph-compliance aliases for existing consumers.
+            "public_mechanism_compliance": graph_mechanism_compliance,
+            "public_mechanism_compliance_complete": graph_mechanism_complete,
             **complexity,
         }
         rows.append(row)
@@ -254,8 +275,8 @@ def write_report(report: dict[str, object], output_root: Path) -> None:
         "remained closed.",
         "",
         "| Arm | Complete | Valid rounds | Accepted refinements | Target pass | "
-        "Mechanism compliance | Median validation NMSE |",
-        "|:---|---:|---:|---:|---:|---:|---:|",
+        "Graph mechanism | Annotation metadata | Median validation NMSE |",
+        "|:---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for group in report["groups"]:
         assert isinstance(group, dict)
@@ -264,7 +285,8 @@ def write_report(report: dict[str, object], output_root: Path) -> None:
             f"{group['mean_valid_round_count']:.3f} | "
             f"{group['mean_accepted_postinitial_challenger_count']:.3f} | "
             f"{_format(group['public_target_pass_rate'])} | "
-            f"{_format(group['mean_public_mechanism_compliance'])} | "
+            f"{_format(group['mean_public_graph_mechanism_compliance'])} | "
+            f"{_format(group['mean_public_mechanism_annotation_compliance'])} | "
             f"{_format(group['median_validation_normalized_mse'])} |"
         )
     lines.extend(
@@ -295,20 +317,34 @@ def _group(arm_id: str, rows: list[dict[str, object]]) -> dict[str, object]:
         for item in selected
         if isinstance(item["selection_validation_normalized_mse"], (int, float))
     ]
-    compliance = [
-        float(item["public_mechanism_compliance"])
+    graph_compliance = [
+        float(item["public_graph_mechanism_compliance"])
         for item in selected
-        if isinstance(item["public_mechanism_compliance"], (int, float))
+        if isinstance(item["public_graph_mechanism_compliance"], (int, float))
+    ]
+    annotation_compliance = [
+        float(item["public_mechanism_annotation_compliance"])
+        for item in selected
+        if isinstance(
+            item["public_mechanism_annotation_compliance"], (int, float)
+        )
     ]
     target_results = [
         item["public_target_pass"]
         for item in selected
         if isinstance(item["public_target_pass"], bool)
     ]
-    compliance_complete = [
-        item["public_mechanism_compliance_complete"]
+    graph_complete = [
+        item["public_graph_mechanism_compliance_complete"]
         for item in selected
-        if isinstance(item["public_mechanism_compliance_complete"], bool)
+        if isinstance(item["public_graph_mechanism_compliance_complete"], bool)
+    ]
+    annotation_complete = [
+        item["public_mechanism_annotation_compliance_complete"]
+        for item in selected
+        if isinstance(
+            item["public_mechanism_annotation_compliance_complete"], bool
+        )
     ]
     return {
         "arm_id": arm_id,
@@ -330,11 +366,24 @@ def _group(arm_id: str, rows: list[dict[str, object]]) -> dict[str, object]:
         "public_target_pass_rate": (
             None if not target_results else mean(target_results)
         ),
+        "mean_public_graph_mechanism_compliance": (
+            None if not graph_compliance else mean(graph_compliance)
+        ),
+        "public_graph_mechanism_complete_assessment_rate": (
+            None if not graph_complete else mean(graph_complete)
+        ),
+        "mean_public_mechanism_annotation_compliance": (
+            None if not annotation_compliance else mean(annotation_compliance)
+        ),
+        "public_mechanism_annotation_complete_assessment_rate": (
+            None if not annotation_complete else mean(annotation_complete)
+        ),
+        # Retained as graph-compliance aliases for existing consumers.
         "mean_public_mechanism_compliance": (
-            None if not compliance else mean(compliance)
+            None if not graph_compliance else mean(graph_compliance)
         ),
         "public_mechanism_complete_assessment_rate": (
-            None if not compliance_complete else mean(compliance_complete)
+            None if not graph_complete else mean(graph_complete)
         ),
         "median_training_normalized_mse": (
             None if not training_losses else median(training_losses)

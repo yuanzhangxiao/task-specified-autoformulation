@@ -284,10 +284,17 @@ def test_final_record_keeps_metrics_separate_without_overall_score() -> None:
 
     assert record.public_mechanism.evaluation is not None
     assert record.public_mechanism.evaluation.mechanism_compliance == 1.0
+    assert record.public_mechanism.evaluation.graph_mechanism_compliance == 1.0
     assert record.target_prediction.normalized_mse == 0.2
     assert record.complexity.additive_term_count == 4
     assert summary["mean_target_test_nmse"] == 0.2
     assert summary["mean_public_mechanism_compliance"] == 1.0
+    assert summary["mean_public_graph_mechanism_compliance"] == 1.0
+    assert summary["mean_public_mechanism_annotation_compliance"] == 1.0
+    assert summary["public_graph_mechanism_complete_assessment_rate"] == 1.0
+    assert (
+        summary["public_mechanism_annotation_complete_assessment_rate"] == 1.0
+    )
     assert summary["hidden_mechanism_recovery_rate"] == 1.0
     assert summary["mean_hidden_nmse_conditional_on_recovery"] == 0.1
     assert summary["replay_complete_rate"] == 1.0
@@ -362,6 +369,8 @@ def test_final_evaluation_cli_writes_separate_endpoint_artifacts(
         (output / "final_evaluation_manifest.json").read_text(encoding="utf-8")
     )
     assert summary["mean_public_mechanism_compliance"] == 1.0
+    assert summary["mean_public_graph_mechanism_compliance"] == 1.0
+    assert summary["mean_public_mechanism_annotation_compliance"] == 1.0
     assert summary["source_completion_rate"] == 0.5
     assert "overall_score" not in summary
     assert manifest["weighted_overall_score_defined"] is False

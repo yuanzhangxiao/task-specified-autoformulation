@@ -182,12 +182,42 @@ def _condition_summaries(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "public_target_pass_rate": _rate(
                     sum(item["public_target"]["passed"] for item in items), items
                 ),
+                "mean_public_graph_mechanism_compliance": _mean(
+                    [
+                        float(item["graph_mechanism_compliance"])
+                        for item in mechanism
+                    ]
+                ),
+                "complete_public_graph_mechanism_assessment_rate": _rate(
+                    sum(
+                        item["graph_mechanism_compliance_complete"]
+                        for item in mechanism
+                    ),
+                    mechanism,
+                ),
+                "mean_public_mechanism_annotation_compliance": _mean(
+                    [
+                        float(item["mechanism_annotation_compliance"])
+                        for item in mechanism
+                    ]
+                ),
+                "complete_public_mechanism_annotation_assessment_rate": _rate(
+                    sum(
+                        item["mechanism_annotation_compliance_complete"]
+                        for item in mechanism
+                    ),
+                    mechanism,
+                ),
+                # Retained as graph-compliance aliases for existing consumers.
                 "mean_public_mechanism_compliance": _mean(
-                    [float(item["mechanism_compliance"]) for item in mechanism]
+                    [
+                        float(item["graph_mechanism_compliance"])
+                        for item in mechanism
+                    ]
                 ),
                 "complete_public_mechanism_assessment_rate": _rate(
                     sum(
-                        item["mechanism_compliance_complete"]
+                        item["graph_mechanism_compliance_complete"]
                         for item in mechanism
                     ),
                     mechanism,
@@ -319,6 +349,18 @@ def _paired_rows(tasks: list[dict[str, Any]], plan: object) -> list[dict[str, An
                     "second_mechanism_compliance": second["public_mechanism"][
                         "mechanism_compliance"
                     ],
+                    "first_graph_mechanism_compliance": first[
+                        "public_mechanism"
+                    ]["graph_mechanism_compliance"],
+                    "second_graph_mechanism_compliance": second[
+                        "public_mechanism"
+                    ]["graph_mechanism_compliance"],
+                    "first_mechanism_annotation_compliance": first[
+                        "public_mechanism"
+                    ]["mechanism_annotation_compliance"],
+                    "second_mechanism_annotation_compliance": second[
+                        "public_mechanism"
+                    ]["mechanism_annotation_compliance"],
                     "first_ast_node_count": first["complexity"][
                         "total_expression_ast_node_count"
                     ],
@@ -347,6 +389,19 @@ def _flat_row(item: dict[str, Any]) -> dict[str, Any]:
         "candidate_sha256": item["candidate_sha256"],
         "runtime_valid": item["runtime"]["valid"],
         "public_target_passed": item["public_target"]["passed"],
+        "graph_mechanism_compliance": mechanism[
+            "graph_mechanism_compliance"
+        ],
+        "graph_mechanism_compliance_complete": mechanism[
+            "graph_mechanism_compliance_complete"
+        ],
+        "mechanism_annotation_compliance": mechanism[
+            "mechanism_annotation_compliance"
+        ],
+        "mechanism_annotation_compliance_complete": mechanism[
+            "mechanism_annotation_compliance_complete"
+        ],
+        # Retained as graph-compliance aliases for existing consumers.
         "mechanism_compliance": mechanism["mechanism_compliance"],
         "mechanism_compliance_complete": mechanism[
             "mechanism_compliance_complete"
@@ -386,9 +441,9 @@ def _markdown(
         "point is defined.",
         "",
         "| Reasoning | Tokens | Fit success | Primary fit | Target pass | "
-        "Mechanism compliance | Median validation NMSE* | Fit wall (s) | "
-        "Process CPU (s) |",
-        "|:---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "Graph mechanism | Annotation metadata | Median validation NMSE* | "
+        "Fit wall (s) | Process CPU (s) |",
+        "|:---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in conditions:
         validation = item[
@@ -399,7 +454,8 @@ def _markdown(
             f"{item['fit_success_rate']:.3f} | "
             f"{item['primary_fit_success_rate']:.3f} | "
             f"{item['public_target_pass_rate']:.3f} | "
-            f"{item['mean_public_mechanism_compliance']:.3f} | "
+            f"{item['mean_public_graph_mechanism_compliance']:.3f} | "
+            f"{item['mean_public_mechanism_annotation_compliance']:.3f} | "
             f"{_format_optional(validation)} | "
             f"{item['total_fit_wall_seconds']:.1f} | "
             f"{item['total_process_cpu_seconds']:.1f} |"

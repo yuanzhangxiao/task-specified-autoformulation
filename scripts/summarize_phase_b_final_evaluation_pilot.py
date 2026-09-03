@@ -164,6 +164,31 @@ def _source_row(
             "mechanism_compliance": (
                 None if mechanism is None else mechanism.mechanism_compliance
             ),
+            "mechanism_compliance_complete": (
+                None
+                if mechanism is None
+                else mechanism.mechanism_compliance_complete
+            ),
+            "graph_mechanism_compliance": (
+                None
+                if mechanism is None
+                else mechanism.graph_mechanism_compliance
+            ),
+            "graph_mechanism_compliance_complete": (
+                None
+                if mechanism is None
+                else mechanism.graph_mechanism_compliance_complete
+            ),
+            "mechanism_annotation_compliance": (
+                None
+                if mechanism is None
+                else mechanism.mechanism_annotation_compliance
+            ),
+            "mechanism_annotation_compliance_complete": (
+                None
+                if mechanism is None
+                else mechanism.mechanism_annotation_compliance_complete
+            ),
             "target_status": record.target_prediction.status,
             "target_test_nmse": record.target_prediction.normalized_mse,
             "hidden_required_count": len(record.hidden_mechanisms),
@@ -226,6 +251,24 @@ def _group_row(
         "mechanism_compliance_mean": _mean(
             [row.get("mechanism_compliance") for row in adapted]
         ),
+        "graph_mechanism_coverage": _coverage(
+            adapted, "graph_mechanism_compliance"
+        ),
+        "graph_mechanism_compliance_mean": _mean(
+            [row.get("graph_mechanism_compliance") for row in adapted]
+        ),
+        "graph_mechanism_complete_assessment_rate": _rate_available(
+            adapted, "graph_mechanism_compliance_complete"
+        ),
+        "mechanism_annotation_coverage": _coverage(
+            adapted, "mechanism_annotation_compliance"
+        ),
+        "mechanism_annotation_compliance_mean": _mean(
+            [row.get("mechanism_annotation_compliance") for row in adapted]
+        ),
+        "mechanism_annotation_complete_assessment_rate": _rate_available(
+            adapted, "mechanism_annotation_compliance_complete"
+        ),
         "target_replay_coverage": _rate_value(adapted, "target_status", "available"),
         "target_test_nmse_mean": _mean(
             [row.get("target_test_nmse") for row in adapted]
@@ -278,16 +321,17 @@ def render_markdown(report: dict[str, Any]) -> str:
         "All endpoints are reported separately; no weighted overall score is defined.",
         "Conditional means exclude unavailable endpoints, whose coverage is shown.",
         "",
-        "| Benchmark | Method | Source | Runtime | Mechanism | Target replay | "
-        "Target NMSE | Hidden recovery | Hidden NMSE | Intervention | "
-        "Intervention NMSE | States | Parameters |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Benchmark | Method | Source | Runtime | Graph mechanism | "
+        "Annotation metadata | Target replay | Target NMSE | Hidden recovery | "
+        "Hidden NMSE | Intervention | Intervention NMSE | States | Parameters |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for group in report["groups"]:
         lines.append(
             "| {benchmark_id} ({tier}) | {method_id} | {source_completion_rate} | "
-            "{runtime_valid_rate} | {mechanism_compliance_mean} | "
-            "{target_replay_coverage} | {target_test_nmse_mean} | "
+            "{runtime_valid_rate} | {graph_mechanism_compliance_mean} | "
+            "{mechanism_annotation_compliance_mean} | {target_replay_coverage} | "
+            "{target_test_nmse_mean} | "
             "{hidden_mechanism_recovery_rate} | {hidden_nmse_conditional_mean} | "
             "{intervention_coverage} | {intervention_target_nmse_mean} | "
             "{state_count_mean} | {parameter_count_mean} |".format(
@@ -336,6 +380,11 @@ def _median(values: list[object]) -> float | None:
 
 def _rate(rows: list[dict[str, Any]], key: str) -> float | None:
     return None if not rows else sum(bool(row.get(key)) for row in rows) / len(rows)
+
+
+def _rate_available(rows: list[dict[str, Any]], key: str) -> float | None:
+    values = [row.get(key) for row in rows if isinstance(row.get(key), bool)]
+    return None if not values else sum(values) / len(values)
 
 
 def _rate_value(rows: list[dict[str, Any]], key: str, value: object) -> float | None:

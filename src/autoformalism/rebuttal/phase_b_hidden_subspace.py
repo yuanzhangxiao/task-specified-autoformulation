@@ -238,8 +238,8 @@ def evaluate_phase_b_hidden_subspace(
         )
     public_evaluation = evaluate_mechanisms(subject.candidate, public_mechanism_spec)
     structurally_recovered = (
-        public_evaluation.mechanism_compliance_complete
-        and public_evaluation.mechanism_compliance == 1.0
+        public_evaluation.graph_mechanism_compliance_complete
+        and public_evaluation.graph_mechanism_compliance == 1.0
     )
     claims = mechanism_claim_components(subject.candidate, public_mechanism_spec)
     components = tuple(sorted(set().union(*map(set, claims.values()))))

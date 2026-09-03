@@ -233,9 +233,13 @@ def test_summary_preserves_separate_endpoints_and_pairing() -> None:
 
     assert conditions[0]["fit_success_rate"] == 1.0
     assert conditions[0]["mean_public_mechanism_compliance"] == 0.5
+    assert conditions[0]["mean_public_graph_mechanism_compliance"] == 0.5
+    assert conditions[0]["mean_public_mechanism_annotation_compliance"] == 0.25
     assert conditions[0]["total_process_cpu_seconds"] == 10.0
     assert pairs[0]["fit_outcome"] == "medium_024576"
     assert pairs[0]["validation_nmse_ratio_first_over_second"] == 2.0
+    assert pairs[0]["first_graph_mechanism_compliance"] == 0.5
+    assert pairs[0]["first_mechanism_annotation_compliance"] == 0.25
     assert "weighted" not in pairs[0]
 
 
@@ -281,6 +285,10 @@ def _task_payload(
         "runtime": {"valid": True},
         "public_target": {"passed": True},
         "public_mechanism": {
+            "graph_mechanism_compliance": 0.5,
+            "graph_mechanism_compliance_complete": True,
+            "mechanism_annotation_compliance": 0.25,
+            "mechanism_annotation_compliance_complete": True,
             "mechanism_compliance": 0.5,
             "mechanism_compliance_complete": True,
         },

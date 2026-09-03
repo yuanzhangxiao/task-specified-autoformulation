@@ -54,7 +54,8 @@ path, so pending or frozen experiments are unaffected.
 
 The next independent milestones are:
 
-1. report graph-mechanism compliance separately from annotation compliance;
+1. report graph-mechanism compliance separately from annotation compliance
+   (implemented; graph compliance is the primary scientific signal);
 2. add the profiled affine-weight fitter for models with latent basis dynamics;
 3. route stage-specific feedback into topology and function revision actions;
 4. compare staged beam search with a small-budget tree-search policy only after
