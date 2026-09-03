@@ -26,7 +26,9 @@ class FitConfig(BaseModel):
     integration_backend: Literal["fixed_rk4", "solve_ivp"] = "solve_ivp"
     allow_derivative_regression: bool = True
     parameter_fit_strategy: Literal[
-        "bounded_nonlinear", "exact_derivative_linear_ridge"
+        "bounded_nonlinear",
+        "exact_derivative_linear_ridge",
+        "fixed_latent_basis_linear_ridge",
     ] = "bounded_nonlinear"
     derivative_ridge_regularization: float = Field(default=1e-8, ge=0.0)
     integration_method: str = "RK45"

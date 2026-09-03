@@ -8,6 +8,7 @@ from time import monotonic
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.integrate import solve_ivp
 from scipy.optimize import OptimizeResult, least_squares
 
 from autoformalism.data import (
@@ -19,6 +20,7 @@ from autoformalism.data import (
 from autoformalism.expressions import (
     CompiledModel,
     RuntimeExpressionError,
+    validate_fixed_latent_basis_parameterization,
     validate_gmm_parameterization,
 )
 from autoformalism.fitting.models import (
@@ -78,6 +80,15 @@ def fit_candidate(
     }
     if settings.parameter_fit_strategy == "exact_derivative_linear_ridge":
         return _fit_exact_derivative_linear_ridge(
+            model,
+            training,
+            validation,
+            settings,
+            target_scales,
+            deadline,
+        )
+    if settings.parameter_fit_strategy == "fixed_latent_basis_linear_ridge":
+        return _fit_fixed_latent_basis_linear_ridge(
             model,
             training,
             validation,
@@ -444,6 +455,335 @@ def _fit_exact_derivative_linear_ridge(
     )
 
 
+def _fit_fixed_latent_basis_linear_ridge(
+    model: CompiledModel,
+    training: DatasetSplit,
+    validation: DatasetSplit,
+    config: FitConfig,
+    target_scales: Mapping[str, float],
+    deadline: float | None,
+) -> FitResult:
+    """Fit affine weights while generating, rather than revealing, latent states.
+
+    Exact derivatives are required only for directly observed dynamic states.
+    The proposer owns the parameter-free latent dynamics and fixed latent
+    initialization. During training, measured observed-state paths drive that
+    fixed subsystem; no latent trajectory or latent derivative is supplied.
+    The fitted model is then scored by the ordinary causal rollout evaluator.
+    """
+    if not config.allow_derivative_regression:
+        raise ExactDerivativeFitError(
+            "fixed_latent_basis_linear_ridge requires derivative regression"
+        )
+    report = validate_fixed_latent_basis_parameterization(model.validated)
+    direct = model.direct_state_observation_channels
+    observed_names = {
+        item.name
+        for item in model.validated.candidate.states
+        if item.kind.value == "observed"
+    }
+    latent_names = {
+        item.name
+        for item in model.validated.candidate.states
+        if item.kind.value == "latent"
+    }
+    missing_observed = sorted(observed_names - set(direct))
+    mislabeled_latent = sorted(latent_names & set(direct))
+    if missing_observed or mislabeled_latent:
+        raise ExactDerivativeFitError(
+            "fixed latent-basis fitting requires identity observations for all "
+            "observed states and no direct observation of latent states; "
+            f"missing_observed={missing_observed}, "
+            f"directly_observed_latent={mislabeled_latent}"
+        )
+    for trajectory in training.trajectories:
+        if trajectory.derivative_provenance is not DerivativeProvenance.EXACT:
+            raise ExactDerivativeFitError(
+                "fixed latent-basis fitting refuses non-exact observed "
+                f"derivatives: {trajectory.trajectory_id} has "
+                f"{trajectory.derivative_provenance.value!r} provenance"
+            )
+        missing = sorted(set(direct.values()) - set(trajectory.derivatives))
+        if missing:
+            raise ExactDerivativeFitError(
+                f"trajectory {trajectory.trajectory_id} lacks exact observed "
+                f"derivatives: {missing}"
+            )
+
+    parameter_specs = tuple(model.validated.candidate.parameters)
+    parameter_names = report.parameter_names
+    variables = tuple(
+        _Variable(
+            f"parameter:{item.name}",
+            item.bounds.lower,
+            item.bounds.upper,
+            item.initialization_range.lower,
+            item.initialization_range.upper,
+        )
+        for item in parameter_specs
+    )
+    anchor = {
+        item.name: (item.bounds.lower + item.bounds.upper) / 2.0
+        for item in parameter_specs
+    }
+    rows: list[NDArray[np.float64]] = []
+    labels: list[float] = []
+    for trajectory in training.trajectories:
+        state_values = _fixed_latent_basis_state_matrix(
+            model,
+            trajectory,
+            anchor,
+            config,
+            deadline,
+        )
+        skipped = 1 if model.validated.context.lagged_targets else 0
+        for index in range(skipped, trajectory.number_of_rows):
+            _check_deadline(deadline)
+            forcing = trajectory_forcing(
+                model,
+                trajectory,
+                causal_index=max(0, index - 1),
+            )
+            state = state_values[:, index]
+            time = float(trajectory.time[index])
+            anchor_rhs = model.rhs(time, state, anchor, forcing)
+            design = np.empty((len(model.state_names), len(parameter_names)))
+            for parameter_index, spec in enumerate(parameter_specs):
+                probe = dict(anchor)
+                probe[spec.name] = float(spec.bounds.lower)
+                delta = probe[spec.name] - anchor[spec.name]
+                if delta == 0.0:
+                    raise AssertionError("parameter probe has zero displacement")
+                probe_rhs = model.rhs(time, state, probe, forcing)
+                design[:, parameter_index] = (probe_rhs - anchor_rhs) / delta
+            intercept = anchor_rhs - design @ np.asarray(
+                [anchor[name] for name in parameter_names], dtype=float
+            )
+            for state_name in sorted(observed_names):
+                state_index = model.state_names.index(state_name)
+                channel = direct[state_name]
+                rows.append(design[state_index].copy())
+                labels.append(
+                    float(trajectory.derivatives[channel][index])
+                    - float(intercept[state_index])
+                )
+
+    matrix = (
+        np.vstack(rows)
+        if rows
+        else np.empty((0, len(parameter_names)), dtype=float)
+    )
+    response = np.asarray(labels, dtype=float)
+    if parameter_names:
+        regularized = matrix.T @ matrix + (
+            config.derivative_ridge_regularization
+            * np.eye(len(parameter_names))
+        )
+        rhs = matrix.T @ response
+        try:
+            values = np.linalg.solve(regularized, rhs)
+        except np.linalg.LinAlgError:
+            values = np.linalg.lstsq(regularized, rhs, rcond=None)[0]
+    else:
+        values = np.empty(0, dtype=float)
+    if not np.isfinite(values).all():
+        raise ExactDerivativeFitError("fixed latent-basis solution is nonfinite")
+    bounds_error = [
+        f"{spec.name}={value:.12g} outside "
+        f"[{spec.bounds.lower:.12g}, {spec.bounds.upper:.12g}]"
+        for spec, value in zip(parameter_specs, values, strict=True)
+        if value < spec.bounds.lower or value > spec.bounds.upper
+    ]
+    if bounds_error:
+        raise ExactDerivativeFitError(
+            "unconstrained fixed latent-basis solution violates proposer bounds; "
+            + "; ".join(bounds_error)
+        )
+
+    parameters = dict(zip(parameter_names, values, strict=True))
+    training_initials = _direct_observed_initials(model, training, direct)
+    validation_initials = _direct_observed_initials(model, validation, direct)
+    residual = matrix @ values - response
+    result = OptimizeResult(
+        x=values,
+        success=True,
+        status=1,
+        message="fixed latent-basis exact-derivative ridge solution",
+        cost=float(0.5 * np.dot(residual, residual)),
+        nfev=1,
+    )
+    diagnostic = _diagnostic(
+        0,
+        result,
+        FailureCounter(),
+        variables,
+        config,
+        backend="fixed_latent_basis_linear_ridge",
+    )
+    train_metrics = _evaluate(
+        model,
+        training,
+        parameters,
+        {},
+        training_initials,
+        target_scales,
+        config,
+    )
+    validation_metrics = _evaluate(
+        model,
+        validation,
+        parameters,
+        {},
+        validation_initials,
+        target_scales,
+        config,
+    )
+    succeeded = bool(
+        not train_metrics.failed_trajectories
+        and not validation_metrics.failed_trajectories
+        and np.isfinite(train_metrics.normalized_mse)
+        and np.isfinite(validation_metrics.normalized_mse)
+    )
+    return FitResult(
+        success=succeeded,
+        global_parameters=parameters,
+        global_initial_conditions={},
+        training_trajectory_initial_conditions=training_initials,
+        validation_trajectory_initial_conditions=validation_initials,
+        training_metrics=train_metrics,
+        validation_metrics=validation_metrics,
+        diagnostics=(diagnostic,),
+        best_start_index=0,
+        target_scales=target_scales,
+        message=(
+            None
+            if succeeded
+            else "fixed latent-basis parameters produced an invalid rollout"
+        ),
+    )
+
+
+def _fixed_latent_basis_state_matrix(
+    model: CompiledModel,
+    trajectory: Trajectory,
+    parameters: Mapping[str, float],
+    config: FitConfig,
+    deadline: float | None,
+) -> NDArray[np.float64]:
+    """Generate latent basis paths while conditioning on observed train paths."""
+    direct = model.direct_state_observation_channels
+    latent_indices = tuple(
+        index
+        for index, state in enumerate(model.validated.candidate.states)
+        if state.kind.value == "latent"
+    )
+    state_values = np.empty(
+        (len(model.state_names), trajectory.number_of_rows), dtype=float
+    )
+    for state_name, channel in direct.items():
+        state_values[model.state_names.index(state_name)] = np.asarray(
+            [
+                _observed_value(trajectory, channel, index)
+                for index in range(trajectory.number_of_rows)
+            ],
+            dtype=float,
+        )
+    if not latent_indices:
+        return state_values
+
+    known = {
+        **{name: float(values[0]) for name, values in trajectory.targets.items()},
+        **{
+            name: float(values[0])
+            for name, values in trajectory.auxiliaries.items()
+        },
+        **{
+            name: float(values[0])
+            for name, values in trajectory.external_inputs.items()
+        },
+        **{
+            name: float(value)
+            for name, value in trajectory.fixed_covariates.items()
+            if isinstance(value, int | float) and not isinstance(value, bool)
+        },
+    }
+    latent_initial: list[float] = []
+    for index in latent_indices:
+        state_name = model.state_names[index]
+        value = model.initial_condition_value(state_name, known)
+        if value is None:
+            raise ExactDerivativeFitError(
+                f"fixed latent initial is unavailable: {state_name}"
+            )
+        latent_initial.append(float(value))
+        known[state_name] = float(value)
+    state_values[np.asarray(latent_indices), 0] = np.asarray(latent_initial)
+
+    time = np.asarray(trajectory.time, dtype=float)
+    latent = np.asarray(latent_initial, dtype=float)
+    for interval in range(trajectory.number_of_rows - 1):
+        _check_deadline(deadline)
+        start = float(time[interval])
+        end = float(time[interval + 1])
+        forcing = trajectory_forcing(model, trajectory, causal_index=interval)
+
+        def latent_rhs(
+            current_time: float,
+            latent_state: NDArray[np.float64],
+            interval_forcing=forcing,
+        ):
+            full_state = np.empty(len(model.state_names), dtype=float)
+            for state_name, channel in direct.items():
+                state_index = model.state_names.index(state_name)
+                series = (
+                    trajectory.targets[channel]
+                    if channel in trajectory.targets
+                    else trajectory.auxiliaries[channel]
+                )
+                full_state[state_index] = float(
+                    np.interp(current_time, time, series)
+                )
+            full_state[np.asarray(latent_indices)] = latent_state
+            return model.rhs(
+                current_time, full_state, parameters, interval_forcing
+            )[np.asarray(latent_indices)]
+
+        if config.integration_backend == "fixed_rk4":
+            step = (end - start) / config.fixed_step_substeps
+            current = start
+            updated = latent.copy()
+            for _ in range(config.fixed_step_substeps):
+                k1 = latent_rhs(current, updated)
+                k2 = latent_rhs(current + step / 2.0, updated + step * k1 / 2.0)
+                k3 = latent_rhs(current + step / 2.0, updated + step * k2 / 2.0)
+                k4 = latent_rhs(current + step, updated + step * k3)
+                updated = updated + step * (k1 + 2 * k2 + 2 * k3 + k4) / 6.0
+                current += step
+            latent = updated
+        else:
+            solution = solve_ivp(
+                latent_rhs,
+                (start, end),
+                latent,
+                t_eval=[end],
+                method=config.integration_method,
+                rtol=config.relative_tolerance,
+                atol=config.absolute_tolerance,
+            )
+            if not solution.success:
+                raise ExactDerivativeFitError(
+                    "fixed latent-basis integration failed: "
+                    f"{solution.message}"
+                )
+            latent = np.asarray(solution.y[:, -1], dtype=float)
+        if not np.isfinite(latent).all():
+            raise ExactDerivativeFitError(
+                "fixed latent-basis integration produced nonfinite values"
+            )
+        state_values[np.asarray(latent_indices), interval + 1] = latent
+    return state_values
+
+
 def _observed_value(
     trajectory: Trajectory,
     channel: str,
@@ -486,9 +826,15 @@ def evaluate_fitted_candidate(
 ) -> tuple[Mapping[str, Mapping[str, float]], EvaluationMetrics]:
     """Evaluate frozen globals with fitted or target-free local initials."""
     settings = config or FitConfig()
-    if settings.parameter_fit_strategy == "exact_derivative_linear_ridge":
+    if settings.parameter_fit_strategy in {
+        "exact_derivative_linear_ridge",
+        "fixed_latent_basis_linear_ridge",
+    }:
         observed = model.direct_state_observation_channels
-        if set(observed) != set(model.state_names):
+        if (
+            settings.parameter_fit_strategy == "exact_derivative_linear_ridge"
+            and set(observed) != set(model.state_names)
+        ):
             raise ExactDerivativeFitError(
                 "exact derivative evaluation requires every state to be "
                 "directly observed"

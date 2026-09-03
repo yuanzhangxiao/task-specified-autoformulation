@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from autoformalism.expressions.diagnostics import (
     ModelValidationError,
@@ -20,6 +21,7 @@ class ParameterLinearityReport:
 
     parameter_names: tuple[str, ...]
     rhs_parameters: frozenset[str]
+    state_rhs_parameters: Mapping[str, frozenset[str]]
 
 
 def validate_gmm_parameterization(
@@ -38,6 +40,7 @@ def validate_gmm_parameterization(
     processes = validated.process_expressions
     diagnostics: list[ValidationDiagnostic] = []
     rhs_parameters: set[str] = set()
+    state_rhs_parameters: dict[str, frozenset[str]] = {}
 
     cache: dict[str, frozenset[str]] = {}
 
@@ -123,9 +126,11 @@ def validate_gmm_parameterization(
         raise AssertionError(f"unexpected restricted AST node: {type(node).__name__}")
 
     for state_name, expression in validated.equation_expressions.items():
-        rhs_parameters.update(
-            analyze(expression.tree.body, location=f"state_equation:{state_name}")
+        used = analyze(
+            expression.tree.body, location=f"state_equation:{state_name}"
         )
+        state_rhs_parameters[state_name] = used
+        rhs_parameters.update(used)
 
     for kind, expressions in (
         ("observation_mapping", validated.observation_expressions),
@@ -159,7 +164,60 @@ def validate_gmm_parameterization(
         )
     if diagnostics:
         raise ModelValidationError(tuple(sorted(diagnostics)))
-    return ParameterLinearityReport(parameters, frozenset(rhs_parameters))
+    return ParameterLinearityReport(
+        parameters,
+        frozenset(rhs_parameters),
+        MappingProxyType(dict(state_rhs_parameters)),
+    )
+
+
+def validate_fixed_latent_basis_parameterization(
+    validated: ValidatedCandidate,
+) -> ParameterLinearityReport:
+    """Certify affine weights with parameter-free latent-basis dynamics.
+
+    Observed-state derivatives may identify affine graph weights. Latent states
+    remain genuinely unobserved: their trajectories are generated from their
+    proposer-specified, parameter-free dynamics and fixed initialization rather
+    than supplied by an oracle.
+    """
+    report = validate_gmm_parameterization(validated)
+    latent_names = {
+        item.name
+        for item in validated.candidate.states
+        if item.kind.value == "latent"
+    }
+    diagnostics: list[ValidationDiagnostic] = []
+    for state_name in sorted(latent_names):
+        used = report.state_rhs_parameters[state_name]
+        if used:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "PARAMETER_IN_FIXED_LATENT_BASIS",
+                    f"state_equation:{state_name}",
+                    "fixed latent-basis dynamics cannot contain fitted "
+                    f"parameters: {', '.join(sorted(used))}",
+                )
+            )
+    initials = {
+        item.state: item for item in validated.candidate.initial_conditions
+    }
+    for state_name in sorted(latent_names):
+        initial = initials.get(state_name)
+        if initial is None or (
+            initial.fixed_value is None and initial.expression is None
+        ):
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "FIXED_LATENT_INITIAL_REQUIRED",
+                    f"initial_condition:{state_name}",
+                    "fixed latent-basis fitting requires a fixed_value or "
+                    "parameter-free analytic initial condition",
+                )
+            )
+    if diagnostics:
+        raise ModelValidationError(tuple(diagnostics))
+    return report
 
 
 def _expanded_parameter_symbols(

@@ -138,10 +138,27 @@ def test_mechanism_compliance_is_conjunctive_per_requirement() -> None:
     result = evaluate_mechanisms(_candidate(dynamic_memory=False), _spec())
 
     assert result.mechanism_coverage == 1.0
-    assert result.structural_validity == pytest.approx(2 / 3)
+    assert result.structural_validity == pytest.approx(3 / 4)
+    assert result.graph_mechanism_compliance == 0.0
+    assert result.mechanism_annotation_compliance == 0.0
     assert result.mechanism_compliance == 0.0
     assert result.mechanism_compliance_complete is True
     assert result.mechanism_results[0].status == "failed"
+
+
+def test_graph_compliance_does_not_require_proposer_annotation() -> None:
+    payload = _candidate().model_dump(mode="json")
+    payload["states"][0]["mechanisms"] = []
+
+    result = evaluate_mechanisms(CandidateModel.model_validate(payload), _spec())
+
+    assert result.graph_mechanism_compliance == 1.0
+    assert result.mechanism_compliance == 1.0
+    assert result.mechanism_annotation_compliance == 0.0
+    assert result.graph_compliant_mechanisms == ("input_memory",)
+    assert result.annotation_compliant_mechanisms == ()
+    assert result.annotation_repairs[0].status == "unambiguous"
+    assert result.annotation_repairs[0].suggested_components == ("memory",)
 
 
 def test_public_mechanism_endpoint_retains_specification_provenance() -> None:
@@ -172,7 +189,7 @@ def test_compliance_averages_small_conjunctive_groups() -> None:
     payload["required_mechanisms"].append(
         {
             "id": "missing_mechanism",
-            "required_drivers": ["input_u"],
+            "required_drivers": ["other_input"],
             "required_targets": ["target"],
             "requires_dynamic_memory": False,
         }

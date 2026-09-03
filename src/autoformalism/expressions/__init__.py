@@ -12,6 +12,7 @@ from autoformalism.expressions.diagnostics import (
 )
 from autoformalism.expressions.parameter_linearity import (
     ParameterLinearityReport,
+    validate_fixed_latent_basis_parameterization,
     validate_gmm_parameterization,
 )
 from autoformalism.expressions.parser import ParsedExpression, RestrictedParser
@@ -36,5 +37,6 @@ __all__ = [
     "ValidationDiagnostic",
     "compile_candidate",
     "repair_protected_declarations",
+    "validate_fixed_latent_basis_parameterization",
     "validate_gmm_parameterization",
 ]

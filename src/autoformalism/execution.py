@@ -112,6 +112,11 @@ snapshot of the current candidate, per-target train/validation errors,
 deterministic target and public-mechanism predicates, numerical diagnostics,
 pruning outcomes, and question-level paired scientific evidence when available.
 Use the specific evidence rather than responding only to aggregate NMSE.
+Treat `graph_mechanism_compliance` as the primary scientific mechanism signal.
+`mechanism_annotation_compliance` measures metadata quality only; apply any
+unambiguous `annotation_repairs`, but do not mistake a missing tag for a missing
+executable pathway. Parameter-bound contacts are advisory scale diagnostics,
+not by themselves proof that an equation or mechanism is wrong.
 
 Follow the request's `proposal_mode`. In `incumbent_refinement` mode, return one
 complete candidate (not a patch), set `parent_candidate_id` to the required
@@ -119,6 +124,9 @@ incumbent, and make a coherent feedback-motivated revision. Multiple related
 edits are allowed. Preserve validated components unless their modification is
 needed for the repair, and enumerate intentional changes in `change_summary`.
 The runtime—not the proposer—continues to fit numeric parameter values.
+Do not resubmit a structure listed as a prior failed structure: use its recorded
+fit and validation evidence to make a substantive dependency, operator, state,
+process, or algebraic revision before requesting another fit.
 """.strip()
 
 _EXACT_DERIVATIVE_GMM_PROMPT = """
@@ -133,6 +141,21 @@ numeric literals chosen in this proposal. For example, use
 Parameters may not occur in observation mappings or initial conditions. The
 runtime deterministically rejects violations and computes all theta values once
 by ridge regression on exact training derivatives; do not propose their values.
+""".strip()
+
+_FIXED_LATENT_BASIS_GMM_PROMPT = """
+This run uses an exact-observed-derivative, fixed-latent-basis affine-weight
+backend. Every fitted parameter is an affine graph-edge weight as in Eqs.
+(10)-(11). Latent states are encouraged when scientifically justified, but
+their dynamics must be fully specified using proposer-owned numeric shape
+constants and no fitted parameters. Each latent state must have a fixed_value
+or parameter-free analytic initial condition. The runtime generates latent
+training paths from those dynamics while conditioning on measured observed-state
+paths; it is never given latent trajectories or latent derivatives. Fitted
+parameters may appear only affinely in state RHSs and never in a denominator,
+exponent, nonlinear function argument, observation mapping, initialization, or
+product with another fitted parameter. The final model is evaluated by ordinary
+causal rollout, not by derivative fit alone.
 """.strip()
 
 _JUDGE_CONTROLLER_PROMPT = """
@@ -206,7 +229,9 @@ class ExecutionArguments:
     forbid_latent_states: bool = False
     use_derivative_fit_fast_path: bool = True
     parameter_fit_strategy: Literal[
-        "bounded_nonlinear", "exact_derivative_linear_ridge"
+        "bounded_nonlinear",
+        "exact_derivative_linear_ridge",
+        "fixed_latent_basis_linear_ridge",
     ] = "bounded_nonlinear"
     derivative_ridge_regularization: float = 1e-8
     llm_cache_only: bool = False
@@ -552,11 +577,15 @@ def build_experiment_parser(
     )
     parser.add_argument(
         "--parameter-fit-strategy",
-        choices=("bounded_nonlinear", "exact_derivative_linear_ridge"),
+        choices=(
+            "bounded_nonlinear",
+            "exact_derivative_linear_ridge",
+            "fixed_latent_basis_linear_ridge",
+        ),
         default="bounded_nonlinear",
         help=(
-            "continuous-parameter backend; exact_derivative_linear_ridge is "
-            "an oracle experiment requiring exact derivative provenance"
+            "continuous-parameter backend; both linear-ridge strategies "
+            "require exact observed-derivative provenance"
         ),
     )
     parser.add_argument(
@@ -655,12 +684,16 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
                 "--proposal-policy incumbent_refinement_v1 requires --beam-size 1"
             )
     if (
-        namespace.parameter_fit_strategy == "exact_derivative_linear_ridge"
+        namespace.parameter_fit_strategy
+        in {
+            "exact_derivative_linear_ridge",
+            "fixed_latent_basis_linear_ridge",
+        }
         and namespace.disable_derivative_fit_fast_path
     ):
         raise SystemExit(
-            "--parameter-fit-strategy exact_derivative_linear_ridge conflicts "
-            "with --disable-derivative-fit-fast-path"
+            "linear-ridge parameter-fit strategies conflict with "
+            "--disable-derivative-fit-fast-path"
         )
     _validate_optional_fit_retry(
         starts=namespace.fit_retry_starts,
@@ -817,7 +850,11 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         else BenchmarkRegistry().get(arguments.benchmark_id)
     )
     use_derivative_fit_fast_path = (
-        arguments.parameter_fit_strategy == "exact_derivative_linear_ridge"
+        arguments.parameter_fit_strategy
+        in {
+            "exact_derivative_linear_ridge",
+            "fixed_latent_basis_linear_ridge",
+        }
         or (
             arguments.use_derivative_fit_fast_path
             and (
@@ -1107,7 +1144,9 @@ def _optional_fit_config(
     integration_backend: Literal["fixed_rk4", "solve_ivp"],
     allow_derivative_regression: bool,
     parameter_fit_strategy: Literal[
-        "bounded_nonlinear", "exact_derivative_linear_ridge"
+        "bounded_nonlinear",
+        "exact_derivative_linear_ridge",
+        "fixed_latent_basis_linear_ridge",
     ] = "bounded_nonlinear",
     derivative_ridge_regularization: float = 1e-8,
 ) -> FitConfig | None:
@@ -1293,9 +1332,11 @@ def _latent_ablation_prompt(arguments: ExecutionArguments) -> str:
 
 def _gmm_parameterization_prompt(arguments: ExecutionArguments) -> str:
     """Render the opt-in linear graph-edge-weight contract."""
-    if arguments.parameter_fit_strategy != "exact_derivative_linear_ridge":
-        return ""
-    return f"\n\n{_EXACT_DERIVATIVE_GMM_PROMPT}"
+    if arguments.parameter_fit_strategy == "exact_derivative_linear_ridge":
+        return f"\n\n{_EXACT_DERIVATIVE_GMM_PROMPT}"
+    if arguments.parameter_fit_strategy == "fixed_latent_basis_linear_ridge":
+        return f"\n\n{_FIXED_LATENT_BASIS_GMM_PROMPT}"
+    return ""
 
 
 def _structured_proposer_feedback_prompt(arguments: ExecutionArguments) -> str:
@@ -1312,7 +1353,10 @@ def _validate_exact_derivative_experiment(
     splits: tuple[DatasetSplit, ...],
 ) -> None:
     """Fail before LLM calls if the oracle derivative contract is unavailable."""
-    if arguments.parameter_fit_strategy != "exact_derivative_linear_ridge":
+    if arguments.parameter_fit_strategy not in {
+        "exact_derivative_linear_ridge",
+        "fixed_latent_basis_linear_ridge",
+    }:
         return
     invalid = [
         f"{split.name.value}:{trajectory.trajectory_id}="
@@ -1325,8 +1369,8 @@ def _validate_exact_derivative_experiment(
         preview = ", ".join(invalid[:5])
         suffix = "" if len(invalid) <= 5 else f", ... ({len(invalid)} total)"
         raise SystemExit(
-            "exact_derivative_linear_ridge is an oracle-only milestone and "
-            "requires derivatives tagged with exact provenance; found "
+            f"{arguments.parameter_fit_strategy} requires observed derivatives "
+            "tagged with exact provenance; found "
             f"{preview}{suffix}"
         )
 

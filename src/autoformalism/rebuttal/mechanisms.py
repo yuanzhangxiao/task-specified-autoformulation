@@ -79,18 +79,37 @@ class MechanismComplianceResult(BaseModel):
     predicates: tuple[PredicateResult, ...] = Field(min_length=1)
 
 
+class MechanismAnnotationRepair(BaseModel):
+    """Provenance-bearing metadata repair suggested by graph inference."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mechanism_id: str
+    status: Literal["unambiguous", "ambiguous"]
+    suggested_components: tuple[str, ...] = ()
+    evidence: str
+
+
 class MechanismEvaluation(BaseModel):
     """Independent coverage and structural-validity result."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     mechanism_coverage: float
+    graph_mechanism_compliance: float
+    graph_mechanism_compliance_complete: bool
+    mechanism_annotation_compliance: float
+    mechanism_annotation_compliance_complete: bool
     mechanism_compliance: float
     mechanism_compliance_complete: bool
     structural_validity: float
     covered_mechanisms: tuple[str, ...]
+    graph_compliant_mechanisms: tuple[str, ...]
+    annotation_compliant_mechanisms: tuple[str, ...]
     compliant_mechanisms: tuple[str, ...]
     mechanism_results: tuple[MechanismComplianceResult, ...]
+    annotation_results: tuple[MechanismComplianceResult, ...]
+    annotation_repairs: tuple[MechanismAnnotationRepair, ...]
     predicates: tuple[PredicateResult, ...]
     manual_review_required: bool
 
@@ -115,8 +134,9 @@ def evaluate_mechanisms(
     predicates: list[PredicateResult] = []
     covered: list[str] = []
     mechanism_results: list[MechanismComplianceResult] = []
+    annotation_results: list[MechanismComplianceResult] = []
+    annotation_repairs: list[MechanismAnnotationRepair] = []
     for requirement in spec.required_mechanisms:
-        legacy_predicates: list[PredicateResult] = []
         accepted_tags = tuple(
             _normalize_tag(tag) for tag in (requirement.id, *requirement.tag_aliases)
         )
@@ -130,109 +150,187 @@ def evaluate_mechanisms(
         coverage_ok = bool(connected_claims)
         if coverage_ok:
             covered.append(requirement.id)
-        legacy_predicates.append(
-            PredicateResult(
-                mechanism_id=requirement.id,
-                predicate="generated_connected_coverage",
-                status="satisfied" if coverage_ok else "failed",
-                evidence=(
-                    f"connected tagged components: {sorted(connected_claims)}"
-                    if coverage_ok
-                    else (
-                        "tagged components without required target path: "
-                        f"{sorted(claims)}"
-                    )
-                ),
-            )
+        graph_claims = _graph_claim_components(
+            candidate,
+            requirement,
+            graph=graph,
+            reverse=reverse,
         )
-        for driver in requirement.required_drivers:
-            driven = any(
-                driver in _ancestors(reverse, claim) for claim in connected_claims
-            )
-            legacy_predicates.append(
-                PredicateResult(
-                    mechanism_id=requirement.id,
-                    predicate=f"driver:{driver}",
-                    status="satisfied" if driven else "failed",
-                    evidence=f"driver ancestry checked for {sorted(connected_claims)}",
-                )
-            )
-        if requirement.requires_dynamic_memory:
-            dynamic_components = {
-                claim
-                for claim in connected_claims
-                if claim in latent_state_names
-                or bool(_ancestors(reverse, claim) & latent_state_names)
-            }
-            dynamic = bool(dynamic_components)
-            legacy_predicates.append(
-                PredicateResult(
-                    mechanism_id=requirement.id,
-                    predicate="dynamic_memory",
-                    status="satisfied" if dynamic else "failed",
-                    evidence=(
-                        "tagged components with latent-state memory: "
-                        f"{sorted(dynamic_components)}"
-                    ),
-                )
-            )
-        if requirement.required_sign != "unspecified":
-            legacy_predicates.append(
-                PredicateResult(
-                    mechanism_id=requirement.id,
-                    predicate=f"regulatory_sign:{requirement.required_sign}",
-                    status="ambiguous",
-                    evidence="nonlinear multi-path sign requires blinded manual review",
-                )
-            )
-        predicates.extend(legacy_predicates)
-        compliance_predicates = _compliance_predicates(
+        graph_predicates = _graph_compliance_predicates(
+            requirement,
+            claims=graph_claims,
+            graph=graph,
+            reverse=reverse,
+            latent_state_names=latent_state_names,
+        )
+        predicates.extend(graph_predicates)
+        graph_result = _compliance_result(requirement.id, graph_predicates)
+        mechanism_results.append(graph_result)
+
+        annotation_predicates = _compliance_predicates(
             requirement,
             claims=claims,
             graph=graph,
             reverse=reverse,
             latent_state_names=latent_state_names,
         )
-        statuses = {item.status for item in compliance_predicates}
-        status: Literal["satisfied", "failed", "ambiguous"]
-        if "failed" in statuses:
-            status = "failed"
-        elif "ambiguous" in statuses:
-            status = "ambiguous"
-        else:
-            status = "satisfied"
-        mechanism_results.append(
-            MechanismComplianceResult(
-                mechanism_id=requirement.id,
-                status=status,
-                applicable_predicates=len(compliance_predicates),
-                satisfied_predicates=sum(
-                    item.status == "satisfied" for item in compliance_predicates
-                ),
-                predicates=compliance_predicates,
-            )
+        annotation_result = _compliance_result(
+            requirement.id, annotation_predicates
         )
+        annotation_results.append(annotation_result)
+        if (
+            graph_result.status == "satisfied"
+            and annotation_result.status != "satisfied"
+        ):
+            annotation_repairs.append(
+                _annotation_repair(candidate, requirement, graph_claims)
+            )
     scored = [item for item in predicates if item.status != "ambiguous"]
     validity = (
         sum(item.status == "satisfied" for item in scored) / len(scored)
         if scored
         else 0.0
     )
-    compliant = tuple(
+    graph_compliant = tuple(
         item.mechanism_id for item in mechanism_results if item.status == "satisfied"
     )
+    annotation_compliant = tuple(
+        item.mechanism_id
+        for item in annotation_results
+        if item.status == "satisfied"
+    )
+    graph_complete = all(item.status != "ambiguous" for item in mechanism_results)
+    annotation_complete = all(
+        item.status != "ambiguous" for item in annotation_results
+    )
+    graph_score = len(graph_compliant) / len(spec.required_mechanisms)
+    annotation_score = len(annotation_compliant) / len(spec.required_mechanisms)
     return MechanismEvaluation(
         mechanism_coverage=len(covered) / len(spec.required_mechanisms),
-        mechanism_compliance=len(compliant) / len(spec.required_mechanisms),
-        mechanism_compliance_complete=all(
-            item.status != "ambiguous" for item in mechanism_results
-        ),
+        graph_mechanism_compliance=graph_score,
+        graph_mechanism_compliance_complete=graph_complete,
+        mechanism_annotation_compliance=annotation_score,
+        mechanism_annotation_compliance_complete=annotation_complete,
+        # Backward-compatible names now expose the primary graph endpoint.
+        mechanism_compliance=graph_score,
+        mechanism_compliance_complete=graph_complete,
         structural_validity=validity,
         covered_mechanisms=tuple(covered),
-        compliant_mechanisms=compliant,
+        graph_compliant_mechanisms=graph_compliant,
+        annotation_compliant_mechanisms=annotation_compliant,
+        compliant_mechanisms=graph_compliant,
         mechanism_results=tuple(mechanism_results),
+        annotation_results=tuple(annotation_results),
+        annotation_repairs=tuple(annotation_repairs),
         predicates=tuple(predicates),
         manual_review_required=any(item.status == "ambiguous" for item in predicates),
+    )
+
+
+def _compliance_result(
+    mechanism_id: str,
+    predicates: tuple[PredicateResult, ...],
+) -> MechanismComplianceResult:
+    statuses = {item.status for item in predicates}
+    status: Literal["satisfied", "failed", "ambiguous"]
+    if "failed" in statuses:
+        status = "failed"
+    elif "ambiguous" in statuses:
+        status = "ambiguous"
+    else:
+        status = "satisfied"
+    return MechanismComplianceResult(
+        mechanism_id=mechanism_id,
+        status=status,
+        applicable_predicates=len(predicates),
+        satisfied_predicates=sum(item.status == "satisfied" for item in predicates),
+        predicates=predicates,
+    )
+
+
+def _graph_claim_components(
+    candidate: CandidateModel,
+    requirement: MechanismRequirement,
+    *,
+    graph: dict[str, set[str]],
+    reverse: dict[str, set[str]],
+) -> set[str]:
+    """Infer candidate-owned nodes lying on a required driver-to-target path."""
+    if not requirement.required_drivers or not requirement.required_targets:
+        return set()
+    components = {
+        item.name for item in (*candidate.states, *candidate.processes)
+    }
+    target_nodes = {f"target:{name}" for name in requirement.required_targets}
+    return {
+        component
+        for component in components
+        if _reaches_any(graph, component, target_nodes)
+        and any(
+            driver == component or driver in _ancestors(reverse, component)
+            for driver in requirement.required_drivers
+        )
+    }
+
+
+def _graph_compliance_predicates(
+    requirement: MechanismRequirement,
+    *,
+    claims: set[str],
+    graph: dict[str, set[str]],
+    reverse: dict[str, set[str]],
+    latent_state_names: set[str],
+) -> tuple[PredicateResult, ...]:
+    """Evaluate graph-identifiable requirements without trusting LLM tags."""
+    if not requirement.required_drivers or not requirement.required_targets:
+        return (
+            PredicateResult(
+                mechanism_id=requirement.id,
+                predicate="graph_inference",
+                status="ambiguous",
+                evidence=(
+                    "independent graph inference requires at least one public "
+                    "driver and target; annotation evidence is reported separately"
+                ),
+            ),
+        )
+    return _compliance_predicates(
+        requirement,
+        claims=claims,
+        graph=graph,
+        reverse=reverse,
+        latent_state_names=latent_state_names,
+    )
+
+
+def _annotation_repair(
+    candidate: CandidateModel,
+    requirement: MechanismRequirement,
+    graph_claims: set[str],
+) -> MechanismAnnotationRepair:
+    """Suggest a tag addition only when graph evidence identifies one anchor."""
+    process_names = {item.name for item in candidate.processes}
+    latent_names = {
+        item.name for item in candidate.states if item.kind.value == "latent"
+    }
+    target_names = set(requirement.required_targets)
+    preferred = sorted(graph_claims & process_names)
+    if not preferred and requirement.requires_dynamic_memory:
+        preferred = sorted(graph_claims & latent_names)
+    if not preferred:
+        preferred = sorted(graph_claims - target_names)
+    if not preferred:
+        preferred = sorted(graph_claims)
+    unambiguous = len(preferred) == 1
+    return MechanismAnnotationRepair(
+        mechanism_id=requirement.id,
+        status="unambiguous" if unambiguous else "ambiguous",
+        suggested_components=tuple(preferred),
+        evidence=(
+            "one candidate-owned graph anchor can receive a runtime-inferred tag"
+            if unambiguous
+            else "multiple graph-valid anchors remain; proposer clarification required"
+        ),
     )
 
 

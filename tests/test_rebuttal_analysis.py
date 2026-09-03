@@ -1017,7 +1017,7 @@ def test_dynamic_memory_does_not_count_observed_target_state() -> None:
     result = evaluate_mechanisms(CandidateModel.model_validate(payload), spec)
 
     assert result.mechanism_coverage == 1.0
-    assert result.structural_validity == pytest.approx(2 / 3)
+    assert result.structural_validity == pytest.approx(3 / 4)
 
 
 def test_process_inheriting_latent_state_counts_as_dynamic_memory() -> None:

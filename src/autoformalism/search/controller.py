@@ -17,6 +17,7 @@ from autoformalism.expressions import (
     ModelValidationError,
     compile_candidate,
     repair_protected_declarations,
+    validate_fixed_latent_basis_parameterization,
     validate_gmm_parameterization,
 )
 from autoformalism.fitting import (
@@ -226,6 +227,9 @@ class SearchController:
                 request_payload["feedback_schema_version"] = (
                     "proposer-feedback-rich-1"
                 )
+                request_payload["failed_structure_memory"] = (
+                    self._failed_structure_memory(round_index)
+                )
             if proposal_mode == "incumbent_refinement":
                 request_payload["refinement_contract"] = (
                     _refinement_contract(beam[0])
@@ -310,6 +314,13 @@ class SearchController:
                     == "exact_derivative_linear_ridge"
                 ):
                     validate_gmm_parameterization(compiled.validated)
+                elif (
+                    self._config.fit_config.parameter_fit_strategy
+                    == "fixed_latent_basis_linear_ridge"
+                ):
+                    validate_fixed_latent_basis_parameterization(
+                        compiled.validated
+                    )
             except ModelValidationError as exc:
                 payload.update(
                     valid=False,
@@ -322,6 +333,21 @@ class SearchController:
                         }
                         for item in exc.diagnostics
                     ],
+                    stage="complete",
+                )
+                self._store.save_round(round_index, payload)
+                self._callback("complete", round_index)
+                return None
+            structural_hash = _structural_hash(candidate)
+            payload["structural_hash"] = structural_hash
+            prior_failure = self._prior_failed_structure(
+                round_index, structural_hash
+            )
+            if prior_failure is not None:
+                payload.update(
+                    valid=False,
+                    error="previously failed structural duplicate",
+                    prior_structural_failure=prior_failure,
                     stage="complete",
                 )
                 self._store.save_round(round_index, payload)
@@ -360,7 +386,6 @@ class SearchController:
                     }
                     for item in compiled.validated.warnings
                 ]
-            structural_hash = _structural_hash(candidate)
             if any(
                 structural_hash
                 in {
@@ -377,7 +402,6 @@ class SearchController:
                 self._store.save_round(round_index, payload)
                 self._callback("complete", round_index)
                 return None
-            payload["structural_hash"] = structural_hash
             stage = self._save_stage(round_index, payload, "validated")
         compiled = compile_candidate(candidate, self._context)
 
@@ -720,7 +744,11 @@ class SearchController:
                 error = str(payload.get("error", "candidate was rejected"))
                 feedback[0]["recent_rejected_candidate"] = {
                     "candidate_id": candidate.candidate_id,
+                    "structural_hash": payload.get("structural_hash"),
                     "error": error,
+                    "prior_structural_failure": payload.get(
+                        "prior_structural_failure"
+                    ),
                     "deterministic_validation_diagnostics": list(
                         payload.get("deterministic_validation_diagnostics", [])
                     ),
@@ -780,6 +808,7 @@ class SearchController:
                 feedback.append(
                     {
                         "candidate_id": candidate.candidate_id,
+                        "structural_hash": payload.get("structural_hash"),
                         "eligible_parent": True,
                         "lineage_parent": candidate.parent_candidate_id,
                         "equations": {
@@ -802,19 +831,27 @@ class SearchController:
                             else None
                         ),
                         "judge_category_scores": {},
-                        "deterministic_runtime": {
-                            "candidate_validation": (
-                                "failed" if rejected_fit is None else "passed"
-                            ),
-                            "validation_diagnostics": list(
-                                payload.get(
-                                    "deterministic_validation_diagnostics", []
-                                )
-                            ),
-                            "public_target_evaluation": payload.get(
-                                "public_target_evaluation"
-                            ),
-                        },
+                        "deterministic_runtime": (
+                            {
+                                "candidate_validation": "failed",
+                                "validation_diagnostics": list(
+                                    payload.get(
+                                        "deterministic_validation_diagnostics",
+                                        [],
+                                    )
+                                ),
+                                "public_target_evaluation": payload.get(
+                                    "public_target_evaluation"
+                                ),
+                            }
+                            if rejected_fit is None
+                            else _deterministic_runtime_feedback(
+                                candidate,
+                                rejected_fit,
+                                self._public_target_contract,
+                                self._public_mechanism_spec,
+                            )
+                        ),
                         "numerical_failures": {
                             (
                                 "deterministic_validation"
@@ -833,6 +870,16 @@ class SearchController:
                         },
                         "pruning_diagnostics": {},
                         "rejected_before_fit": rejected_fit is None,
+                        "prior_structural_failure": payload.get(
+                            "prior_structural_failure"
+                        ),
+                        "required_edit": (
+                            "Do not resubmit this executable structure. Address "
+                            "the recorded failure by changing at least one "
+                            "dependency, operator, state, process, or algebraic "
+                            "mechanism; renaming or bound-only edits are not new "
+                            "structure."
+                        ),
                     }
                 )
                 if self._config.proposer_feedback_mode == "legacy":
@@ -928,6 +975,126 @@ class SearchController:
             candidate = CandidateModel.model_validate(payload["candidate"])
             identifiers.add(candidate.candidate_id)
         return identifiers
+
+    def _prior_failed_structure(
+        self,
+        round_index: int,
+        structural_hash: str,
+    ) -> dict[str, object] | None:
+        """Return bounded provenance for an already rejected structure."""
+        for previous_round in range(round_index - 1, -1, -1):
+            payload = self._store.load_round(previous_round)
+            if (
+                payload is None
+                or payload.get("stage") != "complete"
+                or payload.get("valid")
+                or not isinstance(payload.get("candidate"), dict)
+            ):
+                continue
+            previous_hash = payload.get("structural_hash")
+            if previous_hash is None:
+                previous = CandidateModel.model_validate(payload["candidate"])
+                previous_hash = _structural_hash(previous)
+            if previous_hash != structural_hash:
+                continue
+            previous = CandidateModel.model_validate(payload["candidate"])
+            inherited = payload.get("prior_structural_failure")
+            if isinstance(inherited, dict):
+                return {
+                    **inherited,
+                    "duplicate_attempt_round": previous_round,
+                    "duplicate_candidate_id": previous.candidate_id,
+                }
+            fit = payload.get("fit")
+            fit_summary = None
+            if isinstance(fit, dict):
+                training_metrics = fit.get("training_metrics", {})
+                validation_metrics = fit.get("validation_metrics", {})
+                fit_summary = {
+                    "success": bool(fit.get("success", False)),
+                    "message": fit.get("message"),
+                    "global_parameters": dict(
+                        fit.get("global_parameters", {})
+                    ),
+                    "training_normalized_mse": training_metrics.get(
+                        "normalized_mse"
+                    ),
+                    "validation_normalized_mse": validation_metrics.get(
+                        "normalized_mse"
+                    ),
+                    "training_per_target_normalized_mse": dict(
+                        training_metrics.get("per_target_normalized_mse", {})
+                    ),
+                    "validation_per_target_normalized_mse": dict(
+                        validation_metrics.get("per_target_normalized_mse", {})
+                    ),
+                    "diagnostics": [
+                        {
+                            "backend": item.get("backend"),
+                            "status": item.get("status"),
+                            "message": item.get("message"),
+                            "function_evaluations": item.get(
+                                "function_evaluations"
+                            ),
+                            "integration_failures": item.get(
+                                "integration_failures"
+                            ),
+                            "integration_failure_messages": list(
+                                item.get("integration_failure_messages", [])
+                            ),
+                        }
+                        for item in fit.get("diagnostics", [])
+                    ],
+                }
+            return {
+                "round_index": previous_round,
+                "candidate_id": previous.candidate_id,
+                "structural_hash": structural_hash,
+                "error": str(payload.get("error", "candidate was rejected")),
+                "fit_attempts": list(payload.get("fit_attempts", [])),
+                "fit": fit_summary,
+                "equations": {
+                    item.state: item.rhs
+                    for item in previous.state_equations
+                },
+                "processes": {
+                    item.name: item.expression for item in previous.processes
+                },
+                "instruction": (
+                    "This executable structure has already failed and will not "
+                    "be fit again. Revise its scientific or dynamic structure."
+                ),
+            }
+        return None
+
+    def _failed_structure_memory(
+        self,
+        round_index: int,
+        *,
+        limit: int = 3,
+    ) -> list[dict[str, object]]:
+        """Expose a bounded, deduplicated memory of expensive failed structures."""
+        remembered: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for previous_round in range(round_index - 1, -1, -1):
+            payload = self._store.load_round(previous_round)
+            if (
+                payload is None
+                or payload.get("stage") != "complete"
+                or payload.get("valid")
+                or not isinstance(payload.get("structural_hash"), str)
+            ):
+                continue
+            structural_hash = str(payload["structural_hash"])
+            if structural_hash in seen:
+                continue
+            seen.add(structural_hash)
+            entry = self._prior_failed_structure(round_index, structural_hash)
+            if entry is not None:
+                remembered.append(entry)
+            if len(remembered) == limit:
+                break
+        return remembered
 
     def _completed_records(self) -> list[CandidateRecord]:
         records: list[CandidateRecord] = []
@@ -1341,10 +1508,32 @@ def _deterministic_runtime_feedback(
             mode="json"
         )
     )
+    lower_contacts = sorted(
+        {
+            parameter
+            for item in fit.diagnostics
+            for parameter in item.parameters_at_lower_bound
+        }
+    )
+    upper_contacts = sorted(
+        {
+            parameter
+            for item in fit.diagnostics
+            for parameter in item.parameters_at_upper_bound
+        }
+    )
     return {
         "candidate_validation": "passed",
         "public_target_evaluation": target_evaluation,
         "public_mechanism_evaluation": mechanism_evaluation,
+        "public_mechanism_feedback_contract": {
+            "primary_scientific_signal": "graph_mechanism_compliance",
+            "metadata_signal": "mechanism_annotation_compliance",
+            "annotation_repair_policy": (
+                "apply only unambiguous runtime suggestions and preserve repair "
+                "provenance"
+            ),
+        },
         "fit": {
             "success": fit.success,
             "message": fit.message,
@@ -1365,19 +1554,11 @@ def _deterministic_runtime_feedback(
                     for message in item.integration_failure_messages
                 }
             )[:10],
-            "parameters_at_lower_bound": sorted(
-                {
-                    parameter
-                    for item in fit.diagnostics
-                    for parameter in item.parameters_at_lower_bound
-                }
-            ),
-            "parameters_at_upper_bound": sorted(
-                {
-                    parameter
-                    for item in fit.diagnostics
-                    for parameter in item.parameters_at_upper_bound
-                }
+            "parameters_at_lower_bound": lower_contacts,
+            "parameters_at_upper_bound": upper_contacts,
+            "bound_contact_interpretation": (
+                "advisory scale or identifiability diagnostic; not standalone "
+                "evidence of structural invalidity"
             ),
             "training_failed_trajectories": list(
                 fit.training_metrics.failed_trajectories

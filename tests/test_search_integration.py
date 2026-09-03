@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -659,7 +660,8 @@ def test_rich_incumbent_refinement_binds_lineage_and_exposes_actionable_feedback
     mechanism = incumbent_feedback["deterministic_runtime"][
         "public_mechanism_evaluation"
     ]
-    assert mechanism["mechanism_results"][0]["status"] == "failed"
+    assert mechanism["mechanism_results"][0]["status"] == "ambiguous"
+    assert mechanism["annotation_results"][0]["status"] == "failed"
     assert "test" not in json.dumps(prompts[1]).lower()
     second_checkpoint = json.loads(
         (tmp_path / "rich-refinement" / "round_0001.json").read_text()
@@ -1045,6 +1047,73 @@ def test_structural_duplicate_is_included_in_next_bounded_feedback(
     assert "renaming" in feedback[0]["recent_rejected_candidate"][
         "required_edit"
     ]
+
+
+def test_previously_failed_structure_is_not_fit_again_and_is_explained(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _candidate("failed_first", "-decay * x", (("decay", 0.2, 1.0),))
+    duplicate = first.model_copy(
+        update={
+            "candidate_id": "failed_duplicate",
+            "parent_candidate_id": "failed_first",
+        }
+    )
+    distinct = _candidate(
+        "revised",
+        "-decay * x + offset",
+        (("decay", 0.2, 1.0), ("offset", -0.1, 0.1)),
+        parent="failed_first",
+    )
+    client = MockLLMClient(
+        proposer_responses=[first, duplicate, distinct],
+        judge_responses=[_judge()] * 4,
+    )
+    config = _config(tmp_path / "failed-duplicate", 3).model_copy(
+        update={"beam_size": 1, "proposer_feedback_mode": "rich_v1"}
+    )
+
+    from autoformalism.search import controller as controller_module
+
+    real_fit = controller_module.fit_candidate
+    failed_structure_fit_count = 0
+
+    def controlled_fit(model, *args, **kwargs):
+        nonlocal failed_structure_fit_count
+        fitted = real_fit(model, *args, **kwargs)
+        if model.validated.candidate.candidate_id == "failed_first":
+            failed_structure_fit_count += 1
+            return replace(fitted, success=False, message="synthetic fit failure")
+        return fitted
+
+    monkeypatch.setattr(controller_module, "fit_candidate", controlled_fit)
+    result = _controller(client, config).run()
+
+    duplicate_record = json.loads(
+        (config.checkpoint_directory / "round_0001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    prompts = [
+        json.loads(call["user_prompt"])
+        for call in client.calls
+        if call["role"] == "proposer"
+    ]
+    remembered = prompts[2]["beam_feedback"][0]
+    failed_memory = prompts[2]["failed_structure_memory"]
+
+    assert result.completed_iterations == 1
+    assert failed_structure_fit_count == 1
+    assert duplicate_record["error"] == "previously failed structural duplicate"
+    assert remembered["candidate_id"] == "failed_duplicate"
+    assert remembered["prior_structural_failure"]["candidate_id"] == "failed_first"
+    assert "will not be fit again" in remembered["prior_structural_failure"][
+        "instruction"
+    ]
+    assert len(failed_memory) == 1
+    assert failed_memory[0]["candidate_id"] == "failed_first"
+    assert failed_memory[0]["fit"]["message"] == "synthetic fit failure"
 
 
 def test_nonexistent_lineage_parent_is_rejected(tmp_path: Path) -> None:

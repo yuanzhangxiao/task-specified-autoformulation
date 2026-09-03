@@ -769,6 +769,168 @@ def test_exact_derivative_linear_ridge_refuses_estimated_derivatives() -> None:
         )
 
 
+def test_fixed_latent_basis_linear_ridge_recovers_weight_without_latent_oracle(
+) -> None:
+    time = np.linspace(0.0, 3.0, 61)
+    weight = 2.5
+    latent = np.exp(-time)
+    target = weight * (1.0 - latent)
+    trajectory = Trajectory(
+        "partially_observed",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {"target": weight * latent},
+        DerivativeProvenance.EXACT,
+    )
+    candidate = CandidateModel.model_validate(
+        {
+            "candidate_id": "fixed_latent_basis",
+            "parent_candidate_id": None,
+            "change_summary": "One fixed latent basis drives an observed state.",
+            "states": [
+                {
+                    "name": "y",
+                    "kind": "observed",
+                    "unit": "unit",
+                    "description": "Observed response.",
+                },
+                {
+                    "name": "z",
+                    "kind": "latent",
+                    "unit": "unit/time",
+                    "description": "Unobserved fixed-shape memory.",
+                },
+            ],
+            "state_equations": [
+                {"state": "y", "rhs": "weight * z"},
+                {"state": "z", "rhs": "-z"},
+            ],
+            "observation_mappings": [
+                {"channel": "target", "expression": "y", "unit": "unit"}
+            ],
+            "parameters": [
+                {
+                    "name": "weight",
+                    "scope": "global",
+                    "bounds": {"lower": 0.0, "upper": 4.0},
+                    "initialization_range": {"lower": 0.0, "upper": 4.0},
+                    "unit": "1/time",
+                    "description": "Affine latent-to-observed edge weight.",
+                }
+            ],
+            "initial_conditions": [
+                {
+                    "state": "y",
+                    "scope": "global",
+                    "initialization_range": {"lower": -1.0, "upper": 1.0},
+                },
+                {"state": "z", "scope": "global", "fixed_value": 1.0},
+            ],
+        }
+    )
+    model = compile_candidate(
+        candidate,
+        ValidationContext(targets=("target",)),
+    )
+    config = FitConfig(
+        parameter_fit_strategy="fixed_latent_basis_linear_ridge",
+        derivative_ridge_regularization=0.0,
+    )
+
+    fit = fit_candidate(
+        model,
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+        config,
+    )
+
+    assert fit.success
+    assert fit.global_parameters["weight"] == pytest.approx(weight, abs=2e-6)
+    assert fit.diagnostics[0].backend == "fixed_latent_basis_linear_ridge"
+    assert fit.diagnostics[0].function_evaluations == 1
+    assert fit.validation_metrics.normalized_mse < 1e-10
+
+
+def test_fixed_latent_basis_rejects_fitted_parameter_in_latent_dynamics() -> None:
+    time = np.linspace(0.0, 1.0, 11)
+    target = 1.0 - np.exp(-time)
+    trajectory = Trajectory(
+        "partial",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {"target": np.exp(-time)},
+        DerivativeProvenance.EXACT,
+    )
+    payload = {
+        "candidate_id": "parameterized_latent",
+        "parent_candidate_id": None,
+        "change_summary": "Invalid parameterized latent basis.",
+        "states": [
+            {
+                "name": "y",
+                "kind": "observed",
+                "unit": "unit",
+                "description": "Observed response.",
+            },
+            {
+                "name": "z",
+                "kind": "latent",
+                "unit": "unit",
+                "description": "Latent response.",
+            },
+        ],
+        "state_equations": [
+            {"state": "y", "rhs": "weight * z"},
+            {"state": "z", "rhs": "-rate * z"},
+        ],
+        "observation_mappings": [
+            {"channel": "target", "expression": "y", "unit": "unit"}
+        ],
+        "parameters": [
+            {
+                "name": name,
+                "scope": "global",
+                "bounds": {"lower": 0.1, "upper": 3.0},
+                "initialization_range": {"lower": 0.1, "upper": 3.0},
+                "unit": "1/time",
+                "description": f"Parameter {name}.",
+            }
+            for name in ("weight", "rate")
+        ],
+        "initial_conditions": [
+            {
+                "state": "y",
+                "scope": "global",
+                "initialization_range": {"lower": -1.0, "upper": 1.0},
+            },
+            {"state": "z", "scope": "global", "fixed_value": 1.0},
+        ],
+    }
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",)),
+    )
+
+    with pytest.raises(ModelValidationError) as caught:
+        fit_candidate(
+            model,
+            _split(SplitName.TRAIN, (trajectory,)),
+            _split(SplitName.VALIDATION, (trajectory,)),
+            FitConfig(
+                parameter_fit_strategy="fixed_latent_basis_linear_ridge"
+            ),
+        )
+    assert "PARAMETER_IN_FIXED_LATENT_BASIS" in {
+        item.code for item in caught.value.diagnostics
+    }
+
+
 def test_gmm_parameterization_accepts_fixed_shape_and_rejects_fitted_shape() -> None:
     fixed_shape = compile_candidate(
         _candidate(
