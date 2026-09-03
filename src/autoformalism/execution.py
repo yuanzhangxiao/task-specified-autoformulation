@@ -158,6 +158,22 @@ product with another fitted parameter. The final model is evaluated by ordinary
 causal rollout, not by derivative fit alone.
 """.strip()
 
+_PROFILED_LATENT_BASIS_GMM_PROMPT = """
+This run uses exact observed derivatives with variable projection for
+parameterized latent-basis dynamics. Latent states are encouraged when
+scientifically justified. Parameters used by any latent-state RHS are a small
+outer set of latent-shape parameters and may occur nonlinearly, for example
+`-X / tau_x`. Every remaining parameter is an inner graph-edge weight and must
+enter the expanded state RHSs affinely conditional on the outer values. Inner
+weights may multiply basis functions that depend on outer parameters, but may
+not occur in a denominator, exponent, nonlinear function argument, or product
+with another inner weight. Each latent state must have a fixed_value or a
+parameter-free analytic initial condition. The runtime generates latent paths
+while conditioning on measured observed-state paths, profiles the bounded inner
+weights by ridge least squares at each outer step, and is never given latent
+values or latent derivatives. Final selection uses causal validation rollouts.
+""".strip()
+
 _JUDGE_CONTROLLER_PROMPT = """
 This runtime uses the prospective scientific judge rubric, schema version 2.
 Any earlier version-1 category names, weights, validity caps, or response example
@@ -232,6 +248,7 @@ class ExecutionArguments:
         "bounded_nonlinear",
         "exact_derivative_linear_ridge",
         "fixed_latent_basis_linear_ridge",
+        "profiled_latent_basis_linear_ridge",
     ] = "bounded_nonlinear"
     derivative_ridge_regularization: float = 1e-8
     llm_cache_only: bool = False
@@ -581,10 +598,11 @@ def build_experiment_parser(
             "bounded_nonlinear",
             "exact_derivative_linear_ridge",
             "fixed_latent_basis_linear_ridge",
+            "profiled_latent_basis_linear_ridge",
         ),
         default="bounded_nonlinear",
         help=(
-            "continuous-parameter backend; both linear-ridge strategies "
+            "continuous-parameter backend; derivative-based strategies "
             "require exact observed-derivative provenance"
         ),
     )
@@ -688,6 +706,7 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         in {
             "exact_derivative_linear_ridge",
             "fixed_latent_basis_linear_ridge",
+            "profiled_latent_basis_linear_ridge",
         }
         and namespace.disable_derivative_fit_fast_path
     ):
@@ -854,6 +873,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         in {
             "exact_derivative_linear_ridge",
             "fixed_latent_basis_linear_ridge",
+            "profiled_latent_basis_linear_ridge",
         }
         or (
             arguments.use_derivative_fit_fast_path
@@ -1147,6 +1167,7 @@ def _optional_fit_config(
         "bounded_nonlinear",
         "exact_derivative_linear_ridge",
         "fixed_latent_basis_linear_ridge",
+        "profiled_latent_basis_linear_ridge",
     ] = "bounded_nonlinear",
     derivative_ridge_regularization: float = 1e-8,
 ) -> FitConfig | None:
@@ -1336,6 +1357,8 @@ def _gmm_parameterization_prompt(arguments: ExecutionArguments) -> str:
         return f"\n\n{_EXACT_DERIVATIVE_GMM_PROMPT}"
     if arguments.parameter_fit_strategy == "fixed_latent_basis_linear_ridge":
         return f"\n\n{_FIXED_LATENT_BASIS_GMM_PROMPT}"
+    if arguments.parameter_fit_strategy == "profiled_latent_basis_linear_ridge":
+        return f"\n\n{_PROFILED_LATENT_BASIS_GMM_PROMPT}"
     return ""
 
 
@@ -1356,6 +1379,7 @@ def _validate_exact_derivative_experiment(
     if arguments.parameter_fit_strategy not in {
         "exact_derivative_linear_ridge",
         "fixed_latent_basis_linear_ridge",
+        "profiled_latent_basis_linear_ridge",
     }:
         return
     invalid = [

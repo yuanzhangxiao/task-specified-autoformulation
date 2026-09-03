@@ -12,8 +12,10 @@ from autoformalism.expressions.diagnostics import (
 )
 from autoformalism.expressions.parameter_linearity import (
     ParameterLinearityReport,
+    ProfiledLatentBasisParameterizationReport,
     validate_fixed_latent_basis_parameterization,
     validate_gmm_parameterization,
+    validate_profiled_latent_basis_parameterization,
 )
 from autoformalism.expressions.parser import ParsedExpression, RestrictedParser
 from autoformalism.expressions.validation import (
@@ -30,6 +32,7 @@ __all__ = [
     "ParameterLinearityReport",
     "ParsedExpression",
     "PiecewiseLinearForcing",
+    "ProfiledLatentBasisParameterizationReport",
     "RestrictedParser",
     "RuntimeExpressionError",
     "ValidatedCandidate",
@@ -39,4 +42,5 @@ __all__ = [
     "repair_protected_declarations",
     "validate_fixed_latent_basis_parameterization",
     "validate_gmm_parameterization",
+    "validate_profiled_latent_basis_parameterization",
 ]

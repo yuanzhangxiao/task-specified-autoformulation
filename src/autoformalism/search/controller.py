@@ -18,6 +18,7 @@ from autoformalism.expressions import (
     repair_protected_declarations,
     validate_fixed_latent_basis_parameterization,
     validate_gmm_parameterization,
+    validate_profiled_latent_basis_parameterization,
 )
 from autoformalism.fitting import (
     EvaluationMetrics,
@@ -321,6 +322,13 @@ class SearchController:
                     == "fixed_latent_basis_linear_ridge"
                 ):
                     validate_fixed_latent_basis_parameterization(
+                        compiled.validated
+                    )
+                elif (
+                    self._config.fit_config.parameter_fit_strategy
+                    == "profiled_latent_basis_linear_ridge"
+                ):
+                    validate_profiled_latent_basis_parameterization(
                         compiled.validated
                     )
             except ModelValidationError as exc:

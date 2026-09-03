@@ -18,6 +18,7 @@ from autoformalism.expressions import (
     ValidationContext,
     compile_candidate,
     validate_gmm_parameterization,
+    validate_profiled_latent_basis_parameterization,
 )
 from autoformalism.fitting import (
     ExactDerivativeFitError,
@@ -929,6 +930,131 @@ def test_fixed_latent_basis_rejects_fitted_parameter_in_latent_dynamics() -> Non
     assert "PARAMETER_IN_FIXED_LATENT_BASIS" in {
         item.code for item in caught.value.diagnostics
     }
+
+
+def test_profiled_latent_basis_recovers_shape_and_affine_weight_without_oracle(
+) -> None:
+    tau = 1.4
+    weight = 2.5
+
+    def split(name: SplitName, identifier: str, initial: float) -> DatasetSplit:
+        time = np.linspace(0.0, 3.0, 61)
+        latent = np.exp(-time / tau)
+        target = initial + weight * tau * (1.0 - latent)
+        trajectory = Trajectory(
+            identifier,
+            time,
+            {"target": target},
+            {},
+            {},
+            {},
+            {"target": weight * latent},
+            DerivativeProvenance.EXACT,
+        )
+        return _split(name, (trajectory,))
+
+    model = compile_candidate(
+        _profiled_latent_candidate("weight * z"),
+        ValidationContext(targets=("target",)),
+    )
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+    assert report.affine_parameter_names == ("weight",)
+    assert report.latent_shape_parameter_names == ("tau",)
+    config = FitConfig(
+        parameter_fit_strategy="profiled_latent_basis_linear_ridge",
+        number_of_starts=2,
+        maximum_function_evaluations=100,
+        derivative_ridge_regularization=0.0,
+        relative_tolerance=1e-9,
+        absolute_tolerance=1e-11,
+    )
+
+    fit = fit_candidate(
+        model,
+        split(SplitName.TRAIN, "train", 0.2),
+        split(SplitName.VALIDATION, "validation", -0.3),
+        config,
+    )
+
+    assert fit.success
+    assert fit.global_parameters == pytest.approx(
+        {"weight": weight, "tau": tau}, abs=2e-5
+    )
+    assert {
+        item.backend for item in fit.diagnostics
+    } == {"profiled_latent_basis_linear_ridge"}
+    assert fit.validation_metrics.normalized_mse < 1e-9
+
+
+def test_profiled_latent_basis_rejects_nonlinear_inner_weight() -> None:
+    model = compile_candidate(
+        _profiled_latent_candidate("exp(weight) * z"),
+        ValidationContext(targets=("target",)),
+    )
+
+    with pytest.raises(ModelValidationError) as caught:
+        validate_profiled_latent_basis_parameterization(model.validated)
+
+    assert "PARAMETER_IN_NONLINEAR_FUNCTION" in {
+        item.code for item in caught.value.diagnostics
+    }
+
+
+def _profiled_latent_candidate(observed_rhs: str) -> CandidateModel:
+    return CandidateModel.model_validate(
+        {
+            "candidate_id": "profiled_latent_basis",
+            "parent_candidate_id": None,
+            "change_summary": "Fit one latent shape and one affine weight.",
+            "states": [
+                {
+                    "name": "y",
+                    "kind": "observed",
+                    "unit": "unit",
+                    "description": "Observed response.",
+                },
+                {
+                    "name": "z",
+                    "kind": "latent",
+                    "unit": "unit",
+                    "description": "Unobserved relaxation memory.",
+                },
+            ],
+            "state_equations": [
+                {"state": "y", "rhs": observed_rhs},
+                {"state": "z", "rhs": "-z / tau"},
+            ],
+            "observation_mappings": [
+                {"channel": "target", "expression": "y", "unit": "unit"}
+            ],
+            "parameters": [
+                {
+                    "name": "weight",
+                    "scope": "global",
+                    "bounds": {"lower": 0.0, "upper": 4.0},
+                    "initialization_range": {"lower": 0.0, "upper": 4.0},
+                    "unit": "1/time",
+                    "description": "Affine latent-to-observed weight.",
+                },
+                {
+                    "name": "tau",
+                    "scope": "global",
+                    "bounds": {"lower": 0.1, "upper": 2.0},
+                    "initialization_range": {"lower": 0.1, "upper": 2.0},
+                    "unit": "1/time",
+                    "description": "Nonlinear latent relaxation time.",
+                },
+            ],
+            "initial_conditions": [
+                {
+                    "state": "y",
+                    "scope": "global",
+                    "initialization_range": {"lower": -1.0, "upper": 1.0},
+                },
+                {"state": "z", "scope": "global", "fixed_value": 1.0},
+            ],
+        }
+    )
 
 
 def test_gmm_parameterization_accepts_fixed_shape_and_rejects_fitted_shape() -> None:

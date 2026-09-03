@@ -70,12 +70,16 @@ closed-form contract.
 
 ## Relationship to the broader profiled-ODE plan
 
-The attached profiled-ODE specification describes a useful later hierarchy:
-estimated derivatives, separable nonlinear least squares, collocation, multiple
-shooting, and likelihood-based noise models. Those components are intentionally
-not part of this milestone. The next numerical milestone should first compare
-documented derivative estimators under a frozen protocol, then decide whether
-variable projection over a small set of nonlinear shape parameters is warranted.
+The attached profiled-ODE specification describes a useful hierarchy: estimated
+derivatives, separable nonlinear least squares, collocation, multiple shooting,
+and likelihood-based noise models. Those components are intentionally not part
+of this oracle backend. The separately selectable
+`profiled_latent_basis_linear_ridge` backend now implements the first variable-
+projection extension for partially observed candidates: it searches a small
+outer set of latent-shape parameters while solving conditional affine weights
+inside each step. It still requires exact observed derivatives. Documented
+derivative estimators, collocation, and derivative-free variants remain later
+frozen protocol comparisons.
 
 ## Proposer feedback milestone
 

@@ -29,6 +29,7 @@ class FitConfig(BaseModel):
         "bounded_nonlinear",
         "exact_derivative_linear_ridge",
         "fixed_latent_basis_linear_ridge",
+        "profiled_latent_basis_linear_ridge",
     ] = "bounded_nonlinear"
     derivative_ridge_regularization: float = Field(default=1e-8, ge=0.0)
     integration_method: str = "RK45"

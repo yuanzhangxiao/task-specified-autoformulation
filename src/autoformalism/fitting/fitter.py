@@ -9,7 +9,7 @@ from time import monotonic
 import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
-from scipy.optimize import OptimizeResult, least_squares
+from scipy.optimize import OptimizeResult, least_squares, lsq_linear
 
 from autoformalism.data import (
     DatasetSplit,
@@ -22,6 +22,7 @@ from autoformalism.expressions import (
     RuntimeExpressionError,
     validate_fixed_latent_basis_parameterization,
     validate_gmm_parameterization,
+    validate_profiled_latent_basis_parameterization,
 )
 from autoformalism.fitting.models import (
     EvaluationMetrics,
@@ -38,6 +39,7 @@ from autoformalism.schemas import (
     ConstraintSpec,
     InitialConditionSpec,
     ParameterScope,
+    ParameterSpec,
 )
 
 
@@ -55,6 +57,13 @@ class _Decoded:
     parameters: Mapping[str, float]
     global_initials: Mapping[str, float]
     trajectory_initials: Mapping[str, Mapping[str, float]]
+
+
+@dataclass(frozen=True)
+class _ProfiledOutcome:
+    result: OptimizeResult
+    parameters: Mapping[str, float]
+    failures: FailureCounter
 
 
 def fit_candidate(
@@ -95,6 +104,16 @@ def fit_candidate(
             settings,
             target_scales,
             deadline,
+        )
+    if settings.parameter_fit_strategy == "profiled_latent_basis_linear_ridge":
+        return _fit_profiled_latent_basis_linear_ridge(
+            model,
+            training,
+            validation,
+            settings,
+            target_scales,
+            deadline,
+            initial_global_parameters,
         )
     variables = _training_variables(model, training)
     lower = np.asarray([item.lower for item in variables])
@@ -529,7 +548,7 @@ def _fit_fixed_latent_basis_linear_ridge(
     rows: list[NDArray[np.float64]] = []
     labels: list[float] = []
     for trajectory in training.trajectories:
-        state_values = _fixed_latent_basis_state_matrix(
+        state_values = _conditioned_latent_state_matrix(
             model,
             trajectory,
             anchor,
@@ -663,7 +682,436 @@ def _fit_fixed_latent_basis_linear_ridge(
     )
 
 
-def _fixed_latent_basis_state_matrix(
+def _fit_profiled_latent_basis_linear_ridge(
+    model: CompiledModel,
+    training: DatasetSplit,
+    validation: DatasetSplit,
+    config: FitConfig,
+    target_scales: Mapping[str, float],
+    deadline: float | None,
+    initial_global_parameters: Mapping[str, float] | None,
+) -> FitResult:
+    """Profile affine weights inside a small nonlinear latent-shape search.
+
+    Exact derivatives are supplied only for directly observed states. For each
+    outer latent-shape vector, the candidate's latent subsystem is integrated
+    while conditioning on measured observed paths, then all remaining affine
+    RHS weights are solved by bounded ridge least squares. Validation continues
+    to use a causal rollout of the complete fitted model.
+    """
+    if not config.allow_derivative_regression:
+        raise ExactDerivativeFitError(
+            "profiled_latent_basis_linear_ridge requires derivative regression"
+        )
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+    direct, observed_names = _validate_partial_exact_derivative_contract(
+        model,
+        training,
+        backend_label="profiled latent-basis fitting",
+    )
+    derivative_scales = {
+        state_name: max(
+            float(
+                np.std(
+                    np.concatenate(
+                        [
+                            trajectory.derivatives[direct[state_name]]
+                            for trajectory in training.trajectories
+                        ]
+                    )
+                )
+            ),
+            1e-8,
+        )
+        for state_name in observed_names
+    }
+    specs_by_name = {
+        item.name: item for item in model.validated.candidate.parameters
+    }
+    outer_specs = tuple(
+        specs_by_name[name] for name in report.latent_shape_parameter_names
+    )
+    inner_specs = tuple(
+        specs_by_name[name] for name in report.affine_parameter_names
+    )
+    outer_variables = tuple(
+        _Variable(
+            f"parameter:{item.name}",
+            item.bounds.lower,
+            item.bounds.upper,
+            item.initialization_range.lower,
+            item.initialization_range.upper,
+        )
+        for item in outer_specs
+    )
+    all_variables = tuple(
+        _Variable(
+            f"parameter:{item.name}",
+            item.bounds.lower,
+            item.bounds.upper,
+            item.initialization_range.lower,
+            item.initialization_range.upper,
+        )
+        for item in model.validated.candidate.parameters
+    )
+    lower = np.asarray([item.lower for item in outer_variables], dtype=float)
+    upper = np.asarray([item.upper for item in outer_variables], dtype=float)
+    preferred_outer = (
+        None
+        if initial_global_parameters is None
+        else {
+            name: value
+            for name, value in initial_global_parameters.items()
+            if name in report.latent_shape_parameter_names
+        }
+    )
+    starts = _starts(
+        outer_variables,
+        config.number_of_starts,
+        np.random.default_rng(config.random_seed),
+        preferred_parameters=preferred_outer,
+    )
+    residual_size = sum(
+        (
+            trajectory.number_of_rows
+            - (1 if model.validated.context.lagged_targets else 0)
+        )
+        * len(observed_names)
+        for trajectory in training.trajectories
+    ) + len(inner_specs)
+    outcomes: list[_ProfiledOutcome] = []
+
+    for start in starts:
+        failures = FailureCounter()
+
+        def residual(
+            outer_values: NDArray[np.float64],
+            counter: FailureCounter = failures,
+        ) -> NDArray[np.float64]:
+            try:
+                _, values = _profile_affine_latent_basis_weights(
+                    model,
+                    training,
+                    config,
+                    direct,
+                    observed_names,
+                    derivative_scales,
+                    outer_specs,
+                    inner_specs,
+                    outer_values,
+                    deadline,
+                )
+                return values
+            except (
+                ExactDerivativeFitError,
+                RuntimeExpressionError,
+                FloatingPointError,
+                OverflowError,
+                ValueError,
+            ) as exc:
+                counter.record(str(exc))
+                return np.full(residual_size, config.failure_penalty, dtype=float)
+
+        try:
+            outer_result = least_squares(
+                residual,
+                start,
+                bounds=(lower, upper),
+                max_nfev=config.maximum_function_evaluations,
+            )
+        except TimeoutError as exc:
+            failures.record(str(exc))
+            outer_result = OptimizeResult(
+                x=start,
+                success=False,
+                status=-2,
+                message=str(exc),
+                cost=0.5 * residual_size * config.failure_penalty**2,
+                nfev=0,
+            )
+        try:
+            parameters, profiled_residual = _profile_affine_latent_basis_weights(
+                model,
+                training,
+                config,
+                direct,
+                observed_names,
+                derivative_scales,
+                outer_specs,
+                inner_specs,
+                np.asarray(outer_result.x, dtype=float),
+                deadline,
+            )
+            cost = float(0.5 * np.dot(profiled_residual, profiled_residual))
+        except (
+            ExactDerivativeFitError,
+            RuntimeExpressionError,
+            FloatingPointError,
+            OverflowError,
+            ValueError,
+            TimeoutError,
+        ) as exc:
+            failures.record(str(exc))
+            parameters = {
+                **dict(
+                    zip(
+                        report.latent_shape_parameter_names,
+                        np.asarray(outer_result.x, dtype=float),
+                        strict=True,
+                    )
+                ),
+                **{
+                    item.name: (item.bounds.lower + item.bounds.upper) / 2.0
+                    for item in inner_specs
+                },
+            }
+            cost = 0.5 * residual_size * config.failure_penalty**2
+            outer_result.success = False
+            if isinstance(exc, TimeoutError):
+                outer_result.status = -2
+                outer_result.message = str(exc)
+        full_values = np.asarray(
+            [parameters[item.name] for item in model.validated.candidate.parameters],
+            dtype=float,
+        )
+        result = OptimizeResult(
+            x=full_values,
+            success=bool(outer_result.success),
+            status=int(outer_result.status),
+            message=str(outer_result.message),
+            cost=cost,
+            nfev=int(outer_result.nfev),
+        )
+        outcomes.append(_ProfiledOutcome(result, parameters, failures))
+        if int(result.status) == -2:
+            break
+
+    best_index = min(
+        range(len(outcomes)), key=lambda index: float(outcomes[index].result.cost)
+    )
+    best = outcomes[best_index]
+    training_initials = _direct_observed_initials(model, training, direct)
+    validation_initials = _direct_observed_initials(model, validation, direct)
+    diagnostics = tuple(
+        _diagnostic(
+            index,
+            outcome.result,
+            outcome.failures,
+            all_variables,
+            config,
+            backend="profiled_latent_basis_linear_ridge",
+        )
+        for index, outcome in enumerate(outcomes)
+    )
+    decoded = _Decoded(best.parameters, {}, training_initials)
+    if int(best.result.status) == -2:
+        return _timeout_fit_result(
+            model,
+            training,
+            validation,
+            decoded,
+            diagnostics,
+            best_index,
+            target_scales,
+            config.failure_penalty,
+        )
+    train_metrics = _evaluate(
+        model,
+        training,
+        best.parameters,
+        {},
+        training_initials,
+        target_scales,
+        config,
+    )
+    validation_metrics = _evaluate(
+        model,
+        validation,
+        best.parameters,
+        {},
+        validation_initials,
+        target_scales,
+        config,
+    )
+    evaluation_budget_reached = int(best.result.status) == 0
+    succeeded = bool(
+        (bool(best.result.success) or evaluation_budget_reached)
+        and np.isfinite(float(best.result.cost))
+        and np.isfinite(best.result.x).all()
+        and not train_metrics.failed_trajectories
+        and not validation_metrics.failed_trajectories
+        and np.isfinite(train_metrics.normalized_mse)
+        and np.isfinite(validation_metrics.normalized_mse)
+    )
+    return FitResult(
+        success=succeeded,
+        global_parameters=best.parameters,
+        global_initial_conditions={},
+        training_trajectory_initial_conditions=training_initials,
+        validation_trajectory_initial_conditions=validation_initials,
+        training_metrics=train_metrics,
+        validation_metrics=validation_metrics,
+        diagnostics=diagnostics,
+        best_start_index=best_index,
+        target_scales=target_scales,
+        message=(
+            "outer optimizer evaluation budget reached; finite profiled fit retained"
+            if succeeded and evaluation_budget_reached
+            else None
+            if succeeded
+            else "profiled latent-basis fit is numerically invalid"
+        ),
+    )
+
+
+def _profile_affine_latent_basis_weights(
+    model: CompiledModel,
+    training: DatasetSplit,
+    config: FitConfig,
+    direct: Mapping[str, str],
+    observed_names: frozenset[str],
+    derivative_scales: Mapping[str, float],
+    outer_specs: Sequence[ParameterSpec],
+    inner_specs: Sequence[ParameterSpec],
+    outer_values: NDArray[np.float64],
+    deadline: float | None,
+) -> tuple[Mapping[str, float], NDArray[np.float64]]:
+    """Solve bounded affine weights conditional on one latent-shape vector."""
+    outer = dict(
+        zip((item.name for item in outer_specs), outer_values, strict=True)
+    )
+    inner_anchor = {
+        item.name: (item.bounds.lower + item.bounds.upper) / 2.0
+        for item in inner_specs
+    }
+    anchor = {**outer, **inner_anchor}
+    inner_names = tuple(item.name for item in inner_specs)
+    rows: list[NDArray[np.float64]] = []
+    labels: list[float] = []
+    for trajectory in training.trajectories:
+        state_values = _conditioned_latent_state_matrix(
+            model,
+            trajectory,
+            anchor,
+            config,
+            deadline,
+        )
+        skipped = 1 if model.validated.context.lagged_targets else 0
+        for index in range(skipped, trajectory.number_of_rows):
+            _check_deadline(deadline)
+            forcing = trajectory_forcing(
+                model,
+                trajectory,
+                causal_index=max(0, index - 1),
+            )
+            state = state_values[:, index]
+            time = float(trajectory.time[index])
+            anchor_rhs = model.rhs(time, state, anchor, forcing)
+            design = np.empty((len(model.state_names), len(inner_names)))
+            for parameter_index, spec in enumerate(inner_specs):
+                probe = dict(anchor)
+                probe[spec.name] = float(spec.bounds.lower)
+                delta = probe[spec.name] - anchor[spec.name]
+                if delta == 0.0:
+                    raise AssertionError("parameter probe has zero displacement")
+                probe_rhs = model.rhs(time, state, probe, forcing)
+                design[:, parameter_index] = (probe_rhs - anchor_rhs) / delta
+            intercept = anchor_rhs - design @ np.asarray(
+                [inner_anchor[name] for name in inner_names], dtype=float
+            )
+            for state_name in sorted(observed_names):
+                state_index = model.state_names.index(state_name)
+                channel = direct[state_name]
+                scale = derivative_scales[state_name]
+                rows.append(design[state_index].copy() / scale)
+                labels.append(
+                    (
+                        float(trajectory.derivatives[channel][index])
+                        - float(intercept[state_index])
+                    )
+                    / scale
+                )
+    matrix = np.vstack(rows)
+    response = np.asarray(labels, dtype=float)
+    if not np.isfinite(matrix).all() or not np.isfinite(response).all():
+        raise ExactDerivativeFitError("profiled design matrix is nonfinite")
+    regularization = config.derivative_ridge_regularization
+    if regularization:
+        matrix_for_solve = np.vstack(
+            (matrix, np.sqrt(regularization) * np.eye(len(inner_names)))
+        )
+        response_for_solve = np.concatenate(
+            (response, np.zeros(len(inner_names), dtype=float))
+        )
+    else:
+        matrix_for_solve = matrix
+        response_for_solve = response
+    solution = lsq_linear(
+        matrix_for_solve,
+        response_for_solve,
+        bounds=(
+            np.asarray([item.bounds.lower for item in inner_specs], dtype=float),
+            np.asarray([item.bounds.upper for item in inner_specs], dtype=float),
+        ),
+    )
+    if not solution.success or not np.isfinite(solution.x).all():
+        raise ExactDerivativeFitError(
+            "bounded profiled affine solve failed: " + str(solution.message)
+        )
+    parameters = {**outer, **dict(zip(inner_names, solution.x, strict=True))}
+    residual = np.concatenate(
+        (
+            matrix @ solution.x - response,
+            np.sqrt(regularization) * np.asarray(solution.x, dtype=float),
+        )
+    )
+    return parameters, residual
+
+
+def _validate_partial_exact_derivative_contract(
+    model: CompiledModel,
+    training: DatasetSplit,
+    *,
+    backend_label: str,
+) -> tuple[Mapping[str, str], frozenset[str]]:
+    """Validate public observations needed by partial exact-derivative fits."""
+    direct = model.direct_state_observation_channels
+    observed_names = frozenset(
+        item.name
+        for item in model.validated.candidate.states
+        if item.kind.value == "observed"
+    )
+    latent_names = {
+        item.name
+        for item in model.validated.candidate.states
+        if item.kind.value == "latent"
+    }
+    missing_observed = sorted(observed_names - set(direct))
+    mislabeled_latent = sorted(latent_names & set(direct))
+    if missing_observed or mislabeled_latent:
+        raise ExactDerivativeFitError(
+            f"{backend_label} requires identity observations for all observed "
+            "states and no direct observation of latent states; "
+            f"missing_observed={missing_observed}, "
+            f"directly_observed_latent={mislabeled_latent}"
+        )
+    for trajectory in training.trajectories:
+        if trajectory.derivative_provenance is not DerivativeProvenance.EXACT:
+            raise ExactDerivativeFitError(
+                f"{backend_label} refuses non-exact observed derivatives: "
+                f"{trajectory.trajectory_id} has "
+                f"{trajectory.derivative_provenance.value!r} provenance"
+            )
+        missing = sorted(set(direct.values()) - set(trajectory.derivatives))
+        if missing:
+            raise ExactDerivativeFitError(
+                f"trajectory {trajectory.trajectory_id} lacks exact observed "
+                f"derivatives: {missing}"
+            )
+    return direct, observed_names
+
+
+def _conditioned_latent_state_matrix(
     model: CompiledModel,
     trajectory: Trajectory,
     parameters: Mapping[str, float],
@@ -829,6 +1277,7 @@ def evaluate_fitted_candidate(
     if settings.parameter_fit_strategy in {
         "exact_derivative_linear_ridge",
         "fixed_latent_basis_linear_ridge",
+        "profiled_latent_basis_linear_ridge",
     }:
         observed = model.direct_state_observation_channels
         if (

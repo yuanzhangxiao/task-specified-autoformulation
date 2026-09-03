@@ -465,6 +465,35 @@ def test_cli_enables_fixed_latent_basis_parameterization_explicitly(
     assert plan["parameter_fit_strategy"] == "fixed_latent_basis_linear_ridge"
 
 
+def test_cli_enables_profiled_latent_basis_parameterization_explicitly(
+    tmp_path: Path,
+) -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--benchmark-id",
+                "synthetic",
+                "--data-root",
+                str(tmp_path),
+                "--parameter-fit-strategy",
+                "profiled_latent_basis_linear_ridge",
+            ]
+        )
+    )
+
+    assert arguments.parameter_fit_strategy == "profiled_latent_basis_linear_ridge"
+    prompt = _gmm_parameterization_prompt(arguments)
+    assert "variable projection" in prompt
+    assert "never given latent values or latent derivatives" in " ".join(
+        prompt.split()
+    )
+    plan = execute(arguments)
+    assert plan["parameter_fit_strategy"] == "profiled_latent_basis_linear_ridge"
+
+
 def test_structured_proposer_feedback_is_independent_and_opt_in(
     tmp_path: Path,
 ) -> None:

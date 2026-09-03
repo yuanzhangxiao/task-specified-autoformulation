@@ -28,12 +28,12 @@ Validation and test metrics are computed by the existing rollout evaluator. No
 derivative labels, fitted latent paths, or private information are used in model
 selection or held-out scoring.
 
-## Scope and next milestone
+## Scope and profiled extension
 
 This backend is appropriate when the proposer can choose scientifically useful
 latent basis dynamics in advance. It cannot fit a latent time constant such as
-`tau` in `dX/dt = -X / tau + I`, because that would make the latent basis depend
-on an optimized parameter. Variable projection is the planned extension for
-those parameterized latent dynamics: outer optimization would update the small
-set of nonlinear latent-shape parameters, while the inner affine weights remain
-a deterministic linear solve.
+`tau` in `dX/dt = -X / tau + I`, because that makes the latent basis depend on
+an optimized parameter. The separately selectable
+`profiled_latent_basis_linear_ridge` backend implements that extension: outer
+optimization updates the small set of latent-shape parameters while bounded
+inner affine weights remain a deterministic ridge solve.
