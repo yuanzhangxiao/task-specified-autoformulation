@@ -12,6 +12,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from autoformalism.expressions.diagnostics import RuntimeExpressionError
+from autoformalism.expressions.observability import infer_effective_observability
 from autoformalism.expressions.parser import ParsedExpression
 from autoformalism.expressions.validation import (
     CandidateValidator,
@@ -121,6 +122,22 @@ class CompiledModel:
     """Numerical ODE right-hand side and observation mappings."""
 
     validated: ValidatedCandidate
+    nonbinding_parameter_bounds: frozenset[str] = frozenset()
+
+    def with_nonbinding_parameter_bounds(
+        self,
+        parameter_names: frozenset[str],
+    ) -> CompiledModel:
+        """Return a view where selected declared ranges are suggestions only."""
+        unknown = parameter_names - frozenset(self.parameter_names)
+        if unknown:
+            raise ValueError(
+                f"unknown nonbinding parameter bounds: {sorted(unknown)}"
+            )
+        return CompiledModel(
+            validated=self.validated,
+            nonbinding_parameter_bounds=parameter_names,
+        )
 
     @property
     def state_names(self) -> tuple[str, ...]:
@@ -142,27 +159,7 @@ class CompiledModel:
     @property
     def direct_state_observation_channels(self) -> Mapping[str, str]:
         """Map every state that is an identity observation to its data channel."""
-        available = set(self.validated.context.targets) | set(
-            self.validated.context.auxiliaries
-        )
-        mapping = {
-            state: state for state in self.state_names if state in available
-        }
-        for channel, expression in self.validated.observation_expressions.items():
-            body = expression.tree.body
-            if (
-                channel in available
-                and isinstance(body, ast.Name)
-                and body.id in self.state_names
-            ):
-                existing = mapping.get(body.id)
-                if existing is not None and existing != channel:
-                    raise RuntimeExpressionError(
-                        f"state {body.id} has conflicting observed channels: "
-                        f"{existing}, {channel}"
-                    )
-                mapping[body.id] = channel
-        return mapping
+        return infer_effective_observability(self.validated).state_channels
 
     def rhs(
         self,
@@ -270,6 +267,9 @@ class CompiledModel:
                 parameters[parameter.name],
                 f"parameter {parameter.name}",
             )
+            if parameter.name in self.nonbinding_parameter_bounds:
+                parameter_values[parameter.name] = value
+                continue
             lower = parameter.bounds.lower
             upper = parameter.bounds.upper
             width = upper - lower

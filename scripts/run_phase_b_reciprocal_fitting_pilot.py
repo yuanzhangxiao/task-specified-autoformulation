@@ -124,6 +124,9 @@ def run_task(
         allow_derivative_regression=condition.allow_derivative_regression,
         parameter_fit_strategy=condition.parameter_fit_strategy,
         derivative_ridge_regularization=1e-8,
+        # Preserve the frozen v1 pilot's bounded inner solve. Later profiled
+        # experiments use the new suggested-range policy explicitly.
+        affine_parameter_bound_policy="hard",
         maximum_function_evaluations=condition.maximum_function_evaluations,
         maximum_wall_time_seconds=condition.maximum_wall_time_seconds,
         use_certified_reciprocal_coordinates=(

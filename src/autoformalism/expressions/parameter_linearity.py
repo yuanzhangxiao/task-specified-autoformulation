@@ -11,6 +11,7 @@ from autoformalism.expressions.diagnostics import (
     ModelValidationError,
     ValidationDiagnostic,
 )
+from autoformalism.expressions.observability import infer_effective_observability
 from autoformalism.expressions.parser import ParsedExpression
 from autoformalism.expressions.validation import ValidatedCandidate
 
@@ -33,6 +34,20 @@ class ProfiledLatentBasisParameterizationReport:
     latent_shape_parameter_names: tuple[str, ...]
     reciprocal_transformations: tuple[ReciprocalParameterTransformation, ...]
     state_rhs_parameters: Mapping[str, frozenset[str]]
+    observation_parameters: Mapping[str, frozenset[str]]
+    effective_observed_state_names: frozenset[str]
+    effective_latent_state_names: frozenset[str]
+    runtime_inferred_observed_state_names: frozenset[str]
+
+    @property
+    def outer_parameter_names(self) -> tuple[str, ...]:
+        """Return all externally optimized parameters.
+
+        ``latent_shape_parameter_names`` is retained as a compatibility alias
+        for existing frozen artifacts; outer parameters can now also arise from
+        nonlinear observation mappings.
+        """
+        return self.latent_shape_parameter_names
 
 
 @dataclass(frozen=True)
@@ -205,11 +220,7 @@ def validate_fixed_latent_basis_parameterization(
     than supplied by an oracle.
     """
     report = validate_gmm_parameterization(validated)
-    latent_names = {
-        item.name
-        for item in validated.candidate.states
-        if item.kind.value == "latent"
-    }
+    latent_names = infer_effective_observability(validated).latent_state_names
     diagnostics: list[ValidationDiagnostic] = []
     for state_name in sorted(latent_names):
         used = report.state_rhs_parameters[state_name]
@@ -248,19 +259,18 @@ def validate_profiled_latent_basis_parameterization(
 ) -> ProfiledLatentBasisParameterizationReport:
     """Partition fitted parameters into outer latent shapes and affine weights.
 
-    A parameter used by any latent-state RHS is an outer shape parameter. All
-    remaining parameters are inner weights and must enter every expanded RHS
-    affinely conditional on the outer values. Latent initial values remain
+    A parameter used by any effectively latent-state RHS is an outer shape
+    parameter. Parameters used non-affinely in an observed RHS or observation
+    mapping are also outer parameters. All remaining parameters are inner
+    weights and must enter state RHSs and observation mappings affinely
+    conditional on the outer values. Latent initial values remain
     proposer-owned and parameter-free, so the fit never consumes latent oracle
     values or derivatives.
     """
     parameters = tuple(item.name for item in validated.candidate.parameters)
     parameter_set = frozenset(parameters)
-    latent_names = {
-        item.name
-        for item in validated.candidate.states
-        if item.kind.value == "latent"
-    }
+    observability = infer_effective_observability(validated)
+    latent_names = observability.latent_state_names
     state_rhs_parameters = {
         state_name: _expanded_parameter_symbols(
             expression,
@@ -269,10 +279,31 @@ def validate_profiled_latent_basis_parameterization(
         )
         for state_name, expression in validated.equation_expressions.items()
     }
-    latent_shape_parameters = frozenset().union(
+    observation_parameters = {
+        channel: _expanded_parameter_symbols(
+            expression,
+            parameter_set=parameter_set,
+            processes=validated.process_expressions,
+        )
+        for channel, expression in validated.observation_expressions.items()
+    }
+    outer_parameters = frozenset().union(
         *(state_rhs_parameters[name] for name in latent_names)
     )
-    affine_parameters = parameter_set - latent_shape_parameters
+    used_parameters = frozenset().union(
+        *state_rhs_parameters.values(),
+        *observation_parameters.values(),
+    )
+    while True:
+        candidate_affine = parameter_set - outer_parameters
+        non_affine = _intrinsically_non_affine_parameters(
+            validated,
+            candidate_parameter_set=candidate_affine,
+        )
+        if non_affine <= outer_parameters:
+            break
+        outer_parameters |= non_affine
+    affine_parameters = parameter_set - outer_parameters
     diagnostics: list[ValidationDiagnostic] = []
     if not latent_names:
         diagnostics.append(
@@ -282,13 +313,13 @@ def validate_profiled_latent_basis_parameterization(
                 "profiled latent-basis fitting requires at least one latent state",
             )
         )
-    if not latent_shape_parameters:
+    if not outer_parameters:
         diagnostics.append(
             ValidationDiagnostic(
                 "LATENT_SHAPE_PARAMETER_REQUIRED",
                 "candidate",
-                "profiled latent-basis fitting requires at least one parameter "
-                "in latent dynamics",
+                "profiled latent-basis fitting requires at least one outer "
+                "latent-shape or nonlinear observation parameter",
             )
         )
     if not affine_parameters:
@@ -297,40 +328,37 @@ def validate_profiled_latent_basis_parameterization(
                 "AFFINE_WEIGHT_PARAMETER_REQUIRED",
                 "candidate",
                 "profiled latent-basis fitting requires at least one conditional "
-                "affine RHS weight",
+                "affine RHS or observation-mapping weight",
             )
         )
 
-    rhs_parameters = frozenset().union(*state_rhs_parameters.values())
-    missing = sorted(parameter_set - rhs_parameters)
+    missing = sorted(parameter_set - used_parameters)
     if missing:
         diagnostics.append(
             ValidationDiagnostic(
                 "PARAMETER_NOT_IN_RHS",
                 "candidate",
-                "every optimized parameter must occur in an RHS: "
+                "every optimized parameter must occur in a state RHS or "
+                "observation mapping: "
                 + ", ".join(missing),
             )
         )
-    for kind, expressions in (
-        ("observation_mapping", validated.observation_expressions),
-        ("initial_condition", validated.initial_condition_expressions),
-    ):
-        for name, expression in expressions.items():
-            used = _expanded_parameter_symbols(
-                expression,
-                parameter_set=parameter_set,
-                processes=validated.process_expressions,
-            )
-            if used:
-                diagnostics.append(
-                    ValidationDiagnostic(
-                        "PARAMETER_OUTSIDE_RHS",
-                        f"{kind}:{name}",
-                        "profiled parameters may occur only in state RHSs: "
-                        + ", ".join(sorted(used)),
-                    )
+    for name, expression in validated.initial_condition_expressions.items():
+        used = _expanded_parameter_symbols(
+            expression,
+            parameter_set=parameter_set,
+            processes=validated.process_expressions,
+        )
+        if used:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "PARAMETER_IN_PROFILED_INITIAL",
+                    f"initial_condition:{name}",
+                    "profiled fitting does not yet support parameters in "
+                    "initial-condition expressions: "
+                    + ", ".join(sorted(used)),
                 )
+            )
 
     diagnostics.extend(
         _affine_subset_diagnostics(
@@ -340,7 +368,7 @@ def validate_profiled_latent_basis_parameterization(
     )
     reciprocal_transformations = certify_reciprocal_transformations(
         validated,
-        eligible_parameter_names=latent_shape_parameters,
+        eligible_parameter_names=outer_parameters,
     )
     initials = {
         item.state: item for item in validated.candidate.initial_conditions
@@ -366,10 +394,16 @@ def validate_profiled_latent_basis_parameterization(
             name for name in parameters if name in affine_parameters
         ),
         latent_shape_parameter_names=tuple(
-            name for name in parameters if name in latent_shape_parameters
+            name for name in parameters if name in outer_parameters
         ),
         reciprocal_transformations=reciprocal_transformations,
         state_rhs_parameters=MappingProxyType(dict(state_rhs_parameters)),
+        observation_parameters=MappingProxyType(dict(observation_parameters)),
+        effective_observed_state_names=observability.observed_state_names,
+        effective_latent_state_names=observability.latent_state_names,
+        runtime_inferred_observed_state_names=(
+            observability.runtime_inferred_observed_state_names
+        ),
     )
 
 
@@ -526,6 +560,77 @@ def _expanded_rhs_is_affine_in_reciprocal(
     return True
 
 
+def _intrinsically_non_affine_parameters(
+    validated: ValidatedCandidate,
+    *,
+    candidate_parameter_set: frozenset[str],
+) -> frozenset[str]:
+    """Find candidate inner parameters that must instead be optimized outside.
+
+    Parameters in denominators, powers, or nonlinear calls are promoted first.
+    Once those symbols are treated as fixed outer coordinates, products among
+    the remaining candidate weights are promoted. This ordering preserves a
+    useful partition such as ``gain * sigmoid(shape * z)``: ``shape`` is outer
+    while ``gain`` remains an affine observation weight.
+    """
+    processes = validated.process_expressions
+
+    def scan(*, mark_products: bool) -> frozenset[str]:
+        cache: dict[str, frozenset[str]] = {}
+        non_affine: set[str] = set()
+
+        def process_dependencies(name: str) -> frozenset[str]:
+            cached = cache.get(name)
+            if cached is not None:
+                return cached
+            dependencies = analyze(processes[name].tree.body)
+            cache[name] = dependencies
+            return dependencies
+
+        def analyze(node: ast.AST) -> frozenset[str]:
+            if isinstance(node, ast.Constant):
+                return frozenset()
+            if isinstance(node, ast.Name):
+                if node.id in candidate_parameter_set:
+                    return frozenset({node.id})
+                if node.id in processes:
+                    return process_dependencies(node.id)
+                return frozenset()
+            if isinstance(node, ast.UnaryOp):
+                return analyze(node.operand)
+            if isinstance(node, ast.BinOp):
+                left = analyze(node.left)
+                right = analyze(node.right)
+                if isinstance(node.op, ast.Mult) and mark_products and left and right:
+                    non_affine.update(left | right)
+                elif isinstance(node.op, ast.Div):
+                    non_affine.update(right)
+                elif isinstance(node.op, ast.Pow):
+                    non_affine.update(right)
+                    if not _is_literal_one(node.right):
+                        non_affine.update(left)
+                return left | right
+            if isinstance(node, ast.Call):
+                dependencies = frozenset().union(
+                    *(analyze(argument) for argument in node.args)
+                )
+                non_affine.update(dependencies)
+                return dependencies
+            raise AssertionError(
+                f"unexpected restricted AST node: {type(node).__name__}"
+            )
+
+        for expression in (
+            *validated.equation_expressions.values(),
+            *validated.observation_expressions.values(),
+        ):
+            analyze(expression.tree.body)
+        return frozenset(non_affine)
+
+    intrinsic = scan(mark_products=False)
+    return intrinsic if intrinsic else scan(mark_products=True)
+
+
 def _affine_subset_diagnostics(
     validated: ValidatedCandidate,
     *,
@@ -619,6 +724,8 @@ def _affine_subset_diagnostics(
 
     for state_name, expression in validated.equation_expressions.items():
         analyze(expression.tree.body, location=f"state_equation:{state_name}")
+    for channel, expression in validated.observation_expressions.items():
+        analyze(expression.tree.body, location=f"observation_mapping:{channel}")
     return tuple(diagnostics)
 
 

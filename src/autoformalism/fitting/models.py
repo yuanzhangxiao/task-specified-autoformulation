@@ -33,6 +33,7 @@ class FitConfig(BaseModel):
     ] = "bounded_nonlinear"
     derivative_ridge_regularization: float = Field(default=1e-8, ge=0.0)
     use_certified_reciprocal_coordinates: bool = True
+    affine_parameter_bound_policy: Literal["suggested", "hard"] = "suggested"
     integration_method: str = "RK45"
     fixed_step_substeps: int = Field(default=1, ge=1)
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
@@ -110,6 +111,13 @@ class OptimizationDiagnostic:
     parameters_at_lower_bound: tuple[str, ...] = ()
     parameters_at_upper_bound: tuple[str, ...] = ()
     certified_parameter_transformations: tuple[str, ...] = ()
+    affine_parameters_outside_suggested_bounds: tuple[str, ...] = ()
+    runtime_inferred_observed_states: tuple[str, ...] = ()
+    derivative_equation_rows: int = 0
+    observation_mapping_rows: int = 0
+    affine_design_rank: int | None = None
+    affine_design_condition: float | None = None
+    physical_outer_start_parameters: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

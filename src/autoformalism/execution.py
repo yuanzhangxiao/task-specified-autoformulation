@@ -69,6 +69,10 @@ benchmark target to an `observed_channel` or same-named state/algebraic; do not
 emit `target_channel`. Put any qualitative or bounded constraint inside the
 declaration it governs. Use `mechanisms` to tag the task-required scientific
 mechanisms implemented by each state or algebraic.
+Classify a state as observed only when its value is directly supplied by a public
+channel through an identity mapping. A state underneath a nonidentity target
+mapping remains latent. The runtime independently infers this effective partition
+from the mappings and records any disagreement with your declared state kind.
 Every constraint must remain attached to the state or algebraic it governs. Do not
 create constraints for prose mechanism labels or other undeclared concepts.
 Every declared parameter must appear in at least one state RHS, algebraic, or
@@ -83,8 +87,10 @@ powers; `^` is forbidden. Do not use undeclared aliases such as `sigma`.
 Do not redeclare supplied auxiliary, external-input, or fixed-covariate channel
 names as states, processes, or parameters. Map each observed target exactly once:
 never create both an observed state and a same-named algebraic for one target.
-Do not invent numeric bounds for states or other variables. Parameter bounds are
-required; `initialization_range` is optional and defaults to the parameter bounds.
+Do not invent numeric bounds for states or other variables. Parameter ranges are
+required by the transport schema as initialization/search suggestions; do not
+present them as scientific hard constraints unless the benchmark supplies the
+range. `initialization_range` is optional and defaults to the parameter range.
 For states, use qualitative `nonnegative` or `positive` constraints
 without `bounds`; use a `bounded` constraint only when the benchmark supplies the
 numeric range explicitly.

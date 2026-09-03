@@ -743,6 +743,87 @@ def test_exact_derivative_linear_ridge_recovers_graph_weights_once() -> None:
     assert fit.diagnostics[0].function_evaluations == 1
 
 
+def test_exact_derivative_affine_ranges_are_suggestions_by_default() -> None:
+    time = np.linspace(0.0, 2.0, 41)
+    source = 0.35
+    decay = 0.7
+    target = source / decay + (1.4 - source / decay) * np.exp(-decay * time)
+    trajectory = Trajectory(
+        "oracle",
+        time,
+        {"target": target},
+        {},
+        {},
+        {},
+        {"target": source - decay * target},
+        DerivativeProvenance.EXACT,
+    )
+    model = compile_candidate(
+        _candidate(
+            {"x": "source - decay * x"},
+            "x",
+            (("source", 0.0, 0.1), ("decay", 0.1, 1.5)),
+        ),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    splits = (
+        _split(SplitName.TRAIN, (trajectory,)),
+        _split(SplitName.VALIDATION, (trajectory,)),
+    )
+
+    fit = fit_candidate(
+        model,
+        *splits,
+        FitConfig(
+            parameter_fit_strategy="exact_derivative_linear_ridge",
+            derivative_ridge_regularization=0.0,
+        ),
+    )
+
+    assert fit.success
+    assert fit.global_parameters["source"] == pytest.approx(source, abs=1e-10)
+    assert fit.diagnostics[0].affine_parameters_outside_suggested_bounds == (
+        "parameter:source",
+    )
+    with pytest.raises(ExactDerivativeFitError, match="violates proposer bounds"):
+        fit_candidate(
+            model,
+            *splits,
+            FitConfig(
+                parameter_fit_strategy="exact_derivative_linear_ridge",
+                derivative_ridge_regularization=0.0,
+                affine_parameter_bound_policy="hard",
+            ),
+        )
+
+    constrained_payload = model.validated.candidate.model_dump(mode="json")
+    constrained_payload["constraints"] = [
+        {
+            "subject": "source",
+            "kind": "bounded",
+            "bounds": {"lower": 0.0, "upper": 0.1},
+            "source": "benchmark",
+            "enforcement": "hard",
+        }
+    ]
+    constrained_model = compile_candidate(
+        CandidateModel.model_validate(constrained_payload),
+        ValidationContext(targets=("target",), lagged_targets=("target",)),
+    )
+    constrained_fit = fit_candidate(
+        constrained_model,
+        *splits,
+        FitConfig(
+            parameter_fit_strategy="exact_derivative_linear_ridge",
+            derivative_ridge_regularization=0.0,
+        ),
+    )
+    assert constrained_fit.global_parameters["source"] == pytest.approx(0.1)
+    assert constrained_fit.diagnostics[0].parameters_at_upper_bound == (
+        "parameter:source",
+    )
+
+
 def test_exact_derivative_linear_ridge_refuses_estimated_derivatives() -> None:
     time = np.linspace(0.0, 1.0, 11)
     target = np.exp(-time)
@@ -1041,6 +1122,41 @@ def test_profiled_latent_basis_can_disable_reciprocal_optimizer_coordinate() -> 
     assert fit.global_parameters["tau"] == pytest.approx(truth["tau"], rel=1e-5)
 
 
+def test_profiled_reciprocal_coordinates_share_physical_multistarts() -> None:
+    model = compile_candidate(
+        _profiled_latent_candidate("weight * z"),
+        ValidationContext(targets=("target",)),
+    )
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+    tau = next(
+        item
+        for item in model.validated.candidate.parameters
+        if item.name == "tau"
+    )
+    transformation = report.reciprocal_transformations[0]
+
+    original, original_physical = fitter_module._profiled_outer_starts(
+        (tau,),
+        3,
+        np.random.default_rng(7),
+        preferred_parameters=None,
+        reciprocal_by_name={},
+    )
+    reciprocal, reciprocal_physical = fitter_module._profiled_outer_starts(
+        (tau,),
+        3,
+        np.random.default_rng(7),
+        preferred_parameters=None,
+        reciprocal_by_name={"tau": transformation},
+    )
+
+    assert original_physical == reciprocal_physical
+    for original_start, reciprocal_start in zip(
+        original, reciprocal, strict=True
+    ):
+        assert reciprocal_start[0] == pytest.approx(1.0 / original_start[0])
+
+
 @pytest.mark.parametrize(
     "latent_rhs",
     (
@@ -1075,9 +1191,224 @@ def test_profiled_latent_basis_rejects_nonlinear_inner_weight() -> None:
     with pytest.raises(ModelValidationError) as caught:
         validate_profiled_latent_basis_parameterization(model.validated)
 
-    assert "PARAMETER_IN_NONLINEAR_FUNCTION" in {
+    assert "AFFINE_WEIGHT_PARAMETER_REQUIRED" in {
         item.code for item in caught.value.diagnostics
     }
+
+
+def test_profiled_observation_mapping_recovers_unbounded_affine_weight() -> None:
+    truth = {"gain": 2.5, "tau": 1.4}
+
+    def split(name: SplitName, identifier: str) -> DatasetSplit:
+        time = np.linspace(0.0, 3.0, 61)
+        target = truth["gain"] * np.exp(-time / truth["tau"])
+        return _split(
+            name,
+            (
+                Trajectory(
+                    identifier,
+                    time,
+                    {"target": target},
+                    {},
+                    {},
+                    {},
+                    {},
+                    DerivativeProvenance.UNAVAILABLE,
+                ),
+            ),
+        )
+
+    model = compile_candidate(
+        CandidateModel.model_validate(
+            {
+                "candidate_id": "profiled_observation_mapping",
+                "parent_candidate_id": None,
+                "change_summary": "Fit a latent shape and observation gain.",
+                "states": [
+                    {
+                        "name": "z",
+                        "kind": "latent",
+                        "unit": "unit",
+                        "description": "Unobserved relaxation state.",
+                    }
+                ],
+                "state_equations": [{"state": "z", "rhs": "-z / tau"}],
+                "observation_mappings": [
+                    {
+                        "channel": "target",
+                        "expression": "gain * z",
+                        "unit": "unit",
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "gain",
+                        "scope": "global",
+                        "bounds": {"lower": 0.0, "upper": 1.0},
+                        "initialization_range": {"lower": 0.0, "upper": 1.0},
+                        "unit": "dimensionless",
+                        "description": "Affine observation gain.",
+                    },
+                    {
+                        "name": "tau",
+                        "scope": "global",
+                        "bounds": {"lower": 0.5, "upper": 2.0},
+                        "initialization_range": {"lower": 0.5, "upper": 2.0},
+                        "unit": "time",
+                        "description": "Latent relaxation time.",
+                    },
+                ],
+                "initial_conditions": [
+                    {"state": "z", "scope": "global", "fixed_value": 1.0}
+                ],
+            }
+        ),
+        ValidationContext(targets=("target",)),
+    )
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+    assert report.affine_parameter_names == ("gain",)
+    assert report.latent_shape_parameter_names == ("tau",)
+    assert report.observation_parameters["target"] == frozenset({"gain"})
+
+    fit = fit_candidate(
+        model,
+        split(SplitName.TRAIN, "train"),
+        split(SplitName.VALIDATION, "validation"),
+        FitConfig(
+            parameter_fit_strategy="profiled_latent_basis_linear_ridge",
+            number_of_starts=2,
+            maximum_function_evaluations=100,
+            derivative_ridge_regularization=0.0,
+        ),
+    )
+
+    assert fit.success
+    assert fit.global_parameters == pytest.approx(truth, rel=2e-5)
+    assert fit.validation_metrics.normalized_mse < 1e-9
+    diagnostic = fit.diagnostics[fit.best_start_index]
+    assert diagnostic.derivative_equation_rows == 0
+    assert diagnostic.observation_mapping_rows == 61
+    assert diagnostic.affine_parameters_outside_suggested_bounds == (
+        "parameter:gain",
+    )
+
+
+def test_profiled_observability_overrides_incorrect_latent_label() -> None:
+    payload = _profiled_latent_candidate("weight * z").model_dump(mode="json")
+    payload["states"][0]["kind"] = "latent"
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target",)),
+    )
+
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+
+    assert report.effective_observed_state_names == frozenset({"y"})
+    assert report.effective_latent_state_names == frozenset({"z"})
+    assert report.runtime_inferred_observed_state_names == frozenset({"y"})
+
+
+def test_profiled_promotes_nonlinear_observation_shape_but_keeps_gain_affine(
+) -> None:
+    candidate = _profiled_latent_candidate("weight * z")
+    payload = candidate.model_dump(mode="json")
+    payload["observation_mappings"][0]["channel"] = "target_y"
+    payload["observation_mappings"].append(
+        {
+            "channel": "target_z",
+            "expression": "gain * sigmoid(shape * z)",
+            "unit": "unit",
+        }
+    )
+    payload["parameters"].extend(
+        [
+            {
+                "name": "gain",
+                "scope": "global",
+                "bounds": {"lower": 0.1, "upper": 2.0},
+                "initialization_range": {"lower": 0.1, "upper": 2.0},
+                "unit": "dimensionless",
+                "description": "Affine observation gain.",
+            },
+            {
+                "name": "shape",
+                "scope": "global",
+                "bounds": {"lower": 0.1, "upper": 2.0},
+                "initialization_range": {"lower": 0.1, "upper": 2.0},
+                "unit": "dimensionless",
+                "description": "Nonlinear observation shape.",
+            },
+        ]
+    )
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("target_y", "target_z")),
+    )
+
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+
+    assert report.affine_parameter_names == ("weight", "gain")
+    assert report.latent_shape_parameter_names == ("tau", "shape")
+
+
+def test_profiled_accepts_affine_total_output_parameter() -> None:
+    model = compile_candidate(
+        CandidateModel.model_validate(
+            {
+                "candidate_id": "profiled_total_output",
+                "parent_candidate_id": None,
+                "change_summary": "Exercise identity and algebraic targets.",
+                "states": [
+                    {
+                        "name": name,
+                        "kind": "latent",
+                        "unit": "unit",
+                        "description": f"State {name}.",
+                    }
+                    for name in ("Gp", "I", "X")
+                ],
+                "state_equations": [
+                    {"state": "Gp", "rhs": "-p_U * X"},
+                    {"state": "I", "rhs": "-k_i * I"},
+                    {"state": "X", "rhs": "-X / tau + I"},
+                ],
+                "observation_mappings": [
+                    {"channel": "Gp", "expression": "Gp", "unit": "unit"},
+                    {"channel": "I", "expression": "I", "unit": "unit"},
+                    {
+                        "channel": "U",
+                        "expression": "Uii + p_U * X",
+                        "unit": "unit",
+                    },
+                ],
+                "parameters": [
+                    {
+                        "name": name,
+                        "scope": "global",
+                        "bounds": {"lower": 0.1, "upper": 2.0},
+                        "initialization_range": {"lower": 0.1, "upper": 2.0},
+                        "unit": "dimensionless",
+                        "description": f"Parameter {name}.",
+                    }
+                    for name in ("p_U", "k_i", "tau")
+                ],
+                "initial_conditions": [
+                    {"state": "Gp", "scope": "global", "fixed_value": 1.0},
+                    {"state": "I", "scope": "global", "fixed_value": 1.0},
+                    {"state": "X", "scope": "global", "fixed_value": 0.0},
+                ],
+            }
+        ),
+        ValidationContext(targets=("Gp", "I", "U"), auxiliaries=("Uii",)),
+    )
+
+    report = validate_profiled_latent_basis_parameterization(model.validated)
+
+    assert report.effective_observed_state_names == frozenset({"Gp", "I"})
+    assert report.effective_latent_state_names == frozenset({"X"})
+    assert report.affine_parameter_names == ("p_U", "k_i")
+    assert report.latent_shape_parameter_names == ("tau",)
+    assert report.observation_parameters["U"] == frozenset({"p_U"})
 
 
 def _profiled_latent_candidate(observed_rhs: str) -> CandidateModel:

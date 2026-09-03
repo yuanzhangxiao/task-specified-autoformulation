@@ -2025,6 +2025,20 @@ def _fit_from_dict(payload: Mapping[str, Any]) -> FitResult:
                     "integration_failure_messages": tuple(
                         item.get("integration_failure_messages", ())
                     ),
+                    "certified_parameter_transformations": tuple(
+                        item.get("certified_parameter_transformations", ())
+                    ),
+                    "affine_parameters_outside_suggested_bounds": tuple(
+                        item.get(
+                            "affine_parameters_outside_suggested_bounds", ()
+                        )
+                    ),
+                    "runtime_inferred_observed_states": tuple(
+                        item.get("runtime_inferred_observed_states", ())
+                    ),
+                    "physical_outer_start_parameters": tuple(
+                        item.get("physical_outer_start_parameters", ())
+                    ),
                 }
             )
             for item in payload["diagnostics"]

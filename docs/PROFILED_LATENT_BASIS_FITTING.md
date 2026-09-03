@@ -6,18 +6,28 @@ latent trajectories or latent derivatives.
 
 ## Parameter partition
 
-The runtime derives the partition from the executable candidate:
+The runtime first derives effective observability from public mappings. An
+identity mapping such as `Gp <- Gp` makes that state observed even if the
+proposer labeled it latent. A nonidentity mapping such as
+`v01 <- k1 * x + k2 * y` does not expose `x` or `y`; they remain latent. The
+declared label is preserved for audit, and disagreements are reported.
 
-- every parameter used by a latent-state RHS is an outer latent-shape
-  parameter;
-- every remaining parameter is an inner affine RHS weight.
+The runtime then derives the parameter partition from the executable candidate:
 
-Outer parameters may occur nonlinearly. Thus a latent relaxation such as
+- every parameter used by an effectively latent-state RHS is an outer
+  latent-shape parameter;
+- every parameter used non-affinely in an observed-state RHS or observation
+  mapping is an outer parameter; and
+- every remaining parameter is an inner affine RHS or observation weight.
+
+For example, in `v01 = gain * sigmoid(shape * z)`, `shape` is outer and `gain`
+is inner. In `U = Uii + p_U * X`, `p_U` is an inner observation weight. Outer
+parameters may occur nonlinearly. Thus a latent relaxation such as
 `dX/dt = -X / tau_x + I` is supported. Conditional on the outer values, every
 inner weight must be affine after algebraic-process expansion. Inner weights
 cannot occur in denominators, exponents, nonlinear functions, or products with
-one another. Parameters remain forbidden in observation mappings and initial
-conditions. Each latent initial value is fixed or parameter-free.
+one another. Parameters remain unsupported in initial-condition expressions.
+Each latent initial value is fixed or parameter-free.
 
 ## Variable-projection solver
 
@@ -25,8 +35,9 @@ At each bounded outer-optimizer step, the runtime:
 
 1. integrates only the candidate's latent subsystem while conditioning it on
    measured public observed-state paths;
-2. constructs the exact-observed-derivative design matrix for the inner weights;
-3. solves the bounded ridge problem for those weights; and
+2. constructs one linear system from exact derivatives of identity-mapped
+   target states and measured values of nonidentity target mappings;
+3. solves the ridge problem for all inner RHS and observation weights; and
 4. returns the profiled derivative-plus-ridge residual to the outer optimizer.
 
 Each observed-state derivative block is divided by its training-only standard
@@ -34,9 +45,20 @@ deviation before the joint solve, preventing a high-magnitude channel from
 silently dominating a multi-output fit.
 
 This is separable nonlinear least squares, or variable projection. It avoids
-sending affine weights through the nonlinear optimizer and makes proposer
-bounds explicit constraints instead of rejecting an otherwise useful structure
-after an unconstrained solve.
+sending affine weights through the nonlinear optimizer. Across the affine
+linear backends, proposer-supplied ranges are initialization/search suggestions
+and diagnostic reference ranges by default. Inner weights use the direct ridge
+solution and may leave those suggestions; every such estimate is reported. A
+`hard` compatibility policy retains rejection or bounded linear least squares
+for frozen comparisons. The ordinary bounded-rollout backend is unchanged and
+continues to enforce all declared bounds.
+Independently supplied hard benchmark, runtime, or deterministic constraints
+remain binding under the suggested-range policy; only proposer ranges are
+relaxed.
+
+The diagnostic separately reports derivative-equation rows,
+observation-mapping rows, linear-system rank and condition number, inferred
+observed-state labels, and affine estimates outside suggested ranges.
 
 ## Certified reciprocal coordinates
 
@@ -52,9 +74,11 @@ the following hold:
 
 The outer optimizer then uses bounds `[1 / tau_upper, 1 / tau_lower]`, maps each
 trial point back to the candidate's declared `tau`, and reports the
-transformation in the fitting diagnostic. Unsafe or ambiguous uses are not
-rewritten. The feature is separately switchable so its effect can be measured
-against optimization in the original coordinate.
+transformation in the fitting diagnostic. Original- and reciprocal-coordinate
+conditions draw the same starts in physical parameter space before the latter
+is transformed, so their multistart comparison is matched. Unsafe or ambiguous
+uses are not rewritten. The feature is separately switchable so its effect can
+be measured against optimization in the original coordinate.
 
 This reparameterization does not turn a partially observed latent-dynamics fit
 into a closed-form linear solve. Even when `dZ/dt = -k * Z` is affine in `k` at
@@ -62,10 +86,12 @@ one instant, the generated path `Z(t; k)` depends nonlinearly on `k`. Therefore
 `k` remains an outer variable unless the state path is observed or supplied,
 which this method does not assume.
 
-Only exact derivatives of observed states are accepted in this milestone.
-Neither latent values nor latent derivatives are inputs. Training derivatives
-fit the parameters; validation and test use ordinary causal rollouts of the
-complete ODE model.
+Only exact derivatives of identity-mapped target states are accepted. A fully
+latent candidate with a nonidentity observation mapping can instead be fitted
+from measured target levels and needs no derivative input. Neither latent
+values nor latent derivatives are inputs. Training evidence fits the
+parameters; validation and test use ordinary causal rollouts of the complete
+ODE model.
 
 ## Frozen public pilot
 
@@ -90,4 +116,6 @@ candidate-generated conditional trajectories, not independently optimized
 nuisance variables. The next search milestone can route separate topology,
 functional-form, deterministic-contract, and numerical-fit feedback into staged
 candidate revisions. Estimated-derivative and derivative-free profiled fitting
-remain later protocol variants and must be evaluated separately.
+remain later protocol variants and must be evaluated separately. The current
+direct ridge solve is closed form in the numerical linear-algebra sense; it does
+not impose signs or other hard scientific constraints on affine weights.

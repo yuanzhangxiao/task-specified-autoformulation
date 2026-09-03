@@ -10,6 +10,10 @@ from autoformalism.expressions.diagnostics import (
     RuntimeExpressionError,
     ValidationDiagnostic,
 )
+from autoformalism.expressions.observability import (
+    EffectiveObservability,
+    infer_effective_observability,
+)
 from autoformalism.expressions.parameter_linearity import (
     ParameterLinearityReport,
     ProfiledLatentBasisParameterizationReport,
@@ -30,6 +34,7 @@ from autoformalism.expressions.validation import (
 __all__ = [
     "CandidateValidator",
     "CompiledModel",
+    "EffectiveObservability",
     "ModelValidationError",
     "ParameterLinearityReport",
     "ParsedExpression",
@@ -43,6 +48,7 @@ __all__ = [
     "ValidationDiagnostic",
     "certify_reciprocal_transformations",
     "compile_candidate",
+    "infer_effective_observability",
     "repair_protected_declarations",
     "validate_fixed_latent_basis_parameterization",
     "validate_gmm_parameterization",

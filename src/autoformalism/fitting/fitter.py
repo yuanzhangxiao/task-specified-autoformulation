@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from time import monotonic
@@ -37,6 +38,7 @@ from autoformalism.fitting.simulation import simulate_trajectory, trajectory_for
 from autoformalism.schemas import (
     ConstraintEnforcement,
     ConstraintKind,
+    ConstraintSource,
     ConstraintSpec,
     InitialConditionSpec,
     ParameterScope,
@@ -65,6 +67,18 @@ class _ProfiledOutcome:
     result: OptimizeResult
     parameters: Mapping[str, float]
     failures: FailureCounter
+    linear_solve: _ProfiledLinearSolve | None
+    physical_outer_start: Mapping[str, float]
+
+
+@dataclass(frozen=True)
+class _ProfiledLinearSolve:
+    parameters: Mapping[str, float]
+    residual: NDArray[np.float64]
+    derivative_row_count: int
+    observation_row_count: int
+    matrix_rank: int
+    matrix_condition: float
 
 
 def fit_candidate(
@@ -302,8 +316,20 @@ def _fit_exact_derivative_linear_ridge(
             "exact_derivative_linear_ridge requires derivative regression"
         )
     validate_gmm_parameterization(model.validated)
-    observed = model.direct_state_observation_channels
-    missing_states = sorted(set(model.state_names) - set(observed))
+    parameter_specs = tuple(model.validated.candidate.parameters)
+    parameter_names = tuple(item.name for item in parameter_specs)
+    nonbinding_parameter_names = _nonbinding_affine_parameter_names(
+        model,
+        frozenset(parameter_names),
+        config,
+    )
+    fit_model = (
+        model.with_nonbinding_parameter_bounds(nonbinding_parameter_names)
+        if nonbinding_parameter_names
+        else model
+    )
+    observed = fit_model.direct_state_observation_channels
+    missing_states = sorted(set(fit_model.state_names) - set(observed))
     if missing_states:
         raise ExactDerivativeFitError(
             "exact derivative fitting requires every state to be directly "
@@ -322,8 +348,6 @@ def _fit_exact_derivative_linear_ridge(
                 f"trajectory {trajectory.trajectory_id} lacks exact derivatives: "
                 f"{missing}"
             )
-    parameter_specs = tuple(model.validated.candidate.parameters)
-    parameter_names = tuple(item.name for item in parameter_specs)
     variables = tuple(
         _Variable(
             f"parameter:{item.name}",
@@ -345,32 +369,32 @@ def _fit_exact_derivative_linear_ridge(
         for index in range(skipped, trajectory.number_of_rows):
             _check_deadline(deadline)
             forcing = trajectory_forcing(
-                model,
+                fit_model,
                 trajectory,
                 causal_index=max(0, index - 1),
             )
             state = np.asarray(
                 [
                     _observed_value(trajectory, observed[name], index)
-                    for name in model.state_names
+                    for name in fit_model.state_names
                 ],
                 dtype=float,
             )
             time = float(trajectory.time[index])
-            anchor_rhs = model.rhs(time, state, anchor, forcing)
-            design = np.empty((len(model.state_names), len(parameter_names)))
+            anchor_rhs = fit_model.rhs(time, state, anchor, forcing)
+            design = np.empty((len(fit_model.state_names), len(parameter_names)))
             for parameter_index, spec in enumerate(parameter_specs):
                 probe = dict(anchor)
                 probe[spec.name] = float(spec.bounds.lower)
                 delta = probe[spec.name] - anchor[spec.name]
                 if delta == 0.0:  # schema forbids degenerate bounds
                     raise AssertionError("parameter probe has zero displacement")
-                probe_rhs = model.rhs(time, state, probe, forcing)
+                probe_rhs = fit_model.rhs(time, state, probe, forcing)
                 design[:, parameter_index] = (probe_rhs - anchor_rhs) / delta
             intercept = anchor_rhs - design @ np.asarray(
                 [anchor[name] for name in parameter_names], dtype=float
             )
-            for state_index, state_name in enumerate(model.state_names):
+            for state_index, state_name in enumerate(fit_model.state_names):
                 channel = observed[state_name]
                 rows.append(design[state_index].copy())
                 labels.append(
@@ -385,15 +409,32 @@ def _fit_exact_derivative_linear_ridge(
     )
     response = np.asarray(labels, dtype=float)
     if parameter_names:
-        gram = matrix.T @ matrix
-        rhs = matrix.T @ response
-        regularized = gram + config.derivative_ridge_regularization * np.eye(
-            len(parameter_names)
+        regularization = config.derivative_ridge_regularization
+        matrix_for_solve = (
+            np.vstack(
+                (matrix, np.sqrt(regularization) * np.eye(len(parameter_names)))
+            )
+            if regularization
+            else matrix
         )
-        try:
-            values = np.linalg.solve(regularized, rhs)
-        except np.linalg.LinAlgError:
-            values = np.linalg.lstsq(regularized, rhs, rcond=None)[0]
+        response_for_solve = (
+            np.concatenate(
+                (response, np.zeros(len(parameter_names), dtype=float))
+            )
+            if regularization
+            else response
+        )
+        values = _solve_affine_system(
+            matrix_for_solve,
+            response_for_solve,
+            parameter_specs,
+            nonbinding_parameter_names=(
+                frozenset(parameter_names)
+                if config.affine_parameter_bound_policy == "hard"
+                else nonbinding_parameter_names
+            ),
+            backend_label="exact-derivative affine",
+        )
     else:
         values = np.empty(0, dtype=float)
     if not np.isfinite(values).all():
@@ -405,14 +446,14 @@ def _fit_exact_derivative_linear_ridge(
         for spec, value in zip(parameter_specs, values, strict=True)
         if value < spec.bounds.lower or value > spec.bounds.upper
     ]
-    if bounds_error:
+    if bounds_error and config.affine_parameter_bound_policy == "hard":
         raise ExactDerivativeFitError(
             "unconstrained Eq. (11) solution violates proposer bounds; "
             + "; ".join(bounds_error)
         )
 
     parameters = dict(zip(parameter_names, values, strict=True))
-    training_initials = _direct_observed_initials(model, training, observed)
+    training_initials = _direct_observed_initials(fit_model, training, observed)
     decoded = _Decoded(parameters, {}, training_initials)
     residual = matrix @ values - response
     result = OptimizeResult(
@@ -430,9 +471,17 @@ def _fit_exact_derivative_linear_ridge(
         variables,
         config,
         backend="exact_derivative_linear_ridge",
+        affine_parameters_outside_suggested_bounds=(
+            _parameters_outside_suggested_bounds(
+                parameters,
+                parameter_specs,
+                config.bound_tolerance,
+            )
+        ),
+        nonbinding_parameter_names=nonbinding_parameter_names,
     )
     train_metrics = _evaluate(
-        model,
+        fit_model,
         training,
         decoded.parameters,
         decoded.global_initials,
@@ -440,9 +489,11 @@ def _fit_exact_derivative_linear_ridge(
         target_scales,
         config,
     )
-    validation_initials = _direct_observed_initials(model, validation, observed)
+    validation_initials = _direct_observed_initials(
+        fit_model, validation, observed
+    )
     validation_metrics = _evaluate(
-        model,
+        fit_model,
         validation,
         decoded.parameters,
         decoded.global_initials,
@@ -496,26 +547,20 @@ def _fit_fixed_latent_basis_linear_ridge(
             "fixed_latent_basis_linear_ridge requires derivative regression"
         )
     report = validate_fixed_latent_basis_parameterization(model.validated)
-    direct = model.direct_state_observation_channels
-    observed_names = {
-        item.name
-        for item in model.validated.candidate.states
-        if item.kind.value == "observed"
-    }
-    latent_names = {
-        item.name
-        for item in model.validated.candidate.states
-        if item.kind.value == "latent"
-    }
-    missing_observed = sorted(observed_names - set(direct))
-    mislabeled_latent = sorted(latent_names & set(direct))
-    if missing_observed or mislabeled_latent:
-        raise ExactDerivativeFitError(
-            "fixed latent-basis fitting requires identity observations for all "
-            "observed states and no direct observation of latent states; "
-            f"missing_observed={missing_observed}, "
-            f"directly_observed_latent={mislabeled_latent}"
-        )
+    parameter_specs = tuple(model.validated.candidate.parameters)
+    parameter_names = report.parameter_names
+    nonbinding_parameter_names = _nonbinding_affine_parameter_names(
+        model,
+        frozenset(parameter_names),
+        config,
+    )
+    fit_model = (
+        model.with_nonbinding_parameter_bounds(nonbinding_parameter_names)
+        if nonbinding_parameter_names
+        else model
+    )
+    direct = fit_model.direct_state_observation_channels
+    observed_names = frozenset(direct)
     for trajectory in training.trajectories:
         if trajectory.derivative_provenance is not DerivativeProvenance.EXACT:
             raise ExactDerivativeFitError(
@@ -530,8 +575,6 @@ def _fit_fixed_latent_basis_linear_ridge(
                 f"derivatives: {missing}"
             )
 
-    parameter_specs = tuple(model.validated.candidate.parameters)
-    parameter_names = report.parameter_names
     variables = tuple(
         _Variable(
             f"parameter:{item.name}",
@@ -550,7 +593,7 @@ def _fit_fixed_latent_basis_linear_ridge(
     labels: list[float] = []
     for trajectory in training.trajectories:
         state_values = _conditioned_latent_state_matrix(
-            model,
+            fit_model,
             trajectory,
             anchor,
             config,
@@ -560,27 +603,27 @@ def _fit_fixed_latent_basis_linear_ridge(
         for index in range(skipped, trajectory.number_of_rows):
             _check_deadline(deadline)
             forcing = trajectory_forcing(
-                model,
+                fit_model,
                 trajectory,
                 causal_index=max(0, index - 1),
             )
             state = state_values[:, index]
             time = float(trajectory.time[index])
-            anchor_rhs = model.rhs(time, state, anchor, forcing)
-            design = np.empty((len(model.state_names), len(parameter_names)))
+            anchor_rhs = fit_model.rhs(time, state, anchor, forcing)
+            design = np.empty((len(fit_model.state_names), len(parameter_names)))
             for parameter_index, spec in enumerate(parameter_specs):
                 probe = dict(anchor)
                 probe[spec.name] = float(spec.bounds.lower)
                 delta = probe[spec.name] - anchor[spec.name]
                 if delta == 0.0:
                     raise AssertionError("parameter probe has zero displacement")
-                probe_rhs = model.rhs(time, state, probe, forcing)
+                probe_rhs = fit_model.rhs(time, state, probe, forcing)
                 design[:, parameter_index] = (probe_rhs - anchor_rhs) / delta
             intercept = anchor_rhs - design @ np.asarray(
                 [anchor[name] for name in parameter_names], dtype=float
             )
             for state_name in sorted(observed_names):
-                state_index = model.state_names.index(state_name)
+                state_index = fit_model.state_names.index(state_name)
                 channel = direct[state_name]
                 rows.append(design[state_index].copy())
                 labels.append(
@@ -595,15 +638,32 @@ def _fit_fixed_latent_basis_linear_ridge(
     )
     response = np.asarray(labels, dtype=float)
     if parameter_names:
-        regularized = matrix.T @ matrix + (
-            config.derivative_ridge_regularization
-            * np.eye(len(parameter_names))
+        regularization = config.derivative_ridge_regularization
+        matrix_for_solve = (
+            np.vstack(
+                (matrix, np.sqrt(regularization) * np.eye(len(parameter_names)))
+            )
+            if regularization
+            else matrix
         )
-        rhs = matrix.T @ response
-        try:
-            values = np.linalg.solve(regularized, rhs)
-        except np.linalg.LinAlgError:
-            values = np.linalg.lstsq(regularized, rhs, rcond=None)[0]
+        response_for_solve = (
+            np.concatenate(
+                (response, np.zeros(len(parameter_names), dtype=float))
+            )
+            if regularization
+            else response
+        )
+        values = _solve_affine_system(
+            matrix_for_solve,
+            response_for_solve,
+            parameter_specs,
+            nonbinding_parameter_names=(
+                frozenset(parameter_names)
+                if config.affine_parameter_bound_policy == "hard"
+                else nonbinding_parameter_names
+            ),
+            backend_label="fixed-latent-basis affine",
+        )
     else:
         values = np.empty(0, dtype=float)
     if not np.isfinite(values).all():
@@ -614,15 +674,17 @@ def _fit_fixed_latent_basis_linear_ridge(
         for spec, value in zip(parameter_specs, values, strict=True)
         if value < spec.bounds.lower or value > spec.bounds.upper
     ]
-    if bounds_error:
+    if bounds_error and config.affine_parameter_bound_policy == "hard":
         raise ExactDerivativeFitError(
             "unconstrained fixed latent-basis solution violates proposer bounds; "
             + "; ".join(bounds_error)
         )
 
     parameters = dict(zip(parameter_names, values, strict=True))
-    training_initials = _direct_observed_initials(model, training, direct)
-    validation_initials = _direct_observed_initials(model, validation, direct)
+    training_initials = _direct_observed_initials(fit_model, training, direct)
+    validation_initials = _direct_observed_initials(
+        fit_model, validation, direct
+    )
     residual = matrix @ values - response
     result = OptimizeResult(
         x=values,
@@ -639,9 +701,17 @@ def _fit_fixed_latent_basis_linear_ridge(
         variables,
         config,
         backend="fixed_latent_basis_linear_ridge",
+        affine_parameters_outside_suggested_bounds=(
+            _parameters_outside_suggested_bounds(
+                parameters,
+                parameter_specs,
+                config.bound_tolerance,
+            )
+        ),
+        nonbinding_parameter_names=nonbinding_parameter_names,
     )
     train_metrics = _evaluate(
-        model,
+        fit_model,
         training,
         parameters,
         {},
@@ -650,7 +720,7 @@ def _fit_fixed_latent_basis_linear_ridge(
         config,
     )
     validation_metrics = _evaluate(
-        model,
+        fit_model,
         validation,
         parameters,
         {},
@@ -694,19 +764,31 @@ def _fit_profiled_latent_basis_linear_ridge(
 ) -> FitResult:
     """Profile affine weights inside a small nonlinear latent-shape search.
 
-    Exact derivatives are supplied only for directly observed states. For each
-    outer latent-shape vector, the candidate's latent subsystem is integrated
-    while conditioning on measured observed paths, then all remaining affine
-    RHS weights are solved by bounded ridge least squares. Validation continues
-    to use a causal rollout of the complete fitted model.
+    Exact derivatives are supplied only for identity-mapped observed states.
+    Nonidentity target mappings instead contribute observed-value equations.
+    For each outer latent-shape vector, the candidate's latent subsystem is
+    integrated while conditioning on measured public paths, then all remaining
+    affine RHS and observation weights are solved by ridge least squares.
+    Validation continues to use a causal rollout of the complete fitted model.
     """
     if not config.allow_derivative_regression:
         raise ExactDerivativeFitError(
             "profiled_latent_basis_linear_ridge requires derivative regression"
         )
     report = validate_profiled_latent_basis_parameterization(model.validated)
-    direct, observed_names = _validate_partial_exact_derivative_contract(
+    inner_parameter_names = frozenset(report.affine_parameter_names)
+    nonbinding_inner_names = _nonbinding_affine_parameter_names(
         model,
+        inner_parameter_names,
+        config,
+    )
+    profiled_model = (
+        model.with_nonbinding_parameter_bounds(nonbinding_inner_names)
+        if nonbinding_inner_names
+        else model
+    )
+    direct, derivative_state_names = _validate_partial_exact_derivative_contract(
+        profiled_model,
         training,
         backend_label="profiled latent-basis fitting",
     )
@@ -724,8 +806,9 @@ def _fit_profiled_latent_basis_linear_ridge(
             ),
             1e-8,
         )
-        for state_name in observed_names
+        for state_name in derivative_state_names
     }
+    observation_channels = _profiled_observation_channels(profiled_model, direct)
     specs_by_name = {
         item.name: item for item in model.validated.candidate.parameters
     }
@@ -759,28 +842,24 @@ def _fit_profiled_latent_basis_linear_ridge(
     )
     lower = np.asarray([item.lower for item in outer_variables], dtype=float)
     upper = np.asarray([item.upper for item in outer_variables], dtype=float)
-    preferred_outer = _profiled_outer_warm_start(
-        initial_global_parameters,
-        report.latent_shape_parameter_names,
-        reciprocal_by_name,
-    )
-    starts = _starts(
-        outer_variables,
+    starts, physical_starts = _profiled_outer_starts(
+        outer_specs,
         config.number_of_starts,
         np.random.default_rng(config.random_seed),
-        preferred_parameters=preferred_outer,
+        preferred_parameters=initial_global_parameters,
+        reciprocal_by_name=reciprocal_by_name,
     )
     residual_size = sum(
         (
             trajectory.number_of_rows
             - (1 if model.validated.context.lagged_targets else 0)
         )
-        * len(observed_names)
+        * (len(derivative_state_names) + len(observation_channels))
         for trajectory in training.trajectories
     ) + len(inner_specs)
     outcomes: list[_ProfiledOutcome] = []
 
-    for start in starts:
+    for start, physical_start in zip(starts, physical_starts, strict=True):
         failures = FailureCounter()
 
         def residual(
@@ -788,12 +867,14 @@ def _fit_profiled_latent_basis_linear_ridge(
             counter: FailureCounter = failures,
         ) -> NDArray[np.float64]:
             try:
-                _, values = _profile_affine_latent_basis_weights(
-                    model,
+                solve = _profile_affine_latent_basis_weights(
+                    profiled_model,
                     training,
                     config,
                     direct,
-                    observed_names,
+                    derivative_state_names,
+                    observation_channels,
+                    target_scales,
                     derivative_scales,
                     outer_specs,
                     inner_specs,
@@ -801,7 +882,7 @@ def _fit_profiled_latent_basis_linear_ridge(
                     reciprocal_by_name,
                     deadline,
                 )
-                return values
+                return solve.residual
             except (
                 ExactDerivativeFitError,
                 RuntimeExpressionError,
@@ -830,12 +911,14 @@ def _fit_profiled_latent_basis_linear_ridge(
                 nfev=0,
             )
         try:
-            parameters, profiled_residual = _profile_affine_latent_basis_weights(
-                model,
+            linear_solve = _profile_affine_latent_basis_weights(
+                profiled_model,
                 training,
                 config,
                 direct,
-                observed_names,
+                derivative_state_names,
+                observation_channels,
+                target_scales,
                 derivative_scales,
                 outer_specs,
                 inner_specs,
@@ -843,7 +926,10 @@ def _fit_profiled_latent_basis_linear_ridge(
                 reciprocal_by_name,
                 deadline,
             )
-            cost = float(0.5 * np.dot(profiled_residual, profiled_residual))
+            parameters = linear_solve.parameters
+            cost = float(
+                0.5 * np.dot(linear_solve.residual, linear_solve.residual)
+            )
         except (
             ExactDerivativeFitError,
             RuntimeExpressionError,
@@ -869,6 +955,7 @@ def _fit_profiled_latent_basis_linear_ridge(
             if isinstance(exc, TimeoutError):
                 outer_result.status = -2
                 outer_result.message = str(exc)
+            linear_solve = None
         full_values = np.asarray(
             [parameters[item.name] for item in model.validated.candidate.parameters],
             dtype=float,
@@ -881,7 +968,15 @@ def _fit_profiled_latent_basis_linear_ridge(
             cost=cost,
             nfev=int(outer_result.nfev),
         )
-        outcomes.append(_ProfiledOutcome(result, parameters, failures))
+        outcomes.append(
+            _ProfiledOutcome(
+                result,
+                parameters,
+                failures,
+                linear_solve,
+                physical_start,
+            )
+        )
         if int(result.status) == -2:
             break
 
@@ -889,8 +984,10 @@ def _fit_profiled_latent_basis_linear_ridge(
         range(len(outcomes)), key=lambda index: float(outcomes[index].result.cost)
     )
     best = outcomes[best_index]
-    training_initials = _direct_observed_initials(model, training, direct)
-    validation_initials = _direct_observed_initials(model, validation, direct)
+    training_initials = _direct_observed_initials(profiled_model, training, direct)
+    validation_initials = _direct_observed_initials(
+        profiled_model, validation, direct
+    )
     diagnostics = tuple(
         _diagnostic(
             index,
@@ -903,6 +1000,41 @@ def _fit_profiled_latent_basis_linear_ridge(
                 f"{item.coordinate_name}=1/{item.parameter_name}"
                 for item in active_transformations
             ),
+            affine_parameters_outside_suggested_bounds=(
+                _parameters_outside_suggested_bounds(
+                    outcome.parameters,
+                    inner_specs,
+                    config.bound_tolerance,
+                )
+            ),
+            runtime_inferred_observed_states=tuple(
+                sorted(report.runtime_inferred_observed_state_names)
+            ),
+            derivative_equation_rows=(
+                outcome.linear_solve.derivative_row_count
+                if outcome.linear_solve is not None
+                else 0
+            ),
+            observation_mapping_rows=(
+                outcome.linear_solve.observation_row_count
+                if outcome.linear_solve is not None
+                else 0
+            ),
+            affine_design_rank=(
+                outcome.linear_solve.matrix_rank
+                if outcome.linear_solve is not None
+                else None
+            ),
+            affine_design_condition=(
+                outcome.linear_solve.matrix_condition
+                if outcome.linear_solve is not None
+                else None
+            ),
+            physical_outer_start_parameters=tuple(
+                f"{name}={value:.17g}"
+                for name, value in outcome.physical_outer_start.items()
+            ),
+            nonbinding_parameter_names=nonbinding_inner_names,
         )
         for index, outcome in enumerate(outcomes)
     )
@@ -919,7 +1051,7 @@ def _fit_profiled_latent_basis_linear_ridge(
             config.failure_penalty,
         )
     train_metrics = _evaluate(
-        model,
+        profiled_model,
         training,
         best.parameters,
         {},
@@ -928,7 +1060,7 @@ def _fit_profiled_latent_basis_linear_ridge(
         config,
     )
     validation_metrics = _evaluate(
-        model,
+        profiled_model,
         validation,
         best.parameters,
         {},
@@ -972,15 +1104,17 @@ def _profile_affine_latent_basis_weights(
     training: DatasetSplit,
     config: FitConfig,
     direct: Mapping[str, str],
-    observed_names: frozenset[str],
+    derivative_state_names: frozenset[str],
+    observation_channels: tuple[str, ...],
+    target_scales: Mapping[str, float],
     derivative_scales: Mapping[str, float],
     outer_specs: Sequence[ParameterSpec],
     inner_specs: Sequence[ParameterSpec],
     outer_values: NDArray[np.float64],
     reciprocal_by_name: Mapping[str, ReciprocalParameterTransformation],
     deadline: float | None,
-) -> tuple[Mapping[str, float], NDArray[np.float64]]:
-    """Solve bounded affine weights conditional on one latent-shape vector."""
+) -> _ProfiledLinearSolve:
+    """Solve conditional affine RHS and observation weights in one system."""
     outer = _decode_profiled_outer_parameters(
         outer_specs,
         outer_values,
@@ -994,6 +1128,8 @@ def _profile_affine_latent_basis_weights(
     inner_names = tuple(item.name for item in inner_specs)
     rows: list[NDArray[np.float64]] = []
     labels: list[float] = []
+    derivative_row_count = 0
+    observation_row_count = 0
     for trajectory in training.trajectories:
         state_values = _conditioned_latent_state_matrix(
             model,
@@ -1013,7 +1149,12 @@ def _profile_affine_latent_basis_weights(
             state = state_values[:, index]
             time = float(trajectory.time[index])
             anchor_rhs = model.rhs(time, state, anchor, forcing)
-            design = np.empty((len(model.state_names), len(inner_names)))
+            anchor_observations = model.observe(time, state, anchor, forcing)
+            rhs_design = np.empty((len(model.state_names), len(inner_names)))
+            observation_design = {
+                channel: np.empty(len(inner_names), dtype=float)
+                for channel in observation_channels
+            }
             for parameter_index, spec in enumerate(inner_specs):
                 probe = dict(anchor)
                 probe[spec.name] = float(spec.bounds.lower)
@@ -1021,22 +1162,48 @@ def _profile_affine_latent_basis_weights(
                 if delta == 0.0:
                     raise AssertionError("parameter probe has zero displacement")
                 probe_rhs = model.rhs(time, state, probe, forcing)
-                design[:, parameter_index] = (probe_rhs - anchor_rhs) / delta
-            intercept = anchor_rhs - design @ np.asarray(
+                probe_observations = model.observe(time, state, probe, forcing)
+                rhs_design[:, parameter_index] = (
+                    probe_rhs - anchor_rhs
+                ) / delta
+                for channel in observation_channels:
+                    observation_design[channel][parameter_index] = (
+                        probe_observations[channel]
+                        - anchor_observations[channel]
+                    ) / delta
+            anchor_vector = np.asarray(
                 [inner_anchor[name] for name in inner_names], dtype=float
             )
-            for state_name in sorted(observed_names):
+            rhs_intercept = anchor_rhs - rhs_design @ anchor_vector
+            for state_name in sorted(derivative_state_names):
                 state_index = model.state_names.index(state_name)
                 channel = direct[state_name]
                 scale = derivative_scales[state_name]
-                rows.append(design[state_index].copy() / scale)
+                rows.append(rhs_design[state_index].copy() / scale)
                 labels.append(
                     (
                         float(trajectory.derivatives[channel][index])
-                        - float(intercept[state_index])
+                        - float(rhs_intercept[state_index])
                     )
                     / scale
                 )
+                derivative_row_count += 1
+            for channel in observation_channels:
+                scale = target_scales[channel]
+                mapping_design = observation_design[channel]
+                mapping_intercept = (
+                    float(anchor_observations[channel])
+                    - float(mapping_design @ anchor_vector)
+                )
+                rows.append(mapping_design.copy() / scale)
+                labels.append(
+                    (
+                        float(trajectory.targets[channel][index])
+                        - mapping_intercept
+                    )
+                    / scale
+                )
+                observation_row_count += 1
     matrix = np.vstack(rows)
     response = np.asarray(labels, dtype=float)
     if not np.isfinite(matrix).all() or not np.isfinite(response).all():
@@ -1052,26 +1219,28 @@ def _profile_affine_latent_basis_weights(
     else:
         matrix_for_solve = matrix
         response_for_solve = response
-    solution = lsq_linear(
+    solution = _solve_affine_system(
         matrix_for_solve,
         response_for_solve,
-        bounds=(
-            np.asarray([item.bounds.lower for item in inner_specs], dtype=float),
-            np.asarray([item.bounds.upper for item in inner_specs], dtype=float),
-        ),
+        inner_specs,
+        nonbinding_parameter_names=model.nonbinding_parameter_bounds,
+        backend_label="profiled affine",
     )
-    if not solution.success or not np.isfinite(solution.x).all():
-        raise ExactDerivativeFitError(
-            "bounded profiled affine solve failed: " + str(solution.message)
-        )
-    parameters = {**outer, **dict(zip(inner_names, solution.x, strict=True))}
+    parameters = {**outer, **dict(zip(inner_names, solution, strict=True))}
     residual = np.concatenate(
         (
-            matrix @ solution.x - response,
-            np.sqrt(regularization) * np.asarray(solution.x, dtype=float),
+            matrix @ solution - response,
+            np.sqrt(regularization) * solution,
         )
     )
-    return parameters, residual
+    return _ProfiledLinearSolve(
+        parameters=parameters,
+        residual=residual,
+        derivative_row_count=derivative_row_count,
+        observation_row_count=observation_row_count,
+        matrix_rank=int(np.linalg.matrix_rank(matrix)),
+        matrix_condition=float(np.linalg.cond(matrix)),
+    )
 
 
 def _profiled_outer_variable(
@@ -1096,21 +1265,160 @@ def _profiled_outer_variable(
     )
 
 
-def _profiled_outer_warm_start(
-    initial_parameters: Mapping[str, float] | None,
-    outer_names: Sequence[str],
+def _profiled_outer_starts(
+    specs: Sequence[ParameterSpec],
+    count: int,
+    rng: np.random.Generator,
+    *,
+    preferred_parameters: Mapping[str, float] | None,
     reciprocal_by_name: Mapping[str, ReciprocalParameterTransformation],
-) -> Mapping[str, float] | None:
-    """Map an original-parameter warm start into outer optimizer coordinates."""
-    if initial_parameters is None:
-        return None
-    result: dict[str, float] = {}
-    for name in outer_names:
-        if name not in initial_parameters:
+) -> tuple[tuple[NDArray[np.float64], ...], tuple[Mapping[str, float], ...]]:
+    """Generate starts in physical space, then map to optimizer coordinates.
+
+    This gives original and reciprocal-coordinate experiments the same physical
+    multistarts for a fixed seed.
+    """
+    physical_variables = tuple(
+        _Variable(
+            f"parameter:{spec.name}",
+            spec.bounds.lower,
+            spec.bounds.upper,
+            spec.initialization_range.lower,
+            spec.initialization_range.upper,
+        )
+        for spec in specs
+    )
+    names = frozenset(spec.name for spec in specs)
+    preferred = (
+        None
+        if preferred_parameters is None
+        else {
+            name: value
+            for name, value in preferred_parameters.items()
+            if name in names
+        }
+    )
+    physical_values = _starts(
+        physical_variables,
+        count,
+        rng,
+        preferred_parameters=preferred,
+    )
+    physical_starts = tuple(
+        dict(zip((spec.name for spec in specs), values, strict=True))
+        for values in physical_values
+    )
+    coordinate_starts = tuple(
+        np.asarray(
+            [
+                1.0 / float(values[index])
+                if spec.name in reciprocal_by_name
+                else float(values[index])
+                for index, spec in enumerate(specs)
+            ],
+            dtype=float,
+        )
+        for values in physical_values
+    )
+    return coordinate_starts, physical_starts
+
+
+def _profiled_observation_channels(
+    model: CompiledModel,
+    direct: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Return targets whose measured values constrain a nonidentity mapping."""
+    result: list[str] = []
+    for channel in model.validated.context.targets:
+        body = model.validated.observation_expressions[channel].tree.body
+        if (
+            isinstance(body, ast.Name)
+            and direct.get(body.id) == channel
+        ):
             continue
-        value = float(initial_parameters[name])
-        result[name] = 1.0 / value if name in reciprocal_by_name else value
-    return result
+        result.append(channel)
+    return tuple(result)
+
+
+def _parameters_outside_suggested_bounds(
+    parameters: Mapping[str, float],
+    specs: Sequence[ParameterSpec],
+    tolerance_fraction: float,
+) -> tuple[str, ...]:
+    """Report affine estimates outside proposer-supplied suggested ranges."""
+    outside: list[str] = []
+    for spec in specs:
+        value = float(parameters[spec.name])
+        width = spec.bounds.upper - spec.bounds.lower
+        tolerance = tolerance_fraction * max(1.0, width)
+        if (
+            value < spec.bounds.lower - tolerance
+            or value > spec.bounds.upper + tolerance
+        ):
+            outside.append(f"parameter:{spec.name}")
+    return tuple(outside)
+
+
+def _nonbinding_affine_parameter_names(
+    model: CompiledModel,
+    parameter_names: frozenset[str],
+    config: FitConfig,
+) -> frozenset[str]:
+    """Separate proposer suggestions from trusted hard parameter constraints."""
+    if config.affine_parameter_bound_policy == "hard":
+        return frozenset()
+    trusted_hard = {
+        constraint.subject
+        for constraint in model.validated.candidate.constraints
+        if constraint.enforcement is ConstraintEnforcement.HARD
+        and constraint.source
+        in {
+            ConstraintSource.BENCHMARK,
+            ConstraintSource.RUNTIME,
+            ConstraintSource.DETERMINISTIC,
+        }
+    }
+    return parameter_names - trusted_hard
+
+
+def _solve_affine_system(
+    matrix: NDArray[np.float64],
+    response: NDArray[np.float64],
+    specs: Sequence[ParameterSpec],
+    *,
+    nonbinding_parameter_names: frozenset[str],
+    backend_label: str,
+) -> NDArray[np.float64]:
+    """Solve a linear system directly, retaining only trusted hard bounds."""
+    binding = {
+        spec.name for spec in specs if spec.name not in nonbinding_parameter_names
+    }
+    if not binding:
+        solution, _, _, _ = np.linalg.lstsq(matrix, response, rcond=None)
+    else:
+        lower = np.asarray(
+            [
+                spec.bounds.lower if spec.name in binding else -np.inf
+                for spec in specs
+            ],
+            dtype=float,
+        )
+        upper = np.asarray(
+            [
+                spec.bounds.upper if spec.name in binding else np.inf
+                for spec in specs
+            ],
+            dtype=float,
+        )
+        bounded = lsq_linear(matrix, response, bounds=(lower, upper))
+        if not bounded.success:
+            raise ExactDerivativeFitError(
+                f"{backend_label} solve failed: {bounded.message}"
+            )
+        solution = np.asarray(bounded.x, dtype=float)
+    if not np.isfinite(solution).all():
+        raise ExactDerivativeFitError(f"{backend_label} solve is nonfinite")
+    return solution
 
 
 def _decode_profiled_outer_parameters(
@@ -1137,25 +1445,13 @@ def _validate_partial_exact_derivative_contract(
 ) -> tuple[Mapping[str, str], frozenset[str]]:
     """Validate public observations needed by partial exact-derivative fits."""
     direct = model.direct_state_observation_channels
-    observed_names = frozenset(
-        item.name
-        for item in model.validated.candidate.states
-        if item.kind.value == "observed"
+    derivative_state_names = frozenset(
+        state_name
+        for state_name, channel in direct.items()
+        if channel in model.validated.context.targets
     )
-    latent_names = {
-        item.name
-        for item in model.validated.candidate.states
-        if item.kind.value == "latent"
-    }
-    missing_observed = sorted(observed_names - set(direct))
-    mislabeled_latent = sorted(latent_names & set(direct))
-    if missing_observed or mislabeled_latent:
-        raise ExactDerivativeFitError(
-            f"{backend_label} requires identity observations for all observed "
-            "states and no direct observation of latent states; "
-            f"missing_observed={missing_observed}, "
-            f"directly_observed_latent={mislabeled_latent}"
-        )
+    if not derivative_state_names:
+        return direct, derivative_state_names
     for trajectory in training.trajectories:
         if trajectory.derivative_provenance is not DerivativeProvenance.EXACT:
             raise ExactDerivativeFitError(
@@ -1163,13 +1459,16 @@ def _validate_partial_exact_derivative_contract(
                 f"{trajectory.trajectory_id} has "
                 f"{trajectory.derivative_provenance.value!r} provenance"
             )
-        missing = sorted(set(direct.values()) - set(trajectory.derivatives))
+        derivative_channels = {
+            direct[state_name] for state_name in derivative_state_names
+        }
+        missing = sorted(derivative_channels - set(trajectory.derivatives))
         if missing:
             raise ExactDerivativeFitError(
                 f"trajectory {trajectory.trajectory_id} lacks exact observed "
                 f"derivatives: {missing}"
             )
-    return direct, observed_names
+    return direct, derivative_state_names
 
 
 def _conditioned_latent_state_matrix(
@@ -1183,8 +1482,8 @@ def _conditioned_latent_state_matrix(
     direct = model.direct_state_observation_channels
     latent_indices = tuple(
         index
-        for index, state in enumerate(model.validated.candidate.states)
-        if state.kind.value == "latent"
+        for index, state_name in enumerate(model.state_names)
+        if state_name not in direct
     )
     state_values = np.empty(
         (len(model.state_names), trajectory.number_of_rows), dtype=float
@@ -1335,6 +1634,31 @@ def evaluate_fitted_candidate(
 ) -> tuple[Mapping[str, Mapping[str, float]], EvaluationMetrics]:
     """Evaluate frozen globals with fitted or target-free local initials."""
     settings = config or FitConfig()
+    if settings.affine_parameter_bound_policy == "suggested":
+        nonbinding: frozenset[str] = frozenset()
+        if settings.parameter_fit_strategy in {
+            "exact_derivative_linear_ridge",
+            "fixed_latent_basis_linear_ridge",
+        }:
+            nonbinding = _nonbinding_affine_parameter_names(
+                model,
+                frozenset(model.parameter_names),
+                settings,
+            )
+        elif (
+            settings.parameter_fit_strategy
+            == "profiled_latent_basis_linear_ridge"
+        ):
+            report = validate_profiled_latent_basis_parameterization(
+                model.validated
+            )
+            nonbinding = _nonbinding_affine_parameter_names(
+                model,
+                frozenset(report.affine_parameter_names),
+                settings,
+            )
+        if nonbinding:
+            model = model.with_nonbinding_parameter_bounds(nonbinding)
     if settings.parameter_fit_strategy in {
         "exact_derivative_linear_ridge",
         "fixed_latent_basis_linear_ridge",
@@ -1892,10 +2216,24 @@ def _diagnostic(
     *,
     backend: str = "rollout_least_squares",
     certified_parameter_transformations: tuple[str, ...] = (),
+    affine_parameters_outside_suggested_bounds: tuple[str, ...] = (),
+    runtime_inferred_observed_states: tuple[str, ...] = (),
+    derivative_equation_rows: int = 0,
+    observation_mapping_rows: int = 0,
+    affine_design_rank: int | None = None,
+    affine_design_condition: float | None = None,
+    physical_outer_start_parameters: tuple[str, ...] = (),
+    nonbinding_parameter_names: frozenset[str] = frozenset(),
 ) -> OptimizationDiagnostic:
     lower_hits: list[str] = []
     upper_hits: list[str] = []
     for variable, value in zip(variables, result.x, strict=True):
+        if (
+            variable.name.startswith("parameter:")
+            and variable.name.removeprefix("parameter:")
+            in nonbinding_parameter_names
+        ):
+            continue
         width = variable.upper - variable.lower
         tolerance = config.bound_tolerance * max(1.0, width)
         if value - variable.lower <= tolerance:
@@ -1915,6 +2253,15 @@ def _diagnostic(
         parameters_at_lower_bound=tuple(lower_hits),
         parameters_at_upper_bound=tuple(upper_hits),
         certified_parameter_transformations=certified_parameter_transformations,
+        affine_parameters_outside_suggested_bounds=(
+            affine_parameters_outside_suggested_bounds
+        ),
+        runtime_inferred_observed_states=runtime_inferred_observed_states,
+        derivative_equation_rows=derivative_equation_rows,
+        observation_mapping_rows=observation_mapping_rows,
+        affine_design_rank=affine_design_rank,
+        affine_design_condition=affine_design_condition,
+        physical_outer_start_parameters=physical_outer_start_parameters,
     )
 
 
