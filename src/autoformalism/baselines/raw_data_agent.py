@@ -1006,6 +1006,9 @@ def fit_result_payload(fit: FitResult) -> dict[str, object]:
             fit.validation_metrics.failed_trajectories
         ),
         "diagnostics": [asdict(item) for item in fit.diagnostics],
+        "initialization_diagnostics": [
+            asdict(item) for item in fit.initialization_diagnostics
+        ],
         "best_start_index": fit.best_start_index,
         "target_scales": dict(fit.target_scales),
     }

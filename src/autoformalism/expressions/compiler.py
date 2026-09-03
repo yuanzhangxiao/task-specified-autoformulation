@@ -24,6 +24,7 @@ from autoformalism.schemas import (
     ConstraintEnforcement,
     ConstraintKind,
     ConstraintSource,
+    ParameterDomain,
 )
 
 # ODE solvers can cross an invariant boundary by a few units of floating-point
@@ -277,6 +278,15 @@ class CompiledModel:
                 parameters[parameter.name],
                 f"parameter {parameter.name}",
             )
+            if parameter.domain is ParameterDomain.NONNEGATIVE and value < 0.0:
+                raise RuntimeExpressionError(
+                    f"parameter {parameter.name}={value} violates its "
+                    "nonnegative domain"
+                )
+            if parameter.domain is ParameterDomain.POSITIVE and value <= 0.0:
+                raise RuntimeExpressionError(
+                    f"parameter {parameter.name}={value} violates its positive domain"
+                )
             if (
                 parameter.name in self.nonbinding_parameter_bounds
                 or parameter.bounds is None

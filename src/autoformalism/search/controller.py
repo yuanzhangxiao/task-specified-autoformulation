@@ -24,6 +24,7 @@ from autoformalism.fitting import (
     EvaluationMetrics,
     FitConfig,
     FitResult,
+    InitializationDiagnostic,
     OptimizationDiagnostic,
     evaluate_fitted_candidate,
     fit_candidate,
@@ -1439,6 +1440,9 @@ def _fit_attempt_to_dict(
         "diagnostic_function_evaluations": [
             item.function_evaluations for item in fit.diagnostics
         ],
+        "initialization_diagnostics": [
+            asdict(item) for item in fit.initialization_diagnostics
+        ],
     }
 
 
@@ -1454,10 +1458,13 @@ def _implementation_fingerprint() -> str:
         root / "judging" / "prompts.py",
         root / "targets.py",
         root / "expressions" / "compiler.py",
+        root / "fitting" / "casadi_initializer.py",
         root / "fitting" / "fitter.py",
+        root / "fitting" / "models.py",
         root / "pruning" / "pruner.py",
         root / "schemas" / "candidate.py",
         root / "schemas" / "judge.py",
+        root / "schemas" / "proposal.py",
     )
     digest = hashlib.sha256()
     for path in paths:
@@ -1607,6 +1614,18 @@ def _deterministic_runtime_feedback(
             "success": fit.success,
             "message": fit.message,
             "backends": sorted({item.backend for item in fit.diagnostics}),
+            "nonlinear_initializers": [
+                {
+                    "backend": item.backend,
+                    "success": item.success,
+                    "status": item.status,
+                    "message": item.message,
+                    "objective": item.objective,
+                    "iterations": item.iterations,
+                    "wall_seconds": item.wall_seconds,
+                }
+                for item in fit.initialization_diagnostics
+            ],
             "optimizer_messages": [
                 item.message for item in fit.diagnostics if item.message
             ],
@@ -1987,6 +2006,9 @@ def _fit_to_dict(fit: FitResult) -> dict[str, Any]:
         "training_metrics": _metrics_to_dict(fit.training_metrics),
         "validation_metrics": _metrics_to_dict(fit.validation_metrics),
         "diagnostics": [asdict(item) for item in fit.diagnostics],
+        "initialization_diagnostics": [
+            asdict(item) for item in fit.initialization_diagnostics
+        ],
         "best_start_index": fit.best_start_index,
         "target_scales": dict(fit.target_scales),
         "message": fit.message,
@@ -2042,6 +2064,17 @@ def _fit_from_dict(payload: Mapping[str, Any]) -> FitResult:
                 }
             )
             for item in payload["diagnostics"]
+        ),
+        initialization_diagnostics=tuple(
+            InitializationDiagnostic(
+                **{
+                    **item,
+                    "parameter_estimates": tuple(
+                        item.get("parameter_estimates", ())
+                    ),
+                }
+            )
+            for item in payload.get("initialization_diagnostics", ())
         ),
         best_start_index=int(payload["best_start_index"]),
         target_scales=dict(payload["target_scales"]),

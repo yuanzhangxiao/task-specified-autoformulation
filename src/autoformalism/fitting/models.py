@@ -31,6 +31,12 @@ class FitConfig(BaseModel):
         "fixed_latent_basis_linear_ridge",
         "profiled_latent_basis_linear_ridge",
     ] = "bounded_nonlinear"
+    nonlinear_initializer: Literal["none", "casadi_multiple_shooting"] = "none"
+    nonlinear_initializer_failure_policy: Literal["continue", "raise"] = "continue"
+    casadi_shooting_interval_count: int = Field(default=10, ge=1)
+    casadi_maximum_intervals_per_trajectory: int = Field(default=128, ge=1)
+    casadi_maximum_iterations: int = Field(default=200, ge=1)
+    casadi_maximum_wall_time_seconds: float = Field(default=120.0, gt=0.0)
     derivative_ridge_regularization: float = Field(default=1e-8, ge=0.0)
     use_certified_reciprocal_coordinates: bool = True
     affine_parameter_bound_policy: Literal["suggested", "hard"] = "suggested"
@@ -130,6 +136,20 @@ class OptimizationDiagnostic:
 
 
 @dataclass(frozen=True)
+class InitializationDiagnostic:
+    """Outcome of an optional nonlinear initialization backend."""
+
+    backend: str
+    success: bool
+    status: str
+    message: str
+    objective: float | None
+    iterations: int | None
+    wall_seconds: float
+    parameter_estimates: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class FitResult:
     """Best bounded fit and train/validation rollout evaluation."""
 
@@ -144,6 +164,7 @@ class FitResult:
     best_start_index: int
     target_scales: Mapping[str, float]
     message: str | None = None
+    initialization_diagnostics: tuple[InitializationDiagnostic, ...] = ()
 
     def __post_init__(self) -> None:
         for attribute in (

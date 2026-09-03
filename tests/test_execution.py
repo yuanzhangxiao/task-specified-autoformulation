@@ -149,6 +149,12 @@ def test_cli_timeout_defaults_to_900_and_accepts_override() -> None:
     assert default.forbid_latent_states is False
     assert default.use_derivative_fit_fast_path is True
     assert default.parameter_fit_strategy == "bounded_nonlinear"
+    assert default.nonlinear_initializer == "none"
+    assert default.nonlinear_initializer_failure_policy == "continue"
+    assert default.casadi_shooting_interval_count == 10
+    assert default.casadi_maximum_intervals_per_trajectory == 128
+    assert default.casadi_maximum_iterations == 200
+    assert default.casadi_maximum_wall_time_seconds == 120.0
     assert default.derivative_ridge_regularization == 1e-8
     assert default.llm_cache_only is False
     assert default.llm_cache_root is None
@@ -492,6 +498,44 @@ def test_cli_enables_profiled_latent_basis_parameterization_explicitly(
     )
     plan = execute(arguments)
     assert plan["parameter_fit_strategy"] == "profiled_latent_basis_linear_ridge"
+
+
+def test_cli_enables_casadi_initializer_explicitly(tmp_path: Path) -> None:
+    parser = build_experiment_parser(description="test")
+    arguments = arguments_from_namespace(
+        parser.parse_args(
+            [
+                "--mock-llm",
+                "--dry-run",
+                "--benchmark-id",
+                "synthetic",
+                "--data-root",
+                str(tmp_path),
+                "--nonlinear-initializer",
+                "casadi_multiple_shooting",
+                "--nonlinear-initializer-failure-policy",
+                "raise",
+                "--casadi-shooting-interval-count",
+                "8",
+                "--casadi-maximum-intervals-per-trajectory",
+                "64",
+                "--casadi-maximum-iterations",
+                "90",
+                "--casadi-maximum-wall-time-seconds",
+                "45",
+            ]
+        )
+    )
+
+    plan = execute(arguments)
+
+    assert arguments.nonlinear_initializer == "casadi_multiple_shooting"
+    assert arguments.nonlinear_initializer_failure_policy == "raise"
+    assert plan["nonlinear_initializer"] == "casadi_multiple_shooting"
+    assert plan["casadi_shooting_interval_count"] == 8
+    assert plan["casadi_maximum_intervals_per_trajectory"] == 64
+    assert plan["casadi_maximum_iterations"] == 90
+    assert plan["casadi_maximum_wall_time_seconds"] == 45.0
 
 
 def test_structured_proposer_feedback_is_independent_and_opt_in(

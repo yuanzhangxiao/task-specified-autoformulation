@@ -30,6 +30,41 @@ class ParameterScope(str, Enum):
     TRAJECTORY_SPECIFIC = "trajectory_specific"
 
 
+class ParameterDomain(str, Enum):
+    """Qualitative physical domain without a proposer-owned magnitude range."""
+
+    REAL = "real"
+    NONNEGATIVE = "nonnegative"
+    POSITIVE = "positive"
+
+
+class ParameterRole(str, Enum):
+    """Small operational role vocabulary used to derive parameter domains."""
+
+    COEFFICIENT = "coefficient"
+    NONNEGATIVE_COEFFICIENT = "nonnegative_coefficient"
+    RATE = "rate"
+    TIME_CONSTANT = "time_constant"
+    SCALE = "scale"
+    OFFSET = "offset"
+    SHAPE = "shape"
+    POSITIVE_SHAPE = "positive_shape"
+
+    @property
+    def domain(self) -> ParameterDomain:
+        """Return the deterministic domain implied by this typed role."""
+        if self is ParameterRole.NONNEGATIVE_COEFFICIENT:
+            return ParameterDomain.NONNEGATIVE
+        if self in {
+            ParameterRole.RATE,
+            ParameterRole.TIME_CONSTANT,
+            ParameterRole.SCALE,
+            ParameterRole.POSITIVE_SHAPE,
+        }:
+            return ParameterDomain.POSITIVE
+        return ParameterDomain.REAL
+
+
 class ConstraintKind(str, Enum):
     """Machine-readable constraint categories."""
 
@@ -135,14 +170,32 @@ class ParameterSpec(StrictSchema):
 
     name: Identifier
     scope: ParameterScope
+    role: ParameterRole = ParameterRole.COEFFICIENT
+    domain: ParameterDomain = ParameterDomain.REAL
     bounds: ValueRange | None = None
     initialization_range: ValueRange | None = None
     unit: NonEmptyText = "unspecified"
     description: NonEmptyText = "unspecified"
 
+    @model_validator(mode="before")
+    @classmethod
+    def derive_domain_from_role(cls, value: Any) -> Any:
+        """Fill the redundant domain field from a supplied typed role."""
+        if not isinstance(value, dict) or "domain" in value:
+            return value
+        normalized = dict(value)
+        role = ParameterRole(normalized.get("role", ParameterRole.COEFFICIENT))
+        normalized["domain"] = role.domain.value
+        return normalized
+
     @model_validator(mode="after")
     def initialization_is_within_bounds(self) -> ParameterSpec:
         """Validate legacy ranges when either one is present."""
+        if self.domain is not self.role.domain:
+            raise ValueError(
+                f"parameter role {self.role.value} requires domain "
+                f"{self.role.domain.value}"
+            )
         if self.bounds is not None and self.bounds.lower == self.bounds.upper:
             raise ValueError("parameter bounds must be nondegenerate")
         if (

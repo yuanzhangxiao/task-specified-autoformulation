@@ -87,10 +87,15 @@ powers; `^` is forbidden. Do not use undeclared aliases such as `sigma`.
 Do not redeclare supplied auxiliary, external-input, or fixed-covariate channel
 names as states, processes, or parameters. Map each observed target exactly once:
 never create both an observed state and a same-named algebraic for one target.
-Do not propose numeric parameter bounds or initialization ranges. Declare only
-each fitted parameter's name and global scope; the runtime owns numerical search
-initialization and any trusted benchmark constraints. Do not invent numeric
-bounds for states or other variables.
+Do not propose numeric parameter bounds or initialization ranges. For each fitted
+parameter, declare its name, global scope, and one qualitative role. Use `rate`
+or `time_constant` only when the equation encodes the sign separately and the
+physical quantity must be positive; use `nonnegative_coefficient` for a weight
+that may be zero; use `coefficient`, `offset`, or `shape` when either sign is
+admissible. The runtime derives the qualitative real/nonnegative/positive domain
+from that role and owns numerical initialization and trusted benchmark constraints.
+Do not infer a role from the parameter's name or invent numeric bounds for states
+or other variables.
 For states, use qualitative `nonnegative` or `positive` constraints
 without `bounds`; use a `bounded` constraint only when the benchmark supplies the
 numeric range explicitly.
@@ -264,6 +269,12 @@ class ExecutionArguments:
         "fixed_latent_basis_linear_ridge",
         "profiled_latent_basis_linear_ridge",
     ] = "bounded_nonlinear"
+    nonlinear_initializer: Literal["none", "casadi_multiple_shooting"] = "none"
+    nonlinear_initializer_failure_policy: Literal["continue", "raise"] = "continue"
+    casadi_shooting_interval_count: int = 10
+    casadi_maximum_intervals_per_trajectory: int = 128
+    casadi_maximum_iterations: int = 200
+    casadi_maximum_wall_time_seconds: float = 120.0
     derivative_ridge_regularization: float = 1e-8
     llm_cache_only: bool = False
     llm_cache_root: Path | None = None
@@ -626,6 +637,29 @@ def build_experiment_parser(
         default=1e-8,
         help="nonnegative Eq. (11) ridge coefficient for the oracle GMM backend",
     )
+    parser.add_argument(
+        "--nonlinear-initializer",
+        choices=("none", "casadi_multiple_shooting"),
+        default="none",
+        help=(
+            "optional training-only nonlinear initializer; the existing fitter "
+            "and causal rollout evaluator remain authoritative"
+        ),
+    )
+    parser.add_argument(
+        "--nonlinear-initializer-failure-policy",
+        choices=("continue", "raise"),
+        default="continue",
+        help="continue with runtime starts or reject when initialization fails",
+    )
+    parser.add_argument("--casadi-shooting-interval-count", type=int, default=10)
+    parser.add_argument(
+        "--casadi-maximum-intervals-per-trajectory", type=int, default=128
+    )
+    parser.add_argument("--casadi-maximum-iterations", type=int, default=200)
+    parser.add_argument(
+        "--casadi-maximum-wall-time-seconds", type=float, default=120.0
+    )
     return parser
 
 
@@ -705,6 +739,16 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         raise SystemExit("--fit-timeout-seconds must be positive")
     if namespace.derivative_ridge_regularization < 0.0:
         raise SystemExit("--derivative-ridge-regularization must be nonnegative")
+    if namespace.casadi_shooting_interval_count < 1:
+        raise SystemExit("--casadi-shooting-interval-count must be at least 1")
+    if namespace.casadi_maximum_intervals_per_trajectory < 1:
+        raise SystemExit(
+            "--casadi-maximum-intervals-per-trajectory must be at least 1"
+        )
+    if namespace.casadi_maximum_iterations < 1:
+        raise SystemExit("--casadi-maximum-iterations must be at least 1")
+    if namespace.casadi_maximum_wall_time_seconds <= 0.0:
+        raise SystemExit("--casadi-maximum-wall-time-seconds must be positive")
     if namespace.proposal_policy == "incumbent_refinement_v1":
         if namespace.proposer_feedback_mode != "rich_v1":
             raise SystemExit(
@@ -783,6 +827,18 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         forbid_latent_states=namespace.forbid_latent_states,
         use_derivative_fit_fast_path=(not namespace.disable_derivative_fit_fast_path),
         parameter_fit_strategy=namespace.parameter_fit_strategy,
+        nonlinear_initializer=namespace.nonlinear_initializer,
+        nonlinear_initializer_failure_policy=(
+            namespace.nonlinear_initializer_failure_policy
+        ),
+        casadi_shooting_interval_count=namespace.casadi_shooting_interval_count,
+        casadi_maximum_intervals_per_trajectory=(
+            namespace.casadi_maximum_intervals_per_trajectory
+        ),
+        casadi_maximum_iterations=namespace.casadi_maximum_iterations,
+        casadi_maximum_wall_time_seconds=(
+            namespace.casadi_maximum_wall_time_seconds
+        ),
         derivative_ridge_regularization=(
             namespace.derivative_ridge_regularization
         ),
@@ -1013,6 +1069,20 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
         "parameter_fit_strategy": arguments.parameter_fit_strategy,
+        "nonlinear_initializer": arguments.nonlinear_initializer,
+        "nonlinear_initializer_failure_policy": (
+            arguments.nonlinear_initializer_failure_policy
+        ),
+        "casadi_shooting_interval_count": (
+            arguments.casadi_shooting_interval_count
+        ),
+        "casadi_maximum_intervals_per_trajectory": (
+            arguments.casadi_maximum_intervals_per_trajectory
+        ),
+        "casadi_maximum_iterations": arguments.casadi_maximum_iterations,
+        "casadi_maximum_wall_time_seconds": (
+            arguments.casadi_maximum_wall_time_seconds
+        ),
         "derivative_ridge_regularization": (
             arguments.derivative_ridge_regularization
         ),
@@ -1085,6 +1155,20 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             maximum_wall_time_seconds=arguments.fit_timeout_seconds,
             allow_derivative_regression=use_derivative_fit_fast_path,
             parameter_fit_strategy=arguments.parameter_fit_strategy,
+            nonlinear_initializer=arguments.nonlinear_initializer,
+            nonlinear_initializer_failure_policy=(
+                arguments.nonlinear_initializer_failure_policy
+            ),
+            casadi_shooting_interval_count=(
+                arguments.casadi_shooting_interval_count
+            ),
+            casadi_maximum_intervals_per_trajectory=(
+                arguments.casadi_maximum_intervals_per_trajectory
+            ),
+            casadi_maximum_iterations=arguments.casadi_maximum_iterations,
+            casadi_maximum_wall_time_seconds=(
+                arguments.casadi_maximum_wall_time_seconds
+            ),
             derivative_ridge_regularization=(
                 arguments.derivative_ridge_regularization
             ),

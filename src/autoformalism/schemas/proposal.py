@@ -22,6 +22,7 @@ from autoformalism.schemas.candidate import (
     ConstraintSpec,
     InitialConditionSpec,
     ObservationMapping,
+    ParameterRole,
     ParameterScope,
     ParameterSpec,
     ProcessSpec,
@@ -87,6 +88,7 @@ class ProposedParameter(StrictSchema):
 
     name: Identifier
     scope: ParameterScope = ParameterScope.GLOBAL
+    role: ParameterRole = ParameterRole.COEFFICIENT
     # Accepted only so historical stored responses remain readable. These are
     # excluded from serialization, enrichment, and the provider-facing schema.
     bounds: ValueRange | None = Field(default=None, exclude=True, repr=False)
@@ -175,7 +177,12 @@ def enrich_proposal(proposal: ProposerCandidate) -> CandidateModel:
             )
         )
     parameters = [
-        ParameterSpec(name=parameter.name, scope=parameter.scope)
+        ParameterSpec(
+            name=parameter.name,
+            scope=parameter.scope,
+            role=parameter.role,
+            domain=parameter.role.domain,
+        )
         for parameter in proposal.parameters
     ]
     return CandidateModel(
@@ -491,6 +498,8 @@ def enrich_proposal_v2(
             ParameterSpec(
                 name=parameter.name,
                 scope=parameter.scope,
+                role=parameter.role,
+                domain=parameter.role.domain,
             )
             for parameter in proposal.parameters
         ),

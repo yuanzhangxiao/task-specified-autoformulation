@@ -46,6 +46,21 @@
       "title": "EmbeddedConstraint",
       "type": "object"
     },
+    "ParameterRole": {
+      "description": "Small operational role vocabulary used to derive parameter domains.",
+      "enum": [
+        "coefficient",
+        "nonnegative_coefficient",
+        "rate",
+        "time_constant",
+        "scale",
+        "offset",
+        "shape",
+        "positive_shape"
+      ],
+      "title": "ParameterRole",
+      "type": "string"
+    },
     "ParameterScope": {
       "description": "Sharing scope for a fitted scalar.",
       "enum": [
@@ -90,6 +105,10 @@
           "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
           "title": "Name",
           "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ParameterRole",
+          "default": "coefficient"
         },
         "scope": {
           "$ref": "#/$defs/ParameterScope",

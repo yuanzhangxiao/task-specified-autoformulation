@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 
 import numpy as np
@@ -41,6 +41,7 @@ from autoformalism.schemas import (
     ConstraintSource,
     ConstraintSpec,
     InitialConditionSpec,
+    ParameterDomain,
     ParameterScope,
     ParameterSpec,
 )
@@ -73,6 +74,10 @@ def _parameter_variable(
     """Build a numerical search domain without asking the proposer for one."""
     lower = -float("inf") if spec.bounds is None else spec.bounds.lower
     upper = float("inf") if spec.bounds is None else spec.bounds.upper
+    if spec.domain is ParameterDomain.NONNEGATIVE:
+        lower = max(lower, 0.0)
+    elif spec.domain is ParameterDomain.POSITIVE:
+        lower = max(lower, np.finfo(float).eps)
     for constraint in model.validated.candidate.constraints:
         if (
             constraint.subject != spec.name
@@ -180,6 +185,40 @@ def fit_candidate(
         channel: scaler.scales[f"target:{channel}"].standard_deviation
         for channel in model.validated.context.targets
     }
+    if settings.nonlinear_initializer == "casadi_multiple_shooting":
+        from autoformalism.fitting.casadi_initializer import (
+            initialize_parameters_with_multiple_shooting,
+        )
+
+        initialized = initialize_parameters_with_multiple_shooting(
+            model,
+            training,
+            settings,
+            target_scales,
+            preferred_parameters=initial_global_parameters,
+        )
+        if (
+            not initialized.diagnostic.success
+            and settings.nonlinear_initializer_failure_policy == "raise"
+        ):
+            raise RuntimeError(initialized.diagnostic.message)
+        preferred = dict(initial_global_parameters or {})
+        if initialized.diagnostic.success:
+            preferred.update(initialized.parameters)
+        core_settings = settings.model_copy(
+            update={"nonlinear_initializer": "none"}
+        )
+        fitted = fit_candidate(
+            model,
+            training,
+            validation,
+            core_settings,
+            initial_global_parameters=preferred or None,
+        )
+        return replace(
+            fitted,
+            initialization_diagnostics=(initialized.diagnostic,),
+        )
     if settings.parameter_fit_strategy == "exact_derivative_linear_ridge":
         return _fit_exact_derivative_linear_ridge(
             model,
@@ -1476,7 +1515,10 @@ def _solve_affine_system(
 ) -> NDArray[np.float64]:
     """Solve a linear system directly, retaining only trusted hard bounds."""
     binding = {
-        spec.name for spec in specs if spec.name not in nonbinding_parameter_names
+        spec.name
+        for spec in specs
+        if spec.domain is not ParameterDomain.REAL
+        or spec.name not in nonbinding_parameter_names
     }
     if not binding:
         solution, _, _, _ = np.linalg.lstsq(matrix, response, rcond=None)
