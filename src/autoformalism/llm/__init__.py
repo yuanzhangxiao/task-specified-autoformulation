@@ -11,7 +11,12 @@ from autoformalism.llm.config import (
 )
 from autoformalism.llm.gemini import GeminiClient
 from autoformalism.llm.mock import MockLLMClient
-from autoformalism.llm.models import LLMCallResult, LLMClient, TokenUsage
+from autoformalism.llm.models import (
+    LLMCallResult,
+    LLMClient,
+    StagedLLMClient,
+    TokenUsage,
+)
 from autoformalism.llm.ollama import OllamaClient
 from autoformalism.llm.openai_responses import OpenAIResponsesClient
 from autoformalism.llm.vllm import VLLMClient
@@ -28,6 +33,7 @@ __all__ = [
     "OllamaResponseMode",
     "OllamaThinking",
     "OpenAIResponsesClient",
+    "StagedLLMClient",
     "TokenUsage",
     "VLLMClient",
     "VLLMReasoningEffort",

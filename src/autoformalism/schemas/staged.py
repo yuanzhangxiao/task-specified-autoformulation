@@ -14,6 +14,7 @@ from autoformalism.schemas.candidate import (
     ParameterSpec,
     StateSpec,
 )
+from autoformalism.schemas.proposal import ProposedInitialValue, ProposedParameter
 
 Sha256Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
@@ -202,6 +203,101 @@ class FunctionalCandidate(StrictSchema):
         )
         _unique_attribute("parameter", self.parameters, "name")
         _unique_attribute("initial condition", self.initial_conditions, "state")
+        return self
+
+
+class ProposedTopologyState(StrictSchema):
+    """One generated state identity in the compact topology contract.
+
+    State observability is deliberately omitted.  The runtime derives it from
+    the target mappings instead of asking the proposer to duplicate public
+    channel metadata.
+    """
+
+    name: Identifier
+    mechanisms: tuple[Identifier, ...] = Field(default=(), max_length=32)
+
+
+class ProposedTopologyProcess(StrictSchema):
+    """One instantaneous generated quantity before a function is assigned."""
+
+    name: Identifier
+    mechanisms: tuple[Identifier, ...] = Field(default=(), max_length=32)
+
+
+class ProposedTopologyCandidate(StrictSchema):
+    """Minimal provider-facing graph proposal without runtime-owned metadata."""
+
+    schema_version: Literal["proposed-topology-candidate-1"] = (
+        "proposed-topology-candidate-1"
+    )
+    candidate_id: Identifier
+    parent_candidate_id: Identifier | None = None
+    change_summary: NonEmptyText = "unspecified"
+    states: tuple[ProposedTopologyState, ...] = Field(min_length=1, max_length=64)
+    processes: tuple[ProposedTopologyProcess, ...] = Field(
+        default=(), max_length=256
+    )
+    interactions: tuple[TopologyInteraction, ...] = Field(
+        min_length=1,
+        max_length=512,
+    )
+    observation_mappings: tuple[TopologyObservationMapping, ...] = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    @model_validator(mode="after")
+    def declarations_are_locally_unique(self) -> ProposedTopologyCandidate:
+        """Reject ambiguity before context-dependent topology enrichment."""
+        states = _unique_attribute("state", self.states, "name")
+        processes = _unique_attribute("process", self.processes, "name")
+        _unique_attribute("interaction", self.interactions, "interaction_id")
+        _unique_attribute(
+            "observation channel", self.observation_mappings, "channel"
+        )
+        collisions = states & processes
+        if collisions:
+            raise ValueError(
+                f"state/process name collision: {sorted(collisions)}"
+            )
+        return self
+
+
+class ProposedFunctionalInitial(StrictSchema):
+    """Initial value supplied only for one runtime-derived latent state."""
+
+    state: Identifier
+    initial: ProposedInitialValue
+
+
+class ProposedFunctionalCandidate(StrictSchema):
+    """Minimal provider-facing functions for one committed topology."""
+
+    schema_version: Literal["proposed-functional-candidate-1"] = (
+        "proposed-functional-candidate-1"
+    )
+    candidate_id: Identifier
+    parent_candidate_id: Identifier | None = None
+    change_summary: NonEmptyText = "unspecified"
+    interaction_functions: tuple[InteractionFunction, ...] = Field(
+        min_length=1,
+        max_length=512,
+    )
+    parameters: tuple[ProposedParameter, ...] = Field(default=(), max_length=256)
+    latent_initials: tuple[ProposedFunctionalInitial, ...] = Field(
+        default=(),
+        max_length=64,
+    )
+
+    @model_validator(mode="after")
+    def declarations_are_unique(self) -> ProposedFunctionalCandidate:
+        """Require one function, parameter, and latent initializer per name."""
+        _unique_attribute(
+            "interaction function", self.interaction_functions, "interaction_id"
+        )
+        _unique_attribute("parameter", self.parameters, "name")
+        _unique_attribute("latent initial", self.latent_initials, "state")
         return self
 
 

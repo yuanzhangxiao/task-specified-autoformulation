@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -12,11 +12,16 @@ from autoformalism.schemas import (
     AtomicJudgeResult,
     CandidateModel,
     ComparativeJudgeResult,
+    FunctionalCandidate,
     HybridJudgeResult,
     PairedTargetCompletenessJudgeResult,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
+    TopologyCandidate,
 )
+
+if TYPE_CHECKING:
+    from autoformalism.expressions import ValidationContext
 
 StructuredT = TypeVar("StructuredT", bound=BaseModel)
 
@@ -133,4 +138,31 @@ class LLMClient(Protocol):
         expected_target_ids: set[str],
     ) -> LLMCallResult[PairedTargetCompletenessJudgeResult]:
         """Request target-only absolute answers for two visible candidates."""
+        ...
+
+
+class StagedLLMClient(Protocol):
+    """Provider-neutral topology and function proposal interface."""
+
+    def propose_topology(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: ValidationContext,
+        cache_only: bool = False,
+    ) -> LLMCallResult[TopologyCandidate]:
+        """Request one runtime-enriched topology candidate."""
+        ...
+
+    def propose_functions(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        topology: TopologyCandidate,
+        context: ValidationContext,
+        cache_only: bool = False,
+    ) -> LLMCallResult[FunctionalCandidate]:
+        """Request functions bound to one topology commitment."""
         ...

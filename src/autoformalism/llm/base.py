@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic
+from typing import TYPE_CHECKING, Any, Generic
 
 from pydantic import BaseModel, ValidationError
 
@@ -33,13 +33,20 @@ from autoformalism.schemas import (
     AtomicJudgeResult,
     CandidateModel,
     ComparativeJudgeResult,
+    FunctionalCandidate,
     HybridJudgeResult,
     PairedTargetCompletenessJudgeResult,
+    ProposedFunctionalCandidate,
+    ProposedTopologyCandidate,
     ProposerCandidateV2,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
+    TopologyCandidate,
     enrich_proposal_v2,
 )
+
+if TYPE_CHECKING:
+    from autoformalism.expressions import ValidationContext
 
 
 def _provider_request_count(raw_response: object) -> int:
@@ -135,6 +142,88 @@ class CachedLLMClient(ABC):
                 compact.parsed,
                 self._proposal_target_channels,
             ),
+            raw_response=compact.raw_response,
+            cache_hit=compact.cache_hit,
+            attempts=compact.attempts,
+            latency_ms=compact.latency_ms,
+            usage=compact.usage,
+            actual_provider_attempts=compact.provider_attempts,
+        )
+
+    def propose_topology(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: ValidationContext,
+        cache_only: bool = False,
+    ) -> LLMCallResult[TopologyCandidate]:
+        """Request a compact graph and enrich public metadata locally."""
+        from autoformalism.staging import enrich_topology_proposal
+
+        compact = self._structured_call(
+            role="staged_topology_proposer_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=ProposedTopologyCandidate,
+            validate_parsed=lambda proposal: enrich_topology_proposal(
+                proposal, context
+            ),
+            request_metadata={
+                "validation_context": context.model_dump(mode="json")
+            },
+            cache_only=cache_only,
+        )
+        topology = enrich_topology_proposal(compact.parsed, context)
+        return LLMCallResult(
+            request_hash=compact.request_hash,
+            parsed=topology,
+            raw_response=compact.raw_response,
+            cache_hit=compact.cache_hit,
+            attempts=compact.attempts,
+            latency_ms=compact.latency_ms,
+            usage=compact.usage,
+            actual_provider_attempts=compact.provider_attempts,
+        )
+
+    def propose_functions(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        topology: TopologyCandidate,
+        context: ValidationContext,
+        cache_only: bool = False,
+    ) -> LLMCallResult[FunctionalCandidate]:
+        """Request functions for one committed topology and enrich locally."""
+        from autoformalism.staging import (
+            enrich_functional_proposal,
+            expand_staged_candidate,
+            topology_commitment_sha256,
+        )
+
+        def validate(proposal: ProposedFunctionalCandidate) -> None:
+            functional = enrich_functional_proposal(proposal, topology)
+            expand_staged_candidate(topology, functional, context)
+
+        compact = self._structured_call(
+            role="staged_function_proposer_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=ProposedFunctionalCandidate,
+            validate_parsed=validate,
+            request_metadata={
+                "topology_commitment_sha256": topology_commitment_sha256(
+                    topology
+                ),
+                "validation_context": context.model_dump(mode="json"),
+            },
+            cache_only=cache_only,
+        )
+        functional = enrich_functional_proposal(compact.parsed, topology)
+        return LLMCallResult(
+            request_hash=compact.request_hash,
+            parsed=functional,
             raw_response=compact.raw_response,
             cache_hit=compact.cache_hit,
             attempts=compact.attempts,
@@ -308,6 +397,7 @@ class CachedLLMClient(ABC):
             Callable[[StructuredT], tuple[StructuredT, dict[str, object]]] | None
         ) = None,
         validate_parsed: Callable[[StructuredT], object] | None = None,
+        request_metadata: dict[str, object] | None = None,
         cache_only: bool = False,
     ) -> LLMCallResult[StructuredT]:
         if not system_prompt.strip() or not user_prompt.strip():
@@ -317,6 +407,7 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=response_model,
+            request_metadata=request_metadata,
         )
         cached = self._load_cache(request_hash, response_model)
         if cached is not None:
@@ -476,6 +567,7 @@ class CachedLLMClient(ABC):
         system_prompt: str,
         user_prompt: str,
         response_model: type[BaseModel],
+        request_metadata: dict[str, object] | None = None,
     ) -> str:
         """Hash all semantic request inputs using canonical JSON."""
         request = {
@@ -491,6 +583,8 @@ class CachedLLMClient(ABC):
                 self._proposal_protected_parameter_names
             ),
         }
+        if request_metadata is not None:
+            request["request_metadata"] = request_metadata
         canonical = json.dumps(
             request,
             sort_keys=True,

@@ -9,9 +9,16 @@ import pytest
 from pydantic import ValidationError
 
 from autoformalism.expressions import ValidationContext
-from autoformalism.schemas import FunctionalCandidate, TopologyCandidate
+from autoformalism.schemas import (
+    FunctionalCandidate,
+    ProposedFunctionalCandidate,
+    ProposedTopologyCandidate,
+    TopologyCandidate,
+)
 from autoformalism.search import candidate_identity
 from autoformalism.staging import (
+    enrich_functional_proposal,
+    enrich_topology_proposal,
     expand_staged_candidate,
     topology_commitment_sha256,
 )
@@ -126,6 +133,49 @@ def _context() -> ValidationContext:
     return ValidationContext(targets=("target",), external_inputs=("input_u",))
 
 
+def _proposed_topology_payload() -> dict[str, Any]:
+    payload = _topology_payload()
+    payload["schema_version"] = "proposed-topology-candidate-1"
+    payload.pop("external_symbols")
+    payload["states"] = [
+        {"name": item["name"], "mechanisms": item.get("mechanisms", [])}
+        for item in payload["states"]
+    ]
+    payload["processes"] = [
+        {"name": item["name"], "mechanisms": item.get("mechanisms", [])}
+        for item in payload["processes"]
+    ]
+    return payload
+
+
+def _proposed_functional_payload() -> dict[str, Any]:
+    return {
+        "candidate_id": "functional_compact_0",
+        "change_summary": "Assign functions to a fixed graph.",
+        "interaction_functions": [
+            {"interaction_id": "latent_drive", "expression": "input_u"},
+            {
+                "interaction_id": "latent_relaxation",
+                "expression": "latent_decay * z",
+            },
+            {"interaction_id": "flux_generation", "expression": "gain * z"},
+            {"interaction_id": "storage_source", "expression": "flux"},
+            {
+                "interaction_id": "storage_sink",
+                "expression": "storage_decay * x",
+            },
+        ],
+        "parameters": [
+            {"name": "latent_decay", "role": "rate"},
+            {"name": "gain", "role": "scale"},
+            {"name": "storage_decay", "role": "rate"},
+        ],
+        "latent_initials": [
+            {"state": "z", "initial": {"fixed_value": 0.0}}
+        ],
+    }
+
+
 def test_staged_expansion_builds_valid_executable_and_identity_link() -> None:
     topology = TopologyCandidate.model_validate(_topology_payload())
     functional = FunctionalCandidate.model_validate(_functional_payload(topology))
@@ -142,6 +192,59 @@ def test_staged_expansion_builds_valid_executable_and_identity_link() -> None:
         "x": "(flux) - (storage_decay * x)",
         "z": "(input_u) - (latent_decay * z)",
     }
+
+
+def test_compact_staged_proposals_are_enriched_from_runtime_context() -> None:
+    proposed_topology = ProposedTopologyCandidate.model_validate(
+        _proposed_topology_payload()
+    )
+    topology = enrich_topology_proposal(proposed_topology, _context())
+    proposed_functional = ProposedFunctionalCandidate.model_validate(
+        _proposed_functional_payload()
+    )
+    functional = enrich_functional_proposal(proposed_functional, topology)
+
+    result = expand_staged_candidate(topology, functional, _context())
+
+    assert topology.external_symbols == ("input_u",)
+    assert {item.name: item.kind.value for item in topology.states} == {
+        "x": "observed",
+        "z": "latent",
+    }
+    assert {item.state: item.expression for item in functional.initial_conditions} == {
+        "x": "target",
+        "z": None,
+    }
+    assert all(item.scope.value == "global" for item in functional.parameters)
+    assert all(item.bounds is None for item in functional.parameters)
+    assert result.candidate_identity == candidate_identity(result.candidate)
+
+
+def test_compact_topology_cannot_invent_external_channels_or_targets() -> None:
+    unknown_source = _proposed_topology_payload()
+    unknown_source["interactions"][0]["sources"] = ["private_signal"]
+    proposal = ProposedTopologyCandidate.model_validate(unknown_source)
+    with pytest.raises(ValueError, match="unavailable external symbols"):
+        enrich_topology_proposal(proposal, _context())
+
+    wrong_target = _proposed_topology_payload()
+    wrong_target["observation_mappings"][0]["channel"] = "other_target"
+    proposal = ProposedTopologyCandidate.model_validate(wrong_target)
+    with pytest.raises(ValueError, match="mappings differ from public targets"):
+        enrich_topology_proposal(proposal, _context())
+
+
+def test_compact_functional_requires_exact_latent_initial_set() -> None:
+    topology = enrich_topology_proposal(
+        ProposedTopologyCandidate.model_validate(_proposed_topology_payload()),
+        _context(),
+    )
+    payload = _proposed_functional_payload()
+    payload["latent_initials"] = []
+    proposal = ProposedFunctionalCandidate.model_validate(payload)
+
+    with pytest.raises(ValueError, match=r"missing=\['z'\]"):
+        enrich_functional_proposal(proposal, topology)
 
 
 def test_topology_commitment_is_stable_across_json_round_trip() -> None:

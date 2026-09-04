@@ -1,0 +1,194 @@
+{
+  "$defs": {
+    "InteractionFunction": {
+      "additionalProperties": false,
+      "description": "Restricted expression assigned to one topology interaction.",
+      "properties": {
+        "expression": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "expression"
+      ],
+      "title": "InteractionFunction",
+      "type": "object"
+    },
+    "ParameterRole": {
+      "description": "Small operational role vocabulary used to derive parameter domains.",
+      "enum": [
+        "coefficient",
+        "nonnegative_coefficient",
+        "rate",
+        "time_constant",
+        "scale",
+        "offset",
+        "shape",
+        "positive_shape"
+      ],
+      "title": "ParameterRole",
+      "type": "string"
+    },
+    "ProposedFunctionalInitial": {
+      "additionalProperties": false,
+      "description": "Initial value supplied only for one runtime-derived latent state.",
+      "properties": {
+        "initial": {
+          "$ref": "#/$defs/ProposedInitialValue"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "initial"
+      ],
+      "title": "ProposedFunctionalInitial",
+      "type": "object"
+    },
+    "ProposedInitialValue": {
+      "additionalProperties": false,
+      "description": "Fixed or analytic initialization for one latent state.",
+      "properties": {
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expression"
+        },
+        "fixed_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixed Value"
+        }
+      },
+      "title": "ProposedInitialValue",
+      "type": "object"
+    },
+    "ProposedParameter": {
+      "additionalProperties": false,
+      "description": "A fitted scalar identity; numerical values belong to the runtime.",
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ParameterRole",
+          "default": "coefficient"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ProposedParameter",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Minimal provider-facing functions for one committed topology.",
+  "properties": {
+    "candidate_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "change_summary": {
+      "default": "unspecified",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Change Summary",
+      "type": "string"
+    },
+    "interaction_functions": {
+      "items": {
+        "$ref": "#/$defs/InteractionFunction"
+      },
+      "maxItems": 512,
+      "minItems": 1,
+      "title": "Interaction Functions",
+      "type": "array"
+    },
+    "latent_initials": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProposedFunctionalInitial"
+      },
+      "maxItems": 64,
+      "title": "Latent Initials",
+      "type": "array"
+    },
+    "parameters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProposedParameter"
+      },
+      "maxItems": 256,
+      "title": "Parameters",
+      "type": "array"
+    },
+    "parent_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Candidate Id"
+    },
+    "schema_version": {
+      "const": "proposed-functional-candidate-1",
+      "default": "proposed-functional-candidate-1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "interaction_functions"
+  ],
+  "title": "ProposedFunctionalCandidate",
+  "type": "object"
+}

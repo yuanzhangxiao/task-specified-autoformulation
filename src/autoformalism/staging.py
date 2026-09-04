@@ -16,12 +16,20 @@ from autoformalism.expressions import (
 from autoformalism.schemas import (
     CandidateModel,
     FunctionalCandidate,
+    InitialConditionSpec,
     InteractionPolarity,
     InteractionTargetKind,
     ObservationMapping,
+    ParameterScope,
+    ParameterSpec,
     ProcessSpec,
+    ProposedFunctionalCandidate,
+    ProposedTopologyCandidate,
     StateEquation,
+    StateKind,
+    StateSpec,
     TopologyCandidate,
+    TopologyProcessSpec,
 )
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.staged import Sha256Digest
@@ -52,6 +60,176 @@ def topology_commitment_sha256(topology: TopologyCandidate) -> str:
         ensure_ascii=True,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def enrich_topology_proposal(
+    proposal: ProposedTopologyCandidate,
+    context: ValidationContext,
+) -> TopologyCandidate:
+    """Add public/runtime-owned graph metadata to a compact topology proposal.
+
+    The proposer names generated nodes and signed dependencies.  The runtime
+    derives external symbols from the public validation context and derives
+    state observability from direct target mappings.  This prevents the model
+    from inventing availability or incorrectly labelling a measured state as
+    latent.
+    """
+    state_names = {item.name for item in proposal.states}
+    process_names = {item.name for item in proposal.processes}
+    generated = state_names | process_names
+    referenced = {
+        source
+        for interaction in proposal.interactions
+        for source in interaction.sources
+    }
+    external_symbols = referenced - generated
+    available_external = set(context.forcing_channels) | {context.time_symbol}
+    unknown_external = external_symbols - available_external
+    if unknown_external:
+        raise ValueError(
+            "topology references unavailable external symbols: "
+            f"{sorted(unknown_external)}"
+        )
+
+    channels = {item.channel for item in proposal.observation_mappings}
+    missing_targets = set(context.targets) - channels
+    extra_targets = channels - set(context.targets)
+    if missing_targets or extra_targets:
+        raise ValueError(
+            "topology target mappings differ from public targets: "
+            f"missing={sorted(missing_targets)}, extra={sorted(extra_targets)}"
+        )
+    direct_state_channels: dict[str, list[str]] = {}
+    for mapping in proposal.observation_mappings:
+        if mapping.source in state_names:
+            direct_state_channels.setdefault(mapping.source, []).append(
+                mapping.channel
+            )
+    ambiguous_states = {
+        state: channels
+        for state, channels in direct_state_channels.items()
+        if len(channels) != 1
+    }
+    if ambiguous_states:
+        raise ValueError(
+            "directly observed state maps to multiple target channels: "
+            f"{ambiguous_states}"
+        )
+
+    interaction_mechanisms: dict[str, set[str]] = {
+        name: set() for name in generated
+    }
+    for interaction in proposal.interactions:
+        interaction_mechanisms.setdefault(interaction.target, set()).update(
+            interaction.mechanisms
+        )
+
+    topology = TopologyCandidate(
+        candidate_id=proposal.candidate_id,
+        parent_candidate_id=proposal.parent_candidate_id,
+        change_summary=proposal.change_summary,
+        states=tuple(
+            StateSpec(
+                name=item.name,
+                kind=(
+                    StateKind.OBSERVED
+                    if item.name in direct_state_channels
+                    else StateKind.LATENT
+                ),
+                mechanisms=tuple(
+                    sorted(
+                        set(item.mechanisms)
+                        | interaction_mechanisms.get(item.name, set())
+                    )
+                ),
+            )
+            for item in proposal.states
+        ),
+        processes=tuple(
+            TopologyProcessSpec(
+                name=item.name,
+                mechanisms=tuple(
+                    sorted(
+                        set(item.mechanisms)
+                        | interaction_mechanisms.get(item.name, set())
+                    )
+                ),
+            )
+            for item in proposal.processes
+        ),
+        external_symbols=tuple(sorted(external_symbols)),
+        interactions=proposal.interactions,
+        observation_mappings=proposal.observation_mappings,
+    )
+    if context.forbid_latent_states and any(
+        item.kind is StateKind.LATENT for item in topology.states
+    ):
+        raise ValueError("topology contains latent states but they are forbidden")
+    return topology
+
+
+def enrich_functional_proposal(
+    proposal: ProposedFunctionalCandidate,
+    topology: TopologyCandidate,
+) -> FunctionalCandidate:
+    """Bind compact interaction functions to an immutable topology artifact."""
+    latent_states = {
+        item.name for item in topology.states if item.kind is StateKind.LATENT
+    }
+    supplied_latent_states = {item.state for item in proposal.latent_initials}
+    missing = latent_states - supplied_latent_states
+    extra = supplied_latent_states - latent_states
+    if missing or extra:
+        raise ValueError(
+            "functional latent initializers differ from topology: "
+            f"missing={sorted(missing)}, extra={sorted(extra)}"
+        )
+
+    direct_observed_channels = {
+        mapping.source: mapping.channel
+        for mapping in topology.observation_mappings
+        if mapping.source
+        in {
+            state.name
+            for state in topology.states
+            if state.kind is StateKind.OBSERVED
+        }
+    }
+    observed_initials = tuple(
+        InitialConditionSpec(
+            state=state.name,
+            scope=ParameterScope.GLOBAL,
+            expression=direct_observed_channels[state.name],
+        )
+        for state in topology.states
+        if state.kind is StateKind.OBSERVED
+    )
+    latent_initials = tuple(
+        InitialConditionSpec(
+            state=item.state,
+            scope=ParameterScope.GLOBAL,
+            fixed_value=item.initial.fixed_value,
+            expression=item.initial.expression,
+        )
+        for item in proposal.latent_initials
+    )
+    return FunctionalCandidate(
+        candidate_id=proposal.candidate_id,
+        parent_candidate_id=proposal.parent_candidate_id,
+        change_summary=proposal.change_summary,
+        topology_commitment_sha256=topology_commitment_sha256(topology),
+        interaction_functions=proposal.interaction_functions,
+        parameters=tuple(
+            ParameterSpec(
+                name=item.name,
+                scope=ParameterScope.GLOBAL,
+                role=item.role,
+                domain=item.role.domain,
+            )
+            for item in proposal.parameters
+        ),
+        initial_conditions=(*observed_initials, *latent_initials),
+    )
 
 
 def expand_staged_candidate(

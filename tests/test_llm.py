@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from autoformalism.expressions import ValidationContext
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import (
     LLMConfig,
@@ -37,6 +38,8 @@ from autoformalism.schemas import (
     AtomicJudgeResult,
     CandidateModel,
     HybridJudgeResult,
+    ProposedFunctionalCandidate,
+    ProposedTopologyCandidate,
     ProposerCandidateV2,
     ScientificJudgeResult,
     enrich_proposal_v2,
@@ -234,6 +237,68 @@ def test_mock_has_separate_proposer_and_judge_methods() -> None:
     assert candidate.parsed.candidate_id == "candidate_1"
     assert judge.parsed.aggregate_score == 1.0
     assert [call["role"] for call in client.calls] == ["proposer", "judge"]
+
+
+def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> None:
+    topology_proposal = ProposedTopologyCandidate.model_validate(
+        {
+            "candidate_id": "graph_0",
+            "states": [{"name": "x"}],
+            "interactions": [
+                {
+                    "interaction_id": "decay",
+                    "target": "x",
+                    "target_kind": "state_derivative",
+                    "sources": ["x"],
+                    "polarity": "subtractive",
+                }
+            ],
+            "observation_mappings": [{"channel": "target", "source": "x"}],
+        }
+    )
+    functional_proposal = ProposedFunctionalCandidate.model_validate(
+        {
+            "candidate_id": "functions_0",
+            "interaction_functions": [
+                {"interaction_id": "decay", "expression": "rate * x"}
+            ],
+            "parameters": [{"name": "rate", "role": "rate"}],
+        }
+    )
+
+    class StagedClient(StubCachedClient):
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            self.provider_calls += 1
+            response = (
+                topology_proposal
+                if kwargs["role"] == "staged_topology_proposer_v1"
+                else functional_proposal
+            )
+            return ProviderResponse(parsed=response, raw_response={})
+
+    context = ValidationContext(targets=("target",))
+    client = StagedClient(tmp_path)
+    topology = client.propose_topology(
+        system_prompt="topology system",
+        user_prompt="topology request",
+        context=context,
+    )
+    functional = client.propose_functions(
+        system_prompt="functional system",
+        user_prompt="functional request",
+        topology=topology.parsed,
+        context=context,
+    )
+    cached_topology = client.propose_topology(
+        system_prompt="topology system",
+        user_prompt="topology request",
+        context=context,
+    )
+
+    assert client.provider_calls == 2
+    assert topology.parsed.states[0].kind.value == "observed"
+    assert functional.parsed.parameters[0].scope.value == "global"
+    assert cached_topology.cache_hit is True
 
 
 def test_cached_hybrid_client_repairs_only_redundant_atomic_role_units(

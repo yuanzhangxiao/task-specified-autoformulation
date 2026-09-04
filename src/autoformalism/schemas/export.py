@@ -18,7 +18,12 @@ from autoformalism.schemas.judge import (
     TargetCompletenessJudgeResult,
 )
 from autoformalism.schemas.proposal import ProposerCandidate, ProposerCandidateV2
-from autoformalism.schemas.staged import FunctionalCandidate, TopologyCandidate
+from autoformalism.schemas.staged import (
+    FunctionalCandidate,
+    ProposedFunctionalCandidate,
+    ProposedTopologyCandidate,
+    TopologyCandidate,
+)
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "atomic-judge-v1.schema.json": AtomicJudgeResult,
@@ -26,6 +31,8 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "functional-candidate-v1.schema.json": FunctionalCandidate,
     "proposer-candidate.schema.json": ProposerCandidate,
     "proposer-candidate-v2.schema.json": ProposerCandidateV2,
+    "proposed-functional-candidate-v1.schema.json": ProposedFunctionalCandidate,
+    "proposed-topology-candidate-v1.schema.json": ProposedTopologyCandidate,
     "judge.schema.json": JudgeResult,
     "scientific-judge-v2.schema.json": ScientificJudgeResult,
     "comparative-judge-v1.schema.json": ComparativeJudgeResult,
