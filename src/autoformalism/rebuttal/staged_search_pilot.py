@@ -285,10 +285,8 @@ def summarize_staged_search_pilot(
             else None
         )
         process_time_path = run_root / "search_process_time.json"
-        process_time = (
-            json.loads(process_time_path.read_text(encoding="utf-8"))
-            if process_time_path.is_file()
-            else None
+        process_time, process_time_status = _read_process_time(
+            process_time_path
         )
         failure_classes = Counter(
             str(item["failure_class"])
@@ -372,6 +370,7 @@ def summarize_staged_search_pilot(
                     "parameters",
                 ),
                 "failure_class_counts": dict(sorted(failure_classes.items())),
+                "process_time_status": process_time_status,
                 "process_wall_seconds": _numeric_field(
                     process_time,
                     "elapsed_seconds",
@@ -464,12 +463,60 @@ def summarize_staged_search_pilot(
         "total_process_cpu_seconds": sum(
             float(item["process_cpu_seconds"] or 0.0) for item in rows
         ),
+        "process_time_status_counts": dict(
+            sorted(
+                Counter(str(item["process_time_status"]) for item in rows).items()
+            )
+        ),
         "median_validation_normalized_mse": (
             statistics.median(completed_nmse) if completed_nmse else None
         ),
         "rows": rows,
     }
     return report
+
+
+def _read_process_time(path: Path) -> tuple[dict[str, object] | None, str]:
+    """Read current JSON or legacy key-value timing without aborting a summary."""
+    if not path.is_file():
+        return None, "missing"
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        return None, "empty"
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = _parse_legacy_process_time(text)
+        if payload is None:
+            return None, "invalid"
+        return payload, "legacy_key_value"
+    if not isinstance(payload, dict):
+        return None, "invalid"
+    return payload, "json"
+
+
+def _parse_legacy_process_time(text: str) -> dict[str, object] | None:
+    """Parse the original atomic ``key=value`` resource-timing artifact."""
+    payload: dict[str, object] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            return None
+        key, raw_value = line.split("=", 1)
+        if not key or not raw_value:
+            return None
+        if key in {"elapsed_seconds", "user_cpu_seconds", "system_cpu_seconds"}:
+            try:
+                payload[key] = float(raw_value)
+            except ValueError:
+                return None
+        elif key in {"max_rss_kib", "exit_code"}:
+            try:
+                payload[key] = int(raw_value)
+            except ValueError:
+                return None
+        else:
+            payload[key] = raw_value
+    return payload or None
 
 
 def _mean_field(payloads: list[dict[str, object]], field: str) -> float | None:

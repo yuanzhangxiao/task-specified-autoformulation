@@ -100,6 +100,7 @@ fi
 
 "${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/run_with_resource_timing.py" \
   --output "${process_time}" \
+  --output-format json \
   -- \
   "${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/run_experiment.py" \
     --data-root "${AF_PUBLIC_DATA_ROOT}" \

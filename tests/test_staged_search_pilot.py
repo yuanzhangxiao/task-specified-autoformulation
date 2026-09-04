@@ -213,8 +213,68 @@ def test_summary_reports_stage_specific_revisions_and_transport(
     assert report["total_fit_successful_round_count"] == 1
     assert report["total_fit_retry_activation_count"] == 1
     assert report["total_process_wall_seconds"] == 10.0
+    assert report["process_time_status_counts"] == {"json": 1}
     assert report["rows"][0]["selected_latent_state_count"] == 1
     assert report["median_validation_normalized_mse"] == 0.25
+
+
+@pytest.mark.parametrize(
+    ("timing_text", "expected_status", "expected_wall_seconds"),
+    [
+        ("", "empty", None),
+        ("not timing data\n", "invalid", None),
+        (
+            "schema_version=portable-child-process-timing-1\n"
+            "elapsed_seconds=12.5\n"
+            "user_cpu_seconds=3.0\n"
+            "system_cpu_seconds=1.0\n"
+            "max_rss_kib=2048\n"
+            "exit_code=1\n",
+            "legacy_key_value",
+            12.5,
+        ),
+    ],
+)
+def test_summary_tolerates_non_json_process_timing(
+    tmp_path: Path,
+    timing_text: str,
+    expected_status: str,
+    expected_wall_seconds: float | None,
+) -> None:
+    source = json.loads(
+        Path("configs/phase_b_staged_search_pilot_v1.json").read_text()
+    )
+    source["cells"] = source["cells"][:1]
+    source["repetitions"] = [0]
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(source), encoding="utf-8")
+    plan = load_staged_search_plan(plan_path)
+    task_path = tmp_path / "task_plan.jsonl"
+    task_path.write_text(
+        "".join(
+            json.dumps(item.model_dump(mode="json"), sort_keys=True) + "\n"
+            for item in build_staged_search_tasks(plan)
+        ),
+        encoding="utf-8",
+    )
+    run = (
+        tmp_path
+        / "search"
+        / "runs"
+        / "phase_b_dalla_man_t2_canonical_named_easy_easy_seed0"
+    )
+    run.mkdir(parents=True)
+    (run / "search_process_time.json").write_text(timing_text, encoding="utf-8")
+
+    report = summarize_staged_search_pilot(
+        plan_path,
+        task_path,
+        tmp_path / "search",
+    )
+
+    assert report["status"] == "incomplete"
+    assert report["process_time_status_counts"] == {expected_status: 1}
+    assert report["rows"][0]["process_wall_seconds"] == expected_wall_seconds
 
 
 @pytest.mark.parametrize(

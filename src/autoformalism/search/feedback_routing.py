@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import ast
 import math
+from collections.abc import Iterable
 from enum import Enum
 from typing import Literal
 
 from pydantic import Field
 
+from autoformalism.expressions import ModelValidationError, RestrictedParser
+from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
 from autoformalism.fitting import FitResult
 from autoformalism.rebuttal.mechanisms import (
     MechanismEvaluationSpec,
@@ -22,6 +26,8 @@ FeedbackSource = Literal[
     "public_target_contract",
     "graph_mechanism",
     "mechanism_annotation",
+    "dynamic_structure",
+    "parameter_identifiability",
     "deterministic_validator",
     "validation_metric",
     "numerical_fitter",
@@ -74,6 +80,12 @@ class CandidateFeedbackEvidence(StrictSchema):
     annotation_failures: tuple[NonEmptyText, ...] = Field(
         default=(), max_length=64
     )
+    annotation_function_advisories: tuple[NonEmptyText, ...] = Field(
+        default=(), max_length=64
+    )
+    dynamic_structure_advisories: tuple[NonEmptyText, ...] = Field(
+        default=(), max_length=64
+    )
     deterministic_validation_failures: tuple[NonEmptyText, ...] = Field(
         default=(), max_length=64
     )
@@ -81,6 +93,12 @@ class CandidateFeedbackEvidence(StrictSchema):
         default=(), max_length=64
     )
     fit_failures: tuple[NonEmptyText, ...] = Field(default=(), max_length=64)
+    parameter_boundary_advisories: tuple[NonEmptyText, ...] = Field(
+        default=(), max_length=64
+    )
+    inactive_dynamics_advisories: tuple[NonEmptyText, ...] = Field(
+        default=(), max_length=64
+    )
     integration_failures: tuple[NonEmptyText, ...] = Field(
         default=(), max_length=64
     )
@@ -201,6 +219,20 @@ def route_proposer_feedback(
         code="annotation_repair",
     )
     add_many(
+        evidence.annotation_function_advisories,
+        route=FeedbackRoute.FUNCTIONAL_FORM,
+        priority=FeedbackPriority.ADVISORY,
+        source="mechanism_annotation",
+        code="annotation_function_mismatch",
+    )
+    add_many(
+        evidence.dynamic_structure_advisories,
+        route=FeedbackRoute.TOPOLOGY,
+        priority=FeedbackPriority.ADVISORY,
+        source="dynamic_structure",
+        code="missing_relaxation",
+    )
+    add_many(
         evidence.deterministic_validation_failures,
         route=FeedbackRoute.FUNCTIONAL_FORM,
         priority=FeedbackPriority.BLOCKING,
@@ -213,6 +245,20 @@ def route_proposer_feedback(
         priority=FeedbackPriority.PRIMARY,
         source="numerical_fitter",
         code="fit_failure",
+    )
+    add_many(
+        evidence.parameter_boundary_advisories,
+        route=FeedbackRoute.NUMERICAL_FIT,
+        priority=FeedbackPriority.ADVISORY,
+        source="parameter_identifiability",
+        code="parameter_boundary_contact",
+    )
+    add_many(
+        evidence.inactive_dynamics_advisories,
+        route=FeedbackRoute.NUMERICAL_FIT,
+        priority=FeedbackPriority.ADVISORY,
+        source="numerical_fitter",
+        code="inactive_target_dynamics",
     )
     add_many(
         evidence.integration_failures,
@@ -339,11 +385,19 @@ def evidence_from_completed_candidate(
         f"Validation rollout failed for trajectory {name}."
         for name in fit.validation_metrics.failed_trajectories
     )
+    boundary_advisories, inactive_advisories = _fit_parameter_advisories(
+        candidate,
+        fit,
+    )
 
     return CandidateFeedbackEvidence(
         target_contract_failures=tuple(target_failures),
         graph_mechanism_failures=tuple(graph_failures),
         annotation_failures=tuple(annotation_failures),
+        annotation_function_advisories=(
+            _annotation_function_advisories(candidate)
+        ),
+        dynamic_structure_advisories=_dynamic_structure_advisories(candidate),
         validation_metrics=tuple(
             TargetValidationMetric(target=target, normalized_mse=value)
             for target, value in sorted(
@@ -352,6 +406,8 @@ def evidence_from_completed_candidate(
             if math.isfinite(value) and value >= 0.0
         ),
         fit_failures=tuple(dict.fromkeys(fit_failures)),
+        parameter_boundary_advisories=boundary_advisories,
+        inactive_dynamics_advisories=inactive_advisories,
         integration_failures=tuple(dict.fromkeys(integration_failures)),
         scientific_missing_requirements=(
             () if judge is None else tuple(judge.missing_requirements)
@@ -378,3 +434,274 @@ def _render_mechanism_result(
         if item.status != "satisfied"
     ]
     return f"{mechanism_id}/{status}: {'; '.join(evidence)}"
+
+
+def _fit_parameter_advisories(
+    candidate: CandidateModel,
+    fit: FitResult,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return nonblocking boundary-contact and target-inactivity evidence."""
+    parameter_names = {item.name for item in candidate.parameters}
+    lower_contacts = _normalized_parameter_contacts(
+        candidate,
+        (
+            contact
+            for diagnostic in fit.diagnostics
+            for contact in diagnostic.parameters_at_lower_bound
+        ),
+    )
+    upper_contacts = _normalized_parameter_contacts(
+        candidate,
+        (
+            contact
+            for diagnostic in fit.diagnostics
+            for contact in diagnostic.parameters_at_upper_bound
+        ),
+    )
+    boundary: list[str] = []
+    if lower_contacts:
+        boundary.append(
+            "Fitted parameters contact their runtime lower boundary: "
+            f"{list(lower_contacts)}. Treat this as possible scale or "
+            "identifiability evidence, not as standalone structural invalidity."
+        )
+    if upper_contacts:
+        boundary.append(
+            "Fitted parameters contact their runtime upper boundary: "
+            f"{list(upper_contacts)}. Treat this as possible scale or "
+            "identifiability evidence, not as standalone structural invalidity."
+        )
+
+    target_parameters = _target_path_parameters(candidate)
+    positive_parameters = {
+        item.name
+        for item in candidate.parameters
+        if item.domain.value in {"positive", "nonnegative"}
+    }
+    inactive: tuple[str, ...] = ()
+    if (
+        target_parameters
+        and target_parameters <= parameter_names
+        and target_parameters <= positive_parameters
+        and target_parameters <= set(lower_contacts)
+    ):
+        inactive = (
+            "Every positive/nonnegative fitted parameter on a target-generating "
+            f"dependency path contacts its lower runtime boundary: "
+            f"{sorted(target_parameters)}. The fitted target response may have "
+            "collapsed toward inactive dynamics; compare its trajectory with a "
+            "persistence or null prediction before retaining the structure.",
+        )
+    return tuple(boundary), inactive
+
+
+def _normalized_parameter_contacts(
+    candidate: CandidateModel,
+    contacts: Iterable[str],
+) -> tuple[str, ...]:
+    """Normalize legacy ``parameter:name`` optimizer labels to model names."""
+    parameter_names = {item.name for item in candidate.parameters}
+    normalized = {
+        name
+        for raw in contacts
+        if (name := str(raw).removeprefix("parameter:")) in parameter_names
+    }
+    return tuple(sorted(normalized))
+
+
+def _target_path_parameters(candidate: CandidateModel) -> set[str]:
+    """Collect parameters recursively upstream of public target mappings."""
+    parser = RestrictedParser()
+    definitions = {
+        item.state: item.rhs for item in candidate.state_equations
+    } | {item.name: item.expression for item in candidate.processes}
+    parameter_names = {item.name for item in candidate.parameters}
+    frontier: list[str] = []
+    found: set[str] = set()
+    for index, mapping in enumerate(candidate.observation_mappings):
+        symbols = _safe_symbols(
+            parser,
+            mapping.expression,
+            f"observation_mapping:{index}",
+        )
+        found.update(symbols & parameter_names)
+        frontier.extend(symbols & definitions.keys())
+    visited: set[str] = set()
+    while frontier:
+        symbol = frontier.pop()
+        if symbol in visited:
+            continue
+        visited.add(symbol)
+        symbols = _safe_symbols(parser, definitions[symbol], f"definition:{symbol}")
+        found.update(symbols & parameter_names)
+        frontier.extend(symbols & definitions.keys() - visited)
+    return found
+
+
+def _dynamic_structure_advisories(candidate: CandidateModel) -> tuple[str, ...]:
+    """Find factual missing-self-regulation patterns without rejecting a model."""
+    parser = RestrictedParser()
+    state_names = {item.name for item in candidate.states}
+    mechanisms = {item.name: item.mechanisms for item in candidate.states}
+    dependencies = {
+        item.state: (
+            _safe_symbols(parser, item.rhs, f"state_equation:{item.state}")
+            & state_names
+        )
+        for item in candidate.state_equations
+    }
+    advisories: list[str] = []
+    memory_tokens = (
+        "memory",
+        "delay",
+        "stock",
+        "storage",
+        "reservoir",
+        "compartment",
+        "persistent",
+        "feedback",
+    )
+    for state in sorted(state_names):
+        if state in dependencies.get(state, set()):
+            continue
+        matching_tags = sorted(
+            tag
+            for tag in mechanisms.get(state, ())
+            if any(token in tag.lower() for token in memory_tokens)
+        )
+        if matching_tags:
+            advisories.append(
+                f"State {state} is tagged {matching_tags} but its RHS has no "
+                "self-dependent term. This may be an intentional accumulator; "
+                "otherwise add or justify a removal/relaxation timescale."
+            )
+
+    seen_cycles: set[frozenset[str]] = set()
+    reachability = {
+        state: _reachable_states(state, dependencies) for state in state_names
+    }
+    for state in sorted(state_names):
+        component = frozenset(
+            other
+            for other in state_names
+            if other in reachability[state] and state in reachability[other]
+        )
+        if len(component) < 2 or component in seen_cycles:
+            continue
+        seen_cycles.add(component)
+        if all(item not in dependencies.get(item, set()) for item in component):
+            advisories.append(
+                f"Coupled state cycle {sorted(component)} has no direct "
+                "self-dependent term on any member. Verify an explicit "
+                "stabilizing removal/relaxation mechanism rather than assuming "
+                "the cycle is dynamically stable."
+            )
+    return tuple(advisories)
+
+
+def _reachable_states(
+    start: str,
+    dependencies: dict[str, frozenset[str] | set[str]],
+) -> set[str]:
+    """Return state dependencies reachable from one state."""
+    reached: set[str] = set()
+    frontier = list(dependencies.get(start, ()))
+    while frontier:
+        state = frontier.pop()
+        if state in reached:
+            continue
+        reached.add(state)
+        frontier.extend(dependencies.get(state, ()))
+    return reached
+
+
+def _annotation_function_advisories(
+    candidate: CandidateModel,
+) -> tuple[str, ...]:
+    """Flag a claimed nonlinear mechanism when the whole model is affine."""
+    claimed = sorted(
+        f"{item.name}:{tag}"
+        for item in (*candidate.states, *candidate.processes)
+        for tag in item.mechanisms
+        if "nonlinear" in tag.lower()
+    )
+    if not claimed or _candidate_has_syntactic_nonlinearity(candidate):
+        return ()
+    return (
+        "Mechanism annotations claim nonlinear behavior at "
+        f"{claimed}, but no state equation, process, or target mapping contains "
+        "syntactically nonlinear dependence on a non-parameter symbol. Revise "
+        "the functional form or correct the annotation.",
+    )
+
+
+def _candidate_has_syntactic_nonlinearity(candidate: CandidateModel) -> bool:
+    """Conservatively identify nonlinear dependence on states or inputs."""
+    parser = RestrictedParser()
+    parameter_names = {item.name for item in candidate.parameters}
+    expressions = [item.rhs for item in candidate.state_equations]
+    expressions.extend(item.expression for item in candidate.processes)
+    expressions.extend(item.expression for item in candidate.observation_mappings)
+    for index, expression in enumerate(expressions):
+        try:
+            tree = parser.parse(expression, location=f"expression:{index}").tree
+        except ModelValidationError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _has_nonparameter_symbol(
+                node,
+                parameter_names,
+            ):
+                return True
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult) and all(
+                _has_nonparameter_symbol(branch, parameter_names)
+                for branch in (node.left, node.right)
+            ):
+                return True
+            if (
+                isinstance(node, ast.BinOp)
+                and isinstance(node.op, ast.Div)
+                and _has_nonparameter_symbol(
+                    node.right,
+                    parameter_names,
+                )
+            ):
+                return True
+            if (
+                isinstance(node, ast.BinOp)
+                and isinstance(node.op, ast.Pow)
+                and _has_nonparameter_symbol(node.left, parameter_names)
+                and not _is_literal_one(node.right)
+            ):
+                return True
+    return False
+
+
+def _has_nonparameter_symbol(node: ast.AST, parameter_names: set[str]) -> bool:
+    return any(
+        isinstance(child, ast.Name)
+        and child.id not in parameter_names
+        and child.id not in APPROVED_FUNCTION_ARITY
+        for child in ast.walk(node)
+    )
+
+
+def _is_literal_one(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, int | float)
+        and not isinstance(node.value, bool)
+        and float(node.value) == 1.0
+    )
+
+
+def _safe_symbols(
+    parser: RestrictedParser,
+    expression: str,
+    location: str,
+) -> frozenset[str]:
+    """Return symbols for valid expressions and no inferred fact otherwise."""
+    try:
+        return parser.parse(expression, location=location).symbols
+    except ModelValidationError:
+        return frozenset()

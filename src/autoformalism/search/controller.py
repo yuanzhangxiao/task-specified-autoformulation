@@ -1693,6 +1693,12 @@ def _merge_feedback_evidence(
         target_contract_failures=messages("target_contract_failures"),
         graph_mechanism_failures=messages("graph_mechanism_failures"),
         annotation_failures=messages("annotation_failures"),
+        annotation_function_advisories=messages(
+            "annotation_function_advisories"
+        ),
+        dynamic_structure_advisories=messages(
+            "dynamic_structure_advisories"
+        ),
         deterministic_validation_failures=messages(
             "deterministic_validation_failures"
         ),
@@ -1701,6 +1707,12 @@ def _merge_feedback_evidence(
             for target, value in sorted(metrics.items())
         ),
         fit_failures=messages("fit_failures"),
+        parameter_boundary_advisories=messages(
+            "parameter_boundary_advisories"
+        ),
+        inactive_dynamics_advisories=messages(
+            "inactive_dynamics_advisories"
+        ),
         integration_failures=messages("integration_failures"),
         scientific_missing_requirements=messages(
             "scientific_missing_requirements"

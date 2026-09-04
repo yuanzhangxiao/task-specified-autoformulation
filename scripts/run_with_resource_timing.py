@@ -12,7 +12,12 @@ import time
 from pathlib import Path
 
 
-def run_with_timing(command: list[str], output: Path) -> int:
+def run_with_timing(
+    command: list[str],
+    output: Path,
+    *,
+    output_format: str = "key_value",
+) -> int:
     """Execute ``command``, atomically record usage, and return its exit code."""
     if not command:
         raise ValueError("timed command is empty")
@@ -31,7 +36,12 @@ def run_with_timing(command: list[str], output: Path) -> int:
     }
     destination = output.expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    text = "".join(f"{key}={value}\n" for key, value in payload.items())
+    if output_format == "json":
+        text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    elif output_format == "key_value":
+        text = "".join(f"{key}={value}\n" for key, value in payload.items())
+    else:  # pragma: no cover - argparse enforces this for CLI use.
+        raise ValueError(f"unsupported timing output format: {output_format}")
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -50,10 +60,17 @@ def main() -> None:
     """Parse a command after ``--`` and preserve its return code."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--output-format",
+        choices=("key_value", "json"),
+        default="key_value",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    raise SystemExit(run_with_timing(command, args.output))
+    raise SystemExit(
+        run_with_timing(command, args.output, output_format=args.output_format)
+    )
 
 
 if __name__ == "__main__":

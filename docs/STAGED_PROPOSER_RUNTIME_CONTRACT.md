@@ -331,10 +331,23 @@ There are three distinct behaviors, in this order:
    function revision; otherwise the exact incumbent topology is reused and
    only the functions are revised.
 
+   Nonblocking deterministic advisories supplement these signals. Topology sees
+   tagged memory-like states or coupled state cycles that lack direct
+   self-regulation. Functional revision sees parameter contact with
+   runtime-owned boundaries, collapse of every positive target-path parameter
+   to its lower boundary, and a claimed nonlinear mechanism with no
+   syntactically nonlinear dependence anywhere in the executable model. These
+   facts request review; they neither invalidate a candidate nor prove that a
+   parameter, accumulator, or annotation is scientifically wrong.
+
 Request hashes include provider, model, role, prompts, response schema,
 provider options, validation context, and topology commitment where relevant.
 Successful calls are cached, all calls are append-only logged, and validated
 stages are checkpointed by a run-scoped input hash for deterministic resume.
+Cluster resource timing is written atomically as JSON. The summary reader also
+accepts the earlier key-value format and records missing, empty, or malformed
+timing artifacts as unavailable accounting rather than discarding completed
+scientific results.
 
 ## Current limits and historical scope
 

@@ -43,3 +43,29 @@ def test_resource_wrapper_records_usage_and_preserves_exit_code(
     )
     assert int(values["exit_code"]) == exit_code
     assert float(values["user_cpu_seconds"]) >= 0.0
+
+
+def test_resource_wrapper_can_write_atomic_json(tmp_path: Path) -> None:
+    output = tmp_path / "process_time.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_with_resource_timing.py",
+            "--output",
+            str(output),
+            "--output-format",
+            "json",
+            "--",
+            sys.executable,
+            "-c",
+            "raise SystemExit(0)",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "portable-child-process-timing-1"
+    assert payload["exit_code"] == 0

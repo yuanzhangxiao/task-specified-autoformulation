@@ -141,3 +141,155 @@ def test_completed_candidate_evidence_selects_public_fit_and_judge_signals() -> 
         item["message"] == "required/x: Add stable memory."
         for item in integrated["items"]
     )
+
+
+def test_completed_candidate_reports_degenerate_dynamics_as_advisory() -> None:
+    candidate = CandidateModel.model_validate(
+        {
+            "candidate_id": "degenerate_candidate",
+            "parent_candidate_id": None,
+            "states": [
+                {
+                    "name": "x_mem",
+                    "kind": "latent",
+                    "mechanisms": ["input_memory"],
+                },
+                {
+                    "name": "x_coup",
+                    "kind": "latent",
+                    "mechanisms": ["persistent_coupling"],
+                },
+                {
+                    "name": "x_nl",
+                    "kind": "latent",
+                    "mechanisms": ["nonlinear_feedback"],
+                },
+            ],
+            "state_equations": [
+                {"state": "x_mem", "rhs": "a_mem * u"},
+                {
+                    "state": "x_coup",
+                    "rhs": "a_coup * x_mem + b_coup * x_nl",
+                },
+                {"state": "x_nl", "rhs": "a_nl * x_coup"},
+            ],
+            "processes": [
+                {
+                    "name": "output",
+                    "expression": "a_out * x_nl",
+                    "mechanisms": ["output_generation"],
+                }
+            ],
+            "observation_mappings": [
+                {"channel": "target", "expression": "output"}
+            ],
+            "parameters": [
+                {"name": name, "scope": "global", "role": "positive_shape"}
+                for name in ("a_mem", "a_coup", "b_coup", "a_nl", "a_out")
+            ],
+            "initial_conditions": [
+                {"state": name, "scope": "global", "fixed_value": 0.0}
+                for name in ("x_mem", "x_coup", "x_nl")
+            ],
+        }
+    )
+    metrics = EvaluationMetrics(
+        normalized_mse=1.4,
+        per_target_normalized_mse={"target": 1.4},
+    )
+    contacts = tuple(
+        f"parameter:{name}"
+        for name in ("a_mem", "a_coup", "b_coup", "a_nl", "a_out")
+    )
+    fit = FitResult(
+        success=True,
+        global_parameters={name.removeprefix("parameter:"): 1e-10 for name in contacts},
+        global_initial_conditions={},
+        training_trajectory_initial_conditions={},
+        validation_trajectory_initial_conditions={},
+        training_metrics=metrics,
+        validation_metrics=metrics,
+        diagnostics=(
+            OptimizationDiagnostic(
+                start_index=0,
+                success=True,
+                status=1,
+                message="converged",
+                cost=1.4,
+                function_evaluations=5,
+                integration_failures=0,
+                parameters_at_lower_bound=contacts,
+            ),
+        ),
+        best_start_index=0,
+        target_scales={"target": 1.0},
+    )
+
+    evidence = evidence_from_completed_candidate(candidate, fit, None)
+    routed = route_proposer_feedback(evidence)
+    topology = routed.for_stage(RevisionStage.TOPOLOGY)
+    functional = routed.for_stage(RevisionStage.FUNCTIONAL_FORM)
+
+    assert evidence.annotation_function_advisories
+    assert any(
+        "Coupled state cycle" in item
+        for item in evidence.dynamic_structure_advisories
+    )
+    assert evidence.parameter_boundary_advisories
+    assert evidence.inactive_dynamics_advisories
+    assert {item["code"] for item in topology["items"]} == {"missing_relaxation"}
+    assert {
+        "annotation_function_mismatch",
+        "parameter_boundary_contact",
+        "inactive_target_dynamics",
+        "worst_validation_target",
+    } <= {item["code"] for item in functional["items"]}
+    assert all(item["priority"] == "advisory" for item in topology["items"])
+
+
+def test_nonlinear_function_satisfies_nonlinear_annotation_check() -> None:
+    candidate = CandidateModel.model_validate(
+        {
+            "candidate_id": "nonlinear_candidate",
+            "parent_candidate_id": None,
+            "states": [
+                {
+                    "name": "x",
+                    "kind": "latent",
+                    "mechanisms": ["nonlinear_feedback"],
+                }
+            ],
+            "state_equations": [{"state": "x", "rhs": "-rate * x"}],
+            "processes": [{"name": "output", "expression": "tanh(x)"}],
+            "observation_mappings": [
+                {"channel": "target", "expression": "output"}
+            ],
+            "parameters": [
+                {"name": "rate", "scope": "global", "role": "rate"}
+            ],
+            "initial_conditions": [
+                {"state": "x", "scope": "global", "fixed_value": 0.0}
+            ],
+        }
+    )
+    metrics = EvaluationMetrics(
+        normalized_mse=0.5,
+        per_target_normalized_mse={"target": 0.5},
+    )
+    fit = FitResult(
+        success=True,
+        global_parameters={"rate": 1.0},
+        global_initial_conditions={},
+        training_trajectory_initial_conditions={},
+        validation_trajectory_initial_conditions={},
+        training_metrics=metrics,
+        validation_metrics=metrics,
+        diagnostics=(),
+        best_start_index=0,
+        target_scales={"target": 1.0},
+    )
+
+    evidence = evidence_from_completed_candidate(candidate, fit, None)
+
+    assert evidence.annotation_function_advisories == ()
+    assert evidence.inactive_dynamics_advisories == ()
