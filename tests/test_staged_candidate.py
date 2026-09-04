@@ -20,6 +20,7 @@ from autoformalism.staging import (
     enrich_functional_proposal,
     enrich_topology_proposal,
     expand_staged_candidate,
+    normalize_topology_proposal,
     topology_commitment_sha256,
 )
 
@@ -254,6 +255,101 @@ def test_observability_uses_auxiliary_measurements_not_target_status() -> None:
         "x": "observed",
         "z": "latent",
     }
+
+
+def test_topology_normalization_applies_only_unambiguous_repairs() -> None:
+    proposal = ProposedTopologyCandidate.model_validate(
+        {
+            "candidate_id": "repairable_graph",
+            "states": [{"name": "x"}, {"name": "driver_alias"}],
+            "processes": [{"name": "predicted_y"}],
+            "interactions": [
+                {
+                    "interaction_id": "drive",
+                    "target": "x",
+                    "target_kind": "algebraic_process",
+                    "sources": ["driver_alias"],
+                },
+                {
+                    "interaction_id": "predict",
+                    "target": "predicted_y",
+                    "target_kind": "state_derivative",
+                    "sources": ["x"],
+                },
+            ],
+            "state_measurements": [
+                {"state": "driver_alias", "channel": "driver_aux"},
+                {"state": "public_aux", "channel": "public_aux"},
+            ],
+            "target_mappings": [
+                {"channel": "y", "source": "predicted_y"},
+                {"channel": "y", "source": "predicted_y"},
+            ],
+        }
+    )
+    context = ValidationContext(
+        targets=("y",),
+        auxiliaries=("driver_aux", "public_aux"),
+    )
+
+    normalized, repair = normalize_topology_proposal(proposal, context)
+    topology = enrich_topology_proposal(normalized, context)
+
+    assert [item.name for item in normalized.states] == ["x"]
+    assert normalized.state_measurements == ()
+    assert len(normalized.target_mappings) == 1
+    assert {
+        item.interaction_id: item.target_kind.value
+        for item in normalized.interactions
+    } == {"drive": "state_derivative", "predict": "algebraic_process"}
+    assert normalized.interactions[0].sources == ("driver_aux",)
+    assert topology.external_symbols == ("driver_aux",)
+    assert repair == {
+        "schema_version": "staged-topology-repair-1",
+        "exact_duplicate_target_mappings_removed": ["y"],
+        "interaction_target_kinds_corrected": [
+            "drive:algebraic_process->state_derivative",
+            "predict:state_derivative->algebraic_process",
+        ],
+        "forcing_alias_states_collapsed": ["driver_alias->driver_aux"],
+        "redundant_state_measurements_removed": [
+            "driver_alias->driver_aux",
+            "public_aux->public_aux",
+        ],
+    }
+
+
+def test_topology_normalization_rejects_conflicting_target_mappings() -> None:
+    proposal = ProposedTopologyCandidate.model_validate(
+        {
+            "candidate_id": "ambiguous_graph",
+            "states": [{"name": "x"}, {"name": "z"}],
+            "interactions": [
+                {
+                    "interaction_id": "x_dynamics",
+                    "target": "x",
+                    "target_kind": "state_derivative",
+                    "sources": ["x"],
+                },
+                {
+                    "interaction_id": "z_dynamics",
+                    "target": "z",
+                    "target_kind": "state_derivative",
+                    "sources": ["z"],
+                },
+            ],
+            "target_mappings": [
+                {"channel": "y", "source": "x"},
+                {"channel": "y", "source": "z"},
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="conflicting duplicate target channel"):
+        normalize_topology_proposal(
+            proposal,
+            ValidationContext(targets=("y",)),
+        )
 
 
 def test_parameterized_target_process_does_not_reveal_internal_state() -> None:

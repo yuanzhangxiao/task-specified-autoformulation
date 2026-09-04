@@ -44,6 +44,7 @@ from autoformalism.schemas import (
     ScientificJudgeResult,
     enrich_proposal_v2,
 )
+from autoformalism.staging import enrich_topology_proposal
 
 
 def _proposal() -> ProposerCandidateV2:
@@ -248,12 +249,15 @@ def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> Non
                 {
                     "interaction_id": "decay",
                     "target": "x",
-                    "target_kind": "state_derivative",
+                    "target_kind": "algebraic_process",
                     "sources": ["x"],
                     "polarity": "subtractive",
                 }
             ],
-            "target_mappings": [{"channel": "target", "source": "x"}],
+            "target_mappings": [
+                {"channel": "target", "source": "x"},
+                {"channel": "target", "source": "x"},
+            ],
         }
     )
     functional_proposal = ProposedFunctionalCandidate.model_validate(
@@ -271,7 +275,7 @@ def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> Non
             self.provider_calls += 1
             response = (
                 topology_proposal
-                if kwargs["role"] == "staged_topology_proposer_v2"
+                if kwargs["role"] == "staged_topology_proposer_v3"
                 else functional_proposal
             )
             return ProviderResponse(parsed=response, raw_response={})
@@ -297,8 +301,82 @@ def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> Non
 
     assert client.provider_calls == 2
     assert topology.parsed.states[0].kind.value == "observed"
+    assert topology.parsed.interactions[0].target_kind.value == "state_derivative"
+    assert len(topology.parsed.target_mappings) == 1
+    assert topology.raw_response["_autoformalism_contract_repair"] == {
+        "schema_version": "staged-topology-repair-1",
+        "exact_duplicate_target_mappings_removed": ["target"],
+        "interaction_target_kinds_corrected": [
+            "decay:algebraic_process->state_derivative"
+        ],
+        "forcing_alias_states_collapsed": [],
+        "redundant_state_measurements_removed": [],
+    }
     assert functional.parsed.parameters[0].scope.value == "global"
     assert cached_topology.cache_hit is True
+
+
+def test_staged_function_syntax_diagnostic_retries_instead_of_escaping(
+    tmp_path: Path,
+) -> None:
+    topology_proposal = ProposedTopologyCandidate.model_validate(
+        {
+            "candidate_id": "graph_0",
+            "states": [{"name": "x"}],
+            "interactions": [
+                {
+                    "interaction_id": "decay",
+                    "target": "x",
+                    "target_kind": "state_derivative",
+                    "sources": ["x"],
+                    "polarity": "subtractive",
+                }
+            ],
+            "target_mappings": [{"channel": "target", "source": "x"}],
+        }
+    )
+    context = ValidationContext(targets=("target",))
+    topology = enrich_topology_proposal(topology_proposal, context)
+
+    class SyntaxRepairClient(StubCachedClient):
+        def __init__(self, path: Path) -> None:
+            super().__init__(path)
+            self.user_prompts: list[str] = []
+
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            self.provider_calls += 1
+            self.provider_attempt_numbers.append(kwargs["attempt_number"])
+            self.user_prompts.append(kwargs["user_prompt"])
+            expression = (
+                "rate' = rate * x"
+                if self.provider_calls == 1
+                else "rate * x"
+            )
+            response = ProposedFunctionalCandidate.model_validate(
+                {
+                    "candidate_id": "functions_0",
+                    "interaction_functions": [
+                        {"interaction_id": "decay", "expression": expression}
+                    ],
+                    "parameters": [{"name": "rate", "role": "rate"}],
+                }
+            )
+            return ProviderResponse(parsed=response, raw_response={})
+
+    client = SyntaxRepairClient(tmp_path)
+
+    result = client.propose_functions(
+        system_prompt="Return RHS expressions only.",
+        user_prompt="Assign the interaction function.",
+        topology=topology,
+        context=context,
+    )
+
+    assert client.provider_attempt_numbers == [1, 2]
+    assert result.attempts == 2
+    assert result.parsed.interaction_functions[0].expression == "rate * x"
+    assert "SYNTAX_ERROR" in client.user_prompts[1]
+    assert "Return one complete corrected object" in client.user_prompts[1]
 
 
 def test_cached_hybrid_client_repairs_only_redundant_atomic_role_units(

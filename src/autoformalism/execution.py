@@ -124,7 +124,12 @@ ranges, parameter scopes, units, state observed/latent labels, or state initial
 values. The runtime derives external symbols and state observability from the
 public channel contract. A target mapping through an algebraic process does not
 make its internal states observed. Every state and process must receive at least
-one defining interaction; every target must map exactly once to a generated node.
+one defining interaction. Emit exactly one target mapping for every required
+target channel, with no duplicate or extra channel. Set `target_kind` to
+`state_derivative` exactly when the interaction target is a declared state and
+to `algebraic_process` exactly when it is a declared process. Do not redeclare an
+available input, covariate, lagged target, or measured auxiliary as a generated
+state merely to use it as a source; reference the available channel directly.
 Treat each polarity as the outer plus/minus role of the term, not as a claim that
 the source-dependent expression is itself nonnegative. Use the routed topology
 and integrated scientific evidence to revise graph structure while preserving
@@ -139,8 +144,11 @@ names and qualitative roles, and initialize every runtime-derived latent state.
 Do not emit parameter values, numeric ranges, scopes, topology edits, extra
 sources, or unused parameters. The topology owns each outer plus/minus sign, so
 a scalar interaction weight must have a positive or nonnegative role rather than
-the signed `coefficient` role. Expressions may use only that interaction's exact
-declared sources and declared parameters. Allowed functions are `abs`, `exp`,
+the signed `coefficient` role. Each expression is only the right-hand-side value
+of its interaction. Do not emit an equation, assignment, derivative notation,
+prime notation, or an interaction name followed by `=`. Expressions may use only
+that interaction's exact declared sources and declared parameters. Allowed
+functions are `abs`, `exp`,
 `log`, `max`, `min`, `sigmoid`, `softplus`, `sqrt`, and `tanh`; use Python `**`
 for powers. The runtime safely parses, validates, fits, and causally evaluates the
 expanded model. Use routed functional, numerical, and integrated scientific

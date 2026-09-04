@@ -298,18 +298,29 @@ latent.
 
 ## Repair, retry, cache, and feedback behavior
 
-There are three distinct behaviors:
+There are three distinct behaviors, in this order:
 
-1. **Schema/provider retry.** Invalid JSON, strict-schema failures, and
+1. **Lossless normalization and deterministic enrichment.** Before contextual
+   graph validation, the runtime applies a narrowly enumerated representation
+   repair: it removes byte-identical duplicate target mappings, derives an
+   interaction's `target_kind` when its target belongs unambiguously to the
+   declared state or process namespace, and collapses a dynamics-free alias of
+   an available forcing channel back to that channel. Redundant identity
+   measurements of supplied auxiliary channels are removed with the alias.
+   Every action is recorded in `_autoformalism_contract_repair`. The runtime
+   never chooses between conflicting target mappings, invents dynamics, makes
+   an unavailable channel available, or changes a scientific expression.
+   Runtime-owned units, descriptions, external symbols, and observed/latent
+   metadata are then derived from the public contract.
+2. **Schema/provider retry.** Invalid JSON, strict-schema failures, and
    deterministic post-schema failures produce a sanitized typed diagnostic.
-   The same logical call is retried within the configured attempt limit with a
+   This includes restricted-expression diagnostics such as an assignment or
+   prime notation supplied where an RHS expression was required. The same
+   logical call is retried within the configured attempt limit with a
    contract-repair instruction. Every provider attempt is counted and logged.
-2. **Deterministic enrichment.** Runtime-owned metadata is added, but the staged
-   path does not silently rewrite scientific nodes, edges, expressions, or
-   mappings. Observed/latent metadata on historical complete-candidate payloads
-   is canonicalized from public identity mappings before fitting and feedback.
-   A bad scientific structure must be regenerated or revised by a later
-   proposer action.
+   Exhausting retries is returned to the search controller as a typed response
+   failure and checkpointed at candidate level instead of escaping as a raw
+   expression-validation exception.
 3. **Search feedback.** Once a candidate is executable, public evidence is
    routed by responsibility: target-contract and graph-mechanism failures to
    topology; expression/annotation failures plus fit, integration, and worst
@@ -328,8 +339,11 @@ stages are checkpointed by a run-scoped input hash for deterministic resume.
 ## Current limits and historical scope
 
 - The staged path is connected to the search controller as an explicit opt-in
-  and has a local checkpoint/resume integration test. It has not yet passed the
-  planned two-benchmark, three-seed cluster experiment.
+  and has a local checkpoint/resume integration test. The first planned
+  two-benchmark, three-seed cluster attempt exposed provider representation
+  errors and one uncaught restricted-expression diagnostic; it produced no
+  complete trial and is not scientific evidence. The repaired protocol uses a
+  new cache namespace and still requires the full pilot rerun.
 - Legacy post-fit term pruning is deliberately off in staged-v2 runs. A future
   staged pruner must produce a new topology/function commitment rather than
   mutating only the expanded complete candidate.

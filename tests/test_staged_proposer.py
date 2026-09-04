@@ -170,6 +170,18 @@ def test_staged_proposer_routes_prompts_and_resumes_checkpoints(
     assert [role for role, _ in client.calls] == ["topology", "functional"]
     topology_prompt = json.loads(client.calls[0][1])
     functional_prompt = json.loads(client.calls[1][1])
+    assert topology_prompt["schema_version"] == "staged-topology-request-3"
+    assert topology_prompt["runtime_contract"][
+        "required_target_mapping_count"
+    ] == 1
+    assert topology_prompt["runtime_contract"][
+        "required_target_mapping_channels"
+    ] == ["target"]
+    assert "target_kind" in topology_prompt["runtime_contract"][
+        "interaction_target_rule"
+    ]
+    assert functional_prompt["schema_version"] == "staged-functional-request-3"
+    assert "right-hand-side value only" in functional_prompt["task"]
     assert {
         item["source"] for item in topology_prompt["routed_feedback"]["items"]
     } == {"public_target_contract"}

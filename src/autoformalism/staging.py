@@ -63,6 +63,134 @@ def topology_commitment_sha256(topology: TopologyCandidate) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def normalize_topology_proposal(
+    proposal: ProposedTopologyCandidate,
+    context: ValidationContext,
+) -> tuple[ProposedTopologyCandidate, dict[str, object]]:
+    """Apply only unambiguous representation repairs before enrichment.
+
+    This normalization never chooses between competing scientific target
+    mappings, invents dynamics, or makes an unavailable channel available. It
+    removes exact duplicates, derives interaction target-kind tags from the
+    declared node namespace, and collapses dynamics-free aliases of supplied
+    forcing channels back to those channels.
+    """
+    states = {item.name: item for item in proposal.states}
+    processes = {item.name: item for item in proposal.processes}
+
+    target_mappings = []
+    target_by_channel = {}
+    removed_target_mappings: list[str] = []
+    for mapping in proposal.target_mappings:
+        previous = target_by_channel.get(mapping.channel)
+        if previous is None:
+            target_by_channel[mapping.channel] = mapping
+            target_mappings.append(mapping)
+        elif previous == mapping:
+            removed_target_mappings.append(mapping.channel)
+        else:
+            raise ValueError(
+                "conflicting duplicate target channel: "
+                f"{mapping.channel}; sources={previous.source},{mapping.source}"
+            )
+
+    corrected_kinds: list[str] = []
+    interactions = []
+    for interaction in proposal.interactions:
+        expected = None
+        if interaction.target in states:
+            expected = InteractionTargetKind.STATE_DERIVATIVE
+        elif interaction.target in processes:
+            expected = InteractionTargetKind.ALGEBRAIC_PROCESS
+        if expected is not None and interaction.target_kind is not expected:
+            corrected_kinds.append(
+                f"{interaction.interaction_id}:"
+                f"{interaction.target_kind.value}->{expected.value}"
+            )
+            interaction = interaction.model_copy(update={"target_kind": expected})
+        interactions.append(interaction)
+
+    derivative_targets = {
+        item.target
+        for item in interactions
+        if item.target_kind is InteractionTargetKind.STATE_DERIVATIVE
+    }
+    target_sources = {item.source for item in target_mappings}
+    measurement_by_state = {
+        item.state: item for item in proposal.state_measurements
+    }
+    forcing_channels = set(context.forcing_channels)
+    forcing_aliases: dict[str, str] = {}
+    for state in proposal.states:
+        if state.name in derivative_targets or state.name in target_sources:
+            continue
+        measurement = measurement_by_state.get(state.name)
+        if measurement is not None and measurement.channel in forcing_channels:
+            forcing_aliases[state.name] = measurement.channel
+        elif state.name in forcing_channels:
+            forcing_aliases[state.name] = state.name
+
+    normalized_interactions = []
+    for interaction in interactions:
+        sources = tuple(
+            dict.fromkeys(
+                forcing_aliases.get(item, item) for item in interaction.sources
+            )
+        )
+        if sources != interaction.sources:
+            interaction = interaction.model_copy(update={"sources": sources})
+        normalized_interactions.append(interaction)
+
+    retained_states = tuple(
+        item for item in proposal.states if item.name not in forcing_aliases
+    )
+    retained_state_names = {item.name for item in retained_states}
+    removed_measurements: list[str] = []
+    retained_measurements = []
+    for measurement in proposal.state_measurements:
+        if measurement.state in forcing_aliases:
+            removed_measurements.append(
+                f"{measurement.state}->{measurement.channel}"
+            )
+            continue
+        if (
+            measurement.state not in retained_state_names
+            and measurement.state == measurement.channel
+            and measurement.channel in set(context.auxiliaries)
+        ):
+            removed_measurements.append(
+                f"{measurement.state}->{measurement.channel}"
+            )
+            continue
+        retained_measurements.append(measurement)
+
+    normalized = ProposedTopologyCandidate.model_validate(
+        {
+            **proposal.model_dump(mode="json"),
+            "states": [item.model_dump(mode="json") for item in retained_states],
+            "interactions": [
+                item.model_dump(mode="json") for item in normalized_interactions
+            ],
+            "state_measurements": [
+                item.model_dump(mode="json") for item in retained_measurements
+            ],
+            "target_mappings": [
+                item.model_dump(mode="json") for item in target_mappings
+            ],
+        }
+    )
+    return normalized, {
+        "schema_version": "staged-topology-repair-1",
+        "exact_duplicate_target_mappings_removed": removed_target_mappings,
+        "interaction_target_kinds_corrected": corrected_kinds,
+        "forcing_alias_states_collapsed": [
+            f"{state}->{channel}"
+            for state, channel in sorted(forcing_aliases.items())
+        ],
+        "redundant_state_measurements_removed": removed_measurements,
+    }
+
+
 def enrich_topology_proposal(
     proposal: ProposedTopologyCandidate,
     context: ValidationContext,

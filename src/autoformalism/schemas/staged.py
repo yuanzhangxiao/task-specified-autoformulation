@@ -292,7 +292,6 @@ class ProposedTopologyCandidate(StrictSchema):
         _unique_attribute(
             "state measurement channel", self.state_measurements, "channel"
         )
-        _unique_attribute("target channel", self.target_mappings, "channel")
         collisions = states & processes
         if collisions:
             raise ValueError(

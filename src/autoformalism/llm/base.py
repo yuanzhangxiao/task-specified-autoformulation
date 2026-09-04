@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Generic
 
 from pydantic import BaseModel, ValidationError
 
+from autoformalism.expressions.diagnostics import ModelValidationError
 from autoformalism.llm.exceptions import (
     LLMCacheError,
     LLMCacheMissError,
@@ -159,13 +160,19 @@ class CachedLLMClient(ABC):
         cache_only: bool = False,
     ) -> LLMCallResult[TopologyCandidate]:
         """Request a compact graph and enrich public metadata locally."""
-        from autoformalism.staging import enrich_topology_proposal
+        from autoformalism.staging import (
+            enrich_topology_proposal,
+            normalize_topology_proposal,
+        )
 
         compact = self._structured_call(
-            role="staged_topology_proposer_v2",
+            role="staged_topology_proposer_v3",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ProposedTopologyCandidate,
+            normalize_parsed=lambda proposal: normalize_topology_proposal(
+                proposal, context
+            ),
             validate_parsed=lambda proposal: enrich_topology_proposal(
                 proposal, context
             ),
@@ -459,61 +466,64 @@ class CachedLLMClient(ABC):
                 )
                 provider_attempts += provider_response.provider_attempts
                 current_provider_counted = True
-                if normalize_parsed is not None:
-                    parsed, repair = normalize_parsed(provider_response.parsed)
-                    raw_response = dict(provider_response.raw_response)
-                    raw_response["_autoformalism_contract_repair"] = repair
-                    provider_response = ProviderResponse(
-                        parsed=parsed,
-                        raw_response=raw_response,
-                        usage=provider_response.usage,
-                        latency_ms=provider_response.latency_ms,
-                        provider_attempts=provider_response.provider_attempts,
-                    )
-                if validate_parsed is not None:
-                    try:
+                try:
+                    if normalize_parsed is not None:
+                        parsed, repair = normalize_parsed(
+                            provider_response.parsed
+                        )
+                        raw_response = dict(provider_response.raw_response)
+                        raw_response[
+                            "_autoformalism_contract_repair"
+                        ] = repair
+                        provider_response = ProviderResponse(
+                            parsed=parsed,
+                            raw_response=raw_response,
+                            usage=provider_response.usage,
+                            latency_ms=provider_response.latency_ms,
+                            provider_attempts=(
+                                provider_response.provider_attempts
+                            ),
+                        )
+                    if validate_parsed is not None:
                         validate_parsed(provider_response.parsed)
-                    except ValueError as exc:
-                        if (
-                            normalize_after_exhausted is not None
-                            and attempts >= self._max_attempts
-                        ):
-                            parsed, repair = normalize_after_exhausted(
-                                provider_response.parsed
-                            )
-                            try:
+                except (ModelValidationError, ValueError) as exc:
+                    if (
+                        normalize_after_exhausted is not None
+                        and attempts >= self._max_attempts
+                    ):
+                        parsed, repair = normalize_after_exhausted(
+                            provider_response.parsed
+                        )
+                        try:
+                            if validate_parsed is not None:
                                 validate_parsed(parsed)
-                            except ValueError as repaired_exc:
-                                raise LLMResponseError(
-                                    "response failed post-schema validation: "
-                                    f"{repaired_exc}",
-                                    raw_response=provider_response.raw_response,
-                                    diagnostic_code=(
-                                        RepairDiagnosticCode.POST_SCHEMA_VALIDATION
-                                    ),
-                                ) from repaired_exc
-                            raw_response = dict(provider_response.raw_response)
-                            raw_response[
-                                "_autoformalism_contract_repair"
-                            ] = repair
-                            provider_response = ProviderResponse(
-                                parsed=parsed,
-                                raw_response=raw_response,
-                                usage=provider_response.usage,
-                                latency_ms=provider_response.latency_ms,
-                                provider_attempts=(
-                                    provider_response.provider_attempts
-                                ),
-                            )
-                        else:
+                        except (ModelValidationError, ValueError) as repaired_exc:
                             raise LLMResponseError(
                                 "response failed post-schema validation: "
-                                f"{exc}",
+                                f"{repaired_exc}",
                                 raw_response=provider_response.raw_response,
                                 diagnostic_code=(
                                     RepairDiagnosticCode.POST_SCHEMA_VALIDATION
                                 ),
-                            ) from exc
+                            ) from repaired_exc
+                        raw_response = dict(provider_response.raw_response)
+                        raw_response["_autoformalism_contract_repair"] = repair
+                        provider_response = ProviderResponse(
+                            parsed=parsed,
+                            raw_response=raw_response,
+                            usage=provider_response.usage,
+                            latency_ms=provider_response.latency_ms,
+                            provider_attempts=provider_response.provider_attempts,
+                        )
+                    else:
+                        raise LLMResponseError(
+                            "response failed post-schema validation: "
+                            f"{exc}",
+                            raw_response=provider_response.raw_response,
+                            diagnostic_code=(
+                                RepairDiagnosticCode.POST_SCHEMA_VALIDATION
+                            ),
+                        ) from exc
                 break
             except (LLMProviderError, LLMResponseError) as exc:
                 if not current_provider_counted:
