@@ -268,8 +268,14 @@ def repair_protected_declarations(
         item.name for item in candidate.parameters if item.name in protected
     } | unused_parameters
     removed = removed_states | removed_processes | removed_parameters
-    modeled_auxiliaries = set(context.auxiliaries) & {
+    retained_state_names = {
         item.name for item in candidate.states if item.name not in removed_states
+    }
+    modeled_auxiliaries = {
+        item.channel
+        for item in candidate.observation_mappings
+        if item.channel in context.auxiliaries
+        and item.expression.replace(" ", "") in retained_state_names
     }
     redundant_auxiliary_mappings = {
         item.channel
@@ -409,17 +415,6 @@ class CandidateValidator:
             diagnostics,
         )
         self._validate_parameter_scopes(candidate, diagnostics)
-        if context.forbid_latent_states:
-            for state in candidate.states:
-                if state.kind.value == "latent":
-                    diagnostics.append(
-                        ValidationDiagnostic(
-                            "LATENT_STATE_FORBIDDEN",
-                            f"state:{state.name}",
-                            "this ablation permits only dynamic states mapped to "
-                            "observed target or supplied auxiliary channels",
-                        )
-                    )
         self._validate_state_equation_closure(candidate, diagnostics)
         self._validate_constraint_subjects(
             candidate,
@@ -866,8 +861,14 @@ class CandidateValidator:
     ) -> None:
         mapped = {item.channel for item in candidate.observation_mappings}
         expected = set(context.targets)
-        modeled_auxiliaries = set(context.auxiliaries) & {
-            state.name for state in candidate.states
+        observed_state_channels = CandidateValidator._identity_observed_state_channels(
+            candidate, context
+        )
+        modeled_auxiliaries = {
+            channel
+            for channels in observed_state_channels.values()
+            for channel in channels
+            if channel in context.auxiliaries
         }
         for channel in sorted(expected - mapped):
             diagnostics.append(

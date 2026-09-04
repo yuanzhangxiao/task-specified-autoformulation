@@ -162,7 +162,7 @@ class CachedLLMClient(ABC):
         from autoformalism.staging import enrich_topology_proposal
 
         compact = self._structured_call(
-            role="staged_topology_proposer_v1",
+            role="staged_topology_proposer_v2",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ProposedTopologyCandidate,
@@ -207,7 +207,7 @@ class CachedLLMClient(ABC):
             expand_staged_candidate(topology, functional, context)
 
         compact = self._structured_call(
-            role="staged_function_proposer_v1",
+            role="staged_function_proposer_v2",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ProposedFunctionalCandidate,

@@ -27,7 +27,12 @@ class InteractionTargetKind(str, Enum):
 
 
 class InteractionPolarity(str, Enum):
-    """How an interaction term enters its target definition."""
+    """Outer algebraic operator used to assemble an interaction term.
+
+    This is not by itself a proof that the assigned function is nonnegative or
+    monotone in every source. Parameter roles and scientific checks own those
+    separate claims.
+    """
 
     ADDITIVE = "additive"
     SUBTRACTIVE = "subtractive"
@@ -63,18 +68,31 @@ class TopologyInteraction(StrictSchema):
         return self
 
 
-class TopologyObservationMapping(StrictSchema):
-    """Direct mapping from a generated topology node to a public channel."""
+class TopologyStateMeasurement(StrictSchema):
+    """Identity measurement that makes one modeled state directly observed."""
+
+    state: Identifier
+    channel: Identifier
+    unit: NonEmptyText = "unspecified"
+
+
+class TopologyTargetMapping(StrictSchema):
+    """Direct mapping from a generated node to one prediction target."""
 
     channel: Identifier
     source: Identifier
     unit: NonEmptyText = "unspecified"
 
 
+# Import compatibility for the unrun staged-v1 prototype. New artifacts use
+# the scientifically narrower ``TopologyTargetMapping`` name.
+TopologyObservationMapping = TopologyTargetMapping
+
+
 class TopologyCandidate(StrictSchema):
     """Immutable graph-stage candidate with no interaction functions."""
 
-    schema_version: Literal["topology-candidate-1"] = "topology-candidate-1"
+    schema_version: Literal["topology-candidate-2"] = "topology-candidate-2"
     candidate_id: Identifier
     parent_candidate_id: Identifier | None = None
     change_summary: NonEmptyText = "unspecified"
@@ -85,7 +103,11 @@ class TopologyCandidate(StrictSchema):
         min_length=1,
         max_length=512,
     )
-    observation_mappings: tuple[TopologyObservationMapping, ...] = Field(
+    state_measurements: tuple[TopologyStateMeasurement, ...] = Field(
+        default=(),
+        max_length=64,
+    )
+    target_mappings: tuple[TopologyTargetMapping, ...] = Field(
         min_length=1,
         max_length=64,
     )
@@ -96,9 +118,11 @@ class TopologyCandidate(StrictSchema):
         state_names = _unique_attribute("state", self.states, "name")
         process_names = _unique_attribute("process", self.processes, "name")
         _unique_attribute("interaction", self.interactions, "interaction_id")
+        _unique_attribute("measured state", self.state_measurements, "state")
         _unique_attribute(
-            "observation channel", self.observation_mappings, "channel"
+            "state measurement channel", self.state_measurements, "channel"
         )
+        _unique_attribute("target channel", self.target_mappings, "channel")
         if len(self.external_symbols) != len(set(self.external_symbols)):
             raise ValueError("duplicate external symbol")
 
@@ -157,11 +181,18 @@ class TopologyCandidate(StrictSchema):
                 f"processes without defining interactions: {sorted(missing_processes)}"
             )
 
+        for measurement in self.state_measurements:
+            if measurement.state not in state_names:
+                raise ValueError(
+                    "state measurement references an undeclared state: "
+                    f"{measurement.state}"
+                )
+
         generated = state_names | process_names
-        for mapping in self.observation_mappings:
+        for mapping in self.target_mappings:
             if mapping.source not in generated:
                 raise ValueError(
-                    f"observation {mapping.channel} maps from a non-generated "
+                    f"target {mapping.channel} maps from a non-generated "
                     f"symbol: {mapping.source}"
                 )
 
@@ -209,9 +240,9 @@ class FunctionalCandidate(StrictSchema):
 class ProposedTopologyState(StrictSchema):
     """One generated state identity in the compact topology contract.
 
-    State observability is deliberately omitted.  The runtime derives it from
-    the target mappings instead of asking the proposer to duplicate public
-    channel metadata.
+    State observability is deliberately omitted. The runtime derives it from
+    validated public measurement and target mappings instead of asking the
+    proposer to emit a fallible observed/latent label.
     """
 
     name: Identifier
@@ -228,8 +259,8 @@ class ProposedTopologyProcess(StrictSchema):
 class ProposedTopologyCandidate(StrictSchema):
     """Minimal provider-facing graph proposal without runtime-owned metadata."""
 
-    schema_version: Literal["proposed-topology-candidate-1"] = (
-        "proposed-topology-candidate-1"
+    schema_version: Literal["proposed-topology-candidate-2"] = (
+        "proposed-topology-candidate-2"
     )
     candidate_id: Identifier
     parent_candidate_id: Identifier | None = None
@@ -242,7 +273,11 @@ class ProposedTopologyCandidate(StrictSchema):
         min_length=1,
         max_length=512,
     )
-    observation_mappings: tuple[TopologyObservationMapping, ...] = Field(
+    state_measurements: tuple[TopologyStateMeasurement, ...] = Field(
+        default=(),
+        max_length=64,
+    )
+    target_mappings: tuple[TopologyTargetMapping, ...] = Field(
         min_length=1,
         max_length=64,
     )
@@ -253,9 +288,11 @@ class ProposedTopologyCandidate(StrictSchema):
         states = _unique_attribute("state", self.states, "name")
         processes = _unique_attribute("process", self.processes, "name")
         _unique_attribute("interaction", self.interactions, "interaction_id")
+        _unique_attribute("measured state", self.state_measurements, "state")
         _unique_attribute(
-            "observation channel", self.observation_mappings, "channel"
+            "state measurement channel", self.state_measurements, "channel"
         )
+        _unique_attribute("target channel", self.target_mappings, "channel")
         collisions = states & processes
         if collisions:
             raise ValueError(

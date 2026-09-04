@@ -59,7 +59,7 @@ def main() -> None:
                     "polarity": "subtractive",
                 },
             ],
-            "observation_mappings": [
+            "target_mappings": [
                 {"channel": "target", "source": "x"}
             ],
         }
@@ -92,10 +92,15 @@ def main() -> None:
                 {
                     "name": name,
                     "scope": "global",
+                    "role": role,
                     "bounds": {"lower": 0.01, "upper": 5.0},
                     "initialization_range": {"lower": 0.1, "upper": 1.0},
                 }
-                for name in ("latent_decay", "gain", "storage_decay")
+                for name, role in (
+                    ("latent_decay", "rate"),
+                    ("gain", "scale"),
+                    ("storage_decay", "rate"),
+                )
             ],
             "initial_conditions": [
                 {"state": "x", "scope": "global", "expression": "target"},

@@ -253,7 +253,7 @@ def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> Non
                     "polarity": "subtractive",
                 }
             ],
-            "observation_mappings": [{"channel": "target", "source": "x"}],
+            "target_mappings": [{"channel": "target", "source": "x"}],
         }
     )
     functional_proposal = ProposedFunctionalCandidate.model_validate(
@@ -271,7 +271,7 @@ def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> Non
             self.provider_calls += 1
             response = (
                 topology_proposal
-                if kwargs["role"] == "staged_topology_proposer_v1"
+                if kwargs["role"] == "staged_topology_proposer_v2"
                 else functional_proposal
             )
             return ProviderResponse(parsed=response, raw_response={})

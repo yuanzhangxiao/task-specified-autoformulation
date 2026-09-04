@@ -20,6 +20,7 @@ from autoformalism.schemas import (
     InteractionPolarity,
     InteractionTargetKind,
     ObservationMapping,
+    ParameterRole,
     ParameterScope,
     ParameterSpec,
     ProcessSpec,
@@ -68,11 +69,10 @@ def enrich_topology_proposal(
 ) -> TopologyCandidate:
     """Add public/runtime-owned graph metadata to a compact topology proposal.
 
-    The proposer names generated nodes and signed dependencies.  The runtime
-    derives external symbols from the public validation context and derives
-    state observability from direct target mappings.  This prevents the model
-    from inventing availability or incorrectly labelling a measured state as
-    latent.
+    The proposer names generated nodes, dependencies, direct auxiliary-state
+    measurements, and target outputs. The runtime validates every channel
+    against the public context and derives state observability from identity
+    measurements. Target status is not itself the definition of observability.
     """
     state_names = {item.name for item in proposal.states}
     process_names = {item.name for item in proposal.processes}
@@ -91,7 +91,7 @@ def enrich_topology_proposal(
             f"{sorted(unknown_external)}"
         )
 
-    channels = {item.channel for item in proposal.observation_mappings}
+    channels = {item.channel for item in proposal.target_mappings}
     missing_targets = set(context.targets) - channels
     extra_targets = channels - set(context.targets)
     if missing_targets or extra_targets:
@@ -99,8 +99,29 @@ def enrich_topology_proposal(
             "topology target mappings differ from public targets: "
             f"missing={sorted(missing_targets)}, extra={sorted(extra_targets)}"
         )
+
+    measured_channels = {item.channel for item in proposal.state_measurements}
+    unavailable_measurements = measured_channels - set(context.auxiliaries)
+    if unavailable_measurements:
+        raise ValueError(
+            "state measurements must reference supplied auxiliary channels: "
+            f"{sorted(unavailable_measurements)}"
+        )
+    unknown_measured_states = {
+        item.state for item in proposal.state_measurements
+    } - state_names
+    if unknown_measured_states:
+        raise ValueError(
+            "state measurements reference undeclared states: "
+            f"{sorted(unknown_measured_states)}"
+        )
+
     direct_state_channels: dict[str, list[str]] = {}
-    for mapping in proposal.observation_mappings:
+    for measurement in proposal.state_measurements:
+        direct_state_channels.setdefault(measurement.state, []).append(
+            measurement.channel
+        )
+    for mapping in proposal.target_mappings:
         if mapping.source in state_names:
             direct_state_channels.setdefault(mapping.source, []).append(
                 mapping.channel
@@ -159,7 +180,8 @@ def enrich_topology_proposal(
         ),
         external_symbols=tuple(sorted(external_symbols)),
         interactions=proposal.interactions,
-        observation_mappings=proposal.observation_mappings,
+        state_measurements=proposal.state_measurements,
+        target_mappings=proposal.target_mappings,
     )
     if context.forbid_latent_states and any(
         item.kind is StateKind.LATENT for item in topology.states
@@ -185,16 +207,21 @@ def enrich_functional_proposal(
             f"missing={sorted(missing)}, extra={sorted(extra)}"
         )
 
-    direct_observed_channels = {
-        mapping.source: mapping.channel
-        for mapping in topology.observation_mappings
-        if mapping.source
-        in {
-            state.name
-            for state in topology.states
-            if state.kind is StateKind.OBSERVED
-        }
+    observed_state_names = {
+        state.name
+        for state in topology.states
+        if state.kind is StateKind.OBSERVED
     }
+    direct_observed_channels = {
+        item.state: item.channel for item in topology.state_measurements
+    }
+    direct_observed_channels.update(
+        {
+            mapping.source: mapping.channel
+            for mapping in topology.target_mappings
+            if mapping.source in observed_state_names
+        }
+    )
     observed_initials = tuple(
         InitialConditionSpec(
             state=state.name,
@@ -276,6 +303,11 @@ def expand_staged_candidate(
 
     restricted_parser = parser or RestrictedParser()
     parameter_names = {item.name for item in functional.parameters}
+    signed_coefficient_names = {
+        item.name
+        for item in functional.parameters
+        if item.role is ParameterRole.COEFFICIENT
+    }
     terms_by_target: dict[
         tuple[InteractionTargetKind, str],
         list[tuple[InteractionPolarity, str]],
@@ -293,6 +325,16 @@ def expand_staged_candidate(
                 f"interaction {interaction.interaction_id} changes topology: "
                 f"missing_sources={sorted(expected_sources - used_sources)}, "
                 f"extra_sources={sorted(used_sources - expected_sources)}"
+            )
+        ambiguous_signed_coefficients = sorted(
+            parsed.symbols & signed_coefficient_names
+        )
+        if ambiguous_signed_coefficients:
+            raise ValueError(
+                f"interaction {interaction.interaction_id} uses signed scalar "
+                "coefficient roles even though topology owns the outer polarity: "
+                f"{ambiguous_signed_coefficients}; use nonnegative_coefficient, "
+                "rate, scale, or another scientifically appropriate typed role"
             )
         terms_by_target.setdefault(
             (interaction.target_kind, interaction.target), []
@@ -330,13 +372,23 @@ def expand_staged_candidate(
         states=topology.states,
         processes=processes,
         state_equations=state_equations,
-        observation_mappings=tuple(
-            ObservationMapping(
-                channel=mapping.channel,
-                expression=mapping.source,
-                unit=mapping.unit,
-            )
-            for mapping in topology.observation_mappings
+        observation_mappings=(
+            *(
+                ObservationMapping(
+                    channel=mapping.channel,
+                    expression=mapping.source,
+                    unit=mapping.unit,
+                )
+                for mapping in topology.target_mappings
+            ),
+            *(
+                ObservationMapping(
+                    channel=measurement.channel,
+                    expression=measurement.state,
+                    unit=measurement.unit,
+                )
+                for measurement in topology.state_measurements
+            ),
         ),
         parameters=functional.parameters,
         initial_conditions=functional.initial_conditions,

@@ -1,0 +1,305 @@
+{
+  "$defs": {
+    "InteractionPolarity": {
+      "description": "Outer algebraic operator used to assemble an interaction term.\n\nThis is not by itself a proof that the assigned function is nonnegative or\nmonotone in every source. Parameter roles and scientific checks own those\nseparate claims.",
+      "enum": [
+        "additive",
+        "subtractive"
+      ],
+      "title": "InteractionPolarity",
+      "type": "string"
+    },
+    "InteractionTargetKind": {
+      "description": "Kind of definition assembled from an interaction hyperedge.",
+      "enum": [
+        "state_derivative",
+        "algebraic_process"
+      ],
+      "title": "InteractionTargetKind",
+      "type": "string"
+    },
+    "ProposedTopologyProcess": {
+      "additionalProperties": false,
+      "description": "One instantaneous generated quantity before a function is assigned.",
+      "properties": {
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ProposedTopologyProcess",
+      "type": "object"
+    },
+    "ProposedTopologyState": {
+      "additionalProperties": false,
+      "description": "One generated state identity in the compact topology contract.\n\nState observability is deliberately omitted. The runtime derives it from\nvalidated public measurement and target mappings instead of asking the\nproposer to emit a fallible observed/latent label.",
+      "properties": {
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ProposedTopologyState",
+      "type": "object"
+    },
+    "TopologyInteraction": {
+      "additionalProperties": false,
+      "description": "One signed dependency hyperedge in a staged topology.",
+      "properties": {
+        "description": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "mechanisms": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Mechanisms",
+          "type": "array"
+        },
+        "polarity": {
+          "$ref": "#/$defs/InteractionPolarity",
+          "default": "additive"
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Sources",
+          "type": "array"
+        },
+        "target": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Target",
+          "type": "string"
+        },
+        "target_kind": {
+          "$ref": "#/$defs/InteractionTargetKind"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "target",
+        "target_kind"
+      ],
+      "title": "TopologyInteraction",
+      "type": "object"
+    },
+    "TopologyStateMeasurement": {
+      "additionalProperties": false,
+      "description": "Identity measurement that makes one modeled state directly observed.",
+      "properties": {
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        },
+        "unit": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "channel"
+      ],
+      "title": "TopologyStateMeasurement",
+      "type": "object"
+    },
+    "TopologyTargetMapping": {
+      "additionalProperties": false,
+      "description": "Direct mapping from a generated node to one prediction target.",
+      "properties": {
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Source",
+          "type": "string"
+        },
+        "unit": {
+          "default": "unspecified",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "source"
+      ],
+      "title": "TopologyTargetMapping",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Minimal provider-facing graph proposal without runtime-owned metadata.",
+  "properties": {
+    "candidate_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "change_summary": {
+      "default": "unspecified",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Change Summary",
+      "type": "string"
+    },
+    "interactions": {
+      "items": {
+        "$ref": "#/$defs/TopologyInteraction"
+      },
+      "maxItems": 512,
+      "minItems": 1,
+      "title": "Interactions",
+      "type": "array"
+    },
+    "parent_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Candidate Id"
+    },
+    "processes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProposedTopologyProcess"
+      },
+      "maxItems": 256,
+      "title": "Processes",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "proposed-topology-candidate-2",
+      "default": "proposed-topology-candidate-2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "state_measurements": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TopologyStateMeasurement"
+      },
+      "maxItems": 64,
+      "title": "State Measurements",
+      "type": "array"
+    },
+    "states": {
+      "items": {
+        "$ref": "#/$defs/ProposedTopologyState"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "States",
+      "type": "array"
+    },
+    "target_mappings": {
+      "items": {
+        "$ref": "#/$defs/TopologyTargetMapping"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Target Mappings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "states",
+    "interactions",
+    "target_mappings"
+  ],
+  "title": "ProposedTopologyCandidate",
+  "type": "object"
+}

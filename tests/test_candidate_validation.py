@@ -11,6 +11,7 @@ from autoformalism.expressions import (
     CandidateValidator,
     ModelValidationError,
     ValidationContext,
+    infer_effective_observability,
     repair_protected_declarations,
 )
 from autoformalism.schemas import CandidateModel
@@ -151,7 +152,35 @@ def test_no_latent_ablation_rejects_latent_dynamic_state(
     with pytest.raises(ModelValidationError) as raised:
         CandidateValidator().validate(_candidate(), restricted)
 
-    assert "LATENT_STATE_FORBIDDEN" in _codes(raised.value)
+    assert "UNOBSERVED_DYNAMIC_STATE_FORBIDDEN" in _codes(raised.value)
+
+
+def test_declared_latent_identity_measurement_is_effectively_observed(
+    context: ValidationContext,
+) -> None:
+    payload = candidate_payload()
+    payload["states"] = [payload["states"][1]]
+    payload["states"][0]["kind"] = "latent"
+    payload["state_equations"] = [payload["state_equations"][1]]
+    payload["state_equations"][0]["rhs"] = "-decay * y + input_u"
+    payload["processes"] = []
+    payload["parameters"] = [payload["parameters"][2]]
+    payload["initial_conditions"] = [payload["initial_conditions"][1]]
+    payload["initial_conditions"][0].update(
+        {
+            "scope": "global",
+            "initialization_range": None,
+            "expression": "target",
+        }
+    )
+    restricted = context.model_copy(update={"forbid_latent_states": True})
+
+    validated = CandidateValidator().validate(_candidate(payload), restricted)
+
+    assert validated.candidate.states[0].kind.value == "latent"
+    assert infer_effective_observability(validated).observed_state_names == {
+        "y"
+    }
 
 
 def test_no_latent_ablation_rejects_unmapped_observed_state(
@@ -575,6 +604,39 @@ def test_requires_exact_target_observation_mappings(
         "MISSING_OBSERVATION_MAPPING",
         "UNEXPECTED_OBSERVATION_MAPPING",
     }
+
+
+def test_auxiliary_identity_mapping_can_observe_differently_named_state(
+    context: ValidationContext,
+) -> None:
+    payload = candidate_payload()
+    payload["states"].append(
+        {
+            "name": "measured_aux_state",
+            "kind": "observed",
+            "unit": "relative",
+            "description": "Modeled state measured by the auxiliary channel.",
+        }
+    )
+    payload["state_equations"].append(
+        {"state": "measured_aux_state", "rhs": "input_u"}
+    )
+    payload["observation_mappings"].append(
+        {"channel": "aux", "expression": "measured_aux_state"}
+    )
+    payload["initial_conditions"].append(
+        {
+            "state": "measured_aux_state",
+            "scope": "global",
+            "expression": "aux",
+        }
+    )
+
+    validated = CandidateValidator().validate(_candidate(payload), context)
+
+    assert validated.observation_expressions["aux"].symbols == frozenset(
+        {"measured_aux_state"}
+    )
 
 
 def test_validator_defensively_checks_state_equation_closure(

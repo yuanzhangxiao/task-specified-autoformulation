@@ -60,7 +60,7 @@ def _topology_proposal() -> ProposedTopologyCandidate:
                     "polarity": "subtractive",
                 },
             ],
-            "observation_mappings": [{"channel": "target", "source": "x"}],
+            "target_mappings": [{"channel": "target", "source": "x"}],
         }
     )
 

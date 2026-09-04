@@ -37,10 +37,10 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "proposer-candidate.schema.json",
         "proposer-candidate-v2.schema.json",
         "proposed-functional-candidate-v1.schema.json",
-        "proposed-topology-candidate-v1.schema.json",
+        "proposed-topology-candidate-v2.schema.json",
         "scientific-judge-v2.schema.json",
         "target-completeness-judge-v1.schema.json",
-        "topology-candidate-v1.schema.json",
+        "topology-candidate-v2.schema.json",
     }
     assert {path.name: path.read_bytes() for path in second_paths} == first_contents
 
@@ -57,7 +57,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         first_contents["proposed-functional-candidate-v1.schema.json"]
     )
     proposed_topology_schema = json.loads(
-        first_contents["proposed-topology-candidate-v1.schema.json"]
+        first_contents["proposed-topology-candidate-v2.schema.json"]
     )
     scientific_judge_schema = json.loads(
         first_contents["scientific-judge-v2.schema.json"]
@@ -72,7 +72,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         first_contents["paired-target-completeness-judge-v1.schema.json"]
     )
     topology_candidate_schema = json.loads(
-        first_contents["topology-candidate-v1.schema.json"]
+        first_contents["topology-candidate-v2.schema.json"]
     )
     assert candidate_schema == CandidateModel.model_json_schema(mode="validation")
     assert atomic_judge_schema == AtomicJudgeResult.model_json_schema(
@@ -172,11 +172,11 @@ def test_checked_in_schemas_match_models() -> None:
     ) == ProposedFunctionalCandidate.model_json_schema(mode="validation")
     assert json.loads(
         (
-            schema_directory / "proposed-topology-candidate-v1.schema.json"
+            schema_directory / "proposed-topology-candidate-v2.schema.json"
         ).read_text(encoding="utf-8")
     ) == ProposedTopologyCandidate.model_json_schema(mode="validation")
     assert json.loads(
-        (schema_directory / "topology-candidate-v1.schema.json").read_text(
+        (schema_directory / "topology-candidate-v2.schema.json").read_text(
             encoding="utf-8"
         )
     ) == TopologyCandidate.model_json_schema(mode="validation")

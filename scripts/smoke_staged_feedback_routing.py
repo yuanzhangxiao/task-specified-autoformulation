@@ -62,7 +62,7 @@ def main() -> None:
                     "polarity": "subtractive",
                 },
             ],
-            "observation_mappings": [{"channel": "target", "source": "x"}],
+            "target_mappings": [{"channel": "target", "source": "x"}],
         }
     )
     topology = enrich_topology_proposal(proposed_topology, context)

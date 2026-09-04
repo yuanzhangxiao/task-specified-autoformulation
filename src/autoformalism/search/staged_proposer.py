@@ -29,8 +29,8 @@ from autoformalism.staging import (
 class StagedProposerConfig(StrictSchema):
     """Immutable prompts and cache namespace for staged construction."""
 
-    schema_version: Literal["staged-proposer-config-1"] = (
-        "staged-proposer-config-1"
+    schema_version: Literal["staged-proposer-config-2"] = (
+        "staged-proposer-config-2"
     )
     checkpoint_directory: Path
     run_fingerprint: Sha256Digest
@@ -212,19 +212,29 @@ def _topology_prompt(
     incumbent_topology: TopologyCandidate | None,
 ) -> str:
     payload = {
-        "schema_version": "staged-topology-request-1",
+        "schema_version": "staged-topology-request-2",
         "task": (
             "Propose only the dynamic interaction graph. Do not provide equations, "
-            "interaction functions, parameters, units, scopes, or numeric ranges."
+            "interaction functions, parameters, units, scopes, or numeric ranges. "
+            "Separate direct auxiliary-state measurements from prediction-target "
+            "mappings."
         ),
         "public_problem": public_problem,
         "runtime_contract": {
             "target_channels": list(context.targets),
+            "state_measurement_channels": list(context.auxiliaries),
             "available_forcing_channels": sorted(context.forcing_channels),
             "time_symbol": context.time_symbol,
             "observability_rule": (
-                "The runtime marks a state observed only when a public target maps "
-                "directly to it; all other proposed states are latent."
+                "A state is observed only through an identity measurement: either "
+                "a target maps directly to that state, or state_measurements binds "
+                "it to a supplied auxiliary channel. A target produced through an "
+                "algebraic process does not reveal its internal states."
+            ),
+            "mapping_rule": (
+                "target_mappings must cover every target exactly once. "
+                "state_measurements may bind states only to listed auxiliary "
+                "channels; inputs and covariates remain external forcing."
             ),
         },
         "routed_feedback": feedback.for_stage(RevisionStage.TOPOLOGY),
@@ -256,11 +266,15 @@ def _functional_prompt(
     feedback: RoutedProposerFeedback,
 ) -> str:
     payload = {
-        "schema_version": "staged-functional-request-1",
+        "schema_version": "staged-functional-request-2",
         "task": (
             "Assign one restricted expression to every interaction without changing "
             "the topology. Declare parameter names and qualitative roles only; omit "
-            "parameter scopes and numeric ranges. Initialize every latent state."
+            "parameter scopes and numeric ranges. The topology owns each outer plus "
+            "or minus sign, so scalar interaction weights must use a nonnegative or "
+            "positive role rather than the signed coefficient role. Offsets and "
+            "shape parameters may use their corresponding roles. Initialize every "
+            "latent state."
         ),
         "public_problem": public_problem,
         "immutable_topology": topology.model_dump(mode="json"),

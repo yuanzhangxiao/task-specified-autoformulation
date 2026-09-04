@@ -32,13 +32,13 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "proposer-candidate.schema.json": ProposerCandidate,
     "proposer-candidate-v2.schema.json": ProposerCandidateV2,
     "proposed-functional-candidate-v1.schema.json": ProposedFunctionalCandidate,
-    "proposed-topology-candidate-v1.schema.json": ProposedTopologyCandidate,
+    "proposed-topology-candidate-v2.schema.json": ProposedTopologyCandidate,
     "judge.schema.json": JudgeResult,
     "scientific-judge-v2.schema.json": ScientificJudgeResult,
     "comparative-judge-v1.schema.json": ComparativeJudgeResult,
     "hybrid-judge-v1.schema.json": HybridJudgeResult,
     "target-completeness-judge-v1.schema.json": TargetCompletenessJudgeResult,
-    "topology-candidate-v1.schema.json": TopologyCandidate,
+    "topology-candidate-v2.schema.json": TopologyCandidate,
     "paired-target-completeness-judge-v1.schema.json": (
         PairedTargetCompletenessJudgeResult
     ),

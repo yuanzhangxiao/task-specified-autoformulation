@@ -88,6 +88,8 @@ from autoformalism.schemas.staged import (
     TopologyInteraction,
     TopologyObservationMapping,
     TopologyProcessSpec,
+    TopologyStateMeasurement,
+    TopologyTargetMapping,
 )
 
 __all__ = [
@@ -164,6 +166,8 @@ __all__ = [
     "TopologyInteraction",
     "TopologyObservationMapping",
     "TopologyProcessSpec",
+    "TopologyStateMeasurement",
+    "TopologyTargetMapping",
     "ValueRange",
     "enrich_proposal",
     "enrich_proposal_v2",

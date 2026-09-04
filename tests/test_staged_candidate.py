@@ -85,7 +85,7 @@ def _topology_payload() -> dict[str, Any]:
                 "polarity": "subtractive",
             },
         ],
-        "observation_mappings": [
+        "target_mappings": [
             {"channel": "target", "source": "x", "unit": "relative"}
         ],
     }
@@ -117,10 +117,15 @@ def _functional_payload(topology: TopologyCandidate) -> dict[str, Any]:
             {
                 "name": name,
                 "scope": "global",
+                "role": role,
                 "bounds": {"lower": 0.01, "upper": 5.0},
                 "initialization_range": {"lower": 0.1, "upper": 1.0},
             }
-            for name in ("latent_decay", "gain", "storage_decay")
+            for name, role in (
+                ("latent_decay", "rate"),
+                ("gain", "scale"),
+                ("storage_decay", "rate"),
+            )
         ],
         "initial_conditions": [
             {"state": "x", "scope": "global", "expression": "target"},
@@ -135,7 +140,7 @@ def _context() -> ValidationContext:
 
 def _proposed_topology_payload() -> dict[str, Any]:
     payload = _topology_payload()
-    payload["schema_version"] = "proposed-topology-candidate-1"
+    payload["schema_version"] = "proposed-topology-candidate-2"
     payload.pop("external_symbols")
     payload["states"] = [
         {"name": item["name"], "mechanisms": item.get("mechanisms", [])}
@@ -220,6 +225,122 @@ def test_compact_staged_proposals_are_enriched_from_runtime_context() -> None:
     assert result.candidate_identity == candidate_identity(result.candidate)
 
 
+def test_observability_uses_auxiliary_measurements_not_target_status() -> None:
+    payload = _proposed_topology_payload()
+    payload["states"].append({"name": "measured_driver"})
+    payload["state_measurements"] = [
+        {"state": "measured_driver", "channel": "driver_aux"}
+    ]
+    payload["interactions"].append(
+        {
+            "interaction_id": "measured_driver_dynamics",
+            "target": "measured_driver",
+            "target_kind": "state_derivative",
+            "sources": ["input_u"],
+        }
+    )
+    context = ValidationContext(
+        targets=("target",),
+        auxiliaries=("driver_aux",),
+        external_inputs=("input_u",),
+    )
+
+    topology = enrich_topology_proposal(
+        ProposedTopologyCandidate.model_validate(payload), context
+    )
+
+    assert {item.name: item.kind.value for item in topology.states} == {
+        "measured_driver": "observed",
+        "x": "observed",
+        "z": "latent",
+    }
+
+
+def test_parameterized_target_process_does_not_reveal_internal_state() -> None:
+    proposal = ProposedTopologyCandidate.model_validate(
+        {
+            "candidate_id": "nonidentity_measurement",
+            "states": [{"name": "x"}],
+            "processes": [{"name": "predicted_y"}],
+            "interactions": [
+                {
+                    "interaction_id": "x_dynamics",
+                    "target": "x",
+                    "target_kind": "state_derivative",
+                    "sources": ["input_u"],
+                },
+                {
+                    "interaction_id": "measurement_function",
+                    "target": "predicted_y",
+                    "target_kind": "algebraic_process",
+                    "sources": ["x"],
+                },
+            ],
+            "target_mappings": [{"channel": "y", "source": "predicted_y"}],
+        }
+    )
+    context = ValidationContext(targets=("y",), external_inputs=("input_u",))
+    topology = enrich_topology_proposal(proposal, context)
+    functional_proposal = ProposedFunctionalCandidate.model_validate(
+        {
+            "candidate_id": "nonidentity_functions",
+            "interaction_functions": [
+                {"interaction_id": "x_dynamics", "expression": "input_u"},
+                {
+                    "interaction_id": "measurement_function",
+                    "expression": "theta * x",
+                },
+            ],
+            "parameters": [{"name": "theta", "role": "scale"}],
+            "latent_initials": [
+                {"state": "x", "initial": {"fixed_value": 0.0}}
+            ],
+        }
+    )
+    functional = enrich_functional_proposal(functional_proposal, topology)
+
+    result = expand_staged_candidate(topology, functional, context)
+
+    assert topology.states[0].kind.value == "latent"
+    assert result.candidate.observation_mappings[0].expression == "predicted_y"
+
+
+def test_target_state_can_depend_on_a_latent_state() -> None:
+    proposal = ProposedTopologyCandidate.model_validate(
+        {
+            "candidate_id": "latent_drives_target",
+            "states": [{"name": "x"}, {"name": "z"}],
+            "interactions": [
+                {
+                    "interaction_id": "x_memory",
+                    "target": "x",
+                    "target_kind": "state_derivative",
+                    "sources": ["x", "input_u"],
+                },
+                {
+                    "interaction_id": "z_response",
+                    "target": "z",
+                    "target_kind": "state_derivative",
+                    "sources": ["x", "input_u"],
+                },
+            ],
+            "target_mappings": [{"channel": "z_data", "source": "z"}],
+        }
+    )
+
+    topology = enrich_topology_proposal(
+        proposal,
+        ValidationContext(
+            targets=("z_data",), external_inputs=("input_u",)
+        ),
+    )
+
+    assert {item.name: item.kind.value for item in topology.states} == {
+        "x": "latent",
+        "z": "observed",
+    }
+
+
 def test_compact_topology_cannot_invent_external_channels_or_targets() -> None:
     unknown_source = _proposed_topology_payload()
     unknown_source["interactions"][0]["sources"] = ["private_signal"]
@@ -228,7 +349,7 @@ def test_compact_topology_cannot_invent_external_channels_or_targets() -> None:
         enrich_topology_proposal(proposal, _context())
 
     wrong_target = _proposed_topology_payload()
-    wrong_target["observation_mappings"][0]["channel"] = "other_target"
+    wrong_target["target_mappings"][0]["channel"] = "other_target"
     proposal = ProposedTopologyCandidate.model_validate(wrong_target)
     with pytest.raises(ValueError, match="mappings differ from public targets"):
         enrich_topology_proposal(proposal, _context())
@@ -283,6 +404,19 @@ def test_function_bindings_must_cover_topology_exactly() -> None:
     functional = FunctionalCandidate.model_validate(payload)
 
     with pytest.raises(ValueError, match="bindings differ from topology"):
+        expand_staged_candidate(topology, functional, _context())
+
+
+def test_topology_owned_sign_rejects_signed_scalar_coefficient_role() -> None:
+    topology = TopologyCandidate.model_validate(_topology_payload())
+    payload = _functional_payload(topology)
+    for parameter in payload["parameters"]:
+        if parameter["name"] == "gain":
+            parameter["role"] = "coefficient"
+            parameter.pop("domain", None)
+    functional = FunctionalCandidate.model_validate(payload)
+
+    with pytest.raises(ValueError, match="topology owns the outer polarity"):
         expand_staged_candidate(topology, functional, _context())
 
 

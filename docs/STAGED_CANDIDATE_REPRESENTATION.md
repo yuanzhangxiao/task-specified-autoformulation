@@ -12,9 +12,16 @@ controller, mechanism scoring, or fitting backend.
 - observed and latent dynamic states;
 - instantaneous algebraic process nodes;
 - public forcing symbols;
-- signed interaction hyperedges, including their source set, target, and
-  mechanism annotations;
-- direct mappings from generated nodes to public observation channels.
+- interaction hyperedges, including their source set, target, outer additive
+  or subtractive operator, and mechanism annotations;
+- identity measurements from states to supplied auxiliary channels;
+- mappings from generated states or processes to prediction targets.
+
+The interaction polarity controls only how the completed term is assembled
+into its target equation. It is not a proof that the interaction function is
+nonnegative or monotone. A scalar weight that carries the edge sign, such as
+`k` in `-k * (x - x0)`, must use a nonnegative or positive parameter role;
+`x - x0` is still allowed to change sign.
 
 Every dynamic state must have at least one derivative interaction and every
 algebraic process must have at least one defining interaction. Dynamic feedback
@@ -38,15 +45,22 @@ not create a route around the execution safety boundary.
 The LLM does not emit the complete internal artifacts. The
 `ProposedTopologyCandidate` contract omits equations, functions, parameters,
 units, external-symbol declarations, and observed/latent labels. The runtime
-derives external symbols from the public validation context and marks a state
-observed only when a public target maps directly to it. This prevents invented
-data access and the state-label error seen in earlier complete-model proposals.
+derives external symbols from the public validation context. It marks a state
+observed only when a target maps directly to that state or an explicit identity
+measurement binds it to a supplied auxiliary channel. A target mapped from an
+algebraic process does not reveal the process's internal states. Thus
+`y_hat = theta * x; y <- y_hat` leaves `x` latent, while `y <- x` makes `x`
+directly observed.
 
 The `ProposedFunctionalCandidate` contract receives the exact committed
 topology. It emits one restricted expression per interaction, parameter names
 and qualitative roles, and latent initial values. Parameter scope, domain, and
 all numerical ranges are runtime-owned. Deterministic enrichment creates the
 full `FunctionalCandidate` before ordinary staged expansion and validation.
+
+The exact provider payloads and the deterministic validation, enrichment,
+retry, and feedback rules are recorded in
+[`STAGED_PROPOSER_RUNTIME_CONTRACT.md`](STAGED_PROPOSER_RUNTIME_CONTRACT.md).
 
 `CachedLLMClient.propose_topology` and `propose_functions` use distinct roles,
 schemas, request hashes, cache entries, and append-only call records. The
