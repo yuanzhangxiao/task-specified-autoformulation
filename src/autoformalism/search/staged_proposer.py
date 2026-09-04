@@ -92,6 +92,7 @@ class StagedProposer:
         feedback: RoutedProposerFeedback,
         fixed_topology: TopologyCandidate | None = None,
         incumbent_topology: TopologyCandidate | None = None,
+        cache_only: bool | None = None,
     ) -> StagedProposalResult:
         """Build or functionally refine one validated executable candidate."""
         if not public_problem.strip():
@@ -112,6 +113,7 @@ class StagedProposer:
             topology, topology_call = self._topology_stage(
                 topology_prompt,
                 context,
+                cache_only=cache_only,
             )
             topology_reused = False
         else:
@@ -127,6 +129,7 @@ class StagedProposer:
             functional_prompt,
             topology,
             context,
+            cache_only=cache_only,
         )
         expansion = expand_staged_candidate(topology, functional, context)
         return StagedProposalResult(
@@ -143,6 +146,8 @@ class StagedProposer:
         self,
         user_prompt: str,
         context: ValidationContext,
+        *,
+        cache_only: bool | None,
     ) -> tuple[TopologyCandidate, StageCallReceipt]:
         input_hash = self._stage_input_hash(
             "topology", self._config.topology_system_prompt, user_prompt
@@ -156,7 +161,9 @@ class StagedProposer:
             system_prompt=self._config.topology_system_prompt,
             user_prompt=user_prompt,
             context=context,
-            cache_only=self._config.cache_only,
+            cache_only=(
+                self._config.cache_only if cache_only is None else cache_only
+            ),
         )
         _write_checkpoint(checkpoint, input_hash, result)
         return result.parsed, _call_receipt(result)
@@ -166,6 +173,8 @@ class StagedProposer:
         user_prompt: str,
         topology: TopologyCandidate,
         context: ValidationContext,
+        *,
+        cache_only: bool | None,
     ) -> tuple[FunctionalCandidate, StageCallReceipt]:
         input_hash = self._stage_input_hash(
             "functional", self._config.functional_system_prompt, user_prompt
@@ -180,7 +189,9 @@ class StagedProposer:
             user_prompt=user_prompt,
             topology=topology,
             context=context,
-            cache_only=self._config.cache_only,
+            cache_only=(
+                self._config.cache_only if cache_only is None else cache_only
+            ),
         )
         _write_checkpoint(checkpoint, input_hash, result)
         return result.parsed, _call_receipt(result)
@@ -237,7 +248,10 @@ def _topology_prompt(
                 "channels; inputs and covariates remain external forcing."
             ),
         },
-        "routed_feedback": feedback.for_stage(RevisionStage.TOPOLOGY),
+        "routed_feedback": feedback.for_stage(
+            RevisionStage.TOPOLOGY,
+            include_integrated_repairs=True,
+        ),
         "incumbent_topology": (
             None
             if incumbent_topology is None
@@ -279,7 +293,10 @@ def _functional_prompt(
         "public_problem": public_problem,
         "immutable_topology": topology.model_dump(mode="json"),
         "topology_commitment_sha256": topology_commitment_sha256(topology),
-        "routed_feedback": feedback.for_stage(RevisionStage.FUNCTIONAL_FORM),
+        "routed_feedback": feedback.for_stage(
+            RevisionStage.FUNCTIONAL_FORM,
+            include_integrated_repairs=True,
+        ),
     }
     return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 

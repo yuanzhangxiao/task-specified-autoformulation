@@ -19,6 +19,7 @@ from autoformalism.search.models import (
     FinalEvaluation,
     FrozenSelection,
     IncumbentChallenge,
+    ProposerConstructionMode,
     SearchConfig,
 )
 
@@ -33,6 +34,7 @@ __all__ = [
     "FinalEvaluation",
     "FrozenSelection",
     "IncumbentChallenge",
+    "ProposerConstructionMode",
     "RevisionStage",
     "RoutedFeedbackItem",
     "RoutedProposerFeedback",

@@ -2,8 +2,8 @@
 
 This document records what the staged proposer actually sees and emits, what
 the runtime derives, and which failures are repaired or retried. It describes
-the opt-in staged path; the existing complete-candidate search remains a
-separate path until staged search integration is complete.
+the opt-in staged path; the existing complete-candidate search remains the
+default compatibility path.
 
 ## Which proposer path is currently live
 
@@ -60,9 +60,11 @@ from public identity mappings before validation, fitting, and feedback. Every
 repair is recorded. Scientific equations or dependencies are not silently
 changed.
 
-The two-stage schemas below are the replacement architecture being developed.
-They are implemented and smoke-tested as library APIs, but are not yet wired
-into the production search controller or the prior refinement experiments.
+The two-stage schemas below are now wired into the search controller behind
+`--proposer-construction-mode staged_v2`. The flag also requires feedback-rich
+beam-one incumbent refinement and disables the legacy post-fit term pruner so
+the topology commitment remains exact. Historical experiments still use the
+complete-candidate path unless their frozen run configuration says otherwise.
 
 The authoritative machine-readable provider schemas are:
 
@@ -313,7 +315,10 @@ There are three distinct behaviors:
    topology; expression/annotation failures plus fit, integration, and worst
    validation-target evidence to functional form; scientific-judge missing
    requirements and actionable edits to integrated repair. Each stage sees
-   only its routed view.
+   its routed view. Cross-cutting scientific-judge repairs are visible to both
+   staged calls. A target or graph-mechanism failure triggers a topology plus
+   function revision; otherwise the exact incumbent topology is reused and
+   only the functions are revised.
 
 Request hashes include provider, model, role, prompts, response schema,
 provider options, validation context, and topology commitment where relevant.
@@ -322,9 +327,12 @@ stages are checkpointed by a run-scoped input hash for deterministic resume.
 
 ## Current limits and historical scope
 
-- The staged path has passed local construction/validation smokes but is not yet
-  connected to the production search controller or evaluated in the planned
-  two-benchmark, three-seed experiment.
+- The staged path is connected to the search controller as an explicit opt-in
+  and has a local checkpoint/resume integration test. It has not yet passed the
+  planned two-benchmark, three-seed cluster experiment.
+- Legacy post-fit term pruning is deliberately off in staged-v2 runs. A future
+  staged pruner must produce a new topology/function commitment rather than
+  mutating only the expanded complete candidate.
 - Its v1 topology prototype inferred observability from direct target mappings
   only. V2 corrects this by representing auxiliary state measurements
   separately. The established complete-candidate compiler already inferred

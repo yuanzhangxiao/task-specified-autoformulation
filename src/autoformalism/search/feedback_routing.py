@@ -111,8 +111,18 @@ class RoutedProposerFeedback(StrictSchema):
     items: tuple[RoutedFeedbackItem, ...] = Field(default=(), max_length=64)
     omitted_item_count: int = Field(default=0, ge=0)
 
-    def for_stage(self, stage: RevisionStage) -> dict[str, object]:
-        """Return only the evidence appropriate for one proposer operation."""
+    def for_stage(
+        self,
+        stage: RevisionStage,
+        *,
+        include_integrated_repairs: bool = False,
+    ) -> dict[str, object]:
+        """Return only evidence appropriate for one proposer operation.
+
+        A two-stage search may expose cross-cutting scientific-judge repairs to
+        both construction calls while retaining the normal stage-local view for
+        callers that do not opt in.
+        """
         visible_routes = {
             RevisionStage.TOPOLOGY: {FeedbackRoute.TOPOLOGY},
             RevisionStage.FUNCTIONAL_FORM: {
@@ -121,6 +131,8 @@ class RoutedProposerFeedback(StrictSchema):
             },
             RevisionStage.INTEGRATED_REPAIR: set(FeedbackRoute),
         }[stage]
+        if include_integrated_repairs:
+            visible_routes = visible_routes | {FeedbackRoute.INTEGRATED_REPAIR}
         visible = tuple(item for item in self.items if item.route in visible_routes)
         return {
             "schema_version": "stage-feedback-view-1",

@@ -21,6 +21,7 @@ SelectionPolicy = Literal[
 ]
 ProposerFeedbackMode = Literal["legacy", "structured", "rich_v1"]
 ProposalPolicy = Literal["exploratory", "incumbent_refinement_v1"]
+ProposerConstructionMode = Literal["complete", "staged_v2"]
 
 
 class IncumbentChallenge(StrictSchema):
@@ -54,6 +55,7 @@ class SearchConfig(BaseModel):
     validation_mse_target: float = Field(default=0.0, ge=0.0)
     cheap_prefit_judge: bool = False
     use_judge: bool = True
+    proposer_construction_mode: ProposerConstructionMode = "complete"
     proposer_feedback_mode: ProposerFeedbackMode = "legacy"
     proposal_policy: ProposalPolicy = "exploratory"
     require_initial_proposer_cache_hit: bool = False
@@ -63,12 +65,16 @@ class SearchConfig(BaseModel):
     hybrid_science_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     evaluate_test: bool = True
     proposer_system_prompt: str
+    staged_public_problem: str | None = None
+    staged_topology_system_prompt: str | None = None
+    staged_functional_system_prompt: str | None = None
     judge_system_prompt: str
     fit_config: FitConfig = FitConfig()
     fit_retry_config: FitConfig | None = None
     final_fit_config: FitConfig = FitConfig()
     final_fit_retry_config: FitConfig | None = None
     pruning_config: PruningConfig = PruningConfig()
+    apply_postfit_pruning: bool = True
 
     @model_validator(mode="after")
     def validate_selection_policy_contract(self) -> SearchConfig:
@@ -82,6 +88,33 @@ class SearchConfig(BaseModel):
                 )
             if self.beam_size != 1:
                 raise ValueError("incumbent_refinement_v1 requires beam_size=1")
+        if self.proposer_construction_mode == "staged_v2":
+            if self.proposer_feedback_mode != "rich_v1":
+                raise ValueError(
+                    "staged_v2 requires proposer_feedback_mode=rich_v1"
+                )
+            if self.proposal_policy != "incumbent_refinement_v1":
+                raise ValueError(
+                    "staged_v2 requires proposal_policy=incumbent_refinement_v1"
+                )
+            if self.apply_postfit_pruning:
+                raise ValueError(
+                    "staged_v2 requires apply_postfit_pruning=False because "
+                    "legacy term pruning would invalidate the topology commitment"
+                )
+            for field_name, value in (
+                ("staged_public_problem", self.staged_public_problem),
+                (
+                    "staged_topology_system_prompt",
+                    self.staged_topology_system_prompt,
+                ),
+                (
+                    "staged_functional_system_prompt",
+                    self.staged_functional_system_prompt,
+                ),
+            ):
+                if value is None or not value.strip():
+                    raise ValueError(f"staged_v2 requires {field_name}")
         if (
             self.selection_policy == "incumbent_relative_hybrid"
             and self.beam_size != 1

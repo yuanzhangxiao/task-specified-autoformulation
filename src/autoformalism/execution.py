@@ -44,7 +44,11 @@ from autoformalism.llm import (
 )
 from autoformalism.pruning import PruningConfig
 from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
-from autoformalism.schemas import CandidateModel, ScientificJudgeResult
+from autoformalism.schemas import (
+    CandidateModel,
+    ScientificJudgeResult,
+    TopologyCandidate,
+)
 from autoformalism.search import FinalEvaluation, SearchConfig, SearchController
 from autoformalism.search.hybrid_pair import PairedHybridJudge
 from autoformalism.targets import PublicTargetContract
@@ -109,6 +113,38 @@ structural sign.
 Natural-language concepts in the benchmark prompt are descriptions, not expression
 identifiers. Every expression symbol must exactly match a name in the runtime
 symbol contract below or a state, process, or parameter declared in this proposal.
+""".strip()
+
+_STAGED_TOPOLOGY_CONTROLLER_PROMPT = """
+Return exactly one ProposedTopologyCandidateV2 through the structured response
+schema. Propose only generated state/process nodes, signed dependency hyperedges,
+task-mechanism tags, direct auxiliary-state measurements, and target mappings.
+Do not emit equations, interaction expressions, fitted parameters, parameter
+ranges, parameter scopes, units, state observed/latent labels, or state initial
+values. The runtime derives external symbols and state observability from the
+public channel contract. A target mapping through an algebraic process does not
+make its internal states observed. Every state and process must receive at least
+one defining interaction; every target must map exactly once to a generated node.
+Treat each polarity as the outer plus/minus role of the term, not as a claim that
+the source-dependent expression is itself nonnegative. Use the routed topology
+and integrated scientific evidence to revise graph structure while preserving
+unaffected incumbent graph components.
+""".strip()
+
+_STAGED_FUNCTIONAL_CONTROLLER_PROMPT = """
+Return exactly one ProposedFunctionalCandidateV1 through the structured response
+schema. The supplied topology commitment is immutable. Assign exactly one
+restricted analytic expression to every interaction, declare only parameter
+names and qualitative roles, and initialize every runtime-derived latent state.
+Do not emit parameter values, numeric ranges, scopes, topology edits, extra
+sources, or unused parameters. The topology owns each outer plus/minus sign, so
+a scalar interaction weight must have a positive or nonnegative role rather than
+the signed `coefficient` role. Expressions may use only that interaction's exact
+declared sources and declared parameters. Allowed functions are `abs`, `exp`,
+`log`, `max`, `min`, `sigmoid`, `softplus`, `sqrt`, and `tanh`; use Python `**`
+for powers. The runtime safely parses, validates, fits, and causally evaluates the
+expanded model. Use routed functional, numerical, and integrated scientific
+evidence to make a substantive repair rather than renaming symbols.
 """.strip()
 
 _STRUCTURED_PROPOSER_FEEDBACK_PROMPT = """
@@ -244,6 +280,8 @@ class ExecutionArguments:
     dry_run: bool
     mock_llm: bool
     use_clean_observations: bool
+    proposer_construction_mode: Literal["complete", "staged_v2"] = "complete"
+    apply_postfit_pruning: bool = True
     llm_timeout_seconds: float = 900.0
     llm_max_output_tokens: int = 2048
     fit_starts: int = 1
@@ -323,6 +361,40 @@ class _RoleClient:
 
     def judge(self, *, system_prompt: str, user_prompt: str):
         return self._judge.judge(system_prompt=system_prompt, user_prompt=user_prompt)
+
+    def propose_topology(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: ValidationContext,
+        cache_only: bool = False,
+    ):
+        method = self._proposer.propose_topology  # type: ignore[attr-defined]
+        return method(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            context=context,
+            cache_only=cache_only,
+        )
+
+    def propose_functions(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        topology: TopologyCandidate,
+        context: ValidationContext,
+        cache_only: bool = False,
+    ):
+        method = self._proposer.propose_functions  # type: ignore[attr-defined]
+        return method(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            topology=topology,
+            context=context,
+            cache_only=cache_only,
+        )
 
 
 def build_experiment_parser(
@@ -582,6 +654,23 @@ def build_experiment_parser(
         ),
     )
     parser.add_argument(
+        "--proposer-construction-mode",
+        choices=("complete", "staged_v2"),
+        default="complete",
+        help=(
+            "complete requests the historical monolithic candidate; staged_v2 "
+            "separates topology and functional-form proposal calls"
+        ),
+    )
+    parser.add_argument(
+        "--disable-postfit-pruning",
+        action="store_true",
+        help=(
+            "preserve the fitted candidate exactly; required by staged_v2 so "
+            "the immutable topology/function commitment remains valid"
+        ),
+    )
+    parser.add_argument(
         "--require-initial-proposer-cache-hit",
         action="store_true",
         help=(
@@ -760,6 +849,22 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
             raise SystemExit(
                 "--proposal-policy incumbent_refinement_v1 requires --beam-size 1"
             )
+    if namespace.proposer_construction_mode == "staged_v2":
+        if namespace.proposer_feedback_mode != "rich_v1":
+            raise SystemExit(
+                "--proposer-construction-mode staged_v2 requires "
+                "--proposer-feedback-mode rich_v1"
+            )
+        if namespace.proposal_policy != "incumbent_refinement_v1":
+            raise SystemExit(
+                "--proposer-construction-mode staged_v2 requires "
+                "--proposal-policy incumbent_refinement_v1"
+            )
+        if not namespace.disable_postfit_pruning:
+            raise SystemExit(
+                "--proposer-construction-mode staged_v2 requires "
+                "--disable-postfit-pruning"
+            )
     if (
         namespace.parameter_fit_strategy
         in {
@@ -809,6 +914,8 @@ def arguments_from_namespace(namespace: argparse.Namespace) -> ExecutionArgument
         dry_run=namespace.dry_run,
         mock_llm=namespace.mock_llm,
         use_clean_observations=namespace.clean,
+        proposer_construction_mode=namespace.proposer_construction_mode,
+        apply_postfit_pruning=not namespace.disable_postfit_pruning,
         llm_timeout_seconds=namespace.llm_timeout_seconds,
         llm_max_output_tokens=namespace.llm_max_output_tokens,
         fit_starts=namespace.fit_starts,
@@ -1065,8 +1172,10 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             else max(2, min(5, arguments.iteration_budget))
         ),
         "use_judge": arguments.use_judge,
+        "proposer_construction_mode": arguments.proposer_construction_mode,
         "proposer_feedback_mode": arguments.proposer_feedback_mode,
         "proposal_policy": arguments.proposal_policy,
+        "apply_postfit_pruning": arguments.apply_postfit_pruning,
         "forbid_latent_states": arguments.forbid_latent_states,
         "use_derivative_fit_fast_path": use_derivative_fit_fast_path,
         "parameter_fit_strategy": arguments.parameter_fit_strategy,
@@ -1126,6 +1235,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         validation_mse_target=0.0,
         cheap_prefit_judge=False,
         use_judge=arguments.use_judge,
+        proposer_construction_mode=arguments.proposer_construction_mode,
         proposer_feedback_mode=arguments.proposer_feedback_mode,
         proposal_policy=arguments.proposal_policy,
         require_initial_proposer_cache_hit=(
@@ -1139,6 +1249,15 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
         proposer_system_prompt=proposer_system_prompt(
             arguments,
             public_prompt=proposer_prompt,
+            context=context,
+        ),
+        staged_public_problem=proposer_prompt,
+        staged_topology_system_prompt=staged_topology_system_prompt(
+            arguments,
+            context=context,
+        ),
+        staged_functional_system_prompt=staged_functional_system_prompt(
+            arguments,
             context=context,
         ),
         judge_system_prompt=(
@@ -1211,6 +1330,7 @@ def execute(arguments: ExecutionArguments) -> dict[str, Any]:
             ),
         ),
         pruning_config=PruningConfig(),
+        apply_postfit_pruning=arguments.apply_postfit_pruning,
     )
     result = SearchController(
         llm_client=client,
@@ -1251,6 +1371,38 @@ def proposer_system_prompt(
         f"{_latent_ablation_prompt(arguments)}"
         f"{_gmm_parameterization_prompt(arguments)}"
         f"{_structured_proposer_feedback_prompt(arguments)}"
+    )
+
+
+def staged_topology_system_prompt(
+    arguments: ExecutionArguments,
+    *,
+    context: ValidationContext,
+) -> str:
+    """Build the graph-only provider instruction for staged construction."""
+    return (
+        f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
+        f"{_prediction_protocol_prompt(context)}\n\n"
+        f"{_symbol_contract(context)}\n\n"
+        f"Topology-stage controller requirements:\n"
+        f"{_STAGED_TOPOLOGY_CONTROLLER_PROMPT}"
+        f"{_latent_ablation_prompt(arguments)}"
+    )
+
+
+def staged_functional_system_prompt(
+    arguments: ExecutionArguments,
+    *,
+    context: ValidationContext,
+) -> str:
+    """Build the function-only provider instruction for staged construction."""
+    return (
+        f"Configured proposer model: {arguments.proposer_model or 'mock'}\n\n"
+        f"{_prediction_protocol_prompt(context)}\n\n"
+        f"{_symbol_contract(context)}\n\n"
+        f"Functional-stage controller requirements:\n"
+        f"{_STAGED_FUNCTIONAL_CONTROLLER_PROMPT}"
+        f"{_gmm_parameterization_prompt(arguments)}"
     )
 
 

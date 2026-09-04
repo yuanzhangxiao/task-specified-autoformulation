@@ -7,7 +7,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -31,6 +31,7 @@ from autoformalism.fitting import (
 )
 from autoformalism.llm import LLMClient
 from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
+from autoformalism.llm.models import StagedLLMClient
 from autoformalism.pruning import prune_candidate
 from autoformalism.rebuttal.mechanisms import (
     MechanismEvaluationSpec,
@@ -40,9 +41,18 @@ from autoformalism.schemas import (
     CandidateModel,
     JudgeAssessment,
     ScientificJudgeResult,
+    TopologyCandidate,
     parse_judge_assessment,
 )
 from autoformalism.search.checkpoints import CheckpointStore
+from autoformalism.search.feedback_routing import (
+    CandidateFeedbackEvidence,
+    FeedbackRoute,
+    RoutedProposerFeedback,
+    TargetValidationMetric,
+    evidence_from_completed_candidate,
+    route_proposer_feedback,
+)
 from autoformalism.search.hybrid_pair import (
     HybridPairJudgment,
     PairwiseScientificJudge,
@@ -59,6 +69,9 @@ from autoformalism.targets import (
     PublicTargetContract,
     evaluate_public_targets,
 )
+
+if TYPE_CHECKING:
+    from autoformalism.search.staged_proposer import StagedProposer
 
 StageCallback = Callable[[str, int | None], None]
 
@@ -145,6 +158,36 @@ class SearchController:
         self._store = CheckpointStore(
             config.checkpoint_directory, self._run_fingerprint()
         )
+        self._staged_proposer: StagedProposer | None = None
+        if config.proposer_construction_mode == "staged_v2":
+            from autoformalism.search.staged_proposer import (
+                StagedProposer,
+                StagedProposerConfig,
+            )
+
+            for method in ("propose_topology", "propose_functions"):
+                if not callable(getattr(llm_client, method, None)):
+                    raise TypeError(
+                        "staged_v2 requires an LLM client with "
+                        f"{method}()"
+                    )
+            assert config.staged_topology_system_prompt is not None
+            assert config.staged_functional_system_prompt is not None
+            self._staged_proposer = StagedProposer(
+                client=cast(StagedLLMClient, llm_client),
+                config=StagedProposerConfig(
+                    checkpoint_directory=(
+                        config.checkpoint_directory / "staged-provider"
+                    ),
+                    run_fingerprint=self._store.fingerprint,
+                    topology_system_prompt=(
+                        config.staged_topology_system_prompt
+                    ),
+                    functional_system_prompt=(
+                        config.staged_functional_system_prompt
+                    ),
+                ),
+            )
 
     def run(self) -> FinalEvaluation:
         """Run search, freeze validation selection, and optionally test once."""
@@ -218,44 +261,61 @@ class SearchController:
             return _record_from_dict(payload["record"]) if payload["valid"] else None
 
         if stage == "new":
-            feedback = self._proposer_feedback(beam, round_index)
-            proposal_mode = _proposal_mode(self._config, round_index, beam)
-            request_payload: dict[str, object] = {
-                "round": round_index,
-                "proposal_mode": proposal_mode,
-                "beam_feedback": feedback,
-            }
-            if self._config.proposer_feedback_mode == "rich_v1":
-                request_payload["feedback_schema_version"] = (
-                    "proposer-feedback-rich-1"
-                )
-                request_payload["failed_structure_memory"] = (
-                    self._failed_structure_memory(round_index)
-                )
-            if proposal_mode == "incumbent_refinement":
-                request_payload["refinement_contract"] = (
-                    _refinement_contract(beam[0])
-                )
             try:
-                proposal_arguments = {
-                    "system_prompt": self._config.proposer_system_prompt,
-                    "user_prompt": json.dumps(request_payload, sort_keys=True),
-                }
-                if (
-                    round_index == 0
-                    and self._config.require_initial_proposer_cache_hit
-                ):
-                    proposal = self._client.propose(
-                        **proposal_arguments,
-                        cache_only=True,
-                    ).parsed
+                if self._config.proposer_construction_mode == "staged_v2":
+                    proposal, construction = self._propose_staged_candidate(
+                        round_index,
+                        beam,
+                    )
+                    payload["staged_proposal"] = construction
                 else:
-                    proposal = self._client.propose(**proposal_arguments).parsed
-            except (LLMProviderError, LLMResponseError) as exc:
+                    feedback = self._proposer_feedback(beam, round_index)
+                    proposal_mode = _proposal_mode(
+                        self._config, round_index, beam
+                    )
+                    request_payload: dict[str, object] = {
+                        "round": round_index,
+                        "proposal_mode": proposal_mode,
+                        "beam_feedback": feedback,
+                    }
+                    if self._config.proposer_feedback_mode == "rich_v1":
+                        request_payload["feedback_schema_version"] = (
+                            "proposer-feedback-rich-1"
+                        )
+                        request_payload["failed_structure_memory"] = (
+                            self._failed_structure_memory(round_index)
+                        )
+                    if proposal_mode == "incumbent_refinement":
+                        request_payload["refinement_contract"] = (
+                            _refinement_contract(beam[0])
+                        )
+                    proposal_arguments = {
+                        "system_prompt": self._config.proposer_system_prompt,
+                        "user_prompt": json.dumps(
+                            request_payload, sort_keys=True
+                        ),
+                    }
+                    if (
+                        round_index == 0
+                        and self._config.require_initial_proposer_cache_hit
+                    ):
+                        proposal = self._client.propose(
+                            **proposal_arguments,
+                            cache_only=True,
+                        ).parsed
+                    else:
+                        proposal = self._client.propose(
+                            **proposal_arguments
+                        ).parsed
+            except (LLMProviderError, LLMResponseError, ValueError) as exc:
                 payload.update(
                     valid=False,
                     error=f"{type(exc).__name__}: {str(exc)[:1000]}",
-                    failure_class="proposal_transport",
+                    failure_class=(
+                        "proposal_transport"
+                        if isinstance(exc, (LLMProviderError, LLMResponseError))
+                        else "staged_proposal_contract"
+                    ),
                     stage="complete",
                 )
                 self._store.save_round(round_index, payload)
@@ -469,18 +529,34 @@ class SearchController:
         postfit = parse_judge_assessment(payload["postfit_judge"])
 
         if stage == "postfit_judged":
-            pruning = prune_candidate(
-                compiled,
-                self._training,
-                self._validation,
-                fit_config=self._config.fit_config,
-                pruning_config=self._config.pruning_config,
-                unpruned_fit=fitted,
-            )
-            selected_candidate = pruning.selected_candidate
-            selected_fit = pruning.selected_fit
-            removed_terms = pruning.selected_removed_terms
-            removed_parameters = pruning.selected_removed_parameters
+            if self._config.apply_postfit_pruning:
+                pruning = prune_candidate(
+                    compiled,
+                    self._training,
+                    self._validation,
+                    fit_config=self._config.fit_config,
+                    pruning_config=self._config.pruning_config,
+                    unpruned_fit=fitted,
+                )
+                selected_candidate = pruning.selected_candidate
+                selected_fit = pruning.selected_fit
+                removed_terms = pruning.selected_removed_terms
+                removed_parameters = pruning.selected_removed_parameters
+                contributions = dict(pruning.contribution_by_term)
+                persistence_training_mse = pruning.persistence_training_mse
+                persistence_validation_mse = pruning.persistence_validation_mse
+                rejected_supports = sum(
+                    not item.accepted for item in pruning.candidates
+                )
+            else:
+                selected_candidate = candidate
+                selected_fit = fitted
+                removed_terms = ()
+                removed_parameters = ()
+                contributions = {}
+                persistence_training_mse = None
+                persistence_validation_mse = None
+                rejected_supports = 0
             if self._public_target_contract is not None:
                 pruned_target_evaluation = evaluate_public_targets(
                     selected_candidate, self._public_target_contract
@@ -506,22 +582,27 @@ class SearchController:
                 )
             payload["pruned_fit"] = _fit_to_dict(selected_fit)
             payload["pruning"] = {
+                "applied": self._config.apply_postfit_pruning,
                 "removed_terms": list(removed_terms),
                 "removed_parameters": list(removed_parameters),
-                "contributions": dict(pruning.contribution_by_term),
-                "persistence_training_mse": pruning.persistence_training_mse,
-                "persistence_validation_mse": pruning.persistence_validation_mse,
-                "rejected_supports": sum(
-                    not item.accepted for item in pruning.candidates
-                ),
+                "contributions": contributions,
+                "persistence_training_mse": persistence_training_mse,
+                "persistence_validation_mse": persistence_validation_mse,
+                "rejected_supports": rejected_supports,
             }
             stage = self._save_stage(round_index, payload, "pruned")
         pruned_candidate = CandidateModel.model_validate(payload["pruned_candidate"])
         pruned_fit = _fit_from_dict(payload["pruned_fit"])
 
         if stage == "pruned":
-            postpruning = self._judge(pruned_candidate, "post_pruning")
-            payload["postpruning_judge"] = postpruning.model_dump(mode="json")
+            if self._config.apply_postfit_pruning:
+                postpruning = self._judge(pruned_candidate, "post_pruning")
+                payload["postpruning_judge"] = postpruning.model_dump(
+                    mode="json"
+                )
+            else:
+                payload["postpruning_judge"] = payload["postfit_judge"]
+                payload["postpruning_judge_reused"] = True
             stage = self._save_stage(round_index, payload, "postpruning_judged")
         postpruning = parse_judge_assessment(payload["postpruning_judge"])
 
@@ -586,6 +667,204 @@ class SearchController:
             self._save_stage(round_index, payload, "complete")
             return record
         raise RuntimeError(f"unsupported checkpoint stage: {stage}")
+
+    def _propose_staged_candidate(
+        self,
+        round_index: int,
+        beam: Sequence[CandidateRecord],
+    ) -> tuple[CandidateModel, dict[str, object]]:
+        """Construct one candidate through checkpointed graph/function stages."""
+        assert self._staged_proposer is not None
+        assert self._config.staged_public_problem is not None
+        feedback = self._staged_feedback(beam, round_index)
+        incumbent_topology, parent_candidate_id = (
+            self._staged_incumbent_topology(beam, round_index)
+        )
+        requires_topology_revision = any(
+            item.route is FeedbackRoute.TOPOLOGY for item in feedback.items
+        )
+        if incumbent_topology is None:
+            decision = "initial_topology_and_functions"
+            fixed_topology = None
+            revisable_topology = None
+        elif requires_topology_revision:
+            decision = "topology_and_function_revision"
+            fixed_topology = None
+            revisable_topology = incumbent_topology
+        else:
+            decision = "function_only_revision"
+            fixed_topology = incumbent_topology
+            revisable_topology = None
+        result = self._staged_proposer.construct(
+            public_problem=self._config.staged_public_problem,
+            context=self._context,
+            feedback=feedback,
+            fixed_topology=fixed_topology,
+            incumbent_topology=revisable_topology,
+            cache_only=(
+                True
+                if round_index == 0
+                and self._config.require_initial_proposer_cache_hit
+                else None
+            ),
+        )
+        candidate = result.expansion.candidate
+        lineage_repair = None
+        if candidate.parent_candidate_id != parent_candidate_id:
+            candidate = candidate.model_copy(
+                update={"parent_candidate_id": parent_candidate_id}
+            )
+            lineage_repair = (
+                "runtime bound staged candidate lineage to "
+                f"{parent_candidate_id or 'root'}"
+            )
+        construction = result.model_dump(mode="json")
+        construction.update(
+            {
+                "construction_mode": "staged_v2",
+                "revision_decision": decision,
+                "requires_topology_revision": requires_topology_revision,
+                "runtime_parent_candidate_id": parent_candidate_id,
+                "lineage_repair": lineage_repair,
+            }
+        )
+        return candidate, construction
+
+    def _staged_feedback(
+        self,
+        beam: Sequence[CandidateRecord],
+        round_index: int,
+    ) -> RoutedProposerFeedback:
+        """Collect bounded public evidence and route it by revision stage."""
+        evidence: list[CandidateFeedbackEvidence] = []
+        if beam:
+            incumbent = beam[0]
+            evidence.append(
+                evidence_from_completed_candidate(
+                    incumbent.pruned_candidate,
+                    incumbent.pruned_fit,
+                    (
+                        incumbent.postpruning_judge
+                        if self._config.use_judge
+                        else None
+                    ),
+                    public_target_contract=self._public_target_contract,
+                    public_mechanism_spec=self._public_mechanism_spec,
+                )
+            )
+        rejected = self._latest_rejected_staged_payload(round_index)
+        if rejected is not None:
+            evidence.append(self._evidence_from_rejected_payload(rejected))
+        return route_proposer_feedback(_merge_feedback_evidence(evidence))
+
+    def _evidence_from_rejected_payload(
+        self,
+        payload: Mapping[str, Any],
+    ) -> CandidateFeedbackEvidence:
+        """Recover typed feedback from one checkpointed rejected candidate."""
+        candidate_payload = payload.get("candidate")
+        candidate = (
+            CandidateModel.model_validate(candidate_payload)
+            if isinstance(candidate_payload, Mapping)
+            else None
+        )
+        fit_payload = payload.get("fit")
+        if candidate is not None and isinstance(fit_payload, Mapping):
+            base = evidence_from_completed_candidate(
+                candidate,
+                _fit_from_dict(dict(fit_payload)),
+                None,
+                public_target_contract=self._public_target_contract,
+                public_mechanism_spec=self._public_mechanism_spec,
+            )
+        else:
+            base = CandidateFeedbackEvidence()
+        structural = (
+            _structural_feedback_evidence(
+                candidate,
+                self._public_target_contract,
+                self._public_mechanism_spec,
+            )
+            if candidate is not None
+            else CandidateFeedbackEvidence()
+        )
+        diagnostics = tuple(
+            _diagnostic_message(item)
+            for item in payload.get("deterministic_validation_diagnostics", [])
+            if isinstance(item, Mapping)
+        )
+        failure_class = str(payload.get("failure_class", ""))
+        error = str(payload.get("error", "candidate was rejected"))
+        base = _merge_feedback_evidence((base, structural))
+        deterministic = list(base.deterministic_validation_failures)
+        fit_failures = list(base.fit_failures)
+        if diagnostics:
+            deterministic.extend(diagnostics)
+        elif failure_class in {
+            "deterministic_contract",
+            "duplicate",
+            "public_contract",
+            "staged_proposal_contract",
+        }:
+            deterministic.append(error)
+        elif failure_class == "numerical_fit" and error not in fit_failures:
+            fit_failures.append(error)
+        return base.model_copy(
+            update={
+                "deterministic_validation_failures": tuple(
+                    dict.fromkeys(deterministic)
+                ),
+                "fit_failures": tuple(dict.fromkeys(fit_failures)),
+            }
+        )
+
+    def _staged_incumbent_topology(
+        self,
+        beam: Sequence[CandidateRecord],
+        round_index: int,
+    ) -> tuple[TopologyCandidate | None, str | None]:
+        """Restore the topology belonging to the active or last failed parent."""
+        wanted = beam[0].pruned_candidate.candidate_id if beam else None
+        fallback: tuple[TopologyCandidate, str] | None = None
+        for previous_round in range(round_index - 1, -1, -1):
+            payload = self._store.load_round(previous_round)
+            if payload is None or not isinstance(
+                payload.get("staged_proposal"), Mapping
+            ):
+                continue
+            candidate_payload = payload.get("candidate")
+            topology_payload = payload["staged_proposal"].get("topology")
+            if not isinstance(candidate_payload, Mapping) or not isinstance(
+                topology_payload, Mapping
+            ):
+                continue
+            candidate_id = str(candidate_payload.get("candidate_id", ""))
+            topology = TopologyCandidate.model_validate(topology_payload)
+            if wanted is not None and candidate_id == wanted:
+                return topology, wanted
+            if fallback is None and not payload.get("valid"):
+                fallback = (topology, candidate_id)
+        if wanted is not None:
+            raise RuntimeError(
+                "active staged incumbent has no checkpointed topology artifact"
+            )
+        return fallback if fallback is not None else (None, None)
+
+    def _latest_rejected_staged_payload(
+        self,
+        round_index: int,
+    ) -> dict[str, Any] | None:
+        """Return the newest staged candidate rejection, if one exists."""
+        for previous_round in range(round_index - 1, -1, -1):
+            payload = self._store.load_round(previous_round)
+            if (
+                payload is not None
+                and payload.get("stage") == "complete"
+                and not payload.get("valid")
+                and isinstance(payload.get("staged_proposal"), Mapping)
+            ):
+                return payload
+        return None
 
     def _judge(self, candidate: CandidateModel, stage: str) -> JudgeAssessment:
         if (
@@ -1388,6 +1667,103 @@ class SearchController:
         ).hexdigest()
 
 
+def _merge_feedback_evidence(
+    evidence: Sequence[CandidateFeedbackEvidence],
+) -> CandidateFeedbackEvidence:
+    """Merge evidence records deterministically without repeating messages."""
+    if not evidence:
+        return CandidateFeedbackEvidence()
+
+    def messages(field: str) -> tuple[str, ...]:
+        values = (
+            value
+            for item in evidence
+            for value in getattr(item, field)
+        )
+        return tuple(dict.fromkeys(values))[:64]
+
+    metrics: dict[str, float] = {}
+    for item in evidence:
+        for metric in item.validation_metrics:
+            metrics[metric.target] = max(
+                metric.normalized_mse,
+                metrics.get(metric.target, 0.0),
+            )
+    return CandidateFeedbackEvidence(
+        target_contract_failures=messages("target_contract_failures"),
+        graph_mechanism_failures=messages("graph_mechanism_failures"),
+        annotation_failures=messages("annotation_failures"),
+        deterministic_validation_failures=messages(
+            "deterministic_validation_failures"
+        ),
+        validation_metrics=tuple(
+            TargetValidationMetric(target=target, normalized_mse=value)
+            for target, value in sorted(metrics.items())
+        ),
+        fit_failures=messages("fit_failures"),
+        integration_failures=messages("integration_failures"),
+        scientific_missing_requirements=messages(
+            "scientific_missing_requirements"
+        ),
+        scientific_actionable_edits=messages(
+            "scientific_actionable_edits"
+        ),
+    )
+
+
+def _structural_feedback_evidence(
+    candidate: CandidateModel,
+    public_target_contract: PublicTargetContract | None,
+    public_mechanism_spec: MechanismEvaluationSpec | None,
+) -> CandidateFeedbackEvidence:
+    """Extract target and mechanism findings without requiring a fit result."""
+    target_failures: list[str] = []
+    if public_target_contract is not None:
+        evaluation = evaluate_public_targets(candidate, public_target_contract)
+        target_failures.extend(
+            f"{item.target_channel}/{item.predicate}: {item.evidence}"
+            for item in evaluation.predicates
+            if item.status == "failed"
+        )
+
+    graph_failures: list[str] = []
+    annotation_failures: list[str] = []
+    if public_mechanism_spec is not None:
+        evaluation = evaluate_mechanisms(candidate, public_mechanism_spec)
+        for result in evaluation.mechanism_results:
+            if result.status != "satisfied":
+                graph_failures.append(_mechanism_feedback_message(result))
+        for result in evaluation.annotation_results:
+            if result.status != "satisfied":
+                annotation_failures.append(_mechanism_feedback_message(result))
+        annotation_failures.extend(
+            f"{item.mechanism_id}: {item.evidence}; suggested components="
+            f"{list(item.suggested_components)}"
+            for item in evaluation.annotation_repairs
+        )
+    return CandidateFeedbackEvidence(
+        target_contract_failures=tuple(target_failures),
+        graph_mechanism_failures=tuple(graph_failures),
+        annotation_failures=tuple(annotation_failures),
+    )
+
+
+def _mechanism_feedback_message(result: Any) -> str:
+    evidence = [
+        item.evidence
+        for item in result.predicates
+        if item.status != "satisfied"
+    ]
+    return f"{result.mechanism_id}/{result.status}: {'; '.join(evidence)}"
+
+
+def _diagnostic_message(diagnostic: Mapping[str, Any]) -> str:
+    code = str(diagnostic.get("code", "validation_error"))
+    location = str(diagnostic.get("location", "candidate"))
+    message = str(diagnostic.get("message", "candidate validation failed"))
+    return f"{code} at {location}: {message}"
+
+
 def _fit_with_retry(
     model: Any,
     training: DatasetSplit,
@@ -1454,9 +1830,12 @@ def _implementation_fingerprint() -> str:
         root / "search" / "hybrid_pair.py",
         root / "search" / "identity.py",
         root / "search" / "models.py",
+        root / "search" / "feedback_routing.py",
+        root / "search" / "staged_proposer.py",
         root / "judging" / "hybrid.py",
         root / "judging" / "prompts.py",
         root / "targets.py",
+        root / "staging.py",
         root / "expressions" / "compiler.py",
         root / "fitting" / "casadi_initializer.py",
         root / "fitting" / "fitter.py",
@@ -1465,6 +1844,7 @@ def _implementation_fingerprint() -> str:
         root / "schemas" / "candidate.py",
         root / "schemas" / "judge.py",
         root / "schemas" / "proposal.py",
+        root / "schemas" / "staged.py",
     )
     digest = hashlib.sha256()
     for path in paths:
