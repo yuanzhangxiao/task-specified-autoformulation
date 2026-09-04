@@ -5,6 +5,65 @@ the runtime derives, and which failures are repaired or retried. It describes
 the opt-in staged path; the existing complete-candidate search remains a
 separate path until staged search integration is complete.
 
+## Which proposer path is currently live
+
+The search controller used by the completed ACES/Delta experiments still asks
+for one complete [`ProposerCandidateV2`](../schemas/proposer-candidate-v2.schema.json)
+per round. Its provider payload contains:
+
+```json
+{
+  "schema_version": "2",
+  "candidate_id": "candidate_1",
+  "parent_candidate_id": null,
+  "change_summary": "Complete candidate.",
+  "states": [
+    {
+      "name": "x",
+      "kind": "latent",
+      "observed_channel": null,
+      "rhs": "-rate * x + u",
+      "initial": {"fixed_value": 0.0, "expression": null},
+      "constraints": [],
+      "mechanisms": []
+    }
+  ],
+  "algebraics": [
+    {
+      "name": "y",
+      "expression": "scale * x",
+      "constraints": [],
+      "mechanisms": []
+    }
+  ],
+  "parameters": [
+    {"name": "rate", "role": "rate"},
+    {"name": "scale", "role": "scale"}
+  ]
+}
+```
+
+That legacy-compatible contract still asks the provider for `kind`, RHSs,
+algebraics, and latent initials in one response. Before strict schema parsing,
+the runtime may remove only legacy numeric parameter ranges, protected public
+channels mistakenly declared as parameters, and byte-identical duplicate
+parameter declarations. Conflicting duplicates are rejected rather than
+silently resolved.
+
+After parsing, the runtime enriches target mappings and runtime-owned parameter
+domains, then applies lossless boundary repairs: causal lag aliases and direct
+measurement initializers are normalized; protected forcing declarations,
+unreferenced algebraic processes, unused parameters, redundant unmodeled
+auxiliary mappings, invented bounds on qualitative constraints, and constraints
+on undeclared symbols are removed. Observed/latent metadata is now canonicalized
+from public identity mappings before validation, fitting, and feedback. Every
+repair is recorded. Scientific equations or dependencies are not silently
+changed.
+
+The two-stage schemas below are the replacement architecture being developed.
+They are implemented and smoke-tested as library APIs, but are not yet wired
+into the production search controller or the prior refinement experiments.
+
 The authoritative machine-readable provider schemas are:
 
 - [`proposed-topology-candidate-v2.schema.json`](../schemas/proposed-topology-candidate-v2.schema.json)
