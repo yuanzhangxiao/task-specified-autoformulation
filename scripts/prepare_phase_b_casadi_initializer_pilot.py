@@ -217,7 +217,7 @@ def _sha256(path: Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--config", dest="config_path", type=Path, required=True)
     parser.add_argument("--source-replay-root", type=Path, required=True)
     parser.add_argument("--public-data-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)

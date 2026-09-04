@@ -14,9 +14,42 @@ from autoformalism.rebuttal.casadi_initializer_pilot import (
     casadi_initializer_task_identity,
     load_casadi_initializer_pilot_plan,
 )
+from scripts import prepare_phase_b_casadi_initializer_pilot as prepare_script
 from scripts.summarize_phase_b_casadi_initializer_pilot import summarize
 
 CONFIG = Path("configs/phase_b_casadi_initializer_pilot_v1.json")
+
+
+def test_prepare_cli_maps_config_option_to_function_argument(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_prepare(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(prepare_script, "prepare_pilot", fake_prepare)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "prepare_phase_b_casadi_initializer_pilot.py",
+            "--config",
+            str(tmp_path / "plan.json"),
+            "--source-replay-root",
+            str(tmp_path / "replay"),
+            "--public-data-root",
+            str(tmp_path / "public"),
+            "--output-root",
+            str(tmp_path / "output"),
+        ],
+    )
+
+    prepare_script.main()
+
+    assert captured["config_path"] == tmp_path / "plan.json"
+    assert "config" not in captured
 
 
 def test_casadi_initializer_pilot_is_two_cells_by_three_seeds_by_two_arms() -> None:
