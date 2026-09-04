@@ -214,8 +214,97 @@ def test_summary_reports_stage_specific_revisions_and_transport(
     assert report["total_fit_retry_activation_count"] == 1
     assert report["total_process_wall_seconds"] == 10.0
     assert report["process_time_status_counts"] == {"json": 1}
+    assert report["rows"][0]["proposer_accounting_source"] == (
+        "checkpoint_receipts"
+    )
     assert report["rows"][0]["selected_latent_state_count"] == 1
     assert report["median_validation_normalized_mse"] == 0.25
+
+
+def test_summary_counts_failed_proposer_attempts_from_event_log(
+    tmp_path: Path,
+) -> None:
+    source = json.loads(
+        Path("configs/phase_b_staged_search_pilot_v1.json").read_text()
+    )
+    source["cells"] = source["cells"][:1]
+    source["repetitions"] = [0]
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(source), encoding="utf-8")
+    plan = load_staged_search_plan(plan_path)
+    task_path = tmp_path / "task_plan.jsonl"
+    task_path.write_text(
+        "".join(
+            json.dumps(item.model_dump(mode="json"), sort_keys=True) + "\n"
+            for item in build_staged_search_tasks(plan)
+        ),
+        encoding="utf-8",
+    )
+    run = (
+        tmp_path
+        / "search"
+        / "runs"
+        / "phase_b_dalla_man_t2_canonical_named_easy_easy_seed0"
+    )
+    run.mkdir(parents=True)
+    events = [
+        {
+            "event": "llm_failure",
+            "role": "staged_topology_proposer_v3",
+            "request_hash": "a",
+            "attempt": 1,
+            "raw_response": {
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20}
+            },
+        },
+        {
+            "event": "llm_response",
+            "role": "staged_topology_proposer_v3",
+            "request_hash": "a",
+            "provider_attempts": 2,
+            "usage": {"input_tokens": 11, "output_tokens": 21},
+        },
+        {
+            "event": "llm_failure",
+            "role": "staged_function_proposer_v2",
+            "request_hash": "b",
+            "attempt": 1,
+            "raw_response": {
+                "usage": {"prompt_tokens": 12, "completion_tokens": 22}
+            },
+        },
+        {
+            "event": "llm_failure",
+            "role": "staged_function_proposer_v2",
+            "request_hash": "b",
+            "attempt": 2,
+            "provider_attempts": 1,
+            "usage": {"input_tokens": 13, "output_tokens": 23},
+        },
+    ]
+    (run / "proposer_events.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in events) + "truncated",
+        encoding="utf-8",
+    )
+
+    report = summarize_staged_search_pilot(
+        plan_path,
+        task_path,
+        tmp_path / "search",
+    )
+
+    row = report["rows"][0]
+    assert row["proposer_accounting_source"] == "event_log"
+    assert row["proposer_event_log_invalid_line_count"] == 1
+    assert row["proposer_logical_calls"] == 2
+    assert row["proposer_terminal_failed_logical_calls"] == 1
+    assert row["proposer_failed_attempts"] == 3
+    assert row["proposer_provider_attempts"] == 4
+    assert row["proposer_input_tokens"] == 46
+    assert row["proposer_output_tokens"] == 86
+    assert row["proposer_token_usage_observed"] is True
+    assert report["total_proposer_terminal_failed_logical_calls"] == 1
+    assert report["total_proposer_failed_attempts"] == 3
 
 
 @pytest.mark.parametrize(

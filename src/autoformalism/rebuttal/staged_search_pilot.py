@@ -262,6 +262,26 @@ def summarize_staged_search_pilot(
             for call in (item.get("topology_call"), item.get("functional_call"))
             if isinstance(call, dict)
         ]
+        proposer_accounting = _proposer_event_accounting(
+            run_root / "proposer_events.jsonl"
+        )
+        if proposer_accounting["accounting_source"] == "checkpoint_receipts":
+            proposer_accounting.update(
+                {
+                    "logical_calls": sum(
+                        int(item.get("logical_calls", 0)) for item in calls
+                    ),
+                    "provider_attempts": sum(
+                        int(item.get("provider_attempts", 0)) for item in calls
+                    ),
+                    "input_tokens": sum(
+                        int(item.get("input_tokens") or 0) for item in calls
+                    ),
+                    "output_tokens": sum(
+                        int(item.get("output_tokens") or 0) for item in calls
+                    ),
+                }
+            )
         target_evaluations = [
             item["public_target_evaluation"]
             for item in round_payloads
@@ -315,18 +335,27 @@ def summarize_staged_search_pilot(
                     item.get("revision_decision") == "function_only_revision"
                     for item in staged
                 ),
-                "proposer_logical_calls": sum(
-                    int(item.get("logical_calls", 0)) for item in calls
-                ),
-                "proposer_provider_attempts": sum(
-                    int(item.get("provider_attempts", 0)) for item in calls
-                ),
-                "proposer_input_tokens": sum(
-                    int(item.get("input_tokens") or 0) for item in calls
-                ),
-                "proposer_output_tokens": sum(
-                    int(item.get("output_tokens") or 0) for item in calls
-                ),
+                "proposer_accounting_source": proposer_accounting[
+                    "accounting_source"
+                ],
+                "proposer_event_log_invalid_line_count": proposer_accounting[
+                    "invalid_line_count"
+                ],
+                "proposer_logical_calls": proposer_accounting["logical_calls"],
+                "proposer_terminal_failed_logical_calls": proposer_accounting[
+                    "terminal_failed_logical_calls"
+                ],
+                "proposer_failed_attempts": proposer_accounting[
+                    "failed_attempts"
+                ],
+                "proposer_provider_attempts": proposer_accounting[
+                    "provider_attempts"
+                ],
+                "proposer_input_tokens": proposer_accounting["input_tokens"],
+                "proposer_output_tokens": proposer_accounting["output_tokens"],
+                "proposer_token_usage_observed": proposer_accounting[
+                    "token_usage_observed"
+                ],
                 "public_target_evaluation_count": len(target_evaluations),
                 "public_target_pass_count": sum(
                     item.get("passed") is True for item in target_evaluations
@@ -427,6 +456,12 @@ def summarize_staged_search_pilot(
         "total_proposer_logical_calls": sum(
             int(item["proposer_logical_calls"]) for item in rows
         ),
+        "total_proposer_terminal_failed_logical_calls": sum(
+            int(item["proposer_terminal_failed_logical_calls"]) for item in rows
+        ),
+        "total_proposer_failed_attempts": sum(
+            int(item["proposer_failed_attempts"]) for item in rows
+        ),
         "total_proposer_provider_attempts": sum(
             int(item["proposer_provider_attempts"]) for item in rows
         ),
@@ -474,6 +509,154 @@ def summarize_staged_search_pilot(
         "rows": rows,
     }
     return report
+
+
+def _proposer_event_accounting(path: Path) -> dict[str, object]:
+    """Account for successful and failed staged proposer requests from JSONL."""
+    events, invalid_lines = _read_jsonl_events(path)
+    relevant = [
+        item
+        for item in events
+        if isinstance(item.get("role"), str)
+        and str(item["role"]).startswith("staged_")
+        and "proposer" in str(item["role"])
+        and isinstance(item.get("request_hash"), str)
+    ]
+    if not relevant:
+        return {
+            "accounting_source": "checkpoint_receipts",
+            "invalid_line_count": invalid_lines,
+            "logical_calls": 0,
+            "terminal_failed_logical_calls": 0,
+            "failed_attempts": 0,
+            "provider_attempts": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "token_usage_observed": False,
+        }
+    by_request: dict[str, list[dict[str, object]]] = {}
+    for event in relevant:
+        by_request.setdefault(str(event["request_hash"]), []).append(event)
+    provider_attempts = 0
+    input_tokens = 0
+    output_tokens = 0
+    usage_observed = False
+    terminal_failures = 0
+    failed_attempts = 0
+    for request_events in by_request.values():
+        failures = [
+            item for item in request_events if item.get("event") == "llm_failure"
+        ]
+        responses = [
+            item for item in request_events if item.get("event") == "llm_response"
+        ]
+        failed_attempts += len(failures)
+        if responses:
+            response = responses[-1]
+            observed_attempts = response.get("provider_attempts")
+            if isinstance(observed_attempts, int) and not isinstance(
+                observed_attempts, bool
+            ):
+                provider_attempts += observed_attempts
+        else:
+            terminal_failures += 1
+            provider_attempts += sum(
+                _event_provider_attempts(item) for item in failures
+            )
+        usage_events = [*failures, *([] if not responses else [responses[-1]])]
+        for event in usage_events:
+            observed_input, observed_output = _event_token_usage(event)
+            if observed_input is not None:
+                input_tokens += observed_input
+                usage_observed = True
+            if observed_output is not None:
+                output_tokens += observed_output
+                usage_observed = True
+    return {
+        "accounting_source": "event_log",
+        "invalid_line_count": invalid_lines,
+        "logical_calls": len(by_request),
+        "terminal_failed_logical_calls": terminal_failures,
+        "failed_attempts": failed_attempts,
+        "provider_attempts": provider_attempts,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "token_usage_observed": usage_observed,
+    }
+
+
+def _read_jsonl_events(path: Path) -> tuple[list[dict[str, object]], int]:
+    """Read complete JSONL events while tolerating a truncated final record."""
+    if not path.is_file():
+        return [], 0
+    events: list[dict[str, object]] = []
+    invalid_lines = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            invalid_lines += 1
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+        else:
+            invalid_lines += 1
+    return events, invalid_lines
+
+
+def _event_provider_attempts(event: Mapping[str, object]) -> int:
+    observed = event.get("provider_attempts")
+    if isinstance(observed, int) and not isinstance(observed, bool):
+        return observed
+    raw = event.get("raw_response")
+    if not isinstance(raw, dict):
+        return 1
+    continuation = raw.get("_autoformalism_continuation")
+    if isinstance(continuation, dict):
+        count = continuation.get("request_count")
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 1:
+            return count
+    return 1
+
+
+def _event_token_usage(
+    event: Mapping[str, object],
+) -> tuple[int | None, int | None]:
+    usage = event.get("usage")
+    if isinstance(usage, dict):
+        return _usage_values(usage)
+    raw = event.get("raw_response")
+    if not isinstance(raw, dict):
+        return None, None
+    continuation = raw.get("_autoformalism_continuation")
+    physical: list[dict[str, object]] = [raw]
+    if isinstance(continuation, dict):
+        segments = continuation.get("segments")
+        if isinstance(segments, list) and all(
+            isinstance(item, dict) for item in segments
+        ):
+            physical = segments
+    usages = [
+        _usage_values(item["usage"])
+        for item in physical
+        if isinstance(item.get("usage"), dict)
+    ]
+    inputs = [item[0] for item in usages if item[0] is not None]
+    outputs = [item[1] for item in usages if item[1] is not None]
+    return (sum(inputs) if inputs else None, sum(outputs) if outputs else None)
+
+
+def _usage_values(usage: Mapping[str, object]) -> tuple[int | None, int | None]:
+    input_value = usage.get("input_tokens", usage.get("prompt_tokens"))
+    output_value = usage.get("output_tokens", usage.get("completion_tokens"))
+    return (
+        input_value
+        if isinstance(input_value, int) and not isinstance(input_value, bool)
+        else None,
+        output_value
+        if isinstance(output_value, int) and not isinstance(output_value, bool)
+        else None,
+    )
 
 
 def _read_process_time(path: Path) -> tuple[dict[str, object] | None, str]:

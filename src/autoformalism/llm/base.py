@@ -63,6 +63,51 @@ def _provider_request_count(raw_response: object) -> int:
     return 1
 
 
+def _failed_response_usage(
+    raw_response: object,
+) -> dict[str, int | None] | None:
+    """Normalize token usage retained by one failed provider generation."""
+    if not isinstance(raw_response, dict):
+        return None
+    physical = [raw_response]
+    continuation = raw_response.get("_autoformalism_continuation")
+    if isinstance(continuation, dict):
+        segments = continuation.get("segments")
+        if isinstance(segments, list) and all(
+            isinstance(item, dict) for item in segments
+        ):
+            physical = segments
+    input_tokens = 0
+    output_tokens = 0
+    input_observed = False
+    output_observed = False
+    for response in physical:
+        usage = response.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        observed = usage.get("prompt_tokens", usage.get("input_tokens"))
+        if isinstance(observed, int) and not isinstance(observed, bool):
+            input_tokens += observed
+            input_observed = True
+        observed = usage.get("completion_tokens", usage.get("output_tokens"))
+        if isinstance(observed, int) and not isinstance(observed, bool):
+            output_tokens += observed
+            output_observed = True
+    if not input_observed and not output_observed:
+        return None
+    normalized_input = input_tokens if input_observed else None
+    normalized_output = output_tokens if output_observed else None
+    return {
+        "input_tokens": normalized_input,
+        "output_tokens": normalized_output,
+        "total_tokens": (
+            None
+            if normalized_input is None or normalized_output is None
+            else normalized_input + normalized_output
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class ProviderResponse(Generic[StructuredT]):
     """Normalized result returned by a concrete provider adapter."""
@@ -206,6 +251,7 @@ class CachedLLMClient(ABC):
         from autoformalism.staging import (
             enrich_functional_proposal,
             expand_staged_candidate,
+            normalize_functional_proposal,
             topology_commitment_sha256,
         )
 
@@ -218,6 +264,9 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ProposedFunctionalCandidate,
+            normalize_parsed=lambda proposal: normalize_functional_proposal(
+                proposal, topology
+            ),
             validate_parsed=validate,
             request_metadata={
                 "topology_commitment_sha256": topology_commitment_sha256(
@@ -729,6 +778,7 @@ class CachedLLMClient(ABC):
         attempt: int,
         error: LLMProviderError | LLMResponseError,
     ) -> None:
+        raw_response = getattr(error, "raw_response", None)
         self._append_log(
             {
                 "event": "llm_failure",
@@ -741,11 +791,13 @@ class CachedLLMClient(ABC):
                 "failure_category": error.category.value,
                 "error_type": type(error).__name__,
                 "error": str(error),
+                "provider_attempts": _provider_request_count(raw_response),
+                "usage": _failed_response_usage(raw_response),
                 "repair_diagnostics": [
                     {"code": item.code.value, "message": item.message}
                     for item in getattr(error, "repair_diagnostics", ())
                 ],
-                "raw_response": getattr(error, "raw_response", None),
+                "raw_response": raw_response,
             }
         )
 

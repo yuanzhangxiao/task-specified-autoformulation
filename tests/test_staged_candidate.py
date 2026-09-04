@@ -20,6 +20,7 @@ from autoformalism.staging import (
     enrich_functional_proposal,
     enrich_topology_proposal,
     expand_staged_candidate,
+    normalize_functional_proposal,
     normalize_topology_proposal,
     topology_commitment_sha256,
 )
@@ -224,6 +225,47 @@ def test_compact_staged_proposals_are_enriched_from_runtime_context() -> None:
     assert all(item.scope.value == "global" for item in functional.parameters)
     assert all(item.bounds is None for item in functional.parameters)
     assert result.candidate_identity == candidate_identity(result.candidate)
+
+
+def test_functional_normalization_removes_only_matching_equation_wrappers() -> None:
+    topology = enrich_topology_proposal(
+        ProposedTopologyCandidate.model_validate(_proposed_topology_payload()),
+        _context(),
+    )
+    payload = _proposed_functional_payload()
+    expressions = {
+        "latent_drive": "d(z) / dt = input_u",
+        "latent_relaxation": "z' = latent_decay * z",
+        "flux_generation": "flux = gain * z",
+        "storage_source": "other = flux",
+        "storage_sink": "storage_decay * x",
+    }
+    payload["interaction_functions"] = [
+        {"interaction_id": key, "expression": value}
+        for key, value in expressions.items()
+    ]
+    proposal = ProposedFunctionalCandidate.model_validate(payload)
+
+    normalized, repair = normalize_functional_proposal(proposal, topology)
+
+    assert {
+        item.interaction_id: item.expression
+        for item in normalized.interaction_functions
+    } == {
+        "latent_drive": "input_u",
+        "latent_relaxation": "latent_decay * z",
+        "flux_generation": "gain * z",
+        "storage_source": "other = flux",
+        "storage_sink": "storage_decay * x",
+    }
+    assert repair == {
+        "schema_version": "staged-functional-repair-1",
+        "matching_full_equation_wrappers_removed": [
+            "latent_drive:z",
+            "latent_relaxation:z",
+            "flux_generation:flux",
+        ],
+    }
 
 
 def test_observability_uses_auxiliary_measurements_not_target_status() -> None:

@@ -316,7 +316,7 @@ def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> Non
     assert cached_topology.cache_hit is True
 
 
-def test_staged_function_syntax_diagnostic_retries_instead_of_escaping(
+def test_staged_function_matching_equation_wrapper_is_repaired_without_retry(
     tmp_path: Path,
 ) -> None:
     topology_proposal = ProposedTopologyCandidate.model_validate(
@@ -347,11 +347,68 @@ def test_staged_function_syntax_diagnostic_retries_instead_of_escaping(
             self.provider_calls += 1
             self.provider_attempt_numbers.append(kwargs["attempt_number"])
             self.user_prompts.append(kwargs["user_prompt"])
-            expression = (
-                "rate' = rate * x"
-                if self.provider_calls == 1
-                else "rate * x"
+            expression = "x' = rate * x"
+            response = ProposedFunctionalCandidate.model_validate(
+                {
+                    "candidate_id": "functions_0",
+                    "interaction_functions": [
+                        {"interaction_id": "decay", "expression": expression}
+                    ],
+                    "parameters": [{"name": "rate", "role": "rate"}],
+                }
             )
+            return ProviderResponse(parsed=response, raw_response={})
+
+    client = SyntaxRepairClient(tmp_path)
+
+    result = client.propose_functions(
+        system_prompt="Return RHS expressions only.",
+        user_prompt="Assign the interaction function.",
+        topology=topology,
+        context=context,
+    )
+
+    assert client.provider_attempt_numbers == [1]
+    assert result.attempts == 1
+    assert result.parsed.interaction_functions[0].expression == "rate * x"
+    assert result.raw_response["_autoformalism_contract_repair"] == {
+        "schema_version": "staged-functional-repair-1",
+        "matching_full_equation_wrappers_removed": ["decay:x"],
+    }
+
+
+def test_staged_function_mismatched_equation_wrapper_still_retries(
+    tmp_path: Path,
+) -> None:
+    topology_proposal = ProposedTopologyCandidate.model_validate(
+        {
+            "candidate_id": "graph_0",
+            "states": [{"name": "x"}],
+            "interactions": [
+                {
+                    "interaction_id": "decay",
+                    "target": "x",
+                    "target_kind": "state_derivative",
+                    "sources": ["x"],
+                    "polarity": "subtractive",
+                }
+            ],
+            "target_mappings": [{"channel": "target", "source": "x"}],
+        }
+    )
+    context = ValidationContext(targets=("target",))
+    topology = enrich_topology_proposal(topology_proposal, context)
+
+    class SyntaxRepairClient(StubCachedClient):
+        def __init__(self, path: Path) -> None:
+            super().__init__(path)
+            self.user_prompts: list[str] = []
+
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            self.provider_calls += 1
+            self.provider_attempt_numbers.append(kwargs["attempt_number"])
+            self.user_prompts.append(kwargs["user_prompt"])
+            expression = "wrong' = rate * x" if self.provider_calls == 1 else "rate * x"
             response = ProposedFunctionalCandidate.model_validate(
                 {
                     "candidate_id": "functions_0",
@@ -376,7 +433,6 @@ def test_staged_function_syntax_diagnostic_retries_instead_of_escaping(
     assert result.attempts == 2
     assert result.parsed.interaction_functions[0].expression == "rate * x"
     assert "SYNTAX_ERROR" in client.user_prompts[1]
-    assert "Return one complete corrected object" in client.user_prompts[1]
 
 
 def test_cached_hybrid_client_repairs_only_redundant_atomic_role_units(
@@ -680,7 +736,13 @@ def test_invalid_structured_response_retries_with_repair_feedback(
             if len(prompts) == 1:
                 raise LLMResponseError(
                     "duplicate declaration body_weight_kg",
-                    raw_response={"message": {"content": "invalid"}},
+                    raw_response={
+                        "message": {"content": "invalid"},
+                        "usage": {
+                            "prompt_tokens": 7,
+                            "completion_tokens": 9,
+                        },
+                    },
                 )
             return super()._call_provider(**kwargs)
 
@@ -695,7 +757,16 @@ def test_invalid_structured_response_retries_with_repair_feedback(
     failure = json.loads(
         (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0]
     )
-    assert failure["raw_response"] == {"message": {"content": "invalid"}}
+    assert failure["raw_response"] == {
+        "message": {"content": "invalid"},
+        "usage": {"prompt_tokens": 7, "completion_tokens": 9},
+    }
+    assert failure["provider_attempts"] == 1
+    assert failure["usage"] == {
+        "input_tokens": 7,
+        "output_tokens": 9,
+        "total_tokens": 16,
+    }
     assert failure["failure_category"] == "repairable_contract"
     assert failure["repair_diagnostics"] == [
         {

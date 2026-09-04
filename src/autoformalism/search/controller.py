@@ -307,7 +307,12 @@ class SearchController:
                         proposal = self._client.propose(
                             **proposal_arguments
                         ).parsed
-            except (LLMProviderError, LLMResponseError, ValueError) as exc:
+            except (
+                LLMProviderError,
+                LLMResponseError,
+                ModelValidationError,
+                ValueError,
+            ) as exc:
                 payload.update(
                     valid=False,
                     error=f"{type(exc).__name__}: {str(exc)[:1000]}",

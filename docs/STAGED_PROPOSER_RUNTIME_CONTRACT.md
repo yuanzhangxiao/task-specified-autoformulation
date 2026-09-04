@@ -331,6 +331,14 @@ There are three distinct behaviors, in this order:
    function revision; otherwise the exact incumbent topology is reused and
    only the functions are revised.
 
+Before requesting another provider generation, the functional boundary removes
+one redundant full-equation wrapper only when its left-hand side exactly names
+the committed interaction target (`x'`, `dx/dt`, or `d(x)/dt` for a state, and
+`p` for an algebraic process). A mismatched target, more than one assignment,
+or an empty right-hand side remains a validation error. An exhausted staged
+validation error invalidates that round and preserves any earlier fitted
+incumbent; it does not terminate an otherwise viable search task.
+
    Nonblocking deterministic advisories supplement these signals. Topology sees
    tagged memory-like states or coupled state cycles that lack direct
    self-regulation. Functional revision sees parameter contact with
@@ -347,7 +355,11 @@ stages are checkpointed by a run-scoped input hash for deterministic resume.
 Cluster resource timing is written atomically as JSON. The summary reader also
 accepts the earlier key-value format and records missing, empty, or malformed
 timing artifacts as unavailable accounting rather than discarding completed
-scientific results.
+scientific results. Staged proposer accounting is reconstructed from the
+append-only event log so terminal failures, repair attempts, physical provider
+requests, and token usage are retained. Older runs without usable event logs
+fall back to successful checkpoint receipts and identify that accounting source
+explicitly.
 
 ## Current limits and historical scope
 

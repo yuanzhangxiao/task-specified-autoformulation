@@ -11,7 +11,11 @@ import pytest
 from pydantic import ValidationError
 
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
-from autoformalism.expressions import ValidationContext
+from autoformalism.expressions import (
+    ModelValidationError,
+    ValidationContext,
+    ValidationDiagnostic,
+)
 from autoformalism.fitting import FitConfig
 from autoformalism.llm import LLMCallResult
 from autoformalism.pruning import PruningConfig
@@ -214,6 +218,44 @@ def test_staged_search_routes_fit_feedback_and_reuses_topology(
     ).run()
     assert resumed.frozen_selection == result.frozen_selection
     assert resumed_client.calls == []
+
+
+def test_staged_validation_exception_invalidates_round_without_losing_incumbent(
+    tmp_path: Path,
+) -> None:
+    class _EscapingValidationClient(_StagedSearchClient):
+        def propose_functions(self, **kwargs):
+            if len([item for item in self.calls if item[0] == "functional"]) == 1:
+                raise ModelValidationError(
+                    (
+                        ValidationDiagnostic(
+                            code="SYNTAX_ERROR",
+                            location="interaction:decay",
+                            message="expression cannot be parsed",
+                        ),
+                    )
+                )
+            return super().propose_functions(**kwargs)
+
+    client = _EscapingValidationClient()
+    controller = SearchController(
+        llm_client=client,
+        context=ValidationContext(targets=("target",)),
+        training=_split(SplitName.TRAIN),
+        validation=_split(SplitName.VALIDATION),
+        test_loader=lambda _selection: _split(SplitName.TEST),
+        config=_config(tmp_path / "checkpoints"),
+    )
+
+    result = controller.run()
+
+    assert result.completed_iterations == 1
+    failed_round = json.loads(
+        (tmp_path / "checkpoints" / "round_0001.json").read_text()
+    )
+    assert failed_round["valid"] is False
+    assert failed_round["failure_class"] == "staged_proposal_contract"
+    assert "SYNTAX_ERROR" in failed_round["error"]
 
 
 def test_staged_search_rejects_legacy_pruning_contract(tmp_path: Path) -> None:

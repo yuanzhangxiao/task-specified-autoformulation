@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Literal
 
 from pydantic import ConfigDict
@@ -30,6 +31,7 @@ from autoformalism.schemas import (
     StateKind,
     StateSpec,
     TopologyCandidate,
+    TopologyInteraction,
     TopologyProcessSpec,
 )
 from autoformalism.schemas.base import Identifier, StrictSchema
@@ -385,6 +387,73 @@ def enrich_functional_proposal(
         ),
         initial_conditions=(*observed_initials, *latent_initials),
     )
+
+
+def normalize_functional_proposal(
+    proposal: ProposedFunctionalCandidate,
+    topology: TopologyCandidate,
+) -> tuple[ProposedFunctionalCandidate, dict[str, object]]:
+    """Remove only an unambiguous redundant LHS from interaction functions.
+
+    The functional contract requires one RHS expression per committed
+    interaction. Some providers instead emit ``x' = term`` or ``p = term``.
+    The runtime may discard that wrapper only when the LHS names the exact
+    topology target with notation appropriate to its state/process kind. It
+    never guesses a target, changes a sign, or splits a multi-term equation.
+    """
+    interactions = {
+        item.interaction_id: item for item in topology.interactions
+    }
+    normalized_functions = []
+    extracted: list[str] = []
+    for binding in proposal.interaction_functions:
+        interaction = interactions.get(binding.interaction_id)
+        expression = binding.expression
+        if interaction is not None:
+            repaired = _extract_matching_rhs(expression, interaction)
+            if repaired is not None:
+                expression = repaired
+                extracted.append(
+                    f"{binding.interaction_id}:{interaction.target}"
+                )
+        normalized_functions.append(
+            binding.model_copy(update={"expression": expression})
+        )
+    normalized = proposal.model_copy(
+        update={"interaction_functions": tuple(normalized_functions)}
+    )
+    return normalized, {
+        "schema_version": "staged-functional-repair-1",
+        "matching_full_equation_wrappers_removed": extracted,
+    }
+
+
+def _extract_matching_rhs(
+    expression: str,
+    interaction: TopologyInteraction,
+) -> str | None:
+    """Return one RHS only when its assignment LHS is contract-identical."""
+    matches = list(re.finditer(r"(?<![<>=!])=(?!=)", expression))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    left = re.sub(r"\s+", "", expression[: match.start()])
+    right = expression[match.end() :].strip()
+    if not right:
+        return None
+    target = interaction.target
+    target_kind = interaction.target_kind
+    if target_kind is InteractionTargetKind.STATE_DERIVATIVE:
+        permitted = {
+            f"{target}'",
+            f"d{target}/dt",
+            f"d({target})/dt",
+        }
+    elif target_kind is InteractionTargetKind.ALGEBRAIC_PROCESS:
+        permitted = {target}
+    else:  # pragma: no cover - the typed topology schema owns this invariant.
+        return None
+    return right if left in permitted else None
 
 
 def expand_staged_candidate(
