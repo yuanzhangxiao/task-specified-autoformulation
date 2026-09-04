@@ -115,10 +115,11 @@ class ProposedParameter(StrictSchema):
         core_schema: Any,
         handler: Any,
     ) -> dict[str, Any]:
-        """Hide obsolete numeric ranges from every structured-output provider."""
+        """Hide runtime-owned fields from every structured-output provider."""
         schema = handler(core_schema)
         properties = schema.get("properties")
         if isinstance(properties, dict):
+            properties.pop("scope", None)
             properties.pop("bounds", None)
             properties.pop("initialization_range", None)
         required = schema.get("required")
@@ -126,7 +127,7 @@ class ProposedParameter(StrictSchema):
             schema["required"] = [
                 item
                 for item in required
-                if item not in {"bounds", "initialization_range"}
+                if item not in {"scope", "bounds", "initialization_range"}
             ]
         return schema
 

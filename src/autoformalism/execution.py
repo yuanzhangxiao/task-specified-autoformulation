@@ -88,7 +88,8 @@ Do not redeclare supplied auxiliary, external-input, or fixed-covariate channel
 names as states, processes, or parameters. Map each observed target exactly once:
 never create both an observed state and a same-named algebraic for one target.
 Do not propose numeric parameter bounds or initialization ranges. For each fitted
-parameter, declare its name, global scope, and one qualitative role. Use `rate`
+parameter, declare its name and one qualitative role. Parameter scope is assigned
+as global by the runtime. Use `rate`
 or `time_constant` only when the equation encodes the sign separately and the
 physical quantity must be positive; use `nonnegative_coefficient` for a weight
 that may be zero; use `coefficient`, `offset`, or `shape` when either sign is

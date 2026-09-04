@@ -127,7 +127,7 @@ def test_proposer_parameter_schema_omits_numeric_ranges() -> None:
     schema = ProposerCandidateV2.model_json_schema(mode="validation")
     parameter = schema["$defs"]["ProposedParameter"]
 
-    assert set(parameter["properties"]) == {"name", "role", "scope"}
+    assert set(parameter["properties"]) == {"name", "role"}
     assert parameter["required"] == ["name"]
 
 

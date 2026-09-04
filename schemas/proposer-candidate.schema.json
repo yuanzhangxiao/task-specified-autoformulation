@@ -109,10 +109,6 @@
         "role": {
           "$ref": "#/$defs/ParameterRole",
           "default": "coefficient"
-        },
-        "scope": {
-          "$ref": "#/$defs/ParameterScope",
-          "default": "global"
         }
       },
       "required": [

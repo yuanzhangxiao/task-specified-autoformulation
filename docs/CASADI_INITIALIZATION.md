@@ -26,6 +26,25 @@ The initializer is disabled by default. Enable it with
 falls back to ordinary runtime starts; `raise` fails closed for controlled
 validation experiments.
 
+## Matched public pilot
+
+`configs/phase_b_casadi_initializer_pilot_v1.json` freezes the next realistic
+development comparison. It reuses the same six repaired proposer candidates
+(two public benchmarks by three seeds) in both arms:
+
+- ordinary runtime-owned starts with 900 seconds for the existing bounded
+  nonlinear fitter; and
+- CasADi multiple-shooting starts with 120 seconds for initialization and 780
+  seconds for the same bounded nonlinear fitter.
+
+Thus both arms receive 900 seconds in total. Both use the complete public
+training and validation trajectories, the same fixed-RK4 causal evaluator, one
+downstream start, and no exact derivatives or latent labels. Candidate files,
+public prompt and split hashes, the task matrix, and every output are recorded
+in write-once ledgers. Results report initializer success, final fit success,
+validation NMSE, function evaluations, numerical failures, and wall time as
+separate endpoints; the summarizer does not choose a scalar winner.
+
 ## Qualitative parameter domains
 
 New proposer responses declare a qualitative parameter role rather than numeric
@@ -39,8 +58,10 @@ bounds. The runtime maps roles to domains:
 
 These are sign/domain constraints, not magnitude guesses. Trusted benchmark or
 runtime constraints may further restrict a domain. Historical numeric proposer
-ranges remain readable for deterministic replay but are not part of the new
-proposer contract.
+ranges and parameter scope remain readable for deterministic replay but are not
+part of the new proposer contract. New parameters are assigned global scope by
+the runtime. A future explicit trajectory-specific-parameter feature can expose
+a separate typed mechanism if the experiments require it.
 
 For affine parameters, unconstrained real coefficients continue to use the
 closed-form least-squares solve. A qualitative nonnegative/positive domain uses

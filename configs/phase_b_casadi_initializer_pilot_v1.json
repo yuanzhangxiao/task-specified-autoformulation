@@ -1,0 +1,75 @@
+{
+  "schema_version": "phase-b-casadi-initializer-pilot-1",
+  "status": "planned_before_fitting",
+  "development_only": true,
+  "test_data_opened": false,
+  "private_reference_available_to_fitter": false,
+  "observed_derivatives_supplied": false,
+  "latent_values_supplied": false,
+  "latent_derivatives_supplied": false,
+  "weighted_overall_score_defined": false,
+  "source_replay": {
+    "manifest_schema_version": "phase-b-proposer-repair-replay-manifest-1",
+    "required_status": "pass",
+    "source_plan_sha256": "edca1f5a6b94445a0d429d2aee8ecfeeee8a2479524932ed30bcf3aa5eda087b",
+    "replay_plan_sha256": "07dfd2ef5687b9f4e6e25c7b50ac15947e7098d6bbf4f5a38016ec1533f23af4",
+    "artifact_ledger_sha256": "8a6bf544f2db51e1b0dea0020f86edafacb0820244e67652b9da7d0644601951",
+    "replay_result_count": 12
+  },
+  "source_candidate_condition": {
+    "reasoning_effort": "low",
+    "max_output_tokens": 16384
+  },
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "fit_conditions": [
+    {
+      "condition_id": "runtime_owned_start",
+      "nonlinear_initializer": "none",
+      "nonlinear_initializer_failure_policy": "continue",
+      "number_of_starts": 1,
+      "maximum_function_evaluations": 100,
+      "core_fit_wall_time_seconds": 900.0,
+      "initializer_wall_time_seconds": 0.0,
+      "casadi_shooting_interval_count": 10,
+      "casadi_maximum_intervals_per_trajectory": 128,
+      "casadi_maximum_iterations": 200
+    },
+    {
+      "condition_id": "casadi_multiple_shooting_start",
+      "nonlinear_initializer": "casadi_multiple_shooting",
+      "nonlinear_initializer_failure_policy": "continue",
+      "number_of_starts": 1,
+      "maximum_function_evaluations": 100,
+      "core_fit_wall_time_seconds": 780.0,
+      "initializer_wall_time_seconds": 120.0,
+      "casadi_shooting_interval_count": 10,
+      "casadi_maximum_intervals_per_trajectory": 128,
+      "casadi_maximum_iterations": 200
+    }
+  ],
+  "reported_endpoints": [
+    "fit_contract_compatibility",
+    "initializer_activation",
+    "initializer_success",
+    "initializer_objective",
+    "fit_success",
+    "training_nmse",
+    "validation_nmse",
+    "function_evaluations",
+    "integration_failures",
+    "initializer_wall_seconds",
+    "total_fit_wall_seconds"
+  ]
+}

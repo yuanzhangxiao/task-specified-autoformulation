@@ -61,15 +61,6 @@
       "title": "ParameterRole",
       "type": "string"
     },
-    "ParameterScope": {
-      "description": "Sharing scope for a fitted scalar.",
-      "enum": [
-        "global",
-        "trajectory_specific"
-      ],
-      "title": "ParameterScope",
-      "type": "string"
-    },
     "ProposedAlgebraicV2": {
       "additionalProperties": false,
       "description": "Instantaneous named expression, optionally producing a target channel.",
@@ -164,10 +155,6 @@
         "role": {
           "$ref": "#/$defs/ParameterRole",
           "default": "coefficient"
-        },
-        "scope": {
-          "$ref": "#/$defs/ParameterScope",
-          "default": "global"
         }
       },
       "required": [
