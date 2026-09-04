@@ -25,7 +25,12 @@ from autoformalism.expressions.parser import (
     ParsedExpression,
     RestrictedParser,
 )
-from autoformalism.schemas import CandidateModel, ConstraintKind, ParameterScope
+from autoformalism.schemas import (
+    CandidateModel,
+    ConstraintKind,
+    ParameterScope,
+    StateKind,
+)
 from autoformalism.schemas.base import FiniteFloat, Identifier, StrictSchema
 
 IdentifierTuple = Annotated[tuple[Identifier, ...], Field(default=())]
@@ -268,6 +273,18 @@ def repair_protected_declarations(
         item.name for item in candidate.parameters if item.name in protected
     } | unused_parameters
     removed = removed_states | removed_processes | removed_parameters
+    effectively_observed_states = set(
+        CandidateValidator._identity_observed_state_channels(candidate, context)
+    )
+    state_kind_updates: dict[str, StateKind] = {}
+    for item in candidate.states:
+        expected_kind = (
+            StateKind.OBSERVED
+            if item.name in effectively_observed_states
+            else StateKind.LATENT
+        )
+        if item.name not in removed_states and item.kind is not expected_kind:
+            state_kind_updates[item.name] = expected_kind
     retained_state_names = {
         item.name for item in candidate.states if item.name not in removed_states
     }
@@ -303,6 +320,7 @@ def repair_protected_declarations(
     }
     if (
         not removed
+        and not state_kind_updates
         and not redundant_auxiliary_mappings
         and not numeric_qualitative_constraints
         and not unknown_constraint_subjects
@@ -312,6 +330,10 @@ def repair_protected_declarations(
     payload["states"] = [
         item for item in payload["states"] if item["name"] not in removed_states
     ]
+    for state in payload["states"]:
+        replacement = state_kind_updates.get(state["name"])
+        if replacement is not None:
+            state["kind"] = replacement.value
     payload["processes"] = [
         item for item in payload["processes"] if item["name"] not in removed_processes
     ]
@@ -346,6 +368,11 @@ def repair_protected_declarations(
         ):
             constraint["bounds"] = None
     repairs = list(initial_repairs)
+    repairs.extend(
+        "derived state observability from public identity mappings: "
+        f"{name} -> {kind.value}"
+        for name, kind in sorted(state_kind_updates.items())
+    )
     repairs.extend(
         f"used supplied forcing instead of modeled declaration: {name}"
         for name in sorted(

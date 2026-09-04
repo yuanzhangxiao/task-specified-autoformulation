@@ -245,8 +245,10 @@ There are three distinct behaviors:
    contract-repair instruction. Every provider attempt is counted and logged.
 2. **Deterministic enrichment.** Runtime-owned metadata is added, but the staged
    path does not silently rewrite scientific nodes, edges, expressions, or
-   mappings. A bad scientific structure must be regenerated or revised by a
-   later proposer action.
+   mappings. Observed/latent metadata on historical complete-candidate payloads
+   is canonicalized from public identity mappings before fitting and feedback.
+   A bad scientific structure must be regenerated or revised by a later
+   proposer action.
 3. **Search feedback.** Once a candidate is executable, public evidence is
    routed by responsibility: target-contract and graph-mechanism failures to
    topology; expression/annotation failures plus fit, integration, and worst
@@ -271,8 +273,9 @@ stages are checkpointed by a run-scoped input hash for deterministic resume.
   this staged-v1 issue does not by itself explain all earlier search failures.
 - A provider-declared `StateKind` remains in historical complete-candidate
   artifacts, but effective numerical observability is runtime-owned and is
-  inferred from public identity mappings. A wrong label no longer determines
-  the no-latent ablation verdict.
+  inferred from public identity mappings. At the runtime boundary the label is
+  canonicalized as metadata, so a wrong label no longer determines the
+  no-latent ablation verdict or downstream mechanism/complexity feedback.
 - Polarity plus a positive scalar role does not prove a nonlinear interaction is
   sign-definite or monotone over its full domain. Such scientific properties
   require a separate certified constraint or evaluator.

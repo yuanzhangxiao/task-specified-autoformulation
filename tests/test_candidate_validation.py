@@ -251,6 +251,28 @@ def test_protected_declarations_are_repaired_to_supplied_forcing(
     assert len(diagnostics) == 2
 
 
+def test_repair_canonicalizes_state_kinds_from_identity_measurements(
+    context: ValidationContext,
+) -> None:
+    payload = candidate_payload()
+    payload["states"][0]["kind"] = "observed"
+    payload["states"][1]["kind"] = "latent"
+    payload["initial_conditions"][0]["scope"] = "global"
+
+    repaired, diagnostics = repair_protected_declarations(
+        _candidate(payload), context
+    )
+
+    assert {item.name: item.kind.value for item in repaired.states} == {
+        "x": "latent",
+        "y": "observed",
+    }
+    assert diagnostics == (
+        "derived state observability from public identity mappings: x -> latent",
+        "derived state observability from public identity mappings: y -> observed",
+    )
+
+
 def test_repair_drops_only_unmodeled_auxiliary_observation_mappings(
     context: ValidationContext,
 ) -> None:
