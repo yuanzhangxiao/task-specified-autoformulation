@@ -94,6 +94,9 @@ resume.
 
 ## Milestone 4 — routed revision and bounded search policy
 
+Status: construction-only action loop and one-seed cluster gate implemented;
+live numerical fitting feedback remains pending the transport gate.
+
 - Route target-path and graph-mechanism failures to topology actions.
 - Route expression, integration, parameter, and worst-target fit failures to
   functional actions.
