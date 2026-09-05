@@ -78,7 +78,10 @@ class BenchmarkLoader:
         spec = self._registry.get(config.benchmark_id)
         roles = self._roles(spec, config.tier)
         self._validate_root_paths(config.root, spec)
-        self._validate_manifest(config.root, spec, config.tier, roles)
+        self._validate_manifest(
+            config.root, spec, config.tier, roles,
+            selected_splits=(SplitName.TRAIN, SplitName.VALIDATION),
+        )
         paths = {
             split: self._resolve_split_paths(
                 config.root,
@@ -236,6 +239,8 @@ class BenchmarkLoader:
         spec: BenchmarkSpec,
         tier: str,
         roles: TierRoles,
+        *,
+        selected_splits: tuple[SplitName, ...] = tuple(SplitName),
     ) -> None:
         manifest = load_json(self._resolve_under(root, spec.manifest_relative_path))
         if spec.data_layout == "tidy_split_file":
@@ -281,7 +286,13 @@ class BenchmarkLoader:
                     "Phase-B release must declare all three split fingerprints"
                 )
             benchmark_root = self._resolve_under(root, spec.relative_root)
+            selected_names = {
+                "validation" if split is SplitName.VALIDATION else split.value
+                for split in selected_splits
+            }
             for split_name, expected_hash in split_hashes.items():
+                if split_name not in selected_names:
+                    continue
                 split_path = benchmark_root / f"{split_name}.csv"
                 require_file(split_path)
                 actual_hash = hashlib.sha256(split_path.read_bytes()).hexdigest()
