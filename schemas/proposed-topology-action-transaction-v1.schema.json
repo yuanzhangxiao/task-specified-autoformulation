@@ -1,0 +1,390 @@
+{
+  "$defs": {
+    "AddInteractionAction": {
+      "additionalProperties": false,
+      "description": "Add one signed dependency hyperedge without a functional expression.",
+      "properties": {
+        "action": {
+          "const": "add_interaction",
+          "default": "add_interaction",
+          "title": "Action",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "polarity": {
+          "$ref": "#/$defs/InteractionPolarity",
+          "default": "additive"
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Sources",
+          "type": "array"
+        },
+        "target": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "target"
+      ],
+      "title": "AddInteractionAction",
+      "type": "object"
+    },
+    "AddProcessAction": {
+      "additionalProperties": false,
+      "description": "Add one generated instantaneous process to the topology draft.",
+      "properties": {
+        "action": {
+          "const": "add_process",
+          "default": "add_process",
+          "title": "Action",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AddProcessAction",
+      "type": "object"
+    },
+    "AddStateAction": {
+      "additionalProperties": false,
+      "description": "Add one generated dynamic state to the runtime-maintained draft.",
+      "properties": {
+        "action": {
+          "const": "add_state",
+          "default": "add_state",
+          "title": "Action",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AddStateAction",
+      "type": "object"
+    },
+    "ConstructionIntent": {
+      "additionalProperties": false,
+      "description": "Compact decision state externalized before proposing model edits.\n\nPublic requirement and target identifiers are anchors into runtime-owned\ncontracts.  They are not explanatory prose and do not duplicate model\nstructure.",
+      "properties": {
+        "objective": {
+          "$ref": "#/$defs/ConstructionObjective"
+        },
+        "requirement_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Requirement Ids",
+          "type": "array"
+        },
+        "target_channels": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Target Channels",
+          "type": "array"
+        }
+      },
+      "required": [
+        "objective"
+      ],
+      "title": "ConstructionIntent",
+      "type": "object"
+    },
+    "ConstructionObjective": {
+      "description": "Scientific responsibility addressed by one incremental transaction.",
+      "enum": [
+        "initial_construction",
+        "target_path_repair",
+        "mechanism_repair",
+        "function_repair",
+        "numerical_repair",
+        "simplification"
+      ],
+      "title": "ConstructionObjective",
+      "type": "string"
+    },
+    "InteractionPolarity": {
+      "description": "Outer algebraic operator used to assemble an interaction term.\n\nThis is not by itself a proof that the assigned function is nonnegative or\nmonotone in every source. Parameter roles and scientific checks own those\nseparate claims.",
+      "enum": [
+        "additive",
+        "subtractive"
+      ],
+      "title": "InteractionPolarity",
+      "type": "string"
+    },
+    "RemoveGeneratedNodeAction": {
+      "additionalProperties": false,
+      "description": "Remove one state or process after references are edited explicitly.",
+      "properties": {
+        "action": {
+          "const": "remove_generated_node",
+          "default": "remove_generated_node",
+          "title": "Action",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "RemoveGeneratedNodeAction",
+      "type": "object"
+    },
+    "RemoveInteractionAction": {
+      "additionalProperties": false,
+      "description": "Remove one interaction by its stable runtime identifier.",
+      "properties": {
+        "action": {
+          "const": "remove_interaction",
+          "default": "remove_interaction",
+          "title": "Action",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interaction_id"
+      ],
+      "title": "RemoveInteractionAction",
+      "type": "object"
+    },
+    "RemoveStateMeasurementAction": {
+      "additionalProperties": false,
+      "description": "Remove the direct auxiliary measurement attached to one state.",
+      "properties": {
+        "action": {
+          "const": "remove_state_measurement",
+          "default": "remove_state_measurement",
+          "title": "Action",
+          "type": "string"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "RemoveStateMeasurementAction",
+      "type": "object"
+    },
+    "RemoveTargetMappingAction": {
+      "additionalProperties": false,
+      "description": "Remove one target mapping before replacing or rebuilding it.",
+      "properties": {
+        "action": {
+          "const": "remove_target_mapping",
+          "default": "remove_target_mapping",
+          "title": "Action",
+          "type": "string"
+        },
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel"
+      ],
+      "title": "RemoveTargetMappingAction",
+      "type": "object"
+    },
+    "SetStateMeasurementAction": {
+      "additionalProperties": false,
+      "description": "Bind one state directly to one supplied auxiliary channel.",
+      "properties": {
+        "action": {
+          "const": "set_state_measurement",
+          "default": "set_state_measurement",
+          "title": "Action",
+          "type": "string"
+        },
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "channel"
+      ],
+      "title": "SetStateMeasurementAction",
+      "type": "object"
+    },
+    "SetTargetMappingAction": {
+      "additionalProperties": false,
+      "description": "Set or replace the generated source of one public target.",
+      "properties": {
+        "action": {
+          "const": "set_target_mapping",
+          "default": "set_target_mapping",
+          "title": "Action",
+          "type": "string"
+        },
+        "channel": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "source"
+      ],
+      "title": "SetTargetMappingAction",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One focused bundle of topology edits; unmentioned structure is retained.",
+  "properties": {
+    "actions": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "add_interaction": "#/$defs/AddInteractionAction",
+            "add_process": "#/$defs/AddProcessAction",
+            "add_state": "#/$defs/AddStateAction",
+            "remove_generated_node": "#/$defs/RemoveGeneratedNodeAction",
+            "remove_interaction": "#/$defs/RemoveInteractionAction",
+            "remove_state_measurement": "#/$defs/RemoveStateMeasurementAction",
+            "remove_target_mapping": "#/$defs/RemoveTargetMappingAction",
+            "set_state_measurement": "#/$defs/SetStateMeasurementAction",
+            "set_target_mapping": "#/$defs/SetTargetMappingAction"
+          },
+          "propertyName": "action"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AddStateAction"
+          },
+          {
+            "$ref": "#/$defs/AddProcessAction"
+          },
+          {
+            "$ref": "#/$defs/RemoveGeneratedNodeAction"
+          },
+          {
+            "$ref": "#/$defs/AddInteractionAction"
+          },
+          {
+            "$ref": "#/$defs/RemoveInteractionAction"
+          },
+          {
+            "$ref": "#/$defs/SetStateMeasurementAction"
+          },
+          {
+            "$ref": "#/$defs/RemoveStateMeasurementAction"
+          },
+          {
+            "$ref": "#/$defs/SetTargetMappingAction"
+          },
+          {
+            "$ref": "#/$defs/RemoveTargetMappingAction"
+          }
+        ]
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Actions",
+      "type": "array"
+    },
+    "intent": {
+      "$ref": "#/$defs/ConstructionIntent"
+    },
+    "schema_version": {
+      "const": "proposed-topology-action-transaction-1",
+      "default": "proposed-topology-action-transaction-1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "intent",
+    "actions"
+  ],
+  "title": "ProposedTopologyActionTransaction",
+  "type": "object"
+}

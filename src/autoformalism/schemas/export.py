@@ -8,6 +8,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from autoformalism.schemas.candidate import CandidateModel
+from autoformalism.schemas.construction import (
+    ProposedFunctionalActionTransaction,
+    ProposedTopologyActionTransaction,
+)
 from autoformalism.schemas.judge import (
     AtomicJudgeResult,
     ComparativeJudgeResult,
@@ -32,6 +36,12 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "proposer-candidate.schema.json": ProposerCandidate,
     "proposer-candidate-v2.schema.json": ProposerCandidateV2,
     "proposed-functional-candidate-v1.schema.json": ProposedFunctionalCandidate,
+    "proposed-functional-action-transaction-v1.schema.json": (
+        ProposedFunctionalActionTransaction
+    ),
+    "proposed-topology-action-transaction-v1.schema.json": (
+        ProposedTopologyActionTransaction
+    ),
     "proposed-topology-candidate-v2.schema.json": ProposedTopologyCandidate,
     "judge.schema.json": JudgeResult,
     "scientific-judge-v2.schema.json": ScientificJudgeResult,

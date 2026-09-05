@@ -10,7 +10,9 @@ from autoformalism.schemas import (
     HybridJudgeResult,
     JudgeResult,
     PairedTargetCompletenessJudgeResult,
+    ProposedFunctionalActionTransaction,
     ProposedFunctionalCandidate,
+    ProposedTopologyActionTransaction,
     ProposedTopologyCandidate,
     ProposerCandidate,
     ProposerCandidateV2,
@@ -37,6 +39,8 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "proposer-candidate.schema.json",
         "proposer-candidate-v2.schema.json",
         "proposed-functional-candidate-v1.schema.json",
+        "proposed-functional-action-transaction-v1.schema.json",
+        "proposed-topology-action-transaction-v1.schema.json",
         "proposed-topology-candidate-v2.schema.json",
         "scientific-judge-v2.schema.json",
         "target-completeness-judge-v1.schema.json",
@@ -55,6 +59,12 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     )
     proposed_functional_schema = json.loads(
         first_contents["proposed-functional-candidate-v1.schema.json"]
+    )
+    proposed_functional_action_schema = json.loads(
+        first_contents["proposed-functional-action-transaction-v1.schema.json"]
+    )
+    proposed_topology_action_schema = json.loads(
+        first_contents["proposed-topology-action-transaction-v1.schema.json"]
     )
     proposed_topology_schema = json.loads(
         first_contents["proposed-topology-candidate-v2.schema.json"]
@@ -86,6 +96,12 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert proposed_functional_schema == (
         ProposedFunctionalCandidate.model_json_schema(mode="validation")
     )
+    assert proposed_functional_action_schema == (
+        ProposedFunctionalActionTransaction.model_json_schema(mode="validation")
+    )
+    assert proposed_topology_action_schema == (
+        ProposedTopologyActionTransaction.model_json_schema(mode="validation")
+    )
     assert proposed_topology_schema == ProposedTopologyCandidate.model_json_schema(
         mode="validation"
     )
@@ -110,6 +126,8 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert proposer_schema["additionalProperties"] is False
     assert proposer_v2_schema["additionalProperties"] is False
     assert proposed_functional_schema["additionalProperties"] is False
+    assert proposed_functional_action_schema["additionalProperties"] is False
+    assert proposed_topology_action_schema["additionalProperties"] is False
     assert proposed_topology_schema["additionalProperties"] is False
     assert scientific_judge_schema["additionalProperties"] is False
     assert hybrid_judge_schema["additionalProperties"] is False
@@ -170,6 +188,18 @@ def test_checked_in_schemas_match_models() -> None:
             schema_directory / "proposed-functional-candidate-v1.schema.json"
         ).read_text(encoding="utf-8")
     ) == ProposedFunctionalCandidate.model_json_schema(mode="validation")
+    assert json.loads(
+        (
+            schema_directory
+            / "proposed-functional-action-transaction-v1.schema.json"
+        ).read_text(encoding="utf-8")
+    ) == ProposedFunctionalActionTransaction.model_json_schema(mode="validation")
+    assert json.loads(
+        (
+            schema_directory
+            / "proposed-topology-action-transaction-v1.schema.json"
+        ).read_text(encoding="utf-8")
+    ) == ProposedTopologyActionTransaction.model_json_schema(mode="validation")
     assert json.loads(
         (
             schema_directory / "proposed-topology-candidate-v2.schema.json"

@@ -1,0 +1,298 @@
+{
+  "$defs": {
+    "ConstructionIntent": {
+      "additionalProperties": false,
+      "description": "Compact decision state externalized before proposing model edits.\n\nPublic requirement and target identifiers are anchors into runtime-owned\ncontracts.  They are not explanatory prose and do not duplicate model\nstructure.",
+      "properties": {
+        "objective": {
+          "$ref": "#/$defs/ConstructionObjective"
+        },
+        "requirement_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Requirement Ids",
+          "type": "array"
+        },
+        "target_channels": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Target Channels",
+          "type": "array"
+        }
+      },
+      "required": [
+        "objective"
+      ],
+      "title": "ConstructionIntent",
+      "type": "object"
+    },
+    "ConstructionObjective": {
+      "description": "Scientific responsibility addressed by one incremental transaction.",
+      "enum": [
+        "initial_construction",
+        "target_path_repair",
+        "mechanism_repair",
+        "function_repair",
+        "numerical_repair",
+        "simplification"
+      ],
+      "title": "ConstructionObjective",
+      "type": "string"
+    },
+    "ParameterRole": {
+      "description": "Small operational role vocabulary used to derive parameter domains.",
+      "enum": [
+        "coefficient",
+        "nonnegative_coefficient",
+        "rate",
+        "time_constant",
+        "scale",
+        "offset",
+        "shape",
+        "positive_shape"
+      ],
+      "title": "ParameterRole",
+      "type": "string"
+    },
+    "ProposedInitialValue": {
+      "additionalProperties": false,
+      "description": "Fixed or analytic initialization for one latent state.",
+      "properties": {
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expression"
+        },
+        "fixed_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixed Value"
+        }
+      },
+      "title": "ProposedInitialValue",
+      "type": "object"
+    },
+    "ProposedParameter": {
+      "additionalProperties": false,
+      "description": "A fitted scalar identity; numerical values belong to the runtime.",
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ParameterRole",
+          "default": "coefficient"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ProposedParameter",
+      "type": "object"
+    },
+    "RemoveInteractionFunctionAction": {
+      "additionalProperties": false,
+      "description": "Remove one function assignment while retaining its topology edge.",
+      "properties": {
+        "action": {
+          "const": "remove_interaction_function",
+          "default": "remove_interaction_function",
+          "title": "Action",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interaction_id"
+      ],
+      "title": "RemoveInteractionFunctionAction",
+      "type": "object"
+    },
+    "RemoveLatentInitialAction": {
+      "additionalProperties": false,
+      "description": "Remove a latent initializer before revising it.",
+      "properties": {
+        "action": {
+          "const": "remove_latent_initial",
+          "default": "remove_latent_initial",
+          "title": "Action",
+          "type": "string"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "RemoveLatentInitialAction",
+      "type": "object"
+    },
+    "SetInteractionFunctionAction": {
+      "additionalProperties": false,
+      "description": "Set or replace the function assigned to one committed interaction.",
+      "properties": {
+        "action": {
+          "const": "set_interaction_function",
+          "default": "set_interaction_function",
+          "title": "Action",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "interaction_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "parameters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProposedParameter"
+          },
+          "maxItems": 64,
+          "title": "Parameters",
+          "type": "array"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "expression"
+      ],
+      "title": "SetInteractionFunctionAction",
+      "type": "object"
+    },
+    "SetLatentInitialAction": {
+      "additionalProperties": false,
+      "description": "Set or replace the current initializer for one latent state.",
+      "properties": {
+        "action": {
+          "const": "set_latent_initial",
+          "default": "set_latent_initial",
+          "title": "Action",
+          "type": "string"
+        },
+        "initial": {
+          "$ref": "#/$defs/ProposedInitialValue"
+        },
+        "state": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "initial"
+      ],
+      "title": "SetLatentInitialAction",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One focused function transaction conditioned on an exact topology.",
+  "properties": {
+    "actions": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "remove_interaction_function": "#/$defs/RemoveInteractionFunctionAction",
+            "remove_latent_initial": "#/$defs/RemoveLatentInitialAction",
+            "set_interaction_function": "#/$defs/SetInteractionFunctionAction",
+            "set_latent_initial": "#/$defs/SetLatentInitialAction"
+          },
+          "propertyName": "action"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SetInteractionFunctionAction"
+          },
+          {
+            "$ref": "#/$defs/RemoveInteractionFunctionAction"
+          },
+          {
+            "$ref": "#/$defs/SetLatentInitialAction"
+          },
+          {
+            "$ref": "#/$defs/RemoveLatentInitialAction"
+          }
+        ]
+      },
+      "maxItems": 128,
+      "minItems": 1,
+      "title": "Actions",
+      "type": "array"
+    },
+    "intent": {
+      "$ref": "#/$defs/ConstructionIntent"
+    },
+    "schema_version": {
+      "const": "proposed-functional-action-transaction-1",
+      "default": "proposed-functional-action-transaction-1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "topology_commitment_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Topology Commitment Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "topology_commitment_sha256",
+    "intent",
+    "actions"
+  ],
+  "title": "ProposedFunctionalActionTransaction",
+  "type": "object"
+}
