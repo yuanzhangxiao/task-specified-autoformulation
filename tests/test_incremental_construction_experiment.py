@@ -36,7 +36,34 @@ def test_repository_v2_plan_uses_phased_runtime_agenda() -> None:
 
     assert plan.construction_protocol == "phased_runtime_agenda_v2"
     assert plan.construction_budget.maximum_topology_action_steps == 6
+    assert plan.construction_budget.maximum_topology_actions_per_transaction == 12
+    assert plan.construction_budget.maximum_functional_actions_per_transaction == 24
+    assert plan.construction_budget.maximum_generated_nodes_per_topology == 12
+    assert plan.construction_budget.maximum_interactions_per_topology == 32
     assert len(build_incremental_construction_tasks(plan)) == 6
+
+
+def test_aces_worker_redirects_compiler_caches_out_of_home() -> None:
+    worker = Path(
+        "scripts/hpc/phase_b_incremental_construction_aces.slurm"
+    ).read_text(encoding="utf-8")
+    submit = Path(
+        "scripts/hpc/submit_phase_b_incremental_construction_aces.sh"
+    ).read_text(encoding="utf-8")
+
+    for variable in (
+        "TRITON_CACHE_DIR",
+        "TORCHINDUCTOR_CACHE_DIR",
+        "VLLM_CACHE_ROOT",
+        "XDG_CACHE_HOME",
+        "CUDA_CACHE_PATH",
+        "TMPDIR",
+    ):
+        assert f'--env "{variable}=${{{variable}}}"' in worker
+    assert '${SCRATCH}/autoformalism-runtime-cache/incremental-construction' in (
+        submit
+    )
+    assert "AF_COMPUTE_CACHE_ROOT" in submit
 
 
 def test_freeze_and_summary_keep_test_and_private_data_closed(

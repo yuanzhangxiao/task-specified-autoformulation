@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
+
 from autoformalism.construction import (
     ConstructionTranspositionTable,
     apply_functional_actions,
@@ -67,6 +69,18 @@ class IncrementalProposerConfig(StrictSchema):
     functional_action_system_prompt: NonEmptyText
     decision_policy: Literal["llm_objective_v1", "runtime_priority_v2"] = (
         "llm_objective_v1"
+    )
+    maximum_topology_actions_per_transaction: int = Field(
+        default=64, ge=1, le=64
+    )
+    maximum_functional_actions_per_transaction: int = Field(
+        default=128, ge=1, le=128
+    )
+    maximum_generated_nodes_per_topology: int = Field(
+        default=64, ge=1, le=64
+    )
+    maximum_interactions_per_topology: int = Field(
+        default=512, ge=1, le=512
     )
     cache_only: bool = False
 
@@ -158,6 +172,10 @@ class IncrementalProposer:
             agenda=agenda,
             topology_phase=topology_phase,
             proposal_slot=proposal_slot,
+            maximum_action_count=_topology_action_limit(
+                self._config.maximum_topology_actions_per_transaction,
+                topology_phase,
+            ),
         )
         input_hash = self._stage_input_hash(
             "topology_action",
@@ -186,6 +204,15 @@ class IncrementalProposer:
             attach_intent_mechanisms=attach_intent_mechanisms,
             cache_only=self._cache_only(cache_only),
         )
+        action_limit = _topology_action_limit(
+            self._config.maximum_topology_actions_per_transaction,
+            topology_phase,
+        )
+        _require_action_budget(
+            count=len(call.parsed.actions),
+            maximum=action_limit,
+            stage=f"topology/{topology_phase.value}",
+        )
         application = apply_topology_actions(
             parent,
             intent.as_runtime_intent(),
@@ -194,6 +221,12 @@ class IncrementalProposer:
             allowed_requirement_ids=allowed_requirement_ids,
             topology_phase=topology_phase,
             attach_intent_mechanisms=attach_intent_mechanisms,
+            maximum_generated_nodes=(
+                self._config.maximum_generated_nodes_per_topology
+            ),
+            maximum_interactions=(
+                self._config.maximum_interactions_per_topology
+            ),
         )
         if not application.changed:
             raise ValueError("topology action transaction makes no change")
@@ -253,6 +286,9 @@ class IncrementalProposer:
             intent=intent,
             agenda=agenda,
             proposal_slot=proposal_slot,
+            maximum_action_count=(
+                self._config.maximum_functional_actions_per_transaction
+            ),
         )
         input_hash = self._stage_input_hash(
             "functional_action",
@@ -279,6 +315,11 @@ class IncrementalProposer:
             context=context,
             allowed_requirement_ids=allowed_requirement_ids,
             cache_only=self._cache_only(cache_only),
+        )
+        _require_action_budget(
+            count=len(call.parsed.actions),
+            maximum=self._config.maximum_functional_actions_per_transaction,
+            stage="functional_form",
         )
         application = apply_functional_actions(
             parent,
@@ -580,6 +621,7 @@ def _topology_action_prompt(
     agenda: ConstructionAgenda | None,
     topology_phase: TopologyConstructionPhase,
     proposal_slot: int,
+    maximum_action_count: int,
 ) -> str:
     payload: dict[str, object] = {
         "schema_version": (
@@ -622,6 +664,9 @@ def _topology_action_prompt(
             "outer_sign_owned_by_topology": True,
             "target_kind_derived_by_runtime": True,
             "observability_derived_from_measurements_and_target_mappings": True,
+            "maximum_action_count": maximum_action_count,
+            "every_generated_node_requires_a_distinct_scientific_role": True,
+            "name_extension_chains_are_not_scientific_roles": True,
         },
     }
     if agenda is not None:
@@ -644,6 +689,7 @@ def _functional_action_prompt(
     intent: ProposedConstructionIntent,
     agenda: ConstructionAgenda | None,
     proposal_slot: int,
+    maximum_action_count: int,
 ) -> str:
     payload: dict[str, object] = {
         "schema_version": (
@@ -688,6 +734,7 @@ def _functional_action_prompt(
             "outer_sign_owned_by_topology": True,
             "signed_scalar_weight_forbidden": True,
             "latent_initials_required_before_fitting": True,
+            "maximum_action_count": maximum_action_count,
         },
     }
     if agenda is not None:
@@ -722,6 +769,29 @@ def _allowed_topology_actions(
         "set_target_mapping",
         "remove_target_mapping",
     ]
+
+
+def _topology_action_limit(
+    configured_maximum: int,
+    phase: TopologyConstructionPhase,
+) -> int:
+    """Return the bounded transaction size for one topology responsibility."""
+    phase_maximum = {
+        TopologyConstructionPhase.COMPONENT_SPECIFICATION: 12,
+        TopologyConstructionPhase.DYNAMIC_TOPOLOGY: 16,
+        TopologyConstructionPhase.ALGEBRAIC_READOUT_TOPOLOGY: 16,
+        TopologyConstructionPhase.CLOSURE_REPAIR: 8,
+    }.get(phase, configured_maximum)
+    return min(configured_maximum, phase_maximum)
+
+
+def _require_action_budget(*, count: int, maximum: int, stage: str) -> None:
+    """Reject an oversized response before it can mutate a maintained draft."""
+    if count > maximum:
+        raise ValueError(
+            f"{stage} action transaction contains {count} actions; "
+            f"maximum is {maximum}"
+        )
 
 
 def _public_contract(

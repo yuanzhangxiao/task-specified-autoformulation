@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
+
 from autoformalism.expressions import ValidationContext
+from autoformalism.llm.exceptions import LLMProviderError
 from autoformalism.llm.models import LLMCallResult
 from autoformalism.rebuttal.incremental_construction_pilot import (
     IncrementalConstructionPilotConfig,
+    build_public_construction_problem,
     construct_public_candidates,
 )
 from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
@@ -166,6 +171,16 @@ class _PhasedPilotClient:
         )
 
 
+class _DeadProviderClient:
+    """Represent a local model server that died after its internal retries."""
+
+    def propose_construction_intent(self, **_kwargs) -> LLMCallResult:
+        raise LLMProviderError(
+            "vLLM connection failed: [Errno 111] Connection refused",
+            retryable=True,
+        )
+
+
 def _target_contract() -> PublicTargetContract:
     return PublicTargetContract.model_validate(
         {
@@ -196,6 +211,63 @@ def _mechanism_spec() -> MechanismEvaluationSpec:
             ],
         }
     )
+
+
+def test_phased_public_problem_excludes_conflicting_response_instructions() -> None:
+    public_problem = build_public_construction_problem(
+        public_prompt=(
+            "A. Task specification\nInfer a causal model.\n\n"
+            "F. Required response\nReturn one complete model with prose.\n"
+        ),
+        context=ValidationContext(
+            targets=("target",), external_inputs=("input_u",)
+        ),
+        target_contract=_target_contract(),
+        mechanism_spec=_mechanism_spec(),
+        construction_protocol="phased_runtime_agenda_v2",
+    )
+    payload = json.loads(public_problem)
+
+    assert payload["schema_version"] == "public-construction-problem-2"
+    assert payload["benchmark_response_instructions_removed"] is True
+    assert "Infer a causal model" in payload["benchmark_scientific_context"]
+    assert "Return one complete model" not in public_problem
+    assert "benchmark_prompt" not in payload
+
+
+def test_dead_local_provider_stops_after_one_recorded_attempt(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "construction_result.json"
+    with pytest.raises(LLMProviderError, match="Connection refused"):
+        construct_public_candidates(
+            client=_DeadProviderClient(),
+            proposer_config=IncrementalProposerConfig(
+                checkpoint_directory=tmp_path / "checkpoints",
+                run_fingerprint="c" * 64,
+                intent_system_prompt="Select one objective.",
+                topology_action_system_prompt="Return topology actions.",
+                functional_action_system_prompt="Return functions.",
+            ),
+            pilot_config=IncrementalConstructionPilotConfig(
+                topology_branch_count=2,
+                function_children_per_topology=1,
+                maximum_topology_action_steps=4,
+                maximum_functional_action_steps=1,
+            ),
+            public_problem="Infer a causal input-response model.",
+            context=ValidationContext(
+                targets=("target",), external_inputs=("input_u",)
+            ),
+            target_contract=_target_contract(),
+            mechanism_spec=_mechanism_spec(),
+            output_path=output,
+        )
+
+    partial = json.loads(output.read_text(encoding="utf-8"))
+    assert partial["status"] == "incomplete"
+    assert len(partial["attempts"]) == 1
+    assert partial["attempts"][0]["failure_class"] == "provider_transport"
 
 
 def test_incremental_pilot_preserves_partial_edits_and_localizes_failure(

@@ -96,6 +96,7 @@ def main() -> None:
         context=context,
         target_contract=target_contract,
         mechanism_spec=mechanism_spec,
+        construction_protocol=plan.construction_protocol,
     )
     run_fingerprint = hashlib.sha256(
         plan_path.read_bytes()
@@ -136,6 +137,18 @@ def main() -> None:
             functional_action_system_prompt=FUNCTIONAL_ACTION_SYSTEM_PROMPT,
             decision_policy=(
                 "runtime_priority_v2" if phased_protocol else "llm_objective_v1"
+            ),
+            maximum_topology_actions_per_transaction=(
+                budget.maximum_topology_actions_per_transaction
+            ),
+            maximum_functional_actions_per_transaction=(
+                budget.maximum_functional_actions_per_transaction
+            ),
+            maximum_generated_nodes_per_topology=(
+                budget.maximum_generated_nodes_per_topology
+            ),
+            maximum_interactions_per_topology=(
+                budget.maximum_interactions_per_topology
             ),
         ),
         pilot_config=IncrementalConstructionPilotConfig(

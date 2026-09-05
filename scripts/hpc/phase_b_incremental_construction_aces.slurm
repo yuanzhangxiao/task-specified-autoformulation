@@ -17,6 +17,7 @@ set -euo pipefail
 : "${AF_OUTPUT_ROOT:?AF_OUTPUT_ROOT is required}"
 : "${AF_VLLM_IMAGE:?AF_VLLM_IMAGE is required}"
 : "${AF_HF_HOME:?AF_HF_HOME is required}"
+: "${AF_COMPUTE_CACHE_ROOT:?AF_COMPUTE_CACHE_ROOT is required}"
 : "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
 : "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_TENSOR_PARALLEL_SIZE:=2}"
@@ -28,10 +29,23 @@ readonly context_tokens="$(jq -r '.model_contract.served_context_tokens' "${plan
 readonly endpoint_port=8100
 readonly endpoint="http://127.0.0.1:${endpoint_port}"
 readonly server_log="${AF_OUTPUT_ROOT}/runtime/vllm-${SLURM_JOB_ID}.log"
+readonly job_cache_root="${AF_COMPUTE_CACHE_ROOT}/${SLURM_JOB_ID}"
+readonly triton_cache="${job_cache_root}/triton"
+readonly torchinductor_cache="${job_cache_root}/torchinductor"
+readonly vllm_cache="${job_cache_root}/vllm"
+readonly xdg_cache="${job_cache_root}/xdg"
+readonly cuda_cache="${job_cache_root}/cuda"
+readonly runtime_tmp="${job_cache_root}/tmp"
 
-mkdir -p "${AF_OUTPUT_ROOT}/runtime" "${AF_HF_HOME}"
+mkdir -p "${AF_OUTPUT_ROOT}/runtime" "${AF_HF_HOME}" "${triton_cache}" "${torchinductor_cache}" "${vllm_cache}" "${xdg_cache}" "${cuda_cache}" "${runtime_tmp}"
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
 export no_proxy="${NO_PROXY}"
+export TRITON_CACHE_DIR="${triton_cache}"
+export TORCHINDUCTOR_CACHE_DIR="${torchinductor_cache}"
+export VLLM_CACHE_ROOT="${vllm_cache}"
+export XDG_CACHE_HOME="${xdg_cache}"
+export CUDA_CACHE_PATH="${cuda_cache}"
+export TMPDIR="${runtime_tmp}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -61,9 +75,24 @@ trap cleanup EXIT
 
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader \
   >"${AF_OUTPUT_ROOT}/runtime/gpu-${SLURM_JOB_ID}.txt"
+jq -n \
+  --arg triton "${TRITON_CACHE_DIR}" \
+  --arg torchinductor "${TORCHINDUCTOR_CACHE_DIR}" \
+  --arg vllm "${VLLM_CACHE_ROOT}" \
+  --arg xdg "${XDG_CACHE_HOME}" \
+  --arg cuda "${CUDA_CACHE_PATH}" \
+  --arg tmp "${TMPDIR}" \
+  '{schema_version:"runtime-cache-paths-1",triton:$triton,torchinductor:$torchinductor,vllm:$vllm,xdg:$xdg,cuda:$cuda,tmp:$tmp}' \
+  >"${AF_OUTPUT_ROOT}/runtime/cache-paths-${SLURM_JOB_ID}.json"
 "${runtime}" exec --nv \
-  --bind "${AF_HF_HOME}:${AF_HF_HOME}" \
+  --bind "${AF_HF_HOME}:${AF_HF_HOME},${job_cache_root}:${job_cache_root}" \
   --env "HF_HOME=${AF_HF_HOME}" \
+  --env "TRITON_CACHE_DIR=${TRITON_CACHE_DIR}" \
+  --env "TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR}" \
+  --env "VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT}" \
+  --env "XDG_CACHE_HOME=${XDG_CACHE_HOME}" \
+  --env "CUDA_CACHE_PATH=${CUDA_CACHE_PATH}" \
+  --env "TMPDIR=${TMPDIR}" \
   "${AF_VLLM_IMAGE}" \
   vllm serve "${model}" \
     --host 127.0.0.1 \

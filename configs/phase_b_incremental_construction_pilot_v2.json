@@ -38,6 +38,10 @@
     "topology_branch_count": 2,
     "function_children_per_topology": 2,
     "maximum_topology_action_steps": 6,
-    "maximum_functional_action_steps": 6
+    "maximum_functional_action_steps": 6,
+    "maximum_topology_actions_per_transaction": 12,
+    "maximum_functional_actions_per_transaction": 24,
+    "maximum_generated_nodes_per_topology": 12,
+    "maximum_interactions_per_topology": 32
   }
 }

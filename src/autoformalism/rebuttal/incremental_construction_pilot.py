@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -75,6 +76,8 @@ Return only a small coherent transaction of typed topology actions. Use states
 for dynamic memory and processes for instantaneous generated quantities. Add
 only dependencies justified by the public task. The runtime owns observability,
 mechanism tags, target kinds, parent identity, diffs, units, and validation.
+Every generated node must have a distinct scientific role. Never create chains
+of renamed variants merely to fill the action budget.
 Do not emit equations, parameter declarations, ranges, prose, or a full model."""
 
 FUNCTIONAL_ACTION_SYSTEM_PROMPT = """You assign functions to an immutable ODE
@@ -152,13 +155,25 @@ def build_public_construction_problem(
     context: ValidationContext,
     target_contract: PublicTargetContract,
     mechanism_spec: MechanismEvaluationSpec,
+    construction_protocol: ConstructionProtocol = "mixed_llm_intent_v1",
 ) -> str:
     """Render the runtime-owned Level-0 summary supplied to every LLM stage."""
     if not public_prompt.strip():
         raise ValueError("public prompt must not be empty")
+    if construction_protocol == "phased_runtime_agenda_v2":
+        prompt_field = {
+            "benchmark_scientific_context": (
+                _scientific_prompt_context(public_prompt)
+            ),
+            "benchmark_response_instructions_removed": True,
+        }
+        schema_version = "public-construction-problem-2"
+    else:
+        prompt_field = {"benchmark_prompt": public_prompt}
+        schema_version = "public-construction-problem-1"
     payload = {
-        "schema_version": "public-construction-problem-1",
-        "benchmark_prompt": public_prompt,
+        "schema_version": schema_version,
+        **prompt_field,
         "public_channels": {
             "targets": list(context.targets),
             "auxiliaries": list(context.auxiliaries),
@@ -180,6 +195,24 @@ def build_public_construction_problem(
         },
     }
     return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+
+def _scientific_prompt_context(public_prompt: str) -> str:
+    """Remove the benchmark's full-model response format from staged calls."""
+    parts = re.split(
+        r"(?m)^F\.\s+Required response\s*$",
+        public_prompt,
+        maxsplit=1,
+    )
+    if len(parts) != 2:
+        raise ValueError(
+            "phased construction requires a reviewed 'F. Required response' "
+            "section boundary"
+        )
+    scientific_context = parts[0].rstrip()
+    if not scientific_context:
+        raise ValueError("benchmark scientific context is empty")
+    return scientific_context
 
 
 def construct_public_candidates(
@@ -249,6 +282,8 @@ def construct_public_candidates(
                     candidates,
                     len(complete_topologies),
                 )
+                if _is_terminal_provider_outage(exc):
+                    raise
                 continue
             draft = result.application.draft
             if (
@@ -370,6 +405,8 @@ def construct_public_candidates(
                         candidates,
                         len(complete_topologies),
                     )
+                    if _is_terminal_provider_outage(exc):
+                        raise
                     continue
                 functional = result.application.draft
                 attempts.append(
@@ -533,6 +570,24 @@ def _failure_class(exc: Exception) -> str:
             return "restricted_expression_grammar"
         return "deterministic_model_contract"
     return "deterministic_action_contract"
+
+
+def _is_terminal_provider_outage(exc: Exception) -> bool:
+    """Identify exhausted provider failures that imply a dead local endpoint."""
+    if not isinstance(exc, LLMProviderError):
+        return False
+    if not exc.retryable:
+        return True
+    message = str(exc).casefold()
+    return any(
+        marker in message
+        for marker in (
+            "connection refused",
+            "connection reset by peer",
+            "engine dead",
+            "enginedead",
+        )
+    )
 
 
 def _topology_failure_feedback(exc: Exception) -> RoutedProposerFeedback:

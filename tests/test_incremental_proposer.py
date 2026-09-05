@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from autoformalism.construction import finalize_topology_draft
 from autoformalism.expressions import ValidationContext
 from autoformalism.llm import LLMCallResult
@@ -287,3 +289,29 @@ def test_runtime_agenda_owns_objective_and_allows_multiple_mechanisms(
     assert result.focus is not None
     assert result.focus.feedback_item_indices == (0,)
     assert all(not item.mechanisms for item in result.application.draft.states)
+
+
+def test_oversized_topology_transaction_is_rejected_before_draft_mutation(
+    tmp_path: Path,
+) -> None:
+    client = _FakeIncrementalClient()
+    parent = TopologyDraft()
+    proposer = IncrementalProposer(
+        client=client,
+        config=_config(tmp_path).model_copy(
+            update={"maximum_topology_actions_per_transaction": 5}
+        ),
+    )
+
+    with pytest.raises(ValueError, match="contains 6 actions; maximum is 5"):
+        proposer.revise_topology(
+            public_problem="Infer a driven response model from public data.",
+            context=_context(),
+            allowed_requirement_ids=("input_response",),
+            feedback=_feedback(),
+            parent=parent,
+        )
+
+    assert parent == TopologyDraft()
+    topology_prompt = json.loads(client.calls[-1][1])
+    assert topology_prompt["edit_rules"]["maximum_action_count"] == 5

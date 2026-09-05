@@ -42,6 +42,18 @@ class IncrementalConstructionBudget(StrictSchema):
     function_children_per_topology: int = Field(ge=1, le=8)
     maximum_topology_action_steps: int = Field(ge=1, le=16)
     maximum_functional_action_steps: int = Field(ge=1, le=32)
+    maximum_topology_actions_per_transaction: int = Field(
+        default=64, ge=1, le=64
+    )
+    maximum_functional_actions_per_transaction: int = Field(
+        default=128, ge=1, le=128
+    )
+    maximum_generated_nodes_per_topology: int = Field(
+        default=64, ge=1, le=64
+    )
+    maximum_interactions_per_topology: int = Field(
+        default=512, ge=1, le=512
+    )
 
 
 class IncrementalConstructionExperimentPlan(StrictSchema):

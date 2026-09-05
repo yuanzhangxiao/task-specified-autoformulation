@@ -116,6 +116,8 @@ def apply_topology_actions(
     allowed_requirement_ids: Iterable[str] | None = None,
     topology_phase: TopologyConstructionPhase = TopologyConstructionPhase.MIXED,
     attach_intent_mechanisms: bool = True,
+    maximum_generated_nodes: int = 64,
+    maximum_interactions: int = 512,
 ) -> TopologyActionApplication:
     """Apply one ordered topology transaction and validate its public boundary.
 
@@ -229,6 +231,19 @@ def apply_topology_actions(
             target_mappings=tuple(mappings.values()),
         )
     )
+    generated_node_count = len(after.states) + len(after.processes)
+    if generated_node_count > maximum_generated_nodes:
+        raise ValueError(
+            "topology draft contains "
+            f"{generated_node_count} generated nodes; maximum is "
+            f"{maximum_generated_nodes}"
+        )
+    if len(after.interactions) > maximum_interactions:
+        raise ValueError(
+            "topology draft contains "
+            f"{len(after.interactions)} interactions; maximum is "
+            f"{maximum_interactions}"
+        )
     _validate_partial_topology(after, context)
     after_sha256 = topology_draft_sha256(after)
     return TopologyActionApplication(

@@ -410,6 +410,21 @@ explicitly.
 
 ## Current limits and historical scope
 
+- Phased-v2 calls receive the reviewed scientific sections of the benchmark
+  prompt but not its final full-model response-format section. That legacy
+  format conflicts with the smaller focus, topology-action, and
+  functional-action schemas. The complete public channel, target, unit, and
+  mechanism contracts remain explicit in the runtime-owned Level-0 summary.
+- The frozen v2 pilot permits at most 12 topology actions or 24 functional
+  actions in one transaction, 12 generated nodes in one topology, and 32
+  interactions in one topology. The closure-repair phase has the tighter
+  eight-action ceiling. Oversized transactions are rejected before they can
+  change the maintained draft, and generated nodes must have distinct
+  scientific roles rather than forming name-extension chains.
+- ACES workers place Triton, TorchInductor, vLLM, XDG, CUDA, and temporary
+  compiler caches under a scratch-backed, job-specific directory. An exhausted
+  local provider endpoint is checkpointed once and then terminates the task;
+  later branches are not charged for repeated calls to a dead engine.
 - The staged path is connected to the search controller as an explicit opt-in
   and has a local checkpoint/resume integration test. The first planned
   two-benchmark, three-seed cluster attempt exposed provider representation
