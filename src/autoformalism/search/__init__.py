@@ -1,6 +1,11 @@
 """Checkpointed judge-integrated beam search."""
 
 from autoformalism.search.checkpoints import CheckpointError, CheckpointStore
+from autoformalism.search.construction_agenda import (
+    ConstructionAgenda,
+    select_construction_agenda,
+    select_next_revision_stage,
+)
 from autoformalism.search.controller import SearchController
 from autoformalism.search.feedback_routing import (
     CandidateFeedbackEvidence,
@@ -29,6 +34,7 @@ __all__ = [
     "CandidateRecord",
     "CheckpointError",
     "CheckpointStore",
+    "ConstructionAgenda",
     "FeedbackPriority",
     "FeedbackRoute",
     "FinalEvaluation",
@@ -44,4 +50,6 @@ __all__ = [
     "candidate_identity",
     "evidence_from_completed_candidate",
     "route_proposer_feedback",
+    "select_construction_agenda",
+    "select_next_revision_stage",
 ]

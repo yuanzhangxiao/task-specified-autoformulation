@@ -47,7 +47,10 @@ class IncrementalConstructionBudget(StrictSchema):
 class IncrementalConstructionExperimentPlan(StrictSchema):
     """Immutable public-only incremental-construction plan."""
 
-    schema_version: Literal["phase-b-incremental-construction-plan-1"]
+    schema_version: Literal[
+        "phase-b-incremental-construction-plan-1",
+        "phase-b-incremental-construction-plan-2",
+    ]
     status: Literal["frozen_before_proposer_calls"]
     purpose: NonEmptyText
     development_only: Literal[True]
@@ -55,6 +58,10 @@ class IncrementalConstructionExperimentPlan(StrictSchema):
     private_reference_opened: Literal[False]
     parameter_fitting_performed: Literal[False]
     scientific_judge_called: Literal[False]
+    construction_protocol: Literal[
+        "mixed_llm_intent_v1",
+        "phased_runtime_agenda_v2",
+    ] = "mixed_llm_intent_v1"
     cells: tuple[IncrementalConstructionCell, ...] = Field(min_length=1)
     repetitions: tuple[int, ...] = Field(min_length=1)
     model_contract: IncrementalConstructionModelContract
@@ -70,6 +77,13 @@ class IncrementalConstructionExperimentPlan(StrictSchema):
             item < 0 for item in self.repetitions
         ):
             raise ValueError("repetitions must be unique and nonnegative")
+        expected_protocol = (
+            "mixed_llm_intent_v1"
+            if self.schema_version == "phase-b-incremental-construction-plan-1"
+            else "phased_runtime_agenda_v2"
+        )
+        if self.construction_protocol != expected_protocol:
+            raise ValueError(f"{self.schema_version} requires {expected_protocol}")
         return self
 
 
@@ -105,15 +119,11 @@ def build_incremental_construction_tasks(
             tier=cell.tier,
             repetition=repetition,
             public_prompt_sha256=cell.public_prompt_sha256,
-            public_target_contract_sha256=(
-                cell.public_target_contract_sha256
-            ),
+            public_target_contract_sha256=(cell.public_target_contract_sha256),
             public_mechanism_spec_sha256=cell.public_mechanism_spec_sha256,
         )
         for index, (cell, repetition) in enumerate(
-            (cell, repetition)
-            for cell in plan.cells
-            for repetition in plan.repetitions
+            (cell, repetition) for cell in plan.cells for repetition in plan.repetitions
         )
     )
 
@@ -132,10 +142,7 @@ def freeze_incremental_construction_experiment(
     plan = load_incremental_construction_plan(source)
     for cell in plan.cells:
         _require_sha(
-            public_data_root
-            / "phase_b_v1"
-            / cell.benchmark_id
-            / "proposer_prompt.txt",
+            public_data_root / "phase_b_v1" / cell.benchmark_id / "proposer_prompt.txt",
             cell.public_prompt_sha256,
             "public prompt",
         )
@@ -169,6 +176,7 @@ def freeze_incremental_construction_experiment(
         "private_reference_opened": False,
         "parameter_fitting_performed": False,
         "scientific_judge_called": False,
+        "construction_protocol": plan.construction_protocol,
         "task_count": len(tasks),
         "cell_count": len(plan.cells),
         "repetition_count": len(plan.repetitions),
@@ -213,9 +221,7 @@ def summarize_incremental_construction_experiment(
         attempts = payload.get("attempts", []) if payload else []
         candidates = payload.get("candidates", []) if payload else []
         failures = Counter(
-            str(item["failure_class"])
-            for item in attempts
-            if item.get("failure_class")
+            str(item["failure_class"]) for item in attempts if item.get("failure_class")
         )
         rows.append(
             {
@@ -224,26 +230,20 @@ def summarize_incremental_construction_experiment(
                 "tier": task.tier,
                 "repetition": task.repetition,
                 "result_present": payload is not None,
-                "construction_status": (
-                    payload.get("status") if payload else None
-                ),
+                "construction_status": (payload.get("status") if payload else None),
                 "complete_topology_count": (
-                    payload.get("complete_topology_count", 0)
-                    if payload
-                    else 0
+                    payload.get("complete_topology_count", 0) if payload else 0
                 ),
                 "complete_candidate_count": len(candidates),
                 "applied_incomplete_action_count": sum(
-                    item.get("status") == "applied_incomplete"
-                    for item in attempts
+                    item.get("status") == "applied_incomplete" for item in attempts
                 ),
                 "rejected_action_count": sum(
                     item.get("status") == "rejected" for item in attempts
                 ),
                 "failure_class_counts": dict(sorted(failures.items())),
                 "public_target_pass_count": sum(
-                    item.get("public_target_evaluation", {}).get("passed")
-                    is True
+                    item.get("public_target_evaluation", {}).get("passed") is True
                     for item in candidates
                 ),
                 "graph_mechanism_pass_count": sum(
@@ -259,9 +259,7 @@ def summarize_incremental_construction_experiment(
     return {
         "schema_version": "phase-b-incremental-construction-summary-1",
         "status": (
-            "complete"
-            if all(item["result_present"] for item in rows)
-            else "incomplete"
+            "complete" if all(item["result_present"] for item in rows) else "incomplete"
         ),
         "development_only": True,
         "test_data_opened": False,

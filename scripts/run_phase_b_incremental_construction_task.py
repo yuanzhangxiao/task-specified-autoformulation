@@ -17,6 +17,7 @@ from autoformalism.rebuttal.incremental_construction_experiment import (
     load_incremental_construction_plan,
 )
 from autoformalism.rebuttal.incremental_construction_pilot import (
+    FOCUS_SYSTEM_PROMPT,
     FUNCTIONAL_ACTION_SYSTEM_PROMPT,
     INTENT_SYSTEM_PROMPT,
     TOPOLOGY_ACTION_SYSTEM_PROMPT,
@@ -122,26 +123,27 @@ def main() -> None:
         jitter_fraction=0.0,
     )
     budget = plan.construction_budget
+    phased_protocol = plan.construction_protocol == "phased_runtime_agenda_v2"
     result = construct_public_candidates(
         client=client,
         proposer_config=IncrementalProposerConfig(
             checkpoint_directory=run_root / "checkpoints",
             run_fingerprint=run_fingerprint,
-            intent_system_prompt=INTENT_SYSTEM_PROMPT,
+            intent_system_prompt=(
+                FOCUS_SYSTEM_PROMPT if phased_protocol else INTENT_SYSTEM_PROMPT
+            ),
             topology_action_system_prompt=TOPOLOGY_ACTION_SYSTEM_PROMPT,
             functional_action_system_prompt=FUNCTIONAL_ACTION_SYSTEM_PROMPT,
+            decision_policy=(
+                "runtime_priority_v2" if phased_protocol else "llm_objective_v1"
+            ),
         ),
         pilot_config=IncrementalConstructionPilotConfig(
             topology_branch_count=budget.topology_branch_count,
-            function_children_per_topology=(
-                budget.function_children_per_topology
-            ),
-            maximum_topology_action_steps=(
-                budget.maximum_topology_action_steps
-            ),
-            maximum_functional_action_steps=(
-                budget.maximum_functional_action_steps
-            ),
+            function_children_per_topology=(budget.function_children_per_topology),
+            maximum_topology_action_steps=(budget.maximum_topology_action_steps),
+            maximum_functional_action_steps=(budget.maximum_functional_action_steps),
+            construction_protocol=plan.construction_protocol,
         ),
         public_problem=public_problem,
         context=context,

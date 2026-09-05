@@ -22,6 +22,7 @@ from autoformalism.schemas import (
     FunctionalDraft,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
+    TopologyConstructionPhase,
     TopologyDraft,
 )
 from autoformalism.staging import topology_commitment_sha256
@@ -183,6 +184,81 @@ def test_topology_deletion_does_not_silently_cascade() -> None:
         apply_topology_actions(draft, _intent("simplification"), removal, _context())
 
 
+def test_topology_phases_reject_out_of_order_actions() -> None:
+    components = ProposedTopologyActionTransaction.model_validate(
+        {"actions": [{"action": "add_state", "name": "x"}]}
+    )
+    component_draft = apply_topology_actions(
+        TopologyDraft(),
+        _intent(),
+        components,
+        _context(),
+        topology_phase=TopologyConstructionPhase.COMPONENT_SPECIFICATION,
+        attach_intent_mechanisms=False,
+    ).draft
+    interaction = ProposedTopologyActionTransaction.model_validate(
+        {
+            "actions": [
+                {
+                    "action": "add_interaction",
+                    "interaction_id": "drive",
+                    "target": "x",
+                    "sources": ["input_u"],
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="component_specification"):
+        apply_topology_actions(
+            TopologyDraft(),
+            _intent(),
+            interaction,
+            _context(),
+            topology_phase=TopologyConstructionPhase.COMPONENT_SPECIFICATION,
+        )
+    dynamic = apply_topology_actions(
+        component_draft,
+        _intent(),
+        interaction,
+        _context(),
+        topology_phase=TopologyConstructionPhase.DYNAMIC_TOPOLOGY,
+        attach_intent_mechanisms=False,
+    )
+    assert dynamic.topology_phase == TopologyConstructionPhase.DYNAMIC_TOPOLOGY
+    assert all(not item.mechanisms for item in dynamic.draft.states)
+    assert all(not item.mechanisms for item in dynamic.draft.interactions)
+
+    mapping = ProposedTopologyActionTransaction.model_validate(
+        {
+            "actions": [
+                {
+                    "action": "set_target_mapping",
+                    "channel": "target",
+                    "source": "x",
+                }
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="dynamic_topology"):
+        apply_topology_actions(
+            dynamic.draft,
+            _intent(),
+            mapping,
+            _context(),
+            topology_phase=TopologyConstructionPhase.DYNAMIC_TOPOLOGY,
+        )
+    readout = apply_topology_actions(
+        dynamic.draft,
+        _intent(),
+        mapping,
+        _context(),
+        topology_phase=TopologyConstructionPhase.ALGEBRAIC_READOUT_TOPOLOGY,
+        attach_intent_mechanisms=False,
+    )
+    assert finalize_topology_draft(readout.draft, _context())
+
+
 def test_partial_functions_are_conditioned_on_the_exact_topology() -> None:
     topology = finalize_topology_draft(
         apply_topology_actions(
@@ -239,9 +315,7 @@ def test_compatible_function_actions_expand_to_an_executable_candidate() -> None
     )
 
     report = assess_functional_compatibility(topology, application.draft)
-    expansion = finalize_functional_draft(
-        topology, application.draft, _context()
-    )
+    expansion = finalize_functional_draft(topology, application.draft, _context())
 
     assert report.status == "compatible"
     assert application.changed is True
@@ -275,9 +349,7 @@ def test_incompatible_function_does_not_invalidate_its_topology() -> None:
     report = assess_functional_compatibility(topology, application.draft)
 
     assert report.status == "incompatible"
-    assert [item.code for item in report.diagnostics] == [
-        "TOPOLOGY_SOURCE_MISMATCH"
-    ]
+    assert [item.code for item in report.diagnostics] == ["TOPOLOGY_SOURCE_MISMATCH"]
     assert topology_commitment_sha256(topology) == commitment
 
 
@@ -285,22 +357,12 @@ def test_conditional_beam_reserves_one_child_per_topology_before_fill() -> None:
     a = "a" * 64
     b = "b" * 64
     entries = (
-        ConditionalBeamEntry(
-            topology_sha256=a, functional_sha256="1" * 64, score=0.1
-        ),
-        ConditionalBeamEntry(
-            topology_sha256=a, functional_sha256="2" * 64, score=0.2
-        ),
-        ConditionalBeamEntry(
-            topology_sha256=b, functional_sha256="3" * 64, score=0.15
-        ),
-        ConditionalBeamEntry(
-            topology_sha256=b, functional_sha256="4" * 64, score=0.16
-        ),
+        ConditionalBeamEntry(topology_sha256=a, functional_sha256="1" * 64, score=0.1),
+        ConditionalBeamEntry(topology_sha256=a, functional_sha256="2" * 64, score=0.2),
+        ConditionalBeamEntry(topology_sha256=b, functional_sha256="3" * 64, score=0.15),
+        ConditionalBeamEntry(topology_sha256=b, functional_sha256="4" * 64, score=0.16),
         # A worse duplicate must not replace the identical branch.
-        ConditionalBeamEntry(
-            topology_sha256=a, functional_sha256="1" * 64, score=9.0
-        ),
+        ConditionalBeamEntry(topology_sha256=a, functional_sha256="1" * 64, score=9.0),
     )
 
     selected = select_conditional_beam(

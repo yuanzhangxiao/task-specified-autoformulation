@@ -38,6 +38,7 @@ from autoformalism.schemas import (
     FunctionalDraft,
     HybridJudgeResult,
     PairedTargetCompletenessJudgeResult,
+    ProposedConstructionFocus,
     ProposedConstructionIntent,
     ProposedFunctionalActionTransaction,
     ProposedFunctionalCandidate,
@@ -47,6 +48,7 @@ from autoformalism.schemas import (
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
     TopologyCandidate,
+    TopologyConstructionPhase,
     TopologyDraft,
     enrich_proposal_v2,
 )
@@ -163,9 +165,7 @@ class CachedLLMClient(ABC):
         self._sleep = sleep
         self._random_value = random_value
         self._proposal_target_channels = proposal_target_channels
-        self._proposal_protected_parameter_names = (
-            proposal_protected_parameter_names
-        )
+        self._proposal_protected_parameter_names = proposal_protected_parameter_names
         self._cache_only = cache_only
 
     def propose(
@@ -226,9 +226,7 @@ class CachedLLMClient(ABC):
             validate_parsed=lambda proposal: enrich_topology_proposal(
                 proposal, context
             ),
-            request_metadata={
-                "validation_context": context.model_dump(mode="json")
-            },
+            request_metadata={"validation_context": context.model_dump(mode="json")},
             cache_only=cache_only,
         )
         topology = enrich_topology_proposal(compact.parsed, context)
@@ -274,9 +272,7 @@ class CachedLLMClient(ABC):
             ),
             validate_parsed=validate,
             request_metadata={
-                "topology_commitment_sha256": topology_commitment_sha256(
-                    topology
-                ),
+                "topology_commitment_sha256": topology_commitment_sha256(topology),
                 "validation_context": context.model_dump(mode="json"),
             },
             cache_only=cache_only,
@@ -334,6 +330,66 @@ class CachedLLMClient(ABC):
             cache_only=cache_only,
         )
 
+    def propose_construction_focus(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        allowed_target_channels: tuple[str, ...],
+        allowed_feedback_item_indices: tuple[int, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedConstructionFocus]:
+        """Choose items and anchors inside one runtime-owned category."""
+
+        def validate(proposal: ProposedConstructionFocus) -> None:
+            unknown_targets = set(proposal.target_channels) - set(
+                allowed_target_channels
+            )
+            if unknown_targets:
+                raise ValueError(
+                    "construction focus references unknown targets: "
+                    f"{sorted(unknown_targets)}"
+                )
+            unknown_requirements = set(proposal.requirement_ids) - set(
+                allowed_requirement_ids
+            )
+            if unknown_requirements:
+                raise ValueError(
+                    "construction focus references unknown requirements: "
+                    f"{sorted(unknown_requirements)}"
+                )
+            unknown_items = set(proposal.feedback_item_indices) - set(
+                allowed_feedback_item_indices
+            )
+            if unknown_items:
+                raise ValueError(
+                    "construction focus references unavailable feedback items: "
+                    f"{sorted(unknown_items)}"
+                )
+            if allowed_feedback_item_indices and not proposal.feedback_item_indices:
+                raise ValueError(
+                    "construction focus must select at least one feedback item"
+                )
+            if not allowed_feedback_item_indices and proposal.feedback_item_indices:
+                raise ValueError("initial construction has no feedback items to select")
+
+        return self._structured_call(
+            role="construction_focus_proposer_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=ProposedConstructionFocus,
+            validate_parsed=validate,
+            request_metadata={
+                "allowed_requirement_ids": allowed_requirement_ids,
+                "allowed_target_channels": allowed_target_channels,
+                "allowed_feedback_item_indices": (allowed_feedback_item_indices),
+                "validation_context": context.model_dump(mode="json"),
+            },
+            cache_only=cache_only,
+        )
+
     def propose_topology_actions(
         self,
         *,
@@ -343,6 +399,8 @@ class CachedLLMClient(ABC):
         intent: ProposedConstructionIntent,
         context: ValidationContext,
         allowed_requirement_ids: tuple[str, ...],
+        topology_phase: TopologyConstructionPhase = TopologyConstructionPhase.MIXED,
+        attach_intent_mechanisms: bool = True,
         cache_only: bool = False,
     ) -> LLMCallResult[ProposedTopologyActionTransaction]:
         """Request one non-empty topology edit against an immutable parent."""
@@ -359,10 +417,28 @@ class CachedLLMClient(ABC):
                 transaction,
                 context,
                 allowed_requirement_ids=allowed_requirement_ids,
+                topology_phase=topology_phase,
+                attach_intent_mechanisms=attach_intent_mechanisms,
             )
             if not application.changed:
                 raise ValueError("topology action transaction makes no change")
 
+        request_metadata: dict[str, object] = {
+            "parent_topology_draft_sha256": topology_draft_sha256(parent),
+            "construction_intent": intent.model_dump(mode="json"),
+            "allowed_requirement_ids": allowed_requirement_ids,
+            "validation_context": context.model_dump(mode="json"),
+        }
+        if (
+            topology_phase != TopologyConstructionPhase.MIXED
+            or not attach_intent_mechanisms
+        ):
+            request_metadata.update(
+                {
+                    "topology_phase": topology_phase.value,
+                    "attach_intent_mechanisms": attach_intent_mechanisms,
+                }
+            )
         return self._structured_call(
             role="topology_action_proposer_v1",
             system_prompt=system_prompt,
@@ -370,12 +446,7 @@ class CachedLLMClient(ABC):
             response_model=ProposedTopologyActionTransaction,
             normalize_parsed=normalize_topology_action_transaction,
             validate_parsed=validate,
-            request_metadata={
-                "parent_topology_draft_sha256": topology_draft_sha256(parent),
-                "construction_intent": intent.model_dump(mode="json"),
-                "allowed_requirement_ids": allowed_requirement_ids,
-                "validation_context": context.model_dump(mode="json"),
-            },
+            request_metadata=request_metadata,
             cache_only=cache_only,
         )
 
@@ -411,17 +482,14 @@ class CachedLLMClient(ABC):
             )
             if not application.changed:
                 raise ValueError("functional action transaction makes no change")
-            compatibility = assess_functional_compatibility(
-                topology, application.draft
-            )
+            compatibility = assess_functional_compatibility(topology, application.draft)
             if compatibility.status == "incompatible":
                 details = "; ".join(
                     f"{item.code} at {item.location}: {item.message}"
                     for item in compatibility.diagnostics
                 )
                 raise ValueError(
-                    "functional actions are incompatible with the topology: "
-                    f"{details}"
+                    f"functional actions are incompatible with the topology: {details}"
                 )
 
         return self._structured_call(
@@ -433,9 +501,7 @@ class CachedLLMClient(ABC):
             validate_parsed=validate,
             request_metadata={
                 "parent_functional_draft_sha256": functional_draft_sha256(parent),
-                "topology_commitment_sha256": topology_commitment_sha256(
-                    topology
-                ),
+                "topology_commitment_sha256": topology_commitment_sha256(topology),
                 "construction_intent": intent.model_dump(mode="json"),
                 "allowed_requirement_ids": allowed_requirement_ids,
                 "validation_context": context.model_dump(mode="json"),
@@ -491,8 +557,7 @@ class CachedLLMClient(ABC):
             )
             return normalized, {
                 "redundant_absolute_units_removed": [
-                    f"{criterion.value}:{subject}"
-                    for criterion, subject in removed
+                    f"{criterion.value}:{subject}" for criterion, subject in removed
                 ],
                 "redundant_absolute_unit_repair_count": len(removed),
             }
@@ -524,6 +589,7 @@ class CachedLLMClient(ABC):
         repair_missing_units: bool = False,
     ) -> LLMCallResult[AtomicJudgeResult]:
         """Request sign-blinded atomic evidence before pairwise assessment."""
+
         def normalize(
             result: AtomicJudgeResult,
         ) -> tuple[AtomicJudgeResult, dict[str, object]]:
@@ -549,9 +615,7 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=AtomicJudgeResult,
-            normalize_after_exhausted=(
-                normalize if repair_missing_units else None
-            ),
+            normalize_after_exhausted=(normalize if repair_missing_units else None),
             validate_parsed=lambda result: result.validate_expected_units(
                 occurrence_ids=expected_occurrence_ids,
                 repeat_pair_ids=expected_repeat_pair_ids,
@@ -672,21 +736,15 @@ class CachedLLMClient(ABC):
                 current_provider_counted = True
                 try:
                     if normalize_parsed is not None:
-                        parsed, repair = normalize_parsed(
-                            provider_response.parsed
-                        )
+                        parsed, repair = normalize_parsed(provider_response.parsed)
                         raw_response = dict(provider_response.raw_response)
-                        raw_response[
-                            "_autoformalism_contract_repair"
-                        ] = repair
+                        raw_response["_autoformalism_contract_repair"] = repair
                         provider_response = ProviderResponse(
                             parsed=parsed,
                             raw_response=raw_response,
                             usage=provider_response.usage,
                             latency_ms=provider_response.latency_ms,
-                            provider_attempts=(
-                                provider_response.provider_attempts
-                            ),
+                            provider_attempts=(provider_response.provider_attempts),
                         )
                     if validate_parsed is not None:
                         validate_parsed(provider_response.parsed)
@@ -721,8 +779,7 @@ class CachedLLMClient(ABC):
                         )
                     else:
                         raise LLMResponseError(
-                            "response failed post-schema validation: "
-                            f"{exc}",
+                            f"response failed post-schema validation: {exc}",
                             raw_response=provider_response.raw_response,
                             diagnostic_code=(
                                 RepairDiagnosticCode.POST_SCHEMA_VALIDATION
@@ -741,10 +798,7 @@ class CachedLLMClient(ABC):
                     repair_diagnostic_codes += tuple(
                         item.code for item in exc.repair_diagnostics
                     )
-                    attempt_user_prompt = (
-                        f"{user_prompt}\n\n"
-                        f"{exc.repair_prompt()}"
-                    )
+                    attempt_user_prompt = f"{user_prompt}\n\n{exc.repair_prompt()}"
                 self._sleep(self._backoff(attempts))
         else:  # pragma: no cover - loop exits by success or exception
             raise AssertionError("retry loop terminated unexpectedly")

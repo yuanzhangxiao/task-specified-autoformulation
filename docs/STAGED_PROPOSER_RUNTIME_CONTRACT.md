@@ -77,6 +77,53 @@ The enriched handoff and final executable schemas are:
 - [`functional-candidate-v1.schema.json`](../schemas/functional-candidate-v1.schema.json)
 - [`candidate.schema.json`](../schemas/candidate.schema.json)
 
+The incremental-construction pilot has two versioned protocols. The frozen v1
+protocol retains mixed topology actions and lets the provider choose the
+objective. The opt-in v2 plan uses a runtime-owned agenda and ordered topology
+phases; v1 request payloads and checkpoints remain readable.
+
+### Runtime-owned agenda in incremental v2
+
+The runtime first groups public feedback by responsibility and selects exactly
+one category. Target-contract failures are handled first, followed by graph
+mechanism and missing-scientific-requirement failures. Those scientific graph
+obligations precede executable-form, numerical-fit, validation-error,
+parameter-boundary, and annotation-only categories. The selected category fixes
+the next objective and responsible revision stage.
+
+The provider does not repeat that decision. It returns only a
+[`ProposedConstructionFocus`](../schemas/proposed-construction-focus-v1.schema.json):
+
+```json
+{
+  "schema_version": "proposed-construction-focus-1",
+  "feedback_item_indices": [0, 2],
+  "requirement_ids": ["meal_pathway", "delayed_insulin_action"],
+  "target_channels": ["Gp", "U"]
+}
+```
+
+Indices must refer to the one visible category. Requirement and target anchors
+must belong to the public contracts. Multiple mechanisms may be selected in one
+call, which lets a coherent component or topology transaction address coupled
+requirements without exposing lower-priority feedback at the same time.
+
+Topology construction then proceeds through runtime-owned phases:
+
+1. `component_specification`: add or remove generated dynamic states and
+   instantaneous processes;
+2. `dynamic_topology`: add or remove interactions whose targets are declared
+   states;
+3. `algebraic_readout_topology`: add or remove process interactions and set
+   measurements and public-target mappings;
+4. `closure_repair`: make a localized action of any topology type after exact
+   deterministic completeness diagnostics.
+
+The compiler rejects an action outside its phase before changing the draft.
+It also stops copying a union of selected mechanism identifiers onto every
+new node. Scientific graph compliance is evaluated from the compiled graph;
+annotation repair remains a separate deterministic, auditable operation.
+
 All schema objects reject undeclared fields. Identifiers must match
 `^[A-Za-z][A-Za-z0-9_]*$`, strings and collections are bounded, and nonfinite
 numbers are rejected.
@@ -385,3 +432,7 @@ explicitly.
 - Polarity plus a positive scalar role does not prove a nonlinear interaction is
   sign-definite or monotone over its full domain. Such scientific properties
   require a separate certified constraint or evaluator.
+- Incremental v2 currently validates agenda selection, phased construction,
+  compilation, deduplication, and checkpoint resume before fitting. Routing
+  fitted-candidate evidence back through the same agenda is the next search
+  integration milestone; the v2 two-benchmark plan remains development-only.

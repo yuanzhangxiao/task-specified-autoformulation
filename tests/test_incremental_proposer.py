@@ -10,9 +10,11 @@ from autoformalism.expressions import ValidationContext
 from autoformalism.llm import LLMCallResult
 from autoformalism.schemas import (
     FunctionalDraft,
+    ProposedConstructionFocus,
     ProposedConstructionIntent,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
+    TopologyConstructionPhase,
     TopologyDraft,
 )
 from autoformalism.search import CandidateFeedbackEvidence, route_proposer_feedback
@@ -60,6 +62,17 @@ class _FakeIncrementalClient:
             target_channels=("target",),
         )
         return _result("1" * 64, parsed)
+
+    def propose_construction_focus(self, **kwargs) -> LLMCallResult:
+        self.calls.append(("focus", kwargs["user_prompt"]))
+        parsed = ProposedConstructionFocus(
+            feedback_item_indices=(
+                (0,) if kwargs["allowed_feedback_item_indices"] else ()
+            ),
+            requirement_ids=kwargs["allowed_requirement_ids"],
+            target_channels=("target",),
+        )
+        return _result("4" * 64, parsed)
 
     def propose_topology_actions(self, **kwargs) -> LLMCallResult:
         self.calls.append(("topology", kwargs["user_prompt"]))
@@ -165,12 +178,8 @@ def test_incremental_proposer_checkpoints_decision_action_and_application(
     assert (tmp_path / "transpositions.json").exists()
     checkpoint = next(tmp_path.glob("topology-action-*.json"))
     payload = json.loads(checkpoint.read_text(encoding="utf-8"))
-    assert payload["result"]["transaction"] == first.transaction.model_dump(
-        mode="json"
-    )
-    assert payload["result"]["application"] == first.application.model_dump(
-        mode="json"
-    )
+    assert payload["result"]["transaction"] == first.transaction.model_dump(mode="json")
+    assert payload["result"]["application"] == first.application.model_dump(mode="json")
 
 
 def test_function_actions_are_conditioned_on_exact_topology_and_resume(
@@ -185,9 +194,7 @@ def test_function_actions_are_conditioned_on_exact_topology_and_resume(
         feedback=_feedback(),
         parent=TopologyDraft(),
     )
-    topology = finalize_topology_draft(
-        topology_result.application.draft, _context()
-    )
+    topology = finalize_topology_draft(topology_result.application.draft, _context())
     parent = FunctionalDraft(
         topology_commitment_sha256=topology_commitment_sha256(topology)
     )
@@ -232,9 +239,7 @@ def test_incompatible_function_retry_cannot_mutate_parent(tmp_path: Path) -> Non
         feedback=_feedback(),
         parent=TopologyDraft(),
     )
-    topology = finalize_topology_draft(
-        topology_result.application.draft, _context()
-    )
+    topology = finalize_topology_draft(topology_result.application.draft, _context())
     parent = FunctionalDraft(
         topology_commitment_sha256=topology_commitment_sha256(topology)
     )
@@ -250,3 +255,35 @@ def test_incompatible_function_retry_cannot_mutate_parent(tmp_path: Path) -> Non
     )
 
     assert parent.model_dump_json() == before
+
+
+def test_runtime_agenda_owns_objective_and_allows_multiple_mechanisms(
+    tmp_path: Path,
+) -> None:
+    client = _FakeIncrementalClient()
+    config = _config(tmp_path).model_copy(
+        update={"decision_policy": "runtime_priority_v2"}
+    )
+    proposer = IncrementalProposer(client=client, config=config)
+
+    result = proposer.revise_topology(
+        public_problem="Infer a driven response model from public data.",
+        context=_context(),
+        allowed_requirement_ids=("input_response", "delayed_response"),
+        feedback=_feedback(),
+        parent=TopologyDraft(),
+        topology_phase=TopologyConstructionPhase.CLOSURE_REPAIR,
+        attach_intent_mechanisms=False,
+    )
+
+    assert [role for role, _ in client.calls] == ["focus", "topology"]
+    assert result.agenda is not None
+    assert result.agenda.feedback_category == "graph_mechanism_failure"
+    assert result.intent.objective.value == "mechanism_repair"
+    assert result.intent.requirement_ids == (
+        "input_response",
+        "delayed_response",
+    )
+    assert result.focus is not None
+    assert result.focus.feedback_item_indices == (0,)
+    assert all(not item.mechanisms for item in result.application.draft.states)

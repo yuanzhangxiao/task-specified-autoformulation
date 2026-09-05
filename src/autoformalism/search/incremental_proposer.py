@@ -26,15 +26,21 @@ from autoformalism.schemas import (
     FunctionalActionApplication,
     FunctionalCompatibilityReport,
     FunctionalDraft,
+    ProposedConstructionFocus,
     ProposedConstructionIntent,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
     TopologyActionApplication,
     TopologyCandidate,
+    TopologyConstructionPhase,
     TopologyDraft,
 )
 from autoformalism.schemas.base import NonEmptyText, StrictSchema
 from autoformalism.schemas.staged import Sha256Digest
+from autoformalism.search.construction_agenda import (
+    ConstructionAgenda,
+    select_construction_agenda,
+)
 from autoformalism.search.feedback_routing import (
     RevisionStage,
     RoutedProposerFeedback,
@@ -59,6 +65,9 @@ class IncrementalProposerConfig(StrictSchema):
     intent_system_prompt: NonEmptyText
     topology_action_system_prompt: NonEmptyText
     functional_action_system_prompt: NonEmptyText
+    decision_policy: Literal["llm_objective_v1", "runtime_priority_v2"] = (
+        "llm_objective_v1"
+    )
     cache_only: bool = False
 
 
@@ -69,6 +78,8 @@ class IncrementalTopologyResult(StrictSchema):
         "incremental-topology-result-1"
     )
     intent: ProposedConstructionIntent
+    agenda: ConstructionAgenda | None = None
+    focus: ProposedConstructionFocus | None = None
     transaction: ProposedTopologyActionTransaction
     application: TopologyActionApplication
     intent_call: StageCallReceipt
@@ -83,6 +94,8 @@ class IncrementalFunctionalResult(StrictSchema):
         "incremental-functional-result-1"
     )
     intent: ProposedConstructionIntent
+    agenda: ConstructionAgenda | None = None
+    focus: ProposedConstructionFocus | None = None
     transaction: ProposedFunctionalActionTransaction
     application: FunctionalActionApplication
     compatibility: FunctionalCompatibilityReport
@@ -116,12 +129,14 @@ class IncrementalProposer:
         feedback: RoutedProposerFeedback,
         parent: TopologyDraft,
         proposal_slot: int = 0,
+        topology_phase: TopologyConstructionPhase = (TopologyConstructionPhase.MIXED),
+        attach_intent_mechanisms: bool = True,
         cache_only: bool | None = None,
     ) -> IncrementalTopologyResult:
         """Select a scientific focus and apply one topology transaction."""
         _require_public_problem(public_problem)
         _require_proposal_slot(proposal_slot)
-        intent_prompt = _intent_prompt(
+        intent, intent_call, agenda, focus = self._decision_stage(
             public_problem=public_problem,
             context=context,
             allowed_requirement_ids=allowed_requirement_ids,
@@ -131,11 +146,6 @@ class IncrementalProposer:
             topology=None,
             parent_functional=None,
             proposal_slot=proposal_slot,
-        )
-        intent, intent_call = self._intent_stage(
-            intent_prompt,
-            context=context,
-            allowed_requirement_ids=allowed_requirement_ids,
             cache_only=cache_only,
         )
         action_prompt = _topology_action_prompt(
@@ -145,6 +155,8 @@ class IncrementalProposer:
             feedback=feedback,
             parent=parent,
             intent=intent,
+            agenda=agenda,
+            topology_phase=topology_phase,
             proposal_slot=proposal_slot,
         )
         input_hash = self._stage_input_hash(
@@ -170,6 +182,8 @@ class IncrementalProposer:
             intent=intent,
             context=context,
             allowed_requirement_ids=allowed_requirement_ids,
+            topology_phase=topology_phase,
+            attach_intent_mechanisms=attach_intent_mechanisms,
             cache_only=self._cache_only(cache_only),
         )
         application = apply_topology_actions(
@@ -178,6 +192,8 @@ class IncrementalProposer:
             call.parsed,
             context,
             allowed_requirement_ids=allowed_requirement_ids,
+            topology_phase=topology_phase,
+            attach_intent_mechanisms=attach_intent_mechanisms,
         )
         if not application.changed:
             raise ValueError("topology action transaction makes no change")
@@ -186,6 +202,8 @@ class IncrementalProposer:
         )
         result = IncrementalTopologyResult(
             intent=intent,
+            agenda=agenda,
+            focus=focus,
             transaction=call.parsed,
             application=application,
             intent_call=intent_call,
@@ -213,7 +231,7 @@ class IncrementalProposer:
         commitment = topology_commitment_sha256(topology)
         if parent.topology_commitment_sha256 != commitment:
             raise ValueError("functional parent belongs to a different topology")
-        intent_prompt = _intent_prompt(
+        intent, intent_call, agenda, focus = self._decision_stage(
             public_problem=public_problem,
             context=context,
             allowed_requirement_ids=allowed_requirement_ids,
@@ -223,11 +241,6 @@ class IncrementalProposer:
             topology=topology,
             parent_functional=parent,
             proposal_slot=proposal_slot,
-        )
-        intent, intent_call = self._intent_stage(
-            intent_prompt,
-            context=context,
-            allowed_requirement_ids=allowed_requirement_ids,
             cache_only=cache_only,
         )
         action_prompt = _functional_action_prompt(
@@ -238,6 +251,7 @@ class IncrementalProposer:
             topology=topology,
             parent=parent,
             intent=intent,
+            agenda=agenda,
             proposal_slot=proposal_slot,
         )
         input_hash = self._stage_input_hash(
@@ -276,17 +290,14 @@ class IncrementalProposer:
         )
         if not application.changed:
             raise ValueError("functional action transaction makes no change")
-        compatibility = assess_functional_compatibility(
-            topology, application.draft
-        )
+        compatibility = assess_functional_compatibility(topology, application.draft)
         if compatibility.status == "incompatible":
             details = "; ".join(
                 f"{item.code} at {item.location}: {item.message}"
                 for item in compatibility.diagnostics
             )
             raise ValueError(
-                "functional actions are incompatible with the topology: "
-                f"{details}"
+                f"functional actions are incompatible with the topology: {details}"
             )
         expansion = (
             finalize_functional_draft(topology, application.draft, context)
@@ -298,6 +309,8 @@ class IncrementalProposer:
         )
         result = IncrementalFunctionalResult(
             intent=intent,
+            agenda=agenda,
+            focus=focus,
             transaction=call.parsed,
             application=application,
             compatibility=compatibility,
@@ -308,6 +321,74 @@ class IncrementalProposer:
         )
         _write_result_checkpoint(checkpoint, input_hash, result)
         return result
+
+    def _decision_stage(
+        self,
+        *,
+        public_problem: str,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        feedback: RoutedProposerFeedback,
+        stage: ActionStage,
+        parent_topology: TopologyDraft | None,
+        topology: TopologyCandidate | None,
+        parent_functional: FunctionalDraft | None,
+        proposal_slot: int,
+        cache_only: bool | None,
+    ) -> tuple[
+        ProposedConstructionIntent,
+        StageCallReceipt,
+        ConstructionAgenda | None,
+        ProposedConstructionFocus | None,
+    ]:
+        """Choose a legacy intent or a focus inside a runtime-owned agenda."""
+        if self._config.decision_policy == "llm_objective_v1":
+            prompt = _intent_prompt(
+                public_problem=public_problem,
+                context=context,
+                allowed_requirement_ids=allowed_requirement_ids,
+                feedback=feedback,
+                stage=stage,
+                parent_topology=parent_topology,
+                topology=topology,
+                parent_functional=parent_functional,
+                proposal_slot=proposal_slot,
+            )
+            intent, receipt = self._intent_stage(
+                prompt,
+                context=context,
+                allowed_requirement_ids=allowed_requirement_ids,
+                cache_only=cache_only,
+            )
+            return intent, receipt, None, None
+
+        agenda = select_construction_agenda(
+            stage=stage,
+            feedback=feedback,
+            allowed_requirement_ids=allowed_requirement_ids,
+            target_channels=context.targets,
+        )
+        prompt = _focus_prompt(
+            public_problem=public_problem,
+            context=context,
+            agenda=agenda,
+            parent_topology=parent_topology,
+            topology=topology,
+            parent_functional=parent_functional,
+            proposal_slot=proposal_slot,
+        )
+        focus, receipt = self._focus_stage(
+            prompt,
+            context=context,
+            agenda=agenda,
+            cache_only=cache_only,
+        )
+        intent = ProposedConstructionIntent(
+            objective=agenda.objective,
+            requirement_ids=focus.requirement_ids,
+            target_channels=focus.target_channels,
+        )
+        return intent, receipt, agenda, focus
 
     def _intent_stage(
         self,
@@ -335,6 +416,37 @@ class IncrementalProposer:
             cache_only=self._cache_only(cache_only),
         )
         _write_intent_checkpoint(checkpoint, input_hash, call)
+        return call.parsed, _call_receipt(call)
+
+    def _focus_stage(
+        self,
+        user_prompt: str,
+        *,
+        context: ValidationContext,
+        agenda: ConstructionAgenda,
+        cache_only: bool | None,
+    ) -> tuple[ProposedConstructionFocus, StageCallReceipt]:
+        input_hash = self._stage_input_hash(
+            "construction_focus",
+            self._config.intent_system_prompt,
+            user_prompt,
+        )
+        checkpoint = self._checkpoint_path("focus", input_hash)
+        restored = _load_focus_checkpoint(checkpoint)
+        if restored is not None:
+            focus, request_hash = restored
+            return focus, _checkpoint_receipt(request_hash)
+        allowed_indices = tuple(range(len(agenda.feedback_items)))
+        call = self._client.propose_construction_focus(
+            system_prompt=self._config.intent_system_prompt,
+            user_prompt=user_prompt,
+            context=context,
+            allowed_requirement_ids=agenda.eligible_requirement_ids,
+            allowed_target_channels=agenda.eligible_target_channels,
+            allowed_feedback_item_indices=allowed_indices,
+            cache_only=self._cache_only(cache_only),
+        )
+        _write_focus_checkpoint(checkpoint, input_hash, call)
         return call.parsed, _call_receipt(call)
 
     def _register_transposition(self, stage: str, sha256: str) -> bool:
@@ -401,9 +513,49 @@ def _intent_prompt(
             include_integrated_repairs=True,
         ),
         "parent_topology_draft": (
+            None if parent_topology is None else parent_topology.model_dump(mode="json")
+        ),
+        "immutable_topology": (
+            None if topology is None else topology.model_dump(mode="json")
+        ),
+        "parent_functional_draft": (
             None
-            if parent_topology is None
-            else parent_topology.model_dump(mode="json")
+            if parent_functional is None
+            else parent_functional.model_dump(mode="json")
+        ),
+    }
+    return _render(payload)
+
+
+def _focus_prompt(
+    *,
+    public_problem: str,
+    context: ValidationContext,
+    agenda: ConstructionAgenda,
+    parent_topology: TopologyDraft | None,
+    topology: TopologyCandidate | None,
+    parent_functional: FunctionalDraft | None,
+    proposal_slot: int,
+) -> str:
+    payload = {
+        "schema_version": "construction-focus-request-1",
+        "task": (
+            "The runtime has already selected the highest-priority feedback "
+            "category and objective. Select one or more listed feedback items "
+            "and one or more eligible public mechanism/target anchors for the "
+            "next action. Multiple mechanisms may be selected in one call. "
+            "Do not repeat the objective or propose model content."
+        ),
+        "proposal_slot": proposal_slot,
+        "public_problem": public_problem,
+        "runtime_contract": _public_contract(
+            context,
+            allowed_requirement_ids=agenda.eligible_requirement_ids,
+        ),
+        "runtime_selected_agenda": agenda.model_dump(mode="json"),
+        "feedback_item_indices": list(range(len(agenda.feedback_items))),
+        "parent_topology_draft": (
+            None if parent_topology is None else parent_topology.model_dump(mode="json")
         ),
         "immutable_topology": (
             None if topology is None else topology.model_dump(mode="json")
@@ -425,38 +577,60 @@ def _topology_action_prompt(
     feedback: RoutedProposerFeedback,
     parent: TopologyDraft,
     intent: ProposedConstructionIntent,
+    agenda: ConstructionAgenda | None,
+    topology_phase: TopologyConstructionPhase,
     proposal_slot: int,
 ) -> str:
-    return _render(
-        {
-            "schema_version": "topology-action-request-1",
-            "task": (
+    payload: dict[str, object] = {
+        "schema_version": (
+            "topology-action-request-1"
+            if agenda is None
+            else "topology-action-request-2"
+        ),
+        "task": (
+            (
                 "Propose only the smallest topology action transaction that "
-                "implements the selected intent. Unmentioned runtime-owned "
-                "structure is preserved. Do not provide equations, functions, "
-                "parameters, units, ranges, scopes, summaries, or parent IDs."
-            ),
-            "public_problem": public_problem,
-            "proposal_slot": proposal_slot,
-            "runtime_contract": _public_contract(
-                context, allowed_requirement_ids=allowed_requirement_ids
-            ),
-            "selected_intent": intent.model_dump(mode="json"),
-            "parent_topology_draft": parent.model_dump(mode="json"),
-            "parent_topology_draft_sha256": topology_draft_sha256(parent),
-            "routed_feedback": feedback.for_stage(
+                "implements the selected intent."
+                if agenda is None
+                else "Propose one coherent phase-scoped topology action "
+                "transaction that implements the selected intent. It may "
+                "jointly cover multiple selected mechanisms."
+            )
+            + " Unmentioned runtime-owned structure is preserved. Do not "
+            "provide equations, functions, parameters, units, ranges, "
+            "scopes, summaries, or parent IDs."
+        ),
+        "public_problem": public_problem,
+        "proposal_slot": proposal_slot,
+        "runtime_contract": _public_contract(
+            context, allowed_requirement_ids=allowed_requirement_ids
+        ),
+        "selected_intent": intent.model_dump(mode="json"),
+        "parent_topology_draft": parent.model_dump(mode="json"),
+        "parent_topology_draft_sha256": topology_draft_sha256(parent),
+        "routed_feedback": (
+            feedback.for_stage(
                 RevisionStage.TOPOLOGY,
                 include_integrated_repairs=True,
-            ),
-            "edit_rules": {
-                "no_implicit_deletion": True,
-                "generated_node_types": ["state", "process"],
-                "outer_sign_owned_by_topology": True,
-                "target_kind_derived_by_runtime": True,
-                "observability_derived_from_measurements_and_target_mappings": True,
-            },
-        }
-    )
+            )
+            if agenda is None
+            else None
+        ),
+        "edit_rules": {
+            "no_implicit_deletion": True,
+            "generated_node_types": ["state", "process"],
+            "outer_sign_owned_by_topology": True,
+            "target_kind_derived_by_runtime": True,
+            "observability_derived_from_measurements_and_target_mappings": True,
+        },
+    }
+    if agenda is not None:
+        payload["runtime_selected_agenda"] = agenda.model_dump(mode="json")
+        payload["topology_phase"] = topology_phase.value
+        edit_rules = payload["edit_rules"]
+        assert isinstance(edit_rules, dict)
+        edit_rules["allowed_action_types"] = _allowed_topology_actions(topology_phase)
+    return _render(payload)
 
 
 def _functional_action_prompt(
@@ -468,41 +642,86 @@ def _functional_action_prompt(
     topology: TopologyCandidate,
     parent: FunctionalDraft,
     intent: ProposedConstructionIntent,
+    agenda: ConstructionAgenda | None,
     proposal_slot: int,
 ) -> str:
-    return _render(
-        {
-            "schema_version": "functional-action-request-1",
-            "task": (
-                "Propose only localized interaction-function or latent-initial "
-                "actions under the immutable topology. Unmentioned assignments "
-                "are preserved. Each expression is an RHS value, not an equation. "
-                "Declare only parameter names and qualitative roles; omit ranges, "
-                "scopes, summaries, parent IDs, and topology hashes."
-            ),
-            "public_problem": public_problem,
-            "proposal_slot": proposal_slot,
-            "runtime_contract": _public_contract(
-                context, allowed_requirement_ids=allowed_requirement_ids
-            ),
-            "selected_intent": intent.model_dump(mode="json"),
-            "immutable_topology": topology.model_dump(mode="json"),
-            "topology_commitment_sha256": topology_commitment_sha256(topology),
-            "parent_functional_draft": parent.model_dump(mode="json"),
-            "parent_functional_draft_sha256": functional_draft_sha256(parent),
-            "routed_feedback": feedback.for_stage(
+    payload: dict[str, object] = {
+        "schema_version": (
+            "functional-action-request-1"
+            if agenda is None
+            else "functional-action-request-2"
+        ),
+        "task": (
+            "Propose only localized interaction-function or latent-initial "
+            "actions under the immutable topology. "
+            + (
+                "A coherent transaction may cover multiple selected mechanisms. "
+                if agenda is not None
+                else ""
+            )
+            + "Unmentioned assignments are preserved. Each expression is "
+            "an RHS value, not an equation. "
+            "Declare only parameter names and qualitative roles; omit ranges, "
+            "scopes, summaries, parent IDs, and topology hashes."
+        ),
+        "public_problem": public_problem,
+        "proposal_slot": proposal_slot,
+        "runtime_contract": _public_contract(
+            context, allowed_requirement_ids=allowed_requirement_ids
+        ),
+        "selected_intent": intent.model_dump(mode="json"),
+        "immutable_topology": topology.model_dump(mode="json"),
+        "topology_commitment_sha256": topology_commitment_sha256(topology),
+        "parent_functional_draft": parent.model_dump(mode="json"),
+        "parent_functional_draft_sha256": functional_draft_sha256(parent),
+        "routed_feedback": (
+            feedback.for_stage(
                 RevisionStage.FUNCTIONAL_FORM,
                 include_integrated_repairs=True,
-            ),
-            "compatibility_rules": {
-                "interaction_id_must_exist": True,
-                "expression_sources_must_match_topology_exactly": True,
-                "outer_sign_owned_by_topology": True,
-                "signed_scalar_weight_forbidden": True,
-                "latent_initials_required_before_fitting": True,
-            },
-        }
-    )
+            )
+            if agenda is None
+            else None
+        ),
+        "compatibility_rules": {
+            "interaction_id_must_exist": True,
+            "expression_sources_must_match_topology_exactly": True,
+            "outer_sign_owned_by_topology": True,
+            "signed_scalar_weight_forbidden": True,
+            "latent_initials_required_before_fitting": True,
+        },
+    }
+    if agenda is not None:
+        payload["runtime_selected_agenda"] = agenda.model_dump(mode="json")
+    return _render(payload)
+
+
+def _allowed_topology_actions(
+    phase: TopologyConstructionPhase,
+) -> list[str]:
+    if phase == TopologyConstructionPhase.COMPONENT_SPECIFICATION:
+        return ["add_state", "add_process", "remove_generated_node"]
+    if phase == TopologyConstructionPhase.DYNAMIC_TOPOLOGY:
+        return ["add_interaction", "remove_interaction"]
+    if phase == TopologyConstructionPhase.ALGEBRAIC_READOUT_TOPOLOGY:
+        return [
+            "add_interaction",
+            "remove_interaction",
+            "set_state_measurement",
+            "remove_state_measurement",
+            "set_target_mapping",
+            "remove_target_mapping",
+        ]
+    return [
+        "add_state",
+        "add_process",
+        "remove_generated_node",
+        "add_interaction",
+        "remove_interaction",
+        "set_state_measurement",
+        "remove_state_measurement",
+        "set_target_mapping",
+        "remove_target_mapping",
+    ]
 
 
 def _public_contract(
@@ -556,6 +775,35 @@ def _load_intent_checkpoint(
     request_hash = _required_sha256(payload, "request_hash", path)
     intent = ProposedConstructionIntent.model_validate(payload.get("intent"))
     return intent, request_hash
+
+
+def _write_focus_checkpoint(
+    path: Path,
+    input_hash: str,
+    result: LLMCallResult[ProposedConstructionFocus],
+) -> None:
+    _write_checkpoint_payload(
+        path,
+        {
+            "schema_version": "incremental-focus-checkpoint-1",
+            "input_sha256": input_hash,
+            "request_hash": result.request_hash,
+            "focus": result.parsed.model_dump(mode="json"),
+        },
+    )
+
+
+def _load_focus_checkpoint(
+    path: Path,
+) -> tuple[ProposedConstructionFocus, str] | None:
+    payload = _load_checkpoint_payload(
+        path, expected_schema="incremental-focus-checkpoint-1"
+    )
+    if payload is None:
+        return None
+    request_hash = _required_sha256(payload, "request_hash", path)
+    focus = ProposedConstructionFocus.model_validate(payload.get("focus"))
+    return focus, request_hash
 
 
 def _write_result_checkpoint(

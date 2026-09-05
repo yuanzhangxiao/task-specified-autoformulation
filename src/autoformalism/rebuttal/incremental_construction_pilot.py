@@ -22,7 +22,11 @@ from autoformalism.rebuttal.mechanisms import (
     MechanismEvaluationSpec,
     evaluate_mechanisms,
 )
-from autoformalism.schemas import FunctionalDraft, TopologyDraft
+from autoformalism.schemas import (
+    FunctionalDraft,
+    TopologyConstructionPhase,
+    TopologyDraft,
+)
 from autoformalism.schemas.base import NonEmptyText, StrictSchema
 from autoformalism.search import (
     CandidateFeedbackEvidence,
@@ -50,12 +54,21 @@ ConstructionAttemptStatus = Literal[
     "complete",
     "rejected",
 ]
+ConstructionProtocol = Literal[
+    "mixed_llm_intent_v1",
+    "phased_runtime_agenda_v2",
+]
 
 
 INTENT_SYSTEM_PROMPT = """You select one small scientific construction objective.
 Use only the supplied public requirements and target channels. Return only the
 required structured intent. Do not propose equations, topology, identifiers,
 parameters, values, ranges, explanations, or summaries."""
+
+FOCUS_SYSTEM_PROMPT = """The runtime selects the current feedback category and
+scientific objective. Return only the indices and public requirement/target
+anchors to address next. You may select multiple mechanisms in one call. Do not
+repeat the objective or emit topology, equations, names, values, or prose."""
 
 TOPOLOGY_ACTION_SYSTEM_PROMPT = """You edit a runtime-maintained ODE topology.
 Return only a small coherent transaction of typed topology actions. Use states
@@ -83,12 +96,14 @@ class IncrementalConstructionPilotConfig(StrictSchema):
     function_children_per_topology: int = Field(default=2, ge=1, le=8)
     maximum_topology_action_steps: int = Field(default=4, ge=1, le=16)
     maximum_functional_action_steps: int = Field(default=6, ge=1, le=32)
+    construction_protocol: ConstructionProtocol = "mixed_llm_intent_v1"
 
 
 class ConstructionAttemptRecord(StrictSchema):
     """One accepted or rejected action step retained as negative memory."""
 
     stage: Literal["topology", "functional_form"]
+    topology_phase: TopologyConstructionPhase | None = None
     topology_slot: int = Field(ge=0)
     function_slot: int | None = Field(default=None, ge=0)
     step_index: int = Field(ge=0)
@@ -123,6 +138,7 @@ class IncrementalConstructionPilotResult(StrictSchema):
     status: Literal["complete", "incomplete"]
     test_data_opened: Literal[False] = False
     private_reference_opened: Literal[False] = False
+    construction_protocol: ConstructionProtocol = "mixed_llm_intent_v1"
     topology_branch_count_requested: int = Field(ge=1)
     complete_topology_count: int = Field(ge=0)
     complete_candidate_count: int = Field(ge=0)
@@ -153,8 +169,7 @@ def build_public_construction_problem(
             item.model_dump(mode="json") for item in target_contract.targets
         ],
         "required_mechanisms": [
-            item.model_dump(mode="json")
-            for item in mechanism_spec.required_mechanisms
+            item.model_dump(mode="json") for item in mechanism_spec.required_mechanisms
         ],
         "runtime_rules": {
             "target_mappings_cover_each_public_target_exactly_once": True,
@@ -191,6 +206,7 @@ def construct_public_candidates(
         draft = TopologyDraft()
         feedback = RoutedProposerFeedback()
         topology = None
+        topology_phase = _initial_topology_phase(pilot_config)
         for step_index in range(pilot_config.maximum_topology_action_steps):
             proposal_slot = 1000 * topology_slot + step_index
             parent_sha256 = topology_draft_sha256(draft)
@@ -202,6 +218,10 @@ def construct_public_candidates(
                     feedback=feedback,
                     parent=draft,
                     proposal_slot=proposal_slot,
+                    topology_phase=topology_phase,
+                    attach_intent_mechanisms=(
+                        pilot_config.construction_protocol == "mixed_llm_intent_v1"
+                    ),
                 )
             except (
                 LLMProviderError,
@@ -217,6 +237,7 @@ def construct_public_candidates(
                         step_index=step_index,
                         proposal_slot=proposal_slot,
                         parent_sha256=parent_sha256,
+                        topology_phase=topology_phase,
                         exc=exc,
                     )
                 )
@@ -230,6 +251,35 @@ def construct_public_candidates(
                 )
                 continue
             draft = result.application.draft
+            if (
+                pilot_config.construction_protocol == "phased_runtime_agenda_v2"
+                and topology_phase
+                in {
+                    TopologyConstructionPhase.COMPONENT_SPECIFICATION,
+                    TopologyConstructionPhase.DYNAMIC_TOPOLOGY,
+                }
+            ):
+                attempts.append(
+                    _successful_topology_attempt(
+                        result,
+                        topology_slot=topology_slot,
+                        step_index=step_index,
+                        proposal_slot=proposal_slot,
+                        parent_sha256=parent_sha256,
+                        topology_phase=topology_phase,
+                        status="applied_incomplete",
+                    )
+                )
+                topology_phase = _advance_topology_phase(topology_phase)
+                feedback = RoutedProposerFeedback()
+                _write_progress(
+                    output_path,
+                    pilot_config,
+                    attempts,
+                    candidates,
+                    len(complete_topologies),
+                )
+                continue
             try:
                 topology = finalize_topology_draft(draft, context)
             except (ModelValidationError, ValueError) as exc:
@@ -240,11 +290,13 @@ def construct_public_candidates(
                         step_index=step_index,
                         proposal_slot=proposal_slot,
                         parent_sha256=parent_sha256,
+                        topology_phase=topology_phase,
                         status="applied_incomplete",
                         completion_error=exc,
                     )
                 )
                 feedback = _topology_failure_feedback(exc)
+                topology_phase = TopologyConstructionPhase.CLOSURE_REPAIR
                 _write_progress(
                     output_path,
                     pilot_config,
@@ -260,6 +312,7 @@ def construct_public_candidates(
                     step_index=step_index,
                     proposal_slot=proposal_slot,
                     parent_sha256=parent_sha256,
+                    topology_phase=topology_phase,
                     status="complete",
                 )
             )
@@ -271,23 +324,15 @@ def construct_public_candidates(
             continue
         complete_topologies[topology_sha256] = (topology_slot, draft)
 
-        for function_slot in range(
-            pilot_config.function_children_per_topology
-        ):
+        for function_slot in range(pilot_config.function_children_per_topology):
             functional = FunctionalDraft(
-                topology_commitment_sha256=(
-                    topology_commitment_sha256(topology)
-                )
+                topology_commitment_sha256=(topology_commitment_sha256(topology))
             )
             feedback = RoutedProposerFeedback()
             complete: IncrementalFunctionalResult | None = None
-            for step_index in range(
-                pilot_config.maximum_functional_action_steps
-            ):
+            for step_index in range(pilot_config.maximum_functional_action_steps):
                 proposal_slot = (
-                    100_000 * topology_slot
-                    + 1000 * function_slot
-                    + step_index
+                    100_000 * topology_slot + 1000 * function_slot + step_index
                 )
                 parent_sha256 = functional_draft_sha256(functional)
                 try:
@@ -387,11 +432,13 @@ def _successful_topology_attempt(
     step_index: int,
     proposal_slot: int,
     parent_sha256: str,
+    topology_phase: TopologyConstructionPhase,
     status: Literal["applied_incomplete", "complete"],
     completion_error: Exception | None = None,
 ) -> ConstructionAttemptRecord:
     return ConstructionAttemptRecord(
         stage="topology",
+        topology_phase=topology_phase,
         topology_slot=topology_slot,
         step_index=step_index,
         proposal_slot=proposal_slot,
@@ -404,8 +451,7 @@ def _successful_topology_attempt(
             else None
         ),
         error=(
-            f"{type(completion_error).__name__}: "
-            f"{str(completion_error)[:2000]}"
+            f"{type(completion_error).__name__}: {str(completion_error)[:2000]}"
             if completion_error is not None
             else None
         ),
@@ -428,9 +474,7 @@ def _successful_functional_attempt(
         step_index=step_index,
         proposal_slot=proposal_slot,
         parent_sha256=parent_sha256,
-        status=(
-            "complete" if result.expansion is not None else "applied_incomplete"
-        ),
+        status=("complete" if result.expansion is not None else "applied_incomplete"),
         result=result.model_dump(mode="json"),
     )
 
@@ -443,10 +487,12 @@ def _failed_attempt(
     step_index: int,
     proposal_slot: int,
     parent_sha256: str,
+    topology_phase: TopologyConstructionPhase | None = None,
     exc: Exception,
 ) -> ConstructionAttemptRecord:
     return ConstructionAttemptRecord(
         stage=stage,
+        topology_phase=topology_phase,
         topology_slot=topology_slot,
         function_slot=function_slot,
         step_index=step_index,
@@ -456,6 +502,24 @@ def _failed_attempt(
         failure_class=_failure_class(exc),
         error=f"{type(exc).__name__}: {str(exc)[:2000]}",
     )
+
+
+def _initial_topology_phase(
+    config: IncrementalConstructionPilotConfig,
+) -> TopologyConstructionPhase:
+    if config.construction_protocol == "phased_runtime_agenda_v2":
+        return TopologyConstructionPhase.COMPONENT_SPECIFICATION
+    return TopologyConstructionPhase.MIXED
+
+
+def _advance_topology_phase(
+    phase: TopologyConstructionPhase,
+) -> TopologyConstructionPhase:
+    if phase == TopologyConstructionPhase.COMPONENT_SPECIFICATION:
+        return TopologyConstructionPhase.DYNAMIC_TOPOLOGY
+    if phase == TopologyConstructionPhase.DYNAMIC_TOPOLOGY:
+        return TopologyConstructionPhase.ALGEBRAIC_READOUT_TOPOLOGY
+    return TopologyConstructionPhase.CLOSURE_REPAIR
 
 
 def _failure_class(exc: Exception) -> str:
@@ -507,9 +571,7 @@ def _incomplete_function_feedback(
             f"{list(compatibility.missing_latent_initial_states)}"
         )
     return route_proposer_feedback(
-        CandidateFeedbackEvidence(
-            deterministic_validation_failures=tuple(messages)
-        )
+        CandidateFeedbackEvidence(deterministic_validation_failures=tuple(messages))
     )
 
 
@@ -539,11 +601,10 @@ def _result(
     candidates: list[ConstructedCandidateArtifact],
     complete_topology_count: int,
 ) -> IncrementalConstructionPilotResult:
-    expected = (
-        config.topology_branch_count * config.function_children_per_topology
-    )
+    expected = config.topology_branch_count * config.function_children_per_topology
     return IncrementalConstructionPilotResult(
         status="complete" if len(candidates) == expected else "incomplete",
+        construction_protocol=config.construction_protocol,
         topology_branch_count_requested=config.topology_branch_count,
         complete_topology_count=complete_topology_count,
         complete_candidate_count=len(candidates),
@@ -563,6 +624,7 @@ def _atomic_write_json(path: Path, payload: object) -> None:
 
 
 __all__ = [
+    "FOCUS_SYSTEM_PROMPT",
     "FUNCTIONAL_ACTION_SYSTEM_PROMPT",
     "INTENT_SYSTEM_PROMPT",
     "TOPOLOGY_ACTION_SYSTEM_PROMPT",

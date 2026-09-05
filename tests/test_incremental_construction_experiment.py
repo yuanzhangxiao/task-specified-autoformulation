@@ -21,14 +21,22 @@ def test_repository_incremental_construction_plan_has_six_tasks() -> None:
     tasks = build_incremental_construction_tasks(plan)
 
     assert len(tasks) == 6
-    assert tasks[0].benchmark_id == (
-        "phase_b_dalla_man_t2_canonical_named_easy"
-    )
+    assert tasks[0].benchmark_id == ("phase_b_dalla_man_t2_canonical_named_easy")
     assert tasks[-1].benchmark_id == (
         "phase_b_anonymous_system_task_canonical_opaque_hard"
     )
     assert {item.repetition for item in tasks} == {0, 1, 2}
     assert plan.model_contract.max_output_tokens == 8192
+
+
+def test_repository_v2_plan_uses_phased_runtime_agenda() -> None:
+    plan = load_incremental_construction_plan(
+        Path("configs/phase_b_incremental_construction_pilot_v2.json")
+    )
+
+    assert plan.construction_protocol == "phased_runtime_agenda_v2"
+    assert plan.construction_budget.maximum_topology_action_steps == 6
+    assert len(build_incremental_construction_tasks(plan)) == 6
 
 
 def test_freeze_and_summary_keep_test_and_private_data_closed(

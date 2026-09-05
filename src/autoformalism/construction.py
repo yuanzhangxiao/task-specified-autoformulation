@@ -38,6 +38,7 @@ from autoformalism.schemas.construction import (
     SetStateMeasurementAction,
     SetTargetMappingAction,
     TopologyActionApplication,
+    TopologyConstructionPhase,
     TopologyDraft,
     TopologyDraftInteraction,
 )
@@ -113,6 +114,8 @@ def apply_topology_actions(
     context: ValidationContext,
     *,
     allowed_requirement_ids: Iterable[str] | None = None,
+    topology_phase: TopologyConstructionPhase = TopologyConstructionPhase.MIXED,
+    attach_intent_mechanisms: bool = True,
 ) -> TopologyActionApplication:
     """Apply one ordered topology transaction and validate its public boundary.
 
@@ -131,12 +134,19 @@ def apply_topology_actions(
     before_sha256 = topology_draft_sha256(before)
     states = {item.name: item for item in before.states}
     processes = {item.name: item for item in before.processes}
-    interactions = {
-        item.interaction_id: item for item in before.interactions
-    }
+    interactions = {item.interaction_id: item for item in before.interactions}
+    _validate_topology_phase_actions(
+        transaction,
+        phase=topology_phase,
+        state_names=frozenset(states),
+        process_names=frozenset(processes),
+        interactions=interactions,
+    )
     measurements = {item.state: item for item in before.state_measurements}
     mappings = {item.channel: item for item in before.target_mappings}
-    mechanism_ids = tuple(sorted(intent.requirement_ids))
+    mechanism_ids = (
+        tuple(sorted(intent.requirement_ids)) if attach_intent_mechanisms else ()
+    )
     added_nodes: list[str] = []
     removed_nodes: list[str] = []
     added_interactions: list[str] = []
@@ -165,15 +175,11 @@ def apply_topology_actions(
             elif action.name in processes:
                 del processes[action.name]
             else:
-                raise ValueError(
-                    f"cannot remove unknown generated node: {action.name}"
-                )
+                raise ValueError(f"cannot remove unknown generated node: {action.name}")
             removed_nodes.append(action.name)
         elif isinstance(action, AddInteractionAction):
             if action.interaction_id in interactions:
-                raise ValueError(
-                    f"interaction already exists: {action.interaction_id}"
-                )
+                raise ValueError(f"interaction already exists: {action.interaction_id}")
             interactions[action.interaction_id] = TopologyDraftInteraction(
                 interaction_id=action.interaction_id,
                 target=action.target,
@@ -229,6 +235,7 @@ def apply_topology_actions(
         before_sha256=before_sha256,
         after_sha256=after_sha256,
         intent=intent,
+        topology_phase=topology_phase,
         changed=before_sha256 != after_sha256,
         added_nodes=tuple(added_nodes),
         removed_nodes=tuple(removed_nodes),
@@ -236,6 +243,68 @@ def apply_topology_actions(
         removed_interactions=tuple(removed_interactions),
         draft=after,
     )
+
+
+def _validate_topology_phase_actions(
+    transaction: ProposedTopologyActionTransaction,
+    *,
+    phase: TopologyConstructionPhase,
+    state_names: frozenset[str],
+    process_names: frozenset[str],
+    interactions: dict[str, TopologyDraftInteraction],
+) -> None:
+    """Reject actions outside the current runtime-owned construction phase."""
+    if phase in {
+        TopologyConstructionPhase.MIXED,
+        TopologyConstructionPhase.CLOSURE_REPAIR,
+    }:
+        return
+    for action in transaction.actions:
+        if phase == TopologyConstructionPhase.COMPONENT_SPECIFICATION:
+            if not isinstance(
+                action,
+                (AddStateAction, AddProcessAction, RemoveGeneratedNodeAction),
+            ):
+                raise ValueError(
+                    "component_specification accepts only generated state or "
+                    "process actions"
+                )
+            continue
+        if isinstance(action, AddInteractionAction):
+            target = action.target
+        elif isinstance(action, RemoveInteractionAction):
+            existing = interactions.get(action.interaction_id)
+            if existing is None:
+                raise ValueError(
+                    f"cannot remove unknown interaction: {action.interaction_id}"
+                )
+            target = existing.target
+        else:
+            target = None
+        if phase == TopologyConstructionPhase.DYNAMIC_TOPOLOGY:
+            if target is None or target not in state_names:
+                raise ValueError(
+                    "dynamic_topology accepts only interaction actions whose "
+                    "target is a declared generated state"
+                )
+            continue
+        if phase == TopologyConstructionPhase.ALGEBRAIC_READOUT_TOPOLOGY:
+            if isinstance(
+                action,
+                (
+                    SetStateMeasurementAction,
+                    RemoveStateMeasurementAction,
+                    SetTargetMappingAction,
+                    RemoveTargetMappingAction,
+                ),
+            ):
+                continue
+            if target is not None and target in process_names:
+                continue
+            raise ValueError(
+                "algebraic_readout_topology accepts process-targeted "
+                "interactions, measurements, and target mappings only"
+            )
 
 
 def finalize_topology_draft(
@@ -299,9 +368,7 @@ def apply_functional_actions(
     )
     before = _canonical_functional_draft(draft)
     before_sha256 = functional_draft_sha256(before)
-    functions = {
-        item.interaction_id: item for item in before.interaction_functions
-    }
+    functions = {item.interaction_id: item for item in before.interaction_functions}
     initials = {item.state: item for item in before.latent_initials}
     interaction_ids = {item.interaction_id for item in topology.interactions}
     latent_states = {
@@ -351,9 +418,7 @@ def apply_functional_actions(
             del initials[action.state]
             removed_initials.append(action.state)
         else:  # pragma: no cover - Pydantic owns the closed action union.
-            raise TypeError(
-                f"unsupported functional action: {type(action).__name__}"
-            )
+            raise TypeError(f"unsupported functional action: {type(action).__name__}")
 
     after = _canonical_functional_draft(
         FunctionalDraft(
@@ -393,12 +458,8 @@ def assess_functional_compatibility(
                 message="functional draft belongs to a different topology",
             )
         )
-    interactions = {
-        item.interaction_id: item for item in topology.interactions
-    }
-    functions = {
-        item.interaction_id: item for item in draft.interaction_functions
-    }
+    interactions = {item.interaction_id: item for item in topology.interactions}
+    functions = {item.interaction_id: item for item in draft.interaction_functions}
     missing_interactions = tuple(sorted(set(interactions) - set(functions)))
     for interaction_id in sorted(set(functions) - set(interactions)):
         diagnostics.append(
@@ -594,9 +655,7 @@ def select_conditional_beam(
     for entry in deduplicated.values():
         grouped[entry.topology_sha256].append(entry)
     eligible: dict[str, list[ConditionalBeamEntry]] = {
-        topology: sorted(values, key=_beam_key)[
-            :maximum_functions_per_topology
-        ]
+        topology: sorted(values, key=_beam_key)[:maximum_functions_per_topology]
         for topology, values in grouped.items()
     }
     representatives = sorted(
@@ -612,8 +671,7 @@ def select_conditional_beam(
             item
             for values in eligible.values()
             for item in values
-            if (item.topology_sha256, item.functional_sha256)
-            not in selected_keys
+            if (item.topology_sha256, item.functional_sha256) not in selected_keys
         ),
         key=_beam_key,
     )
@@ -724,9 +782,7 @@ def _canonical_topology_draft(draft: TopologyDraft) -> TopologyDraft:
     return draft.model_copy(
         update={
             "states": tuple(sorted(draft.states, key=lambda item: item.name)),
-            "processes": tuple(
-                sorted(draft.processes, key=lambda item: item.name)
-            ),
+            "processes": tuple(sorted(draft.processes, key=lambda item: item.name)),
             "interactions": tuple(
                 sorted(draft.interactions, key=lambda item: item.interaction_id)
             ),

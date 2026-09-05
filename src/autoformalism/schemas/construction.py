@@ -36,6 +36,16 @@ class ConstructionObjective(str, Enum):
     SIMPLIFICATION = "simplification"
 
 
+class TopologyConstructionPhase(str, Enum):
+    """Runtime-owned topology responsibility for one action transaction."""
+
+    MIXED = "mixed"
+    COMPONENT_SPECIFICATION = "component_specification"
+    DYNAMIC_TOPOLOGY = "dynamic_topology"
+    ALGEBRAIC_READOUT_TOPOLOGY = "algebraic_readout_topology"
+    CLOSURE_REPAIR = "closure_repair"
+
+
 class ConstructionIntent(StrictSchema):
     """Compact decision state externalized before proposing model edits.
 
@@ -81,6 +91,37 @@ class ProposedConstructionIntent(StrictSchema):
             requirement_ids=self.requirement_ids,
             target_channels=self.target_channels,
         )
+
+
+class ProposedConstructionFocus(StrictSchema):
+    """Provider-selected items inside one runtime-owned feedback category."""
+
+    schema_version: Literal["proposed-construction-focus-1"] = (
+        "proposed-construction-focus-1"
+    )
+    feedback_item_indices: tuple[int, ...] = Field(default=(), max_length=64)
+    requirement_ids: tuple[Identifier, ...] = Field(default=(), max_length=32)
+    target_channels: tuple[Identifier, ...] = Field(default=(), max_length=64)
+
+    @model_validator(mode="after")
+    def selections_are_unique_and_anchored(
+        self,
+    ) -> ProposedConstructionFocus:
+        """Reject ambiguous selections while permitting multiple mechanisms."""
+        for label, values in (
+            ("feedback item", self.feedback_item_indices),
+            ("requirement", self.requirement_ids),
+            ("target channel", self.target_channels),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"duplicate {label} in construction focus")
+        if any(item < 0 for item in self.feedback_item_indices):
+            raise ValueError("feedback item indices must be nonnegative")
+        if not self.requirement_ids and not self.target_channels:
+            raise ValueError(
+                "construction focus requires a requirement or target anchor"
+            )
+        return self
 
 
 class AddStateAction(StrictSchema):
@@ -196,9 +237,7 @@ class TopologyDraft(StrictSchema):
 
     schema_version: Literal["topology-draft-1"] = "topology-draft-1"
     states: tuple[ProposedTopologyState, ...] = Field(default=(), max_length=64)
-    processes: tuple[ProposedTopologyProcess, ...] = Field(
-        default=(), max_length=256
-    )
+    processes: tuple[ProposedTopologyProcess, ...] = Field(default=(), max_length=256)
     interactions: tuple[TopologyDraftInteraction, ...] = Field(
         default=(), max_length=512
     )
@@ -261,9 +300,7 @@ class SetInteractionFunctionAction(StrictSchema):
 class RemoveInteractionFunctionAction(StrictSchema):
     """Remove one function assignment while retaining its topology edge."""
 
-    action: Literal["remove_interaction_function"] = (
-        "remove_interaction_function"
-    )
+    action: Literal["remove_interaction_function"] = "remove_interaction_function"
     interaction_id: Identifier
 
 
@@ -315,9 +352,7 @@ class FunctionalDraft(StrictSchema):
     @model_validator(mode="after")
     def declarations_are_unique(self) -> FunctionalDraft:
         """Keep localized function and initializer ownership unambiguous."""
-        interactions = [
-            item.interaction_id for item in self.interaction_functions
-        ]
+        interactions = [item.interaction_id for item in self.interaction_functions]
         initials = [item.state for item in self.latent_initials]
         if len(interactions) != len(set(interactions)):
             raise ValueError("duplicate interaction function in functional draft")
@@ -355,6 +390,7 @@ class TopologyActionApplication(StrictSchema):
     before_sha256: Sha256Digest
     after_sha256: Sha256Digest
     intent: ConstructionIntent
+    topology_phase: TopologyConstructionPhase = TopologyConstructionPhase.MIXED
     changed: bool
     added_nodes: tuple[Identifier, ...] = ()
     removed_nodes: tuple[Identifier, ...] = ()
@@ -400,6 +436,7 @@ __all__ = [
     "FunctionalCompatibilityReport",
     "FunctionalDraft",
     "InteractionFunctionDraft",
+    "ProposedConstructionFocus",
     "ProposedConstructionIntent",
     "ProposedFunctionalActionTransaction",
     "ProposedTopologyActionTransaction",
@@ -414,6 +451,7 @@ __all__ = [
     "SetStateMeasurementAction",
     "SetTargetMappingAction",
     "TopologyActionApplication",
+    "TopologyConstructionPhase",
     "TopologyDraft",
     "TopologyDraftInteraction",
 ]

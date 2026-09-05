@@ -1,0 +1,47 @@
+{
+  "additionalProperties": false,
+  "description": "Provider-selected items inside one runtime-owned feedback category.",
+  "properties": {
+    "feedback_item_indices": {
+      "default": [],
+      "items": {
+        "type": "integer"
+      },
+      "maxItems": 64,
+      "title": "Feedback Item Indices",
+      "type": "array"
+    },
+    "requirement_ids": {
+      "default": [],
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "title": "Requirement Ids",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "proposed-construction-focus-1",
+      "default": "proposed-construction-focus-1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "target_channels": {
+      "default": [],
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Target Channels",
+      "type": "array"
+    }
+  },
+  "title": "ProposedConstructionFocus",
+  "type": "object"
+}

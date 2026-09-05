@@ -12,9 +12,11 @@ from autoformalism.rebuttal.incremental_construction_pilot import (
 )
 from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
 from autoformalism.schemas import (
+    ProposedConstructionFocus,
     ProposedConstructionIntent,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
+    TopologyConstructionPhase,
 )
 from autoformalism.search.incremental_proposer import IncrementalProposerConfig
 from autoformalism.targets import PublicTargetContract
@@ -98,6 +100,72 @@ class _IncrementalPilotClient:
         )
 
 
+class _PhasedPilotClient:
+    """Build one candidate in the runtime-required topology phase order."""
+
+    def __init__(self) -> None:
+        self.focus_calls = 0
+
+    def propose_construction_focus(self, **kwargs) -> LLMCallResult:
+        self.focus_calls += 1
+        return _result(
+            f"{300 + self.focus_calls:064x}",
+            ProposedConstructionFocus(
+                feedback_item_indices=(
+                    (0,) if kwargs["allowed_feedback_item_indices"] else ()
+                ),
+                requirement_ids=kwargs["allowed_requirement_ids"],
+                target_channels=("target",),
+            ),
+        )
+
+    def propose_topology_actions(self, **kwargs) -> LLMCallResult:
+        phase = kwargs["topology_phase"]
+        if phase == TopologyConstructionPhase.COMPONENT_SPECIFICATION:
+            payload = {"actions": [{"action": "add_state", "name": "x"}]}
+        elif phase == TopologyConstructionPhase.DYNAMIC_TOPOLOGY:
+            payload = {
+                "actions": [
+                    {
+                        "action": "add_interaction",
+                        "interaction_id": "input_drive",
+                        "target": "x",
+                        "sources": ["input_u"],
+                    }
+                ]
+            }
+        else:
+            payload = {
+                "actions": [
+                    {
+                        "action": "set_target_mapping",
+                        "channel": "target",
+                        "source": "x",
+                    }
+                ]
+            }
+        return _result(
+            f"{400 + self.focus_calls:064x}",
+            ProposedTopologyActionTransaction.model_validate(payload),
+        )
+
+    def propose_functional_actions(self, **_kwargs) -> LLMCallResult:
+        return _result(
+            f"{500 + self.focus_calls:064x}",
+            ProposedFunctionalActionTransaction.model_validate(
+                {
+                    "actions": [
+                        {
+                            "action": "set_interaction_function",
+                            "interaction_id": "input_drive",
+                            "expression": "input_u",
+                        }
+                    ]
+                }
+            ),
+        )
+
+
 def _target_contract() -> PublicTargetContract:
     return PublicTargetContract.model_validate(
         {
@@ -152,9 +220,7 @@ def test_incremental_pilot_preserves_partial_edits_and_localizes_failure(
             maximum_functional_action_steps=2,
         ),
         public_problem="Infer a causal input-response model.",
-        context=ValidationContext(
-            targets=("target",), external_inputs=("input_u",)
-        ),
+        context=ValidationContext(targets=("target",), external_inputs=("input_u",)),
         target_contract=_target_contract(),
         mechanism_spec=_mechanism_spec(),
         output_path=output,
@@ -177,8 +243,46 @@ def test_incremental_pilot_preserves_partial_edits_and_localizes_failure(
     assert "not_in_topology" in (rejected.error or "")
     candidate = result.candidates[0]
     assert candidate.public_target_evaluation.passed is True
-    assert (
-        candidate.public_mechanism_evaluation.graph_mechanism_compliance
-        == 1.0
-    )
+    assert candidate.public_mechanism_evaluation.graph_mechanism_compliance == 1.0
     assert output.exists()
+
+
+def test_phased_pilot_orders_topology_work_and_uses_runtime_agenda(
+    tmp_path: Path,
+) -> None:
+    client = _PhasedPilotClient()
+    result = construct_public_candidates(
+        client=client,
+        proposer_config=IncrementalProposerConfig(
+            checkpoint_directory=tmp_path / "checkpoints",
+            run_fingerprint="b" * 64,
+            intent_system_prompt="Select anchors inside the runtime agenda.",
+            topology_action_system_prompt="Return phase-compatible topology edits.",
+            functional_action_system_prompt="Return one function edit.",
+            decision_policy="runtime_priority_v2",
+        ),
+        pilot_config=IncrementalConstructionPilotConfig(
+            topology_branch_count=1,
+            function_children_per_topology=1,
+            maximum_topology_action_steps=3,
+            maximum_functional_action_steps=1,
+            construction_protocol="phased_runtime_agenda_v2",
+        ),
+        public_problem="Infer a causal input-response model.",
+        context=ValidationContext(targets=("target",), external_inputs=("input_u",)),
+        target_contract=_target_contract(),
+        mechanism_spec=_mechanism_spec(),
+    )
+
+    assert result.status == "complete"
+    assert result.construction_protocol == "phased_runtime_agenda_v2"
+    assert [item.topology_phase for item in result.attempts[:3]] == [
+        TopologyConstructionPhase.COMPONENT_SPECIFICATION,
+        TopologyConstructionPhase.DYNAMIC_TOPOLOGY,
+        TopologyConstructionPhase.ALGEBRAIC_READOUT_TOPOLOGY,
+    ]
+    assert all(item.failure_class is None for item in result.attempts[:3])
+    topology = result.candidates[0].topology_draft
+    assert all(not item.mechanisms for item in topology.states)
+    assert all(not item.mechanisms for item in topology.interactions)
+    assert client.focus_calls == 4

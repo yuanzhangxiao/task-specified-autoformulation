@@ -16,12 +16,14 @@ from autoformalism.schemas import (
     FunctionalDraft,
     HybridJudgeResult,
     PairedTargetCompletenessJudgeResult,
+    ProposedConstructionFocus,
     ProposedConstructionIntent,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
     TopologyCandidate,
+    TopologyConstructionPhase,
     TopologyDraft,
 )
 
@@ -188,6 +190,20 @@ class IncrementalConstructionLLMClient(Protocol):
         """Select one bounded scientific construction or repair objective."""
         ...
 
+    def propose_construction_focus(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        allowed_target_channels: tuple[str, ...],
+        allowed_feedback_item_indices: tuple[int, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedConstructionFocus]:
+        """Choose items and anchors within a runtime-selected category."""
+        ...
+
     def propose_topology_actions(
         self,
         *,
@@ -197,6 +213,8 @@ class IncrementalConstructionLLMClient(Protocol):
         intent: ProposedConstructionIntent,
         context: ValidationContext,
         allowed_requirement_ids: tuple[str, ...],
+        topology_phase: TopologyConstructionPhase = TopologyConstructionPhase.MIXED,
+        attach_intent_mechanisms: bool = True,
         cache_only: bool = False,
     ) -> LLMCallResult[ProposedTopologyActionTransaction]:
         """Propose localized edits to one runtime-maintained topology draft."""

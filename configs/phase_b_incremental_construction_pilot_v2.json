@@ -1,0 +1,43 @@
+{
+  "schema_version": "phase-b-incremental-construction-plan-2",
+  "status": "frozen_before_proposer_calls",
+  "purpose": "Public-only runtime-agenda pilot with mechanism-oriented component specification, dynamic topology, algebraic/readout topology, closure repair, and topology-conditioned functions",
+  "development_only": true,
+  "test_data_opened": false,
+  "private_reference_opened": false,
+  "parameter_fitting_performed": false,
+  "scientific_judge_called": false,
+  "construction_protocol": "phased_runtime_agenda_v2",
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "public_target_contract_sha256": "76f8c71c8c5454c2c41e53270c41e1f7df207a4b74f26a56565af4afa52c7713",
+      "public_mechanism_spec_sha256": "842b072657cbc0c8740d9b995e320218746e4bf759a34da0b94cfb6d6eaad399"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+      "public_target_contract_sha256": "b6473e233e0a630ca0a9dfd49ae5f39a6da884c0a8c40a25c9750bbbce4b116d",
+      "public_mechanism_spec_sha256": "ba56c7ed208f7015bb173321e15f4734669c6ad918facaaa16413ab5e360f080"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "model_contract": {
+    "model": "openai/gpt-oss-120b",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "served_context_tokens": 65536,
+    "request_timeout_seconds": 1200,
+    "maximum_provider_attempts": 3
+  },
+  "construction_budget": {
+    "topology_branch_count": 2,
+    "function_children_per_topology": 2,
+    "maximum_topology_action_steps": 6,
+    "maximum_functional_action_steps": 6
+  }
+}
