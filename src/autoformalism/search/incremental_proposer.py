@@ -115,10 +115,12 @@ class IncrementalProposer:
         allowed_requirement_ids: tuple[str, ...],
         feedback: RoutedProposerFeedback,
         parent: TopologyDraft,
+        proposal_slot: int = 0,
         cache_only: bool | None = None,
     ) -> IncrementalTopologyResult:
         """Select a scientific focus and apply one topology transaction."""
         _require_public_problem(public_problem)
+        _require_proposal_slot(proposal_slot)
         intent_prompt = _intent_prompt(
             public_problem=public_problem,
             context=context,
@@ -128,6 +130,7 @@ class IncrementalProposer:
             parent_topology=parent,
             topology=None,
             parent_functional=None,
+            proposal_slot=proposal_slot,
         )
         intent, intent_call = self._intent_stage(
             intent_prompt,
@@ -142,6 +145,7 @@ class IncrementalProposer:
             feedback=feedback,
             parent=parent,
             intent=intent,
+            proposal_slot=proposal_slot,
         )
         input_hash = self._stage_input_hash(
             "topology_action",
@@ -200,10 +204,12 @@ class IncrementalProposer:
         feedback: RoutedProposerFeedback,
         topology: TopologyCandidate,
         parent: FunctionalDraft,
+        proposal_slot: int = 0,
         cache_only: bool | None = None,
     ) -> IncrementalFunctionalResult:
         """Select a scientific focus and apply one topology-bound function edit."""
         _require_public_problem(public_problem)
+        _require_proposal_slot(proposal_slot)
         commitment = topology_commitment_sha256(topology)
         if parent.topology_commitment_sha256 != commitment:
             raise ValueError("functional parent belongs to a different topology")
@@ -216,6 +222,7 @@ class IncrementalProposer:
             parent_topology=None,
             topology=topology,
             parent_functional=parent,
+            proposal_slot=proposal_slot,
         )
         intent, intent_call = self._intent_stage(
             intent_prompt,
@@ -231,6 +238,7 @@ class IncrementalProposer:
             topology=topology,
             parent=parent,
             intent=intent,
+            proposal_slot=proposal_slot,
         )
         input_hash = self._stage_input_hash(
             "functional_action",
@@ -371,6 +379,7 @@ def _intent_prompt(
     parent_topology: TopologyDraft | None,
     topology: TopologyCandidate | None,
     parent_functional: FunctionalDraft | None,
+    proposal_slot: int,
 ) -> str:
     payload = {
         "schema_version": "construction-intent-request-1",
@@ -380,6 +389,7 @@ def _intent_prompt(
             "Do not propose model structure, equations, identifiers, or numbers."
         ),
         "stage": stage,
+        "proposal_slot": proposal_slot,
         "public_problem": public_problem,
         "runtime_contract": _public_contract(
             context, allowed_requirement_ids=allowed_requirement_ids
@@ -415,6 +425,7 @@ def _topology_action_prompt(
     feedback: RoutedProposerFeedback,
     parent: TopologyDraft,
     intent: ProposedConstructionIntent,
+    proposal_slot: int,
 ) -> str:
     return _render(
         {
@@ -426,6 +437,7 @@ def _topology_action_prompt(
                 "parameters, units, ranges, scopes, summaries, or parent IDs."
             ),
             "public_problem": public_problem,
+            "proposal_slot": proposal_slot,
             "runtime_contract": _public_contract(
                 context, allowed_requirement_ids=allowed_requirement_ids
             ),
@@ -456,6 +468,7 @@ def _functional_action_prompt(
     topology: TopologyCandidate,
     parent: FunctionalDraft,
     intent: ProposedConstructionIntent,
+    proposal_slot: int,
 ) -> str:
     return _render(
         {
@@ -468,6 +481,7 @@ def _functional_action_prompt(
                 "scopes, summaries, parent IDs, and topology hashes."
             ),
             "public_problem": public_problem,
+            "proposal_slot": proposal_slot,
             "runtime_contract": _public_contract(
                 context, allowed_requirement_ids=allowed_requirement_ids
             ),
@@ -508,6 +522,11 @@ def _public_contract(
 def _require_public_problem(public_problem: str) -> None:
     if not public_problem.strip():
         raise ValueError("public_problem must not be empty")
+
+
+def _require_proposal_slot(proposal_slot: int) -> None:
+    if proposal_slot < 0:
+        raise ValueError("proposal_slot must be nonnegative")
 
 
 def _write_intent_checkpoint(

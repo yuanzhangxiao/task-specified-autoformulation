@@ -72,6 +72,9 @@ cannot alter the parent draft or access test/private data.
 
 ## Milestone 3 — conditional topology/function beam
 
+Status: implemented as a checkpointed deterministic controller; live search
+integration remains in Milestone 4.
+
 - Introduce a construction branch record with topology draft, topology
   commitment, zero or more functional drafts, completion state, and routed
   failures.
