@@ -1,0 +1,23 @@
+{
+  "schema_version": "fitter-diagnostic-plan-1",
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy",
+      "source": "refresh",
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard",
+      "source": "historical",
+      "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e"
+    }
+  ],
+  "repetitions": [0, 1, 2],
+  "total_max_nfev": 300,
+  "fit_seconds": 900,
+  "replay_seconds": 180,
+  "supervisor_grace_seconds": 60,
+  "seed": 20260905
+}
