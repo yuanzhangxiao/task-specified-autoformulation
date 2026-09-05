@@ -11,6 +11,9 @@ set -euo pipefail
 : "${AF_ACES_ACCOUNT:=156264627414}"
 : "${AF_ACES_GRES:=gpu:h100:2}"
 : "${AF_TENSOR_PARALLEL_SIZE:=2}"
+: "${AF_ACES_TIME:=02:00:00}"
+: "${AF_ACES_CPUS_PER_TASK:=16}"
+: "${AF_ACES_MEMORY:=128G}"
 : "${AF_ARRAY_SPEC:=0}"
 : "${AF_PUBLIC_DATA_ROOT:=${SCRATCH}/phase_b/inputs/public-prompt-v3}"
 : "${AF_OUTPUT_ROOT:=${SCRATCH}/phase_b/incremental-construction-pilot-v1-aces-h100x2-smoke}"
@@ -29,10 +32,17 @@ readonly submission_manifest="${AF_OUTPUT_ROOT}/submission_manifest.json"
   echo "invalid tensor-parallel size: ${AF_TENSOR_PARALLEL_SIZE}" >&2
   exit 2
 }
-[[ "${AF_ACES_GRES}" == "gpu:h100:${AF_TENSOR_PARALLEL_SIZE}" ]] || {
+[[ "${AF_ACES_GRES}" =~ ^gpu:(h100|a30):([1-9][0-9]*)$ ]] || {
+  echo "unsupported ACES GPU request: ${AF_ACES_GRES}" >&2
+  exit 2
+}
+readonly gpu_type="${BASH_REMATCH[1]}"
+readonly requested_gpu_count="${BASH_REMATCH[2]}"
+[[ "${requested_gpu_count}" == "${AF_TENSOR_PARALLEL_SIZE}" ]] || {
   echo "GPU request and tensor-parallel size differ" >&2
   exit 2
 }
+readonly platform="aces-${gpu_type}x${requested_gpu_count}"
 module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
 for path in "${AF_PYTHON}" "${AF_CONSTRUCTION_CONFIG}" "${AF_VLLM_IMAGE}" "${AF_WORKER_JOB}" "${AF_SUMMARY_JOB}"; do
   [[ -e "${path}" ]] || { echo "missing incremental-construction input: ${path}" >&2; exit 2; }
@@ -61,7 +71,7 @@ readonly task_count="${task_count_raw//[[:space:]]/}"
 }
 
 readonly common_export="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_GCCCORE_MODULE=${AF_GCCCORE_MODULE},AF_PYTHON_MODULE=${AF_PYTHON_MODULE},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT},AF_TARGET_CONTRACT_ROOT=${AF_TARGET_CONTRACT_ROOT},AF_MECHANISM_SPEC_ROOT=${AF_MECHANISM_SPEC_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_VLLM_IMAGE=${AF_VLLM_IMAGE},AF_HF_HOME=${AF_HF_HOME},AF_COMPUTE_CACHE_ROOT=${AF_COMPUTE_CACHE_ROOT},AF_IPC_TMP_ROOT=${AF_IPC_TMP_ROOT},AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}"
-worker_submission="$(sbatch --parsable --account="${AF_ACES_ACCOUNT}" --gres="${AF_ACES_GRES}" --array="${AF_ARRAY_SPEC}" --output="${AF_REPO_ROOT}/logs/incremental-construction-%A_%a.out" --error="${AF_REPO_ROOT}/logs/incremental-construction-%A_%a.err" --export="${common_export}" "${AF_WORKER_JOB}")"
+worker_submission="$(sbatch --parsable --account="${AF_ACES_ACCOUNT}" --gres="${AF_ACES_GRES}" --time="${AF_ACES_TIME}" --cpus-per-task="${AF_ACES_CPUS_PER_TASK}" --mem="${AF_ACES_MEMORY}" --array="${AF_ARRAY_SPEC}" --output="${AF_REPO_ROOT}/logs/incremental-construction-%A_%a.out" --error="${AF_REPO_ROOT}/logs/incremental-construction-%A_%a.err" --export="${common_export}" "${AF_WORKER_JOB}")"
 readonly worker_job="${worker_submission%%;*}"
 summary_submission="$(sbatch --parsable --account="${AF_ACES_ACCOUNT}" --dependency="afterany:${worker_job}" --output="${AF_REPO_ROOT}/logs/incremental-construction-summary-%j.out" --error="${AF_REPO_ROOT}/logs/incremental-construction-summary-%j.err" --export="${common_export}" "${AF_SUMMARY_JOB}")"
 readonly summary_job="${summary_submission%%;*}"
@@ -74,13 +84,20 @@ jq -n \
   --arg array_spec "${AF_ARRAY_SPEC}" \
   --arg plan_sha256 "$(sha256sum "${AF_OUTPUT_ROOT}/frozen/plan.json" | awk '{print $1}')" \
   --arg requested_gres "${AF_ACES_GRES}" \
+  --arg platform "${platform}" \
+  --arg requested_time "${AF_ACES_TIME}" \
+  --arg requested_cpus_per_task "${AF_ACES_CPUS_PER_TASK}" \
+  --arg requested_memory "${AF_ACES_MEMORY}" \
   --arg compute_cache_root "${AF_COMPUTE_CACHE_ROOT}" \
   --arg ipc_tmp_root "${AF_IPC_TMP_ROOT}" \
   '{
     schema_version: "phase-b-incremental-construction-submission-1",
     submitted_at_utc: $submitted_at_utc,
-    platform: "aces-h100x2",
+    platform: $platform,
     requested_gres: $requested_gres,
+    requested_time: $requested_time,
+    requested_cpus_per_task: ($requested_cpus_per_task | tonumber),
+    requested_memory: $requested_memory,
     compute_cache_root: $compute_cache_root,
     ipc_tmp_root: $ipc_tmp_root,
     array_spec: $array_spec,

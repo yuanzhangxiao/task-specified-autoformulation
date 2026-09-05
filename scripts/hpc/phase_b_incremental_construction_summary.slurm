@@ -14,7 +14,12 @@ set -euo pipefail
 : "${AF_OUTPUT_ROOT:?AF_OUTPUT_ROOT is required}"
 : "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
 : "${AF_PYTHON_MODULE:=Python/3.11.5}"
-module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}"
+: "${AF_SKIP_MODULE_LOAD:=false}"
+case "${AF_SKIP_MODULE_LOAD}" in
+  false) module load "${AF_GCCCORE_MODULE}" "${AF_PYTHON_MODULE}" ;;
+  true) ;;
+  *) echo "AF_SKIP_MODULE_LOAD must be true or false" >&2; exit 2 ;;
+esac
 
 readonly frozen="${AF_OUTPUT_ROOT}/frozen"
 readonly output="${AF_OUTPUT_ROOT}/summary/incremental_construction_summary.json"

@@ -44,6 +44,27 @@ def test_repository_v2_plan_uses_phased_runtime_agenda() -> None:
     assert len(build_incremental_construction_tasks(plan)) == 6
 
 
+def test_repository_20b_gate_changes_only_the_model_scale() -> None:
+    root = Path("configs")
+    large = load_incremental_construction_plan(
+        root / "phase_b_incremental_construction_pilot_v2.json"
+    )
+    small = load_incremental_construction_plan(
+        root / "phase_b_incremental_construction_pilot_v2_20b.json"
+    )
+
+    assert small.model_contract.model == "openai/gpt-oss-20b"
+    assert large.model_contract.model == "openai/gpt-oss-120b"
+    assert small.cells == large.cells
+    assert small.repetitions == large.repetitions
+    assert small.construction_protocol == large.construction_protocol
+    assert small.construction_budget == large.construction_budget
+    matched_small = small.model_contract.model_copy(
+        update={"model": large.model_contract.model}
+    )
+    assert matched_small == large.model_contract
+
+
 def test_aces_worker_redirects_compiler_caches_out_of_home() -> None:
     worker = Path(
         "scripts/hpc/phase_b_incremental_construction_aces.slurm"
@@ -70,6 +91,30 @@ def test_aces_worker_redirects_compiler_caches_out_of_home() -> None:
     assert 'runtime_tmp="${AF_IPC_TMP_ROOT}/${SLURM_JOB_ID}"' in worker
     assert '${#runtime_tmp} > 60' in worker
     assert '${runtime_tmp}:${runtime_tmp}' in worker
+    assert '--time="${AF_ACES_TIME}"' in submit
+    assert '--cpus-per-task="${AF_ACES_CPUS_PER_TASK}"' in submit
+    assert '--mem="${AF_ACES_MEMORY}"' in submit
+    assert 'platform="aces-${gpu_type}x${requested_gpu_count}"' in submit
+
+
+def test_delta_20b_gate_uses_one_a40_and_is_public_only() -> None:
+    worker = Path(
+        "scripts/hpc/phase_b_incremental_construction_delta.slurm"
+    ).read_text(encoding="utf-8")
+    submit = Path(
+        "scripts/hpc/submit_phase_b_incremental_construction_delta.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "#SBATCH --gpus-per-node=1" in worker
+    assert "#SBATCH --time=00:45:00" in worker
+    assert "phase_b_incremental_construction_pilot_v2_20b.json" in submit
+    assert 'AF_ARRAY_SPEC:=0' in submit
+    assert "AF_SKIP_MODULE_LOAD=true" in submit
+    assert 'platform:"delta-a40x1"' in submit
+    assert "parameter_fitting_performed:false" in submit
+    assert "scientific_judge_called:false" in submit
+    assert "test_data_opened:false" in submit
+    assert "private_reference_opened:false" in submit
 
 
 def test_freeze_and_summary_keep_test_and_private_data_closed(
