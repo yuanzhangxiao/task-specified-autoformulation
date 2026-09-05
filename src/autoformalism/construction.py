@@ -95,6 +95,72 @@ def normalize_topology_action_transaction(
     }
 
 
+def normalize_topology_action_transaction_for_context(
+    transaction: ProposedTopologyActionTransaction,
+    *,
+    parent: TopologyDraft,
+    context: ValidationContext,
+) -> tuple[ProposedTopologyActionTransaction, dict[str, object]]:
+    """Repair an unambiguous target/auxiliary mapping action transposition.
+
+    A target identity mapping and an auxiliary state measurement carry distinct
+    action names, but an open model can occasionally transpose those names. The
+    runtime can correct the action only when the referenced generated state and
+    public channel class make the intended identity binding unambiguous.
+    """
+    state_names = {item.name for item in parent.states}
+    state_names.update(
+        action.name
+        for action in transaction.actions
+        if isinstance(action, AddStateAction)
+    )
+    target_channels = set(context.targets)
+    auxiliary_channels = set(context.auxiliaries)
+    rewritten: list[object] = []
+    repairs: list[dict[str, object]] = []
+    for index, action in enumerate(transaction.actions):
+        replacement = action
+        if (
+            isinstance(action, SetStateMeasurementAction)
+            and action.channel in target_channels
+            and action.state in state_names
+        ):
+            replacement = SetTargetMappingAction(
+                channel=action.channel,
+                source=action.state,
+            )
+            repairs.append(
+                {
+                    "action_index": index,
+                    "from": "set_state_measurement",
+                    "to": "set_target_mapping",
+                }
+            )
+        elif (
+            isinstance(action, SetTargetMappingAction)
+            and action.channel in auxiliary_channels
+            and action.source in state_names
+        ):
+            replacement = SetStateMeasurementAction(
+                state=action.source,
+                channel=action.channel,
+            )
+            repairs.append(
+                {
+                    "action_index": index,
+                    "from": "set_target_mapping",
+                    "to": "set_state_measurement",
+                }
+            )
+        rewritten.append(replacement)
+    contextual = transaction.model_copy(update={"actions": tuple(rewritten)})
+    normalized, exact_repairs = normalize_topology_action_transaction(contextual)
+    audit = dict(exact_repairs)
+    if repairs:
+        audit["channel_action_transpositions"] = repairs
+    return normalized, audit
+
+
 def normalize_functional_action_transaction(
     transaction: ProposedFunctionalActionTransaction,
 ) -> tuple[ProposedFunctionalActionTransaction, dict[str, object]]:

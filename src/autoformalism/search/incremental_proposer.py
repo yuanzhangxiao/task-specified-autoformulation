@@ -640,7 +640,9 @@ def _topology_action_prompt(
             )
             + " Unmentioned runtime-owned structure is preserved. Do not "
             "provide equations, functions, parameters, units, ranges, "
-            "scopes, summaries, or parent IDs."
+            "scopes, summaries, or parent IDs. The displayed parent is the "
+            "complete current draft. A rejected transaction is applied zero "
+            "times, so never remove or reference an item absent from that parent."
         ),
         "public_problem": public_problem,
         "proposal_slot": proposal_slot,
@@ -667,6 +669,8 @@ def _topology_action_prompt(
             "maximum_action_count": maximum_action_count,
             "every_generated_node_requires_a_distinct_scientific_role": True,
             "name_extension_chains_are_not_scientific_roles": True,
+            "transaction_is_atomic": True,
+            "displayed_parent_is_authoritative": True,
         },
     }
     if agenda is not None:
@@ -675,6 +679,11 @@ def _topology_action_prompt(
         edit_rules = payload["edit_rules"]
         assert isinstance(edit_rules, dict)
         edit_rules["allowed_action_types"] = _allowed_topology_actions(topology_phase)
+        payload["phase_contract"] = _topology_phase_contract(
+            parent,
+            context,
+            topology_phase,
+        )
     return _render(payload)
 
 
@@ -769,6 +778,62 @@ def _allowed_topology_actions(
         "set_target_mapping",
         "remove_target_mapping",
     ]
+
+
+def _topology_phase_contract(
+    parent: TopologyDraft,
+    context: ValidationContext,
+    phase: TopologyConstructionPhase,
+) -> dict[str, object]:
+    """Expose exact phase domains so the provider need not infer action legality."""
+    state_names = sorted(item.name for item in parent.states)
+    process_names = sorted(item.name for item in parent.processes)
+    mapped_targets = {item.channel for item in parent.target_mappings}
+    contract: dict[str, object] = {
+        "declared_state_names": state_names,
+        "declared_process_names": process_names,
+        "public_target_channels": list(context.targets),
+        "public_auxiliary_measurement_channels": list(context.auxiliaries),
+        "unmapped_target_channels": sorted(set(context.targets) - mapped_targets),
+        "target_channels_are_outputs_not_causal_inputs": True,
+        "set_target_mapping_accepts_only_public_target_channels": True,
+        "set_state_measurement_accepts_only_public_auxiliary_channels": True,
+    }
+    if phase == TopologyConstructionPhase.COMPONENT_SPECIFICATION:
+        contract.update(
+            {
+                "responsibility": (
+                    "Declare every generated dynamic state and instantaneous "
+                    "process needed by the selected mechanisms and target "
+                    "readouts. Existing runtime-scaffolded components and "
+                    "mappings must be preserved."
+                ),
+                "public_channel_names_are_not_implicitly_generated_nodes": True,
+            }
+        )
+    elif phase == TopologyConstructionPhase.DYNAMIC_TOPOLOGY:
+        contract.update(
+            {
+                "responsibility": "Add hyperedges for state ODE right-hand sides.",
+                "allowed_interaction_targets": state_names,
+                "process_targets_forbidden_in_this_phase": True,
+            }
+        )
+    elif phase == TopologyConstructionPhase.ALGEBRAIC_READOUT_TOPOLOGY:
+        contract.update(
+            {
+                "responsibility": (
+                    "Add hyperedges for algebraic processes, auxiliary state "
+                    "measurements, and one generated source for every target."
+                ),
+                "allowed_interaction_targets": process_names,
+            }
+        )
+    else:
+        contract["responsibility"] = (
+            "Repair only the reported closure defect against the current parent."
+        )
+    return contract
 
 
 def _topology_action_limit(

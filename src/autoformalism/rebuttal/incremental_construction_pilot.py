@@ -25,8 +25,11 @@ from autoformalism.rebuttal.mechanisms import (
 )
 from autoformalism.schemas import (
     FunctionalDraft,
+    ProposedTopologyProcess,
+    ProposedTopologyState,
     TopologyConstructionPhase,
     TopologyDraft,
+    TopologyTargetMapping,
 )
 from autoformalism.schemas.base import NonEmptyText, StrictSchema
 from autoformalism.search import (
@@ -47,6 +50,7 @@ from autoformalism.staging import (
 from autoformalism.targets import (
     PublicTargetContract,
     PublicTargetEvaluation,
+    TargetRepresentation,
     evaluate_public_targets,
 )
 
@@ -76,6 +80,8 @@ Return only a small coherent transaction of typed topology actions. Use states
 for dynamic memory and processes for instantaneous generated quantities. Add
 only dependencies justified by the public task. The runtime owns observability,
 mechanism tags, target kinds, parent identity, diffs, units, and validation.
+The displayed parent is authoritative and each transaction is atomic: if a
+prior response was rejected, none of its proposed actions exist in the parent.
 Every generated node must have a distinct scientific role. Never create chains
 of renamed variants merely to fill the action budget.
 Do not emit equations, parameter declarations, ranges, prose, or a full model."""
@@ -98,6 +104,7 @@ class IncrementalConstructionPilotConfig(StrictSchema):
     topology_branch_count: int = Field(default=2, ge=1, le=8)
     function_children_per_topology: int = Field(default=2, ge=1, le=8)
     maximum_topology_action_steps: int = Field(default=4, ge=1, le=16)
+    maximum_topology_attempts_per_phase: int = Field(default=16, ge=1, le=16)
     maximum_functional_action_steps: int = Field(default=6, ge=1, le=32)
     construction_protocol: ConstructionProtocol = "mixed_llm_intent_v1"
 
@@ -145,6 +152,7 @@ class IncrementalConstructionPilotResult(StrictSchema):
     topology_branch_count_requested: int = Field(ge=1)
     complete_topology_count: int = Field(ge=0)
     complete_candidate_count: int = Field(ge=0)
+    runtime_target_scaffold: TopologyDraft = TopologyDraft()
     attempts: tuple[ConstructionAttemptRecord, ...]
     candidates: tuple[ConstructedCandidateArtifact, ...]
 
@@ -215,6 +223,33 @@ def _scientific_prompt_context(public_prompt: str) -> str:
     return scientific_context
 
 
+def build_runtime_target_scaffold(
+    contract: PublicTargetContract,
+    context: ValidationContext,
+) -> TopologyDraft:
+    """Materialize only target representations fixed by the public contract."""
+    if {item.target_channel for item in contract.targets} != set(context.targets):
+        raise ValueError("public targets differ from the target scaffold contract")
+    states: list[ProposedTopologyState] = []
+    processes: list[ProposedTopologyProcess] = []
+    mappings: list[TopologyTargetMapping] = []
+    for requirement in contract.targets:
+        channel = requirement.target_channel
+        representation = requirement.expected_representation
+        if representation is TargetRepresentation.DYNAMIC_STATE:
+            states.append(ProposedTopologyState(name=channel))
+        elif representation is TargetRepresentation.INSTANTANEOUS_PROCESS:
+            processes.append(ProposedTopologyProcess(name=channel))
+        else:
+            continue
+        mappings.append(TopologyTargetMapping(channel=channel, source=channel))
+    return TopologyDraft(
+        states=tuple(states),
+        processes=tuple(processes),
+        target_mappings=tuple(mappings),
+    )
+
+
 def construct_public_candidates(
     *,
     client: IncrementalConstructionLLMClient,
@@ -234,13 +269,20 @@ def construct_public_candidates(
     attempts: list[ConstructionAttemptRecord] = []
     candidates: list[ConstructedCandidateArtifact] = []
     complete_topologies: dict[str, tuple[int, TopologyDraft]] = {}
+    runtime_target_scaffold = (
+        build_runtime_target_scaffold(target_contract, context)
+        if pilot_config.construction_protocol == "phased_runtime_agenda_v2"
+        else TopologyDraft()
+    )
 
     for topology_slot in range(pilot_config.topology_branch_count):
-        draft = TopologyDraft()
+        draft = runtime_target_scaffold
         feedback = RoutedProposerFeedback()
         topology = None
         topology_phase = _initial_topology_phase(pilot_config)
+        phase_attempts: dict[TopologyConstructionPhase, int] = {}
         for step_index in range(pilot_config.maximum_topology_action_steps):
+            phase_attempts[topology_phase] = phase_attempts.get(topology_phase, 0) + 1
             proposal_slot = 1000 * topology_slot + step_index
             parent_sha256 = topology_draft_sha256(draft)
             try:
@@ -281,9 +323,17 @@ def construct_public_candidates(
                     attempts,
                     candidates,
                     len(complete_topologies),
+                    runtime_target_scaffold,
                 )
                 if _is_terminal_provider_outage(exc):
                     raise
+                if (
+                    pilot_config.construction_protocol
+                    == "phased_runtime_agenda_v2"
+                    and phase_attempts[topology_phase]
+                    >= pilot_config.maximum_topology_attempts_per_phase
+                ):
+                    break
                 continue
             draft = result.application.draft
             if (
@@ -313,6 +363,7 @@ def construct_public_candidates(
                     attempts,
                     candidates,
                     len(complete_topologies),
+                    runtime_target_scaffold,
                 )
                 continue
             try:
@@ -338,6 +389,7 @@ def construct_public_candidates(
                     attempts,
                     candidates,
                     len(complete_topologies),
+                    runtime_target_scaffold,
                 )
                 continue
             attempts.append(
@@ -404,6 +456,7 @@ def construct_public_candidates(
                         attempts,
                         candidates,
                         len(complete_topologies),
+                        runtime_target_scaffold,
                     )
                     if _is_terminal_provider_outage(exc):
                         raise
@@ -449,6 +502,7 @@ def construct_public_candidates(
                 attempts,
                 candidates,
                 len(complete_topologies),
+                runtime_target_scaffold,
             )
 
     result = _result(
@@ -456,6 +510,7 @@ def construct_public_candidates(
         attempts,
         candidates,
         len(complete_topologies),
+        runtime_target_scaffold,
     )
     if output_path is not None:
         _atomic_write_json(output_path, result.model_dump(mode="json"))
@@ -636,6 +691,7 @@ def _write_progress(
     attempts: list[ConstructionAttemptRecord],
     candidates: list[ConstructedCandidateArtifact],
     complete_topology_count: int,
+    runtime_target_scaffold: TopologyDraft,
 ) -> None:
     if output_path is None:
         return
@@ -646,6 +702,7 @@ def _write_progress(
             attempts,
             candidates,
             complete_topology_count,
+            runtime_target_scaffold,
         ).model_dump(mode="json"),
     )
 
@@ -655,6 +712,7 @@ def _result(
     attempts: list[ConstructionAttemptRecord],
     candidates: list[ConstructedCandidateArtifact],
     complete_topology_count: int,
+    runtime_target_scaffold: TopologyDraft,
 ) -> IncrementalConstructionPilotResult:
     expected = config.topology_branch_count * config.function_children_per_topology
     return IncrementalConstructionPilotResult(
@@ -663,6 +721,7 @@ def _result(
         topology_branch_count_requested=config.topology_branch_count,
         complete_topology_count=complete_topology_count,
         complete_candidate_count=len(candidates),
+        runtime_target_scaffold=runtime_target_scaffold,
         attempts=tuple(attempts),
         candidates=tuple(candidates),
     )
@@ -688,5 +747,6 @@ __all__ = [
     "IncrementalConstructionPilotConfig",
     "IncrementalConstructionPilotResult",
     "build_public_construction_problem",
+    "build_runtime_target_scaffold",
     "construct_public_candidates",
 ]

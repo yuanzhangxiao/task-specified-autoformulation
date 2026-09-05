@@ -41,6 +41,9 @@ class IncrementalConstructionBudget(StrictSchema):
     topology_branch_count: int = Field(ge=1, le=8)
     function_children_per_topology: int = Field(ge=1, le=8)
     maximum_topology_action_steps: int = Field(ge=1, le=16)
+    maximum_topology_attempts_per_phase: int = Field(
+        default=16, ge=1, le=16
+    )
     maximum_functional_action_steps: int = Field(ge=1, le=32)
     maximum_topology_actions_per_transaction: int = Field(
         default=64, ge=1, le=64

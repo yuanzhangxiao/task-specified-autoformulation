@@ -12,6 +12,7 @@ from autoformalism.construction import (
     finalize_functional_draft,
     finalize_topology_draft,
     functional_draft_sha256,
+    normalize_topology_action_transaction_for_context,
     select_conditional_beam,
     topology_draft_sha256,
 )
@@ -257,6 +258,38 @@ def test_topology_phases_reject_out_of_order_actions() -> None:
         attach_intent_mechanisms=False,
     )
     assert finalize_topology_draft(readout.draft, _context())
+
+
+def test_target_measurement_action_is_transposed_when_unambiguous() -> None:
+    parent = TopologyDraft.model_validate({"states": [{"name": "x"}]})
+    transaction = ProposedTopologyActionTransaction.model_validate(
+        {
+            "actions": [
+                {
+                    "action": "set_state_measurement",
+                    "state": "x",
+                    "channel": "target",
+                }
+            ]
+        }
+    )
+
+    repaired, audit = normalize_topology_action_transaction_for_context(
+        transaction,
+        parent=parent,
+        context=_context(),
+    )
+
+    assert repaired.model_dump(mode="json")["actions"] == [
+        {"action": "set_target_mapping", "channel": "target", "source": "x"}
+    ]
+    assert audit["channel_action_transpositions"] == [
+        {
+            "action_index": 0,
+            "from": "set_state_measurement",
+            "to": "set_target_mapping",
+        }
+    ]
 
 
 def test_partial_functions_are_conditioned_on_the_exact_topology() -> None:

@@ -406,7 +406,7 @@ class CachedLLMClient(ABC):
         """Request one non-empty topology edit against an immutable parent."""
         from autoformalism.construction import (
             apply_topology_actions,
-            normalize_topology_action_transaction,
+            normalize_topology_action_transaction_for_context,
             topology_draft_sha256,
         )
 
@@ -444,7 +444,13 @@ class CachedLLMClient(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=ProposedTopologyActionTransaction,
-            normalize_parsed=normalize_topology_action_transaction,
+            normalize_parsed=lambda transaction: (
+                normalize_topology_action_transaction_for_context(
+                    transaction,
+                    parent=parent,
+                    context=context,
+                )
+            ),
             validate_parsed=validate,
             request_metadata=request_metadata,
             cache_only=cache_only,

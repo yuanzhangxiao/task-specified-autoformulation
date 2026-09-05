@@ -155,6 +155,9 @@ def main() -> None:
             topology_branch_count=budget.topology_branch_count,
             function_children_per_topology=(budget.function_children_per_topology),
             maximum_topology_action_steps=(budget.maximum_topology_action_steps),
+            maximum_topology_attempts_per_phase=(
+                budget.maximum_topology_attempts_per_phase
+            ),
             maximum_functional_action_steps=(budget.maximum_functional_action_steps),
             construction_protocol=plan.construction_protocol,
         ),

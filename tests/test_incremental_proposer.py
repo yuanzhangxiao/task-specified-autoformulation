@@ -289,6 +289,14 @@ def test_runtime_agenda_owns_objective_and_allows_multiple_mechanisms(
     assert result.focus is not None
     assert result.focus.feedback_item_indices == (0,)
     assert all(not item.mechanisms for item in result.application.draft.states)
+    topology_prompt = json.loads(client.calls[-1][1])
+    assert topology_prompt["edit_rules"]["transaction_is_atomic"] is True
+    assert topology_prompt["phase_contract"]["public_target_channels"] == [
+        "target"
+    ]
+    assert topology_prompt["phase_contract"][
+        "set_state_measurement_accepts_only_public_auxiliary_channels"
+    ] is True
 
 
 def test_oversized_topology_transaction_is_rejected_before_draft_mutation(

@@ -35,7 +35,8 @@ def test_repository_v2_plan_uses_phased_runtime_agenda() -> None:
     )
 
     assert plan.construction_protocol == "phased_runtime_agenda_v2"
-    assert plan.construction_budget.maximum_topology_action_steps == 6
+    assert plan.construction_budget.maximum_topology_action_steps == 12
+    assert plan.construction_budget.maximum_topology_attempts_per_phase == 3
     assert plan.construction_budget.maximum_topology_actions_per_transaction == 12
     assert plan.construction_budget.maximum_functional_actions_per_transaction == 24
     assert plan.construction_budget.maximum_generated_nodes_per_topology == 12

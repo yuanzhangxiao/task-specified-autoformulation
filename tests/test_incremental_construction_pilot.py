@@ -8,11 +8,12 @@ from pathlib import Path
 import pytest
 
 from autoformalism.expressions import ValidationContext
-from autoformalism.llm.exceptions import LLMProviderError
+from autoformalism.llm.exceptions import LLMProviderError, LLMResponseError
 from autoformalism.llm.models import LLMCallResult
 from autoformalism.rebuttal.incremental_construction_pilot import (
     IncrementalConstructionPilotConfig,
     build_public_construction_problem,
+    build_runtime_target_scaffold,
     construct_public_candidates,
 )
 from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
@@ -181,6 +182,15 @@ class _DeadProviderClient:
         )
 
 
+class _DynamicFailureClient(_PhasedPilotClient):
+    """Fail every dynamic transaction after component specification."""
+
+    def propose_topology_actions(self, **kwargs) -> LLMCallResult:
+        if kwargs["topology_phase"] == TopologyConstructionPhase.DYNAMIC_TOPOLOGY:
+            raise LLMResponseError("dynamic action violates the phase contract")
+        return super().propose_topology_actions(**kwargs)
+
+
 def _target_contract() -> PublicTargetContract:
     return PublicTargetContract.model_validate(
         {
@@ -233,6 +243,51 @@ def test_phased_public_problem_excludes_conflicting_response_instructions() -> N
     assert "Infer a causal model" in payload["benchmark_scientific_context"]
     assert "Return one complete model" not in public_problem
     assert "benchmark_prompt" not in payload
+
+
+def test_runtime_scaffolds_only_publicly_fixed_target_representations() -> None:
+    contract = PublicTargetContract.model_validate(
+        {
+            "schema_version": "public-target-contract-2",
+            "benchmark_id": "synthetic",
+            "tier": "easy",
+            "public_prompt_sha256": "0" * 64,
+            "targets": [
+                {
+                    "target_channel": "dynamic_target",
+                    "public_requirement": "Generate a dynamic state.",
+                    "expected_representation": "dynamic_state",
+                    "representation_requirement": "Must be a dynamic state.",
+                },
+                {
+                    "target_channel": "process_target",
+                    "public_requirement": "Generate an instantaneous process.",
+                    "expected_representation": "instantaneous_process",
+                    "representation_requirement": (
+                        "Must be an instantaneous process."
+                    ),
+                },
+                {
+                    "target_channel": "open_target",
+                    "public_requirement": "Choose a suitable representation.",
+                },
+            ],
+        }
+    )
+
+    scaffold = build_runtime_target_scaffold(
+        contract,
+        ValidationContext(
+            targets=("dynamic_target", "process_target", "open_target")
+        ),
+    )
+
+    assert [item.name for item in scaffold.states] == ["dynamic_target"]
+    assert [item.name for item in scaffold.processes] == ["process_target"]
+    assert [(item.channel, item.source) for item in scaffold.target_mappings] == [
+        ("dynamic_target", "dynamic_target"),
+        ("process_target", "process_target"),
+    ]
 
 
 def test_dead_local_provider_stops_after_one_recorded_attempt(
@@ -357,4 +412,42 @@ def test_phased_pilot_orders_topology_work_and_uses_runtime_agenda(
     topology = result.candidates[0].topology_draft
     assert all(not item.mechanisms for item in topology.states)
     assert all(not item.mechanisms for item in topology.interactions)
+    assert client.focus_calls == 4
+
+
+def test_phased_pilot_bounds_retries_inside_each_topology_phase(
+    tmp_path: Path,
+) -> None:
+    client = _DynamicFailureClient()
+    result = construct_public_candidates(
+        client=client,
+        proposer_config=IncrementalProposerConfig(
+            checkpoint_directory=tmp_path / "checkpoints",
+            run_fingerprint="d" * 64,
+            intent_system_prompt="Select anchors inside the runtime agenda.",
+            topology_action_system_prompt="Return phase-compatible topology edits.",
+            functional_action_system_prompt="Return one function edit.",
+            decision_policy="runtime_priority_v2",
+        ),
+        pilot_config=IncrementalConstructionPilotConfig(
+            topology_branch_count=1,
+            function_children_per_topology=1,
+            maximum_topology_action_steps=12,
+            maximum_topology_attempts_per_phase=3,
+            maximum_functional_action_steps=1,
+            construction_protocol="phased_runtime_agenda_v2",
+        ),
+        public_problem="Infer a causal input-response model.",
+        context=ValidationContext(targets=("target",), external_inputs=("input_u",)),
+        target_contract=_target_contract(),
+        mechanism_spec=_mechanism_spec(),
+    )
+
+    assert result.status == "incomplete"
+    assert [item.topology_phase for item in result.attempts] == [
+        TopologyConstructionPhase.COMPONENT_SPECIFICATION,
+        TopologyConstructionPhase.DYNAMIC_TOPOLOGY,
+        TopologyConstructionPhase.DYNAMIC_TOPOLOGY,
+        TopologyConstructionPhase.DYNAMIC_TOPOLOGY,
+    ]
     assert client.focus_calls == 4

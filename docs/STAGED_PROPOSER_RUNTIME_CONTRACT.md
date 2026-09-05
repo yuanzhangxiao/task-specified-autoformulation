@@ -421,6 +421,20 @@ explicitly.
   eight-action ceiling. Oversized transactions are rejected before they can
   change the maintained draft, and generated nodes must have distinct
   scientific roles rather than forming name-extension chains.
+- Before the v2 component call, the runtime materializes same-named generated
+  nodes and identity mappings only for target representations explicitly fixed
+  by the reviewed public target contract. A required dynamic-state target is
+  scaffolded as a state, and a required instantaneous-process target as a
+  process. Targets whose representation is publicly unspecified remain an LLM
+  decision. This is representation scaffolding, not a scientific equation or
+  fitted-parameter choice.
+- A topology transaction is atomic: a rejected response changes no part of the
+  displayed parent. Repair prompts state this explicitly. The frozen v2 gate
+  allows 12 total topology attempts but at most three attempts inside any one
+  phase, preventing one failed responsibility from silently consuming an
+  unbounded retry budget. The runtime also repairs the unambiguous transposition
+  between a target identity mapping and an auxiliary state-measurement action;
+  the repair is recorded with the provider response.
 - ACES workers place Triton, TorchInductor, vLLM, XDG, and CUDA compiler caches
   under a scratch-backed, job-specific directory. ZeroMQ IPC temporary files
   use a separate short scratch path because Linux Unix-domain socket paths are

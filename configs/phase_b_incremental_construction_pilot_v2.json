@@ -37,7 +37,8 @@
   "construction_budget": {
     "topology_branch_count": 2,
     "function_children_per_topology": 2,
-    "maximum_topology_action_steps": 6,
+    "maximum_topology_action_steps": 12,
+    "maximum_topology_attempts_per_phase": 3,
     "maximum_functional_action_steps": 6,
     "maximum_topology_actions_per_transaction": 12,
     "maximum_functional_actions_per_transaction": 24,

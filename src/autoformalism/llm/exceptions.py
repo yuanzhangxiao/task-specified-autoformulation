@@ -89,7 +89,12 @@ class LLMResponseError(LLMError):
             +
             "Repair only the executable response contract. Preserve the scientific "
             "hypothesis except where a listed contract correction requires a local "
-            "notation or declaration change. Return one complete corrected object.\n"
+            "notation or declaration change. Return one complete corrected object. "
+            "If this is an incremental action transaction, the rejected transaction "
+            "was atomic and none of its actions were applied; the parent in the "
+            "original request is still authoritative. Return a replacement "
+            "transaction and do not remove an item that existed only in the rejected "
+            "response.\n"
             f"{diagnostics}"
         )
 
