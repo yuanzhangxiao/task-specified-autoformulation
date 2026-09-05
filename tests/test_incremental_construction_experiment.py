@@ -63,7 +63,11 @@ def test_aces_worker_redirects_compiler_caches_out_of_home() -> None:
     assert '${SCRATCH}/autoformalism-runtime-cache/incremental-construction' in (
         submit
     )
+    assert '${SCRATCH}/af-ipc' in submit
     assert "AF_COMPUTE_CACHE_ROOT" in submit
+    assert "AF_IPC_TMP_ROOT" in submit
+    assert 'runtime_tmp="${AF_IPC_TMP_ROOT}/${SLURM_JOB_ID}"' in worker
+    assert '${#runtime_tmp} > 60' in worker
 
 
 def test_freeze_and_summary_keep_test_and_private_data_closed(

@@ -421,10 +421,13 @@ explicitly.
   eight-action ceiling. Oversized transactions are rejected before they can
   change the maintained draft, and generated nodes must have distinct
   scientific roles rather than forming name-extension chains.
-- ACES workers place Triton, TorchInductor, vLLM, XDG, CUDA, and temporary
-  compiler caches under a scratch-backed, job-specific directory. An exhausted
-  local provider endpoint is checkpointed once and then terminates the task;
-  later branches are not charged for repeated calls to a dead engine.
+- ACES workers place Triton, TorchInductor, vLLM, XDG, and CUDA compiler caches
+  under a scratch-backed, job-specific directory. ZeroMQ IPC temporary files
+  use a separate short scratch path because Linux Unix-domain socket paths are
+  limited to 107 characters; the launcher rejects an unsafe base path before
+  model startup. An exhausted local provider endpoint is checkpointed once and
+  then terminates the task, so later branches are not charged for repeated
+  calls to a dead engine.
 - The staged path is connected to the search controller as an explicit opt-in
   and has a local checkpoint/resume integration test. The first planned
   two-benchmark, three-seed cluster attempt exposed provider representation

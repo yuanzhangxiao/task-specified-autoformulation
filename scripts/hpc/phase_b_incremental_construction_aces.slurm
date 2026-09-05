@@ -18,6 +18,7 @@ set -euo pipefail
 : "${AF_VLLM_IMAGE:?AF_VLLM_IMAGE is required}"
 : "${AF_HF_HOME:?AF_HF_HOME is required}"
 : "${AF_COMPUTE_CACHE_ROOT:?AF_COMPUTE_CACHE_ROOT is required}"
+: "${AF_IPC_TMP_ROOT:?AF_IPC_TMP_ROOT is required}"
 : "${AF_GCCCORE_MODULE:=GCCcore/13.2.0}"
 : "${AF_PYTHON_MODULE:=Python/3.11.5}"
 : "${AF_TENSOR_PARALLEL_SIZE:=2}"
@@ -35,7 +36,14 @@ readonly torchinductor_cache="${job_cache_root}/torchinductor"
 readonly vllm_cache="${job_cache_root}/vllm"
 readonly xdg_cache="${job_cache_root}/xdg"
 readonly cuda_cache="${job_cache_root}/cuda"
-readonly runtime_tmp="${job_cache_root}/tmp"
+readonly runtime_tmp="${AF_IPC_TMP_ROOT}/${SLURM_JOB_ID}"
+
+# vLLM appends a slash plus a 36-character UUID to TMPDIR for a ZeroMQ IPC
+# socket. Linux limits the resulting filesystem path to 107 characters.
+if (( ${#runtime_tmp} > 60 )); then
+  echo "vLLM IPC temporary path is too long: ${runtime_tmp}" >&2
+  exit 2
+fi
 
 mkdir -p "${AF_OUTPUT_ROOT}/runtime" "${AF_HF_HOME}" "${triton_cache}" "${torchinductor_cache}" "${vllm_cache}" "${xdg_cache}" "${cuda_cache}" "${runtime_tmp}"
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
