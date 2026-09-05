@@ -12,6 +12,7 @@ from autoformalism.llm.config import (
 from autoformalism.llm.gemini import GeminiClient
 from autoformalism.llm.mock import MockLLMClient
 from autoformalism.llm.models import (
+    IncrementalConstructionLLMClient,
     LLMCallResult,
     LLMClient,
     StagedLLMClient,
@@ -24,6 +25,7 @@ from autoformalism.llm.vllm import VLLMClient
 __all__ = [
     "CachedLLMClient",
     "GeminiClient",
+    "IncrementalConstructionLLMClient",
     "LLMCallResult",
     "LLMClient",
     "LLMConfig",

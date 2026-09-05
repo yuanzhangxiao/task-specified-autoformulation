@@ -96,57 +96,6 @@
       "title": "AddStateAction",
       "type": "object"
     },
-    "ConstructionIntent": {
-      "additionalProperties": false,
-      "description": "Compact decision state externalized before proposing model edits.\n\nPublic requirement and target identifiers are anchors into runtime-owned\ncontracts.  They are not explanatory prose and do not duplicate model\nstructure.",
-      "properties": {
-        "objective": {
-          "$ref": "#/$defs/ConstructionObjective"
-        },
-        "requirement_ids": {
-          "default": [],
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
-            "type": "string"
-          },
-          "maxItems": 32,
-          "title": "Requirement Ids",
-          "type": "array"
-        },
-        "target_channels": {
-          "default": [],
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Target Channels",
-          "type": "array"
-        }
-      },
-      "required": [
-        "objective"
-      ],
-      "title": "ConstructionIntent",
-      "type": "object"
-    },
-    "ConstructionObjective": {
-      "description": "Scientific responsibility addressed by one incremental transaction.",
-      "enum": [
-        "initial_construction",
-        "target_path_repair",
-        "mechanism_repair",
-        "function_repair",
-        "numerical_repair",
-        "simplification"
-      ],
-      "title": "ConstructionObjective",
-      "type": "string"
-    },
     "InteractionPolarity": {
       "description": "Outer algebraic operator used to assemble an interaction term.\n\nThis is not by itself a proof that the assigned function is nonnegative or\nmonotone in every source. Parameter roles and scientific checks own those\nseparate claims.",
       "enum": [
@@ -371,9 +320,6 @@
       "title": "Actions",
       "type": "array"
     },
-    "intent": {
-      "$ref": "#/$defs/ConstructionIntent"
-    },
     "schema_version": {
       "const": "proposed-topology-action-transaction-1",
       "default": "proposed-topology-action-transaction-1",
@@ -382,7 +328,6 @@
     }
   },
   "required": [
-    "intent",
     "actions"
   ],
   "title": "ProposedTopologyActionTransaction",

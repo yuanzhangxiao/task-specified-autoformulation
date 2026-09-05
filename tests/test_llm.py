@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from autoformalism.construction import topology_draft_sha256
 from autoformalism.expressions import ValidationContext
 from autoformalism.llm.base import CachedLLMClient, ProviderResponse
 from autoformalism.llm.config import (
@@ -38,10 +39,13 @@ from autoformalism.schemas import (
     AtomicJudgeResult,
     CandidateModel,
     HybridJudgeResult,
+    ProposedConstructionIntent,
     ProposedFunctionalCandidate,
+    ProposedTopologyActionTransaction,
     ProposedTopologyCandidate,
     ProposerCandidateV2,
     ScientificJudgeResult,
+    TopologyDraft,
     enrich_proposal_v2,
 )
 from autoformalism.staging import enrich_topology_proposal
@@ -314,6 +318,64 @@ def test_cached_client_has_separate_staged_proposer_calls(tmp_path: Path) -> Non
     }
     assert functional.parsed.parameters[0].scope.value == "global"
     assert cached_topology.cache_hit is True
+
+
+def test_topology_actions_repair_exact_duplicates_without_mutating_parent(
+    tmp_path: Path,
+) -> None:
+    transaction = ProposedTopologyActionTransaction.model_validate(
+        {
+            "actions": [
+                {"action": "add_state", "name": "x"},
+                {"action": "add_state", "name": "x"},
+                {
+                    "action": "add_interaction",
+                    "interaction_id": "drive",
+                    "target": "x",
+                    "sources": ["input_u"],
+                },
+                {
+                    "action": "set_target_mapping",
+                    "channel": "target",
+                    "source": "x",
+                },
+            ]
+        }
+    )
+
+    class ActionClient(StubCachedClient):
+        def _call_provider(self, **kwargs: Any) -> ProviderResponse[Any]:
+            self.provider_calls += 1
+            self.provider_attempt_numbers.append(kwargs["attempt_number"])
+            return ProviderResponse(parsed=transaction, raw_response={})
+
+    parent = TopologyDraft()
+    parent_before = topology_draft_sha256(parent)
+    intent = ProposedConstructionIntent(
+        objective="initial_construction",
+        requirement_ids=("input_response",),
+        target_channels=("target",),
+    )
+    client = ActionClient(tmp_path)
+
+    result = client.propose_topology_actions(
+        system_prompt="Return topology actions.",
+        user_prompt="Construct the input response.",
+        parent=parent,
+        intent=intent,
+        context=ValidationContext(
+            targets=("target",), external_inputs=("input_u",)
+        ),
+        allowed_requirement_ids=("input_response",),
+    )
+
+    assert client.provider_attempt_numbers == [1]
+    assert len(result.parsed.actions) == 3
+    assert result.raw_response["_autoformalism_contract_repair"] == {
+        "schema_version": "topology-action-repair-1",
+        "exact_duplicate_action_indices_removed": (1,),
+    }
+    assert topology_draft_sha256(parent) == parent_before
 
 
 def test_staged_function_matching_equation_wrapper_is_repaired_without_retry(

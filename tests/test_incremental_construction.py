@@ -18,6 +18,7 @@ from autoformalism.construction import (
 from autoformalism.expressions import ValidationContext
 from autoformalism.schemas import (
     ConditionalBeamEntry,
+    ConstructionIntent,
     FunctionalDraft,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
@@ -28,6 +29,18 @@ from autoformalism.staging import topology_commitment_sha256
 
 def _context() -> ValidationContext:
     return ValidationContext(targets=("target",), external_inputs=("input_u",))
+
+
+def _intent(
+    objective: str = "initial_construction",
+) -> ConstructionIntent:
+    return ConstructionIntent.model_validate(
+        {
+            "objective": objective,
+            "requirement_ids": ["input_response"],
+            "target_channels": ["target"],
+        }
+    )
 
 
 def _topology_transaction(
@@ -72,29 +85,18 @@ def _topology_transaction(
         actions = [*reversed(actions[:2]), *reversed(actions[2:6]), actions[6]]
     return ProposedTopologyActionTransaction.model_validate(
         {
-            "intent": {
-                "objective": "initial_construction",
-                "requirement_ids": ["input_response"],
-                "target_channels": ["target"],
-            },
             "actions": actions,
         }
     )
 
 
 def _functional_transaction(
-    topology_sha256: str,
+    _topology_sha256: str,
     *,
     x_drive_expression: str = "gain * z",
 ) -> ProposedFunctionalActionTransaction:
     return ProposedFunctionalActionTransaction.model_validate(
         {
-            "topology_commitment_sha256": topology_sha256,
-            "intent": {
-                "objective": "initial_construction",
-                "requirement_ids": ["input_response"],
-                "target_channels": ["target"],
-            },
             "actions": [
                 {
                     "action": "set_interaction_function",
@@ -132,6 +134,7 @@ def _functional_transaction(
 def test_topology_actions_compile_to_existing_immutable_topology() -> None:
     application = apply_topology_actions(
         TopologyDraft(),
+        _intent(),
         _topology_transaction(),
         _context(),
         allowed_requirement_ids=("input_response",),
@@ -153,10 +156,10 @@ def test_topology_actions_compile_to_existing_immutable_topology() -> None:
 
 def test_topology_hash_and_transposition_ignore_action_order() -> None:
     first = apply_topology_actions(
-        TopologyDraft(), _topology_transaction(), _context()
+        TopologyDraft(), _intent(), _topology_transaction(), _context()
     ).draft
     second = apply_topology_actions(
-        TopologyDraft(), _topology_transaction(reverse=True), _context()
+        TopologyDraft(), _intent(), _topology_transaction(reverse=True), _context()
     ).draft
     table = ConstructionTranspositionTable()
 
@@ -168,37 +171,28 @@ def test_topology_hash_and_transposition_ignore_action_order() -> None:
 
 def test_topology_deletion_does_not_silently_cascade() -> None:
     draft = apply_topology_actions(
-        TopologyDraft(), _topology_transaction(), _context()
+        TopologyDraft(), _intent(), _topology_transaction(), _context()
     ).draft
     removal = ProposedTopologyActionTransaction.model_validate(
         {
-            "intent": {
-                "objective": "simplification",
-                "target_channels": ["target"],
-            },
             "actions": [{"action": "remove_generated_node", "name": "z"}],
         }
     )
 
     with pytest.raises(ValueError, match="unavailable sources"):
-        apply_topology_actions(draft, removal, _context())
+        apply_topology_actions(draft, _intent("simplification"), removal, _context())
 
 
 def test_partial_functions_are_conditioned_on_the_exact_topology() -> None:
     topology = finalize_topology_draft(
         apply_topology_actions(
-            TopologyDraft(), _topology_transaction(), _context()
+            TopologyDraft(), _intent(), _topology_transaction(), _context()
         ).draft,
         _context(),
     )
     commitment = topology_commitment_sha256(topology)
     partial_transaction = ProposedFunctionalActionTransaction.model_validate(
         {
-            "topology_commitment_sha256": commitment,
-            "intent": {
-                "objective": "function_repair",
-                "target_channels": ["target"],
-            },
             "actions": [
                 {
                     "action": "set_interaction_function",
@@ -210,6 +204,7 @@ def test_partial_functions_are_conditioned_on_the_exact_topology() -> None:
     )
     application = apply_functional_actions(
         FunctionalDraft(topology_commitment_sha256=commitment),
+        _intent("function_repair"),
         partial_transaction,
         topology,
         _context(),
@@ -229,13 +224,14 @@ def test_partial_functions_are_conditioned_on_the_exact_topology() -> None:
 def test_compatible_function_actions_expand_to_an_executable_candidate() -> None:
     topology = finalize_topology_draft(
         apply_topology_actions(
-            TopologyDraft(), _topology_transaction(), _context()
+            TopologyDraft(), _intent(), _topology_transaction(), _context()
         ).draft,
         _context(),
     )
     commitment = topology_commitment_sha256(topology)
     application = apply_functional_actions(
         FunctionalDraft(topology_commitment_sha256=commitment),
+        _intent(),
         _functional_transaction(commitment),
         topology,
         _context(),
@@ -260,13 +256,14 @@ def test_compatible_function_actions_expand_to_an_executable_candidate() -> None
 def test_incompatible_function_does_not_invalidate_its_topology() -> None:
     topology = finalize_topology_draft(
         apply_topology_actions(
-            TopologyDraft(), _topology_transaction(), _context()
+            TopologyDraft(), _intent(), _topology_transaction(), _context()
         ).draft,
         _context(),
     )
     commitment = topology_commitment_sha256(topology)
     application = apply_functional_actions(
         FunctionalDraft(topology_commitment_sha256=commitment),
+        _intent(),
         _functional_transaction(
             commitment,
             x_drive_expression="gain * input_u",

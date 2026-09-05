@@ -51,6 +51,8 @@ hashing, duplicate collapse, and topology-diverse beam selection.
 
 ## Milestone 2 — provider calls and action checkpoints
 
+Status: implemented behind a non-live additive API.
+
 - Add separate mechanism-intent, topology-action, and functional-action LLM
   calls with strict schemas.
 - Build their prompts from a runtime-owned public problem contract and routed
@@ -61,7 +63,9 @@ hashing, duplicate collapse, and topology-diverse beam selection.
 - Checkpoint action transactions and their deterministic applications rather
   than only the resulting complete candidate.
 - Persist transposition records so resume cannot regenerate an equivalent
-  branch under renamed components or reordered actions.
+  branch under reordered actions. Alpha-equivalent renaming detection remains
+  a later semantic-deduplication extension; exact runtime identifiers are still
+  meaningful because feedback and localized actions address them directly.
 
 Gate: mocked integration tests prove checkpoint/resume and verify that a retry
 cannot alter the parent draft or access test/private data.

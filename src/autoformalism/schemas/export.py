@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from autoformalism.schemas.candidate import CandidateModel
 from autoformalism.schemas.construction import (
+    ProposedConstructionIntent,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
 )
@@ -35,6 +36,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "functional-candidate-v1.schema.json": FunctionalCandidate,
     "proposer-candidate.schema.json": ProposerCandidate,
     "proposer-candidate-v2.schema.json": ProposerCandidateV2,
+    "proposed-construction-intent-v1.schema.json": ProposedConstructionIntent,
     "proposed-functional-candidate-v1.schema.json": ProposedFunctionalCandidate,
     "proposed-functional-action-transaction-v1.schema.json": (
         ProposedFunctionalActionTransaction

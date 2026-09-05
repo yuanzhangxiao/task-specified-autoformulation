@@ -1,56 +1,5 @@
 {
   "$defs": {
-    "ConstructionIntent": {
-      "additionalProperties": false,
-      "description": "Compact decision state externalized before proposing model edits.\n\nPublic requirement and target identifiers are anchors into runtime-owned\ncontracts.  They are not explanatory prose and do not duplicate model\nstructure.",
-      "properties": {
-        "objective": {
-          "$ref": "#/$defs/ConstructionObjective"
-        },
-        "requirement_ids": {
-          "default": [],
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
-            "type": "string"
-          },
-          "maxItems": 32,
-          "title": "Requirement Ids",
-          "type": "array"
-        },
-        "target_channels": {
-          "default": [],
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Target Channels",
-          "type": "array"
-        }
-      },
-      "required": [
-        "objective"
-      ],
-      "title": "ConstructionIntent",
-      "type": "object"
-    },
-    "ConstructionObjective": {
-      "description": "Scientific responsibility addressed by one incremental transaction.",
-      "enum": [
-        "initial_construction",
-        "target_path_repair",
-        "mechanism_repair",
-        "function_repair",
-        "numerical_repair",
-        "simplification"
-      ],
-      "title": "ConstructionObjective",
-      "type": "string"
-    },
     "ParameterRole": {
       "description": "Small operational role vocabulary used to derive parameter domains.",
       "enum": [
@@ -273,24 +222,14 @@
       "title": "Actions",
       "type": "array"
     },
-    "intent": {
-      "$ref": "#/$defs/ConstructionIntent"
-    },
     "schema_version": {
       "const": "proposed-functional-action-transaction-1",
       "default": "proposed-functional-action-transaction-1",
       "title": "Schema Version",
       "type": "string"
-    },
-    "topology_commitment_sha256": {
-      "pattern": "^[0-9a-f]{64}$",
-      "title": "Topology Commitment Sha256",
-      "type": "string"
     }
   },
   "required": [
-    "topology_commitment_sha256",
-    "intent",
     "actions"
   ],
   "title": "ProposedFunctionalActionTransaction",

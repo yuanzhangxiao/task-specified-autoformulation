@@ -10,6 +10,7 @@ from autoformalism.schemas import (
     HybridJudgeResult,
     JudgeResult,
     PairedTargetCompletenessJudgeResult,
+    ProposedConstructionIntent,
     ProposedFunctionalActionTransaction,
     ProposedFunctionalCandidate,
     ProposedTopologyActionTransaction,
@@ -38,6 +39,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
         "paired-target-completeness-judge-v1.schema.json",
         "proposer-candidate.schema.json",
         "proposer-candidate-v2.schema.json",
+        "proposed-construction-intent-v1.schema.json",
         "proposed-functional-candidate-v1.schema.json",
         "proposed-functional-action-transaction-v1.schema.json",
         "proposed-topology-action-transaction-v1.schema.json",
@@ -59,6 +61,9 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     )
     proposed_functional_schema = json.loads(
         first_contents["proposed-functional-candidate-v1.schema.json"]
+    )
+    proposed_intent_schema = json.loads(
+        first_contents["proposed-construction-intent-v1.schema.json"]
     )
     proposed_functional_action_schema = json.loads(
         first_contents["proposed-functional-action-transaction-v1.schema.json"]
@@ -96,6 +101,9 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert proposed_functional_schema == (
         ProposedFunctionalCandidate.model_json_schema(mode="validation")
     )
+    assert proposed_intent_schema == ProposedConstructionIntent.model_json_schema(
+        mode="validation"
+    )
     assert proposed_functional_action_schema == (
         ProposedFunctionalActionTransaction.model_json_schema(mode="validation")
     )
@@ -126,6 +134,7 @@ def test_exports_deterministic_valid_json_schemas(tmp_path: Path) -> None:
     assert proposer_schema["additionalProperties"] is False
     assert proposer_v2_schema["additionalProperties"] is False
     assert proposed_functional_schema["additionalProperties"] is False
+    assert proposed_intent_schema["additionalProperties"] is False
     assert proposed_functional_action_schema["additionalProperties"] is False
     assert proposed_topology_action_schema["additionalProperties"] is False
     assert proposed_topology_schema["additionalProperties"] is False
@@ -183,6 +192,11 @@ def test_checked_in_schemas_match_models() -> None:
             encoding="utf-8"
         )
     ) == ProposerCandidateV2.model_json_schema(mode="validation")
+    assert json.loads(
+        (
+            schema_directory / "proposed-construction-intent-v1.schema.json"
+        ).read_text(encoding="utf-8")
+    ) == ProposedConstructionIntent.model_json_schema(mode="validation")
     assert json.loads(
         (
             schema_directory / "proposed-functional-candidate-v1.schema.json"

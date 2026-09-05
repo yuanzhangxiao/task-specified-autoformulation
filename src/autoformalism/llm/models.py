@@ -13,11 +13,16 @@ from autoformalism.schemas import (
     CandidateModel,
     ComparativeJudgeResult,
     FunctionalCandidate,
+    FunctionalDraft,
     HybridJudgeResult,
     PairedTargetCompletenessJudgeResult,
+    ProposedConstructionIntent,
+    ProposedFunctionalActionTransaction,
+    ProposedTopologyActionTransaction,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
     TopologyCandidate,
+    TopologyDraft,
 )
 
 if TYPE_CHECKING:
@@ -165,4 +170,49 @@ class StagedLLMClient(Protocol):
         cache_only: bool = False,
     ) -> LLMCallResult[FunctionalCandidate]:
         """Request functions bound to one topology commitment."""
+        ...
+
+
+class IncrementalConstructionLLMClient(Protocol):
+    """Provider-neutral decision and localized-action proposal interface."""
+
+    def propose_construction_intent(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedConstructionIntent]:
+        """Select one bounded scientific construction or repair objective."""
+        ...
+
+    def propose_topology_actions(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        parent: TopologyDraft,
+        intent: ProposedConstructionIntent,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedTopologyActionTransaction]:
+        """Propose localized edits to one runtime-maintained topology draft."""
+        ...
+
+    def propose_functional_actions(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        parent: FunctionalDraft,
+        intent: ProposedConstructionIntent,
+        topology: TopologyCandidate,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedFunctionalActionTransaction]:
+        """Propose localized functions under one immutable topology."""
         ...

@@ -35,14 +35,19 @@ from autoformalism.schemas import (
     CandidateModel,
     ComparativeJudgeResult,
     FunctionalCandidate,
+    FunctionalDraft,
     HybridJudgeResult,
     PairedTargetCompletenessJudgeResult,
+    ProposedConstructionIntent,
+    ProposedFunctionalActionTransaction,
     ProposedFunctionalCandidate,
+    ProposedTopologyActionTransaction,
     ProposedTopologyCandidate,
     ProposerCandidateV2,
     ScientificJudgeResult,
     TargetCompletenessJudgeResult,
     TopologyCandidate,
+    TopologyDraft,
     enrich_proposal_v2,
 )
 
@@ -286,6 +291,156 @@ class CachedLLMClient(ABC):
             latency_ms=compact.latency_ms,
             usage=compact.usage,
             actual_provider_attempts=compact.provider_attempts,
+        )
+
+    def propose_construction_intent(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedConstructionIntent]:
+        """Select one public requirement/target focus before proposing edits."""
+
+        def validate(proposal: ProposedConstructionIntent) -> None:
+            intent = proposal.as_runtime_intent()
+            unknown_targets = set(intent.target_channels) - set(context.targets)
+            if unknown_targets:
+                raise ValueError(
+                    "construction intent references unknown targets: "
+                    f"{sorted(unknown_targets)}"
+                )
+            unknown_requirements = set(intent.requirement_ids) - set(
+                allowed_requirement_ids
+            )
+            if unknown_requirements:
+                raise ValueError(
+                    "construction intent references unknown requirements: "
+                    f"{sorted(unknown_requirements)}"
+                )
+
+        return self._structured_call(
+            role="construction_intent_proposer_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=ProposedConstructionIntent,
+            validate_parsed=validate,
+            request_metadata={
+                "allowed_requirement_ids": allowed_requirement_ids,
+                "validation_context": context.model_dump(mode="json"),
+            },
+            cache_only=cache_only,
+        )
+
+    def propose_topology_actions(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        parent: TopologyDraft,
+        intent: ProposedConstructionIntent,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedTopologyActionTransaction]:
+        """Request one non-empty topology edit against an immutable parent."""
+        from autoformalism.construction import (
+            apply_topology_actions,
+            normalize_topology_action_transaction,
+            topology_draft_sha256,
+        )
+
+        def validate(transaction: ProposedTopologyActionTransaction) -> None:
+            application = apply_topology_actions(
+                parent,
+                intent.as_runtime_intent(),
+                transaction,
+                context,
+                allowed_requirement_ids=allowed_requirement_ids,
+            )
+            if not application.changed:
+                raise ValueError("topology action transaction makes no change")
+
+        return self._structured_call(
+            role="topology_action_proposer_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=ProposedTopologyActionTransaction,
+            normalize_parsed=normalize_topology_action_transaction,
+            validate_parsed=validate,
+            request_metadata={
+                "parent_topology_draft_sha256": topology_draft_sha256(parent),
+                "construction_intent": intent.model_dump(mode="json"),
+                "allowed_requirement_ids": allowed_requirement_ids,
+                "validation_context": context.model_dump(mode="json"),
+            },
+            cache_only=cache_only,
+        )
+
+    def propose_functional_actions(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        parent: FunctionalDraft,
+        intent: ProposedConstructionIntent,
+        topology: TopologyCandidate,
+        context: ValidationContext,
+        allowed_requirement_ids: tuple[str, ...],
+        cache_only: bool = False,
+    ) -> LLMCallResult[ProposedFunctionalActionTransaction]:
+        """Request one compatible function edit under an immutable topology."""
+        from autoformalism.construction import (
+            apply_functional_actions,
+            assess_functional_compatibility,
+            functional_draft_sha256,
+            normalize_functional_action_transaction,
+        )
+        from autoformalism.staging import topology_commitment_sha256
+
+        def validate(transaction: ProposedFunctionalActionTransaction) -> None:
+            application = apply_functional_actions(
+                parent,
+                intent.as_runtime_intent(),
+                transaction,
+                topology,
+                context,
+                allowed_requirement_ids=allowed_requirement_ids,
+            )
+            if not application.changed:
+                raise ValueError("functional action transaction makes no change")
+            compatibility = assess_functional_compatibility(
+                topology, application.draft
+            )
+            if compatibility.status == "incompatible":
+                details = "; ".join(
+                    f"{item.code} at {item.location}: {item.message}"
+                    for item in compatibility.diagnostics
+                )
+                raise ValueError(
+                    "functional actions are incompatible with the topology: "
+                    f"{details}"
+                )
+
+        return self._structured_call(
+            role="functional_action_proposer_v1",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=ProposedFunctionalActionTransaction,
+            normalize_parsed=normalize_functional_action_transaction,
+            validate_parsed=validate,
+            request_metadata={
+                "parent_functional_draft_sha256": functional_draft_sha256(parent),
+                "topology_commitment_sha256": topology_commitment_sha256(
+                    topology
+                ),
+                "construction_intent": intent.model_dump(mode="json"),
+                "allowed_requirement_ids": allowed_requirement_ids,
+                "validation_context": context.model_dump(mode="json"),
+            },
+            cache_only=cache_only,
         )
 
     def judge(

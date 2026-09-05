@@ -64,6 +64,25 @@ class ConstructionIntent(StrictSchema):
         return self
 
 
+class ProposedConstructionIntent(StrictSchema):
+    """Provider-selected scientific focus for one subsequent action call."""
+
+    schema_version: Literal["proposed-construction-intent-1"] = (
+        "proposed-construction-intent-1"
+    )
+    objective: ConstructionObjective
+    requirement_ids: tuple[Identifier, ...] = Field(default=(), max_length=32)
+    target_channels: tuple[Identifier, ...] = Field(default=(), max_length=64)
+
+    def as_runtime_intent(self) -> ConstructionIntent:
+        """Convert the provider response into the runtime-owned decision state."""
+        return ConstructionIntent(
+            objective=self.objective,
+            requirement_ids=self.requirement_ids,
+            target_channels=self.target_channels,
+        )
+
+
 class AddStateAction(StrictSchema):
     """Add one generated dynamic state to the runtime-maintained draft."""
 
@@ -159,7 +178,6 @@ class ProposedTopologyActionTransaction(StrictSchema):
     schema_version: Literal["proposed-topology-action-transaction-1"] = (
         "proposed-topology-action-transaction-1"
     )
-    intent: ConstructionIntent
     actions: tuple[TopologyAction, ...] = Field(min_length=1, max_length=64)
 
 
@@ -279,8 +297,6 @@ class ProposedFunctionalActionTransaction(StrictSchema):
     schema_version: Literal["proposed-functional-action-transaction-1"] = (
         "proposed-functional-action-transaction-1"
     )
-    topology_commitment_sha256: Sha256Digest
-    intent: ConstructionIntent
     actions: tuple[FunctionalAction, ...] = Field(min_length=1, max_length=128)
 
 
@@ -338,6 +354,7 @@ class TopologyActionApplication(StrictSchema):
     )
     before_sha256: Sha256Digest
     after_sha256: Sha256Digest
+    intent: ConstructionIntent
     changed: bool
     added_nodes: tuple[Identifier, ...] = ()
     removed_nodes: tuple[Identifier, ...] = ()
@@ -354,6 +371,7 @@ class FunctionalActionApplication(StrictSchema):
     )
     before_sha256: Sha256Digest
     after_sha256: Sha256Digest
+    intent: ConstructionIntent
     changed: bool
     set_interaction_ids: tuple[Identifier, ...] = ()
     removed_interaction_ids: tuple[Identifier, ...] = ()
@@ -382,6 +400,7 @@ __all__ = [
     "FunctionalCompatibilityReport",
     "FunctionalDraft",
     "InteractionFunctionDraft",
+    "ProposedConstructionIntent",
     "ProposedFunctionalActionTransaction",
     "ProposedTopologyActionTransaction",
     "RemoveGeneratedNodeAction",

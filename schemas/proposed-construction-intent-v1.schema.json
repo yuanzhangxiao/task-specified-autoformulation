@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "ConstructionObjective": {
+      "description": "Scientific responsibility addressed by one incremental transaction.",
+      "enum": [
+        "initial_construction",
+        "target_path_repair",
+        "mechanism_repair",
+        "function_repair",
+        "numerical_repair",
+        "simplification"
+      ],
+      "title": "ConstructionObjective",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Provider-selected scientific focus for one subsequent action call.",
+  "properties": {
+    "objective": {
+      "$ref": "#/$defs/ConstructionObjective"
+    },
+    "requirement_ids": {
+      "default": [],
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "title": "Requirement Ids",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "proposed-construction-intent-1",
+      "default": "proposed-construction-intent-1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "target_channels": {
+      "default": [],
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Target Channels",
+      "type": "array"
+    }
+  },
+  "required": [
+    "objective"
+  ],
+  "title": "ProposedConstructionIntent",
+  "type": "object"
+}

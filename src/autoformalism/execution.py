@@ -404,6 +404,21 @@ class _RoleClient:
             cache_only=cache_only,
         )
 
+    def propose_construction_intent(self, **kwargs):
+        """Delegate one incremental construction-intent call."""
+        method = self._proposer.propose_construction_intent  # type: ignore[attr-defined]
+        return method(**kwargs)
+
+    def propose_topology_actions(self, **kwargs):
+        """Delegate one incremental topology-action call."""
+        method = self._proposer.propose_topology_actions  # type: ignore[attr-defined]
+        return method(**kwargs)
+
+    def propose_functional_actions(self, **kwargs):
+        """Delegate one incremental functional-action call."""
+        method = self._proposer.propose_functional_actions  # type: ignore[attr-defined]
+        return method(**kwargs)
+
 
 def build_experiment_parser(
     *,

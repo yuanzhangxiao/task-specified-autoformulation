@@ -20,6 +20,7 @@ from autoformalism.schemas.construction import (
     AddStateAction,
     ConditionalBeamEntry,
     ConstructionDiagnostic,
+    ConstructionIntent,
     FunctionalActionApplication,
     FunctionalCompatibilityReport,
     FunctionalDraft,
@@ -77,8 +78,37 @@ def functional_draft_sha256(draft: FunctionalDraft) -> str:
     return _sha256(canonical.model_dump(mode="json"))
 
 
+def normalize_topology_action_transaction(
+    transaction: ProposedTopologyActionTransaction,
+) -> tuple[ProposedTopologyActionTransaction, dict[str, object]]:
+    """Remove only byte-equivalent repeated topology actions.
+
+    This is a lossless representation repair: actions that merely share a
+    target or identifier but differ in content or order are never collapsed.
+    """
+    actions, removed = _deduplicate_exact_actions(transaction.actions)
+    normalized = transaction.model_copy(update={"actions": actions})
+    return normalized, {
+        "schema_version": "topology-action-repair-1",
+        "exact_duplicate_action_indices_removed": removed,
+    }
+
+
+def normalize_functional_action_transaction(
+    transaction: ProposedFunctionalActionTransaction,
+) -> tuple[ProposedFunctionalActionTransaction, dict[str, object]]:
+    """Remove only byte-equivalent repeated functional actions."""
+    actions, removed = _deduplicate_exact_actions(transaction.actions)
+    normalized = transaction.model_copy(update={"actions": actions})
+    return normalized, {
+        "schema_version": "functional-action-repair-1",
+        "exact_duplicate_action_indices_removed": removed,
+    }
+
+
 def apply_topology_actions(
     draft: TopologyDraft,
+    intent: ConstructionIntent,
     transaction: ProposedTopologyActionTransaction,
     context: ValidationContext,
     *,
@@ -92,8 +122,8 @@ def apply_topology_actions(
     unrelated science.
     """
     _validate_intent(
-        transaction.intent.requirement_ids,
-        transaction.intent.target_channels,
+        intent.requirement_ids,
+        intent.target_channels,
         context,
         allowed_requirement_ids=allowed_requirement_ids,
     )
@@ -106,7 +136,7 @@ def apply_topology_actions(
     }
     measurements = {item.state: item for item in before.state_measurements}
     mappings = {item.channel: item for item in before.target_mappings}
-    mechanism_ids = tuple(sorted(transaction.intent.requirement_ids))
+    mechanism_ids = tuple(sorted(intent.requirement_ids))
     added_nodes: list[str] = []
     removed_nodes: list[str] = []
     added_interactions: list[str] = []
@@ -198,6 +228,7 @@ def apply_topology_actions(
     return TopologyActionApplication(
         before_sha256=before_sha256,
         after_sha256=after_sha256,
+        intent=intent,
         changed=before_sha256 != after_sha256,
         added_nodes=tuple(added_nodes),
         removed_nodes=tuple(removed_nodes),
@@ -249,6 +280,7 @@ def finalize_topology_draft(
 
 def apply_functional_actions(
     draft: FunctionalDraft,
+    intent: ConstructionIntent,
     transaction: ProposedFunctionalActionTransaction,
     topology: TopologyCandidate,
     context: ValidationContext,
@@ -259,11 +291,9 @@ def apply_functional_actions(
     commitment = topology_commitment_sha256(topology)
     if draft.topology_commitment_sha256 != commitment:
         raise ValueError("functional draft belongs to a different topology")
-    if transaction.topology_commitment_sha256 != commitment:
-        raise ValueError("functional transaction belongs to a different topology")
     _validate_intent(
-        transaction.intent.requirement_ids,
-        transaction.intent.target_channels,
+        intent.requirement_ids,
+        intent.target_channels,
         context,
         allowed_requirement_ids=allowed_requirement_ids,
     )
@@ -336,6 +366,7 @@ def apply_functional_actions(
     return FunctionalActionApplication(
         before_sha256=before_sha256,
         after_sha256=after_sha256,
+        intent=intent,
         changed=before_sha256 != after_sha256,
         set_interaction_ids=tuple(set_interactions),
         removed_interaction_ids=tuple(removed_interactions),
@@ -740,6 +771,25 @@ def _beam_key(entry: ConditionalBeamEntry) -> tuple[float, str, str]:
     return (entry.score, entry.topology_sha256, entry.functional_sha256)
 
 
+def _deduplicate_exact_actions(actions: tuple) -> tuple[tuple, tuple[int, ...]]:
+    retained: list[object] = []
+    removed: list[int] = []
+    observed: set[str] = set()
+    for index, action in enumerate(actions):
+        canonical = json.dumps(
+            action.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        if canonical in observed:
+            removed.append(index)
+            continue
+        observed.add(canonical)
+        retained.append(action)
+    return tuple(retained), tuple(removed)
+
+
 def _sha256(payload: object) -> str:
     encoded = json.dumps(
         payload,
@@ -758,6 +808,8 @@ __all__ = [
     "finalize_functional_draft",
     "finalize_topology_draft",
     "functional_draft_sha256",
+    "normalize_functional_action_transaction",
+    "normalize_topology_action_transaction",
     "select_conditional_beam",
     "topology_draft_sha256",
 ]

@@ -19,6 +19,7 @@ from autoformalism.construction import (
 from autoformalism.expressions import ValidationContext
 from autoformalism.schemas import (
     ConditionalBeamEntry,
+    ConstructionIntent,
     FunctionalDraft,
     ProposedFunctionalActionTransaction,
     ProposedTopologyActionTransaction,
@@ -33,16 +34,16 @@ def main() -> None:
         targets=("target",),
         external_inputs=("input_u",),
     )
-    intent = {
-        "objective": "initial_construction",
-        "requirement_ids": ["input_response"],
-        "target_channels": ["target"],
-    }
+    intent = ConstructionIntent(
+        objective="initial_construction",
+        requirement_ids=("input_response",),
+        target_channels=("target",),
+    )
     topology_application = apply_topology_actions(
         TopologyDraft(),
+        intent,
         ProposedTopologyActionTransaction.model_validate(
             {
-                "intent": intent,
                 "actions": [
                     {"action": "add_state", "name": "x"},
                     {"action": "add_state", "name": "z"},
@@ -87,10 +88,9 @@ def main() -> None:
     commitment = topology_commitment_sha256(topology)
     functional_application = apply_functional_actions(
         FunctionalDraft(topology_commitment_sha256=commitment),
+        intent,
         ProposedFunctionalActionTransaction.model_validate(
             {
-                "topology_commitment_sha256": commitment,
-                "intent": intent,
                 "actions": [
                     {
                         "action": "set_interaction_function",
