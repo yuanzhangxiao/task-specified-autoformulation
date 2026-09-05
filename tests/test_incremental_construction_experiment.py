@@ -68,6 +68,7 @@ def test_aces_worker_redirects_compiler_caches_out_of_home() -> None:
     assert "AF_IPC_TMP_ROOT" in submit
     assert 'runtime_tmp="${AF_IPC_TMP_ROOT}/${SLURM_JOB_ID}"' in worker
     assert '${#runtime_tmp} > 60' in worker
+    assert '${runtime_tmp}:${runtime_tmp}' in worker
 
 
 def test_freeze_and_summary_keep_test_and_private_data_closed(

@@ -93,7 +93,7 @@ jq -n \
   '{schema_version:"runtime-cache-paths-1",triton:$triton,torchinductor:$torchinductor,vllm:$vllm,xdg:$xdg,cuda:$cuda,tmp:$tmp}' \
   >"${AF_OUTPUT_ROOT}/runtime/cache-paths-${SLURM_JOB_ID}.json"
 "${runtime}" exec --nv \
-  --bind "${AF_HF_HOME}:${AF_HF_HOME},${job_cache_root}:${job_cache_root}" \
+  --bind "${AF_HF_HOME}:${AF_HF_HOME},${job_cache_root}:${job_cache_root},${runtime_tmp}:${runtime_tmp}" \
   --env "HF_HOME=${AF_HF_HOME}" \
   --env "TRITON_CACHE_DIR=${TRITON_CACHE_DIR}" \
   --env "TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR}" \
