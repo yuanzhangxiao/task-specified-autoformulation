@@ -34,6 +34,7 @@ from autoformalism.staged_topology import (
     merge_variable_reply,
     public_structure_checks,
     validate_equation,
+    validate_inventory_revision,
 )
 
 
@@ -188,6 +189,9 @@ def run_staged_topology(
                 reply: Any, selected=selected, equations=equations
             ) -> Any:
                 if reply.inventory_revision is not None:
+                    validate_inventory_revision(
+                        brief, inventory, reply.inventory_revision
+                    )
                     return reply
                 definition = EquationDefinition(
                     name=selected.name,

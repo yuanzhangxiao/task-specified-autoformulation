@@ -180,6 +180,79 @@ def test_drain_preserves_partial_calls_without_terminal_failure(tmp_path: Path) 
     assert not (tmp_path / "result/result.json").exists()
 
 
+def test_no_op_revision_is_repaired_locally_and_replayed(tmp_path: Path) -> None:
+    fixture = task()
+    inventory = tuple(
+        ScientificVariable.model_validate(item) for item in fixture["initial_inventory"]
+    )
+    calls = []
+
+    def transport(url, body, timeout):
+        payload = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
+        calls.append(payload)
+        if len(calls) == 1:
+            return provider_response(
+                {
+                    "terms": [],
+                    "inventory_revision": {
+                        "variable": next(
+                            item
+                            for item in payload["frozen_inventory"]
+                            if item["name"] == payload["selected_lhs"]["name"]
+                        ),
+                        "reason": "a clearance parameter is missing",
+                    },
+                }
+            )
+        if len(calls) == 2:
+            diagnostic = payload["runtime_diagnostics"]
+            assert "definition unchanged" in diagnostic["error"]
+            assert (
+                "clearance parameter"
+                in diagnostic["rejected_response"]["inventory_revision"]["reason"]
+            )
+        sources = ["z", "x"] if payload["selected_lhs"]["name"] == "x" else ["u", "z"]
+        return provider_response(
+            {
+                "terms": [
+                    {
+                        "sources": sources,
+                        "outer_sign": "add",
+                        "scientific_role": "response",
+                    }
+                ],
+                "inventory_revision": None,
+            }
+        )
+
+    def run():
+        client = StagedTopologyClient(
+            settings=StagedModelSettings(),
+            base_url="http://localhost:8000",
+            directory=tmp_path / "calls",
+            namespace="no-op-repair",
+            seed=0,
+            transport=transport,
+        )
+        return run_staged_topology(
+            PublicScientificBrief.model_validate(fixture["brief"]),
+            ValidationContext.model_validate(fixture["context"]),
+            client,
+            tmp_path / "result",
+            initial_inventory=inventory,
+        )
+
+    result = run()
+    assert result["status"] == "complete"
+    assert result["public_structure_checks_passed"]
+    assert result["inventory_revision"] is None
+    assert result["inventory"] == [item.model_dump(mode="json") for item in inventory]
+    assert sum(not event["accepted"] for event in result["events"]) == 1
+    assert result["physical_requests"] == 3
+    assert run() == result
+    assert len(calls) == 3
+
+
 @pytest.mark.parametrize("finish", ["stop", "length"])
 def test_malformed_and_truncated_visible_text_reaches_repair(
     tmp_path: Path, finish: str

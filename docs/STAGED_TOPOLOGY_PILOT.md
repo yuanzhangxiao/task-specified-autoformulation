@@ -16,7 +16,11 @@ assembly sign and a scientific role. Each call sees the full inventory and
 accepted equation sketch. Its source enum and term limit are enforced by the
 same Pydantic-derived schema sent to the provider. An alternative inventory
 revision response is retained as unresolved; this version does not automatically
-backtrack. Local contract repairs receive the rejected visible response and
+backtrack. A revision must add a variable or change its definition, obey public
+data roles and preserve required declarations and construction limits. Repeating
+an existing name and definition, including rephrased role text, triggers local
+repair. Checking a revision does not apply it or revise accepted equations.
+Local contract repairs receive the rejected visible response and
 diagnostics. Routing, qualitative response assertions, shared-transfer rules and
 the grouped/joint comparison variants are deferred.
 
@@ -81,3 +85,27 @@ Hugging Face, compute-cache and short IPC-root environment paths. They do not
 submit jobs themselves. The 120B campaign follows a reviewed implementation
 probe; a failure in 20B scientific modeling does not by itself establish a
 120B limitation.
+
+## First result and bounded follow-up
+
+ACES job 2096599 (source `cd4e889`) completed in 3 minutes 28 seconds. One of
+two public constructions compiled and passed necessary structural checks; all
+three diagnostic fixtures passed. The worker recorded 21 physical calls and
+33,660 provider tokens. Diagnostic successes do not enter the public denominator.
+
+The anonymous-system topology represents memory and feedback paths, but its
+four differential variables and fourteen terms may be redundant. Nonlinearity,
+stability and predictive quality remain untested without functions and fitting.
+The Dalla construction stopped while defining insulin: it requested a clearance
+parameter as an inventory revision but repeated the existing variable and its
+definition unchanged. That outcome supports clarifying self-dependence and the
+later parameter stage, and rejecting unchanged revisions locally. It does not
+yet support implementing automatic backward routing.
+
+`configs/staged_topology_probe_v2.json` preserves the same public cases, model,
+serving settings and budgets, and tests seeds 0, 1 and 2. Six public constructions
+and the same three diagnostic fixtures share one H100 worker. The v1 config,
+source and results stay frozen. The follow-up measures topology completion,
+necessary public structure, local-repair failures, actual revision requests,
+calls and tokens. It is an implementation probe, not evidence of fitted-model
+quality or an estimate of broad benchmark performance.

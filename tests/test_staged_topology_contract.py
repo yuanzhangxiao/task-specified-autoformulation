@@ -20,6 +20,8 @@ from autoformalism.llm.staged_topology import (
 from autoformalism.schemas.staged_topology import (
     EquationDefinition,
     EquationReply,
+    InventoryRevision,
+    ModelingLimits,
     PublicScientificBrief,
     PublicVariable,
     ScientificRequirement,
@@ -33,6 +35,7 @@ from autoformalism.staged_topology import (
     merge_variable_reply,
     public_structure_checks,
     validate_equation,
+    validate_inventory_revision,
 )
 
 
@@ -89,6 +92,73 @@ def test_inventory_rejects_invalid_public_or_internal_treatment(
 ) -> None:
     with pytest.raises(ValueError):
         merge_variable_reply(brief(), (), VariableReply(variables=(variable,)))
+
+
+def test_repeating_unused_public_variable_preserves_accepted_role() -> None:
+    inventory = (var("x"), var("a", "unused"), var("u", "supplied"))
+    repeated = inventory[1].model_copy(update={"scientific_role": "rephrased role"})
+    assert (
+        merge_variable_reply(brief(), inventory, VariableReply(variables=(repeated,)))
+        == inventory
+    )
+
+
+@pytest.mark.parametrize("role", ["Role of x", "a rephrased role"])
+def test_inventory_revision_rejects_no_op_even_if_role_is_rephrased(role: str) -> None:
+    inventory = (var("x"), var("u", "supplied"))
+    revision = InventoryRevision(
+        variable=var("x").model_copy(update={"scientific_role": role}),
+        reason="a rate parameter will be needed",
+    )
+    with pytest.raises(ValueError, match="definition unchanged"):
+        validate_inventory_revision(brief(), inventory, revision)
+
+
+@pytest.mark.parametrize(
+    ("variable", "message"),
+    [
+        (var("x", "supplied"), "target x"),
+        (var("u"), "external_input u"),
+        (var("z", "supplied"), "internal z"),
+        (var("exp"), "reserved variable"),
+        (var("u", "unused"), "required mechanism drivers"),
+    ],
+)
+def test_inventory_revision_obeys_public_contract(
+    variable: ScientificVariable, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_inventory_revision(
+            brief(),
+            (var("x"), var("u", "supplied")),
+            InventoryRevision(variable=variable, reason="proposed change"),
+        )
+
+
+@pytest.mark.parametrize(
+    "variable", [var("z"), var("a", "supplied"), var("x", "algebraic")]
+)
+def test_legitimate_revision_is_validated_without_mutation(
+    variable: ScientificVariable,
+) -> None:
+    inventory = (var("x"), var("a", "unused"), var("u", "supplied"))
+    before = tuple(item.model_dump() for item in inventory)
+    validate_inventory_revision(
+        brief(), inventory, InventoryRevision(variable=variable, reason="needed")
+    )
+    assert tuple(item.model_dump() for item in inventory) == before
+
+
+def test_inventory_revision_cannot_exceed_generated_variable_limit() -> None:
+    constrained = brief().model_copy(
+        update={"limits": ModelingLimits(generated_variables=1)}
+    )
+    with pytest.raises(ValueError, match="generated variable limit"):
+        validate_inventory_revision(
+            constrained,
+            (var("x"), var("u", "supplied")),
+            InventoryRevision(variable=var("z"), reason="additional memory"),
+        )
 
 
 def test_inventory_requires_explicit_mode_revision_and_all_targets() -> None:

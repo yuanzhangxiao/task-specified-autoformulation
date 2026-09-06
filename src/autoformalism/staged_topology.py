@@ -22,6 +22,7 @@ from autoformalism.schemas.staged import (
 )
 from autoformalism.schemas.staged_topology import (
     EquationDefinition,
+    InventoryRevision,
     ModelingLimits,
     PublicScientificBrief,
     PublicVariable,
@@ -123,7 +124,12 @@ def merge_variable_reply(
         if role in {"external_input", "covariate", "time"} and generated:
             raise ValueError(f"{role} {item.name} must be supplied or unused")
         existing = merged.get(item.name)
-        if existing and existing.definition == "unused" and role != "internal":
+        if (
+            existing
+            and existing.definition == "unused"
+            and item.definition != "unused"
+            and role != "internal"
+        ):
             merged[item.name] = item
             continue
         if existing and existing.definition != item.definition:
@@ -170,6 +176,32 @@ def freeze_inventory(
                 f"{list(dependency.acceptable_sources)}"
             )
     return inventory
+
+
+def validate_inventory_revision(
+    brief: PublicScientificBrief,
+    inventory: tuple[ScientificVariable, ...],
+    revision: InventoryRevision,
+) -> None:
+    """Check a proposed inventory change without applying it or routing backward."""
+    proposed = revision.variable
+    existing = next((item for item in inventory if item.name == proposed.name), None)
+    if existing is not None and existing.definition == proposed.definition:
+        raise ValueError(
+            f"inventory revision leaves {proposed.name} and its definition unchanged; "
+            "return equation terms using the current inventory, or request an "
+            "actual variable addition or definition change. A differential "
+            "variable may be its own source; fitted parameters belong to the "
+            "later functional-form stage, not the variable inventory"
+        )
+    candidate = tuple(
+        proposed if item.name == proposed.name else item for item in inventory
+    )
+    if existing is None:
+        candidate = (*candidate, proposed)
+    # Revalidate public roles, required drivers and construction limits on the
+    # hypothetical inventory. Accepted equations and inventory remain untouched.
+    freeze_inventory(brief, candidate)
 
 
 def validate_equation(
