@@ -17,7 +17,9 @@ readonly worker_seconds="$(jq -r '.config.wall_seconds' "${plan}")"
 readonly runtime_root="${AF_OUTPUT_ROOT}/runtime"
 readonly job_cache="${AF_COMPUTE_CACHE_ROOT}/${SLURM_JOB_ID}"
 readonly ipc_tmp="${AF_IPC_TMP_ROOT}/${SLURM_JOB_ID}"
-readonly endpoint="http://127.0.0.1:8100"
+endpoint_port="$("${AF_PYTHON}" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+[[ "${endpoint_port}" =~ ^[0-9]+$ ]] || exit 2
+readonly endpoint="http://127.0.0.1:${endpoint_port}"
 (( ${#ipc_tmp} <= 60 )) || { echo 'IPC path too long' >&2; exit 2; }
 [[ -f "${AF_VLLM_IMAGE}" && -f "${plan}" && -x "${AF_PYTHON}" ]] || exit 2
 mkdir -p "${runtime_root}" "${job_cache}" "${ipc_tmp}"
@@ -72,7 +74,7 @@ sha256sum "${AF_REPO_ROOT}/scripts/hpc/run_staged_topology_server.sh" \
   --env "CUDA_CACHE_PATH=${job_cache}/cuda" \
   --env "TMPDIR=${ipc_tmp}" \
   "${AF_VLLM_IMAGE}" vllm serve "${model}" --revision "${model_revision}" \
-  --host 127.0.0.1 --port 8100 --max-model-len "${context_tokens}" \
+  --host 127.0.0.1 --port "${endpoint_port}" --max-model-len "${context_tokens}" \
   --max-num-seqs 1 --gpu-memory-utilization 0.90 \
   --tensor-parallel-size "${AF_TENSOR_PARALLEL_SIZE:-1}" \
   >"${runtime_root}/server-${SLURM_JOB_ID}.log" 2>&1 &
