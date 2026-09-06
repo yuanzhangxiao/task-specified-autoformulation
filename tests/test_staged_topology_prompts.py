@@ -30,6 +30,8 @@ def test_variable_identification_prompt_has_one_scientific_responsibility() -> N
     assert "Do not propose equations" in system
     assert "valid empty variable list is allowed" in system
     assert "Public-data roles" in system
+    assert "Data availability is distinct from candidate generation" in system
+    assert "target as differential or\nalgebraic, never supplied or unused" in system
     assert "public variable currently marked unused may be activated" in system
     assert "only definition update allowed" in system
     assert "every internal\nvariable must preserve" in system
@@ -84,6 +86,12 @@ def test_equation_topology_prompt_enforces_frozen_inventory_and_grouped_terms() 
     assert "inventory_revision" in system
     assert "Do not repeat the left-hand side" in system
     assert "does not claim" in system
+    assert "differential left-hand side may also appear" in system
+    assert "k_I * I" in system
+    assert "belong to the later\nfunctional-form stage" in system
+    assert "actual variable addition" in system
+    assert "Repeating an existing name and\ndefinition" in system
+    assert "legitimate request as\nunresolved" in system
 
 
 def test_equation_topology_request_includes_selected_lhs_and_allowed_sources() -> (
