@@ -66,8 +66,8 @@ set. Use that self-dependence for scientifically justified clearance,
 relaxation, decay, or feedback. Numeric coefficients, rate constants, time
 constants, scales, and all other fitted parameters belong to the later
 functional-form stage, not the variable inventory. For example, the topology
-of a later term `k_I * I` uses source `I`; do not request a new variable merely
-because `k_I` will be needed later.
+of a later term `k * x` uses source `x`; do not request a new variable merely
+because `k` will be needed later.
 
 Use only names from the displayed allowed-source list. Do not introduce or
 rename a variable silently. If an additional public or internal variable is
