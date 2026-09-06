@@ -87,7 +87,7 @@ def test_equation_topology_prompt_enforces_frozen_inventory_and_grouped_terms() 
     assert "Do not repeat the left-hand side" in system
     assert "does not claim" in system
     assert "differential left-hand side may also appear" in system
-    assert "k_I * I" in system
+    assert "k * x" in system
     assert "belong to the later\nfunctional-form stage" in system
     assert "actual variable addition" in system
     assert "Repeating an existing name and\ndefinition" in system
