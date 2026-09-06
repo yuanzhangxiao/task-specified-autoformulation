@@ -30,6 +30,9 @@ def test_variable_identification_prompt_has_one_scientific_responsibility() -> N
     assert "Do not propose equations" in system
     assert "valid empty variable list is allowed" in system
     assert "Public-data roles" in system
+    assert "public variable currently marked unused may be activated" in system
+    assert "only definition update allowed" in system
+    assert "every internal\nvariable must preserve" in system
 
 
 def test_variable_identification_request_keeps_runtime_artifacts_separate() -> None:
