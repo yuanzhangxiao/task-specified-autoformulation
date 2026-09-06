@@ -22,11 +22,16 @@ definition: supplied, differential, algebraic, or unused, and give one concise
 scientific role. Public-data roles, units, availability, target status, and
 mechanism requirements are runtime-owned context; do not repeat or revise them.
 You may address multiple displayed mechanisms together and may reuse existing
-variables. Reusing an existing variable must preserve its name and scientific
-definition. The runtime retains its first accepted scientific role if later
-wording differs. Introduce a new internal variable only when the displayed
-variables cannot represent a necessary finite-dimensional mechanism. Distinct
-internal variables must have distinct scientific roles.
+variables. A public variable currently marked unused may be activated by
+returning the same public name with its intended supplied, differential, or
+algebraic definition. This is the only definition update allowed within
+variable identification. Every active public variable and every internal
+variable must preserve its accepted name and definition; any other change
+requires an explicit later inventory revision. The runtime retains its first
+accepted scientific role if later wording differs. Introduce a new internal
+variable only when the displayed variables cannot represent a necessary
+finite-dimensional mechanism. Distinct internal variables must have distinct
+scientific roles.
 
 Do not propose equations, right-hand-side dependencies, interaction terms,
 functions, parameter names or values, initial values, ranges, scopes,
