@@ -192,6 +192,87 @@ def test_equation_batch_wrong_length_retries_without_partial_acceptance(
     assert len(first_progress["accepted_functions"]) == 2
 
 
+def test_hybrid_batch_repairs_only_the_failed_nonlinear_term(tmp_path: Path) -> None:
+    task = function_diagnostic("driven_memory", ModelingLimits())
+    source = task["source"]
+    source["equations"][0]["terms"][0]["scientific_role"] = (
+        "nonlinear joint response and relaxation"
+    )
+    task["brief"]["requirements"][0]["public_requirement"] += (
+        " with nonlinear feedback"
+    )
+    brief = PublicScientificBrief.model_validate(task["brief"])
+    context = ValidationContext.model_validate(task["context"])
+    topology, _ = lower_topology(
+        brief,
+        tuple(
+            ScientificVariable.model_validate(item) for item in source["inventory"]
+        ),
+        tuple(
+            EquationDefinition.model_validate(item) for item in source["equations"]
+        ),
+        context,
+    )
+    source["topology"] = topology.model_dump(mode="json")
+    calls = []
+
+    def transport(url, body, timeout):
+        del url, timeout
+        payload = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
+        calls.append(payload)
+        if "selected_state" in payload:
+            return response({"initial": {"fixed_value": 0.0}})
+        if "selected_term" in payload:
+            assert payload["selected_term"]["functional_obligation"][
+                "requires_nonlinear_source_dependence"
+            ]
+            assert payload["runtime_diagnostics"]["repair_scope"] == (
+                "selected_term_only"
+            )
+            return response(
+                {
+                    "expression": "z**2/(1+z**2)-x",
+                    "parameters": [],
+                }
+            )
+        functions = [
+            {"expression": "-".join(term["sources"]), "parameters": []}
+            for term in payload["selected_equation"]["terms"]
+        ]
+        return response({"functions": functions})
+
+    client = StagedTopologyClient(
+        settings=StagedModelSettings(),
+        base_url="http://localhost:8000",
+        directory=tmp_path / "calls",
+        namespace="hybrid",
+        seed=0,
+        transport=transport,
+    )
+    result = run_staged_functions(
+        brief,
+        context,
+        source,
+        client,
+        tmp_path,
+        generation_granularity="equation_batch_atomic_repair",
+    )
+    assert result["complete_model"]
+    assert result["physical_requests"] == 4
+    assert sum("selected_equation" in call for call in calls) == 2
+    assert sum("selected_term" in call for call in calls) == 1
+    assert sum("selected_state" in call for call in calls) == 1
+    audits = result["batch_term_audits"]
+    assert len(audits) == 2
+    assert sum(item["atomic_repair_attempted"] for item in audits) == 1
+    repaired = next(item for item in audits if item["atomic_repair_attempted"])
+    assert repaired["atomic_repair_succeeded"]
+    assert repaired["final_source"] == "atomic_repair"
+    assert result["scientific_review_facts"][
+        "required_nonlinearity_has_syntax_evidence"
+    ]
+
+
 def test_function_drain_saves_partial_state_and_resumes_without_reissuing(
     tmp_path: Path,
 ) -> None:

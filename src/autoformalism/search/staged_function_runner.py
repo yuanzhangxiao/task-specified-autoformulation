@@ -20,6 +20,7 @@ from autoformalism.schemas.candidate import StateKind
 from autoformalism.schemas.construction import FunctionalDraft
 from autoformalism.schemas.staged_functions import (
     EquationFunctionBatchReply,
+    InteractionFunctionObligation,
     InteractionFunctionReply,
     LatentInitialReply,
 )
@@ -40,12 +41,20 @@ from autoformalism.staged_functions import (
     apply_equation_function_reply,
     apply_function_reply,
     apply_initial_reply,
+    bind_function_reply,
+    derive_interaction_function_obligation,
+    has_nonlinear_source_dependence,
     initial_symbols,
+    rename_expression,
 )
 from autoformalism.staged_topology import content_hash, lower_topology
 from autoformalism.staging import topology_commitment_sha256
 
-FunctionGenerationGranularity = Literal["atomic_interaction", "equation_batch"]
+FunctionGenerationGranularity = Literal[
+    "atomic_interaction",
+    "equation_batch",
+    "equation_batch_atomic_repair",
+]
 
 
 def run_staged_functions(
@@ -75,6 +84,7 @@ def run_staged_functions(
     commitment = topology_commitment_sha256(topology)
     draft = FunctionalDraft(topology_commitment_sha256=commitment)
     events: list[dict[str, Any]] = []
+    batch_term_audits: list[dict[str, Any]] = []
     accepted: list[dict[str, Any]] = []
     registry: dict[str, str] = {}
     common = {
@@ -90,6 +100,7 @@ def run_staged_functions(
                 "source_topology_result_sha256": content_hash(source),
                 "draft": draft.model_dump(mode="json"),
                 "accepted_functions": accepted,
+                "batch_term_audits": batch_term_audits,
                 "events": events,
             },
         )
@@ -100,8 +111,9 @@ def run_staged_functions(
         render: Callable[[str | None], str],
         model: type[StrictSchema],
         validate: Callable[[Any], FunctionalDraft],
+        initial_diagnostic: str | None = None,
     ) -> tuple[Any, FunctionalDraft]:
-        diagnostic = None
+        diagnostic = initial_diagnostic
         for attempt in range(client.settings.attempts_per_step):
             rejected: object = None
             record = client.call(
@@ -145,7 +157,11 @@ def run_staged_functions(
             return reply, result
         raise ValueError(f"bounded local repair exhausted for {step}")
 
-    if generation_granularity not in {"atomic_interaction", "equation_batch"}:
+    if generation_granularity not in {
+        "atomic_interaction",
+        "equation_batch",
+        "equation_batch_atomic_repair",
+    }:
         raise ValueError(
             f"unsupported function generation granularity: {generation_granularity}"
         )
@@ -153,8 +169,18 @@ def run_staged_functions(
     expansion = None
     try:
         for equation_index, equation in enumerate(equations):
+            parameter_identity_policy = (
+                "interaction_local"
+                if generation_granularity == "equation_batch_atomic_repair"
+                else "preserve"
+            )
             selected_terms = tuple(
-                _selected_term(equation, term) for term in equation.terms
+                _selected_term(
+                    equation,
+                    term,
+                    parameter_identity_policy=parameter_identity_policy,
+                )
+                for term in equation.terms
             )
             identifiers = tuple(
                 f"term_{equation_index}_{term_index}"
@@ -178,8 +204,15 @@ def run_staged_functions(
                         InteractionFunctionReply,
                         lambda reply,
                         identifier=identifier,
-                        draft=draft: apply_function_reply(
-                            topology, draft, identifier, reply, context, aliases
+                        draft=draft,
+                        selected=selected: apply_function_reply(
+                            topology,
+                            draft,
+                            identifier,
+                            reply,
+                            context,
+                            aliases,
+                            _obligation(selected),
                         ),
                     )
                     accepted.append(
@@ -189,7 +222,7 @@ def run_staged_functions(
                         {item.name: item.role.value for item in reply.parameters}
                     )
                     checkpoint()
-            else:
+            elif generation_granularity == "equation_batch":
                 selected_equation = {
                     "lhs": equation.name,
                     "definition": equation.definition,
@@ -236,6 +269,133 @@ def run_staged_functions(
                         }
                     )
                 checkpoint()
+            else:
+                selected_equation = {
+                    "lhs": equation.name,
+                    "definition": equation.definition,
+                    "terms": list(selected_terms),
+                }
+
+                def validate_batch_shape(
+                    reply: EquationFunctionBatchReply,
+                    *,
+                    expected_count: int = len(identifiers),
+                    unchanged: FunctionalDraft = draft,
+                ) -> FunctionalDraft:
+                    if len(reply.functions) != expected_count:
+                        raise ValueError(
+                            "equation function count mismatch: "
+                            f"expected={expected_count}, actual={len(reply.functions)}"
+                        )
+                    return unchanged
+
+                reply, _ = request(
+                    f"equation_functions_{equation_index}",
+                    render_equation_function_batch_system_prompt(),
+                    lambda diagnostic,
+                    selected_equation=selected_equation: (
+                        render_equation_function_batch_user_prompt(
+                            **common,
+                            selected_equation_json=json.dumps(selected_equation),
+                            accepted_functions_json=json.dumps(accepted),
+                            parameter_registry_json=json.dumps(registry),
+                            diagnostics_json=diagnostic,
+                        )
+                    ),
+                    EquationFunctionBatchReply,
+                    validate_batch_shape,
+                )
+                for identifier, selected, function in zip(
+                    identifiers,
+                    selected_terms,
+                    reply.functions,
+                    strict=True,
+                ):
+                    audit = {
+                        "interaction_id": identifier,
+                        "lhs": equation.name,
+                        "functional_obligation": selected["functional_obligation"],
+                        "batch_function": function.model_dump(mode="json"),
+                        "batch_accepted": False,
+                        "batch_error": None,
+                        "atomic_repair_attempted": False,
+                        "atomic_repair_succeeded": False,
+                        "final_source": None,
+                    }
+                    batch_term_audits.append(audit)
+                    try:
+                        draft, _ = bind_function_reply(
+                            topology,
+                            draft,
+                            identifier,
+                            function,
+                            context,
+                            aliases,
+                            _obligation(selected),
+                        )
+                    except (
+                        ValueError,
+                        TypeError,
+                        KeyError,
+                        ModelValidationError,
+                    ) as exc:
+                        audit["batch_error"] = str(exc)[:6000]
+                        audit["atomic_repair_attempted"] = True
+                        checkpoint()
+                        diagnostic = json.dumps(
+                            {
+                                "repair_scope": "selected_term_only",
+                                "rejected_batch_function": function.model_dump(
+                                    mode="json"
+                                ),
+                                "deterministic_error": str(exc)[:6000],
+                            }
+                        )
+                        _, draft = request(
+                            f"atomic_repair_{identifier}",
+                            render_interaction_function_system_prompt(),
+                            lambda runtime_diagnostic,
+                            selected=selected: render_interaction_function_user_prompt(
+                                **common,
+                                selected_term_json=json.dumps(selected),
+                                accepted_functions_json=json.dumps(accepted),
+                                parameter_registry_json=json.dumps(registry),
+                                diagnostics_json=runtime_diagnostic,
+                            ),
+                            InteractionFunctionReply,
+                            lambda repaired,
+                            identifier=identifier,
+                            selected=selected,
+                            draft=draft: bind_function_reply(
+                                topology,
+                                draft,
+                                identifier,
+                                repaired,
+                                context,
+                                aliases,
+                                _obligation(selected),
+                            )[0],
+                            initial_diagnostic=diagnostic,
+                        )
+                        audit["atomic_repair_succeeded"] = True
+                        audit["final_source"] = "atomic_repair"
+                    else:
+                        audit["batch_accepted"] = True
+                        audit["final_source"] = "equation_batch"
+                    stored = _accepted_function_record(
+                        draft,
+                        identifier,
+                        selected,
+                        aliases,
+                    )
+                    accepted.append(stored)
+                    registry.update(
+                        {
+                            item["name"]: item["role"]
+                            for item in stored["parameters"]
+                        }
+                    )
+                    checkpoint()
         inverse = {value: key for key, value in aliases.items()}
         for state in topology.states:
             if state.kind is not StateKind.LATENT:
@@ -274,6 +434,7 @@ def run_staged_functions(
         "topology_commitment_sha256": commitment,
         "draft": draft.model_dump(mode="json"),
         "accepted_functions": accepted,
+        "batch_term_audits": batch_term_audits,
         "candidate": expansion.candidate.model_dump(mode="json") if expansion else None,
         "scientific_review_facts": (
             _scientific_review_facts(brief, accepted) if expansion else None
@@ -303,12 +464,19 @@ def run_staged_functions(
 def _selected_term(
     equation: EquationDefinition,
     term: Any,
+    *,
+    parameter_identity_policy: str = "preserve",
 ) -> dict[str, Any]:
     """Render one runtime-owned inner function slot."""
+    obligation = derive_interaction_function_obligation(
+        term.scientific_role,
+        parameter_identity_policy=parameter_identity_policy,
+    )
     return {
         "lhs": equation.name,
         "definition": equation.definition,
         **term.model_dump(mode="json"),
+        "functional_obligation": obligation.model_dump(mode="json"),
         "assembly_template": (
             f"d({equation.name})/dt"
             if equation.definition == "differential"
@@ -317,6 +485,35 @@ def _selected_term(
         + " = ... "
         + ("+" if term.outer_sign == "add" else "-")
         + " (FUNCTION)",
+    }
+
+
+def _obligation(selected: dict[str, Any]) -> InteractionFunctionObligation:
+    """Recover one typed runtime obligation from its provider-visible slot."""
+    return InteractionFunctionObligation.model_validate(
+        selected["functional_obligation"]
+    )
+
+
+def _accepted_function_record(
+    draft: FunctionalDraft,
+    interaction_id: str,
+    selected: dict[str, Any],
+    aliases: dict[str, str],
+) -> dict[str, Any]:
+    """Expose one accepted normalized function using public scientific names."""
+    function = next(
+        item
+        for item in draft.interaction_functions
+        if item.interaction_id == interaction_id
+    )
+    inverse = {value: key for key, value in aliases.items()}
+    return {
+        "selected_term": selected,
+        "expression": rename_expression(function.expression, inverse),
+        "parameters": [
+            item.model_dump(mode="json") for item in function.parameters
+        ],
     }
 
 
@@ -341,7 +538,7 @@ def _scientific_review_facts(
         expression = item["expression"]
         tree = ast.parse(expression, mode="eval")
         sources = set(selected["sources"])
-        if _has_nonlinear_source_dependence(tree, sources):
+        if has_nonlinear_source_dependence(tree, sources):
             nonlinear_source_terms.append(label)
         if (
             len(sources) == 1
@@ -413,41 +610,3 @@ def _scientific_review_facts(
             "mechanistic_adequacy_beyond_syntax",
         ],
     }
-
-
-def _has_nonlinear_source_dependence(tree: ast.AST, sources: set[str]) -> bool:
-    """Detect only explicit nonlinear dependence on scientific source symbols."""
-
-    def source_names(node: ast.AST) -> set[str]:
-        return {
-            child.id
-            for child in ast.walk(node)
-            if isinstance(child, ast.Name) and child.id in sources
-        }
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and source_names(node):
-            return True
-        if (
-            isinstance(node, ast.BinOp)
-            and isinstance(node.op, ast.Pow)
-            and source_names(node.left)
-            and (
-                not isinstance(node.right, ast.Constant) or node.right.value != 1
-            )
-        ):
-            return True
-        if (
-            isinstance(node, ast.BinOp)
-            and isinstance(node.op, ast.Div)
-            and source_names(node.right)
-        ):
-            return True
-        if (
-            isinstance(node, ast.BinOp)
-            and isinstance(node.op, ast.Mult)
-            and source_names(node.left)
-            and source_names(node.right)
-        ):
-            return True
-    return False

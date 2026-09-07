@@ -14,9 +14,10 @@ INTERACTION_FUNCTION_SYSTEM_PROMPT = """\
 You assign only the scalar functional form for one runtime-selected interaction
 term in a continuous-time scientific model. The frozen variable inventory,
 equation topology, selected left-hand side, differential or algebraic
-definition, complete grouped source set, outer_weight_sign, and scientific role are
-authoritative. Return only the structured response required by the response
-schema: expression and parameters.
+definition, complete grouped source set, outer sign, and scientific role are
+authoritative. The selected term also contains a runtime-owned
+functional_obligation. Return only the structured response required by the
+response schema: expression and parameters.
 
 The expression is one scalar right-hand-side contribution, not a complete
 equation. Use every displayed source in the selected term at least once and use
@@ -29,20 +30,21 @@ are not custom callable functions.
 
 Your response fills only the inner FUNCTION slot displayed in
 selected_term.assembly_template. The runtime applies the frozen outer assembly
-sign exactly once when it is positive or negative. For example, if the template is
+sign exactly once. For example, if the template is
 ``d(x)/dt = ... - (FUNCTION)`` and the selected role is self-relaxation, return
 ``x / tau`` with ``tau`` declared as a time_constant; never return
 ``-x / tau``. Internal addition or subtraction inside a genuine grouped-source
-law is allowed, but do not repeat or reverse the whole outer sign. If
-outer_weight_sign is unrestricted, the runtime adds the signed FUNCTION once;
-an outer coefficient or offset may then use the real-valued coefficient or
-offset role.
+law is allowed, but do not repeat or reverse the whole outer sign.
 
 Choose a scientific functional law, not a transcription of the source names.
 Use the public requirement, selected scientific role, units, grouped sources,
 and accepted functions to determine its form. Preserve required nonlinear
 behavior with an admissible nonlinear primitive or joint nonlinear interaction.
-Introduce fitted gain, scale, rate, time_constant, or shape parameters when
+When requires_nonlinear_source_dependence is true, a linear gain or identity is
+invalid: the expression must contain explicit nonlinear dependence on at least
+one displayed source through an admitted function, non-unit power,
+source-dependent denominator, or source-source product. Introduce fitted gain,
+scale, rate, time_constant, or shape parameters when
 unit conversion, unknown response strength, relaxation time, saturation, or
 curvature requires them; do not silently set unknown rates or gains to one. An
 identity source expression is valid only when a known balance contribution and
@@ -63,16 +65,14 @@ parameter already used by another accepted term. Declare no unused parameter.
 Each parameter contains only name and role. Reused names must preserve the role
 in the runtime parameter registry. Supported roles are coefficient,
 nonnegative_coefficient, rate, time_constant, scale, positive_shape, offset,
-shape. For a fixed positive or negative outer_weight_sign, declare an unknown
-direct scalar edge gain by its scientific role, normally coefficient or offset;
-the runtime derives that identified whole-term gain's nonnegative magnitude
-domain. Do not redundantly change it to nonnegative_coefficient merely to encode
-the topology's sign. Rates, time constants, scales, and positive shapes remain
-positive because of their semantic roles. Coefficients or thresholds nested
-inside sums, differences, nonlinear calls, or denominators remain signed unless
-their own scientific role says otherwise. A role constrains only the broad
-numeric domain; it does not prove that the complete nonlinear expression is
-globally nonnegative, monotone, or sign-definite.
+shape. The topology owns the outer sign, so a scalar edge weight that implements
+that sign must use a scientifically appropriate nonnegative or positive role,
+not the real-valued coefficient role. A role constrains only the broad numeric
+domain; it does not prove that the complete nonlinear expression is globally
+nonnegative, monotone, or sign-definite. When parameter_identity_policy is
+interaction_local, each name is only a local mnemonic for this term. The
+runtime deterministically namespaces it, so the same spelling in another term
+does not request or create parameter sharing.
 
 Do not emit an assignment, derivative or left-hand side, repeated outer sign,
 interaction or candidate identifier, source list, topology edit, mechanism ID,
@@ -97,6 +97,10 @@ each slot use every displayed source at least once and no other state, process,
 public channel, or time symbol. After parameter names are removed, its symbol
 set must equal that slot's grouped source set exactly. An empty source set
 permits a scientifically justified constant or parameter-only contribution.
+Each slot contains a runtime-owned functional_obligation. When
+requires_nonlinear_source_dependence is true, a linear gain or identity is
+invalid: that slot must contain explicit nonlinear dependence on at least one
+displayed source through the admitted restricted grammar.
 The runtime applies every frozen outer assembly sign exactly once. For a slot
 shown as ``d(x)/dt = ... - (FUNCTION)``, return ``x / tau`` rather than
 ``-x / tau``.
@@ -104,10 +108,12 @@ shown as ``d(x)/dt = ... - (FUNCTION)``, return ``x / tau`` rather than
 Construct the terms as one scientifically coherent equation. Preserve required
 nonlinear behavior. Introduce fitted gains, rates, scales, time constants, or
 shape parameters when unknown strength, conversion, relaxation, saturation, or
-curvature requires them. Reuse a parameter name only when the same physical
-quantity and qualitative role genuinely apply to both slots; otherwise use
-distinct names. Identity source expressions are valid only for known,
-unit-compatible balance contributions.
+curvature requires them. When parameter_identity_policy is interaction_local,
+parameter names are local mnemonics and the runtime deterministically
+namespaces them by interaction; repeated spelling cannot create sharing. Under
+a preserve policy, reuse a name only when the same physical quantity and
+qualitative role genuinely apply to both slots. Identity source expressions are
+valid only for known, unit-compatible balance contributions.
 
 The restricted grammar permits binary +, -, *, /, and Python **; unary + and -;
 finite integer or floating-point literals with magnitude at most 1e12; one-
@@ -131,8 +137,10 @@ Do not emit assignments, derivatives or left-hand sides, repeated outer signs,
 slot or interaction identifiers, source lists, topology edits, mechanism IDs,
 parameter values, ranges, scopes, units, descriptions, fitted results, initial
 values, hashes, validation claims, revision requests, summaries, or prose. Do
-not repair or route to another equation. The runtime binds the ordered reply
-atomically to the selected LHS; if any slot is invalid, none is accepted."""
+not repair or route to another equation. The runtime audits every slot
+independently. The frozen calling policy either treats the batch as one
+transaction or retains valid slots and sends only failed slots to a later
+focused atomic repair; one slot can never silently alter another."""
 
 
 LATENT_INITIAL_SYSTEM_PROMPT = """\
