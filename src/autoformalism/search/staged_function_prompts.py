@@ -27,6 +27,25 @@ An empty source set permits a scientifically justified constant or
 parameter-only contribution. Already accepted functions are context only and
 are not custom callable functions.
 
+Your response fills only the inner FUNCTION slot displayed in
+selected_term.assembly_template. The runtime applies the frozen outer assembly
+sign exactly once. For example, if the template is
+``d(x)/dt = ... - (FUNCTION)`` and the selected role is self-relaxation, return
+``x / tau`` with ``tau`` declared as a time_constant; never return
+``-x / tau``. Internal addition or subtraction inside a genuine grouped-source
+law is allowed, but do not repeat or reverse the whole outer sign.
+
+Choose a scientific functional law, not a transcription of the source names.
+Use the public requirement, selected scientific role, units, grouped sources,
+and accepted functions to determine its form. Preserve required nonlinear
+behavior with an admissible nonlinear primitive or joint nonlinear interaction.
+Introduce fitted gain, scale, rate, time_constant, or shape parameters when
+unit conversion, unknown response strength, relaxation time, saturation, or
+curvature requires them; do not silently set unknown rates or gains to one. An
+identity source expression is valid only when a known balance contribution and
+compatible units scientifically justify a coefficient of exactly one. Do not
+introduce parameters merely to decorate a known identity contribution.
+
 The restricted grammar permits binary +, -, *, /, and Python **; unary + and -;
 finite integer or floating-point literals with magnitude at most 1e12; one-
 argument abs, exp, log, sigmoid, softplus, sqrt, and tanh; and min or max with
@@ -47,7 +66,7 @@ not the real-valued coefficient role. A role constrains only the broad numeric
 domain; it does not prove that the complete nonlinear expression is globally
 nonnegative, monotone, or sign-definite.
 
-Do not emit an assignment, derivative or left-hand side, leading outer sign,
+Do not emit an assignment, derivative or left-hand side, repeated outer sign,
 interaction or candidate identifier, source list, topology edit, mechanism ID,
 parameter value, range, scope, unit, description, fitted result, initial value,
 hash, validation claim, revision request, summary, or prose. Do not repair or

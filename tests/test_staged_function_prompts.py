@@ -29,6 +29,14 @@ def test_interaction_function_prompt_has_one_immutable_responsibility() -> None:
     assert "one scalar right-hand-side contribution" in system
     assert "symbol set must equal the selected grouped source" in system
     assert "Use the exact displayed scientific names" in system
+    assert "inner FUNCTION slot" in system
+    assert "applies the frozen outer assembly\nsign exactly once" in system
+    assert "d(x)/dt = ... - (FUNCTION)" in system
+    assert "never return\n``-x / tau``" in system
+    assert "scientific functional law, not a transcription" in system
+    assert "Preserve required nonlinear\nbehavior" in system
+    assert "do not silently set unknown rates or gains to one" in system
+    assert "known balance contribution" in system
     assert "binary +, -, *, /, and Python **" in system
     assert "integer literal\nwith absolute value at most 16" in system
     assert "Declare every parameter used" in system
