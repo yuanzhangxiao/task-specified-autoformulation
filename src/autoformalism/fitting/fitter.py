@@ -34,6 +34,7 @@ from autoformalism.fitting.models import (
     FitResult,
     OptimizationDiagnostic,
 )
+from autoformalism.fitting.numerical import TrackedResidual, jacobian_options
 from autoformalism.fitting.simulation import simulate_trajectory, trajectory_forcing
 from autoformalism.schemas import (
     ConstraintEnforcement,
@@ -289,16 +290,18 @@ def fit_candidate(
                 deadline,
             )
         )
+        tracked = TrackedResidual(residual, lambda counter=counter: counter.count)
         try:
             if len(variables):
                 result = least_squares(
-                    residual,
+                    tracked,
                     start,
                     bounds=(lower, upper),
                     max_nfev=settings.maximum_function_evaluations,
+                    **jacobian_options(tracked, lower, upper, settings),
                 )
             else:
-                values = residual(start)
+                values = tracked(start)
                 result = OptimizeResult(
                     x=start,
                     success=True,
@@ -309,20 +312,31 @@ def fit_candidate(
                 )
         except TimeoutError as exc:
             counter.record(str(exc))
+            retained = tracked.best_x is not None
             result = OptimizeResult(
-                x=start,
+                x=tracked.best_x if retained else start,
                 success=False,
                 status=-2,
-                message=str(exc),
-                cost=0.5 * residual_size * settings.failure_penalty**2,
+                message=str(exc)
+                + ("; best finite evaluated trial retained" if retained else ""),
+                cost=tracked.best_cost
+                if retained
+                else (0.5 * residual_size * settings.failure_penalty**2),
                 nfev=0,
+                retained_best_on_timeout=retained,
             )
+        result.actual_residual_evaluations = tracked.calls
         outcomes.append((result, counter))
         if int(result.status) == -2:
             break
 
+    completed = [
+        index for index, (result, _) in enumerate(outcomes)
+        if int(result.status) != -2
+        and float(result.cost) < 0.5 * residual_size * settings.failure_penalty**2
+    ]
     best_index = min(
-        range(len(outcomes)),
+        completed or range(len(outcomes)),
         key=lambda index: float(outcomes[index][0].cost),
     )
     best = outcomes[best_index][0]
@@ -2372,6 +2386,15 @@ def _diagnostic(
         message=str(result.message),
         cost=float(result.cost),
         function_evaluations=int(result.nfev),
+        actual_residual_evaluations=getattr(
+            result, "actual_residual_evaluations", None
+        ),
+        retained_best_on_timeout=getattr(result, "retained_best_on_timeout", False),
+        retained_variables=(
+            tuple((variable.name, float(value)) for variable, value in
+                  zip(variables, result.x, strict=True))
+            if getattr(result, "retained_best_on_timeout", False) else ()
+        ),
         integration_failures=failures.count,
         backend=backend,
         integration_failure_messages=tuple(failures.messages),

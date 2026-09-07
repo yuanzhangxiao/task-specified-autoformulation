@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from time import monotonic
 
 import numpy as np
@@ -17,6 +18,34 @@ from autoformalism.expressions import (
 from autoformalism.fitting.models import FitConfig, SimulationResult
 
 
+@dataclass
+class RolloutProfile:
+    """Optional measurements for one adaptive free rollout; times may be nested."""
+
+    total_seconds: float = 0.0
+    preparation_seconds: float = 0.0
+    integration_seconds: float = 0.0
+    rhs_seconds: float = 0.0
+    constraint_seconds: float = 0.0
+    observation_seconds: float = 0.0
+    observation_forcing_seconds: float = 0.0
+    observation_expression_seconds: float = 0.0
+    rhs_calls: int = 0
+    solver_nfev: int = 0
+    solver_njev: int = 0
+    solver_nlu: int = 0
+
+
+def _profiled_rhs(profile: RolloutProfile, *args) -> np.ndarray:
+    """Count all physical RHS calls, including implicit-solver Jacobian probes."""
+    started = monotonic()
+    profile.rhs_calls += 1
+    try:
+        return _deadline_rhs(*args)
+    finally:
+        profile.rhs_seconds += monotonic() - started
+
+
 def simulate_trajectory(
     model: CompiledModel,
     trajectory: Trajectory,
@@ -26,6 +55,7 @@ def simulate_trajectory(
     *,
     deadline: float | None = None,
     reset_observed_states: bool | None = None,
+    profile: RolloutProfile | None = None,
 ) -> SimulationResult:
     """Roll out a compiled ODE, converting numerical exceptions into failures.
 
@@ -33,6 +63,7 @@ def simulate_trajectory(
     is rejected when a measured target is used as an exogenous forcing symbol,
     because that would reveal the held-out trajectory during rollout.
     """
+    started = monotonic() if profile is not None else 0.0
     time = np.asarray(trajectory.time, dtype=float).copy()
     try:
         if len(time) < 2 or np.any(np.diff(time) <= 0.0):
@@ -83,15 +114,18 @@ def simulate_trajectory(
             if reset_observed_states is None
             else reset_observed_states
         )
-        leaked_targets = (
-            model.validated.forcing_symbols
-            & frozenset(model.validated.context.lagged_targets)
+        leaked_targets = model.validated.forcing_symbols & frozenset(
+            model.validated.context.lagged_targets
         )
         if not use_resets and leaked_targets:
             raise ValueError(
                 "free rollout cannot use measured target forcing: "
                 f"{sorted(leaked_targets)}"
             )
+        if profile is not None and (
+            use_resets or config.integration_backend != "solve_ivp"
+        ):
+            raise ValueError("rollout profiling requires adaptive free integration")
         if use_resets:
             state_values = _simulate_one_step_intervals(
                 model, trajectory, parameters, initial_state, config, deadline
@@ -102,52 +136,79 @@ def simulate_trajectory(
             )
         else:
             forcing = trajectory_forcing(model, trajectory)
-            solution = solve_ivp(
-                lambda current_time, state: _deadline_rhs(
-                    model,
-                    current_time,
-                    state,
-                    parameters,
-                    forcing,
-                    deadline,
-                ),
-                (float(time[0]), float(time[-1])),
-                initial_state,
-                t_eval=time,
-                method=config.integration_method,
-                rtol=config.relative_tolerance,
-                atol=config.absolute_tolerance,
-            )
+            integration_started = monotonic() if profile is not None else 0.0
+            if profile is not None:
+                profile.preparation_seconds = integration_started - started
+
+            def rhs(current_time, state):
+                arguments = (model, current_time, state, parameters, forcing, deadline)
+                return (
+                    _profiled_rhs(profile, *arguments)
+                    if profile is not None
+                    else _deadline_rhs(*arguments)
+                )
+
+            try:
+                solution = solve_ivp(
+                    rhs,
+                    (float(time[0]), float(time[-1])),
+                    initial_state,
+                    t_eval=time,
+                    method=config.integration_method,
+                    rtol=config.relative_tolerance,
+                    atol=config.absolute_tolerance,
+                )
+            finally:
+                if profile is not None:
+                    profile.integration_seconds = monotonic() - integration_started
+            if profile is not None:
+                profile.solver_nfev = int(solution.nfev)
+                profile.solver_njev = int(solution.njev)
+                profile.solver_nlu = int(solution.nlu)
             if not solution.success:
                 raise RuntimeError(f"integration failed: {solution.message}")
             if solution.y.shape != (len(model.state_names), len(time)):
-                raise RuntimeError(
-                    f"unexpected integration shape: {solution.y.shape}"
-                )
+                raise RuntimeError(f"unexpected integration shape: {solution.y.shape}")
             state_values = solution.y
         if not np.isfinite(state_values).all():
             raise RuntimeError("integration produced a nonfinite trajectory")
+        constraint_started = monotonic() if profile is not None else 0.0
         for index in range(state_values.shape[1]):
             model.validate_state_constraints(state_values[:, index])
+        if profile is not None:
+            profile.constraint_seconds = monotonic() - constraint_started
 
+        observation_started = monotonic() if profile is not None else 0.0
         predictions: dict[str, np.ndarray] = {
             channel: np.empty(len(time), dtype=float)
             for channel in model.validated.observation_expressions
         }
         for index, current_time in enumerate(time):
+            forcing_started = monotonic() if profile is not None else 0.0
             forcing = trajectory_forcing(
                 model,
                 trajectory,
                 causal_index=max(0, index - 1),
             )
+            expression_started = monotonic() if profile is not None else 0.0
+            if profile is not None:
+                profile.observation_forcing_seconds += (
+                    expression_started - forcing_started
+                )
             observed = model.observe(
                 float(current_time),
                 state_values[:, index],
                 parameters,
                 forcing,
             )
+            if profile is not None:
+                profile.observation_expression_seconds += (
+                    monotonic() - expression_started
+                )
             for channel, value in observed.items():
                 predictions[channel][index] = value
+        if profile is not None:
+            profile.observation_seconds = monotonic() - observation_started
         if any(not np.isfinite(values).all() for values in predictions.values()):
             raise RuntimeError("observation mapping produced nonfinite values")
         return SimulationResult(True, time, state_values.copy(), predictions)
@@ -159,6 +220,9 @@ def simulate_trajectory(
         ValueError,
     ) as exc:
         return SimulationResult(False, time, None, {}, str(exc))
+    finally:
+        if profile is not None:
+            profile.total_seconds = monotonic() - started
 
 
 def trajectory_forcing(
@@ -390,9 +454,7 @@ def causal_interval_state(
             if index == 0:
                 interval_state[state_index] = 0.0
             else:
-                current = _observed_state_value(
-                    model, trajectory, base_state, index
-                )
+                current = _observed_state_value(model, trajectory, base_state, index)
                 previous = _observed_state_value(
                     model, trajectory, base_state, index - 1
                 )

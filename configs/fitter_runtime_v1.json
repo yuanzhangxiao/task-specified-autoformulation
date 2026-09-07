@@ -1,0 +1,23 @@
+{
+  "protocol": "fitter-runtime-1",
+  "source_code_sha256": "b983212b054eb0d8fb85b1653e6f5dec8bb323f30d1638a27b56d9e2d0a33ed9",
+  "source_plan_sha256": "dc0a072c8f8e1a5a051c652edd4d6efc30339a7548613c032939780f8c665ee8",
+  "anchor_hashes": {
+    "all_ones": "6f738933598822fe7524aba6866e0834327082827a0790d6bed79350dd5c7395",
+    "intermediate": "543af35485d63ce11ec2207cf498d6ecb4c291170badaf64cb442d6fa16275b0",
+    "late": "6d99faf93e4e07cd5e54e267140805ded5c7c72a2808d5bde13e0ab37f03cf1b"
+  },
+  "profile_seconds": 600,
+  "call_seconds": 60,
+  "fit_seconds": 900,
+  "replay_seconds": 120,
+  "grace_seconds": 60,
+  "maximum_nfev": 100,
+  "profile_trajectories": 2,
+  "step": 0.0001,
+  "scale_floor": 1.0,
+  "accuracy_rms": 0.00001,
+  "accuracy_maximum": 0.0001,
+  "reference_rms": 0.000001,
+  "reference_maximum": 0.00001
+}

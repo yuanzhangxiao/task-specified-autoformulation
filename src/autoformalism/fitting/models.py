@@ -53,6 +53,11 @@ class FitConfig(BaseModel):
     fixed_step_substeps: int = Field(default=1, ge=1)
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
     absolute_tolerance: float = Field(default=1e-9, gt=0.0)
+    finite_difference_policy: Literal["relative", "scaled"] = "relative"
+    finite_difference_step: float | None = Field(
+        default=None, gt=0, le=0.1, allow_inf_nan=False
+    )
+    finite_difference_scale_floor: float = Field(default=1.0, gt=0, allow_inf_nan=False)
     maximum_function_evaluations: int = Field(default=50, ge=1)
     maximum_wall_time_seconds: float | None = Field(default=None, gt=0.0)
     failure_penalty: float = Field(default=1e6, gt=0.0)
@@ -133,6 +138,9 @@ class OptimizationDiagnostic:
     affine_design_rank: int | None = None
     affine_design_condition: float | None = None
     physical_outer_start_parameters: tuple[str, ...] = ()
+    actual_residual_evaluations: int | None = None
+    retained_best_on_timeout: bool = False
+    retained_variables: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)

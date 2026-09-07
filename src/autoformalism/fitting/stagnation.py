@@ -15,6 +15,7 @@ from autoformalism.data import DatasetSplit
 from autoformalism.expressions import CompiledModel
 from autoformalism.fitting import fitter
 from autoformalism.fitting.models import FailureCounter, FitConfig
+from autoformalism.fitting.numerical import TrackedResidual, jacobian_options
 from autoformalism.rebuttal.fitter_diagnostic import (
     _finite_payload,
     _write_bytes,
@@ -251,6 +252,7 @@ def instrumented_fit(
     diff_step: float | None,
     max_nfev: int,
     optimizer: Callable[..., Any] = least_squares,
+    settings: FitConfig | None = None,
 ) -> dict[str, Any]:
     """Run the production least-squares call with one explicit diagnostic override."""
     x = oracle.vector(start)
@@ -269,13 +271,19 @@ def instrumented_fit(
         write_json(oracle.directory / f"iteration-{len(iterations):04d}.json", entry)
 
     started = monotonic()
+    tracked = TrackedResidual(oracle, lambda: oracle.failures.count)
+    options = (
+        {"diff_step": diff_step}
+        if settings is None
+        else jacobian_options(tracked, oracle.lower, oracle.upper, settings)
+    )
     try:
         result = optimizer(
-            oracle,
+            tracked,
             x,
             bounds=(oracle.lower, oracle.upper),
             max_nfev=max_nfev,
-            diff_step=diff_step,
+            **options,
             callback=callback,
         )
     except TimeoutError:

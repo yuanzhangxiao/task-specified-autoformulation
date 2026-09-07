@@ -410,6 +410,13 @@ Candidates containing genuine latent states fall back to rollout residuals.
 Search defaults to one bounded start and 50 residual evaluations. A monotonic
 wall-clock deadline is checked inside fixed steps and adaptive RHS calls; expiry
 returns a checkpointable failed fit instead of raising through the controller.
+The generic bounded least-squares branch preserves its best finite,
+integration-valid evaluated vector on timeout while retaining failed-fit metric
+semantics. Actual residual calls are recorded separately from SciPy's reported
+`nfev`. Its optional scaled finite-difference policy uses a parameter-scale
+floor and respects existing hard bounds; SciPy's relative policy remains the
+default. See `docs/FITTER_RUNTIME_ACCURACY.md` for the frozen development
+comparison and optional adaptive-rollout instrumentation.
 The frozen train-plus-validation refit uses the selected search parameters as
 its first bounded optimizer point, adaptive `solve_ivp`, one start, 150 residual
 evaluations, and a separate 300-second deadline by default.
