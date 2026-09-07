@@ -1,0 +1,20 @@
+{
+  "protocol": "fitter-stagnation-1",
+  "source_freeze_sha256": "2c5de6d6950dac6cb209fad3a5cfff75fe7a1653a3e0c12d524831c9475c6564",
+  "source_result_sha256": "f4df64560422fc895f5581bda77dfb20ff866d994acb2d708bf5deb3990565fe",
+  "fit_seconds": 300,
+  "profile_seconds": 600,
+  "replay_seconds": 60,
+  "grace_seconds": 60,
+  "maximum_nfev": 50,
+  "large_diff_step": 0.0001,
+  "tight_rtol": 1e-09,
+  "tight_atol": 1e-11,
+  "profile_trajectories": 2,
+  "profile_steps": [
+    1.4901161193847656e-08,
+    1e-06,
+    0.0001,
+    0.01
+  ]
+}
