@@ -6,7 +6,6 @@ from pydantic import Field, FiniteFloat, model_validator
 
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.candidate import ParameterRole
-from autoformalism.schemas.staged_topology import OuterWeightSign
 
 
 class FunctionParameter(StrictSchema):
@@ -31,13 +30,13 @@ class InteractionFunctionReply(StrictSchema):
         return self
 
 
-class OuterWeightDomainDerivation(StrictSchema):
-    """Runtime record for one sign-derived outer magnitude domain."""
+class EquationFunctionBatchReply(StrictSchema):
+    """Ordered scalar functions for every term of one runtime-selected LHS."""
 
-    parameter: Identifier
-    requested_role: ParameterRole
-    effective_role: ParameterRole
-    outer_weight_sign: OuterWeightSign
+    functions: tuple[InteractionFunctionReply, ...] = Field(
+        min_length=1,
+        max_length=8,
+    )
 
 
 class FixedInitial(StrictSchema):

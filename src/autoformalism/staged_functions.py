@@ -11,7 +11,6 @@ from autoformalism.construction import (
 )
 from autoformalism.expressions import RestrictedParser, ValidationContext
 from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
-from autoformalism.schemas.candidate import ParameterRole
 from autoformalism.schemas.construction import (
     ConstructionIntent,
     FunctionalDraft,
@@ -20,14 +19,12 @@ from autoformalism.schemas.construction import (
     SetLatentInitialAction,
 )
 from autoformalism.schemas.proposal import ProposedInitialValue, ProposedParameter
-from autoformalism.schemas.staged import InteractionPolarity, TopologyCandidate
+from autoformalism.schemas.staged import TopologyCandidate
 from autoformalism.schemas.staged_functions import (
+    EquationFunctionBatchReply,
     InteractionFunctionReply,
     LatentInitialReply,
-    OuterWeightDomainDerivation,
 )
-from autoformalism.schemas.staged_topology import OuterWeightSign
-from autoformalism.sign_contract import analyze_outer_weight
 
 
 def rename_expression(expression: str, aliases: Mapping[str, str]) -> str:
@@ -91,7 +88,6 @@ def apply_function_reply(
             f"source mismatch: missing={sorted(expected - actual)}, "
             f"extra={sorted(actual - expected)}"
         )
-    reply, _ = normalize_outer_weight_reply(reply, selected.polarity, parsed.tree)
     action = SetInteractionFunctionAction(
         interaction_id=selected_id,
         expression=rename_expression(reply.expression, aliases),
@@ -117,51 +113,31 @@ def apply_function_reply(
     return candidate
 
 
-def normalize_outer_weight_reply(
-    reply: InteractionFunctionReply,
-    polarity: InteractionPolarity,
-    tree: ast.Expression | None = None,
-) -> tuple[InteractionFunctionReply, tuple[OuterWeightDomainDerivation, ...]]:
-    """Derive a fixed outer gain domain without touching internal signed terms."""
-    parsed_tree = tree or RestrictedParser().parse(
-        reply.expression, location="function"
-    ).tree
-    roles = {item.name: item.role for item in reply.parameters}
-    analysis = analyze_outer_weight(parsed_tree, roles, polarity)
-    if analysis.diagnostic_code is not None:
+def apply_equation_function_reply(
+    topology: TopologyCandidate,
+    draft: FunctionalDraft,
+    selected_ids: tuple[str, ...],
+    reply: EquationFunctionBatchReply,
+    context: ValidationContext,
+    aliases: Mapping[str, str],
+) -> FunctionalDraft:
+    """Validate and bind one complete same-LHS function batch atomically."""
+    if len(reply.functions) != len(selected_ids):
         raise ValueError(
-            f"{analysis.diagnostic_code}: {analysis.diagnostic_message}"
+            "equation function count mismatch: "
+            f"expected={len(selected_ids)}, actual={len(reply.functions)}"
         )
-    selected = analysis.identified_parameter
-    if selected is None:
-        return reply, ()
-    requested = roles[selected]
-    if polarity is InteractionPolarity.UNRESTRICTED:
-        if requested is not ParameterRole.NONNEGATIVE_COEFFICIENT:
-            return reply, ()
-        effective = ParameterRole.COEFFICIENT
-    else:
-        effective = ParameterRole.NONNEGATIVE_COEFFICIENT
-    parameters = tuple(
-        item.model_copy(update={"role": effective}) if item.name == selected else item
-        for item in reply.parameters
-    )
-    sign = {
-        InteractionPolarity.POSITIVE: OuterWeightSign.POSITIVE,
-        InteractionPolarity.NEGATIVE: OuterWeightSign.NEGATIVE,
-        InteractionPolarity.UNRESTRICTED: OuterWeightSign.UNRESTRICTED,
-    }[polarity]
-    return (
-        reply.model_copy(update={"parameters": parameters}),
-        (
-            OuterWeightDomainDerivation(
-                parameter=selected,
-                requested_role=requested,
-                effective_role=effective,
-                outer_weight_sign=sign,
-            ),
-        ),
-    )
+    candidate = draft
+    for selected_id, function in zip(selected_ids, reply.functions, strict=True):
+        candidate = apply_function_reply(
+            topology,
+            candidate,
+            selected_id,
+            function,
+            context,
+            aliases,
+        )
+    return candidate
 
 
 def apply_initial_reply(

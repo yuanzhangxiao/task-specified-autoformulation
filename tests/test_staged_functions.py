@@ -10,6 +10,7 @@ from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.rebuttal.staged_topology_campaign import diagnostic_task
 from autoformalism.schemas.construction import FunctionalDraft
 from autoformalism.schemas.staged_functions import (
+    EquationFunctionBatchReply,
     InteractionFunctionReply,
     LatentInitialReply,
 )
@@ -19,7 +20,11 @@ from autoformalism.schemas.staged_topology import (
     PublicScientificBrief,
     ScientificVariable,
 )
-from autoformalism.staged_functions import apply_function_reply, apply_initial_reply
+from autoformalism.staged_functions import (
+    apply_equation_function_reply,
+    apply_function_reply,
+    apply_initial_reply,
+)
 from autoformalism.staged_topology import lower_topology
 from autoformalism.staging import topology_commitment_sha256
 
@@ -153,6 +158,89 @@ def test_shared_parameter_role_conflict_is_rejected() -> None:
     with pytest.raises(ValueError, match="PARAMETER_ROLE_CONFLICT"):
         apply_function_reply(
             topology, parent, "term_1_0", reply("k*(u-z)", k="rate"), context, aliases
+        )
+
+
+def test_function_batch_is_bound_in_order_and_fails_atomically() -> None:
+    _, context, _, topology, aliases = fixture()
+    parent = FunctionalDraft(
+        topology_commitment_sha256=topology_commitment_sha256(topology)
+    )
+    valid = EquationFunctionBatchReply(
+        functions=(
+            reply("gain*z-rate*x", gain="scale", rate="rate"),
+            reply("(u-z)/tau", tau="time_constant"),
+        )
+    )
+    updated = apply_equation_function_reply(
+        topology,
+        parent,
+        ("term_0_0", "term_1_0"),
+        valid,
+        context,
+        aliases,
+    )
+    assert len(updated.interaction_functions) == 2
+    assert parent.interaction_functions == ()
+
+
+def test_function_batch_preserves_consistent_shared_parameter_identity() -> None:
+    _, context, _, topology, aliases = fixture()
+    parent = FunctionalDraft(
+        topology_commitment_sha256=topology_commitment_sha256(topology)
+    )
+    updated = apply_equation_function_reply(
+        topology,
+        parent,
+        ("term_0_0", "term_1_0"),
+        EquationFunctionBatchReply(
+            functions=(
+                reply("k*(z-x)", k="scale"),
+                reply("k*(u-z)", k="scale"),
+            )
+        ),
+        context,
+        aliases,
+    )
+    assert len(updated.interaction_functions) == 2
+    assert {
+        parameter.role
+        for function in updated.interaction_functions
+        for parameter in function.parameters
+        if parameter.name == "k"
+    } == {"scale"}
+
+    invalid = EquationFunctionBatchReply(
+        functions=(
+            reply("gain*z-rate*x", gain="scale", rate="rate"),
+            reply("z", tau="time_constant"),
+        )
+    )
+    with pytest.raises(ValueError, match=r"UNUSED_LOCAL_PARAMETER|source mismatch"):
+        apply_equation_function_reply(
+            topology,
+            parent,
+            ("term_0_0", "term_1_0"),
+            invalid,
+            context,
+            aliases,
+        )
+    assert parent.interaction_functions == ()
+
+
+def test_equation_batch_rejects_wrong_function_count() -> None:
+    _, context, _, topology, aliases = fixture()
+    parent = FunctionalDraft(
+        topology_commitment_sha256=topology_commitment_sha256(topology)
+    )
+    with pytest.raises(ValueError, match="function count mismatch"):
+        apply_equation_function_reply(
+            topology,
+            parent,
+            ("term_0_0", "term_1_0"),
+            EquationFunctionBatchReply(functions=(reply("z-x"),)),
+            context,
+            aliases,
         )
 
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from autoformalism.construction import finalize_functional_draft
 from autoformalism.expressions import ModelValidationError, ValidationContext
@@ -18,30 +19,33 @@ from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.candidate import StateKind
 from autoformalism.schemas.construction import FunctionalDraft
 from autoformalism.schemas.staged_functions import (
+    EquationFunctionBatchReply,
     InteractionFunctionReply,
     LatentInitialReply,
 )
 from autoformalism.schemas.staged_topology import (
     EquationDefinition,
-    EquationTerm,
-    LegacyEquationTerm,
-    OuterWeightSign,
     PublicScientificBrief,
     ScientificVariable,
 )
 from autoformalism.search.staged_function_prompts import (
+    render_equation_function_batch_system_prompt,
+    render_equation_function_batch_user_prompt,
     render_interaction_function_system_prompt,
     render_interaction_function_user_prompt,
     render_latent_initial_system_prompt,
     render_latent_initial_user_prompt,
 )
 from autoformalism.staged_functions import (
+    apply_equation_function_reply,
     apply_function_reply,
     apply_initial_reply,
     initial_symbols,
 )
 from autoformalism.staged_topology import content_hash, lower_topology
 from autoformalism.staging import topology_commitment_sha256
+
+FunctionGenerationGranularity = Literal["atomic_interaction", "equation_batch"]
 
 
 def run_staged_functions(
@@ -50,6 +54,8 @@ def run_staged_functions(
     source: dict[str, Any],
     client: StagedTopologyClient,
     output: Path,
+    *,
+    generation_granularity: FunctionGenerationGranularity = "atomic_interaction",
 ) -> dict[str, Any]:
     """Assign functions and causal initializers without fitting or topology edits."""
     inventory = tuple(
@@ -139,53 +145,96 @@ def run_staged_functions(
             return reply, result
         raise ValueError(f"bounded local repair exhausted for {step}")
 
+    if generation_granularity not in {"atomic_interaction", "equation_batch"}:
+        raise ValueError(
+            f"unsupported function generation granularity: {generation_granularity}"
+        )
     error = None
     expansion = None
     try:
         for equation_index, equation in enumerate(equations):
-            for term_index, term in enumerate(equation.terms):
-                identifier = f"term_{equation_index}_{term_index}"
-                selected = {
+            selected_terms = tuple(
+                _selected_term(equation, term) for term in equation.terms
+            )
+            identifiers = tuple(
+                f"term_{equation_index}_{term_index}"
+                for term_index in range(len(equation.terms))
+            )
+            if generation_granularity == "atomic_interaction":
+                for identifier, selected in zip(
+                    identifiers, selected_terms, strict=True
+                ):
+                    reply, draft = request(
+                        f"function_{identifier}",
+                        render_interaction_function_system_prompt(),
+                        lambda diagnostic,
+                        selected=selected: render_interaction_function_user_prompt(
+                            **common,
+                            selected_term_json=json.dumps(selected),
+                            accepted_functions_json=json.dumps(accepted),
+                            parameter_registry_json=json.dumps(registry),
+                            diagnostics_json=diagnostic,
+                        ),
+                        InteractionFunctionReply,
+                        lambda reply,
+                        identifier=identifier,
+                        draft=draft: apply_function_reply(
+                            topology, draft, identifier, reply, context, aliases
+                        ),
+                    )
+                    accepted.append(
+                        {"selected_term": selected, **reply.model_dump(mode="json")}
+                    )
+                    registry.update(
+                        {item.name: item.role.value for item in reply.parameters}
+                    )
+                    checkpoint()
+            else:
+                selected_equation = {
                     "lhs": equation.name,
                     "definition": equation.definition,
-                    **term.model_dump(mode="json"),
-                    "assembly_template": (
-                        f"d({equation.name})/dt"
-                        if equation.definition == "differential"
-                        else equation.name
-                    )
-                    + " = ... "
-                    + _assembly_template(term),
+                    "terms": list(selected_terms),
                 }
                 reply, draft = request(
-                    f"function_{identifier}",
-                    render_interaction_function_system_prompt(),
+                    f"equation_functions_{equation_index}",
+                    render_equation_function_batch_system_prompt(),
                     lambda diagnostic,
-                    selected=selected: render_interaction_function_user_prompt(
-                        **common,
-                        selected_term_json=json.dumps(selected),
-                        accepted_functions_json=json.dumps(accepted),
-                        parameter_registry_json=json.dumps(registry),
-                        diagnostics_json=diagnostic,
+                    selected_equation=selected_equation: (
+                        render_equation_function_batch_user_prompt(
+                            **common,
+                            selected_equation_json=json.dumps(selected_equation),
+                            accepted_functions_json=json.dumps(accepted),
+                            parameter_registry_json=json.dumps(registry),
+                            diagnostics_json=diagnostic,
+                        )
                     ),
-                    InteractionFunctionReply,
+                    EquationFunctionBatchReply,
                     lambda reply,
-                    identifier=identifier,
-                    draft=draft: apply_function_reply(
-                        topology, draft, identifier, reply, context, aliases
+                    identifiers=identifiers,
+                    draft=draft: apply_equation_function_reply(
+                        topology,
+                        draft,
+                        identifiers,
+                        reply,
+                        context,
+                        aliases,
                     ),
                 )
-                accepted.append(
-                    {"selected_term": selected, **reply.model_dump(mode="json")}
-                )
-                applied = next(
-                    item
-                    for item in draft.interaction_functions
-                    if item.interaction_id == identifier
-                )
-                registry.update(
-                    {item.name: item.role.value for item in applied.parameters}
-                )
+                for selected, function in zip(
+                    selected_terms, reply.functions, strict=True
+                ):
+                    accepted.append(
+                        {
+                            "selected_term": selected,
+                            **function.model_dump(mode="json"),
+                        }
+                    )
+                    registry.update(
+                        {
+                            item.name: item.role.value
+                            for item in function.parameters
+                        }
+                    )
                 checkpoint()
         inverse = {value: key for key, value in aliases.items()}
         for state in topology.states:
@@ -217,6 +266,7 @@ def run_staged_functions(
         error = str(exc)[:6000]
     result = {
         "protocol": "scientific-staged-functions-1",
+        "generation_granularity": generation_granularity,
         "status": "complete" if expansion is not None else "failed",
         "error": error,
         "complete_model": expansion is not None,
@@ -225,6 +275,9 @@ def run_staged_functions(
         "draft": draft.model_dump(mode="json"),
         "accepted_functions": accepted,
         "candidate": expansion.candidate.model_dump(mode="json") if expansion else None,
+        "scientific_review_facts": (
+            _scientific_review_facts(brief, accepted) if expansion else None
+        ),
         "events": events,
         "physical_requests": len(client.records),
         "budget_charge": sum(item.get("budget_charge", 0) for item in client.records),
@@ -247,12 +300,154 @@ def run_staged_functions(
     return result
 
 
-def _assembly_template(term: EquationTerm | LegacyEquationTerm) -> str:
-    """Describe exactly how the runtime will assemble one accepted function."""
-    if isinstance(term, LegacyEquationTerm):
-        return "+ (FUNCTION)" if term.outer_sign == "add" else "- (FUNCTION)"
-    if term.outer_weight_sign is OuterWeightSign.POSITIVE:
-        return "+ (FUNCTION)"
-    if term.outer_weight_sign is OuterWeightSign.NEGATIVE:
-        return "- (FUNCTION)"
-    return "+ (SIGNED_FUNCTION)"
+def _selected_term(
+    equation: EquationDefinition,
+    term: Any,
+) -> dict[str, Any]:
+    """Render one runtime-owned inner function slot."""
+    return {
+        "lhs": equation.name,
+        "definition": equation.definition,
+        **term.model_dump(mode="json"),
+        "assembly_template": (
+            f"d({equation.name})/dt"
+            if equation.definition == "differential"
+            else equation.name
+        )
+        + " = ... "
+        + ("+" if term.outer_sign == "add" else "-")
+        + " (FUNCTION)",
+    }
+
+
+def _scientific_review_facts(
+    brief: PublicScientificBrief,
+    accepted: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Expose syntax facts and unresolved human judgments without scoring them."""
+    parameter_uses: dict[str, list[str]] = {}
+    parameter_lhs: dict[str, set[str]] = {}
+    relaxation_terms = []
+    identity_terms = []
+    nonlinear_source_terms = []
+    for index, item in enumerate(accepted):
+        selected = item["selected_term"]
+        lhs = selected["lhs"]
+        label = f"{lhs}[{index}]"
+        parameter_names = {parameter["name"] for parameter in item["parameters"]}
+        for name in parameter_names:
+            parameter_uses.setdefault(name, []).append(label)
+            parameter_lhs.setdefault(name, set()).add(lhs)
+        expression = item["expression"]
+        tree = ast.parse(expression, mode="eval")
+        sources = set(selected["sources"])
+        if _has_nonlinear_source_dependence(tree, sources):
+            nonlinear_source_terms.append(label)
+        if (
+            len(sources) == 1
+            and not parameter_names
+            and isinstance(tree.body, ast.Name)
+            and tree.body.id in sources
+        ):
+            identity_terms.append(label)
+        role = selected["scientific_role"].lower()
+        if any(
+            phrase in role
+            for phrase in (
+                "decay",
+                "relax",
+                "clearance",
+                "return toward baseline",
+                "toward baseline",
+            )
+        ):
+            relaxation_terms.append(
+                {
+                    "term": label,
+                    "lhs": lhs,
+                    "outer_sign": selected["outer_sign"],
+                    "sources": selected["sources"],
+                    "expression": expression,
+                    "subtractive_outer_sign": selected["outer_sign"] == "subtract",
+                }
+            )
+    public_text = " ".join(
+        [
+            brief.scientific_context,
+            *(item.public_requirement for item in brief.requirements),
+            *(
+                positive
+                for item in brief.requirements
+                for positive in item.positive_requirements
+            ),
+        ]
+    ).lower()
+    requires_nonlinearity = "nonlinear" in public_text
+    return {
+        "schema_version": "staged-function-scientific-review-facts-1",
+        "required_nonlinearity_mentioned_publicly": requires_nonlinearity,
+        "source_nonlinear_term_count": len(nonlinear_source_terms),
+        "source_nonlinear_terms": nonlinear_source_terms,
+        "required_nonlinearity_has_syntax_evidence": (
+            bool(nonlinear_source_terms) if requires_nonlinearity else None
+        ),
+        "relaxation_terms": relaxation_terms,
+        "all_tagged_relaxation_outer_signs_subtractive": (
+            all(item["subtractive_outer_sign"] for item in relaxation_terms)
+            if relaxation_terms
+            else None
+        ),
+        "identity_source_terms": identity_terms,
+        "shared_parameters": {
+            name: uses for name, uses in sorted(parameter_uses.items()) if len(uses) > 1
+        },
+        "cross_lhs_shared_parameters": {
+            name: sorted(lhs_values)
+            for name, lhs_values in sorted(parameter_lhs.items())
+            if len(lhs_values) > 1
+        },
+        "human_review_required": [
+            "unit_consistency",
+            "scientific_justification_of_parameter_sharing",
+            "scientific_direction_inside_grouped_source_laws",
+            "mechanistic_adequacy_beyond_syntax",
+        ],
+    }
+
+
+def _has_nonlinear_source_dependence(tree: ast.AST, sources: set[str]) -> bool:
+    """Detect only explicit nonlinear dependence on scientific source symbols."""
+
+    def source_names(node: ast.AST) -> set[str]:
+        return {
+            child.id
+            for child in ast.walk(node)
+            if isinstance(child, ast.Name) and child.id in sources
+        }
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and source_names(node):
+            return True
+        if (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Pow)
+            and source_names(node.left)
+            and (
+                not isinstance(node.right, ast.Constant) or node.right.value != 1
+            )
+        ):
+            return True
+        if (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Div)
+            and source_names(node.right)
+        ):
+            return True
+        if (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Mult)
+            and source_names(node.left)
+            and source_names(node.right)
+        ):
+            return True
+    return False
