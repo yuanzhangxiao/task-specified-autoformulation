@@ -1,0 +1,22 @@
+{
+  "protocol": "scientific-staged-fit-1",
+  "function_plan_sha256": "8c5825d161d61fb3326a424eac64eb2b2f7a132f869e1ead006cc50f132662a0",
+  "function_task_id": "phase_b_anonymous_system_task_canonical_opaque_hard_seed1_functions_seed1",
+  "function_result_sha256": "55687ef4d5acdeb4a270001a9431586f99556781610b595c2da91adb328848a0",
+  "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+  "tier": "hard",
+  "public_prompt_sha256": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+  "fit_config": {
+    "number_of_starts": 3,
+    "random_seed": 20260907,
+    "integration_backend": "solve_ivp",
+    "allow_derivative_regression": false,
+    "nonlinear_initializer": "none",
+    "maximum_function_evaluations": 100,
+    "maximum_wall_time_seconds": 300
+  },
+  "screen_seconds": 30,
+  "replay_seconds": 60,
+  "supervisor_grace_seconds": 60,
+  "selection_reason": "Independent public-scientific review selected the only anonymous function candidate with the required nonlinear feedback; no data metrics used. All other public function attempts remain excluded with recorded reasons."
+}
