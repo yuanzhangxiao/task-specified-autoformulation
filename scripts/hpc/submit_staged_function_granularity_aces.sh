@@ -31,7 +31,7 @@ job_id="$(
   sbatch --parsable --account="${account}" --open-mode=append \
     --output="${output_root}/logs/staged-function-granularity-%j.out" \
     --error="${output_root}/logs/staged-function-granularity-%j.err" \
-    --export=ALL,AF_REPO_ROOT="${repository}",AF_PYTHON="${python}",AF_OUTPUT_ROOT="${output_root}",AF_VLLM_IMAGE="${image}",AF_HF_HOME="${AF_HF_HOME:-${scratch_root}/hf}",AF_COMPUTE_CACHE_ROOT="${AF_COMPUTE_CACHE_ROOT:-${scratch_root}/compute-cache}",AF_IPC_TMP_ROOT="${AF_IPC_TMP_ROOT:-${scratch_root}/ipc}" \
+    --export=ALL,AF_REPO_ROOT="${repository}",AF_PYTHON="${python}",AF_OUTPUT_ROOT="${output_root}",AF_VLLM_IMAGE="${image}",AF_HF_HOME="${AF_HF_HOME:-${scratch_root}/huggingface-cache}",AF_COMPUTE_CACHE_ROOT="${AF_COMPUTE_CACHE_ROOT:-${scratch_root}/compute-cache}",AF_IPC_TMP_ROOT="${AF_IPC_TMP_ROOT:-${scratch_root}/ipc}" \
     "${repository}/scripts/hpc/staged_function_granularity_aces.slurm"
 )"
 job_id="${job_id%%;*}"
