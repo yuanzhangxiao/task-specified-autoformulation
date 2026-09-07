@@ -108,8 +108,10 @@ def test_equation_batch_prompt_owns_lhs_and_ordered_slots() -> None:
     assert "one left-hand side" in system
     assert "length and order must exactly match" in system
     assert "scientifically coherent equation" in system
-    assert "same physical\nquantity" in system
-    assert "if any slot is invalid, none is accepted" in system
+    assert "functional_obligation" in system
+    assert "requires_nonlinear_source_dependence" in system
+    assert "parameter_identity_policy is interaction_local" in system
+    assert "retains valid slots" in system
 
     prompt = render_equation_function_batch_user_prompt(
         public_brief_json="{}",

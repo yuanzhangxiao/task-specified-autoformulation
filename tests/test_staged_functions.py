@@ -24,6 +24,8 @@ from autoformalism.staged_functions import (
     apply_equation_function_reply,
     apply_function_reply,
     apply_initial_reply,
+    bind_function_reply,
+    derive_interaction_function_obligation,
 )
 from autoformalism.staged_topology import lower_topology
 from autoformalism.staging import topology_commitment_sha256
@@ -159,6 +161,58 @@ def test_shared_parameter_role_conflict_is_rejected() -> None:
         apply_function_reply(
             topology, parent, "term_1_0", reply("k*(u-z)", k="rate"), context, aliases
         )
+
+
+def test_runtime_obligation_rejects_linear_law_and_localizes_parameters() -> None:
+    _, context, _, topology, aliases = fixture()
+    parent = FunctionalDraft(
+        topology_commitment_sha256=topology_commitment_sha256(topology)
+    )
+    nonlinear = derive_interaction_function_obligation(
+        "nonlinear joint response",
+        parameter_identity_policy="interaction_local",
+    )
+    with pytest.raises(ValueError, match="NONLINEAR_SOURCE_DEPENDENCE_REQUIRED"):
+        bind_function_reply(
+            topology,
+            parent,
+            "term_0_0",
+            reply("k*(z-x)", k="scale"),
+            context,
+            aliases,
+            nonlinear,
+        )
+    first, normalized = bind_function_reply(
+        topology,
+        parent,
+        "term_0_0",
+        reply("k*(z**2/(1+z**2)-x)", k="scale"),
+        context,
+        aliases,
+        nonlinear,
+    )
+    assert normalized.parameters[0].name != "k"
+    assert normalized.parameters[0].name in normalized.expression
+    second, normalized_second = bind_function_reply(
+        topology,
+        first,
+        "term_1_0",
+        reply("k*(u-z)", k="scale"),
+        context,
+        aliases,
+        derive_interaction_function_obligation(
+            "input response",
+            parameter_identity_policy="interaction_local",
+        ),
+    )
+    assert normalized_second.parameters[0].name != normalized.parameters[0].name
+    assert len(
+        {
+            parameter.name
+            for function in second.interaction_functions
+            for parameter in function.parameters
+        }
+    ) == 2
 
 
 def test_function_batch_is_bound_in_order_and_fails_atomically() -> None:

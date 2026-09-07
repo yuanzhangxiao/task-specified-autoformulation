@@ -553,3 +553,12 @@ control remains blocked on the selected proposer operating point. Every ACES
 baseline artifact is train/validation-only and moves to Delta through a
 hash-recorded selection handoff. The complete protocol and deferred baseline
 rationale are in `docs/PROPOSER_AND_BASELINE_EXECUTION.md`.
+
+Staged function construction now supports a hybrid equation-batch policy after
+the matched granularity probe exposed a cost-versus-nonlinearity trade-off. The
+runtime derives per-interaction syntax obligations from the frozen scientific
+role, retains valid slots from a schema-valid equation batch, sends only failed
+slots to atomic repair, and namespaces parameter identities by interaction.
+The targeted opaque-system protocol and its limitations are documented in
+`docs/STAGED_FUNCTION_HYBRID_REPAIR.md`. It is function-only: fitting, judging,
+test data, and private references remain outside this milestone.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, FiniteFloat, model_validator
 
 from autoformalism.schemas.base import Identifier, StrictSchema
@@ -9,7 +11,7 @@ from autoformalism.schemas.candidate import ParameterRole
 
 
 class FunctionParameter(StrictSchema):
-    """A shared fitted identity and role, without scope, values or ranges."""
+    """A fitted identity and role, without scope, values or ranges."""
 
     name: Identifier
     role: ParameterRole
@@ -37,6 +39,17 @@ class EquationFunctionBatchReply(StrictSchema):
         min_length=1,
         max_length=8,
     )
+
+
+class InteractionFunctionObligation(StrictSchema):
+    """Runtime-owned, syntax-auditable requirements for one frozen term."""
+
+    schema_version: Literal["interaction-function-obligation-1"] = (
+        "interaction-function-obligation-1"
+    )
+    requires_nonlinear_source_dependence: bool = False
+    parameter_identity_policy: Literal["preserve", "interaction_local"] = "preserve"
+    provenance: tuple[str, ...] = Field(default=(), max_length=8)
 
 
 class FixedInitial(StrictSchema):

@@ -1,0 +1,40 @@
+{
+  "protocol": "scientific-staged-function-hybrid-repair-1",
+  "purpose": "Targeted opaque-system evaluation of same-LHS equation batches with deterministic per-interaction obligations, atomic repair only for rejected terms, and interaction-local parameter identities; latent initialization remains separate and no fitting is performed",
+  "platform": "aces-h100x1",
+  "serving_image_sha256": "2f77a130b950c44610ad8b60c2b28703ddfe3107d4cadc9bab44683ac9badf5d",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 64,
+    "maximum_total_tokens": 262144,
+    "attempts_per_step": 3
+  },
+  "served_context_tokens": 32768,
+  "public_cells": [
+    "phase_b_anonymous_system_task_canonical_opaque_hard"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "diagnostic_fixtures": [],
+  "limits": {
+    "generated_variables": 12,
+    "terms_per_equation": 8,
+    "total_terms": 32
+  },
+  "wall_seconds": 1500,
+  "shutdown_margin_seconds": 240,
+  "source_function_plan_sha256": "8c5825d161d61fb3326a424eac64eb2b2f7a132f869e1ead006cc50f132662a0",
+  "selected_topology": {
+    "task_id": "phase_b_anonymous_system_task_canonical_opaque_hard_seed1",
+    "result_sha256": "bd66ed71b74ccf7c20d3de15d4bc2e637fa25e2af7d30baac0d9caaea9ffebe6"
+  },
+  "generation_granularity": "equation_batch_atomic_repair"
+}

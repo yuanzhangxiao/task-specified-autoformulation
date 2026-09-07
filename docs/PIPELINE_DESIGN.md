@@ -708,3 +708,16 @@ NMSE-blinded paired-question-consensus judge reports cross-method mechanistic
 validity and preference. Scientific comparisons are unlabeled and cannot be
 reported as judge accuracy; only mutation-contract calibration experiments
 support accuracy claims.
+
+## Hybrid staged function construction
+
+After a topology passes the reviewed public handoff, the runtime may request
+all ordered interaction functions for one left-hand side in a single provider
+call. Each immutable interaction carries a runtime-derived functional
+obligation. A schema-valid batch is audited slot by slot: valid terms remain in
+the draft, while only rejected terms are resubmitted for atomic repair with the
+deterministic diagnostic. Parameter spellings are interaction-local mnemonics
+and are deterministically namespaced before compilation. This policy preserves
+equation-level context without making one invalid term discard other valid
+terms or accidentally share fitted identities across equations. See
+`docs/STAGED_FUNCTION_HYBRID_REPAIR.md` for the prospective evaluation boundary.
