@@ -14,6 +14,22 @@ readonly model_revision="$(jq -r '.config.model_settings.model_revision' "${plan
 readonly expected_image_sha="$(jq -r '.config.serving_image_sha256' "${plan}")"
 readonly context_tokens="$(jq -r '.config.served_context_tokens' "${plan}")"
 readonly worker_seconds="$(jq -r '.config.wall_seconds' "${plan}")"
+case "$(jq -r '.config.protocol' "${plan}")" in
+  scientific-staged-topology-1) worker_script=staged_topology_campaign.py ;;
+  scientific-staged-functions-1) worker_script=staged_function_campaign.py ;;
+  *) echo 'unsupported frozen worker protocol' >&2; exit 2 ;;
+esac
+readonly worker_script
+case "$(jq -r '.config.platform' "${plan}")" in
+  aces-h100x1|delta-a40x1) expected_tensor_parallel=1 ;;
+  aces-h100x2) expected_tensor_parallel=2 ;;
+  *) echo 'unsupported frozen platform' >&2; exit 2 ;;
+esac
+[[ "${AF_TENSOR_PARALLEL_SIZE:-${expected_tensor_parallel}}" == "${expected_tensor_parallel}" ]] || {
+  echo 'tensor parallel size differs from frozen platform' >&2
+  exit 2
+}
+readonly expected_tensor_parallel
 readonly runtime_root="${AF_OUTPUT_ROOT}/runtime"
 readonly job_cache="${AF_COMPUTE_CACHE_ROOT}/${SLURM_JOB_ID}"
 readonly ipc_tmp="${AF_IPC_TMP_ROOT}/${SLURM_JOB_ID}"
@@ -30,6 +46,17 @@ image_sha="$(sha256sum "${AF_VLLM_IMAGE}")"
 }
 printf '%s\n' "${image_sha}" >"${runtime_root}/image-${SLURM_JOB_ID}.sha256"
 export PYTHONPATH="${AF_REPO_ROOT}/src"
+if [[ "${worker_script}" == staged_function_campaign.py ]]; then
+  "${AF_PYTHON}" - "${plan}" <<'PY'
+import json
+import sys
+from autoformalism.rebuttal.staged_function_campaign import function_launcher_hash
+with open(sys.argv[1], encoding="utf-8") as stream:
+    frozen = json.load(stream)
+if function_launcher_hash() != frozen["launcher_sha256"]:
+    raise SystemExit("launcher differs from frozen function campaign")
+PY
+fi
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
 export no_proxy="${NO_PROXY}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
@@ -76,7 +103,7 @@ sha256sum "${AF_REPO_ROOT}/scripts/hpc/run_staged_topology_server.sh" \
   "${AF_VLLM_IMAGE}" vllm serve "${model}" --revision "${model_revision}" \
   --host 127.0.0.1 --port "${endpoint_port}" --max-model-len "${context_tokens}" \
   --max-num-seqs 1 --gpu-memory-utilization 0.90 \
-  --tensor-parallel-size "${AF_TENSOR_PARALLEL_SIZE:-1}" \
+  --tensor-parallel-size "${expected_tensor_parallel}" \
   >"${runtime_root}/server-${SLURM_JOB_ID}.log" 2>&1 &
 server_pid=$!
 ready=false
@@ -94,7 +121,7 @@ for _ in $(seq 1 300); do
 done
 [[ "${ready}" == true ]] || { echo 'server startup deadline exceeded' >&2; exit 1; }
 date -u +%Y-%m-%dT%H:%M:%SZ >"${runtime_root}/ready-${SLURM_JOB_ID}.txt"
-"${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/staged_topology_campaign.py" run \
+"${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/${worker_script}" run \
   --plan "${plan}" --output "${AF_OUTPUT_ROOT}/results" \
   --base-url "${endpoint}" --wall-seconds "${worker_seconds}" \
   >"${runtime_root}/worker-${SLURM_JOB_ID}.log" 2>&1 &
