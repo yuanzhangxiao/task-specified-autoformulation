@@ -12,7 +12,10 @@ readonly account="${AF_ACCOUNT:-156264627414}"
 readonly config="${repository}/configs/staged_function_granularity_v1.json"
 readonly plan="${output_root}/plan.json"
 readonly manifest="${output_root}/submission_manifest.json"
-[[ -d "${repository}/.git" ]] || { echo "missing repository: ${repository}" >&2; exit 2; }
+git -C "${repository}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+  echo "missing repository: ${repository}" >&2
+  exit 2
+}
 [[ -x "${python}" ]] || { echo "missing Python: ${python}" >&2; exit 2; }
 [[ -f "${AF_SOURCE_FUNCTION_PLAN}" ]] || { echo "missing source function plan: ${AF_SOURCE_FUNCTION_PLAN}" >&2; exit 2; }
 [[ -f "${image}" ]] || { echo "missing vLLM image: ${image}" >&2; exit 2; }
