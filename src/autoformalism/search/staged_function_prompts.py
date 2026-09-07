@@ -74,6 +74,59 @@ route to another topology term. The runtime binds a valid reply atomically to
 the selected interaction."""
 
 
+EQUATION_FUNCTION_BATCH_SYSTEM_PROMPT = """\
+You assign scalar functional forms for every runtime-selected interaction term
+on one left-hand side of a continuous-time scientific model. The frozen
+variable inventory, equation topology, selected left-hand side, differential
+or algebraic definition, ordered term slots, complete grouped source sets,
+outer signs, and scientific roles are authoritative. Return only the structured
+response required by the response schema: one ordered functions array. Its
+length and order must exactly match selected_equation.terms.
+
+Each returned expression fills only the corresponding inner FUNCTION slot. It
+is one scalar right-hand-side contribution, not a complete equation. Within
+each slot use every displayed source at least once and no other state, process,
+public channel, or time symbol. After parameter names are removed, its symbol
+set must equal that slot's grouped source set exactly. An empty source set
+permits a scientifically justified constant or parameter-only contribution.
+The runtime applies every frozen outer assembly sign exactly once. For a slot
+shown as ``d(x)/dt = ... - (FUNCTION)``, return ``x / tau`` rather than
+``-x / tau``.
+
+Construct the terms as one scientifically coherent equation. Preserve required
+nonlinear behavior. Introduce fitted gains, rates, scales, time constants, or
+shape parameters when unknown strength, conversion, relaxation, saturation, or
+curvature requires them. Reuse a parameter name only when the same physical
+quantity and qualitative role genuinely apply to both slots; otherwise use
+distinct names. Identity source expressions are valid only for known,
+unit-compatible balance contributions.
+
+The restricted grammar permits binary +, -, *, /, and Python **; unary + and -;
+finite integer or floating-point literals with magnitude at most 1e12; one-
+argument abs, exp, log, sigmoid, softplus, sqrt, and tanh; and min or max with
+2--64 positional arguments. An exponent after ** must be an integer literal
+with absolute value at most 16. Conventional symbol(t) is normalized only to
+that same scalar symbol. Comparisons, conditionals, Boolean operators, indexing,
+attributes, keywords, strings, arrays, arbitrary calls, and ^ are unsupported.
+Each expression is limited to 4096 characters, 512 AST nodes, and depth 64.
+
+For each function declare every parameter used in that expression exactly once,
+including a shared parameter declared in another slot. Declare no unused
+parameter. Each declaration contains only name and role. Reused names must keep
+one role across the batch and the accepted runtime registry. Supported roles
+are coefficient, nonnegative_coefficient, rate, time_constant, scale,
+positive_shape, offset, shape. Because topology owns outer polarity, a scalar
+edge weight implementing that sign must use a scientifically appropriate
+nonnegative or positive role rather than the real-valued coefficient role.
+
+Do not emit assignments, derivatives or left-hand sides, repeated outer signs,
+slot or interaction identifiers, source lists, topology edits, mechanism IDs,
+parameter values, ranges, scopes, units, descriptions, fitted results, initial
+values, hashes, validation claims, revision requests, summaries, or prose. Do
+not repair or route to another equation. The runtime binds the ordered reply
+atomically to the selected LHS; if any slot is invalid, none is accepted."""
+
+
 LATENT_INITIAL_SYSTEM_PROMPT = """\
 You choose only the causal initial value for one runtime-selected latent state
 in a continuous-time scientific model. The selected state, frozen inventory and
@@ -108,6 +161,11 @@ selected latent state."""
 def render_interaction_function_system_prompt() -> str:
     """Return the immutable per-interaction functional-form instruction."""
     return INTERACTION_FUNCTION_SYSTEM_PROMPT
+
+
+def render_equation_function_batch_system_prompt() -> str:
+    """Return the immutable same-LHS function-batch instruction."""
+    return EQUATION_FUNCTION_BATCH_SYSTEM_PROMPT
 
 
 def render_interaction_function_user_prompt(
@@ -154,6 +212,52 @@ def render_interaction_function_user_prompt(
             label="diagnostics_json",
         )
     return _request_text(stage="interaction function", payload=payload)
+
+
+def render_equation_function_batch_user_prompt(
+    *,
+    public_brief_json: str,
+    inventory_json: str,
+    equation_sketch_json: str,
+    selected_equation_json: str,
+    accepted_functions_json: str,
+    parameter_registry_json: str,
+    diagnostics_json: str | None = None,
+) -> str:
+    """Render one ordered batch request for every term on one selected LHS."""
+    payload: dict[str, object] = {
+        "schema_version": "equation-function-batch-request-1",
+        "public_brief": _json_object(
+            public_brief_json,
+            label="public_brief_json",
+        ),
+        "frozen_inventory": _json_array(
+            inventory_json,
+            label="inventory_json",
+        ),
+        "frozen_equation_sketch": _json_array(
+            equation_sketch_json,
+            label="equation_sketch_json",
+        ),
+        "selected_equation": _json_object(
+            selected_equation_json,
+            label="selected_equation_json",
+        ),
+        "accepted_functions": _json_array(
+            accepted_functions_json,
+            label="accepted_functions_json",
+        ),
+        "parameter_registry": _json_object(
+            parameter_registry_json,
+            label="parameter_registry_json",
+        ),
+    }
+    if diagnostics_json is not None:
+        payload["runtime_diagnostics"] = _json_object(
+            diagnostics_json,
+            label="diagnostics_json",
+        )
+    return _request_text(stage="equation function batch", payload=payload)
 
 
 def render_latent_initial_system_prompt() -> str:

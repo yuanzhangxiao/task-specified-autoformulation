@@ -30,6 +30,15 @@ class InteractionFunctionReply(StrictSchema):
         return self
 
 
+class EquationFunctionBatchReply(StrictSchema):
+    """Ordered scalar functions for every term of one runtime-selected LHS."""
+
+    functions: tuple[InteractionFunctionReply, ...] = Field(
+        min_length=1,
+        max_length=8,
+    )
+
+
 class FixedInitial(StrictSchema):
     """A fixed finite causal initial value."""
 

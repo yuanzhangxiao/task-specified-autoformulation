@@ -21,6 +21,7 @@ from autoformalism.schemas.construction import (
 from autoformalism.schemas.proposal import ProposedInitialValue, ProposedParameter
 from autoformalism.schemas.staged import TopologyCandidate
 from autoformalism.schemas.staged_functions import (
+    EquationFunctionBatchReply,
     InteractionFunctionReply,
     LatentInitialReply,
 )
@@ -108,6 +109,33 @@ def apply_function_reply(
     if report.status == "incompatible":
         raise ValueError(
             "; ".join(f"{item.code}: {item.message}" for item in report.diagnostics)
+        )
+    return candidate
+
+
+def apply_equation_function_reply(
+    topology: TopologyCandidate,
+    draft: FunctionalDraft,
+    selected_ids: tuple[str, ...],
+    reply: EquationFunctionBatchReply,
+    context: ValidationContext,
+    aliases: Mapping[str, str],
+) -> FunctionalDraft:
+    """Validate and bind one complete same-LHS function batch atomically."""
+    if len(reply.functions) != len(selected_ids):
+        raise ValueError(
+            "equation function count mismatch: "
+            f"expected={len(selected_ids)}, actual={len(reply.functions)}"
+        )
+    candidate = draft
+    for selected_id, function in zip(selected_ids, reply.functions, strict=True):
+        candidate = apply_function_reply(
+            topology,
+            candidate,
+            selected_id,
+            function,
+            context,
+            aliases,
         )
     return candidate
 

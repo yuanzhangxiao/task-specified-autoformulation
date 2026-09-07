@@ -62,6 +62,24 @@ def function_transport(calls, repair=False):
     return transport
 
 
+def equation_batch_transport(calls, repair=False):
+    def transport(url, body, timeout):
+        payload = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
+        calls.append(payload)
+        if "selected_state" in payload:
+            return response({"initial": {"fixed_value": 0.0}})
+        selected = payload["selected_equation"]
+        functions = []
+        for term in selected["terms"]:
+            sources = term["sources"]
+            functions.append({"expression": "-".join(sources), "parameters": []})
+        if repair and len(calls) == 1:
+            functions.pop()
+        return response({"functions": functions})
+
+    return transport
+
+
 def test_function_repair_then_complete_candidate_and_exact_replay(
     tmp_path: Path,
 ) -> None:
@@ -93,6 +111,85 @@ def test_function_repair_then_complete_candidate_and_exact_replay(
     assert run() == result
     assert len(calls) == 4
     assert not result["parameter_fitting_performed"]
+
+
+def test_equation_batch_uses_one_function_call_per_lhs_and_same_initial_calls(
+    tmp_path: Path,
+) -> None:
+    task = function_diagnostic("driven_memory", ModelingLimits())
+    task["source"]["equations"][0]["terms"].append(
+        {
+            "sources": ["u"],
+            "outer_sign": "add",
+            "scientific_role": "direct input contribution",
+        }
+    )
+    brief = PublicScientificBrief.model_validate(task["brief"])
+    context = ValidationContext.model_validate(task["context"])
+    topology, _ = lower_topology(
+        brief,
+        tuple(
+            ScientificVariable.model_validate(item)
+            for item in task["source"]["inventory"]
+        ),
+        tuple(
+            EquationDefinition.model_validate(item)
+            for item in task["source"]["equations"]
+        ),
+        context,
+    )
+    task["source"]["topology"] = topology.model_dump(mode="json")
+    calls = []
+    client = StagedTopologyClient(
+        settings=StagedModelSettings(),
+        base_url="http://localhost:8000",
+        directory=tmp_path / "calls",
+        namespace="equation-batch",
+        seed=0,
+        transport=equation_batch_transport(calls),
+    )
+    result = run_staged_functions(
+        brief,
+        context,
+        task["source"],
+        client,
+        tmp_path,
+        generation_granularity="equation_batch",
+    )
+    assert result["complete_model"]
+    assert result["generation_granularity"] == "equation_batch"
+    assert result["physical_requests"] == 3
+    assert sum("selected_equation" in call for call in calls) == 2
+    assert sum("selected_state" in call for call in calls) == 1
+    assert len(calls[0]["selected_equation"]["terms"]) == 2
+    assert result["scientific_review_facts"]["human_review_required"]
+
+
+def test_equation_batch_wrong_length_retries_without_partial_acceptance(
+    tmp_path: Path,
+) -> None:
+    task = function_diagnostic("driven_memory", ModelingLimits())
+    calls = []
+    client = StagedTopologyClient(
+        settings=StagedModelSettings(attempts_per_step=2),
+        base_url="http://localhost:8000",
+        directory=tmp_path / "calls",
+        namespace="equation-batch-repair",
+        seed=0,
+        transport=equation_batch_transport(calls, repair=True),
+    )
+    result = run_staged_functions(
+        PublicScientificBrief.model_validate(task["brief"]),
+        ValidationContext.model_validate(task["context"]),
+        task["source"],
+        client,
+        tmp_path,
+        generation_granularity="equation_batch",
+    )
+    assert result["complete_model"]
+    assert sum(not event["accepted"] for event in result["events"]) == 1
+    first_progress = json.loads((tmp_path / "progress.json").read_text())
+    assert len(first_progress["accepted_functions"]) == 2
 
 
 def test_function_drain_saves_partial_state_and_resumes_without_reissuing(

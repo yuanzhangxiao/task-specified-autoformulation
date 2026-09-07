@@ -8,6 +8,8 @@ from collections.abc import Callable
 import pytest
 
 from autoformalism.search.staged_function_prompts import (
+    render_equation_function_batch_system_prompt,
+    render_equation_function_batch_user_prompt,
     render_interaction_function_system_prompt,
     render_interaction_function_user_prompt,
     render_latent_initial_system_prompt,
@@ -99,6 +101,45 @@ def test_interaction_function_request_keeps_runtime_artifacts_separate() -> None
     assert payload["runtime_diagnostics"] == {
         "items": [{"code": "MISSING_FUNCTION", "lhs": "U"}]
     }
+
+
+def test_equation_batch_prompt_owns_lhs_and_ordered_slots() -> None:
+    system = render_equation_function_batch_system_prompt()
+    assert "one left-hand side" in system
+    assert "length and order must exactly match" in system
+    assert "scientifically coherent equation" in system
+    assert "same physical\nquantity" in system
+    assert "if any slot is invalid, none is accepted" in system
+
+    prompt = render_equation_function_batch_user_prompt(
+        public_brief_json="{}",
+        inventory_json="[]",
+        equation_sketch_json="[]",
+        selected_equation_json=json.dumps(
+            {
+                "lhs": "x",
+                "definition": "differential",
+                "terms": [
+                    {
+                        "sources": ["u"],
+                        "outer_sign": "add",
+                        "assembly_template": "d(x)/dt = ... + (FUNCTION)",
+                    },
+                    {
+                        "sources": ["x"],
+                        "outer_sign": "subtract",
+                        "assembly_template": "d(x)/dt = ... - (FUNCTION)",
+                    },
+                ],
+            }
+        ),
+        accepted_functions_json="[]",
+        parameter_registry_json="{}",
+    )
+    payload = _runtime_payload(prompt)
+    assert payload["schema_version"] == "equation-function-batch-request-1"
+    assert payload["selected_equation"]["lhs"] == "x"
+    assert len(payload["selected_equation"]["terms"]) == 2
 
 
 def test_latent_initial_prompt_enforces_narrow_causal_boundary() -> None:
