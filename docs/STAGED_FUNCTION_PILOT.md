@@ -67,6 +67,17 @@ The complete draft passes the ordinary candidate validator and expression
 compiler. Completion is distinct from numerical stability, scientific
 correctness and fit quality; no parameter fitting occurs in this pilot.
 
+The selected term also includes a runtime-rendered `assembly_template`, such as
+`d(x)/dt = ... - (FUNCTION)` or `output = ... + (FUNCTION)`. The reply fills
+only the parenthesized inner slot. For a subtractive relaxation term, `x / tau`
+becomes `-(x / tau)` after assembly; returning `-x / tau` would instead create
+growth. Genuine grouped laws can contain internal subtraction. The runtime
+preserves their expressions and applies the topology sign once; it does not
+silently remove negations or impose universal nonnegativity on inner functions.
+The prompt asks for scientific functional laws, preserving required nonlinear
+behavior and introducing unknown time scales or gains when needed. It permits
+identity expressions for scientifically known, unit-compatible balance terms.
+
 ## Frozen pilot
 
 `configs/staged_function_probe_v1.json` retains the established 20B, low-reasoning,
@@ -98,6 +109,28 @@ The existing shared server launcher selects the topology or function worker
 from a closed protocol list; earlier source-pinned runs remain reproducible.
 Delta CPU fitting/diagnostics follow after authentication is available and the
 function results are reviewed. No two-H100 job is needed for this gate.
+
+## Matched function follow-up
+
+The initial pilot completed six of six selected-topology public tasks and two
+of two diagnostics at the compiler gate. Scientific review found no public
+candidate ready for fitting: subtractive functions repeated their outer signs,
+turning sinks and relaxation into growth. The anonymous-system candidates also
+omitted the required nonlinear feedback. Dalla candidates had no free
+parameters, and anonymous-system candidates had only an offset, leaving unknown
+rates and gains fixed to one. These outcomes do not establish a function-stage
+scientific pass, and the raw candidates will not receive a fitting budget.
+
+`configs/staged_function_probe_v2.json` defines a separate matched development
+rerun. It preserves both source topology digests, all three function seeds,
+both diagnostics and the serving/budget settings. The changed treatment is the
+explicit assembly slot and scientific-law prompt guidance. The new frozen plan
+binds its own code and launcher identities; the v1 configuration and artifacts
+remain unchanged. Review assembled signs, the required nonlinear pathway,
+parameterization, candidate duplicates and initialization before numerical work.
+These scientific reviews remain separate from deterministic compiler completion.
+Typed scientific-obligation audits, unit propagation and topology revisions are
+deferred until this narrow correction is measured.
 
 ## Verification
 

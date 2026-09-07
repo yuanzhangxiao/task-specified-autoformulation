@@ -22,9 +22,14 @@ from autoformalism.rebuttal.staged_function_campaign import (
 )
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.schemas.staged_functions import LatentInitialReply
-from autoformalism.schemas.staged_topology import ModelingLimits, PublicScientificBrief
+from autoformalism.schemas.staged_topology import (
+    EquationDefinition,
+    ModelingLimits,
+    PublicScientificBrief,
+    ScientificVariable,
+)
 from autoformalism.search.staged_function_runner import run_staged_functions
-from autoformalism.staged_topology import content_hash
+from autoformalism.staged_topology import content_hash, lower_topology
 
 
 def response(payload):
@@ -123,6 +128,65 @@ def test_function_drain_saves_partial_state_and_resumes_without_reissuing(
     assert not (tmp_path / "result.json").exists()
     assert run(lambda: True)["complete_model"]
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("sign", ["add", "subtract"])
+@pytest.mark.parametrize("fixture", ["driven_memory", "generated_auxiliary"])
+def test_displayed_slot_matches_compiled_assembly_without_rewriting_inner_law(
+    tmp_path: Path, fixture: str, sign: str
+) -> None:
+    task = function_diagnostic(fixture, ModelingLimits())
+    source = task["source"]
+    selected_equation = source["equations"][1]
+    selected_equation["terms"][0]["outer_sign"] = sign
+    brief = PublicScientificBrief.model_validate(task["brief"])
+    context = ValidationContext.model_validate(task["context"])
+    topology, aliases = lower_topology(
+        brief,
+        tuple(ScientificVariable.model_validate(item) for item in source["inventory"]),
+        tuple(EquationDefinition.model_validate(item) for item in source["equations"]),
+        context,
+    )
+    source["topology"] = topology.model_dump(mode="json")
+    calls = []
+
+    def transport(url, body, timeout):
+        payload = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
+        calls.append(payload)
+        if "selected_state" in payload:
+            return response({"initial": {"fixed_value": 0.0}})
+        lhs = payload["selected_term"]["lhs"]
+        expression = {"x": "z-x", "z": "u-z", "a": "u"}[lhs]
+        if fixture == "generated_auxiliary" and lhs == "x":
+            expression = "a-x"
+        return response({"expression": expression, "parameters": []})
+
+    client = StagedTopologyClient(
+        settings=StagedModelSettings(),
+        base_url="http://localhost:8000",
+        directory=tmp_path / "calls",
+        namespace="assembly",
+        seed=0,
+        transport=transport,
+    )
+    result = run_staged_functions(brief, context, source, client, tmp_path)
+    assert result["complete_model"]
+    selected = calls[1]["selected_term"]
+    lhs = "d(z)/dt" if fixture == "driven_memory" else "a"
+    operator = "+" if sign == "add" else "-"
+    assert selected["assembly_template"] == f"{lhs} = ... {operator} (FUNCTION)"
+    assert result["accepted_functions"][1]["selected_term"] == selected
+    candidate = result["candidate"]
+    if fixture == "driven_memory":
+        equation = next(e for e in candidate["state_equations"] if e["state"] == "z")
+        expression = equation["rhs"]
+        inner = "u - z"
+    else:
+        equation = next(e for e in candidate["processes"] if e["name"] == aliases["a"])
+        expression = equation["expression"]
+        inner = "u"
+    expected = f"({inner})" if sign == "add" else f"-({inner})"
+    assert expression == expected
 
 
 def test_function_handoff_rejects_changed_topology_before_provider(

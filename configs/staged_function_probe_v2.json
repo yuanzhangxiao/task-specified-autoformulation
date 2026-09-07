@@ -1,0 +1,49 @@
+{
+  "protocol": "scientific-staged-functions-1",
+  "purpose": "Matched conditional function rerun with explicit inner assembly slots and scientific-law guidance; same two reviewed topologies and three function seeds, no fitting",
+  "platform": "aces-h100x1",
+  "serving_image_sha256": "2f77a130b950c44610ad8b60c2b28703ddfe3107d4cadc9bab44683ac9badf5d",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 64,
+    "maximum_total_tokens": 262144,
+    "attempts_per_step": 3
+  },
+  "served_context_tokens": 32768,
+  "public_cells": [
+    "phase_b_dalla_man_t2_canonical_named_easy",
+    "phase_b_anonymous_system_task_canonical_opaque_hard"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "diagnostic_fixtures": [
+    "driven_memory",
+    "generated_auxiliary"
+  ],
+  "limits": {
+    "generated_variables": 12,
+    "terms_per_equation": 8,
+    "total_terms": 32
+  },
+  "wall_seconds": 1500,
+  "shutdown_margin_seconds": 240,
+  "source_plan_sha256": "f3260147dce74cbdf634b2060541cc999ca85b79711b68e221e8632cc9f14b6d",
+  "selected_topologies": [
+    {
+      "task_id": "phase_b_dalla_man_t2_canonical_named_easy_seed1",
+      "result_sha256": "ed64f5d154a97c1ca624216f0869071324bfd35810eb78532d63501522adad26"
+    },
+    {
+      "task_id": "phase_b_anonymous_system_task_canonical_opaque_hard_seed1",
+      "result_sha256": "bd66ed71b74ccf7c20d3de15d4bc2e637fa25e2af7d30baac0d9caaea9ffebe6"
+    }
+  ]
+}

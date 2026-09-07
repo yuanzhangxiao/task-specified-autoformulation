@@ -146,6 +146,14 @@ def run_staged_functions(
                     "lhs": equation.name,
                     "definition": equation.definition,
                     **term.model_dump(mode="json"),
+                    "assembly_template": (
+                        f"d({equation.name})/dt"
+                        if equation.definition == "differential"
+                        else equation.name
+                    )
+                    + " = ... "
+                    + ("+" if term.outer_sign == "add" else "-")
+                    + " (FUNCTION)",
                 }
                 reply, draft = request(
                     f"function_{identifier}",
