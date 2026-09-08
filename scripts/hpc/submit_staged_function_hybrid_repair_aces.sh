@@ -6,10 +6,10 @@ readonly repository="${AF_REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 readonly python="${AF_PYTHON:-${repository}/.venv/bin/python}"
 readonly scratch_root="${SCRATCH:-/scratch/user/${USER}}"
 readonly project_root="${PROJECT:-${scratch_root}}"
-readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-function-hybrid-repair-v1-aces-h100x1}"
+readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-function-hybrid-repair-v2-aces-h100x1}"
 readonly image="${AF_VLLM_IMAGE:-${project_root}/containers/vllm-openai-v0.27.1.sif}"
 readonly account="${AF_ACCOUNT:-156264627414}"
-readonly config="${repository}/configs/staged_function_hybrid_repair_v1.json"
+readonly config="${AF_CONFIG:-${repository}/configs/staged_function_hybrid_repair_v2.json}"
 readonly plan="${output_root}/plan.json"
 readonly manifest="${output_root}/submission_manifest.json"
 git -C "${repository}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
@@ -50,7 +50,7 @@ plan_path = Path(sys.argv[3])
 source_path = Path(sys.argv[4])
 commit = sys.argv[5]
 payload = {
-    "schema_version": "scientific-staged-function-hybrid-repair-submission-1",
+    "schema_version": "scientific-staged-function-hybrid-repair-submission-2",
     "job_id": job_id,
     "commit": commit,
     "plan_path": str(plan_path),

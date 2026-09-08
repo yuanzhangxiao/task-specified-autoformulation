@@ -12,6 +12,7 @@ from autoformalism.construction import (
 )
 from autoformalism.expressions import RestrictedParser, ValidationContext
 from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
+from autoformalism.schemas.candidate import ParameterRole
 from autoformalism.schemas.construction import (
     ConstructionIntent,
     FunctionalDraft,
@@ -22,6 +23,7 @@ from autoformalism.schemas.construction import (
 from autoformalism.schemas.proposal import ProposedInitialValue, ProposedParameter
 from autoformalism.schemas.staged import TopologyCandidate
 from autoformalism.schemas.staged_functions import (
+    DeterministicFunctionRepair,
     EquationFunctionBatchReply,
     FunctionParameter,
     InteractionFunctionObligation,
@@ -147,10 +149,113 @@ def bind_function_reply(
     ).draft
     report = assess_functional_compatibility(topology, candidate)
     if report.status == "incompatible":
-        raise ValueError(
-            "; ".join(f"{item.code}: {item.message}" for item in report.diagnostics)
+        message = "; ".join(
+            f"{item.code}: {item.message}" for item in report.diagnostics
         )
+        raise ValueError(_localize_parameter_diagnostic(message, reply, normalized))
     return candidate, normalized
+
+
+def repair_certified_outer_gain_role(
+    reply: InteractionFunctionReply,
+    sources: set[str],
+) -> tuple[InteractionFunctionReply, tuple[DeterministicFunctionRepair, ...]]:
+    """Repair one signed role only when it is a direct scalar outer gain.
+
+    The certificate is intentionally narrow.  The expression root must be a
+    product, exactly one real-valued ``coefficient`` parameter must occur in
+    the entire expression, that parameter must be one direct factor of the
+    root product, and the remaining product must use a scientific source.
+    Parameters nested inside sums, differences, denominators, functions,
+    powers, or grouped laws are not rewritten.
+    """
+    parsed = RestrictedParser().parse(reply.expression, location="function")
+    direct_factors = _flatten_root_product(parsed.tree.body)
+    if direct_factors is None:
+        return reply, ()
+    coefficient_names = {
+        parameter.name
+        for parameter in reply.parameters
+        if parameter.role is ParameterRole.COEFFICIENT
+    }
+    if len(coefficient_names) != 1:
+        return reply, ()
+    name = next(iter(coefficient_names))
+    if (
+        sum(
+            isinstance(node, ast.Name) and node.id == name
+            for node in ast.walk(parsed.tree)
+        )
+        != 1
+    ):
+        return reply, ()
+    direct_name_factors = {
+        factor.id for factor in direct_factors if isinstance(factor, ast.Name)
+    }
+    if name not in direct_name_factors:
+        return reply, ()
+    remainder_sources = {
+        node.id
+        for factor in direct_factors
+        if not (isinstance(factor, ast.Name) and factor.id == name)
+        for node in ast.walk(factor)
+        if isinstance(node, ast.Name) and node.id in sources
+    }
+    if not remainder_sources:
+        return reply, ()
+    repaired = InteractionFunctionReply(
+        expression=reply.expression,
+        parameters=tuple(
+            FunctionParameter(
+                name=parameter.name,
+                role=(
+                    ParameterRole.NONNEGATIVE_COEFFICIENT
+                    if parameter.name == name
+                    else parameter.role
+                ),
+            )
+            for parameter in reply.parameters
+        ),
+    )
+    return repaired, (
+        DeterministicFunctionRepair(
+            code="OUTER_GAIN_ROLE_CERTIFIED",
+            parameter=name,
+        ),
+    )
+
+
+def _flatten_root_product(node: ast.AST) -> tuple[ast.AST, ...] | None:
+    """Return direct factors of a product root without entering other operators."""
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Mult):
+        return None
+
+    def visit(current: ast.AST) -> tuple[ast.AST, ...]:
+        if isinstance(current, ast.BinOp) and isinstance(current.op, ast.Mult):
+            return (*visit(current.left), *visit(current.right))
+        return (current,)
+
+    return visit(node)
+
+
+def _localize_parameter_diagnostic(
+    message: str,
+    local: InteractionFunctionReply,
+    normalized: InteractionFunctionReply,
+) -> str:
+    """Hide runtime namespaces from provider-facing deterministic diagnostics."""
+    aliases = {
+        normalized_parameter.name: local_parameter.name
+        for local_parameter, normalized_parameter in zip(
+            local.parameters,
+            normalized.parameters,
+            strict=True,
+        )
+        if normalized_parameter.name != local_parameter.name
+    }
+    for runtime_name in sorted(aliases, key=len, reverse=True):
+        message = message.replace(runtime_name, aliases[runtime_name])
+    return message
 
 
 def apply_equation_function_reply(
@@ -216,9 +321,7 @@ def has_nonlinear_source_dependence(tree: ast.AST, sources: set[str]) -> bool:
             isinstance(node, ast.BinOp)
             and isinstance(node.op, ast.Pow)
             and source_names(node.left)
-            and (
-                not isinstance(node.right, ast.Constant) or node.right.value != 1
-            )
+            and (not isinstance(node.right, ast.Constant) or node.right.value != 1)
         ):
             return True
         if (

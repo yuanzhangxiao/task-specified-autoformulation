@@ -32,6 +32,21 @@ class InteractionFunctionReply(StrictSchema):
         return self
 
 
+class DeterministicFunctionRepair(StrictSchema):
+    """One semantics-preserving repair certified from the restricted AST."""
+
+    schema_version: Literal["deterministic-function-repair-1"] = (
+        "deterministic-function-repair-1"
+    )
+    code: Literal["OUTER_GAIN_ROLE_CERTIFIED"]
+    parameter: Identifier
+    original_role: Literal["coefficient"] = "coefficient"
+    repaired_role: Literal["nonnegative_coefficient"] = "nonnegative_coefficient"
+    certificate: Literal["single_direct_outer_multiplicative_gain"] = (
+        "single_direct_outer_multiplicative_gain"
+    )
+
+
 class EquationFunctionBatchReply(StrictSchema):
     """Ordered scalar functions for every term of one runtime-selected LHS."""
 

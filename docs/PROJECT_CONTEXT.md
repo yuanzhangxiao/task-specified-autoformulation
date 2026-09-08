@@ -562,3 +562,8 @@ slots to atomic repair, and namespaces parameter identities by interaction.
 The targeted opaque-system protocol and its limitations are documented in
 `docs/STAGED_FUNCTION_HYBRID_REPAIR.md`. It is function-only: fitting, judging,
 test data, and private references remain outside this milestone.
+The version-2 follow-up deterministically repairs a real-valued parameter role
+only when the restricted AST certifies one direct outer scalar gain. Provider
+context and diagnostics retain short interaction-local names; executable
+namespaces never flow back into later LLM requests. A public-only offline replay
+must account for the reduction in LLM repair calls before a live confirmation.

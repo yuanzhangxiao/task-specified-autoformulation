@@ -26,6 +26,7 @@ from autoformalism.staged_functions import (
     apply_initial_reply,
     bind_function_reply,
     derive_interaction_function_obligation,
+    repair_certified_outer_gain_role,
 )
 from autoformalism.staged_topology import lower_topology
 from autoformalism.staging import topology_commitment_sha256
@@ -206,13 +207,74 @@ def test_runtime_obligation_rejects_linear_law_and_localizes_parameters() -> Non
         ),
     )
     assert normalized_second.parameters[0].name != normalized.parameters[0].name
-    assert len(
-        {
-            parameter.name
-            for function in second.interaction_functions
-            for parameter in function.parameters
-        }
-    ) == 2
+    assert (
+        len(
+            {
+                parameter.name
+                for function in second.interaction_functions
+                for parameter in function.parameters
+            }
+        )
+        == 2
+    )
+
+
+@pytest.mark.parametrize(
+    "expression,roles,sources,expected",
+    [
+        ("k*x", {"k": "coefficient"}, {"x"}, True),
+        ("k*(z-x)", {"k": "coefficient"}, {"x", "z"}, True),
+        ("k*x+z", {"k": "coefficient"}, {"x", "z"}, False),
+        ("exp(k*x)", {"k": "coefficient"}, {"x"}, False),
+        (
+            "k*x/tau",
+            {"k": "coefficient", "tau": "time_constant"},
+            {"x"},
+            False,
+        ),
+        ("k*k*x", {"k": "coefficient"}, {"x"}, False),
+        (
+            "k*q*x",
+            {"k": "coefficient", "q": "coefficient"},
+            {"x"},
+            False,
+        ),
+        ("2*k", {"k": "coefficient"}, {"x"}, False),
+    ],
+)
+def test_certified_outer_gain_role_repair_is_conservative(
+    expression, roles, sources, expected
+) -> None:
+    original = reply(expression, **roles)
+    repaired, records = repair_certified_outer_gain_role(original, sources)
+    assert bool(records) is expected
+    if expected:
+        assert repaired.parameters[0].role.value == "nonnegative_coefficient"
+        assert records[0].parameter == "k"
+    else:
+        assert repaired == original
+
+
+def test_namespaced_compatibility_diagnostic_uses_local_parameter_name() -> None:
+    _, context, _, topology, aliases = fixture()
+    parent = FunctionalDraft(
+        topology_commitment_sha256=topology_commitment_sha256(topology)
+    )
+    with pytest.raises(ValueError) as caught:
+        bind_function_reply(
+            topology,
+            parent,
+            "term_0_0",
+            reply("k*z-rate*x", k="coefficient", rate="rate"),
+            context,
+            aliases,
+            derive_interaction_function_obligation(
+                "joint response",
+                parameter_identity_policy="interaction_local",
+            ),
+        )
+    assert "['k']" in str(caught.value)
+    assert "k_term_0_0" not in str(caught.value)
 
 
 def test_function_batch_is_bound_in_order_and_fails_atomically() -> None:

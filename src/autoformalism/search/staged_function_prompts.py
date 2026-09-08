@@ -74,6 +74,13 @@ interaction_local, each name is only a local mnemonic for this term. The
 runtime deterministically namespaces it, so the same spelling in another term
 does not request or create parameter sharing.
 
+Under a runtime policy explicitly identified as certified_outer_gain, the
+runtime may correct coefficient to nonnegative_coefficient without another LLM
+call only when the restricted AST proves that it is the single, direct scalar
+multiplier of the complete inner contribution. No expression or value changes.
+Ambiguous, nested, repeated, or multiple signed coefficients are never repaired
+this way.
+
 Do not emit an assignment, derivative or left-hand side, repeated outer sign,
 interaction or candidate identifier, source list, topology edit, mechanism ID,
 parameter value, range, scope, unit, description, fitted result, initial value,
@@ -132,6 +139,9 @@ are coefficient, nonnegative_coefficient, rate, time_constant, scale,
 positive_shape, offset, shape. Because topology owns outer polarity, a scalar
 edge weight implementing that sign must use a scientifically appropriate
 nonnegative or positive role rather than the real-valued coefficient role.
+Under a runtime policy explicitly identified as certified_outer_gain, runtime
+may correct coefficient to nonnegative_coefficient only for one AST-certified
+direct outer scalar multiplier; all ambiguous cases remain errors.
 
 Do not emit assignments, derivatives or left-hand sides, repeated outer signs,
 slot or interaction identifiers, source lists, topology edits, mechanism IDs,
