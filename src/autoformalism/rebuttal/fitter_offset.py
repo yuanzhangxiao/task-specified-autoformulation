@@ -167,12 +167,29 @@ def prepare_offset(plan: OffsetPlan, source: Path, output: Path) -> dict:
     ) != parent.get("freeze_sha256"):
         raise ValueError("source freeze digest differs")
     runtime_plan = RuntimePlan.model_validate(parent["plan"])
-    if (
-        content_hash(parent["plan"]) != plan.source_plan_sha256
-        or parent["runtime"]["source_sha256"] != plan.source_code_sha256
-        or parent["tasks"] != list(PARENT_TASKS)
+    for label, actual, expected in (
+        (
+            "source_plan_sha256",
+            content_hash(parent["plan"]),
+            plan.source_plan_sha256,
+        ),
+        (
+            "source_code_sha256",
+            parent["runtime"]["source_sha256"],
+            plan.source_code_sha256,
+        ),
     ):
-        raise ValueError("source runtime code, plan or tasks differ")
+        if actual != expected:
+            raise ValueError(
+                f"source runtime provenance differs: {label} "
+                f"expected={expected}, actual={actual}"
+            )
+    if parent["tasks"] != list(PARENT_TASKS):
+        raise ValueError(
+            "source runtime tasks differ: "
+            f"expected_sha256={content_hash(list(PARENT_TASKS))}, "
+            f"actual_sha256={content_hash(parent['tasks'])}"
+        )
     current = runtime_identity()
     if any(current[k] != parent["runtime"][k] for k in ("python", "packages")):
         raise ValueError("numerical dependencies differ from runtime-v2")

@@ -1,7 +1,7 @@
 {
   "protocol": "fitter-signed-offset-1",
   "source_code_sha256": "e2bd31f25d7b3e1a3db44b7fc8fadea0347d7dd98b640c50c6995c947cd62f1b",
-  "source_plan_sha256": "bea4eb325d3c099dace4c8d4ee5c720bea9ae9ccefa2caa434b8c48e4cee39c2",
+  "source_plan_sha256": "64d09b4d5efe2a4c1a17de7911a73b700ae59ce798c2be6b8fd7ea5ea44eb393",
   "source_candidate_sha256": "bb8491d8039a664dd9ca640f6bdf0be9060861b80e487a1737a0bf1d56a67051",
   "offset_parameter": "c",
   "zero_gain_parameters": ["k", "k_u"],

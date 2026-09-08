@@ -28,6 +28,18 @@ from tests.test_fitter_diagnostic import bundle as diagnostic_bundle  # noqa: F4
 from tests.test_staged_fit_probe import staged_bundle  # noqa: F401
 
 
+def test_production_pin_matches_serialized_runtime_plan():
+    """Pin the actual freeze representation, including float coercion of budgets."""
+    configs = Path(__file__).resolve().parents[1] / "configs"
+    raw = read_json(configs / "fitter_runtime_v2.json")
+    serialized = RuntimePlan.model_validate(raw).model_dump(mode="json")
+    plan = campaign.OffsetPlan.model_validate(
+        read_json(configs / "fitter_signed_offset_v1.json")
+    )
+    assert plan.source_plan_sha256 == content_hash(serialized)
+    assert plan.source_plan_sha256 != content_hash(raw)
+
+
 @pytest.fixture
 def offset_bundle(staged_bundle, tmp_path):  # noqa: F811
     """Make a source-pinned synthetic decay plus negative offset, with no test data."""
@@ -177,10 +189,30 @@ def test_resume_reuses_optimizer_and_per_trajectory_replays(offset_bundle, monke
 )
 def test_wrong_source_pins_are_rejected(offset_bundle, field):
     plan, source, output = offset_bundle
-    with pytest.raises(ValueError, match="differ"):
+    with pytest.raises(ValueError, match="differ") as error:
         campaign.prepare_offset(
             plan.model_copy(update={field: "0" * 64}), source, output
         )
+    if field != "source_candidate_sha256":
+        assert f"{field} expected={'0' * 64}, actual={getattr(plan, field)}" in str(
+            error.value
+        )
+
+
+def test_modified_runtime_tasks_are_rejected_with_both_hashes(offset_bundle):
+    plan, source, output = offset_bundle
+    parent = read_json(source / "freeze.json")
+    expected = content_hash(list(campaign.PARENT_TASKS))
+    parent["tasks"][0]["anchor"] = "different_anchor"
+    actual = content_hash(parent["tasks"])
+    parent["freeze_sha256"] = content_hash(
+        {k: v for k, v in parent.items() if k != "freeze_sha256"}
+    )
+    write_json(source / "freeze.json", parent)
+    with pytest.raises(ValueError, match="source runtime tasks differ") as error:
+        campaign.prepare_offset(plan, source, output)
+    assert f"expected_sha256={expected}, actual_sha256={actual}" in str(error.value)
+    assert not output.exists()
 
 
 @pytest.mark.parametrize(

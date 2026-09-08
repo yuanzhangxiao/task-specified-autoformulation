@@ -13,6 +13,16 @@ plan, original candidate and public-snapshot ancestry are pinned in
 candidate, source metadata and public train/validation data; the test table is
 never loaded. The original benchmark prompt is preserved byte-for-byte.
 
+The source-plan pin hashes the validated `RuntimePlan.model_dump(mode="json")`
+saved in runtime-v2's `freeze.json`. It does not hash the raw configuration:
+validation serializes floating-point budgets such as `900` as `900.0`. The
+initial signed-offset configuration mistakenly pinned the raw representation
+and failed before submission. The corrected pin is
+`64d09b4d5efe2a4c1a17de7911a73b700ae59ce798c2be6b8fd7ea5ea44eb393`.
+Preparation now names a mismatched field and prints its expected and actual
+hashes. All source code, task matrix, candidate, data and ancestry checks remain
+in force. The ACES sign-contract probe is unaffected by this Delta-only fix.
+
 ## Questions and task matrix
 
 1. Does the signed-offset model improve beyond its nonnegative-offset control
