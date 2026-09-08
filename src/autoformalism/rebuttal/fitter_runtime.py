@@ -19,6 +19,7 @@ from autoformalism.fitting.runtime_probe import (
     residual_distance,
     rollout_case,
 )
+from autoformalism.fitting.simulation import forcing_segment_indices
 from autoformalism.fitting.stagnation import RolloutOracle, instrumented_fit
 from autoformalism.rebuttal.fitter_diagnostic import (
     _finite_payload,
@@ -38,6 +39,12 @@ from autoformalism.staged_topology import content_hash
 
 Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 ANCHORS = ("all_ones", "intermediate", "late")
+PRIOR_ARMS = (
+    "current_default",
+    "current_large_step",
+    "tight_default",
+    "tight_large_step",
+)
 TASKS = tuple(
     [
         {"name": f"profile_{anchor}", "kind": "profile", "anchor": anchor}
@@ -53,13 +60,17 @@ TASKS = tuple(
         for method in METHODS
         for policy in ("relative", "scaled")
     ]
+    + [
+        {"name": f"replay_previous_{arm}", "kind": "previous_replay", "arm": arm}
+        for arm in PRIOR_ARMS
+    ]
 )
 
 
 class RuntimePlan(StrictSchema):
-    """Predeclared nine-task comparison, including guards and all resource limits."""
+    """Predeclared corrected comparison, including guards and resource limits."""
 
-    protocol: Literal["fitter-runtime-1"] = "fitter-runtime-1"
+    protocol: Literal["fitter-runtime-2"] = "fitter-runtime-2"
     source_code_sha256: Digest
     source_plan_sha256: Digest
     anchor_hashes: dict[Literal["all_ones", "intermediate", "late"], Digest]
@@ -89,6 +100,8 @@ class RuntimePlan(StrictSchema):
             raise ValueError(
                 "reference tolerance must be stricter than candidate tolerance"
             )
+        if self.worker_seconds(0) > 900 or self.worker_seconds(3) > 1500:
+            raise ValueError("worker budgets exceed the frozen Slurm allocation")
         return self
 
     def worker_seconds(self, index: int) -> float:
@@ -96,7 +109,7 @@ class RuntimePlan(StrictSchema):
         return self.grace_seconds + (
             self.profile_seconds
             if index < 3
-            else self.fit_seconds + 2 * self.replay_seconds
+            else (self.fit_seconds if index < 9 else 0) + 2 * self.replay_seconds
         )
 
 
@@ -126,7 +139,7 @@ def prepare_runtime(plan: RuntimePlan, source: Path, output: Path) -> dict:
     ):
         raise ValueError("previous freeze digest differs")
     previous_plan = StagnationPlan.model_validate(parent["plan"])
-    if content_hash(previous_plan.model_dump(mode="json")) != plan.source_plan_sha256:
+    if content_hash(parent["plan"]) != plan.source_plan_sha256:
         raise ValueError("previous plan differs")
     if parent["tasks"] != list(PREVIOUS_TASKS):
         raise ValueError("previous task matrix differs")
@@ -191,6 +204,27 @@ def prepare_runtime(plan: RuntimePlan, source: Path, output: Path) -> dict:
     ):
         write_json(output / relative, value, immutable=True)
         assets[relative] = sha256(output / relative)
+    previous_parameters = {}
+    previous_scores = {}
+    for arm in PRIOR_ARMS:
+        prior_task = next(t for t in parent["tasks"] if t["name"] == arm)
+        prior_result = read_json(source / "results" / arm / "result.json")
+        prior_fit = read_json(source / "results" / arm / "fit.json")
+        expected = content_hash([parent["freeze_sha256"], prior_task])
+        if (
+            prior_result.get("identity") != expected
+            or prior_fit.get("identity") != expected
+            or prior_result.get("status") != "complete"
+            or prior_result.get("fit") != prior_fit.get("fit")
+            or prior_result.get("test_data_opened") is not False
+            or prior_result.get("private_reference_opened") is not False
+        ):
+            raise ValueError(f"previous replay provenance differs: {arm}")
+        previous_parameters[arm] = prior_fit["fit"]["parameters"]
+        previous_scores[arm] = prior_result.get("replay")
+        relative = f"prior_results/{arm}.json"
+        write_json(output / relative, prior_result, immutable=True)
+        assets[relative] = sha256(output / relative)
     original_plan = StagedFitPlan.model_validate(original["plan"])
     dataset, context = load_data(output, original_plan)
     candidate = CandidateModel.model_validate(read_json(output / "candidate.json"))
@@ -201,7 +235,7 @@ def prepare_runtime(plan: RuntimePlan, source: Path, output: Path) -> dict:
         raise ValueError("runtime diagnosis requires global parameters")
     if any(i.fixed_value is None for i in candidate.initial_conditions):
         raise ValueError("runtime diagnosis preserves fixed initial values")
-    for values in anchors.values():
+    for values in (*anchors.values(), *previous_parameters.values()):
         # Use exactly the production fitter's physical parameter bounds.
         oracle = RolloutOracle(
             model,
@@ -223,6 +257,8 @@ def prepare_runtime(plan: RuntimePlan, source: Path, output: Path) -> dict:
         "launcher_sha256": launch_identity(),
         "assets": assets,
         "anchors": anchors,
+        "previous_parameters": previous_parameters,
+        "previous_scores": previous_scores,
         "profile_trajectory_ids": ids,
         "tasks": list(TASKS),
         "test_data_opened": False,
@@ -271,6 +307,33 @@ def load_problem(output: Path, frozen: dict) -> tuple:
     return parent, dataset, model, scales
 
 
+def check_references(cases: dict, values, plan: RuntimePlan) -> tuple[bool, list[dict]]:
+    """Require both solvers, tolerance refinement, and two bounded-step controls."""
+    pairs = [("Radau_reference", "DOP853_reference")]
+    for method in ("Radau", "DOP853"):
+        pairs.extend(
+            (f"{method}_reference", f"{method}_{suffix}")
+            for suffix in ("tight_0", "step_control", "step_refined")
+        )
+    checks = []
+    for left, right in pairs:
+        complete = all(cases[name]["status"] == "complete" for name in (left, right))
+        difference = residual_distance(values(left), values(right)) if complete else {}
+        checks.append(
+            {
+                "left": left,
+                "right": right,
+                "valid": bool(
+                    complete
+                    and difference["rms"] <= plan.reference_rms
+                    and difference["maximum_absolute"] <= plan.reference_maximum
+                ),
+                **difference,
+            }
+        )
+    return all(check["valid"] for check in checks), checks
+
+
 def profile_anchor(
     output: Path, root: Path, identity: str, task: dict, frozen: dict, plan: RuntimePlan
 ) -> dict:
@@ -289,12 +352,13 @@ def profile_anchor(
     deadline = monotonic() + plan.profile_seconds
     cases = {}
 
-    def evaluate(name, method, rtol, atol):
+    def evaluate(name, method, rtol, atol, max_step=None):
         settings = parent.fit_config.model_copy(
             update={
                 "integration_method": method,
                 "relative_tolerance": rtol,
                 "absolute_tolerance": atol,
+                "maximum_integration_step": max_step,
             }
         )
         record = rollout_case(
@@ -315,6 +379,11 @@ def profile_anchor(
     for method in ("Radau", "DOP853"):
         evaluate(f"{method}_reference", method, 1e-10, 1e-12)
         evaluate(f"{method}_tight_0", method, 1e-9, 1e-11)
+        minimum_spacing = min(
+            float(np.min(np.diff(t.time))) for t in training.trajectories
+        )
+        evaluate(f"{method}_step_control", method, 1e-10, 1e-12, minimum_spacing)
+        evaluate(f"{method}_step_refined", method, 1e-10, 1e-12, minimum_spacing / 2)
     for method in METHODS:
         for name, rtol, atol in (("current", 1e-7, 1e-9), ("tight", 1e-9, 1e-11)):
             for repeat in range(2):
@@ -325,19 +394,8 @@ def profile_anchor(
             root / "cases" / name / "residual.npz", cases[name]["array_sha256"]
         )
 
-    reference = None
-    reference_checks = []
-    for method in ("Radau", "DOP853"):
-        names = (f"{method}_reference", f"{method}_tight_0")
-        if all(cases[n]["status"] == "complete" for n in names):
-            difference = residual_distance(values(names[0]), values(names[1]))
-            valid = (
-                difference["rms"] <= plan.reference_rms
-                and difference["maximum_absolute"] <= plan.reference_maximum
-            )
-            reference_checks.append({"method": method, "valid": valid, **difference})
-            if valid and reference is None:
-                reference = names[0]
+    verified, reference_checks = check_references(cases, values, plan)
+    reference = "Radau_reference" if verified else None
     comparisons = []
     method_gates = {}
     for method in METHODS:
@@ -357,7 +415,13 @@ def profile_anchor(
                     repeat_difference=residual_distance(
                         values(names[0]), values(names[1])
                     ),
-                    median_seconds=float(
+                    median_compute_seconds=float(
+                        np.median([cases[n]["compute_seconds"] for n in names])
+                    ),
+                    median_array_checkpoint_seconds=float(
+                        np.median([cases[n]["array_checkpoint_seconds"] for n in names])
+                    ),
+                    median_total_seconds=float(
                         np.median([cases[n]["seconds"] for n in names])
                     ),
                 )
@@ -377,24 +441,45 @@ def profile_anchor(
             "absolute_tolerance": 1e-11,
         }
     )
-    derivatives = derivative_cases(
-        root / "derivatives",
-        content_hash([identity, "derivatives", reference_method]),
-        model,
-        training,
-        parameters,
-        scales,
-        settings,
-        deadline,
-        plan.call_seconds,
-        step_factor=plan.step,
-        scale_floor=plan.scale_floor,
+    derivatives = (
+        derivative_cases(
+            root / "derivatives",
+            content_hash([identity, "derivatives", reference_method]),
+            model,
+            training,
+            parameters,
+            scales,
+            settings,
+            deadline,
+            plan.call_seconds,
+            step_factor=plan.step,
+            scale_floor=plan.scale_floor,
+            verification_settings=settings.model_copy(
+                update={"integration_method": "DOP853"}
+            ),
+            accuracy_rms=plan.reference_rms,
+            accuracy_maximum=plan.reference_maximum,
+        )
+        if verified
+        else []
     )
+    derivative_checks_pass = verified and all(
+        d["status"] == "complete" for d in derivatives
+    )
+    if not derivative_checks_pass:
+        method_gates = dict.fromkeys(METHODS, False)
     interpreter = interpreter_profile(
         root,
         content_hash([identity, "interpreter"]),
         model,
-        training.trajectories[0],
+        next(
+            (
+                t
+                for t in training.trajectories
+                if len(forcing_segment_indices(model, t)) > 2
+            ),
+            training.trajectories[0],
+        ),
         parameters,
         parent.fit_config,
         deadline,
@@ -402,13 +487,14 @@ def profile_anchor(
     )
     return {
         "identity": identity,
-        "status": "complete" if reference else "reference_failed",
+        "status": "complete" if derivative_checks_pass else "reference_unverified",
         "task": task,
         "parameters": parameters,
         "trajectory_ids": ids,
         "target_scales": scales,
         "reference": reference,
         "reference_checks": reference_checks,
+        "derivative_points_verified": derivative_checks_pass,
         "method_gates": method_gates,
         "comparisons": comparisons,
         "cases": cases,
@@ -438,6 +524,57 @@ def fit_guard(output: Path, frozen: dict, method: str) -> dict:
     return {"pass": all(c["pass"] for c in checks), "checks": checks}
 
 
+def replay_pair(root, identity, model, dataset, parameters, settings, plan) -> dict:
+    """Checkpoint both exact-vector replays; require finite matching scores."""
+    replays = {}
+    for method in ("DOP853", "Radau"):
+        record = checkpoint(root / f"replay_{method}.json", identity)
+        if record is None:
+            tight = settings.model_copy(
+                update={
+                    "integration_method": method,
+                    "relative_tolerance": 1e-9,
+                    "absolute_tolerance": 1e-11,
+                    "maximum_integration_step": None,
+                }
+            )
+            record = {
+                "identity": identity,
+                "settings": tight.model_dump(mode="json"),
+                "replay": replay_parameters(
+                    model, dataset, parameters, tight, plan.replay_seconds
+                )
+                if parameters
+                else None,
+            }
+            write_json(root / f"replay_{method}.json", _finite_payload(record))
+        replays[method] = record["replay"]
+    finite = all(
+        replays[m]
+        and all(
+            replays[m][s]["normalized_mse"] is not None for s in ("train", "validation")
+        )
+        for m in replays
+    )
+    agreement = (
+        {
+            s: abs(
+                replays["DOP853"][s]["normalized_mse"]
+                - replays["Radau"][s]["normalized_mse"]
+            )
+            for s in ("train", "validation")
+        }
+        if finite
+        else None
+    )
+    agrees = finite and all(value <= plan.accuracy_rms for value in agreement.values())
+    return {
+        "status": "complete" if agrees else "replay_unverified",
+        "replays": replays,
+        "replay_score_difference": agreement,
+    }
+
+
 def execute_runtime(output: Path, index: int) -> dict:
     """Run or resume one bounded task without changing model structure or data."""
     frozen = verify_runtime(output)
@@ -453,6 +590,18 @@ def execute_runtime(output: Path, index: int) -> dict:
     plan = RuntimePlan.model_validate(frozen["plan"])
     if task["kind"] == "profile":
         result = profile_anchor(output, root, identity, task, frozen, plan)
+    elif task["kind"] == "previous_replay":
+        parent, dataset, model, _ = load_problem(output, frozen)
+        parameters = frozen["previous_parameters"][task["arm"]]
+        result = {
+            "identity": identity,
+            "task": task,
+            "parameters": parameters,
+            "previous_scores": frozen["previous_scores"][task["arm"]],
+            **replay_pair(
+                root, identity, model, dataset, parameters, parent.fit_config, plan
+            ),
+        }
     else:
         guard = fit_guard(output, frozen, task["method"])
         if not guard["pass"]:
@@ -502,58 +651,15 @@ def execute_runtime(output: Path, index: int) -> dict:
                     ),
                 }
                 write_json(root / "fit.json", fit)
-            replays = {}
             parameters = fit["fit"]["parameters"]
-            for method in ("DOP853", "Radau"):
-                record = checkpoint(root / f"replay_{method}.json", identity)
-                if record is None:
-                    tight = settings.model_copy(
-                        update={
-                            "integration_method": method,
-                            "relative_tolerance": 1e-9,
-                            "absolute_tolerance": 1e-11,
-                        }
-                    )
-                    record = {
-                        "identity": identity,
-                        "replay": replay_parameters(
-                            model, dataset, parameters, tight, plan.replay_seconds
-                        )
-                        if parameters
-                        else None,
-                    }
-                    write_json(root / f"replay_{method}.json", _finite_payload(record))
-                replays[method] = record["replay"]
-            finite = all(
-                replays[m]
-                and all(
-                    replays[m][s]["normalized_mse"] is not None
-                    for s in ("train", "validation")
-                )
-                for m in replays
-            )
-            agreement = (
-                {
-                    s: abs(
-                        replays["DOP853"][s]["normalized_mse"]
-                        - replays["Radau"][s]["normalized_mse"]
-                    )
-                    for s in ("train", "validation")
-                }
-                if finite
-                else None
-            )
-            agrees = finite and all(
-                value <= plan.accuracy_rms for value in agreement.values()
-            )
             result = {
                 "identity": identity,
                 "task": task,
-                "status": "complete" if agrees else "replay_unverified",
                 "guard": guard,
                 **fit,
-                "replays": replays,
-                "replay_score_difference": agreement,
+                **replay_pair(
+                    root, identity, model, dataset, parameters, settings, plan
+                ),
             }
     result.update(test_data_opened=False, private_reference_opened=False, llm_calls=0)
     result = _finite_payload(result)

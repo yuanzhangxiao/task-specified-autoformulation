@@ -401,6 +401,14 @@ boundaries. Iterative screening uses deterministic fixed-step classical RK4 at
 measurement intervals, avoiding one adaptive solver launch per prediction
 slot. Final refitting and frozen test evaluation use `solve_ivp`. Both backends
 check finite values, time coverage, and configured state constraints.
+Adaptive free rollouts integrate separately at every change in the slope of a
+declared supplied input or auxiliary. States carry continuously across segment
+boundaries; target values do not determine segmentation. Exactly equal slopes
+need no restart, while approximate changes are never smoothed away. Requested
+output times alone are insufficient to prevent an adaptive solver from missing
+an input pulse. `maximum_integration_step` optionally adds a finite step cap for
+numerical refinement checks. See `docs/FITTER_INPUT_INTEGRATION.md` for the
+corrected reference protocol and user-run Delta campaign.
 
 `Fitter` constructs one bounded vector containing global parameters only. If
 every candidate state maps directly to an observed target/auxiliary with a

@@ -25,6 +25,8 @@ def runtime_bundle(diagnosis_bundle, tmp_path):  # noqa: F811
     old_plan, original, source = diagnosis_bundle
     frozen = previous.prepare_diagnosis(old_plan, original, source)
     result = previous.execute_diagnosis(source, 2)
+    for index in (1, 3, 4):
+        previous.execute_diagnosis(source, index)
     fit = result["fit"]
     assert len(fit["iterations"]) >= 2
     anchors = {
@@ -47,20 +49,21 @@ def runtime_bundle(diagnosis_bundle, tmp_path):  # noqa: F811
     return plan, source, tmp_path / "runtime"
 
 
-def test_all_nine_tasks_hold_model_fixed_and_recover_known_parameter(runtime_bundle):
+def test_all_tasks_hold_model_fixed_and_recover_known_parameter(runtime_bundle):
     plan, source, output = runtime_bundle
     digest = sha256(source / "candidate.json")
     frozen = campaign.prepare_runtime(plan, source, output)
-    assert len(frozen["tasks"]) == 9
+    assert len(frozen["tasks"]) == 13
     assert not list(output.rglob("test.csv"))
-    results = [campaign.execute_runtime(output, i) for i in range(9)]
+    results = [campaign.execute_runtime(output, i) for i in range(13)]
     assert all(r["status"] == "complete" for r in results)
     for profile in results[:3]:
         assert all(profile["method_gates"].values())
-        assert len(profile["cases"]) == 14
+        assert len(profile["cases"]) == 18
+        assert profile["derivative_points_verified"]
         assert all(d["status"] == "complete" for d in profile["derivatives"])
         assert profile["interpreter"]["timing_comparison_eligible"] is False
-    for result in results[3:]:
+    for result in results[3:9]:
         assert result["fit"]["initial_parameters"] == {"decay": 1.0}
         assert result["fit"]["parameters"]["decay"] == pytest.approx(0.72, abs=1e-4)
         assert result["replays"]["DOP853"]["validation"]["normalized_mse"] < 1e-7
@@ -72,7 +75,12 @@ def test_all_nine_tasks_hold_model_fixed_and_recover_known_parameter(runtime_bun
         sha256(source / "candidate.json") == sha256(output / "candidate.json") == digest
     )
     summary = runner.write_summary(output)
-    assert len(summary["rows"]) == 9
+    assert len(summary["rows"]) == 13
+    for result in results[9:]:
+        assert (
+            result["parameters"] == frozen["previous_parameters"][result["task"]["arm"]]
+        )
+        assert result["replay_score_difference"]["validation"] < 1e-7
     assert not summary["model_selection_performed"]
     report = (output / "summary.md").read_text()
     assert "Observation expression s" in report
@@ -159,7 +167,7 @@ def test_missing_accuracy_evidence_blocks_fit_without_hiding_task(
     result = campaign.execute_runtime(output, 3)
     assert result["status"] == "accuracy_guard_failed"
     assert not result["guard"]["pass"]
-    assert len(campaign.summarize_runtime(output)["rows"]) == 9
+    assert len(campaign.summarize_runtime(output)["rows"]) == 13
 
 
 def test_failed_rollout_case_is_terminal_and_preserves_partial_measurements(
@@ -221,8 +229,11 @@ def test_cli_profile_supervision_and_summary(runtime_bundle, tmp_path):
     assert read_json(output / "summary.json")["rows"][1]["status"] == "missing"
 
 
-@pytest.mark.parametrize("failure", ["inaccurate_rk45", "failed_radau"])
-def test_inaccurate_backend_is_blocked_and_reference_fallback_is_explicit(
+@pytest.mark.parametrize(
+    "failure",
+    ["inaccurate_rk45", "failed_radau", "wrong_radau", "shared_wrong_reference"],
+)
+def test_inaccurate_backend_or_unverified_reference_blocks_fitting(
     runtime_bundle, monkeypatch, failure
 ):
     plan, source, output = runtime_bundle
@@ -237,17 +248,26 @@ def test_inaccurate_backend_is_blocked_and_reference_fallback_is_explicit(
         )
         if failure == "inaccurate_rk45" and settings.integration_method == "RK45":
             values = values + 0.1
+        if failure == "wrong_radau" and settings.integration_method == "Radau":
+            values = values + 0.1
+        if (
+            failure == "shared_wrong_reference"
+            and settings.maximum_integration_step is None
+        ):
+            values = values + 0.1
         return values
 
     monkeypatch.setattr(runtime_probe, "measured_residual", altered)
     result = campaign.execute_runtime(output, 0)
-    assert result["method_gates"]["DOP853"]
     if failure == "inaccurate_rk45":
+        assert result["method_gates"]["DOP853"]
         assert not result["method_gates"]["RK45"]
         assert result["reference"] == "Radau_reference"
     else:
-        assert not result["method_gates"]["Radau"]
-        assert result["reference"] == "DOP853_reference"
+        assert not any(result["method_gates"].values())
+        assert result["reference"] is None
+        assert result["status"] == "reference_unverified"
+        assert not result["derivatives"]
 
 
 def test_configured_step_and_floor_are_used_in_derivative_profile(runtime_bundle):
@@ -259,6 +279,39 @@ def test_configured_step_and_floor_are_used_in_derivative_profile(runtime_bundle
     assert records["relative"]["actual_steps"][0] == pytest.approx(2e-4)
     assert records["scaled"]["actual_steps"][0] == pytest.approx(4e-4)
     assert records["scaled_smaller"]["actual_steps"][0] == pytest.approx(4e-5)
+
+
+def test_disagreement_at_derivative_point_invalidates_profile(
+    runtime_bundle, monkeypatch
+):
+    plan, source, output = runtime_bundle
+    campaign.prepare_runtime(plan, source, output)
+    original = runtime_probe.measured_residual
+
+    def altered(model, training, parameters, scales, settings, deadline, profiles):
+        values = original(
+            model, training, parameters, scales, settings, deadline, profiles
+        )
+        if settings.integration_method == "DOP853" and parameters["decay"] != 1.0:
+            values = values + 0.1
+        return values
+
+    monkeypatch.setattr(runtime_probe, "measured_residual", altered)
+    result = campaign.execute_runtime(output, 0)
+    assert all(c["valid"] for c in result["reference_checks"])
+    assert result["status"] == "reference_unverified"
+    assert not result["derivative_points_verified"]
+    assert not any(result["method_gates"].values())
+
+
+def test_old_protocol_and_excessive_worker_budgets_are_rejected(runtime_bundle):
+    plan, _, _ = runtime_bundle
+    for updates in (
+        {"protocol": "fitter-runtime-1"},
+        {"fit_seconds": 1200, "replay_seconds": 180, "grace_seconds": 120},
+    ):
+        with pytest.raises(ValueError):
+            campaign.RuntimePlan.model_validate({**plan.model_dump(), **updates})
 
 
 def test_supervisor_bounds_fit_worker_and_does_not_repeat_terminal_failure(
@@ -302,7 +355,7 @@ def test_submission_dependencies_and_partial_manifest_prevent_duplicate_jobs(
     git = binaries / "git"
     git.write_text(
         '#!/bin/sh\nif [ "$1" = "rev-parse" ]; then '
-        'echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; fi\n'
+        "echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; fi\n"
     )
     git.chmod(0o755)
     sbatch = binaries / "sbatch"
@@ -349,7 +402,7 @@ print(10000+len(rows))
     rows = [json.loads(line) for line in log.read_text().splitlines()]
     assert "--array=0-2%2" in rows[0]
     assert "--dependency=afterany:10000" in rows[1]
-    assert "--array=3-8%2" in rows[1]
+    assert "--array=3-12%2" in rows[1]
     manifest = read_json(output / "submission.json")
     assert manifest["profile_job_id"] == "10000"
     if fail_submission:

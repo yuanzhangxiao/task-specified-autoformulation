@@ -98,7 +98,7 @@ def write_summary(output: Path) -> dict:
     result = summarize_runtime(output)
     write_json(output / "summary.json", result)
     lines = [
-        "# Fitter runtime and accuracy",
+        "# Fitter runtime and accuracy — corrected input integration",
         "",
         "Frozen model; all fits start at all ones. No test data or LLM calls.",
         "A complete task can still have optimizer timeout or non-convergence.",
@@ -117,11 +117,13 @@ def write_summary(output: Path) -> dict:
         "## Fixed-vector profiles",
         "",
         f"Times cover {len(result['profile_trajectory_ids'])} fixed training "
-        "trajectories; timing fields below are nested.",
+        "trajectories; timing fields below are nested. "
+        "Compute excludes array checkpoint I/O.",
         "",
-        "| Anchor | Method | Tolerance | Accuracy pass | Median seconds | "
+        "| Anchor | Method | Tolerance | Accuracy pass | Median compute s | "
+        "Median array checkpoint s | "
         "Residual RMS difference | Max difference |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
     for row in result["rows"][:3]:
         record = row["result"] or {}
@@ -132,7 +134,8 @@ def write_summary(output: Path) -> dict:
                     entry["method"],
                     entry["tolerance"],
                     entry["accuracy_pass"],
-                    entry.get("median_seconds"),
+                    entry.get("median_compute_seconds"),
+                    entry.get("median_array_checkpoint_seconds"),
                     entry.get("rms"),
                     entry.get("maximum_absolute"),
                 ]
@@ -145,8 +148,11 @@ def write_summary(output: Path) -> dict:
             "",
             f"Status: {row['status']}; reference: {record.get('reference')}",
             f"Reference refinement checks: {record.get('reference_checks')}",
+            "Derivative points verified across solvers: "
+            f"{record.get('derivative_points_verified')}",
             "",
-            "| Case | Status | Total s | Integration s | RHS s | RHS calls | "
+            "| Case | Status | Total simulation s | Integration s | "
+            "RHS s | RHS calls | "
             "Solver nfev | Observation s | Forcing setup s | "
             "Observation expression s |",
             "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -166,13 +172,23 @@ def write_summary(output: Path) -> dict:
                 )
             }
             table_row([name, entry["status"], *totals.values()])
+        for name in ("Radau_reference", "DOP853_reference"):
+            for trajectory in (
+                record.get("cases", {}).get(name, {}).get("trajectories", [])
+            ):
+                lines.append(
+                    f"- {name} / {trajectory['trajectory_id']}: "
+                    f"segments={trajectory.get('integration_segments')}; "
+                    f"state ranges={trajectory.get('state_ranges')}"
+                )
         lines += [
             "",
             "Derivative consistency (reference solver at rtol=1e-9):",
             "",
             "| Policy | Status | Gradient infinity norm | "
-            "Difference from smaller scaled step | Actual steps |",
-            "| --- | --- | ---: | ---: | --- |",
+            "Difference from smaller scaled step | "
+            "Cross-solver Jacobian difference | Actual steps |",
+            "| --- | --- | ---: | ---: | ---: | --- |",
         ]
         for entry in record.get("derivatives", []):
             table_row(
@@ -181,13 +197,18 @@ def write_summary(output: Path) -> dict:
                     entry["status"],
                     entry.get("matrix", {}).get("gradient_inf_norm"),
                     entry.get("relative_difference_from_smaller_scaled"),
+                    entry.get("jacobian_reference_relative_difference"),
                     entry.get("actual_steps"),
                 ]
             )
+            if entry.get("error"):
+                lines.append(f"Derivative check {entry['name']}: {entry['error']}")
         lines += [
             "",
             "Python profile: separate intrusive measurement, "
             "excluded from timing comparisons.",
+            "Profiled trajectory: "
+            f"{record.get('interpreter', {}).get('trajectory_id')}",
             "",
         ]
         for entry in record.get("interpreter", {}).get("functions", [])[:10]:
@@ -210,7 +231,7 @@ def write_summary(output: Path) -> dict:
         "Validation solver score difference |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for row in result["rows"][3:]:
+    for row in result["rows"][3:9]:
         record = row["result"] or {}
         fit = record.get("fit", {})
         replay = record.get("replays", {}).get("DOP853") or {}
@@ -229,7 +250,7 @@ def write_summary(output: Path) -> dict:
                 differences.get("validation"),
             ]
         )
-    for row in result["rows"][3:]:
+    for row in result["rows"][3:9]:
         record = row["result"] or {}
         fit = record.get("fit", {})
         lines += [
@@ -244,6 +265,35 @@ def write_summary(output: Path) -> dict:
         ]
         if record.get("error"):
             lines.append("Error: " + record["error"])
+    lines += [
+        "",
+        "## Replay of previous fitted vectors",
+        "",
+        "Exact previous parameters; no new optimization. "
+        "Corrected scores use DOP853, checked by Radau.",
+        "",
+        "| Previous arm | Status | Old train NMSE | Corrected train NMSE | "
+        "Old validation NMSE | Corrected validation NMSE | "
+        "Train solver difference | Validation solver difference |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in result["rows"][9:]:
+        record = row["result"] or {}
+        old = record.get("previous_scores") or {}
+        replay = record.get("replays", {}).get("DOP853") or {}
+        differences = record.get("replay_score_difference") or {}
+        table_row(
+            [
+                row["task"]["arm"],
+                row["status"],
+                old.get("train", {}).get("normalized_mse"),
+                replay.get("train", {}).get("normalized_mse"),
+                old.get("validation", {}).get("normalized_mse"),
+                replay.get("validation", {}).get("normalized_mse"),
+                differences.get("train"),
+                differences.get("validation"),
+            ]
+        )
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     return result
 

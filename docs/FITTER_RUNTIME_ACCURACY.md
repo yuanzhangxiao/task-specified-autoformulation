@@ -1,5 +1,9 @@
 # Fitter runtime and accuracy milestone
 
+This is the historical runtime-v1 protocol at commit 65c9219. Its run exposed
+a missed-input reference defect. Use `docs/FITTER_INPUT_INTEGRATION.md` and the
+runtime-v2 configuration for the corrected campaign; preserve existing v1 outputs.
+
 The preceding diagnostic reproduced the near-all-one `xtol` stop and showed
 substantial improvement after changing the derivative step or ODE tolerance.
 The improved fits then exhausted their 300-second budgets. Their traces put

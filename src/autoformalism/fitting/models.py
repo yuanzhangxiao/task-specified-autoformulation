@@ -50,6 +50,9 @@ class FitConfig(BaseModel):
         allow_inf_nan=False,
     )
     integration_method: str = "RK45"
+    maximum_integration_step: float | None = Field(
+        default=None, gt=0.0, allow_inf_nan=False
+    )
     fixed_step_substeps: int = Field(default=1, ge=1)
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
     absolute_tolerance: float = Field(default=1e-9, gt=0.0)

@@ -4,8 +4,8 @@ set -euo pipefail
 export AF_REPO_ROOT="${AF_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 export AF_PYTHON="${AF_PYTHON:-/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python}"
 export AF_SOURCE_ROOT="${AF_SOURCE_ROOT:-/work/hdd/bibo/yxiao2/phase_b/fitter-stagnation-v1}"
-export AF_OUTPUT_ROOT="${AF_OUTPUT_ROOT:-/work/hdd/bibo/yxiao2/phase_b/fitter-runtime-v1}"
-export AF_CONFIG="${AF_CONFIG:-${AF_REPO_ROOT}/configs/fitter_runtime_v1.json}"
+export AF_OUTPUT_ROOT="${AF_OUTPUT_ROOT:-/work/hdd/bibo/yxiao2/phase_b/fitter-runtime-v2}"
+export AF_CONFIG="${AF_CONFIG:-${AF_REPO_ROOT}/configs/fitter_runtime_v2.json}"
 readonly concurrency="${AF_ARRAY_CONCURRENCY:-2}"
 [[ "${concurrency}" =~ ^[1-6]$ ]] || { echo 'Concurrency must be 1 through 6.' >&2; exit 2; }
 cd "${AF_REPO_ROOT}"
@@ -36,7 +36,8 @@ from autoformalism.rebuttal.fitter_diagnostic import read_json, write_json
 path = Path(sys.argv[1]) / "submission.json"
 previous = read_json(path) if path.exists() else {}
 write_json(path, {**previous, sys.argv[2]:sys.argv[3], "commit":sys.argv[4],
-                 "profile_tasks":3, "fit_tasks":6, "cpus_per_task":1, "gpus":0})
+                 "profile_tasks":3, "fit_tasks":6, "previous_replay_tasks":4,
+                 "cpus_per_task":1, "gpus":0})
 PY
 }
 profile="$(sbatch --parsable --array="0-2%${concurrency}" --time=00:15:00 \
@@ -45,7 +46,7 @@ profile="$(sbatch --parsable --array="0-2%${concurrency}" --time=00:15:00 \
   --export=ALL scripts/hpc/fitter_runtime_delta.slurm run)"
 profile="${profile%%;*}"
 record_job profile_job_id "${profile}"
-fit="$(sbatch --parsable --array="3-8%${concurrency}" --dependency="afterany:${profile}" \
+fit="$(sbatch --parsable --array="3-12%${concurrency}" --dependency="afterany:${profile}" \
   --output="${AF_OUTPUT_ROOT}/logs/fit-%A_%a.out" \
   --error="${AF_OUTPUT_ROOT}/logs/fit-%A_%a.err" \
   --export=ALL scripts/hpc/fitter_runtime_delta.slurm run)"

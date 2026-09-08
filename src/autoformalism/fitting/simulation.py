@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from itertools import pairwise
 from time import monotonic
 
 import numpy as np
@@ -34,6 +35,7 @@ class RolloutProfile:
     solver_nfev: int = 0
     solver_njev: int = 0
     solver_nlu: int = 0
+    integration_segments: int = 0
 
 
 def _profiled_rhs(profile: RolloutProfile, *args) -> np.ndarray:
@@ -149,27 +151,12 @@ def simulate_trajectory(
                 )
 
             try:
-                solution = solve_ivp(
-                    rhs,
-                    (float(time[0]), float(time[-1])),
-                    initial_state,
-                    t_eval=time,
-                    method=config.integration_method,
-                    rtol=config.relative_tolerance,
-                    atol=config.absolute_tolerance,
+                state_values = _adaptive_free_intervals(
+                    rhs, model, trajectory, initial_state, config, deadline, profile
                 )
             finally:
                 if profile is not None:
                     profile.integration_seconds = monotonic() - integration_started
-            if profile is not None:
-                profile.solver_nfev = int(solution.nfev)
-                profile.solver_njev = int(solution.njev)
-                profile.solver_nlu = int(solution.nlu)
-            if not solution.success:
-                raise RuntimeError(f"integration failed: {solution.message}")
-            if solution.y.shape != (len(model.state_names), len(time)):
-                raise RuntimeError(f"unexpected integration shape: {solution.y.shape}")
-            state_values = solution.y
         if not np.isfinite(state_values).all():
             raise RuntimeError("integration produced a nonfinite trajectory")
         constraint_started = monotonic() if profile is not None else 0.0
@@ -185,11 +172,12 @@ def simulate_trajectory(
         }
         for index, current_time in enumerate(time):
             forcing_started = monotonic() if profile is not None else 0.0
-            forcing = trajectory_forcing(
-                model,
-                trajectory,
-                causal_index=max(0, index - 1),
-            )
+            if use_resets or config.integration_backend == "fixed_rk4":
+                forcing = trajectory_forcing(
+                    model,
+                    trajectory,
+                    causal_index=max(0, index - 1),
+                )
             expression_started = monotonic() if profile is not None else 0.0
             if profile is not None:
                 profile.observation_forcing_seconds += (
@@ -223,6 +211,61 @@ def simulate_trajectory(
     finally:
         if profile is not None:
             profile.total_seconds = monotonic() - started
+
+
+def forcing_segment_indices(model: CompiledModel, trajectory: Trajectory) -> np.ndarray:
+    """Keep every change of supplied forcing slope, without smoothing the input.
+
+    Exactly equal adjacent slopes need no restart. Approximate equality is not
+    used: even a small public input change can matter to a proposed equation.
+    Only declared forcing channels contribute; measured targets are excluded.
+    """
+    time = trajectory.time
+    boundaries = np.zeros(len(time), dtype=bool)
+    boundaries[[0, -1]] = True
+    for name in model.validated.forcing_symbols:
+        values = trajectory.external_inputs.get(name)
+        if values is None:
+            values = trajectory.auxiliaries.get(name)
+        if values is not None:
+            slopes = np.diff(values) / np.diff(time)
+            boundaries[1:-1] |= slopes[1:] != slopes[:-1]
+    return np.flatnonzero(boundaries)
+
+
+def _adaptive_free_intervals(
+    rhs, model, trajectory, initial_state, config, deadline, profile
+) -> np.ndarray:
+    """Integrate through input breakpoints with continuous, never-reset states."""
+    time = trajectory.time
+    boundaries = forcing_segment_indices(model, trajectory)
+    states = np.empty((len(initial_state), len(time)), dtype=float)
+    states[:, 0] = initial_state
+    for start, end in pairwise(boundaries):
+        _check_deadline(deadline)
+        if profile is not None:
+            profile.integration_segments += 1
+        solution = solve_ivp(
+            rhs,
+            (float(time[start]), float(time[end])),
+            states[:, start],
+            t_eval=time[start : end + 1],
+            method=config.integration_method,
+            rtol=config.relative_tolerance,
+            atol=config.absolute_tolerance,
+            max_step=config.maximum_integration_step or np.inf,
+        )
+        if profile is not None:
+            profile.solver_nfev += int(solution.nfev)
+            profile.solver_njev += int(solution.njev)
+            profile.solver_nlu += int(solution.nlu)
+        if not solution.success:
+            raise RuntimeError(f"integration failed: {solution.message}")
+        expected = (len(initial_state), end - start + 1)
+        if solution.y.shape != expected:
+            raise RuntimeError(f"unexpected integration shape: {solution.y.shape}")
+        states[:, start : end + 1] = solution.y
+    return states
 
 
 def trajectory_forcing(
@@ -308,6 +351,7 @@ def _simulate_one_step_intervals(
                 (start, end),
                 interval_initial,
                 t_eval=[end],
+                max_step=config.maximum_integration_step or np.inf,
                 method=config.integration_method,
                 rtol=config.relative_tolerance,
                 atol=config.absolute_tolerance,

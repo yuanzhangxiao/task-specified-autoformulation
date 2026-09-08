@@ -78,6 +78,13 @@ def measured_residual(
             )
         if not simulation.success:
             raise ValueError(simulation.message)
+        profiles[-1]["state_ranges"] = {
+            name: {
+                "minimum": float(np.min(simulation.states[index])),
+                "maximum": float(np.max(simulation.states[index])),
+            }
+            for index, name in enumerate(model.state_names)
+        }
         for channel in model.validated.context.targets:
             pieces.append(
                 fitter._bounded_normalized_residual(
@@ -128,10 +135,15 @@ def rollout_case(
             min(deadline, started + call_seconds),
             profiles,
         )
+        compute_seconds = monotonic() - started
+        checkpoint_started = monotonic()
+        digest = save_array(root / "residual.npz", values)
         record.update(
             status="complete",
-            array_sha256=save_array(root / "residual.npz", values),
+            array_sha256=digest,
             cost=float(0.5 * values @ values),
+            compute_seconds=compute_seconds,
+            array_checkpoint_seconds=monotonic() - checkpoint_started,
         )
     except (TimeoutError, ValueError, RuntimeError, ArithmeticError) as error:
         record.update(
@@ -212,6 +224,9 @@ def derivative_cases(
     call_seconds,
     step_factor=1e-4,
     scale_floor=1.0,
+    verification_settings=None,
+    accuracy_rms=1e-6,
+    accuracy_maximum=1e-5,
 ):
     """Compare relative/scaled probes and two scaled steps at the frozen vector."""
     root.mkdir(parents=True, exist_ok=True)
@@ -222,6 +237,9 @@ def derivative_cases(
         model, training, scales, settings, root / f"attempt-{attempt}", deadline
     )
 
+    checked_points = {}
+    checked_arrays = {}
+
     def cached(point):
         key = content_hash([identity, point.tolist()])
         folder = root / "points" / key
@@ -229,21 +247,49 @@ def derivative_cases(
             record = read_json(folder / "result.json")
             if record["identity"] != key:
                 raise ValueError("derivative point identity differs")
-            return read_array(folder / "residual.npz", record["array_sha256"])
-        # A fresh oracle also enforces a per-residual bound; its calls remain logged.
-        bounded = RolloutOracle(
-            model,
-            training,
-            scales,
-            settings,
-            root / f"attempt-{attempt}" / key,
-            min(deadline, monotonic() + call_seconds),
-        )
-        result = bounded(point)
-        if bounded.failures.count:
-            raise ValueError("derivative point integration failed")
-        digest = save_array(folder / "residual.npz", result)
-        write_json(folder / "result.json", {"identity": key, "array_sha256": digest})
+            result = read_array(folder / "residual.npz", record["array_sha256"])
+        else:
+            # All physical evaluations remain bounded and logged.
+            bounded = RolloutOracle(
+                model,
+                training,
+                scales,
+                settings,
+                root / f"attempt-{attempt}" / key,
+                min(deadline, monotonic() + call_seconds),
+            )
+            result = bounded(point)
+            if bounded.failures.count:
+                raise ValueError("derivative point integration failed")
+            digest = save_array(folder / "residual.npz", result)
+            write_json(
+                folder / "result.json", {"identity": key, "array_sha256": digest}
+            )
+        if verification_settings is not None:
+            record = rollout_case(
+                folder / "verification",
+                content_hash([key, "verification"]),
+                model,
+                training,
+                dict(zip(model.parameter_names, point, strict=True)),
+                scales,
+                verification_settings,
+                deadline,
+                call_seconds,
+            )
+            if record["status"] != "complete":
+                raise ValueError("derivative reference evaluation failed")
+            other = read_array(
+                folder / "verification/residual.npz", record["array_sha256"]
+            )
+            difference = residual_distance(result, other)
+            checked_points[key] = difference
+            checked_arrays[key] = other
+            if (
+                difference["rms"] > accuracy_rms
+                or difference["maximum_absolute"] > accuracy_maximum
+            ):
+                raise ValueError("derivative point reference methods disagree")
         return result
 
     records = []
@@ -278,6 +324,8 @@ def derivative_cases(
             function = TrackedResidual(cached, lambda: 0)
             base = function.at(x)
             columns = []
+            verification_columns = []
+            verification_base = checked_arrays.get(content_hash([identity, x.tolist()]))
             steps = []
             for index, value in enumerate(x):
                 amount = (
@@ -298,6 +346,14 @@ def derivative_cases(
                 if step == 0:
                     raise ValueError("bounded derivative probe has zero displacement")
                 columns.append((function(point) - base) / step)
+                if verification_base is not None:
+                    verification_columns.append(
+                        (
+                            checked_arrays[content_hash([identity, point.tolist()])]
+                            - verification_base
+                        )
+                        / step
+                    )
                 steps.append(step)
             matrix = np.column_stack(columns)
             matrices[name] = matrix
@@ -306,6 +362,15 @@ def derivative_cases(
                 actual_steps=steps,
                 matrix=matrix_report(matrix, base),
                 array_sha256=save_array(root / f"{name}.npz", matrix),
+                point_reference_checks=dict(checked_points),
+                jacobian_reference_relative_difference=(
+                    float(
+                        np.linalg.norm(matrix - np.column_stack(verification_columns))
+                        / max(np.linalg.norm(matrix), 1e-300)
+                    )
+                    if verification_columns
+                    else None
+                ),
             )
         except (TimeoutError, ValueError, RuntimeError, ArithmeticError) as error:
             record.update(status="failed", error=str(error))
