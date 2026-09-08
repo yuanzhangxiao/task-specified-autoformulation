@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Literal
 
 from pydantic import Field, FiniteFloat, model_validator
 
-from autoformalism.schemas.base import Identifier, StrictSchema
+from autoformalism.schemas.base import Identifier, NonEmptyText, StrictSchema
 from autoformalism.schemas.candidate import ParameterRole
 
 
@@ -83,3 +84,54 @@ class LatentInitialReply(StrictSchema):
     """Exactly one initialization mode for a runtime-selected latent state."""
 
     initial: FixedInitial | AnalyticInitial
+
+
+class PrefitReviewCategory(str, Enum):
+    """Fixed public-scientific questions reviewed before parameter fitting."""
+
+    MECHANISM_TOPOLOGY = "mechanism_topology"
+    DIMENSIONAL_CONSISTENCY = "dimensional_consistency"
+    DYNAMIC_PLAUSIBILITY = "dynamic_plausibility"
+    FUNCTIONAL_SEMANTICS = "functional_semantics"
+    PARAMETER_PARSIMONY = "parameter_parsimony"
+    LATENT_INITIALIZATION = "latent_initialization"
+
+
+class PrefitReviewFinding(StrictSchema):
+    """One bounded scientific finding anchored to runtime-owned identities."""
+
+    category: PrefitReviewCategory
+    status: Literal["pass", "fail", "uncertain"]
+    interaction_ids: tuple[Identifier, ...] = Field(default=(), max_length=3)
+    latent_states: tuple[Identifier, ...] = Field(default=(), max_length=2)
+    finding: NonEmptyText
+    suggested_change: NonEmptyText
+
+    @model_validator(mode="after")
+    def unique_anchors(self) -> PrefitReviewFinding:
+        """Keep a finding small and unambiguous before runtime validation."""
+        if len(self.interaction_ids) != len(set(self.interaction_ids)):
+            raise ValueError("duplicate interaction anchor")
+        if len(self.latent_states) != len(set(self.latent_states)):
+            raise ValueError("duplicate latent-state anchor")
+        return self
+
+
+class PrefitScientificReviewReply(StrictSchema):
+    """Exactly one assessment for every fixed pre-fitting category."""
+
+    schema_version: Literal["prefit-scientific-review-1"] = "prefit-scientific-review-1"
+    findings: tuple[PrefitReviewFinding, ...] = Field(min_length=6, max_length=6)
+
+    @model_validator(mode="after")
+    def complete_unique_categories(self) -> PrefitScientificReviewReply:
+        """Reject omitted, duplicated, or invented rubric categories."""
+        categories = [item.category for item in self.findings]
+        if len(categories) != len(set(categories)):
+            raise ValueError("duplicate prefit review category")
+        if set(categories) != set(PrefitReviewCategory):
+            missing = sorted(
+                item.value for item in set(PrefitReviewCategory) - set(categories)
+            )
+            raise ValueError(f"missing prefit review categories: {missing}")
+        return self
