@@ -18,6 +18,7 @@ case "$(jq -r '.config.protocol' "${plan}")" in
   scientific-staged-topology-1) worker_script=staged_topology_campaign.py ;;
   scientific-staged-functions-1) worker_script=staged_function_campaign.py ;;
   scientific-staged-sign-contract-1) worker_script=staged_sign_contract_campaign.py ;;
+  scientific-staged-polarity-calibration-1) worker_script=staged_polarity_calibration.py ;;
   *) echo 'unsupported frozen worker protocol' >&2; exit 2 ;;
 esac
 readonly worker_script
@@ -67,6 +68,17 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     frozen = json.load(stream)
 if sign_contract_launcher_hash() != frozen["launcher_sha256"]:
     raise SystemExit("launcher differs from frozen sign-contract campaign")
+PY
+fi
+if [[ "${worker_script}" == staged_polarity_calibration.py ]]; then
+  "${AF_PYTHON}" - "${plan}" <<'PY'
+import json
+import sys
+from autoformalism.rebuttal.staged_polarity_calibration import polarity_calibration_launcher_hash
+with open(sys.argv[1], encoding="utf-8") as stream:
+    frozen = json.load(stream)
+if polarity_calibration_launcher_hash() != frozen["launcher_sha256"]:
+    raise SystemExit("launcher differs from frozen polarity calibration")
 PY
 fi
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"

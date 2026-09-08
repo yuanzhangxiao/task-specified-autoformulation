@@ -130,6 +130,12 @@ The pipeline is iterative:
   and latent-state handling are validated.
 - The general graph representation remains an expression/dependency graph; the
   linear-in-parameter restriction is enforced only by the oracle GMM profile.
+- Topology-stage outer polarity is calibrated separately from function
+  generation. A public-only diagnostic asks for positive, negative, and
+  appropriately unrestricted contributions whose semantics are explicit in the
+  displayed brief. Evaluator labels are frozen outside the provider request;
+  benchmark mechanisms whose public contracts leave sign unspecified are not
+  assigned hidden-equation labels.
 - The LLM proposes parameter identities, locations, and roles. The numerical
   runtime owns start distributions and any trusted constraints.
 - Numerical optimization determines final parameter values.

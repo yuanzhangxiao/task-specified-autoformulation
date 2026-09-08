@@ -253,6 +253,15 @@ red flags, missing requirements, and edits are advisory. They are retained
 for feedback and score tie-breaking but cannot reject a deterministically
 valid, successfully fitted candidate.
 
+The separately versioned topology-polarity calibration exercises the real
+equation-topology schema and prompt on a public diagnostic with explicit
+activating, stabilizing, direction-unspecified, and signed-baseline obligations.
+Expected source sets and outer polarities are frozen only in the evaluator and
+are not serialized into the provider request. Schema-invalid replies may receive
+bounded contract repair; a schema-valid scientific sign error is scored and is
+never silently repaired. The calibration performs no function generation,
+fitting, judge call, test access, private-reference access, or model selection.
+
 The calibration-only hybrid judge is specified separately in
 `docs/JUDGE_HYBRID_PROTOCOL.md`. It extracts frozen requirements only from the
 public task, preserves proposer claims at lower authority, certifies graph facts

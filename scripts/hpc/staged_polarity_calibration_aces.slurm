@@ -1,0 +1,16 @@
+#!/bin/bash
+# One warm 20B server for the topology-stage polarity calibration.
+#SBATCH --job-name=staged-polarity
+#SBATCH --partition=gpu
+#SBATCH --time=00:20:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --gres=gpu:h100:1
+#SBATCH --signal=B:TERM@240
+#SBATCH --requeue
+
+set -euo pipefail
+module load "${AF_GCCCORE_MODULE:-GCCcore/13.2.0}" "${AF_PYTHON_MODULE:-Python/3.11.5}" WebProxy
+exec bash "${AF_REPO_ROOT:?required}/scripts/hpc/run_staged_topology_server.sh"
