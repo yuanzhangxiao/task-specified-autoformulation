@@ -24,7 +24,7 @@ mkdir -p "${output_root}/logs"
 export PYTHONPATH="${repository}/src"
 "${python}" "${repository}/scripts/staged_prefit_feedback_campaign.py" freeze --config "${config}" --source-hybrid-plan "${source_plan}" --source-results "${source_results}" --output "${plan}"
 "${python}" "${repository}/scripts/staged_prefit_feedback_campaign.py" audit --plan "${plan}" --output "${audit}" >/dev/null
-[[ "$(jq -r '.deterministic_prefit_pass_rate' "${audit}")" == "1" ]] || { echo "source deterministic prefit audit failed" >&2; exit 2; }
+jq -e '.deterministic_prefit_pass_rate == 1' "${audit}" >/dev/null || { echo "source deterministic prefit audit failed" >&2; exit 2; }
 if [[ -f "${manifest}" ]]; then cat "${manifest}"; exit 0; fi
 mkdir "${output_root}/submission.intent" 2>/dev/null || { echo 'Submission may already exist; reconcile the queue before retrying.' >&2; exit 3; }
 job_id="$(sbatch --parsable --account="${account}" --open-mode=append --output="${output_root}/logs/staged-prefit-feedback-%j.out" --error="${output_root}/logs/staged-prefit-feedback-%j.err" --export=ALL,AF_REPO_ROOT="${repository}",AF_PYTHON="${python}",AF_OUTPUT_ROOT="${output_root}",AF_VLLM_IMAGE="${image}",AF_HF_HOME="${AF_HF_HOME:-${scratch_root}/huggingface-cache}",AF_COMPUTE_CACHE_ROOT="${AF_COMPUTE_CACHE_ROOT:-${scratch_root}/compute-cache}",AF_IPC_TMP_ROOT="${AF_IPC_TMP_ROOT:-${scratch_root}/ipc}" "${repository}/scripts/hpc/staged_prefit_feedback_aces.slurm")"
