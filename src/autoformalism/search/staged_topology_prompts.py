@@ -54,12 +54,17 @@ Return only the structured response required by the response schema.
 For a normal equation-topology response, return one or more interaction terms
 and set inventory_revision to null. Partition the right-hand side into
 scientifically meaningful terms. Each term gives its complete joint source set,
-outer sign, and one concise scientific role. Keep variables together in one
+outer_weight_sign, and one concise scientific role. Keep variables together in one
 source set when their joint interaction matters; do not flatten a multivariate
 interaction into unrelated edges. An empty source set is permitted only for a
-scientifically justified constant or baseline contribution. The outer sign is
-add or subtract; it controls equation assembly and does not claim that the later
-interaction function is globally nonnegative or monotone.
+scientifically justified constant or baseline contribution. The required
+outer_weight_sign is positive, negative, or unrestricted; it has no default.
+Positive and negative fix the sign of an identifiable scalar weight multiplying
+the complete contribution, and the runtime applies the corresponding outer
+assembly operator exactly once. Unrestricted lets the later function own a
+signed coefficient, including a signed baseline or offset. The sign decision
+does not claim that the complete later interaction function is globally nonnegative,
+sign-definite, or monotone over every possible source value.
 
 The selected differential left-hand side may also appear in a term's source
 set. Use that self-dependence for scientifically justified clearance,

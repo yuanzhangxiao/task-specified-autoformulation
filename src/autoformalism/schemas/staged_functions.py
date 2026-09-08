@@ -6,6 +6,7 @@ from pydantic import Field, FiniteFloat, model_validator
 
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.candidate import ParameterRole
+from autoformalism.schemas.staged_topology import OuterWeightSign
 
 
 class FunctionParameter(StrictSchema):
@@ -28,6 +29,15 @@ class InteractionFunctionReply(StrictSchema):
         if len(names) != len(set(names)):
             raise ValueError("duplicate parameter declaration")
         return self
+
+
+class OuterWeightDomainDerivation(StrictSchema):
+    """Runtime record for one sign-derived outer magnitude domain."""
+
+    parameter: Identifier
+    requested_role: ParameterRole
+    effective_role: ParameterRole
+    outer_weight_sign: OuterWeightSign
 
 
 class FixedInitial(StrictSchema):

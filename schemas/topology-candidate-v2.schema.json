@@ -4,7 +4,10 @@
       "description": "Outer algebraic operator used to assemble an interaction term.\n\nThis is not by itself a proof that the assigned function is nonnegative or\nmonotone in every source. Parameter roles and scientific checks own those\nseparate claims.",
       "enum": [
         "additive",
-        "subtractive"
+        "subtractive",
+        "positive",
+        "negative",
+        "unrestricted"
       ],
       "title": "InteractionPolarity",
       "type": "string"

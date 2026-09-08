@@ -37,6 +37,12 @@ from autoformalism.schemas import (
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.staged import Sha256Digest
 from autoformalism.search.identity import CandidateIdentity, candidate_identity
+from autoformalism.sign_contract import (
+    analyze_outer_weight,
+    is_fixed_outer_sign,
+    is_legacy_outer_sign,
+    is_subtractive_outer_sign,
+)
 
 
 class StagedCandidateExpansion(StrictSchema):
@@ -523,16 +529,46 @@ def expand_staged_candidate(
                 f"missing_sources={sorted(expected_sources - used_sources)}, "
                 f"extra_sources={sorted(used_sources - expected_sources)}"
             )
-        ambiguous_signed_coefficients = sorted(
-            parsed.symbols & signed_coefficient_names
-        )
-        if ambiguous_signed_coefficients:
-            raise ValueError(
-                f"interaction {interaction.interaction_id} uses signed scalar "
-                "coefficient roles even though topology owns the outer polarity: "
-                f"{ambiguous_signed_coefficients}; use nonnegative_coefficient, "
-                "rate, scale, or another scientifically appropriate typed role"
+        if is_legacy_outer_sign(interaction.polarity):
+            ambiguous_signed_coefficients = sorted(
+                parsed.symbols & signed_coefficient_names
             )
+            if ambiguous_signed_coefficients:
+                raise ValueError(
+                    f"interaction {interaction.interaction_id} uses signed scalar "
+                    "coefficient roles even though legacy topology owns the outer "
+                    f"polarity: {ambiguous_signed_coefficients}"
+                )
+        else:
+            roles = {item.name: item.role for item in functional.parameters}
+            analysis = analyze_outer_weight(
+                parsed.tree, roles, interaction.polarity
+            )
+            if analysis.diagnostic_code is not None:
+                raise ValueError(
+                    f"interaction {interaction.interaction_id}: "
+                    f"{analysis.diagnostic_code}: {analysis.diagnostic_message}"
+                )
+            if (
+                is_fixed_outer_sign(interaction.polarity)
+                and analysis.identified_parameter is not None
+            ):
+                raise ValueError(
+                    f"interaction {interaction.interaction_id} has an underived "
+                    "fixed-sign outer weight domain: "
+                    f"{analysis.identified_parameter}"
+                )
+            if (
+                interaction.polarity is InteractionPolarity.UNRESTRICTED
+                and analysis.identified_parameter is not None
+                and roles[analysis.identified_parameter]
+                is ParameterRole.NONNEGATIVE_COEFFICIENT
+            ):
+                raise ValueError(
+                    f"interaction {interaction.interaction_id} has an underived "
+                    "unrestricted outer weight domain: "
+                    f"{analysis.identified_parameter}"
+                )
         terms_by_target.setdefault(
             (interaction.target_kind, interaction.target), []
         ).append((interaction.polarity, binding.expression))
@@ -605,8 +641,8 @@ def _sum_terms(terms: list[tuple[InteractionPolarity, str]]) -> str:
     rendered: list[str] = []
     for index, (polarity, expression) in enumerate(terms):
         if index == 0:
-            prefix = "-" if polarity is InteractionPolarity.SUBTRACTIVE else ""
+            prefix = "-" if is_subtractive_outer_sign(polarity) else ""
         else:
-            prefix = " - " if polarity is InteractionPolarity.SUBTRACTIVE else " + "
+            prefix = " - " if is_subtractive_outer_sign(polarity) else " + "
         rendered.append(f"{prefix}({expression})")
     return "".join(rendered)

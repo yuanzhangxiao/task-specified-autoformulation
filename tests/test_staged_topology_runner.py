@@ -57,7 +57,7 @@ def test_complete_construction_repair_and_exact_resume(tmp_path: Path) -> None:
                     "terms": [
                         {
                             "sources": ["typo"],
-                            "outer_sign": "add",
+                            "outer_weight_sign": "positive",
                             "scientific_role": "memory",
                         }
                     ],
@@ -74,7 +74,7 @@ def test_complete_construction_repair_and_exact_resume(tmp_path: Path) -> None:
                 "terms": [
                     {
                         "sources": sources,
-                        "outer_sign": "add",
+                        "outer_weight_sign": "positive",
                         "scientific_role": "response",
                     }
                 ],
@@ -217,7 +217,7 @@ def test_no_op_revision_is_repaired_locally_and_replayed(tmp_path: Path) -> None
                 "terms": [
                     {
                         "sources": sources,
-                        "outer_sign": "add",
+                            "outer_weight_sign": "positive",
                         "scientific_role": "response",
                     }
                 ],
@@ -309,7 +309,7 @@ def test_campaign_drains_and_replays_terminal_tasks(
                 "terms": [
                     {
                         "sources": sources,
-                        "outer_sign": "add",
+                            "outer_weight_sign": "positive",
                         "scientific_role": "response",
                     }
                 ],

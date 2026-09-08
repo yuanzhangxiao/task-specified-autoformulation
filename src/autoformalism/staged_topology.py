@@ -22,8 +22,11 @@ from autoformalism.schemas.staged import (
 )
 from autoformalism.schemas.staged_topology import (
     EquationDefinition,
+    EquationTerm,
     InventoryRevision,
+    LegacyEquationTerm,
     ModelingLimits,
+    OuterWeightSign,
     PublicScientificBrief,
     PublicVariable,
     ScientificRequirement,
@@ -364,11 +367,7 @@ def lower_topology(
                     else InteractionTargetKind.ALGEBRAIC_PROCESS
                 ),
                 sources=tuple(name_of(name) for name in term.sources),
-                polarity=(
-                    InteractionPolarity.ADDITIVE
-                    if term.outer_sign == "add"
-                    else InteractionPolarity.SUBTRACTIVE
-                ),
+                polarity=_interaction_polarity(term),
                 description=term.scientific_role,
             )
             for equation_index, equation in enumerate(equations)
@@ -390,3 +389,20 @@ def lower_topology(
         }
     )
     return topology, aliases
+
+
+def _interaction_polarity(
+    term: EquationTerm | LegacyEquationTerm,
+) -> InteractionPolarity:
+    """Lower new sign decisions while preserving legacy replay semantics."""
+    if isinstance(term, LegacyEquationTerm):
+        return (
+            InteractionPolarity.ADDITIVE
+            if term.outer_sign == "add"
+            else InteractionPolarity.SUBTRACTIVE
+        )
+    return {
+        OuterWeightSign.POSITIVE: InteractionPolarity.POSITIVE,
+        OuterWeightSign.NEGATIVE: InteractionPolarity.NEGATIVE,
+        OuterWeightSign.UNRESTRICTED: InteractionPolarity.UNRESTRICTED,
+    }[term.outer_weight_sign]
