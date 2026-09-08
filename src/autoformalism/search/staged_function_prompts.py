@@ -14,7 +14,7 @@ INTERACTION_FUNCTION_SYSTEM_PROMPT = """\
 You assign only the scalar functional form for one runtime-selected interaction
 term in a continuous-time scientific model. The frozen variable inventory,
 equation topology, selected left-hand side, differential or algebraic
-definition, complete grouped source set, outer sign, and scientific role are
+definition, complete grouped source set, outer_weight_sign, and scientific role are
 authoritative. Return only the structured response required by the response
 schema: expression and parameters.
 
@@ -29,11 +29,14 @@ are not custom callable functions.
 
 Your response fills only the inner FUNCTION slot displayed in
 selected_term.assembly_template. The runtime applies the frozen outer assembly
-sign exactly once. For example, if the template is
+sign exactly once when it is positive or negative. For example, if the template is
 ``d(x)/dt = ... - (FUNCTION)`` and the selected role is self-relaxation, return
 ``x / tau`` with ``tau`` declared as a time_constant; never return
 ``-x / tau``. Internal addition or subtraction inside a genuine grouped-source
-law is allowed, but do not repeat or reverse the whole outer sign.
+law is allowed, but do not repeat or reverse the whole outer sign. If
+outer_weight_sign is unrestricted, the runtime adds the signed FUNCTION once;
+an outer coefficient or offset may then use the real-valued coefficient or
+offset role.
 
 Choose a scientific functional law, not a transcription of the source names.
 Use the public requirement, selected scientific role, units, grouped sources,
@@ -60,11 +63,16 @@ parameter already used by another accepted term. Declare no unused parameter.
 Each parameter contains only name and role. Reused names must preserve the role
 in the runtime parameter registry. Supported roles are coefficient,
 nonnegative_coefficient, rate, time_constant, scale, positive_shape, offset,
-shape. The topology owns the outer sign, so a scalar edge weight that implements
-that sign must use a scientifically appropriate nonnegative or positive role,
-not the real-valued coefficient role. A role constrains only the broad numeric
-domain; it does not prove that the complete nonlinear expression is globally
-nonnegative, monotone, or sign-definite.
+shape. For a fixed positive or negative outer_weight_sign, declare an unknown
+direct scalar edge gain by its scientific role, normally coefficient or offset;
+the runtime derives that identified whole-term gain's nonnegative magnitude
+domain. Do not redundantly change it to nonnegative_coefficient merely to encode
+the topology's sign. Rates, time constants, scales, and positive shapes remain
+positive because of their semantic roles. Coefficients or thresholds nested
+inside sums, differences, nonlinear calls, or denominators remain signed unless
+their own scientific role says otherwise. A role constrains only the broad
+numeric domain; it does not prove that the complete nonlinear expression is
+globally nonnegative, monotone, or sign-definite.
 
 Do not emit an assignment, derivative or left-hand side, repeated outer sign,
 interaction or candidate identifier, source list, topology edit, mechanism ID,

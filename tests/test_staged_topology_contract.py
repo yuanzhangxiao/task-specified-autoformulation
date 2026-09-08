@@ -213,7 +213,7 @@ def test_provider_schema_preserves_exact_active_sources_and_limits() -> None:
         "terms": [
             {
                 "sources": ["x", "u"],
-                "outer_sign": "add",
+                "outer_weight_sign": "positive",
                 "scientific_role": "joint response",
             }
         ],

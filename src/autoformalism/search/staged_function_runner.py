@@ -23,6 +23,9 @@ from autoformalism.schemas.staged_functions import (
 )
 from autoformalism.schemas.staged_topology import (
     EquationDefinition,
+    EquationTerm,
+    LegacyEquationTerm,
+    OuterWeightSign,
     PublicScientificBrief,
     ScientificVariable,
 )
@@ -152,8 +155,7 @@ def run_staged_functions(
                         else equation.name
                     )
                     + " = ... "
-                    + ("+" if term.outer_sign == "add" else "-")
-                    + " (FUNCTION)",
+                    + _assembly_template(term),
                 }
                 reply, draft = request(
                     f"function_{identifier}",
@@ -176,8 +178,13 @@ def run_staged_functions(
                 accepted.append(
                     {"selected_term": selected, **reply.model_dump(mode="json")}
                 )
+                applied = next(
+                    item
+                    for item in draft.interaction_functions
+                    if item.interaction_id == identifier
+                )
                 registry.update(
-                    {item.name: item.role.value for item in reply.parameters}
+                    {item.name: item.role.value for item in applied.parameters}
                 )
                 checkpoint()
         inverse = {value: key for key, value in aliases.items()}
@@ -238,3 +245,14 @@ def run_staged_functions(
     checkpoint()
     atomic_json(output / "result.json", result)
     return result
+
+
+def _assembly_template(term: EquationTerm | LegacyEquationTerm) -> str:
+    """Describe exactly how the runtime will assemble one accepted function."""
+    if isinstance(term, LegacyEquationTerm):
+        return "+ (FUNCTION)" if term.outer_sign == "add" else "- (FUNCTION)"
+    if term.outer_weight_sign is OuterWeightSign.POSITIVE:
+        return "+ (FUNCTION)"
+    if term.outer_weight_sign is OuterWeightSign.NEGATIVE:
+        return "- (FUNCTION)"
+    return "+ (SIGNED_FUNCTION)"

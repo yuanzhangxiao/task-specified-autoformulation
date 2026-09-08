@@ -36,6 +36,9 @@ class InteractionPolarity(str, Enum):
 
     ADDITIVE = "additive"
     SUBTRACTIVE = "subtractive"
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    UNRESTRICTED = "unrestricted"
 
 
 class TopologyProcessSpec(StrictSchema):

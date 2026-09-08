@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Literal
 
 from pydantic import Field, create_model, model_validator
@@ -103,15 +104,38 @@ class VariableReply(StrictSchema):
         return self
 
 
+class OuterWeightSign(str, Enum):
+    """Scientific sign choice for one complete equation contribution."""
+
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    UNRESTRICTED = "unrestricted"
+
+
 class EquationTerm(StrictSchema):
-    """An RHS contribution; outer assembly sign is not response behavior."""
+    """A new RHS contribution with an explicit, non-defaulted sign decision."""
+
+    sources: tuple[Identifier, ...] = Field(max_length=64)
+    outer_weight_sign: OuterWeightSign
+    scientific_role: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def sources_are_unique(self) -> EquationTerm:
+        """A grouped source set may be empty, but may not repeat a variable."""
+        if len(self.sources) != len(set(self.sources)):
+            raise ValueError("term sources must be unique")
+        return self
+
+
+class LegacyEquationTerm(StrictSchema):
+    """Previously frozen add/subtract term retained only for exact replay."""
 
     sources: tuple[Identifier, ...] = Field(max_length=64)
     outer_sign: Literal["add", "subtract"]
     scientific_role: str = Field(min_length=1, max_length=1000)
 
     @model_validator(mode="after")
-    def sources_are_unique(self) -> EquationTerm:
+    def sources_are_unique(self) -> LegacyEquationTerm:
         """A grouped source set may be empty, but may not repeat a variable."""
         if len(self.sources) != len(set(self.sources)):
             raise ValueError("term sources must be unique")
@@ -146,7 +170,9 @@ class EquationDefinition(StrictSchema):
 
     name: Identifier
     definition: Literal["differential", "algebraic"]
-    terms: tuple[EquationTerm, ...] = Field(min_length=1, max_length=32)
+    terms: tuple[EquationTerm | LegacyEquationTerm, ...] = Field(
+        min_length=1, max_length=32
+    )
 
 
 def equation_reply_model(

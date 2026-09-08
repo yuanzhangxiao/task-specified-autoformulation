@@ -42,7 +42,9 @@ def test_interaction_function_prompt_has_one_immutable_responsibility() -> None:
     assert "Declare every parameter used" in system
     assert "including a shared\nparameter" in system
     assert "Supported roles are coefficient" in system
-    assert "must use a scientifically appropriate nonnegative" in system
+    assert "runtime derives that identified whole-term gain's nonnegative" in system
+    assert "Do not redundantly change it to nonnegative_coefficient" in system
+    assert "Coefficients or thresholds nested\ninside sums" in system
     assert "Do not emit an assignment" in system
     assert "Do not repair or\nroute to another topology term" in system
 

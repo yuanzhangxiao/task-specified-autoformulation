@@ -45,6 +45,7 @@ from autoformalism.schemas.construction import (
 from autoformalism.schemas.proposal import ProposedParameter
 from autoformalism.schemas.staged import (
     InteractionFunction,
+    InteractionPolarity,
     InteractionTargetKind,
     ProposedFunctionalCandidate,
     ProposedFunctionalInitial,
@@ -55,6 +56,11 @@ from autoformalism.schemas.staged import (
     TopologyInteraction,
     TopologyStateMeasurement,
     TopologyTargetMapping,
+)
+from autoformalism.sign_contract import (
+    analyze_outer_weight,
+    is_fixed_outer_sign,
+    is_legacy_outer_sign,
 )
 from autoformalism.staging import (
     StagedCandidateExpansion,
@@ -623,22 +629,65 @@ def assess_functional_compatibility(
                     ),
                 )
             )
-        signed = sorted(
-            name
-            for name in used_parameters
-            if parameter_roles[name] is ParameterRole.COEFFICIENT
-        )
-        if signed:
-            diagnostics.append(
-                ConstructionDiagnostic(
-                    code="SIGNED_WEIGHT_WITH_TOPOLOGY_POLARITY",
-                    location=f"interaction:{interaction_id}",
-                    message=(
-                        "topology owns the outer sign; scalar edge weights need "
-                        f"nonnegative or positive roles: {signed}"
-                    ),
-                )
+        if is_legacy_outer_sign(interaction.polarity):
+            signed = sorted(
+                name
+                for name in used_parameters
+                if parameter_roles[name] is ParameterRole.COEFFICIENT
             )
+            if signed:
+                diagnostics.append(
+                    ConstructionDiagnostic(
+                        code="SIGNED_WEIGHT_WITH_TOPOLOGY_POLARITY",
+                        location=f"interaction:{interaction_id}",
+                        message=(
+                            "legacy topology owns the outer sign; scalar edge "
+                            f"weights need nonnegative or positive roles: {signed}"
+                        ),
+                    )
+                )
+        else:
+            analysis = analyze_outer_weight(
+                parsed.tree, parameter_roles, interaction.polarity
+            )
+            if analysis.diagnostic_code is not None:
+                diagnostics.append(
+                    ConstructionDiagnostic(
+                        code=analysis.diagnostic_code,
+                        location=f"interaction:{interaction_id}",
+                        message=analysis.diagnostic_message or "sign contract failed",
+                    )
+                )
+            elif (
+                is_fixed_outer_sign(interaction.polarity)
+                and analysis.identified_parameter is not None
+            ):
+                diagnostics.append(
+                    ConstructionDiagnostic(
+                        code="UNDERIVED_FIXED_OUTER_WEIGHT_DOMAIN",
+                        location=f"interaction:{interaction_id}",
+                        message=(
+                            "runtime must derive a nonnegative domain for fixed-sign "
+                            f"outer weight {analysis.identified_parameter}"
+                        ),
+                    )
+                )
+            elif (
+                interaction.polarity is InteractionPolarity.UNRESTRICTED
+                and analysis.identified_parameter is not None
+                and parameter_roles[analysis.identified_parameter]
+                is ParameterRole.NONNEGATIVE_COEFFICIENT
+            ):
+                diagnostics.append(
+                    ConstructionDiagnostic(
+                        code="UNDERIVED_UNRESTRICTED_OUTER_WEIGHT_DOMAIN",
+                        location=f"interaction:{interaction_id}",
+                        message=(
+                            "runtime must restore a real domain for unrestricted "
+                            f"outer weight {analysis.identified_parameter}"
+                        ),
+                    )
+                )
 
     latent_states = {
         item.name for item in topology.states if item.kind is StateKind.LATENT
