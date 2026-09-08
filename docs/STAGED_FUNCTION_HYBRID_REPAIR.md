@@ -51,6 +51,38 @@ winner. The scientific question is whether the hybrid recovers the opaque
 nonlinearity of the atomic arm while retaining most of the equation-batch
 resource reduction.
 
+## Version-2 deterministic scaffolding
+
+The completed version-1 pilot showed that 11 of 13 atomic-repair activations
+were not functional changes. The batch had returned a scalar parameter with
+role `coefficient` as a direct outer multiplier, while the immutable topology
+already owned the term's sign. The atomic call changed only that role to a
+nonnegative or positive role. The remaining two repairs changed source use and
+were genuine function repairs.
+
+Version 2 removes only this mechanical burden. The restricted AST must prove
+that exactly one real-valued `coefficient` parameter occurs once, as a direct
+factor of the expression's root multiplication, and that the remaining product
+contains a frozen scientific source. Only then does runtime change its role to
+`nonnegative_coefficient`. The expression, parameter identity, source set,
+topology, and outer sign are unchanged. Coefficients nested inside additions,
+subtractions, divisions, powers, or function calls, plus repeated or multiple
+signed coefficients, are not repaired and continue to fail closed.
+
+Provider context in version 2 contains the original short, interaction-local
+mnemonics and repaired qualitative roles. Runtime namespaces remain in the
+canonical executable draft but are never sent back in later function or latent
+initialization requests. Compatibility diagnostics are translated back to the
+same local names. The interaction-local parameter registry is empty because a
+repeated local spelling cannot request cross-term sharing.
+
+Before making any new LLM calls, `replay_staged_function_hybrid_roles.py`
+applies the certificate to the frozen version-1 batch responses. It reports the
+atomic calls that become deterministic repairs, remaining genuine LLM repairs,
+and projected request count. It does not refit, reinterpret, or regenerate a
+function. The live three-seed version-2 campaign is a separate confirmation
+with its own config, plan, cache identities, and summary schema.
+
 ## Remaining limitations
 
 - Obligation derivation is deliberately conservative and lexical. It only
@@ -64,3 +96,6 @@ resource reduction.
   it from a repeated name.
 - This pilot evaluates function construction only. Fitting and feedback-routed
   model refinement remain separate prospective milestones.
+- The outer-gain certificate establishes only a numeric-domain role for one
+  multiplier. It does not prove monotonicity or scientific correctness of the
+  remaining source law.

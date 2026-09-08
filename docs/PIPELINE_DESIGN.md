@@ -763,3 +763,13 @@ and are deterministically namespaced before compilation. This policy preserves
 equation-level context without making one invalid term discard other valid
 terms or accidentally share fitted identities across equations. See
 `docs/STAGED_FUNCTION_HYBRID_REPAIR.md` for the prospective evaluation boundary.
+
+The version-2 hybrid policy adds a narrow deterministic role certificate. A
+single real-valued coefficient is converted to `nonnegative_coefficient` only
+when it occurs once as a direct factor of the root product and the other factors
+contain an immutable scientific source. Runtime does not transform the
+expression or infer the sign of grouped source laws. Parameters nested inside
+other operators and ambiguous multiple or repeated coefficients still require
+a provider repair. Provider requests retain short local mnemonics and never
+expose interaction-namespaced executable identities. An offline replay over
+version-1 responses is required before the separate live confirmation.

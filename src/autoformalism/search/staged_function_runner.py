@@ -19,6 +19,7 @@ from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.candidate import StateKind
 from autoformalism.schemas.construction import FunctionalDraft
 from autoformalism.schemas.staged_functions import (
+    DeterministicFunctionRepair,
     EquationFunctionBatchReply,
     InteractionFunctionObligation,
     InteractionFunctionReply,
@@ -46,6 +47,7 @@ from autoformalism.staged_functions import (
     has_nonlinear_source_dependence,
     initial_symbols,
     rename_expression,
+    repair_certified_outer_gain_role,
 )
 from autoformalism.staged_topology import content_hash, lower_topology
 from autoformalism.staging import topology_commitment_sha256
@@ -55,6 +57,7 @@ FunctionGenerationGranularity = Literal[
     "equation_batch",
     "equation_batch_atomic_repair",
 ]
+FunctionRepairPolicy = Literal["legacy", "certified_outer_gain"]
 
 
 def run_staged_functions(
@@ -65,6 +68,7 @@ def run_staged_functions(
     output: Path,
     *,
     generation_granularity: FunctionGenerationGranularity = "atomic_interaction",
+    function_repair_policy: FunctionRepairPolicy = "legacy",
 ) -> dict[str, Any]:
     """Assign functions and causal initializers without fitting or topology edits."""
     inventory = tuple(
@@ -86,6 +90,7 @@ def run_staged_functions(
     events: list[dict[str, Any]] = []
     batch_term_audits: list[dict[str, Any]] = []
     accepted: list[dict[str, Any]] = []
+    provider_accepted: list[dict[str, Any]] = []
     registry: dict[str, str] = {}
     common = {
         "public_brief_json": brief.model_dump_json(),
@@ -100,6 +105,7 @@ def run_staged_functions(
                 "source_topology_result_sha256": content_hash(source),
                 "draft": draft.model_dump(mode="json"),
                 "accepted_functions": accepted,
+                "provider_visible_accepted_functions": provider_accepted,
                 "batch_term_audits": batch_term_audits,
                 "events": events,
             },
@@ -165,6 +171,32 @@ def run_staged_functions(
         raise ValueError(
             f"unsupported function generation granularity: {generation_granularity}"
         )
+    if function_repair_policy not in {"legacy", "certified_outer_gain"}:
+        raise ValueError(
+            f"unsupported function repair policy: {function_repair_policy}"
+        )
+
+    def accepted_context() -> list[dict[str, Any]]:
+        """Keep runtime namespaces outside prospective provider requests."""
+        return (
+            provider_accepted
+            if function_repair_policy == "certified_outer_gain"
+            else accepted
+        )
+
+    def registry_context() -> dict[str, str]:
+        """Interaction-local names do not form a cross-term provider registry."""
+        return {} if function_repair_policy == "certified_outer_gain" else registry
+
+    def prepare_provider_reply(
+        reply: InteractionFunctionReply,
+        selected: dict[str, Any],
+    ) -> tuple[InteractionFunctionReply, tuple[DeterministicFunctionRepair, ...]]:
+        """Apply only the versioned, AST-certified provider-side repair."""
+        if function_repair_policy == "legacy":
+            return reply, ()
+        return repair_certified_outer_gain_role(reply, set(selected["sources"]))
+
     error = None
     expansion = None
     try:
@@ -175,11 +207,18 @@ def run_staged_functions(
                 else "preserve"
             )
             selected_terms = tuple(
-                _selected_term(
-                    equation,
-                    term,
-                    parameter_identity_policy=parameter_identity_policy,
-                )
+                {
+                    **_selected_term(
+                        equation,
+                        term,
+                        parameter_identity_policy=parameter_identity_policy,
+                    ),
+                    **(
+                        {"deterministic_role_repair_policy": ("certified_outer_gain")}
+                        if function_repair_policy == "certified_outer_gain"
+                        else {}
+                    ),
+                }
                 for term in equation.terms
             )
             identifiers = tuple(
@@ -197,8 +236,8 @@ def run_staged_functions(
                         selected=selected: render_interaction_function_user_prompt(
                             **common,
                             selected_term_json=json.dumps(selected),
-                            accepted_functions_json=json.dumps(accepted),
-                            parameter_registry_json=json.dumps(registry),
+                            accepted_functions_json=json.dumps(accepted_context()),
+                            parameter_registry_json=json.dumps(registry_context()),
                             diagnostics_json=diagnostic,
                         ),
                         InteractionFunctionReply,
@@ -209,17 +248,28 @@ def run_staged_functions(
                             topology,
                             draft,
                             identifier,
-                            reply,
+                            prepare_provider_reply(reply, selected)[0],
                             context,
                             aliases,
                             _obligation(selected),
                         ),
                     )
-                    accepted.append(
-                        {"selected_term": selected, **reply.model_dump(mode="json")}
+                    local_reply, _ = prepare_provider_reply(reply, selected)
+                    stored = _accepted_function_record(
+                        draft,
+                        identifier,
+                        selected,
+                        aliases,
+                    )
+                    accepted.append(stored)
+                    provider_accepted.append(
+                        {
+                            "selected_term": selected,
+                            **local_reply.model_dump(mode="json"),
+                        }
                     )
                     registry.update(
-                        {item.name: item.role.value for item in reply.parameters}
+                        {item["name"]: item["role"] for item in stored["parameters"]}
                     )
                     checkpoint()
             elif generation_granularity == "equation_batch":
@@ -231,13 +281,12 @@ def run_staged_functions(
                 reply, draft = request(
                     f"equation_functions_{equation_index}",
                     render_equation_function_batch_system_prompt(),
-                    lambda diagnostic,
-                    selected_equation=selected_equation: (
+                    lambda diagnostic, selected_equation=selected_equation: (
                         render_equation_function_batch_user_prompt(
                             **common,
                             selected_equation_json=json.dumps(selected_equation),
-                            accepted_functions_json=json.dumps(accepted),
-                            parameter_registry_json=json.dumps(registry),
+                            accepted_functions_json=json.dumps(accepted_context()),
+                            parameter_registry_json=json.dumps(registry_context()),
                             diagnostics_json=diagnostic,
                         )
                     ),
@@ -262,11 +311,14 @@ def run_staged_functions(
                             **function.model_dump(mode="json"),
                         }
                     )
-                    registry.update(
+                    provider_accepted.append(
                         {
-                            item.name: item.role.value
-                            for item in function.parameters
+                            "selected_term": selected,
+                            **function.model_dump(mode="json"),
                         }
+                    )
+                    registry.update(
+                        {item.name: item.role.value for item in function.parameters}
                     )
                 checkpoint()
             else:
@@ -292,13 +344,12 @@ def run_staged_functions(
                 reply, _ = request(
                     f"equation_functions_{equation_index}",
                     render_equation_function_batch_system_prompt(),
-                    lambda diagnostic,
-                    selected_equation=selected_equation: (
+                    lambda diagnostic, selected_equation=selected_equation: (
                         render_equation_function_batch_user_prompt(
                             **common,
                             selected_equation_json=json.dumps(selected_equation),
-                            accepted_functions_json=json.dumps(accepted),
-                            parameter_registry_json=json.dumps(registry),
+                            accepted_functions_json=json.dumps(accepted_context()),
+                            parameter_registry_json=json.dumps(registry_context()),
                             diagnostics_json=diagnostic,
                         )
                     ),
@@ -318,17 +369,28 @@ def run_staged_functions(
                         "batch_function": function.model_dump(mode="json"),
                         "batch_accepted": False,
                         "batch_error": None,
+                        "deterministic_role_repairs": [],
+                        "atomic_deterministic_role_repairs": [],
                         "atomic_repair_attempted": False,
                         "atomic_repair_succeeded": False,
                         "final_source": None,
                     }
                     batch_term_audits.append(audit)
+                    local_function = function
+                    deterministic_repairs: tuple[DeterministicFunctionRepair, ...] = ()
                     try:
+                        local_function, deterministic_repairs = prepare_provider_reply(
+                            function, selected
+                        )
+                        audit["deterministic_role_repairs"] = [
+                            item.model_dump(mode="json")
+                            for item in deterministic_repairs
+                        ]
                         draft, _ = bind_function_reply(
                             topology,
                             draft,
                             identifier,
-                            function,
+                            local_function,
                             context,
                             aliases,
                             _obligation(selected),
@@ -345,21 +407,21 @@ def run_staged_functions(
                         diagnostic = json.dumps(
                             {
                                 "repair_scope": "selected_term_only",
-                                "rejected_batch_function": function.model_dump(
+                                "rejected_batch_function": local_function.model_dump(
                                     mode="json"
                                 ),
                                 "deterministic_error": str(exc)[:6000],
                             }
                         )
-                        _, draft = request(
+                        atomic_reply, draft = request(
                             f"atomic_repair_{identifier}",
                             render_interaction_function_system_prompt(),
                             lambda runtime_diagnostic,
                             selected=selected: render_interaction_function_user_prompt(
                                 **common,
                                 selected_term_json=json.dumps(selected),
-                                accepted_functions_json=json.dumps(accepted),
-                                parameter_registry_json=json.dumps(registry),
+                                accepted_functions_json=json.dumps(accepted_context()),
+                                parameter_registry_json=json.dumps(registry_context()),
                                 diagnostics_json=runtime_diagnostic,
                             ),
                             InteractionFunctionReply,
@@ -370,18 +432,31 @@ def run_staged_functions(
                                 topology,
                                 draft,
                                 identifier,
-                                repaired,
+                                prepare_provider_reply(repaired, selected)[0],
                                 context,
                                 aliases,
                                 _obligation(selected),
                             )[0],
                             initial_diagnostic=diagnostic,
                         )
+                        repaired_reply, atomic_deterministic_repairs = (
+                            prepare_provider_reply(atomic_reply, selected)
+                        )
+                        audit["atomic_deterministic_role_repairs"] = [
+                            item.model_dump(mode="json")
+                            for item in atomic_deterministic_repairs
+                        ]
                         audit["atomic_repair_succeeded"] = True
                         audit["final_source"] = "atomic_repair"
+                        provider_function = repaired_reply
                     else:
                         audit["batch_accepted"] = True
-                        audit["final_source"] = "equation_batch"
+                        audit["final_source"] = (
+                            "equation_batch_deterministic_repair"
+                            if deterministic_repairs
+                            else "equation_batch"
+                        )
+                        provider_function = local_function
                     stored = _accepted_function_record(
                         draft,
                         identifier,
@@ -389,11 +464,14 @@ def run_staged_functions(
                         aliases,
                     )
                     accepted.append(stored)
-                    registry.update(
+                    provider_accepted.append(
                         {
-                            item["name"]: item["role"]
-                            for item in stored["parameters"]
+                            "selected_term": selected,
+                            **provider_function.model_dump(mode="json"),
                         }
+                    )
+                    registry.update(
+                        {item["name"]: item["role"] for item in stored["parameters"]}
                     )
                     checkpoint()
         inverse = {value: key for key, value in aliases.items()}
@@ -412,7 +490,7 @@ def run_staged_functions(
                     **common,
                     selected_state_json=json.dumps(selected_state),
                     allowed_symbols_json=json.dumps(initial_symbols(context, aliases)),
-                    accepted_functions_json=json.dumps(accepted),
+                    accepted_functions_json=json.dumps(accepted_context()),
                     diagnostics_json=diagnostic,
                 ),
                 LatentInitialReply,
@@ -427,6 +505,7 @@ def run_staged_functions(
     result = {
         "protocol": "scientific-staged-functions-1",
         "generation_granularity": generation_granularity,
+        "function_repair_policy": function_repair_policy,
         "status": "complete" if expansion is not None else "failed",
         "error": error,
         "complete_model": expansion is not None,
@@ -434,6 +513,7 @@ def run_staged_functions(
         "topology_commitment_sha256": commitment,
         "draft": draft.model_dump(mode="json"),
         "accepted_functions": accepted,
+        "provider_visible_accepted_functions": provider_accepted,
         "batch_term_audits": batch_term_audits,
         "candidate": expansion.candidate.model_dump(mode="json") if expansion else None,
         "scientific_review_facts": (
@@ -511,9 +591,7 @@ def _accepted_function_record(
     return {
         "selected_term": selected,
         "expression": rename_expression(function.expression, inverse),
-        "parameters": [
-            item.model_dump(mode="json") for item in function.parameters
-        ],
+        "parameters": [item.model_dump(mode="json") for item in function.parameters],
     }
 
 

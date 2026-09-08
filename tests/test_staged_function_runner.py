@@ -198,19 +198,13 @@ def test_hybrid_batch_repairs_only_the_failed_nonlinear_term(tmp_path: Path) -> 
     source["equations"][0]["terms"][0]["scientific_role"] = (
         "nonlinear joint response and relaxation"
     )
-    task["brief"]["requirements"][0]["public_requirement"] += (
-        " with nonlinear feedback"
-    )
+    task["brief"]["requirements"][0]["public_requirement"] += " with nonlinear feedback"
     brief = PublicScientificBrief.model_validate(task["brief"])
     context = ValidationContext.model_validate(task["context"])
     topology, _ = lower_topology(
         brief,
-        tuple(
-            ScientificVariable.model_validate(item) for item in source["inventory"]
-        ),
-        tuple(
-            EquationDefinition.model_validate(item) for item in source["equations"]
-        ),
+        tuple(ScientificVariable.model_validate(item) for item in source["inventory"]),
+        tuple(EquationDefinition.model_validate(item) for item in source["equations"]),
         context,
     )
     source["topology"] = topology.model_dump(mode="json")
@@ -271,6 +265,72 @@ def test_hybrid_batch_repairs_only_the_failed_nonlinear_term(tmp_path: Path) -> 
     assert result["scientific_review_facts"][
         "required_nonlinearity_has_syntax_evidence"
     ]
+
+
+def test_hybrid_v2_repairs_outer_roles_without_llm_and_hides_runtime_names(
+    tmp_path: Path,
+) -> None:
+    task = function_diagnostic("driven_memory", ModelingLimits())
+    calls = []
+
+    def transport(url, body, timeout):
+        del url, timeout
+        payload = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
+        calls.append(payload)
+        if "selected_state" in payload:
+            return response({"initial": {"fixed_value": 0.0}})
+        if payload["selected_equation"]["lhs"] == "x":
+            function = {
+                "expression": "k*(z-x)",
+                "parameters": [{"name": "k", "role": "coefficient"}],
+            }
+        else:
+            assert payload["parameter_registry"] == {}
+            assert payload["accepted_functions"][0]["parameters"] == [
+                {"name": "k", "role": "nonnegative_coefficient"}
+            ]
+            assert "term_" not in json.dumps(payload["accepted_functions"])
+            function = {
+                "expression": "k*(u-z)",
+                "parameters": [{"name": "k", "role": "coefficient"}],
+            }
+        return response({"functions": [function]})
+
+    client = StagedTopologyClient(
+        settings=StagedModelSettings(),
+        base_url="http://localhost:8000",
+        directory=tmp_path / "calls",
+        namespace="hybrid-v2",
+        seed=0,
+        transport=transport,
+    )
+    result = run_staged_functions(
+        PublicScientificBrief.model_validate(task["brief"]),
+        ValidationContext.model_validate(task["context"]),
+        task["source"],
+        client,
+        tmp_path,
+        generation_granularity="equation_batch_atomic_repair",
+        function_repair_policy="certified_outer_gain",
+    )
+    assert result["complete_model"]
+    assert result["physical_requests"] == 3
+    assert all(
+        audit["final_source"] == "equation_batch_deterministic_repair"
+        for audit in result["batch_term_audits"]
+    )
+    assert all(
+        len(audit["deterministic_role_repairs"]) == 1
+        for audit in result["batch_term_audits"]
+    )
+    assert all(
+        function["parameters"][0]["name"] == "k"
+        for function in result["provider_visible_accepted_functions"]
+    )
+    assert all(
+        function["parameters"][0]["name"] != "k"
+        for function in result["accepted_functions"]
+    )
 
 
 def test_function_drain_saves_partial_state_and_resumes_without_reissuing(

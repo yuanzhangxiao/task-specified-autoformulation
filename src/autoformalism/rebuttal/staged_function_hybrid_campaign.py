@@ -34,10 +34,14 @@ from autoformalism.staged_topology import content_hash
 class HybridFunctionCampaignConfig(StagedCampaignConfig):
     """One prespecified hybrid arm on one reviewed topology."""
 
-    protocol: Literal["scientific-staged-function-hybrid-repair-1"]
+    protocol: Literal[
+        "scientific-staged-function-hybrid-repair-1",
+        "scientific-staged-function-hybrid-repair-2",
+    ]
     source_function_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     selected_topology: SelectedTopology
     generation_granularity: Literal["equation_batch_atomic_repair"]
+    function_repair_policy: Literal["legacy", "certified_outer_gain"] = "legacy"
 
     @model_validator(mode="after")
     def targeted_public_probe(self) -> HybridFunctionCampaignConfig:
@@ -46,6 +50,15 @@ class HybridFunctionCampaignConfig(StagedCampaignConfig):
             raise ValueError("hybrid repair pilot requires exactly one public cell")
         if self.diagnostic_fixtures:
             raise ValueError("hybrid repair pilot excludes toy diagnostics")
+        expected_policy = (
+            "legacy"
+            if self.protocol == "scientific-staged-function-hybrid-repair-1"
+            else "certified_outer_gain"
+        )
+        if self.function_repair_policy != expected_policy:
+            raise ValueError(
+                f"{self.protocol} requires function repair policy {expected_policy}"
+            )
         return self
 
 
@@ -127,6 +140,7 @@ def freeze_hybrid_campaign(
             "kind": "benchmark",
             "seed": seed,
             "generation_granularity": config.generation_granularity,
+            "function_repair_policy": config.function_repair_policy,
             "brief": canonical["brief"],
             "context": canonical["context"],
             "source": source,
@@ -135,7 +149,11 @@ def freeze_hybrid_campaign(
         for seed in config.seeds
     ]
     plan = {
-        "schema_version": "scientific-staged-function-hybrid-repair-plan-1",
+        "schema_version": (
+            "scientific-staged-function-hybrid-repair-plan-1"
+            if config.protocol == "scientific-staged-function-hybrid-repair-1"
+            else "scientific-staged-function-hybrid-repair-plan-2"
+        ),
         "config": config.model_dump(mode="json"),
         "source_function_plan_sha256": source_digest,
         "runtime_source_sha256": runtime_source_hash(),
@@ -256,6 +274,9 @@ def run_hybrid_campaign(
                             client,
                             root,
                             generation_granularity=task["generation_granularity"],
+                            function_repair_policy=task.get(
+                                "function_repair_policy", "legacy"
+                            ),
                         )
                     except DeferredCall:
                         break
@@ -286,6 +307,15 @@ def summarize_hybrid(
     complete = [row for row in rows if row["complete_model"]]
     audits = [audit for row in rows for audit in row["batch_term_audits"]]
     repairs = [audit for audit in audits if audit["atomic_repair_attempted"]]
+    deterministic_repairs = [
+        repair
+        for audit in audits
+        for key in (
+            "deterministic_role_repairs",
+            "atomic_deterministic_role_repairs",
+        )
+        for repair in audit.get(key, [])
+    ]
     nonlinear = [
         audit
         for audit in audits
@@ -293,7 +323,11 @@ def summarize_hybrid(
     ]
     terminal_results = sum(row["result_present"] for row in rows)
     return {
-        "schema_version": "scientific-staged-function-hybrid-repair-summary-1",
+        "schema_version": (
+            "scientific-staged-function-hybrid-repair-summary-2"
+            if plan["config"].get("function_repair_policy") == "certified_outer_gain"
+            else "scientific-staged-function-hybrid-repair-summary-1"
+        ),
         "status": (
             "complete" if terminal_results == len(plan["tasks"]) else "incomplete"
         ),
@@ -307,13 +341,9 @@ def summarize_hybrid(
             sum(row["batch_first_attempt_accepted_steps"] for row in rows),
             sum(row["batch_attempted_steps"] for row in rows),
         ),
-        "batch_rejected_attempts": sum(
-            row["batch_rejected_attempts"] for row in rows
-        ),
+        "batch_rejected_attempts": sum(row["batch_rejected_attempts"] for row in rows),
         "latent_initial_first_attempt_step_success_rate": _ratio(
-            sum(
-                row["latent_initial_first_attempt_accepted_steps"] for row in rows
-            ),
+            sum(row["latent_initial_first_attempt_accepted_steps"] for row in rows),
             sum(row["latent_initial_attempted_steps"] for row in rows),
         ),
         "latent_initial_rejected_attempts": sum(
@@ -329,6 +359,7 @@ def summarize_hybrid(
             sum(audit["atomic_repair_succeeded"] for audit in repairs),
             len(repairs),
         ),
+        "deterministic_outer_gain_role_repair_count": len(deterministic_repairs),
         "nonlinear_obligation_term_count": len(nonlinear),
         "nonlinear_obligation_final_acceptance_rate": _ratio(
             sum(audit["final_source"] is not None for audit in nonlinear),
@@ -366,9 +397,7 @@ def _summary_row(task: dict[str, Any], record: dict[str, Any] | None) -> dict[st
     batch_events = [
         event for event in events if event["step"].startswith("equation_functions_")
     ]
-    initial_events = [
-        event for event in events if event["step"].startswith("initial_")
-    ]
+    initial_events = [event for event in events if event["step"].startswith("initial_")]
     batch_steps = {event["step"] for event in batch_events}
     initial_steps = {event["step"] for event in initial_events}
     return {
@@ -388,9 +417,7 @@ def _summary_row(task: dict[str, Any], record: dict[str, Any] | None) -> dict[st
                 if event["accepted"] and event["attempt"] == 0
             }
         ),
-        "batch_rejected_attempts": sum(
-            not event["accepted"] for event in batch_events
-        ),
+        "batch_rejected_attempts": sum(not event["accepted"] for event in batch_events),
         "latent_initial_attempted_steps": len(initial_steps),
         "latent_initial_first_attempt_accepted_steps": len(
             {

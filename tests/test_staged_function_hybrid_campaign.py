@@ -138,11 +138,14 @@ def test_freeze_run_resume_and_missing_rows(tmp_path: Path, monkeypatch) -> None
     assert summary["atomic_repair_activation_count"] == 0
     assert summary["models_with_cross_lhs_shared_parameters"] == 0
     assert not summary["automatic_winner_defined"]
-    assert run_hybrid_campaign(
-        tmp_path / "plan.json",
-        tmp_path / "results",
-        "http://localhost:8000",
-    ) == summary
+    assert (
+        run_hybrid_campaign(
+            tmp_path / "plan.json",
+            tmp_path / "results",
+            "http://localhost:8000",
+        )
+        == summary
+    )
     assert len(calls) == 3
     assert sum("selected_equation" in call for call in calls) == 2
     assert sum("selected_state" in call for call in calls) == 1
@@ -161,3 +164,19 @@ def test_freeze_rejects_source_plan_or_selection_mismatch(tmp_path: Path) -> Non
     config.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="source function plan digest mismatch"):
         freeze_hybrid_campaign(config, source, tmp_path / "plan.json")
+
+
+def test_v2_freeze_carries_certified_role_policy(tmp_path: Path) -> None:
+    config, source = _write_campaign_inputs(tmp_path)
+    payload = json.loads(config.read_text())
+    payload.update(
+        protocol="scientific-staged-function-hybrid-repair-2",
+        function_repair_policy="certified_outer_gain",
+    )
+    config.write_text(json.dumps(payload))
+    plan = freeze_hybrid_campaign(config, source, tmp_path / "plan.json")
+    assert plan["schema_version"] == ("scientific-staged-function-hybrid-repair-plan-2")
+    assert plan["tasks"][0]["function_repair_policy"] == ("certified_outer_gain")
+    payload["function_repair_policy"] = "legacy"
+    with pytest.raises(ValueError, match="requires function repair policy"):
+        HybridFunctionCampaignConfig.model_validate(payload)

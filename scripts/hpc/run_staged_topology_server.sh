@@ -23,7 +23,7 @@ case "$(jq -r '.config.protocol' "${plan}")" in
   scientific-staged-prefunction-hybrid-2) worker_script=staged_prefunction_campaign.py ;;
   scientific-staged-function-granularity-1) \
     worker_script=staged_function_granularity_campaign.py ;;
-  scientific-staged-function-hybrid-repair-1) \
+  scientific-staged-function-hybrid-repair-1|scientific-staged-function-hybrid-repair-2) \
     worker_script=staged_function_hybrid_campaign.py ;;
   *) echo 'unsupported frozen worker protocol' >&2; exit 2 ;;
 esac
