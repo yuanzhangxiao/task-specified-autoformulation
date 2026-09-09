@@ -69,10 +69,12 @@ sign-definite, or monotone over every possible source value.
 The runtime may display an interaction_polarity_policy for the selected
 equation. When it is present, an exact source set listed under
 fixed_exact_source_sets must use that displayed fixed sign. Every other source
-set must use default_outer_weight_sign, which is unrestricted. Do not infer a
-fixed sign from hidden equations or general convention when the public evidence
-does not establish it. A schema-valid violation is retained for calibration and
-is not silently repaired.
+set follows unfixed_source_ownership. If it is runtime_requires_unrestricted,
+use default_outer_weight_sign, which is unrestricted. If it is proposer, choose
+positive, negative, or unrestricted using the public scientific context and the
+term's intended role. Do not infer scientific facts from hidden equations. An
+explicit public fixed sign is authoritative; otherwise the proposer owns the
+scientific decision and the runtime preserves it.
 
 The selected differential left-hand side may also appear in a term's source
 set. Use that self-dependence for scientifically justified clearance,

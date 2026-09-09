@@ -73,6 +73,59 @@ class PrefunctionIntegrationConfig(StrictSchema):
         return self
 
 
+class HybridPrefunctionGates(StrictSchema):
+    """Readiness gates for hybrid variable construction before functions."""
+
+    minimum_topology_completion: float = Field(ge=0, le=1)
+    minimum_conditional_target_coverage: float = Field(ge=0, le=1)
+    minimum_conditional_source_coverage: float = Field(ge=0, le=1)
+    minimum_conditional_topology_obligation_coverage: float = Field(ge=0, le=1)
+
+
+class HybridPrefunctionConfig(StrictSchema):
+    """Real-public hybrid variable and memory-path construction campaign."""
+
+    protocol: Literal["scientific-staged-prefunction-hybrid-2"]
+    purpose: str = Field(min_length=1)
+    platform: Literal["aces-h100x1"]
+    serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    model_settings: StagedModelSettings
+    served_context_tokens: int = Field(ge=16384)
+    public_cells: tuple[str, ...] = Field(min_length=2, max_length=2)
+    seeds: tuple[int, ...] = Field(min_length=3, max_length=3)
+    limits: ModelingLimits
+    gates: HybridPrefunctionGates
+    wall_seconds: int = Field(ge=60)
+    shutdown_margin_seconds: int = Field(ge=30)
+
+    @model_validator(mode="after")
+    def bounded_unique_tasks(self) -> HybridPrefunctionConfig:
+        """Fix the intended matrix and require a feasible drain margin."""
+        if len(set(self.public_cells)) != 2:
+            raise ValueError("exactly two distinct public cells are required")
+        if len(set(self.seeds)) != 3 or any(seed < 0 for seed in self.seeds):
+            raise ValueError("exactly three distinct nonnegative seeds are required")
+        if (
+            not self.model_settings.timeout_seconds
+            < self.shutdown_margin_seconds
+            < self.wall_seconds
+        ):
+            raise ValueError("require timeout < shutdown margin < worker wall time")
+        return self
+
+
+PrefunctionConfig = PrefunctionIntegrationConfig | HybridPrefunctionConfig
+
+
+def _config_from_mapping(value: dict[str, Any]) -> PrefunctionConfig:
+    """Load the exact protocol-specific config without schema widening."""
+    if value.get("protocol") == "scientific-staged-prefunction-integration-1":
+        return PrefunctionIntegrationConfig.model_validate(value)
+    if value.get("protocol") == "scientific-staged-prefunction-hybrid-2":
+        return HybridPrefunctionConfig.model_validate(value)
+    raise ValueError("unsupported prefunction protocol")
+
+
 def prefunction_launcher_hash() -> str:
     """Bind the CLI and every scheduler launcher used by the frozen plan."""
     repository = Path(__file__).resolve().parents[3]
@@ -81,6 +134,23 @@ def prefunction_launcher_hash() -> str:
         "scripts/hpc/run_staged_topology_server.sh",
         "scripts/hpc/staged_prefunction_aces.slurm",
         "scripts/hpc/submit_staged_prefunction_aces.sh",
+    )
+    return content_hash(
+        {
+            path: hashlib.sha256((repository / path).read_bytes()).hexdigest()
+            for path in paths
+        }
+    )
+
+
+def hybrid_prefunction_launcher_hash() -> str:
+    """Bind the hybrid CLI and scheduler launchers used by the v2 plan."""
+    repository = Path(__file__).resolve().parents[3]
+    paths = (
+        "scripts/staged_prefunction_campaign.py",
+        "scripts/hpc/run_staged_topology_server.sh",
+        "scripts/hpc/staged_prefunction_hybrid_aces.slurm",
+        "scripts/hpc/submit_staged_prefunction_hybrid_aces.sh",
     )
     return content_hash(
         {
@@ -116,7 +186,7 @@ def freeze_prefunction_campaign(
     config_path: Path, public_root: Path, repository: Path, output: Path
 ) -> dict[str, Any]:
     """Freeze the exact public briefs, reviewed contracts, settings, and order."""
-    config = PrefunctionIntegrationConfig.model_validate_json(config_path.read_text())
+    config = _config_from_mapping(json.loads(config_path.read_text()))
     tasks: list[dict[str, Any]] = []
     for cell in config.public_cells:
         prompt_path = public_root / "phase_b_v1" / cell / "proposer_prompt.txt"
@@ -160,7 +230,11 @@ def freeze_prefunction_campaign(
     plan = {
         "config": config.model_dump(mode="json"),
         "runtime_source_sha256": runtime_source_hash(),
-        "launcher_sha256": prefunction_launcher_hash(),
+        "launcher_sha256": (
+            hybrid_prefunction_launcher_hash()
+            if isinstance(config, HybridPrefunctionConfig)
+            else prefunction_launcher_hash()
+        ),
         "tasks": tasks,
         "parameter_fitting_performed": False,
         "function_generation_performed": False,
@@ -180,7 +254,7 @@ def freeze_prefunction_campaign(
 
 def _task_result(
     task: dict[str, Any],
-    config: PrefunctionIntegrationConfig,
+    config: PrefunctionConfig,
     base_url: str,
     root: Path,
     identity: str,
@@ -202,6 +276,8 @@ def _task_result(
         client,
         root,
         audit_public_polarity_policy=True,
+        hybrid_variable_construction=isinstance(config, HybridPrefunctionConfig),
+        proposer_owns_unfixed_signs=isinstance(config, HybridPrefunctionConfig),
     )
 
 
@@ -221,9 +297,14 @@ def run_prefunction_campaign(
         raise ValueError("frozen prefunction plan digest mismatch")
     if runtime_source_hash() != plan["runtime_source_sha256"]:
         raise ValueError("runtime source differs from frozen prefunction campaign")
-    if prefunction_launcher_hash() != plan["launcher_sha256"]:
+    config = _config_from_mapping(plan["config"])
+    launcher_hash = (
+        hybrid_prefunction_launcher_hash()
+        if isinstance(config, HybridPrefunctionConfig)
+        else prefunction_launcher_hash()
+    )
+    if launcher_hash != plan["launcher_sha256"]:
         raise ValueError("launcher differs from frozen prefunction campaign")
-    config = PrefunctionIntegrationConfig.model_validate(plan["config"])
     deadline = time.monotonic() + (wall_seconds or config.wall_seconds)
     stop = False
 
@@ -293,6 +374,8 @@ def summarize_prefunction(
     plan: dict[str, Any], records: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Report topology, source, mechanism, and polarity endpoints separately."""
+    if plan["config"]["protocol"] == "scientific-staged-prefunction-hybrid-2":
+        return summarize_hybrid_prefunction(plan, records)
     indexed = {item["task_id"]: item for item in records}
     rows: list[dict[str, Any]] = []
     for task in plan["tasks"]:
@@ -362,8 +445,7 @@ def summarize_prefunction(
     }
     gates = PrefunctionIntegrationGates.model_validate(plan["config"]["gates"])
     checks = {
-        "minimum_topology_completion": metrics["topology_completion_rate"]
-        is not None
+        "minimum_topology_completion": metrics["topology_completion_rate"] is not None
         and metrics["topology_completion_rate"] >= gates.minimum_topology_completion,
         "minimum_target_coverage": metrics["target_coverage_rate"] is not None
         and metrics["target_coverage_rate"] >= gates.minimum_target_coverage,
@@ -371,10 +453,8 @@ def summarize_prefunction(
         and metrics["source_coverage_rate"] >= gates.minimum_source_coverage,
         "minimum_mechanism_coverage": metrics["mechanism_coverage_rate"] is not None
         and metrics["mechanism_coverage_rate"] >= gates.minimum_mechanism_coverage,
-        "minimum_polarity_consistency": metrics["polarity_consistency_rate"]
-        is not None
-        and metrics["polarity_consistency_rate"]
-        >= gates.minimum_polarity_consistency,
+        "minimum_polarity_consistency": metrics["polarity_consistency_rate"] is not None
+        and metrics["polarity_consistency_rate"] >= gates.minimum_polarity_consistency,
     }
     complete = sum(item["result_present"] for item in rows) == planned
     return {
@@ -387,16 +467,211 @@ def summarize_prefunction(
         **metrics,
         "checks": checks,
         "total_terms": sum(item["term_count"] for item in rows),
-        "fixed_evidence_terms": sum(
-            item["fixed_evidence_term_count"] for item in rows
-        ),
+        "fixed_evidence_terms": sum(item["fixed_evidence_term_count"] for item in rows),
         "unrestricted_terms": sum(item["unrestricted_term_count"] for item in rows),
         "polarity_errors": sum(item["polarity_error_count"] for item in rows),
         "physical_requests": sum(item["physical_requests"] for item in rows),
-        "observed_total_tokens": sum(
-            item["observed_total_tokens"] for item in rows
-        ),
+        "observed_total_tokens": sum(item["observed_total_tokens"] for item in rows),
         "provider_seconds": sum(item["provider_seconds"] for item in rows),
+        "rows": rows,
+        "function_generation_performed": False,
+        "parameter_fitting_performed": False,
+        "scientific_judge_called": False,
+        "test_data_opened": False,
+        "private_reference_opened": False,
+        "automatic_winner_defined": False,
+    }
+
+
+def summarize_hybrid_prefunction(
+    plan: dict[str, Any], records: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Separate completion from conditional scientific-topology endpoints."""
+    indexed = {item["task_id"]: item for item in records}
+    rows: list[dict[str, Any]] = []
+    for task in plan["tasks"]:
+        record = indexed.get(task["task_id"])
+        result = record["result"] if record else None
+        complete = bool(result and result["complete_topology"])
+        audits = result.get("polarity_policy_audits", []) if result else []
+        audit_rows = [row for audit in audits for row in audit.get("rows", [])]
+        events = result.get("events", []) if result else []
+        variable_events = [
+            event
+            for event in events
+            if str(event.get("step", "")).startswith("variables_")
+        ]
+        equation_events = [
+            event
+            for event in events
+            if str(event.get("step", "")).startswith("equation_")
+        ]
+        memory_failures = [
+            event
+            for event in equation_events
+            if "dynamic-memory" in str(event.get("error", ""))
+        ]
+        repaired_memory_steps = {
+            str(event["step"])
+            for event in memory_failures
+            if any(
+                later.get("step") == event.get("step") and later.get("accepted")
+                for later in equation_events
+            )
+        }
+        sign_counts = {
+            sign: sum(
+                row.get("observed_outer_weight_sign") == sign for row in audit_rows
+            )
+            for sign in ("positive", "negative", "unrestricted")
+        }
+        rows.append(
+            {
+                "task_id": task["task_id"],
+                "benchmark_id": task["benchmark_id"],
+                "seed": task["seed"],
+                "result_present": result is not None,
+                "status": result.get("status") if result else None,
+                "complete_topology": complete,
+                "target_coverage_conditional": (
+                    bool(result["public_target_coverage_passed"]) if complete else None
+                ),
+                "source_coverage_conditional": (
+                    bool(result["public_source_coverage_passed"]) if complete else None
+                ),
+                "topology_obligation_coverage_conditional": (
+                    bool(result["public_mechanism_coverage_passed"])
+                    if complete
+                    else None
+                ),
+                "explicit_sign_compliance_conditional": (
+                    bool(result["public_polarity_consistency_passed"])
+                    if complete
+                    else None
+                ),
+                "explicit_sign_evidence_term_count": sum(
+                    bool(row.get("public_fixed_evidence")) for row in audit_rows
+                ),
+                "explicit_sign_error_count": sum(
+                    bool(row.get("public_fixed_evidence"))
+                    and not bool(row.get("correct"))
+                    for row in audit_rows
+                ),
+                "proposer_owned_sign_counts": sign_counts,
+                "resolved_variable_agenda_skip_count": sum(
+                    bool(event.get("skipped_as_resolved")) for event in variable_events
+                ),
+                "partial_variable_acceptance_count": sum(
+                    bool(event.get("partial_acceptance")) for event in variable_events
+                ),
+                "accepted_variable_entry_count": sum(
+                    len(event.get("accepted_variable_names", []))
+                    for event in variable_events
+                ),
+                "rejected_variable_entry_count": sum(
+                    len(event.get("rejected_variables", []))
+                    for event in variable_events
+                ),
+                "memory_equation_repair_activation_count": len(memory_failures),
+                "memory_equation_repair_recovered_step_count": len(
+                    repaired_memory_steps
+                ),
+                "physical_requests": result.get("physical_requests", 0)
+                if result
+                else 0,
+                "observed_total_tokens": result.get("observed_total_tokens", 0)
+                if result
+                else 0,
+                "provider_seconds": result.get("provider_seconds", 0.0)
+                if result
+                else 0.0,
+                "error": result.get("error") if result else None,
+            }
+        )
+    planned = len(rows)
+    completed = [row for row in rows if row["complete_topology"]]
+
+    def conditional_rate(field: str) -> float | None:
+        return _rate(sum(bool(row[field]) for row in completed), len(completed))
+
+    metrics = {
+        "topology_completion_rate": _rate(len(completed), planned),
+        "conditional_target_coverage_rate": conditional_rate(
+            "target_coverage_conditional"
+        ),
+        "conditional_source_coverage_rate": conditional_rate(
+            "source_coverage_conditional"
+        ),
+        "conditional_topology_obligation_coverage_rate": conditional_rate(
+            "topology_obligation_coverage_conditional"
+        ),
+    }
+    gates = HybridPrefunctionGates.model_validate(plan["config"]["gates"])
+    checks = {
+        "minimum_topology_completion": metrics["topology_completion_rate"] is not None
+        and metrics["topology_completion_rate"] >= gates.minimum_topology_completion,
+        "minimum_conditional_target_coverage": metrics[
+            "conditional_target_coverage_rate"
+        ]
+        is not None
+        and metrics["conditional_target_coverage_rate"]
+        >= gates.minimum_conditional_target_coverage,
+        "minimum_conditional_source_coverage": metrics[
+            "conditional_source_coverage_rate"
+        ]
+        is not None
+        and metrics["conditional_source_coverage_rate"]
+        >= gates.minimum_conditional_source_coverage,
+        "minimum_conditional_topology_obligation_coverage": metrics[
+            "conditional_topology_obligation_coverage_rate"
+        ]
+        is not None
+        and metrics["conditional_topology_obligation_coverage_rate"]
+        >= gates.minimum_conditional_topology_obligation_coverage,
+    }
+    terminal = sum(bool(row["result_present"]) for row in rows)
+    return {
+        "schema_version": "scientific-staged-prefunction-hybrid-summary-2",
+        "status": "complete" if terminal == planned else "incomplete",
+        "overall_result": (
+            "pass" if terminal == planned and all(checks.values()) else "fail"
+        ),
+        "plan_sha256": plan["plan_sha256"],
+        "planned_tasks": planned,
+        "terminal_results": terminal,
+        **metrics,
+        "checks": checks,
+        "explicit_sign_evidence_term_count": sum(
+            row["explicit_sign_evidence_term_count"] for row in rows
+        ),
+        "explicit_sign_error_count": sum(
+            row["explicit_sign_error_count"] for row in rows
+        ),
+        "proposer_owned_sign_counts": {
+            sign: sum(row["proposer_owned_sign_counts"][sign] for row in rows)
+            for sign in ("positive", "negative", "unrestricted")
+        },
+        "resolved_variable_agenda_skip_count": sum(
+            row["resolved_variable_agenda_skip_count"] for row in rows
+        ),
+        "partial_variable_acceptance_count": sum(
+            row["partial_variable_acceptance_count"] for row in rows
+        ),
+        "accepted_variable_entry_count": sum(
+            row["accepted_variable_entry_count"] for row in rows
+        ),
+        "rejected_variable_entry_count": sum(
+            row["rejected_variable_entry_count"] for row in rows
+        ),
+        "memory_equation_repair_activation_count": sum(
+            row["memory_equation_repair_activation_count"] for row in rows
+        ),
+        "memory_equation_repair_recovered_step_count": sum(
+            row["memory_equation_repair_recovered_step_count"] for row in rows
+        ),
+        "physical_requests": sum(row["physical_requests"] for row in rows),
+        "observed_total_tokens": sum(row["observed_total_tokens"] for row in rows),
+        "provider_seconds": sum(row["provider_seconds"] for row in rows),
         "rows": rows,
         "function_generation_performed": False,
         "parameter_fitting_performed": False,

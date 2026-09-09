@@ -270,6 +270,16 @@ sign; unspecified and unmatched terms are explicitly unrestricted. Completion,
 target coverage, source paths, mechanism paths, and term-level polarity policy
 are reported separately before any function generation or fitting.
 
+The versioned hybrid successor keeps each variable call batched while validating
+and retaining schema-valid entries independently. Routine public forcing is
+registered by the runtime, resolved target/mechanism agenda items are skipped,
+and retries receive only rejected entries plus unresolved typed obligations. A
+reviewed dynamic-memory requirement must acquire a differential mediator and a
+driver-to-mediator-to-target topology path, with failures repaired at the
+affected equation only. Explicit public direct signs remain authoritative;
+otherwise scientific sign selection belongs to the proposer and is preserved.
+See `docs/STAGED_PREFUNCTION_HYBRID.md` for the frozen readiness protocol.
+
 The calibration-only hybrid judge is specified separately in
 `docs/JUDGE_HYBRID_PROTOCOL.md`. It extracts frozen requirements only from the
 public task, preserves proposer claims at lower authority, certifies graph facts

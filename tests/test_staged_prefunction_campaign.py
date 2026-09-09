@@ -75,6 +75,7 @@ def test_public_polarity_policy_fixes_only_exact_supported_source_sets() -> None
         "schema_version": "equation-polarity-policy-1",
         "selected_lhs": "x",
         "default_outer_weight_sign": "unrestricted",
+        "unfixed_source_ownership": "runtime_requires_unrestricted",
         "fixed_exact_source_sets": [
             {
                 "sources": ["u"],
@@ -121,9 +122,9 @@ def test_schema_valid_unsupported_fixed_sign_is_scored_without_retry(
         del url, timeout
         request = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
         calls.append(request)
-        assert request["interaction_polarity_policy"]["fixed_exact_source_sets"][
-            0
-        ]["sources"] == ["u"]
+        assert request["interaction_polarity_policy"]["fixed_exact_source_sets"][0][
+            "sources"
+        ] == ["u"]
         return _response(
             {
                 "terms": [
@@ -174,6 +175,159 @@ def test_schema_valid_unsupported_fixed_sign_is_scored_without_retry(
     assert result["public_mechanism_coverage_passed"]
     assert not result["public_polarity_consistency_passed"]
     assert len(calls) == 1
+
+
+def test_hybrid_variables_retain_valid_entries_skip_resolved_target_and_repair_memory(
+    tmp_path: Path,
+) -> None:
+    requests: list[tuple[str, int, dict[str, object]]] = []
+
+    def transport(
+        url: str, body: dict[str, object], timeout: float
+    ) -> dict[str, object]:
+        del url, timeout
+        step = str(body["response_format"]["json_schema"]["name"])
+        payload = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
+        attempt = len([item for item in requests if item[0] == step])
+        requests.append((step, attempt, payload))
+        if step == "VariableReply" and attempt == 0:
+            assert {item["name"] for item in payload["current_inventory"]} == {"u"}
+            return _response(
+                {
+                    "variables": [
+                        {
+                            "name": "y",
+                            "definition": "algebraic",
+                            "scientific_role": "generated output",
+                        },
+                        {
+                            "name": "u",
+                            "definition": "differential",
+                            "scientific_role": "invalid redefinition of supplied input",
+                        },
+                    ]
+                }
+            )
+        if step == "VariableReply":
+            assert {item["name"] for item in payload["current_inventory"]} == {
+                "u",
+                "y",
+            }
+            assert payload["runtime_diagnostics"]["unresolved_obligations"] == [
+                "dynamic_memory_mediator:memory_path"
+            ]
+            return _response(
+                {
+                    "variables": [
+                        {
+                            "name": "z",
+                            "definition": "differential",
+                            "scientific_role": "input-driven memory",
+                        }
+                    ]
+                }
+            )
+        selected = payload["selected_lhs"]["name"]
+        policy = payload["interaction_polarity_policy"]
+        assert policy["unfixed_source_ownership"] == "proposer"
+        if selected == "z" and attempt == 0:
+            return _response(
+                {
+                    "terms": [
+                        {
+                            "sources": ["z"],
+                            "outer_weight_sign": "negative",
+                            "scientific_role": "memory relaxation",
+                        }
+                    ],
+                    "inventory_revision": None,
+                }
+            )
+        if selected == "z":
+            assert "dynamic-memory mediator" in payload["runtime_diagnostics"]["error"]
+            return _response(
+                {
+                    "terms": [
+                        {
+                            "sources": ["z"],
+                            "outer_weight_sign": "negative",
+                            "scientific_role": "memory relaxation",
+                        },
+                        {
+                            "sources": ["u"],
+                            "outer_weight_sign": "positive",
+                            "scientific_role": "input drive",
+                        },
+                    ],
+                    "inventory_revision": None,
+                }
+            )
+        assert selected == "y"
+        return _response(
+            {
+                "terms": [
+                    {
+                        "sources": ["z"],
+                        "outer_weight_sign": "positive",
+                        "scientific_role": "memory readout",
+                    }
+                ],
+                "inventory_revision": None,
+            }
+        )
+
+    brief = PublicScientificBrief(
+        scientific_context="Input u drives output y through dynamic memory.",
+        public_variables=(
+            PublicVariable(name="y", data_role="target"),
+            PublicVariable(name="u", data_role="external_input"),
+        ),
+        requirements=(
+            ScientificRequirement(
+                id="memory_path",
+                public_requirement="u reaches y through dynamic memory",
+                targets=("y",),
+                drivers=("u",),
+                positive_requirements=("Represent dynamic memory.",),
+                requires_dynamic_memory=True,
+                public_pathway_sign="unspecified",
+            ),
+        ),
+    )
+    client = StagedTopologyClient(
+        settings=StagedModelSettings(attempts_per_step=3),
+        base_url="http://localhost:8000",
+        directory=tmp_path / "calls",
+        namespace="hybrid",
+        seed=0,
+        transport=transport,
+    )
+    result = run_staged_topology(
+        brief,
+        ValidationContext(targets=("y",), external_inputs=("u",)),
+        client,
+        tmp_path / "result",
+        audit_public_polarity_policy=True,
+        hybrid_variable_construction=True,
+        proposer_owns_unfixed_signs=True,
+    )
+    assert result["complete_topology"]
+    assert result["public_target_coverage_passed"]
+    assert result["public_source_coverage_passed"]
+    assert result["public_mechanism_coverage_passed"]
+    assert result["public_polarity_consistency_passed"]
+    assert result["memory_candidates"] == {"memory_path": ["z"]}
+    assert len(requests) == 5
+    variable_events = [
+        event for event in result["events"] if event["step"].startswith("variables_")
+    ]
+    assert variable_events[0]["accepted_variable_names"] == ["y"]
+    assert variable_events[0]["partial_acceptance"]
+    assert variable_events[0]["rejected_variables"][0]["name"] == "u"
+    assert variable_events[1]["accepted_variable_names"] == ["z"]
+    assert variable_events[2]["skipped_as_resolved"]
+    equation_z = [event for event in result["events"] if event["step"] == "equation_z"]
+    assert [event["accepted"] for event in equation_z] == [False, True]
 
 
 def _freeze_fixture(
@@ -278,12 +432,18 @@ def test_six_task_freeze_and_terminal_replay(
     assert not plan["parameter_fitting_performed"]
     first = plan["tasks"][0]["source"]
     fourth = plan["tasks"][3]["source"]
-    assert first["level_zero_polarity_contract"][0][
-        "direct_exact_source_outer_weight_sign"
-    ] == "positive"
-    assert fourth["level_zero_polarity_contract"][0][
-        "direct_exact_source_outer_weight_sign"
-    ] == "unrestricted"
+    assert (
+        first["level_zero_polarity_contract"][0][
+            "direct_exact_source_outer_weight_sign"
+        ]
+        == "positive"
+    )
+    assert (
+        fourth["level_zero_polarity_contract"][0][
+            "direct_exact_source_outer_weight_sign"
+        ]
+        == "unrestricted"
+    )
     calls: list[str] = []
 
     def task_result(task, config, base_url, root, identity, can_start):
@@ -315,15 +475,92 @@ def test_six_task_freeze_and_terminal_replay(
 
     monkeypatch.setattr(campaign, "_task_result", task_result)
     output = tmp_path / "results"
-    summary = run_prefunction_campaign(
-        plan_path, output, "http://localhost:8000"
-    )
+    summary = run_prefunction_campaign(plan_path, output, "http://localhost:8000")
     assert summary["status"] == "complete"
     assert summary["overall_result"] == "pass"
     assert summary["topology_completion_rate"] == 1.0
     assert len(calls) == 6
     assert (
-        run_prefunction_campaign(plan_path, output, "http://localhost:8000")
-        == summary
+        run_prefunction_campaign(plan_path, output, "http://localhost:8000") == summary
     )
     assert len(calls) == 6
+
+
+def test_hybrid_freeze_reports_conditional_gates_and_repair_accounting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, public_root, repository = _freeze_fixture(tmp_path, monkeypatch)
+    payload = json.loads(config.read_text())
+    payload["protocol"] = "scientific-staged-prefunction-hybrid-2"
+    payload["gates"] = {
+        "minimum_topology_completion": 1.0,
+        "minimum_conditional_target_coverage": 1.0,
+        "minimum_conditional_source_coverage": 1.0,
+        "minimum_conditional_topology_obligation_coverage": 1.0,
+    }
+    config.write_text(json.dumps(payload))
+    plan_path = tmp_path / "hybrid-plan.json"
+    plan = freeze_prefunction_campaign(config, public_root, repository, plan_path)
+    assert plan["config"]["protocol"] == "scientific-staged-prefunction-hybrid-2"
+
+    def task_result(task, config, base_url, root, identity, can_start):
+        del task, config, base_url, root, identity
+        assert can_start()
+        return {
+            "status": "complete",
+            "error": None,
+            "complete_topology": True,
+            "public_target_coverage_passed": True,
+            "public_source_coverage_passed": True,
+            "public_mechanism_coverage_passed": True,
+            "public_polarity_consistency_passed": True,
+            "polarity_policy_audits": [
+                {
+                    "rows": [
+                        {
+                            "observed_outer_weight_sign": "negative",
+                            "public_fixed_evidence": False,
+                            "correct": True,
+                        }
+                    ]
+                }
+            ],
+            "events": [
+                {
+                    "step": "variables_0",
+                    "accepted": False,
+                    "partial_acceptance": True,
+                    "accepted_variable_names": ["x"],
+                    "rejected_variables": [{"name": "u"}],
+                },
+                {
+                    "step": "variables_1",
+                    "accepted": True,
+                    "skipped_as_resolved": True,
+                },
+                {
+                    "step": "equation_z",
+                    "accepted": False,
+                    "error": "dynamic-memory mediator missing driver",
+                },
+                {"step": "equation_z", "accepted": True},
+            ],
+            "physical_requests": 3,
+            "observed_total_tokens": 30,
+            "provider_seconds": 0.3,
+        }
+
+    import autoformalism.rebuttal.staged_prefunction_campaign as campaign
+
+    monkeypatch.setattr(campaign, "_task_result", task_result)
+    summary = run_prefunction_campaign(
+        plan_path, tmp_path / "hybrid-results", "http://localhost:8000"
+    )
+    assert summary["overall_result"] == "pass"
+    assert summary["conditional_topology_obligation_coverage_rate"] == 1.0
+    assert summary["explicit_sign_evidence_term_count"] == 0
+    assert summary["proposer_owned_sign_counts"]["negative"] == 6
+    assert summary["partial_variable_acceptance_count"] == 6
+    assert summary["resolved_variable_agenda_skip_count"] == 6
+    assert summary["memory_equation_repair_activation_count"] == 6
+    assert summary["memory_equation_repair_recovered_step_count"] == 6

@@ -96,6 +96,7 @@ def build_scientific_brief(
                     else ()
                 ),
                 public_pathway_sign=item.required_sign,
+                requires_dynamic_memory=item.requires_dynamic_memory,
             )
             for item in mechanism_spec.required_mechanisms
         ),
@@ -113,7 +114,10 @@ def build_scientific_brief(
 
 
 def compile_equation_polarity_policy(
-    brief: PublicScientificBrief, selected_lhs: str
+    brief: PublicScientificBrief,
+    selected_lhs: str,
+    *,
+    proposer_owns_unfixed_sources: bool = False,
 ) -> EquationPolarityPolicy:
     """Compile only exact fixed signs certified by reviewed public evidence.
 
@@ -151,6 +155,11 @@ def compile_equation_polarity_policy(
             identifiers.append(requirement.id)
     return EquationPolarityPolicy(
         selected_lhs=selected_lhs,
+        unfixed_source_ownership=(
+            "proposer"
+            if proposer_owns_unfixed_sources
+            else "runtime_requires_unrestricted"
+        ),
         fixed_exact_source_sets=tuple(
             ExactSourcePolarityRule.model_validate(item)
             for _, item in sorted(grouped.items())
@@ -201,6 +210,51 @@ def audit_equation_polarity_policy(
     }
 
 
+def audit_explicit_equation_polarity(
+    equation: EquationDefinition, policy: EquationPolarityPolicy
+) -> dict[str, object]:
+    """Check explicit public signs while leaving all other signs proposer-owned."""
+    if equation.name != policy.selected_lhs:
+        raise ValueError("equation and polarity-policy left-hand sides differ")
+    fixed = {
+        tuple(sorted(item.sources)): item.outer_weight_sign
+        for item in policy.fixed_exact_source_sets
+    }
+    rows: list[dict[str, object]] = []
+    for index, term in enumerate(equation.terms):
+        key = tuple(sorted(term.sources))
+        expected = fixed.get(key)
+        if isinstance(term, LegacyEquationTerm):
+            observed = "positive" if term.outer_sign == "add" else "negative"
+        else:
+            observed = term.outer_weight_sign.value
+        rows.append(
+            {
+                "term_index": index,
+                "sources": list(key),
+                "expected_outer_weight_sign": expected,
+                "observed_outer_weight_sign": observed,
+                "public_fixed_evidence": expected is not None,
+                "proposer_owned": expected is None,
+                "correct": expected is None or observed == expected,
+            }
+        )
+    return {
+        "selected_lhs": equation.name,
+        "term_count": len(rows),
+        "fixed_evidence_term_count": sum(
+            bool(item["public_fixed_evidence"]) for item in rows
+        ),
+        "proposer_owned_term_count": sum(bool(item["proposer_owned"]) for item in rows),
+        "correct_fixed_evidence_term_count": sum(
+            bool(item["public_fixed_evidence"]) and bool(item["correct"])
+            for item in rows
+        ),
+        "passed": all(bool(item["correct"]) for item in rows),
+        "rows": rows,
+    }
+
+
 def merge_variable_reply(
     brief: PublicScientificBrief,
     inventory: tuple[ScientificVariable, ...],
@@ -241,6 +295,52 @@ def merge_variable_reply(
     ):
         raise ValueError("generated variable limit exceeded")
     return tuple(merged.values())
+
+
+def merge_variable_reply_partially(
+    brief: PublicScientificBrief,
+    inventory: tuple[ScientificVariable, ...],
+    reply: VariableReply,
+) -> tuple[tuple[ScientificVariable, ...], tuple[dict[str, object], ...]]:
+    """Retain each independently valid variable and explain every rejection.
+
+    Provider-schema failures still reject the response before this function is
+    called.  This boundary handles cross-item runtime rules: public-role
+    compatibility, immutable accepted definitions, reserved names, and the
+    generated-variable limit.
+    """
+    merged = inventory
+    decisions: list[dict[str, object]] = []
+    for item in reply.variables:
+        before = {variable.name: variable for variable in merged}
+        try:
+            candidate = merge_variable_reply(
+                brief, merged, VariableReply(variables=(item,))
+            )
+        except ValueError as exc:
+            decisions.append(
+                {
+                    "name": item.name,
+                    "definition": item.definition,
+                    "accepted": False,
+                    "changed_inventory": False,
+                    "error": str(exc),
+                }
+            )
+            continue
+        after = {variable.name: variable for variable in candidate}
+        changed = before != after
+        merged = candidate
+        decisions.append(
+            {
+                "name": item.name,
+                "definition": item.definition,
+                "accepted": True,
+                "changed_inventory": changed,
+                "error": None,
+            }
+        )
+    return merged, tuple(decisions)
 
 
 def freeze_inventory(

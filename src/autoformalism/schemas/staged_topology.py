@@ -36,6 +36,18 @@ class ScientificRequirement(StrictSchema):
     drivers: tuple[Identifier, ...]
     positive_requirements: tuple[NonEmptyText, ...] = ()
     public_pathway_sign: Literal["positive", "negative", "unspecified"] | None = None
+    requires_dynamic_memory: bool = False
+
+
+class VariableAgendaItem(StrictSchema):
+    """One runtime-owned variable-construction obligation."""
+
+    agenda_id: Identifier
+    purpose: Literal["mechanism_variables", "target_completion"]
+    requirement_ids: tuple[Identifier, ...] = ()
+    targets: tuple[Identifier, ...] = ()
+    drivers: tuple[Identifier, ...] = ()
+    requires_dynamic_memory: bool = False
 
 
 class TargetDependency(StrictSchema):
@@ -196,11 +208,12 @@ class ExactSourcePolarityRule(StrictSchema):
 class EquationPolarityPolicy(StrictSchema):
     """Runtime-owned polarity evidence for one selected equation."""
 
-    schema_version: Literal["equation-polarity-policy-1"] = (
-        "equation-polarity-policy-1"
-    )
+    schema_version: Literal["equation-polarity-policy-1"] = "equation-polarity-policy-1"
     selected_lhs: Identifier
     default_outer_weight_sign: Literal["unrestricted"] = "unrestricted"
+    unfixed_source_ownership: Literal["runtime_requires_unrestricted", "proposer"] = (
+        "runtime_requires_unrestricted"
+    )
     fixed_exact_source_sets: tuple[ExactSourcePolarityRule, ...] = ()
 
     @model_validator(mode="after")
