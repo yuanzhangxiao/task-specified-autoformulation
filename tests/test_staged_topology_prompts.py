@@ -134,6 +134,34 @@ def test_equation_topology_request_includes_selected_lhs_and_allowed_sources() -
     assert "runtime_diagnostics" not in payload
 
 
+def test_equation_topology_request_can_include_runtime_polarity_policy() -> None:
+    prompt = render_equation_topology_user_prompt(
+        public_brief_json="{}",
+        agenda_json="{}",
+        inventory_json="[]",
+        selected_lhs_json='{"name":"x","definition":"differential"}',
+        equation_sketch_json="[]",
+        allowed_sources_json='["x","u"]',
+        polarity_policy_json=json.dumps(
+            {
+                "schema_version": "equation-polarity-policy-1",
+                "selected_lhs": "x",
+                "default_outer_weight_sign": "unrestricted",
+                "fixed_exact_source_sets": [
+                    {
+                        "sources": ["u"],
+                        "outer_weight_sign": "positive",
+                        "requirement_ids": ["drive"],
+                    }
+                ],
+            }
+        ),
+    )
+    policy = _runtime_payload(prompt)["interaction_polarity_policy"]
+    assert policy["default_outer_weight_sign"] == "unrestricted"
+    assert policy["fixed_exact_source_sets"][0]["sources"] == ["u"]
+
+
 @pytest.mark.parametrize(
     "renderer,kwargs,label",
     [

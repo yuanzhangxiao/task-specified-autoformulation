@@ -66,6 +66,14 @@ signed coefficient, including a signed baseline or offset. The sign decision
 does not claim that the complete later interaction function is globally nonnegative,
 sign-definite, or monotone over every possible source value.
 
+The runtime may display an interaction_polarity_policy for the selected
+equation. When it is present, an exact source set listed under
+fixed_exact_source_sets must use that displayed fixed sign. Every other source
+set must use default_outer_weight_sign, which is unrestricted. Do not infer a
+fixed sign from hidden equations or general convention when the public evidence
+does not establish it. A schema-valid violation is retained for calibration and
+is not silently repaired.
+
 The selected differential left-hand side may also appear in a term's source
 set. Use that self-dependence for scientifically justified clearance,
 relaxation, decay, or feedback. Numeric coefficients, rate constants, time
@@ -135,6 +143,7 @@ def render_equation_topology_user_prompt(
     selected_lhs_json: str,
     equation_sketch_json: str,
     allowed_sources_json: str,
+    polarity_policy_json: str | None = None,
     diagnostics_json: str | None = None,
 ) -> str:
     """Render one Level-2 request for an immutable selected left-hand side."""
@@ -159,6 +168,11 @@ def render_equation_topology_user_prompt(
             label="allowed_sources_json",
         ),
     }
+    if polarity_policy_json is not None:
+        payload["interaction_polarity_policy"] = _json_object(
+            polarity_policy_json,
+            label="polarity_policy_json",
+        )
     if diagnostics_json is not None:
         payload["runtime_diagnostics"] = _json_object(
             diagnostics_json,

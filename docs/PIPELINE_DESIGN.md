@@ -262,6 +262,14 @@ bounded contract repair; a schema-valid scientific sign error is scored and is
 never silently repaired. The calibration performs no function generation,
 fitting, judge call, test access, private-reference access, or model selection.
 
+After that isolated calibration, the public pre-function integration freezes
+two reviewed benchmarks by three seeds and runs the complete Level-0 -> variable
+inventory -> equation-topology path. Level 0 preserves reviewed pathway signs.
+Only an exact direct target/driver source-set match may receive a public fixed
+sign; unspecified and unmatched terms are explicitly unrestricted. Completion,
+target coverage, source paths, mechanism paths, and term-level polarity policy
+are reported separately before any function generation or fitting.
+
 The calibration-only hybrid judge is specified separately in
 `docs/JUDGE_HYBRID_PROTOCOL.md`. It extracts frozen requirements only from the
 public task, preserves proposer claims at lower authority, certifies graph facts

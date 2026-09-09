@@ -136,6 +136,10 @@ The pipeline is iterative:
   displayed brief. Evaluator labels are frozen outside the provider request;
   benchmark mechanisms whose public contracts leave sign unspecified are not
   assigned hidden-equation labels.
+- The subsequent six-task public pre-function integration combines that policy
+  with real variable and equation-topology construction. Fixed signs require an
+  exact reviewed public target/driver match; all other terms remain
+  unrestricted, preserving expressiveness without inventing sign evidence.
 - The LLM proposes parameter identities, locations, and roles. The numerical
   runtime owns start distributions and any trusted constraints.
 - Numerical optimization determines final parameter values.

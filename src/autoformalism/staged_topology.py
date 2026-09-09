@@ -22,7 +22,9 @@ from autoformalism.schemas.staged import (
 )
 from autoformalism.schemas.staged_topology import (
     EquationDefinition,
+    EquationPolarityPolicy,
     EquationTerm,
+    ExactSourcePolarityRule,
     InventoryRevision,
     LegacyEquationTerm,
     ModelingLimits,
@@ -93,6 +95,7 @@ def build_scientific_brief(
                     if item.requires_dynamic_memory
                     else ()
                 ),
+                public_pathway_sign=item.required_sign,
             )
             for item in mechanism_spec.required_mechanisms
         ),
@@ -107,6 +110,95 @@ def build_scientific_brief(
         ),
         limits=limits or ModelingLimits(),
     )
+
+
+def compile_equation_polarity_policy(
+    brief: PublicScientificBrief, selected_lhs: str
+) -> EquationPolarityPolicy:
+    """Compile only exact fixed signs certified by reviewed public evidence.
+
+    A public mechanism sign applies here only when its complete driver set is a
+    direct term of one of its public targets. Indirect nonlinear path signs are
+    not inferred by multiplying edge labels. Every other term remains signed
+    and is therefore assigned the explicit ``unrestricted`` default.
+    """
+    grouped: dict[tuple[str, ...], dict[str, object]] = {}
+    for requirement in brief.requirements:
+        if (
+            selected_lhs not in requirement.targets
+            or requirement.public_pathway_sign not in {"positive", "negative"}
+            or not requirement.drivers
+        ):
+            continue
+        key = tuple(sorted(requirement.drivers))
+        existing = grouped.get(key)
+        if existing is not None and existing["outer_weight_sign"] != (
+            requirement.public_pathway_sign
+        ):
+            raise ValueError(
+                "conflicting public polarity evidence for exact source set "
+                f"{list(key)} on {selected_lhs}"
+            )
+        if existing is None:
+            grouped[key] = {
+                "sources": key,
+                "outer_weight_sign": requirement.public_pathway_sign,
+                "requirement_ids": [requirement.id],
+            }
+        else:
+            identifiers = existing["requirement_ids"]
+            assert isinstance(identifiers, list)
+            identifiers.append(requirement.id)
+    return EquationPolarityPolicy(
+        selected_lhs=selected_lhs,
+        fixed_exact_source_sets=tuple(
+            ExactSourcePolarityRule.model_validate(item)
+            for _, item in sorted(grouped.items())
+        ),
+    )
+
+
+def audit_equation_polarity_policy(
+    equation: EquationDefinition, policy: EquationPolarityPolicy
+) -> dict[str, object]:
+    """Compare every accepted term with its public-evidence polarity policy."""
+    if equation.name != policy.selected_lhs:
+        raise ValueError("equation and polarity-policy left-hand sides differ")
+    fixed = {
+        tuple(sorted(item.sources)): item.outer_weight_sign
+        for item in policy.fixed_exact_source_sets
+    }
+    rows: list[dict[str, object]] = []
+    for index, term in enumerate(equation.terms):
+        key = tuple(sorted(term.sources))
+        expected = fixed.get(key, policy.default_outer_weight_sign)
+        if isinstance(term, LegacyEquationTerm):
+            observed = "positive" if term.outer_sign == "add" else "negative"
+        else:
+            observed = term.outer_weight_sign.value
+        rows.append(
+            {
+                "term_index": index,
+                "sources": list(key),
+                "expected_outer_weight_sign": expected,
+                "observed_outer_weight_sign": observed,
+                "public_fixed_evidence": key in fixed,
+                "correct": observed == expected,
+            }
+        )
+    return {
+        "selected_lhs": equation.name,
+        "term_count": len(rows),
+        "fixed_evidence_term_count": sum(
+            bool(item["public_fixed_evidence"]) for item in rows
+        ),
+        "unrestricted_term_count": sum(
+            item["expected_outer_weight_sign"] == "unrestricted" for item in rows
+        ),
+        "correct_term_count": sum(bool(item["correct"]) for item in rows),
+        "passed": all(bool(item["correct"]) for item in rows),
+        "rows": rows,
+    }
 
 
 def merge_variable_reply(

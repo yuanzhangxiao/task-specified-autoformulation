@@ -35,6 +35,7 @@ class ScientificRequirement(StrictSchema):
     targets: tuple[Identifier, ...]
     drivers: tuple[Identifier, ...]
     positive_requirements: tuple[NonEmptyText, ...] = ()
+    public_pathway_sign: Literal["positive", "negative", "unspecified"] | None = None
 
 
 class TargetDependency(StrictSchema):
@@ -173,6 +174,42 @@ class EquationDefinition(StrictSchema):
     terms: tuple[EquationTerm | LegacyEquationTerm, ...] = Field(
         min_length=1, max_length=32
     )
+
+
+class ExactSourcePolarityRule(StrictSchema):
+    """One fixed sign justified for an exact direct public source set."""
+
+    sources: tuple[Identifier, ...] = Field(min_length=1, max_length=64)
+    outer_weight_sign: Literal["positive", "negative"]
+    requirement_ids: tuple[Identifier, ...] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def unique_references(self) -> ExactSourcePolarityRule:
+        """Reject ambiguous duplicate sources or requirement references."""
+        if len(self.sources) != len(set(self.sources)):
+            raise ValueError("fixed-polarity sources must be unique")
+        if len(self.requirement_ids) != len(set(self.requirement_ids)):
+            raise ValueError("fixed-polarity requirement IDs must be unique")
+        return self
+
+
+class EquationPolarityPolicy(StrictSchema):
+    """Runtime-owned polarity evidence for one selected equation."""
+
+    schema_version: Literal["equation-polarity-policy-1"] = (
+        "equation-polarity-policy-1"
+    )
+    selected_lhs: Identifier
+    default_outer_weight_sign: Literal["unrestricted"] = "unrestricted"
+    fixed_exact_source_sets: tuple[ExactSourcePolarityRule, ...] = ()
+
+    @model_validator(mode="after")
+    def unique_source_sets(self) -> EquationPolarityPolicy:
+        """Require one unambiguous fixed rule per canonical source set."""
+        keys = [tuple(sorted(item.sources)) for item in self.fixed_exact_source_sets]
+        if len(keys) != len(set(keys)):
+            raise ValueError("fixed-polarity source sets must be unique")
+        return self
 
 
 def equation_reply_model(

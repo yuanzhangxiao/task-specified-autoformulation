@@ -28,6 +28,8 @@ from autoformalism.search.staged_topology_prompts import (
     render_variable_identification_user_prompt,
 )
 from autoformalism.staged_topology import (
+    audit_equation_polarity_policy,
+    compile_equation_polarity_policy,
     content_hash,
     freeze_inventory,
     lower_topology,
@@ -73,10 +75,13 @@ def run_staged_topology(
     output: Path,
     *,
     initial_inventory: tuple[ScientificVariable, ...] | None = None,
+    audit_public_polarity_policy: bool = False,
 ) -> dict[str, Any]:
     """Build one topology without functions, numerical data, or a scientific judge."""
     inventory: tuple[ScientificVariable, ...] = initial_inventory or ()
     equations: tuple[EquationDefinition, ...] = ()
+    polarity_policies: list[dict[str, Any]] = []
+    polarity_audits: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     brief_json = brief.model_dump_json()
     output.mkdir(parents=True, exist_ok=True)
@@ -184,6 +189,7 @@ def run_staged_topology(
         for selected in inventory:
             if selected.definition not in {"differential", "algebraic"}:
                 continue
+            polarity_policy = compile_equation_polarity_policy(brief, selected.name)
 
             def accept_equation(
                 reply: Any, selected=selected, equations=equations
@@ -206,7 +212,8 @@ def run_staged_topology(
                 render_equation_topology_system_prompt(),
                 lambda diagnostic,
                 selected=selected,
-                equations=equations: render_equation_topology_user_prompt(
+                equations=equations,
+                polarity_policy=polarity_policy: render_equation_topology_user_prompt(
                     public_brief_json=brief_json,
                     agenda_json=_json(
                         {
@@ -223,6 +230,11 @@ def run_staged_topology(
                         [item.model_dump(mode="json") for item in equations]
                     ),
                     allowed_sources_json=_json(allowed),
+                    polarity_policy_json=(
+                        polarity_policy.model_dump_json()
+                        if audit_public_polarity_policy
+                        else None
+                    ),
                     diagnostics_json=diagnostic,
                 ),
                 model,
@@ -233,6 +245,11 @@ def run_staged_topology(
                 status = "inventory_revision_requested"
                 break
             equations += (accepted,)
+            if audit_public_polarity_policy:
+                polarity_policies.append(polarity_policy.model_dump(mode="json"))
+                polarity_audits.append(
+                    audit_equation_polarity_policy(accepted, polarity_policy)
+                )
             checkpoint()
         else:
             topology, aliases = lower_topology(brief, inventory, equations, context)
@@ -240,6 +257,17 @@ def run_staged_topology(
     except ValueError as exc:
         failure = str(exc)[:6000]
     checks = public_structure_checks(brief, equations)
+    source_checks = [
+        item for item in checks if item["kind"] in {"driver_path", "composition_path"}
+    ]
+    active_sources = {
+        item.name for item in inventory if item.definition != "unused"
+    }
+    source_closure_passed = all(
+        set(term.sources) <= active_sources
+        for equation in equations
+        for term in equation.terms
+    )
     result = {
         "protocol": "scientific-staged-topology-1",
         "status": status,
@@ -248,6 +276,24 @@ def run_staged_topology(
         "public_structure_checks_passed": topology is not None
         and all(item["passed"] for item in checks),
         "public_structure_checks": checks,
+        "public_source_coverage_passed": topology is not None
+        and source_closure_passed
+        and all(bool(item["passed"]) for item in source_checks),
+        "public_mechanism_coverage_passed": topology is not None
+        and all(bool(item["passed"]) for item in checks),
+        "public_target_coverage_passed": topology is not None
+        and {item.name for item in brief.public_variables if item.data_role == "target"}
+        <= {item.name for item in equations},
+        "public_polarity_policy_enabled": audit_public_polarity_policy,
+        "equation_polarity_policies": polarity_policies,
+        "polarity_policy_audits": polarity_audits,
+        "public_polarity_consistency_passed": (
+            topology is not None
+            and len(polarity_audits) == len(equations)
+            and all(bool(item["passed"]) for item in polarity_audits)
+            if audit_public_polarity_policy
+            else None
+        ),
         "inventory": [item.model_dump(mode="json") for item in inventory],
         "inventory_sha256": content_hash(
             [item.model_dump(mode="json") for item in inventory]

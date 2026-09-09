@@ -19,6 +19,7 @@ case "$(jq -r '.config.protocol' "${plan}")" in
   scientific-staged-functions-1) worker_script=staged_function_campaign.py ;;
   scientific-staged-sign-contract-1) worker_script=staged_sign_contract_campaign.py ;;
   scientific-staged-polarity-calibration-1) worker_script=staged_polarity_calibration.py ;;
+  scientific-staged-prefunction-integration-1) worker_script=staged_prefunction_campaign.py ;;
   *) echo 'unsupported frozen worker protocol' >&2; exit 2 ;;
 esac
 readonly worker_script
@@ -57,6 +58,17 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     frozen = json.load(stream)
 if function_launcher_hash() != frozen["launcher_sha256"]:
     raise SystemExit("launcher differs from frozen function campaign")
+PY
+fi
+if [[ "${worker_script}" == staged_prefunction_campaign.py ]]; then
+  "${AF_PYTHON}" - "${plan}" <<'PY'
+import json
+import sys
+from autoformalism.rebuttal.staged_prefunction_campaign import prefunction_launcher_hash
+with open(sys.argv[1], encoding="utf-8") as stream:
+    frozen = json.load(stream)
+if prefunction_launcher_hash() != frozen["launcher_sha256"]:
+    raise SystemExit("launcher differs from frozen prefunction campaign")
 PY
 fi
 if [[ "${worker_script}" == staged_sign_contract_campaign.py ]]; then
