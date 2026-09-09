@@ -1,0 +1,68 @@
+{
+  "protocol": "scientific-staged-prefit-fitting-handoff-1",
+  "purpose": "Freeze and fit the exact six passed staged candidates under one runtime-owned route chosen before fitting; do not regenerate candidates or use a scientific judge, test data, private references, or validation for parameter estimation",
+  "source_plan_sha256": "4cb85460f822af20e83609efbda3e231f738aedc4122c38aa294653fbac1d041",
+  "source_summary_file_sha256": "df573c180b2d7eb849a6f1d7d7cd0f77f09d36a54c0cfa0936cf21dce270fd9b",
+  "public_cells": [
+    "phase_b_dalla_man_t2_canonical_named_easy",
+    "phase_b_anonymous_system_task_canonical_opaque_hard"
+  ],
+  "seeds": [0, 1, 2],
+  "public_asset_sha256": {
+    "phase_b_dalla_man_t2_canonical_named_easy": {
+      "manifest.json": "f07f16ef899ec93543480195e8be6da28a737ffab05489b5591a9c3e974534fe",
+      "proposer_prompt.txt": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "train.csv": "c01583030010c99c68284c49f17e0593fbaeffc6a003c024a5867d1e66c4262e",
+      "validation.csv": "31e963c8da43e688ad428506a9ade8faee91eedb7c8f81eb4eae8977cf502979"
+    },
+    "phase_b_anonymous_system_task_canonical_opaque_hard": {
+      "manifest.json": "b858f7af513cacd2c51d8c0a0255aef8cc7f1d8b06a8fad3b60170db63139233",
+      "proposer_prompt.txt": "2a5bcedbdc0d3c115a783e7d820c1a5aba638edc21f4bd59205b6374837f799e",
+      "train.csv": "ffaa9ff0b947d555b057eebd890dc5ef6f42e38e38e4b25f696b0f2f7c24b1e8",
+      "validation.csv": "06a9e9203204a2c7a7441c992e2b3ce6bc11751d2128c1cc9aea7b4e08db37ca"
+    }
+  },
+  "route_policy": "exact_profiled_else_bounded_rollout",
+  "profiled_fit_config": {
+    "number_of_starts": 1,
+    "random_seed": 0,
+    "integration_backend": "solve_ivp",
+    "allow_derivative_regression": true,
+    "parameter_fit_strategy": "profiled_latent_basis_linear_ridge",
+    "nonlinear_initializer": "none",
+    "derivative_ridge_regularization": 1e-8,
+    "use_certified_reciprocal_coordinates": true,
+    "affine_parameter_bound_policy": "suggested",
+    "runtime_parameter_start_center": 1.0,
+    "runtime_parameter_start_half_width": 2.0,
+    "integration_method": "RK45",
+    "relative_tolerance": 1e-7,
+    "absolute_tolerance": 1e-9,
+    "maximum_function_evaluations": 80,
+    "maximum_wall_time_seconds": 600.0,
+    "failure_penalty": 1000000.0,
+    "bound_tolerance": 1e-5,
+    "soft_constraint_penalty_weight": 1.0
+  },
+  "rollout_fit_config": {
+    "number_of_starts": 1,
+    "random_seed": 0,
+    "integration_backend": "solve_ivp",
+    "allow_derivative_regression": false,
+    "parameter_fit_strategy": "bounded_nonlinear",
+    "nonlinear_initializer": "none",
+    "derivative_ridge_regularization": 1e-8,
+    "use_certified_reciprocal_coordinates": true,
+    "affine_parameter_bound_policy": "suggested",
+    "runtime_parameter_start_center": 1.0,
+    "runtime_parameter_start_half_width": 2.0,
+    "integration_method": "RK45",
+    "relative_tolerance": 1e-7,
+    "absolute_tolerance": 1e-9,
+    "maximum_function_evaluations": 80,
+    "maximum_wall_time_seconds": 600.0,
+    "failure_penalty": 1000000.0,
+    "bound_tolerance": 1e-5,
+    "soft_constraint_penalty_weight": 1.0
+  }
+}
