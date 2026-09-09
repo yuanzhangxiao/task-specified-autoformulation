@@ -27,6 +27,9 @@ from autoformalism.schemas.staged_functions import (
 )
 from autoformalism.schemas.staged_topology import (
     EquationDefinition,
+    EquationTerm,
+    LegacyEquationTerm,
+    OuterWeightSign,
     PublicScientificBrief,
     ScientificVariable,
 )
@@ -195,7 +198,11 @@ def run_staged_functions(
         """Apply only the versioned, AST-certified provider-side repair."""
         if function_repair_policy == "legacy":
             return reply, ()
-        return repair_certified_outer_gain_role(reply, set(selected["sources"]))
+        return repair_certified_outer_gain_role(
+            reply,
+            set(selected["sources"]),
+            outer_weight_sign=selected["outer_weight_sign"],
+        )
 
     error = None
     expansion = None
@@ -543,7 +550,7 @@ def run_staged_functions(
 
 def _selected_term(
     equation: EquationDefinition,
-    term: Any,
+    term: EquationTerm | LegacyEquationTerm,
     *,
     parameter_identity_policy: str = "preserve",
 ) -> dict[str, Any]:
@@ -552,10 +559,17 @@ def _selected_term(
         term.scientific_role,
         parameter_identity_policy=parameter_identity_policy,
     )
-    return {
+    outer_weight_sign = _outer_weight_sign(term)
+    slot = {
+        OuterWeightSign.POSITIVE: "+ (FUNCTION)",
+        OuterWeightSign.NEGATIVE: "- (FUNCTION)",
+        OuterWeightSign.UNRESTRICTED: "+ (SIGNED_FUNCTION)",
+    }[outer_weight_sign]
+    selected = {
         "lhs": equation.name,
         "definition": equation.definition,
         **term.model_dump(mode="json"),
+        "outer_weight_sign": outer_weight_sign.value,
         "functional_obligation": obligation.model_dump(mode="json"),
         "assembly_template": (
             f"d({equation.name})/dt"
@@ -563,9 +577,23 @@ def _selected_term(
             else equation.name
         )
         + " = ... "
-        + ("+" if term.outer_sign == "add" else "-")
-        + " (FUNCTION)",
+        + slot,
     }
+    selected.pop("outer_sign", None)
+    return selected
+
+
+def _outer_weight_sign(
+    term: EquationTerm | LegacyEquationTerm,
+) -> OuterWeightSign:
+    """Normalize new proposer-owned signs and replay-only legacy signs."""
+    if isinstance(term, LegacyEquationTerm):
+        return (
+            OuterWeightSign.POSITIVE
+            if term.outer_sign == "add"
+            else OuterWeightSign.NEGATIVE
+        )
+    return term.outer_weight_sign
 
 
 def _obligation(selected: dict[str, Any]) -> InteractionFunctionObligation:
@@ -591,7 +619,10 @@ def _accepted_function_record(
     return {
         "selected_term": selected,
         "expression": rename_expression(function.expression, inverse),
-        "parameters": [item.model_dump(mode="json") for item in function.parameters],
+        "parameters": [
+            {"name": item.name, "role": item.role.value}
+            for item in function.parameters
+        ],
     }
 
 
@@ -640,10 +671,12 @@ def _scientific_review_facts(
                 {
                     "term": label,
                     "lhs": lhs,
-                    "outer_sign": selected["outer_sign"],
+                    "outer_weight_sign": selected["outer_weight_sign"],
                     "sources": selected["sources"],
                     "expression": expression,
-                    "subtractive_outer_sign": selected["outer_sign"] == "subtract",
+                    "negative_outer_weight_sign": (
+                        selected["outer_weight_sign"] == "negative"
+                    ),
                 }
             )
     public_text = " ".join(
@@ -667,8 +700,14 @@ def _scientific_review_facts(
             bool(nonlinear_source_terms) if requires_nonlinearity else None
         ),
         "relaxation_terms": relaxation_terms,
+        "all_tagged_relaxation_outer_weight_signs_negative": (
+            all(item["negative_outer_weight_sign"] for item in relaxation_terms)
+            if relaxation_terms
+            else None
+        ),
+        # Replay-only name retained for already frozen function campaigns.
         "all_tagged_relaxation_outer_signs_subtractive": (
-            all(item["subtractive_outer_sign"] for item in relaxation_terms)
+            all(item["negative_outer_weight_sign"] for item in relaxation_terms)
             if relaxation_terms
             else None
         ),

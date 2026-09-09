@@ -31,8 +31,8 @@ def test_interaction_function_prompt_has_one_immutable_responsibility() -> None:
     assert "one scalar right-hand-side contribution" in system
     assert "symbol set must equal the selected grouped source" in system
     assert "Use the exact displayed scientific names" in system
-    assert "inner FUNCTION slot" in system
-    assert "applies the frozen outer assembly\nsign exactly once" in system
+    assert "FUNCTION or SIGNED_FUNCTION slot" in system
+    assert "applies the frozen outer assembly sign exactly once" in system
     assert "d(x)/dt = ... - (FUNCTION)" in system
     assert "never return\n``-x / tau``" in system
     assert "scientific functional law, not a transcription" in system
@@ -44,9 +44,9 @@ def test_interaction_function_prompt_has_one_immutable_responsibility() -> None:
     assert "Declare every parameter used" in system
     assert "including a shared\nparameter" in system
     assert "Supported roles are coefficient" in system
-    assert "runtime derives that identified whole-term gain's nonnegative" in system
-    assert "Do not redundantly change it to nonnegative_coefficient" in system
-    assert "Coefficients or thresholds nested\ninside sums" in system
+    assert "runtime derives that identified whole-term\ngain's nonnegative" in system
+    assert "Nested coefficients and all\ncoefficients in unrestricted slots" in system
+    assert "+ (SIGNED_FUNCTION)" in system
     assert "Do not emit an assignment" in system
     assert "Do not repair or\nroute to another topology term" in system
 

@@ -8,6 +8,7 @@ from pydantic import Field, FiniteFloat, model_validator
 
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.candidate import ParameterRole
+from autoformalism.schemas.staged_topology import OuterWeightSign
 
 
 class FunctionParameter(StrictSchema):
@@ -45,6 +46,15 @@ class DeterministicFunctionRepair(StrictSchema):
     certificate: Literal["single_direct_outer_multiplicative_gain"] = (
         "single_direct_outer_multiplicative_gain"
     )
+
+
+class OuterWeightDomainDerivation(StrictSchema):
+    """Runtime record for one sign-derived outer magnitude domain."""
+
+    parameter: Identifier
+    requested_role: ParameterRole
+    effective_role: ParameterRole
+    outer_weight_sign: OuterWeightSign
 
 
 class EquationFunctionBatchReply(StrictSchema):

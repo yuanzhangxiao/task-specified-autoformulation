@@ -450,3 +450,22 @@ def test_initial_schema_rejects_two_modes_or_nonfinite_values() -> None:
     ):
         with pytest.raises(ValidationError):
             LatentInitialReply(initial=initial)
+
+
+def test_certified_outer_gain_repair_never_constrains_unrestricted_sign() -> None:
+    proposed = reply("k*x", k="coefficient")
+    repaired, records = repair_certified_outer_gain_role(
+        proposed,
+        {"x"},
+        outer_weight_sign="unrestricted",
+    )
+    assert repaired == proposed
+    assert records == ()
+
+    repaired, records = repair_certified_outer_gain_role(
+        proposed,
+        {"x"},
+        outer_weight_sign="negative",
+    )
+    assert repaired.parameters[0].role.value == "nonnegative_coefficient"
+    assert len(records) == 1

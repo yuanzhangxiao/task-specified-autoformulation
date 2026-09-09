@@ -28,7 +28,10 @@ from autoformalism.schemas.staged_topology import (
     PublicScientificBrief,
     ScientificVariable,
 )
-from autoformalism.search.staged_function_runner import run_staged_functions
+from autoformalism.search.staged_function_runner import (
+    _selected_term,
+    run_staged_functions,
+)
 from autoformalism.staged_topology import content_hash, lower_topology
 
 
@@ -425,6 +428,34 @@ def test_displayed_slot_matches_compiled_assembly_without_rewriting_inner_law(
         inner = "u"
     expected = f"({inner})" if sign == "add" else f"-({inner})"
     assert expression == expected
+
+
+@pytest.mark.parametrize(
+    ("sign", "slot"),
+    [
+        ("positive", "+ (FUNCTION)"),
+        ("negative", "- (FUNCTION)"),
+        ("unrestricted", "+ (SIGNED_FUNCTION)"),
+    ],
+)
+def test_new_topology_sign_contract_selects_the_correct_function_slot(
+    sign: str, slot: str
+) -> None:
+    equation = EquationDefinition(
+        name="x",
+        definition="differential",
+        terms=(
+            {
+                "sources": ["u"],
+                "outer_weight_sign": sign,
+                "scientific_role": "input response",
+            },
+        ),
+    )
+    selected = _selected_term(equation, equation.terms[0])
+    assert selected["outer_weight_sign"] == sign
+    assert "outer_sign" not in selected
+    assert selected["assembly_template"] == f"d(x)/dt = ... {slot}"
 
 
 def test_function_handoff_rejects_changed_topology_before_provider(

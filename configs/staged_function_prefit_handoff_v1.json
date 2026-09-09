@@ -1,0 +1,38 @@
+{
+  "protocol": "scientific-staged-function-prefit-handoff-1",
+  "purpose": "Generate functions and separate latent initializers on all six passed public hybrid topologies using equation batches, retained valid terms, focused atomic repair, and a deterministic pre-fit certificate; no fitting or scientific judge is used",
+  "platform": "aces-h100x1",
+  "serving_image_sha256": "2f77a130b950c44610ad8b60c2b28703ddfe3107d4cadc9bab44683ac9badf5d",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 64,
+    "maximum_total_tokens": 262144,
+    "attempts_per_step": 3
+  },
+  "served_context_tokens": 32768,
+  "public_cells": [
+    "phase_b_dalla_man_t2_canonical_named_easy",
+    "phase_b_anonymous_system_task_canonical_opaque_hard"
+  ],
+  "seeds": [0, 1, 2],
+  "limits": {
+    "generated_variables": 12,
+    "terms_per_equation": 8,
+    "total_terms": 32
+  },
+  "gates": {
+    "minimum_complete_model_rate": 1.0,
+    "minimum_deterministic_prefit_pass_rate": 1.0,
+    "minimum_nonlinear_obligation_pass_rate": 1.0,
+    "minimum_latent_initializer_coverage_rate": 1.0
+  },
+  "generation_granularity": "equation_batch_atomic_repair",
+  "function_repair_policy": "certified_outer_gain",
+  "wall_seconds": 3300,
+  "shutdown_margin_seconds": 300
+}

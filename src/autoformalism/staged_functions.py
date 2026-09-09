@@ -21,7 +21,7 @@ from autoformalism.schemas.construction import (
     SetLatentInitialAction,
 )
 from autoformalism.schemas.proposal import ProposedInitialValue, ProposedParameter
-from autoformalism.schemas.staged import TopologyCandidate
+from autoformalism.schemas.staged import InteractionPolarity, TopologyCandidate
 from autoformalism.schemas.staged_functions import (
     DeterministicFunctionRepair,
     EquationFunctionBatchReply,
@@ -29,7 +29,10 @@ from autoformalism.schemas.staged_functions import (
     InteractionFunctionObligation,
     InteractionFunctionReply,
     LatentInitialReply,
+    OuterWeightDomainDerivation,
 )
+from autoformalism.schemas.staged_topology import OuterWeightSign
+from autoformalism.sign_contract import analyze_outer_weight
 
 
 def rename_expression(expression: str, aliases: Mapping[str, str]) -> str:
@@ -130,6 +133,10 @@ def bind_function_reply(
         reply,
         policy=active_obligation.parameter_identity_policy,
     )
+    normalized, _ = normalize_outer_weight_reply(
+        normalized,
+        selected.polarity,
+    )
     action = SetInteractionFunctionAction(
         interaction_id=selected_id,
         expression=rename_expression(normalized.expression, aliases),
@@ -156,9 +163,58 @@ def bind_function_reply(
     return candidate, normalized
 
 
+def normalize_outer_weight_reply(
+    reply: InteractionFunctionReply,
+    polarity: InteractionPolarity,
+    tree: ast.Expression | None = None,
+) -> tuple[InteractionFunctionReply, tuple[OuterWeightDomainDerivation, ...]]:
+    """Derive a fixed outer gain domain without touching internal signed terms."""
+    parsed_tree = tree or RestrictedParser().parse(
+        reply.expression, location="function"
+    ).tree
+    roles = {item.name: item.role for item in reply.parameters}
+    analysis = analyze_outer_weight(parsed_tree, roles, polarity)
+    if analysis.diagnostic_code is not None:
+        raise ValueError(
+            f"{analysis.diagnostic_code}: {analysis.diagnostic_message}"
+        )
+    selected = analysis.identified_parameter
+    if selected is None:
+        return reply, ()
+    requested = roles[selected]
+    if polarity is InteractionPolarity.UNRESTRICTED:
+        if requested is not ParameterRole.NONNEGATIVE_COEFFICIENT:
+            return reply, ()
+        effective = ParameterRole.COEFFICIENT
+    else:
+        effective = ParameterRole.NONNEGATIVE_COEFFICIENT
+    parameters = tuple(
+        item.model_copy(update={"role": effective}) if item.name == selected else item
+        for item in reply.parameters
+    )
+    sign = {
+        InteractionPolarity.POSITIVE: OuterWeightSign.POSITIVE,
+        InteractionPolarity.NEGATIVE: OuterWeightSign.NEGATIVE,
+        InteractionPolarity.UNRESTRICTED: OuterWeightSign.UNRESTRICTED,
+    }[polarity]
+    return (
+        reply.model_copy(update={"parameters": parameters}),
+        (
+            OuterWeightDomainDerivation(
+                parameter=selected,
+                requested_role=requested,
+                effective_role=effective,
+                outer_weight_sign=sign,
+            ),
+        ),
+    )
+
+
 def repair_certified_outer_gain_role(
     reply: InteractionFunctionReply,
     sources: set[str],
+    *,
+    outer_weight_sign: OuterWeightSign | str = OuterWeightSign.POSITIVE,
 ) -> tuple[InteractionFunctionReply, tuple[DeterministicFunctionRepair, ...]]:
     """Repair one signed role only when it is a direct scalar outer gain.
 
@@ -169,6 +225,8 @@ def repair_certified_outer_gain_role(
     Parameters nested inside sums, differences, denominators, functions,
     powers, or grouped laws are not rewritten.
     """
+    if OuterWeightSign(outer_weight_sign) is OuterWeightSign.UNRESTRICTED:
+        return reply, ()
     parsed = RestrictedParser().parse(reply.expression, location="function")
     direct_factors = _flatten_root_product(parsed.tree.body)
     if direct_factors is None:
@@ -294,7 +352,7 @@ def derive_interaction_function_obligation(
     lowered = scientific_role.lower()
     markers = tuple(
         marker
-        for marker in ("nonlinear", "saturat", "sigmoid", "threshold")
+        for marker in ("nonlinear", "saturat", "sigmoid")
         if marker in lowered
     )
     return InteractionFunctionObligation(

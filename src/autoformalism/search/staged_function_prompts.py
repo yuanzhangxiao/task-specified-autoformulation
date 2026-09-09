@@ -14,7 +14,7 @@ INTERACTION_FUNCTION_SYSTEM_PROMPT = """\
 You assign only the scalar functional form for one runtime-selected interaction
 term in a continuous-time scientific model. The frozen variable inventory,
 equation topology, selected left-hand side, differential or algebraic
-definition, complete grouped source set, outer sign, and scientific role are
+definition, complete grouped source set, outer weight sign, and scientific role are
 authoritative. The selected term also contains a runtime-owned
 functional_obligation. Return only the structured response required by the
 response schema: expression and parameters.
@@ -28,13 +28,15 @@ An empty source set permits a scientifically justified constant or
 parameter-only contribution. Already accepted functions are context only and
 are not custom callable functions.
 
-Your response fills only the inner FUNCTION slot displayed in
-selected_term.assembly_template. The runtime applies the frozen outer assembly
-sign exactly once. For example, if the template is
+Your response fills only the FUNCTION or SIGNED_FUNCTION slot displayed in
+selected_term.assembly_template. For positive and negative slots, the runtime
+applies the frozen outer assembly sign exactly once. For example, if the template is
 ``d(x)/dt = ... - (FUNCTION)`` and the selected role is self-relaxation, return
 ``x / tau`` with ``tau`` declared as a time_constant; never return
 ``-x / tau``. Internal addition or subtraction inside a genuine grouped-source
-law is allowed, but do not repeat or reverse the whole outer sign.
+law is allowed, but do not repeat or reverse the whole outer sign. For an
+unrestricted slot displayed as ``+ (SIGNED_FUNCTION)``, the expression itself
+owns its scientific direction and may be positive, negative, or sign-changing.
 
 Choose a scientific functional law, not a transcription of the source names.
 Use the public requirement, selected scientific role, units, grouped sources,
@@ -65,9 +67,12 @@ parameter already used by another accepted term. Declare no unused parameter.
 Each parameter contains only name and role. Reused names must preserve the role
 in the runtime parameter registry. Supported roles are coefficient,
 nonnegative_coefficient, rate, time_constant, scale, positive_shape, offset,
-shape. The topology owns the outer sign, so a scalar edge weight that implements
-that sign must use a scientifically appropriate nonnegative or positive role,
-not the real-valued coefficient role. A role constrains only the broad numeric
+shape. For a fixed positive or negative slot, the topology owns the outer sign.
+A single direct scalar gain may be declared as coefficient; under the
+certified_outer_gain policy the runtime derives that identified whole-term
+gain's nonnegative domain from the frozen sign. Nested coefficients and all
+coefficients in unrestricted slots remain proposer-owned and signed. A role
+constrains only the broad numeric
 domain; it does not prove that the complete nonlinear expression is globally
 nonnegative, monotone, or sign-definite. When parameter_identity_policy is
 interaction_local, each name is only a local mnemonic for this term. The
@@ -94,7 +99,7 @@ You assign scalar functional forms for every runtime-selected interaction term
 on one left-hand side of a continuous-time scientific model. The frozen
 variable inventory, equation topology, selected left-hand side, differential
 or algebraic definition, ordered term slots, complete grouped source sets,
-outer signs, and scientific roles are authoritative. Return only the structured
+outer weight signs, and scientific roles are authoritative. Return only the structured
 response required by the response schema: one ordered functions array. Its
 length and order must exactly match selected_equation.terms.
 
@@ -108,9 +113,11 @@ Each slot contains a runtime-owned functional_obligation. When
 requires_nonlinear_source_dependence is true, a linear gain or identity is
 invalid: that slot must contain explicit nonlinear dependence on at least one
 displayed source through the admitted restricted grammar.
-The runtime applies every frozen outer assembly sign exactly once. For a slot
+For positive and negative slots the runtime applies every frozen outer assembly
+sign exactly once. For a slot
 shown as ``d(x)/dt = ... - (FUNCTION)``, return ``x / tau`` rather than
-``-x / tau``.
+``-x / tau``. An unrestricted slot is displayed as ``+ (SIGNED_FUNCTION)``;
+there the expression owns its direction and may be signed or sign-changing.
 
 Construct the terms as one scientifically coherent equation. Preserve required
 nonlinear behavior. Introduce fitted gains, rates, scales, time constants, or
@@ -136,12 +143,12 @@ including a shared parameter declared in another slot. Declare no unused
 parameter. Each declaration contains only name and role. Reused names must keep
 one role across the batch and the accepted runtime registry. Supported roles
 are coefficient, nonnegative_coefficient, rate, time_constant, scale,
-positive_shape, offset, shape. Because topology owns outer polarity, a scalar
-edge weight implementing that sign must use a scientifically appropriate
-nonnegative or positive role rather than the real-valued coefficient role.
-Under a runtime policy explicitly identified as certified_outer_gain, runtime
-may correct coefficient to nonnegative_coefficient only for one AST-certified
-direct outer scalar multiplier; all ambiguous cases remain errors.
+positive_shape, offset, shape. Under a runtime policy explicitly identified as
+certified_outer_gain, runtime may correct coefficient to
+nonnegative_coefficient only for one AST-certified direct outer scalar
+multiplier of a fixed positive or negative slot. Nested coefficients and every
+coefficient in an unrestricted slot remain signed; all ambiguous cases remain
+errors.
 
 Do not emit assignments, derivatives or left-hand sides, repeated outer signs,
 slot or interaction identifiers, source lists, topology edits, mechanism IDs,
