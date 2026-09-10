@@ -49,14 +49,23 @@ tasks=read_json(path.parent / "freeze.json")["tasks"]
 write_json(path, {**previous, sys.argv[2]:sys.argv[3], "commit":sys.argv[4],
     "cpus_per_task":1, "gpus":0,
     "guard_tasks":sum(t["kind"]=="guard" for t in tasks),
+    "initializer_tasks":sum(t["kind"]=="initializer" for t in tasks),
     "fit_tasks":sum(t["kind"]=="fit" for t in tasks),
     "submission_complete":sys.argv[2]=="summary_job_id"})
 PY
 }
-guard="$(sbatch --parsable --array="$(task_indices guard)%${concurrency}" --time=00:10:00 --output="${AF_OUTPUT_ROOT}/logs/guard-%A_%a.out" --error="${AF_OUTPUT_ROOT}/logs/guard-%A_%a.err" --export=ALL scripts/hpc/fitter_methods_delta.slurm run)"
+guard="$(sbatch --parsable --array="$(task_indices guard)%${concurrency}" --time=00:15:00 --output="${AF_OUTPUT_ROOT}/logs/guard-%A_%a.out" --error="${AF_OUTPUT_ROOT}/logs/guard-%A_%a.err" --export=ALL scripts/hpc/fitter_methods_delta.slurm run)"
 guard="${guard%%;*}"
 record_job guard_job_id "${guard}"
-fit="$(sbatch --parsable --array="$(task_indices fit)%${concurrency}" --dependency="afterany:${guard}" --output="${AF_OUTPUT_ROOT}/logs/fit-%A_%a.out" --error="${AF_OUTPUT_ROOT}/logs/fit-%A_%a.err" --export=ALL scripts/hpc/fitter_methods_delta.slurm run)"
+dependency="${guard}"
+initializers="$(task_indices initializer)"
+if [[ -n "${initializers}" ]]; then
+  initializer="$(sbatch --parsable --array="${initializers}%${concurrency}" --dependency="afterany:${guard}" --time=00:05:00 --output="${AF_OUTPUT_ROOT}/logs/init-%A_%a.out" --error="${AF_OUTPUT_ROOT}/logs/init-%A_%a.err" --export=ALL scripts/hpc/fitter_methods_delta.slurm run)"
+  initializer="${initializer%%;*}"
+  record_job initializer_job_id "${initializer}"
+  dependency="${initializer}"
+fi
+fit="$(sbatch --parsable --array="$(task_indices fit)%${concurrency}" --dependency="afterany:${dependency}" --output="${AF_OUTPUT_ROOT}/logs/fit-%A_%a.out" --error="${AF_OUTPUT_ROOT}/logs/fit-%A_%a.err" --export=ALL scripts/hpc/fitter_methods_delta.slurm run)"
 fit="${fit%%;*}"
 record_job fit_job_id "${fit}"
 summary="$(sbatch --parsable --dependency="afterany:${fit}" --time=00:05:00 --output="${AF_OUTPUT_ROOT}/logs/summary-%j.out" --error="${AF_OUTPUT_ROOT}/logs/summary-%j.err" --export=ALL scripts/hpc/fitter_methods_delta.slurm summarize)"
