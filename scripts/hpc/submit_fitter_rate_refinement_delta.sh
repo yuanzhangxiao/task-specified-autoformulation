@@ -50,7 +50,7 @@ last_index="$("${AF_PYTHON}" -c 'import json,sys; print(len(json.load(open(sys.a
 fit="$(sbatch --parsable --array="0-${last_index}%${concurrency}" --output="${AF_OUTPUT_ROOT}/logs/pair-%A_%a.out" --error="${AF_OUTPUT_ROOT}/logs/pair-%A_%a.err" --export=ALL scripts/hpc/fitter_rate_refinement_delta.slurm run)"
 fit="${fit%%;*}"
 record_job fit_job_id "${fit}"
-summary="$(sbatch --parsable --dependency="afterany:${fit}" --time=00:05:00 --output="${AF_OUTPUT_ROOT}/logs/summary-%j.out" --error="${AF_OUTPUT_ROOT}/logs/summary-%j.err" --export=ALL scripts/hpc/fitter_rate_refinement_delta.slurm summarize)"
+summary="$(sbatch --parsable --dependency="afterany:${fit}" --time=00:30:00 --output="${AF_OUTPUT_ROOT}/logs/summary-%j.out" --error="${AF_OUTPUT_ROOT}/logs/summary-%j.err" --export=ALL scripts/hpc/fitter_rate_refinement_delta.slurm summarize)"
 summary="${summary%%;*}"
 record_job summary_job_id "${summary}"
 cat "${AF_OUTPUT_ROOT}/submission.json"

@@ -162,6 +162,88 @@ def test_scheduler_is_cpu_only_and_partial_submission_is_guarded():
     assert "--cpus-per-task=1" in worker and "--gres" not in worker
     assert "00:45:00" in worker
     assert new.RatePlan().worker_seconds("pair") < 45 * 60
+    assert "--time=00:30:00" in shell
+
+
+def test_stopping_pair_changes_only_ftol_and_preserves_missing_counts(
+    source, tmp_path, monkeypatch
+):
+    root, task, original = source
+    original["status"] = "replay_unverified"
+    write_json(root / "results" / task["name"] / "result.json", original)
+    output = tmp_path / "stopping"
+    plan = new.RatePlan(
+        protocol="fitter-rate-stopping-1",
+        source_tasks=(task["name"],),
+        guard_seconds=30,
+        replay_seconds=10,
+    )
+    frozen = new.prepare_rate(plan, root, output)
+    assert len(frozen["tasks"]) == 1  # Previous verification retry is already resolved.
+    missing = new.summarize_rate(output)
+    assert {r["arm"] for r in missing["rows"]} == {"rates_default", "rates_no_ftol"}
+    assert all(
+        g["total"] == 1 and g["recovered"] == 0
+        for g in missing["recovery_by_initializer"]
+    )
+    options = []
+    real = new.least_squares
+
+    def spy(fun, x, **kwargs):
+        options.append(
+            {k: kwargs[k] for k in ("ftol", "xtol", "gtol", "x_scale", "max_nfev")}
+        )
+        return real(fun, x, **kwargs)
+
+    monkeypatch.setattr(new, "least_squares", spy)
+    result = new.execute_rate(output, 0)
+    assert result["status"] == "complete", result
+    left, right = (result["arms"][n] for n in ("rates_default", "rates_no_ftol"))
+    assert left["nominal_start"] == right["nominal_start"]
+    assert left["first_evaluated_parameters"] == right["first_evaluated_parameters"]
+    assert left["refinement_budget_seconds"] == right["refinement_budget_seconds"] == 29
+    assert options[0] == {**options[1], "ftol": 1e-8}
+    assert options[1]["ftol"] is None
+    assert left["parameter_order"] == right["parameter_order"]
+    assert left["raw_gradient_inf_norm"] is not None
+    summary = new.summarize_rate(output)
+    assert all(r["recovered"] for r in summary["rows"])
+    assert "ftol" in (output / "summary.md").read_text()
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("checkpointed optimizer restarted")
+
+    monkeypatch.setattr(new, "least_squares", unexpected)
+    assert new.execute_rate(output, 0) == read_json(
+        output / "results" / frozen["tasks"][0]["name"] / "result.json"
+    )
+    with pytest.raises(ValueError, match="plan differs"):
+        new.prepare_rate(
+            plan.model_copy(update={"protocol": "fitter-rate-refinement-1"}),
+            root,
+            output,
+        )
+
+
+def test_recovery_groups_do_not_confuse_joint_and_alternating():
+    rows = [
+        {
+            "source": "fit_separated_noise1_rep2_" + method,
+            "arm": "rates_no_ftol",
+            "status": "complete",
+            "recovered": index == 0,
+        }
+        for index, method in enumerate(
+            (
+                "collocation_sensitivity",
+                "joint_collocation_sensitivity",
+                "alternating_collocation_sensitivity",
+            )
+        )
+    ]
+    groups = new.recovery_counts(rows)
+    assert [g["method"] for g in groups] == ["C+S", "J+S", "A+S"]
+    assert [g["recovered"] for g in groups] == [1, 0, 0]
 
 
 def test_one_optimizer_failure_does_not_suppress_the_other_arm(

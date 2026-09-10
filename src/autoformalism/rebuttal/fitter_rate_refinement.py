@@ -48,12 +48,20 @@ SOURCE = {
 class RatePlan(StrictSchema):
     """Freeze the source selection and verification budget before new fitting."""
 
-    protocol: Literal["fitter-rate-refinement-1"] = "fitter-rate-refinement-1"
+    protocol: Literal["fitter-rate-refinement-1", "fitter-rate-stopping-1"] = (
+        "fitter-rate-refinement-1"
+    )
     source_tasks: tuple[str, ...] | None = None  # None requires all 39 v4 fits.
     replay_seconds: FiniteFloat = Field(default=90, gt=0, le=90)
     guard_seconds: FiniteFloat = Field(default=120, gt=0, le=180)
     accuracy_rms: FiniteFloat = Field(default=1e-6, gt=0)
     accuracy_maximum: FiniteFloat = Field(default=1e-5, gt=0)
+
+    def arms(self) -> tuple[tuple[str, str, float | None], ...]:
+        """Keep the stopping comparison distinct from the historical coordinate test."""
+        if self.protocol == "fitter-rate-stopping-1":
+            return (("rates_default", "rates", 1e-8), ("rates_no_ftol", "rates", None))
+        return (("physical", "physical", 1e-8), ("rates", "rates", 1e-8))
 
     def worker_seconds(self, kind: str) -> float:
         return 60 + (
@@ -192,7 +200,10 @@ def prepare_rate(plan: RatePlan, source: Path, output: Path) -> dict:
                 "source_task": name,
             }
         )
-        if r["status"] == "replay_unverified":
+        if (
+            r["status"] == "replay_unverified"
+            and plan.protocol == "fitter-rate-refinement-1"
+        ):
             tasks.append(
                 {
                     "name": "retry_" + name.removeprefix("fit_"),
@@ -303,11 +314,24 @@ def clean_scores(root, verification, guard, guard_root, scale) -> dict:
 
 
 def refine(
-    root, identity, coordinates, model, dataset, scale, settings, start, mapped, seconds
+    root,
+    identity,
+    coordinates,
+    model,
+    dataset,
+    scale,
+    settings,
+    start,
+    mapped,
+    seconds,
+    *,
+    ftol: float | None = 1e-8,
 ):
     """Checkpoint complete refinement before any validation or replay work."""
     fitted = checkpoint(root / "fit.json", identity)
     if fitted is not None:
+        if fitted.get("stopping_policy", {}).get("ftol", 1e-8) != ftol:
+            raise ValueError("refinement stopping policy differs on resume")
         return fitted
     # A killed native optimizer cannot be serialized. Do not silently reset its
     # fitting budget: completed fits replay; interrupted fitting requires a new run.
@@ -342,6 +366,7 @@ def refine(
 
     def optimizer(fun, x, **kwargs):
         kwargs["jac"] = oracle.jacobian
+        kwargs.update(ftol=ftol, xtol=1e-8, gtol=1e-8, x_scale=1.0)
         return least_squares(fun, x, **kwargs)
 
     try:
@@ -367,6 +392,13 @@ def refine(
     fitted = {
         "identity": identity,
         "coordinates": coordinates,
+        "stopping_policy": {"ftol": ftol, "xtol": 1e-8, "gtol": 1e-8, "x_scale": 1.0},
+        "parameter_order": oracle.names,
+        "raw_gradient_inf_norm": (
+            float(np.max(np.abs(report["gradient"])))
+            if report.get("gradient") is not None
+            else None
+        ),
         "fit": report,
         "refinement_budget_seconds": seconds,
         "nominal_start": selected,
@@ -502,9 +534,9 @@ def execute_rate(output: Path, index: int) -> dict:
                     raise ValueError(
                         "saved initialization consumed total fitting budget"
                     )
-                for coordinate in ("physical", "rates"):
-                    arm_root = root / coordinate
-                    arm_id = content_hash([identity, coordinate])
+                for arm, coordinate, ftol in plan.arms():
+                    arm_root = root / arm
+                    arm_id = content_hash([identity, arm])
                     fitted = refine(
                         arm_root,
                         arm_id,
@@ -516,10 +548,11 @@ def execute_rate(output: Path, index: int) -> dict:
                         original["refinement_start"],
                         mapped,
                         remaining,
+                        ftol=ftol,
                     )
                     params = fitted["fit"]["parameters"]
                     if params is None:
-                        arms[coordinate] = {
+                        arms[arm] = {
                             **fitted,
                             "status": fitted.get("status", "fit_failed"),
                         }
@@ -535,7 +568,7 @@ def execute_rate(output: Path, index: int) -> dict:
                         plan,
                         scale,
                     )
-                    arms[coordinate] = {
+                    arms[arm] = {
                         **fitted,
                         **verification,
                         "clean_signal_nmse": clean_scores(
@@ -591,19 +624,26 @@ def verify_rate_result(root: Path, result: dict) -> None:
 def summarize_rate(output: Path) -> dict:
     """Separate numerical verification, optimizer stops and output recovery."""
     frozen = verify_rate(output)
+    plan = RatePlan.model_validate(frozen["plan"])
     rows, results = [], []
-    for task in frozen["tasks"]:
+    for index, task in enumerate(frozen["tasks"]):
+        print(
+            f"Checking {index + 1}/{len(frozen['tasks'])}: {task['name']}", flush=True
+        )
         root = output / "results" / task["name"]
         result = checkpoint(
             root / "result.json", content_hash([frozen["freeze_sha256"], task])
         )
         if result is None:
-            rows.append(
+            rows.extend(
                 {
                     "source": task["source_task"],
-                    "arm": task["kind"],
+                    "arm": arm,
                     "status": "missing",
                 }
+                for arm in (
+                    [a[0] for a in plan.arms()] if task["kind"] == "pair" else ["retry"]
+                )
             )
             continue
         verify_rate_result(root, result)
@@ -612,7 +652,7 @@ def summarize_rate(output: Path) -> dict:
             result.get("arms", {}) if task["kind"] == "pair" else {"retry": result}
         )
         if not entries:
-            entries = {task["kind"]: result}
+            entries = {arm: result for arm, _, _ in plan.arms()}
         for arm, item in entries.items():
             fit = item.get("fit", {})
             scores = item.get("clean_signal_nmse", {})
@@ -626,6 +666,9 @@ def summarize_rate(output: Path) -> dict:
                     "calls": fit.get("actual_residual_calls"),
                     "seconds": fit.get("fit_seconds"),
                     "optimality": fit.get("optimality"),
+                    "raw_gradient_inf_norm": item.get("raw_gradient_inf_norm"),
+                    "parameter_order": item.get("parameter_order"),
+                    "stopping_policy": item.get("stopping_policy"),
                     "clean_train_nmse": scores.get("train"),
                     "clean_validation_nmse": scores.get("validation"),
                     "recovered": item.get("status") == "complete"
@@ -642,12 +685,22 @@ def summarize_rate(output: Path) -> dict:
         "results": results,
         "source_freeze": frozen["source_freeze"],
         "runtime": frozen["runtime"],
+        "protocol": plan.protocol,
+        "recovery_by_initializer": recovery_counts(rows),
     }
     write_json(output / "summary.json", summary)
     lines = [
-        "# Saved-start rate refinement",
+        "# Saved-start stopping comparison"
+        if plan.protocol == "fitter-rate-stopping-1"
+        else "# Saved-start rate refinement",
         "",
         (
+            "Same saved v4 initializer points; both arms use direct rate "
+            "sensitivities. "
+            "Only ftol differs (1e-8 versus disabled). No collocation rerun."
+        )
+        if plan.protocol == "fitter-rate-stopping-1"
+        else (
             "Same v4 initializer points; direct physical or rate sensitivities. "
             "No collocation rerun."
         ),
@@ -655,6 +708,17 @@ def summarize_rate(output: Path) -> dict:
             "Clean metrics are post-fit diagnostics. Native success is separate "
             "from verification and recovery."
         ),
+        "",
+        "Recovery counts (both clean NMSEs <= 1e-4; "
+        "missing/failed fits count as unrecovered):",
+        "",
+        "| Initializer | Arm | Starts | Verified | Recovered | Total |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
+        *[
+            f"| {g['method']} | {g['arm']} | {g['starts']} | {g['verified']} | "
+            f"{g['recovered']} | {g['total']} |"
+            for g in summary["recovery_by_initializer"]
+        ],
         "",
         (
             "| Source | Arm | Status | Recovered | Calls | Seconds | "
@@ -682,3 +746,42 @@ def summarize_rate(output: Path) -> dict:
         )
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     return summary
+
+
+def recovery_counts(rows: list[dict]) -> list[dict]:
+    """Report C/J/A recovery with missing pairs retained in the denominator."""
+    groups: dict[tuple, dict] = {}
+    methods = {
+        "collocation_sensitivity": "C+S",
+        "joint_collocation_sensitivity": "J+S",
+        "alternating_collocation_sensitivity": "A+S",
+    }
+    for row in rows:
+        method = next(
+            (
+                label
+                for suffix, label in reversed(list(methods.items()))
+                if row["source"].endswith("_" + suffix)
+            ),
+            "other",
+        )
+        key = (
+            method,
+            row["arm"],
+            "stress" if "stress" in row["source"] else "ordinary",
+        )
+        group = groups.setdefault(
+            key,
+            {
+                "method": key[0],
+                "arm": key[1],
+                "starts": key[2],
+                "total": 0,
+                "verified": 0,
+                "recovered": 0,
+            },
+        )
+        group["total"] += 1
+        group["verified"] += row.get("status") == "complete"
+        group["recovered"] += bool(row.get("recovered"))
+    return list(groups.values())
