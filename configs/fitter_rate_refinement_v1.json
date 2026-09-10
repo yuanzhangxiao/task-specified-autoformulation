@@ -1,0 +1,8 @@
+{
+  "protocol": "fitter-rate-refinement-1",
+  "source_tasks": null,
+  "replay_seconds": 90,
+  "guard_seconds": 120,
+  "accuracy_rms": 1e-6,
+  "accuracy_maximum": 1e-5
+}
