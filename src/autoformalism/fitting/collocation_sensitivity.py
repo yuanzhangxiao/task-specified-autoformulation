@@ -165,6 +165,17 @@ def fit_collocation_forward_sensitivity(
         config=settings,
         fit_trajectory_initial_conditions=False,
     )
+    training_verified = not train_metrics.failed_trajectories and np.isfinite(
+        train_metrics.normalized_mse
+    )
+    refinement["production_training_rollout_verified"] = bool(training_verified)
+    if not training_verified:
+        refinement["optimizer_success"] = False
+        refinement["numerical_status"] = "production_training_rollout_failed"
+        refinement["message"] = (
+            "Selected parameters failed fresh production training replay; "
+            + refinement["message"]
+        )
     validation_initials, validation_metrics = evaluate_fitted_candidate(
         model,
         validation,
@@ -174,9 +185,8 @@ def fit_collocation_forward_sensitivity(
         config=settings,
         fit_trajectory_initial_conditions=False,
     )
-    complete = not train_metrics.failed_trajectories and not (
-        validation_metrics.failed_trajectories
-    )
+    complete = training_verified and not validation_metrics.failed_trajectories
+    complete = complete and np.isfinite(validation_metrics.normalized_mse)
     return {
         "schema_version": "collocation-forward-sensitivity-fit-1",
         "status": "complete" if complete else "rollout_failed",

@@ -175,6 +175,22 @@ class SymbolicODE:
         return trajectory_initial_state(self.model, trajectory, {})
 
 
+class SymbolicRolloutFailure(ValueError):
+    """Numerical failure with measured context, without inferring scientific cause."""
+
+    def __init__(self, message: str, diagnostic: dict):
+        super().__init__(message)
+        self.diagnostic = diagnostic
+
+
+class SymbolicRolloutTimeout(TimeoutError):
+    """Preserve deadline semantics while retaining the last attempted RHS state."""
+
+    def __init__(self, message: str, diagnostic: dict):
+        super().__init__(message)
+        self.diagnostic = diagnostic
+
+
 def symbolic_rollout(
     system: SymbolicODE,
     trajectory: Trajectory,
@@ -193,13 +209,32 @@ def symbolic_rollout(
     values = np.empty((len(time), len(system.channels)))
     jacobian = np.empty((len(time), len(system.channels), p)) if sensitivities else None
     current = (
-        np.concatenate((initial, np.zeros(n * p)))
-        if sensitivities
-        else initial.copy()
+        np.concatenate((initial, np.zeros(n * p))) if sensitivities else initial.copy()
     )
     all_values = np.empty((len(time), len(current)))
     all_values[0] = current
     counters = {"nfev": 0, "njev": 0, "nlu": 0, "segments": 0}
+    last_attempt: dict = {}
+
+    def diagnostic(left, right, solved=None):
+        evidence = {
+            "trajectory_id": trajectory.trajectory_id,
+            "stage": "integration",
+            "integration_interval": [float(time[left]), float(time[right])],
+            "last_rhs_attempt": last_attempt,
+            "attempt_is_accepted_solver_state": False,
+            "sensitivities": sensitivities,
+        }
+        if solved is not None and len(solved.t):
+            evidence["last_returned_sample"] = {
+                "time": float(solved.t[-1]),
+                "states": dict(
+                    zip(
+                        system.model.state_names, solved.y[:n, -1].tolist(), strict=True
+                    )
+                ),
+            }
+        return _finite_payload(evidence)
 
     def inputs(t):
         if deadline is not None and monotonic() >= deadline:
@@ -210,7 +245,23 @@ def symbolic_rollout(
     jac_function = system.augmented_jacobian if sensitivities else system.state_jacobian
 
     def rhs(t, z):
+        last_attempt.clear()
+        last_attempt.update(
+            time=float(t),
+            states=dict(zip(system.model.state_names, z[:n].tolist(), strict=True)),
+        )
         result = np.asarray(rhs_function(t, z, theta, inputs(t))).ravel()
+        last_attempt["state_rhs"] = dict(
+            zip(system.model.state_names, result[:n].tolist(), strict=True)
+        )
+        last_attempt["nonfinite_state_rhs"] = [
+            name
+            for name, value in zip(system.model.state_names, result[:n], strict=True)
+            if not np.isfinite(value)
+        ]
+        last_attempt["nonfinite_sensitivity_rhs"] = bool(
+            not np.isfinite(result[n:]).all()
+        )
         if not np.isfinite(result).all():
             raise ValueError("symbolic RHS is nonfinite")
         return result
@@ -219,18 +270,26 @@ def symbolic_rollout(
         return np.asarray(jac_function(t, z, theta, inputs(t)))
 
     for left, right in pairwise(forcing_segment_indices(system.model, trajectory)):
-        solved = solve_ivp(
-            rhs,
-            (time[left], time[right]),
-            current,
-            t_eval=time[left : right + 1],
-            method=settings.integration_method,
-            rtol=settings.relative_tolerance,
-            atol=settings.absolute_tolerance,
-            jac=jac,
-        )
+        try:
+            solved = solve_ivp(
+                rhs,
+                (time[left], time[right]),
+                current,
+                t_eval=time[left : right + 1],
+                method=settings.integration_method,
+                rtol=settings.relative_tolerance,
+                atol=settings.absolute_tolerance,
+                jac=jac,
+            )
+        except TimeoutError as error:
+            raise SymbolicRolloutTimeout(str(error), diagnostic(left, right)) from error
+        except (ValueError, RuntimeError, ArithmeticError) as error:
+            raise SymbolicRolloutFailure(str(error), diagnostic(left, right)) from error
         if not solved.success or not np.isfinite(solved.y).all():
-            raise ValueError(f"symbolic integration failed: {solved.message}")
+            raise SymbolicRolloutFailure(
+                f"symbolic integration failed: {solved.message}",
+                diagnostic(left, right, solved),
+            )
         all_values[left : right + 1] = solved.y.T
         current = solved.y[:, -1]
         for name in ("nfev", "njev", "nlu"):
@@ -277,6 +336,7 @@ class SymbolicOracle(RolloutOracle):
         self.with_sensitivities = sensitivities
         self.last_x = self.last_jac = None
         self.solver_counts = {"nfev": 0, "njev": 0, "nlu": 0, "segments": 0}
+        self.failure_evidence: list[dict] = []
 
     def __call__(self, values: np.ndarray) -> np.ndarray:
         self.calls += 1
@@ -289,6 +349,7 @@ class SymbolicOracle(RolloutOracle):
             self.vector(record["parameters"])
             residuals, matrices = [], []
             for trajectory in self.training.trajectories:
+                record["trajectory_id"] = trajectory.trajectory_id
                 predictions, jac, _, counts = symbolic_rollout(
                     self.system,
                     trajectory,
@@ -310,7 +371,12 @@ class SymbolicOracle(RolloutOracle):
             self.last_x = values.copy()
             self.last_jac = np.concatenate(matrices) if matrices else None
             cost = float(0.5 * residual @ residual)
-            record.update(status="evaluated", cost=cost)
+            if not np.isfinite(cost):
+                raise ValueError("full training residual cost is nonfinite")
+            self.valid_calls += 1
+            record.update(
+                status="evaluated", cost=cost, valid_full_training_evaluation=True
+            )
             if self.best is None or cost < self.best["cost"]:
                 self.best = {
                     "parameters": record["parameters"],
@@ -319,12 +385,20 @@ class SymbolicOracle(RolloutOracle):
                 }
                 write_json(self.directory / "best_evaluated.json", self.best)
             return residual
-        except TimeoutError:
-            record["status"] = "timeout"
+        except TimeoutError as error:
+            record.update(
+                status="timeout",
+                error=str(error),
+                diagnostic=getattr(error, "diagnostic", None),
+            )
             raise
         except (ValueError, RuntimeError, ArithmeticError) as error:
             self.failures.record(str(error))
-            record.update(status="failed", error=str(error))
+            record.update(
+                status="failed",
+                error=str(error),
+                diagnostic=getattr(error, "diagnostic", None),
+            )
             size = sum(t.number_of_rows for t in self.training.trajectories)
             self.last_x = values.copy()
             self.last_jac = np.zeros((size, len(values)))
@@ -333,6 +407,11 @@ class SymbolicOracle(RolloutOracle):
             seconds = monotonic() - started
             self.seconds += seconds
             record["seconds"] = seconds
+            if (
+                record.get("status") in {"failed", "timeout"}
+                and len(self.failure_evidence) < 5
+            ):
+                self.failure_evidence.append(_finite_payload(dict(record)))
             write_json(
                 self.directory / f"{self.calls:06d}.json", _finite_payload(record)
             )

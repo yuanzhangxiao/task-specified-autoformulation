@@ -91,6 +91,85 @@ def test_adapter_uses_train_only_initialization_and_causal_replay(tmp_path) -> N
     assert not result["collocation_states_used_for_final_score"]
     assert result["training"]["normalized_mse"] < 1e-12
     assert result["validation"]["normalized_mse"] < 1e-12
+    assert result["refinement"]["selected_training_rollout_verified"]
+    assert result["refinement"]["production_training_rollout_verified"]
+
+
+@pytest.mark.parametrize("failing_split", ["train", "validation"])
+def test_fresh_replay_failure_and_training_gate(tmp_path, monkeypatch, failing_split):
+    from types import SimpleNamespace
+
+    from autoformalism.fitting import collocation_sensitivity as adapter
+
+    model = compile_candidate(
+        _candidate(), ValidationContext(targets=("v01",), external_inputs=("u01",))
+    )
+    monkeypatch.setattr(
+        adapter, "bounded_latent_start", lambda *a, **kw: {"success": False}
+    )
+
+    def evaluate(model, data, **kwargs):
+        failed = data.name is (
+            SplitName.TRAIN if failing_split == "train" else SplitName.VALIDATION
+        )
+        return {}, SimpleNamespace(
+            normalized_mse=1e6 if failed else 0.0,
+            per_target_normalized_mse={"v01": 1e6 if failed else 0.0},
+            failed_trajectories=[data.trajectories[0].trajectory_id] if failed else [],
+        )
+
+    monkeypatch.setattr(adapter, "evaluate_fitted_candidate", evaluate)
+    result = fit_collocation_forward_sensitivity(
+        model,
+        _split(SplitName.TRAIN, (1.0,)),
+        _split(SplitName.VALIDATION, (0.6,)),
+        CollocationSensitivityConfig(
+            initializer_seconds=5,
+            refinement_seconds=15,
+            maximum_function_evaluations=10,
+        ),
+        tmp_path,
+        initial_parameters={"rate": 0.7, "gain": 1.3},
+    )
+    assert result["status"] == "rollout_failed"
+    assert result["refinement"]["optimizer_native_success"]
+    assert result["refinement"]["optimizer_success"] == (failing_split != "train")
+    assert result["refinement"]["production_training_rollout_verified"] == (
+        failing_split != "train"
+    )
+
+
+def test_all_failure_adapter_does_not_score_validation(tmp_path, monkeypatch):
+    from autoformalism.fitting import collocation_sensitivity as adapter
+
+    payload = _candidate().model_dump(mode="json")
+    payload["state_equations"][0]["rhs"] = "rate*x**2 + gain*u01"
+    payload["initial_conditions"][0]["fixed_value"] = 2.0
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        ValidationContext(targets=("v01",), external_inputs=("u01",)),
+    )
+    monkeypatch.setattr(
+        adapter, "bounded_latent_start", lambda *a, **kw: {"success": False}
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("no parameter fit exists to score")
+
+    monkeypatch.setattr(adapter, "evaluate_fitted_candidate", forbidden)
+    result = fit_collocation_forward_sensitivity(
+        model,
+        _split(SplitName.TRAIN, (1.0,)),
+        _split(SplitName.VALIDATION, (0.6,)),
+        CollocationSensitivityConfig(initializer_seconds=5, refinement_seconds=15),
+        tmp_path,
+        initial_parameters={"rate": 0.7, "gain": 1.3},
+    )
+    assert result["status"] == "fit_failed"
+    assert result["parameters"] is None and result["validation"] is None
+    assert result["refinement"]["optimizer_native_success"]
+    assert not result["refinement"]["optimizer_success"]
+    assert result["refinement"]["numerical_status"] == "no_feasible_rollout"
 
 
 def test_adapter_uses_each_trajectory_direct_observation_initial_value(
@@ -98,9 +177,7 @@ def test_adapter_uses_each_trajectory_direct_observation_initial_value(
 ) -> None:
     payload = _candidate().model_dump(mode="json")
     payload["states"][0]["name"] = "v01"
-    payload["state_equations"][0].update(
-        state="v01", rhs="-rate*v01 + gain*u01"
-    )
+    payload["state_equations"][0].update(state="v01", rhs="-rate*v01 + gain*u01")
     payload["observation_mappings"][0]["expression"] = "v01"
     payload["initial_conditions"][0].update(
         state="v01", fixed_value=None, expression="v01"
