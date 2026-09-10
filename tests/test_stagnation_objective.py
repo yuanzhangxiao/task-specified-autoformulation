@@ -116,6 +116,92 @@ def test_integration_failure_cannot_be_retained_as_best(problem):
     assert read_json(oracle.directory / "000001.json")["integration_failures"] == 1
 
 
+def test_flat_failure_penalty_is_not_optimizer_success(problem):
+    oracle, *_ = problem
+
+    def failed(point):
+        oracle.failures.record("all training integrations failed")
+        return np.full(3, 1e6)
+
+    oracle.raw = failed
+    report = instrumented_fit(oracle, {"decay": 1.0}, diff_step=None, max_nfev=5)
+    assert report["optimizer_native_success"]
+    assert "gtol" in report["native_optimizer_message"]
+    assert not report["optimizer_success"]
+    assert report["parameters"] is None and report["cost"] is None
+    assert report["numerical_status"] == "no_feasible_rollout"
+    assert report["valid_residual_evaluations"] == 0
+    assert report["verification_residual_calls"] == 0
+
+
+def test_valid_earlier_point_does_not_certify_failed_return(problem):
+    from scipy.optimize import OptimizeResult
+
+    oracle, *_ = problem
+    original = oracle.raw
+
+    def raw(point):
+        if point[0] > 1.5:
+            oracle.failures.record("failed returned point")
+            return np.full(31, 1e6)
+        return original(point)
+
+    oracle.raw = raw
+
+    def optimizer(fun, x, **kwargs):
+        fun(x)
+        invalid = np.array([2.0])
+        residual = fun(invalid)
+        return OptimizeResult(
+            success=True,
+            status=1,
+            message="gtol",
+            x=invalid,
+            cost=float(0.5 * residual @ residual),
+            nfev=2,
+            njev=1,
+            optimality=0.0,
+            grad=np.zeros(1),
+            active_mask=np.zeros(1),
+            jac=np.zeros((len(residual), 1)),
+            fun=residual,
+        )
+
+    report = instrumented_fit(
+        oracle, {"decay": 1.0}, diff_step=None, max_nfev=5, optimizer=optimizer
+    )
+    assert report["optimizer_native_success"] and not report["optimizer_success"]
+    assert not report["returned_point_verification"]["pass"]
+    assert report["fallback_point_verification"]["pass"]
+    assert report["parameters"] == {"decay": 1.0}
+    assert report["native_optimizer_parameters"] == {"decay": 2.0}
+    assert report["verification_residual_calls"] == 2
+
+
+def test_selected_point_verification_respects_deadline(problem):
+    from scipy.optimize import least_squares
+
+    oracle, *_ = problem
+
+    def optimizer(fun, x, **kwargs):
+        result = least_squares(fun, x, **kwargs)
+
+        def timeout(point):
+            raise TimeoutError("verification budget exhausted")
+
+        oracle.raw = timeout
+        return result
+
+    report = instrumented_fit(
+        oracle, {"decay": 1.0}, diff_step=None, max_nfev=30, optimizer=optimizer
+    )
+    assert report["optimizer_native_success"] and not report["optimizer_success"]
+    assert report["returned_point_verification"]["timeout"]
+    assert report["parameters"] is not None
+    assert report["verification_residual_calls"] == 1
+    assert not report["selected_training_rollout_verified"]
+
+
 def test_invalid_profile_domain_fails_before_symmetric_probe(problem, tmp_path):
     oracle, *_ = problem
     with pytest.raises(ValueError, match="leaves frozen parameter domain"):

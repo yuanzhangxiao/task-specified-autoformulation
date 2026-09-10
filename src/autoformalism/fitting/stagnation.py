@@ -60,6 +60,7 @@ class RolloutOracle:
         self.directory = directory
         self.directory.mkdir(parents=True, exist_ok=True)
         self.calls = 0
+        self.valid_calls = 0
         self.seconds = 0.0
         self.best: dict[str, Any] | None = None
 
@@ -102,17 +103,17 @@ class RolloutOracle:
                 residual_count=len(residual),
                 status="evaluated",
             )
-            if (
-                self.failures.count == before
-                and np.isfinite(cost)
-                and (self.best is None or cost < self.best["cost"])
-            ):
-                self.best = {
-                    "parameters": record["parameters"],
-                    "cost": cost,
-                    "call": self.calls,
-                }
-                write_json(self.directory / "best_evaluated.json", self.best)
+            valid = self.failures.count == before and np.isfinite(cost)
+            record["valid_full_training_evaluation"] = bool(valid)
+            if valid:
+                self.valid_calls += 1
+                if self.best is None or cost < self.best["cost"]:
+                    self.best = {
+                        "parameters": record["parameters"],
+                        "cost": cost,
+                        "call": self.calls,
+                    }
+                    write_json(self.directory / "best_evaluated.json", self.best)
             return residual
         finally:
             seconds = monotonic() - started
@@ -315,14 +316,63 @@ def instrumented_fit(
             "active_mask": np.asarray(result.active_mask).tolist(),
             "jacobian": matrix_report(np.asarray(result.jac), np.asarray(result.fun)),
         }
+    optimizer_calls = oracle.calls
+    valid_calls = oracle.valid_calls
+    report["optimizer_native_success"] = report["optimizer_success"]
+    report["native_optimizer_message"] = report["message"]
+    report["native_optimizer_parameters"] = (
+        report["parameters"] if report["optimizer_status"] != -2 else None
+    )
+    report["native_optimizer_cost"] = (
+        report["cost"] if report["optimizer_status"] != -2 else None
+    )
+    report["selected_training_rollout_verified"] = False
+    report["numerical_status"] = "verification_pending"
+    if oracle.best is None:
+        report.update(
+            optimizer_success=False,
+            parameters=None,
+            cost=None,
+            selection="no_feasible_rollout",
+            numerical_status="no_feasible_rollout",
+            message="No feasible full-training rollout found; " + report["message"],
+        )
+    elif report["optimizer_status"] != -2:
+        # Native success may describe a constant failure penalty. A fresh call
+        # checks the actual returned point; a finite earlier point alone is not enough.
+        best = dict(oracle.best)
+        verification = _verify_training_point(oracle, report["parameters"])
+        report["returned_point_verification"] = verification
+        if not verification["pass"]:
+            report.update(
+                optimizer_success=False,
+                parameters=best["parameters"],
+                cost=best["cost"],
+                selection="best_finite_evaluation_after_invalid_return",
+                message="Returned optimizer point failed training verification; "
+                + report["message"],
+            )
+            if not verification.get("timeout"):
+                verification = _verify_training_point(oracle, best["parameters"])
+                report["fallback_point_verification"] = verification
+        report["selected_training_rollout_verified"] = verification["pass"]
+        report["numerical_status"] = (
+            "verified" if verification["pass"] else "training_verification_failed"
+        )
+    if not report["selected_training_rollout_verified"]:
+        report["optimizer_success"] = False
     return _finite_payload(
         {
             **report,
             "actual_residual_calls": oracle.calls,
+            "optimizer_residual_calls": optimizer_calls,
+            "verification_residual_calls": oracle.calls - optimizer_calls,
+            "valid_residual_evaluations": valid_calls,
             "residual_seconds": oracle.seconds,
             "fit_seconds": monotonic() - started,
             "integration_failures": oracle.failures.count,
             "integration_failure_messages": oracle.failures.messages,
+            "failure_evidence": getattr(oracle, "failure_evidence", []),
             "best_evaluated": oracle.best,
             "iterations": iterations,
             "initial_parameters": dict(start),
@@ -334,3 +384,23 @@ def instrumented_fit(
             },
         }
     )
+
+
+def _verify_training_point(oracle: RolloutOracle, parameters: Mapping) -> dict:
+    """Verify one selected point within the oracle's existing fitting deadline."""
+    before = oracle.failures.count
+    try:
+        residual = oracle(oracle.vector(parameters))
+        cost = float(0.5 * residual @ residual)
+    except (TimeoutError, ValueError, RuntimeError, ArithmeticError) as error:
+        return {
+            "pass": False,
+            "error": str(error),
+            "timeout": isinstance(error, TimeoutError),
+        }
+    valid = oracle.failures.count == before and np.isfinite(cost)
+    return {
+        "pass": bool(valid),
+        "cost": cost if valid else None,
+        "integration_failures": oracle.failures.count - before,
+    }

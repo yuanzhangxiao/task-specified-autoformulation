@@ -70,6 +70,70 @@ def test_affine_rhs_has_nonlinear_rollout_sensitivity():
     assert float(fx) == -0.6 and float(fp) == -2
 
 
+def test_explosive_rollout_retains_factual_evidence_and_rejects_false_success(tmp_path):
+    from time import monotonic
+
+    from scipy.optimize import least_squares
+
+    from autoformalism.data import DatasetSplit, SplitName
+    from autoformalism.fitting.sensitivity_probe import SymbolicOracle
+    from autoformalism.fitting.stagnation import instrumented_fit
+
+    payload = decay_model().validated.candidate.model_dump(mode="json")
+    payload["state_equations"][0]["rhs"] = "a*x**2"
+    system = SymbolicODE(
+        compile_candidate(
+            CandidateModel.model_validate(payload), ValidationContext(targets=("v01",))
+        )
+    )
+    training = DatasetSplit(SplitName.TRAIN, (trajectory(),), "synthetic-explosion")
+    oracle = SymbolicOracle(
+        system,
+        training,
+        1.0,
+        settings(),
+        tmp_path,
+        monotonic() + 20,
+        sensitivities=True,
+    )
+
+    def optimizer(fun, x, **kwargs):
+        kwargs["jac"] = oracle.jacobian
+        return least_squares(fun, x, **kwargs)
+
+    report = instrumented_fit(
+        oracle, {"a": 0.6}, diff_step=None, max_nfev=5, optimizer=optimizer
+    )
+    assert report["optimizer_native_success"] and not report["optimizer_success"]
+    assert report["parameters"] is None
+    assert report["valid_residual_evaluations"] == 0
+    evidence = report["failure_evidence"][0]
+    assert evidence["trajectory_id"] == "training"
+    detail = evidence["diagnostic"]
+    assert detail["integration_interval"] == [0.0, 4.0]
+    assert not detail["attempt_is_accepted_solver_state"]
+    assert 0.7 < detail["last_rhs_attempt"]["time"] < 0.9
+    assert detail["last_rhs_attempt"]["state_rhs"]["x"] > 0
+    assert "cause" not in detail
+
+
+def test_rollout_timeout_keeps_deadline_exception_and_context():
+    from time import monotonic
+
+    from autoformalism.fitting.sensitivity_probe import SymbolicRolloutTimeout
+
+    with pytest.raises(SymbolicRolloutTimeout) as caught:
+        symbolic_rollout(
+            SymbolicODE(decay_model()),
+            trajectory(),
+            np.array([0.6]),
+            settings(),
+            monotonic() - 1,
+        )
+    assert isinstance(caught.value, TimeoutError)
+    assert caught.value.diagnostic["trajectory_id"] == "training"
+
+
 def test_sensitivity_includes_hidden_states_and_algebraic_feedback():
     model = compile_candidate(recovery_candidate(), CONTEXT)
     system = SymbolicODE(model)
