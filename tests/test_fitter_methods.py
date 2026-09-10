@@ -294,7 +294,8 @@ def test_bounded_initializer_accepts_only_observed_outputs_of_hidden_system(
     assert not result["hidden_labels_used"]
 
 
-def test_launcher_accounts_for_matrix_and_rejects_partial_submission(tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_launcher_accounts_for_matrix_and_rejects_partial_submission(tmp_path, version):
     import subprocess
     import sys
 
@@ -323,15 +324,25 @@ def test_launcher_accounts_for_matrix_and_rejects_partial_submission(tmp_path):
         "SUBMISSION_LOG": str(log),
         "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
     }
-    command = ["bash", str(root / "scripts/hpc/submit_fitter_methods_delta.sh")]
+    launcher = (
+        "submit_fitter_methods_delta.sh"
+        if version == 1
+        else "submit_fitter_methods_v2_delta.sh"
+    )
+    command = ["bash", str(root / "scripts/hpc" / launcher)]
     one = subprocess.run(command, env=env, text=True, capture_output=True)
     assert one.returncode == 0, one.stderr
     jobs = read_json(output / "submission.json")
-    assert jobs["guard_tasks"] == 3 and jobs["fit_tasks"] == 32
+    assert jobs["guard_tasks"] == (3 if version == 1 else 2)
+    assert jobs["fit_tasks"] == (32 if version == 1 else 36)
+    assert jobs["initializer_tasks"] == (0 if version == 1 else 12)
     assert jobs["submission_complete"]
     text = log.read_text()
-    assert len(text.splitlines()) == 3 and "--array=0,1,2%2" in text
+    assert len(text.splitlines()) == (3 if version == 1 else 4)
+    assert ("--array=0,1,2%2" if version == 1 else "--array=0,1%2") in text
     assert "afterany:100" in text and "afterany:101" in text
+    if version == 2:
+        assert "afterany:102" in text and jobs["initializer_job_id"] == "101"
     two = subprocess.run(command, env=env, text=True, capture_output=True)
     assert two.returncode == 0 and log.read_text() == text
     jobs["submission_complete"] = False
@@ -339,3 +350,174 @@ def test_launcher_accounts_for_matrix_and_rejects_partial_submission(tmp_path):
     three = subprocess.run(command, env=env, text=True, capture_output=True)
     assert three.returncode != 0 and "Partial submission" in three.stderr
     assert log.read_text() == text
+
+
+@pytest.mark.parametrize("slope", [-3.0, 0.0, 3.0])
+@pytest.mark.parametrize("intervals", [8, 10])
+def test_weak_quadrature_preserves_constant_drift(slope, intervals):
+    """Integration by parts must agree on a polynomial, including signed offsets."""
+    from autoformalism.schemas import CandidateModel
+
+    payload = campaign.affine_candidate().model_dump(mode="json")
+    payload["state_equations"][0]["rhs"] = "d"
+    payload["parameters"] = [p for p in payload["parameters"] if p["name"] == "d"]
+    system = SymbolicODE(
+        compile_candidate(CandidateModel.model_validate(payload), campaign.CONTEXT)
+    )
+    time = np.arange(31) * 0.2
+    train = DatasetSplit(
+        SplitName.TRAIN,
+        (Trajectory("linear", time, {"v01": 2 + slope * time}, {}, {}, {}, {}),),
+        "analytic",
+    )
+    result = matching_start(
+        system,
+        train,
+        np.array([-np.inf]),
+        np.array([np.inf]),
+        "weak_init",
+        window_intervals=intervals,
+    )
+    assert result["success"]
+    assert result["parameters"]["d"] == pytest.approx(slope, abs=1e-12)
+    assert result["weak_quadrature"] == "gauss5-linear-v2"
+    if intervals == 8:
+        old = matching_start(
+            system,
+            train,
+            np.array([-np.inf]),
+            np.array([np.inf]),
+            "weak_init",
+            weak_quadrature="trapezoid-v1",
+        )
+        assert old["parameters"]["d"] == pytest.approx(slope * 12 / 13, abs=1e-12)
+    with pytest.raises(ValueError, match="quadrature policy"):
+        matching_start(
+            system,
+            train,
+            np.array([-np.inf]),
+            np.array([np.inf]),
+            "weak_init",
+            weak_quadrature="unknown",
+        )
+
+
+def test_known_memory_alias_preserves_output_and_maps_states():
+    from autoformalism.rebuttal.fitter_methods_report import parameter_equivalence
+
+    plan = small_plan()
+    truth = plan.reference.cases[0].truth.model_dump()
+    case = {"observed_state": False, "truth": truth}
+    report = parameter_equivalence(case, truth)
+    alias = report["known_admissible_aliases"]["memory_pole_swap"]
+    assert (alias["tau"], alias["tau_p"], alias["k_p"]) == pytest.approx((4, 2, 0.15))
+    assert parameter_equivalence(case, alias)["scaled_linf_distance"] == 0
+    for forcing in plan.reference.inputs:
+        time = np.arange(21) * 0.2
+        a = campaign.reference_rollout(forcing, truth, time, "Radau", monotonic() + 10)
+        b = campaign.reference_rollout(forcing, alias, time, "Radau", monotonic() + 10)
+        np.testing.assert_allclose(a[:, 2], b[:, 2], atol=1e-9, rtol=0)
+        np.testing.assert_allclose(
+            b[:, 3],
+            a[:, 3] + (1 / truth["tau"] - 1 / truth["tau_p"]) * a[:, 4],
+            atol=1e-9,
+        )
+        np.testing.assert_allclose(a[:, 4:], b[:, 4:], atol=1e-9, rtol=0)
+    separated = campaign.MethodsPlan.model_validate(read_json(CONFIG)).reference.cases[
+        1
+    ]
+    truth = separated.truth.model_dump()
+    assert (
+        len(
+            parameter_equivalence({"observed_state": False, "truth": truth}, truth)[
+                "known_admissible_aliases"
+            ]
+        )
+        == 1
+    )
+
+
+def test_v2_freezes_paired_starts_and_noise_without_truth_dependence(tmp_path):
+    payload = read_json(CONFIG.with_name("fitter_methods_v2.json"))
+    plan = campaign.MethodsPlan.model_validate(payload)
+    frozen = campaign.prepare_methods(plan, tmp_path / "one")
+    assert len(frozen["tasks"]) == 50
+    assert len({t["pair"] for t in frozen["tasks"] if t["kind"] == "fit"}) == 12
+    for pair in {t["pair"] for t in frozen["tasks"] if t["kind"] == "fit"}:
+        tasks = [t for t in frozen["tasks"] if t.get("pair") == pair]
+        assert len(tasks) == 4
+        assert len({t["noise_seed"] for t in tasks}) == 1
+        assert len({t["start_seed"] for t in tasks}) == 1
+        assert len({t["initializer_task"] for t in tasks}) == 1
+        assert {t["method"] for t in tasks if t["kind"] == "fit"} == set(
+            campaign.PAIRED
+        )
+    payload["reference"]["cases"][0]["truth"]["k"] = 99
+    changed = campaign.prepare_methods(
+        campaign.MethodsPlan.model_validate(payload), tmp_path / "two"
+    )
+    assert frozen["paired_starts"] == changed["paired_starts"]
+    summary = campaign.summarize_methods(tmp_path / "one")
+    assert all(r["status"] == "missing" for r in summary["rows"])
+    assert all(
+        a["planned"] == 3 and a["verified"] == 0
+        for a in summary["paired_summary"]["aggregates"]
+    )
+    assert (tmp_path / "one/details.md").exists()
+    assert (
+        "Both latent cases expose v01 only" in (tmp_path / "one/details.md").read_text()
+    )
+    assert len((tmp_path / "one/summary.md").read_text().splitlines()) < 80
+
+
+def test_paired_collocation_refines_same_checkpoint_and_resumes(tmp_path):
+    payload = small_plan().model_dump(mode="json")
+    payload.update(protocol="fitter-methods-2", initializer_seconds=20, fit_seconds=60)
+    plan = campaign.MethodsPlan.model_validate(payload)
+    frozen = campaign.prepare_methods(plan, tmp_path)
+    guard = campaign.execute_methods(tmp_path, 0)
+    assert guard["status"] == "complete", guard
+    init = campaign.execute_methods(tmp_path, 1)
+    assert init["status"] == "complete", init
+    reports = {}
+    for index, task in enumerate(frozen["tasks"]):
+        if task["kind"] == "fit" and task["method"] != "forward_sensitivity":
+            result = campaign.execute_methods(tmp_path, index)
+            assert result["status"] == "complete", result
+            assert not result["initializer_fallback"]
+            assert result["refinement_start"] == init["initializer"]["parameters"]
+            assert result["total_fit_seconds"] == pytest.approx(
+                init["initializer"]["seconds"] + result["fit"]["fit_seconds"]
+            )
+            assert campaign.execute_methods(tmp_path, index) == result
+            reports[task["method"]] = result
+    assert reports["collocation_sensitivity"]["symbolic_solver_counts"]
+    assert reports["collocation_init"]["symbolic_solver_counts"] is None
+    summary = campaign.summarize_methods(tmp_path)
+    assert summary["paired_summary"]["pairing_checks"][0]["same_data_and_initializer"]
+    assert reports["collocation_sensitivity"]["clean_signal_nmse"]["train"] < 1e-6
+    init["initializer"]["seconds"] += 1
+    write_json(tmp_path / "results" / frozen["tasks"][1]["name"] / "result.json", init)
+    with pytest.raises(ValueError, match="initializer changed"):
+        campaign.summarize_methods(tmp_path)
+
+
+def test_shared_initializer_missing_and_timeout_are_distinct(tmp_path):
+    payload = small_plan().model_dump(mode="json")
+    payload.update(protocol="fitter-methods-2")
+    plan = campaign.MethodsPlan.model_validate(payload)
+    frozen = campaign.prepare_methods(plan, tmp_path)
+    task = next(
+        t for t in frozen["tasks"] if t.get("method") == "collocation_sensitivity"
+    )
+    with pytest.raises(ValueError, match="missing or blocked"):
+        campaign._paired_initializer(tmp_path, frozen, task, plan)
+    init = frozen["tasks"][1]
+    key = campaign.content_hash([frozen["freeze_sha256"], init])
+    write_json(
+        tmp_path / "results" / init["name"] / "result.json",
+        {"identity": key, "task": init, "status": "timeout", "error": "wall limit"},
+    )
+    result = campaign._paired_initializer(tmp_path, frozen, task, plan)
+    assert not result["success"] and result["parameters"] is None
+    assert result["seconds"] == plan.initializer_seconds

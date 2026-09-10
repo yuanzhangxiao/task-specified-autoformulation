@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import multiprocessing
+from itertools import pairwise
 from pathlib import Path
 from time import monotonic
+from typing import Literal
 
 import casadi as ca
 import numpy as np
@@ -23,6 +25,40 @@ from autoformalism.rebuttal.fitter_diagnostic import (
     write_json,
 )
 from autoformalism.schemas import CandidateModel
+
+
+def _weak_window(system, forcing, time: np.ndarray, smooth: np.ndarray):
+    """Integrate one weak equation on the piecewise-linear observed interpolant.
+
+    Five-point Gauss quadrature is applied separately on every sample interval.
+    In particular, both sides integrate constant drift exactly: the quartic test
+    function and its derivative times a linear state are polynomials of degree
+    at most four. Nonlinear RHS features are evaluated at interpolated states,
+    not interpolated from a precomputed feature matrix.
+    """
+    nodes, weights = np.polynomial.legendre.leggauss(5)
+    width = time[-1] - time[0]
+    matrix = np.zeros(len(system.names))
+    response = 0.0
+    zero = np.zeros(len(system.names))
+    for i, (left, right) in enumerate(pairwise(time)):
+        alpha = (nodes + 1) / 2
+        times = left + (right - left) * alpha
+        states = smooth[i] + (smooth[i + 1] - smooth[i]) * alpha
+        q = (times - time[0]) / width
+        phi = q**2 * (1 - q) ** 2
+        derivative = (2 * q - 6 * q**2 + 4 * q**3) / width
+        quadrature = weights * (right - left) / 2
+        for t, x, w, p, dp in zip(
+            times, states, quadrature, phi, derivative, strict=True
+        ):
+            inputs = [forcing.value(name, t) for name in system.inputs]
+            design = np.asarray(system.local(t, [x], zero, inputs)[1]).ravel()
+            offset = float(system.rhs(t, [x], zero, inputs))
+            matrix += w * p * design
+            response += w * (-dp * x - p * offset)
+    # Integral_0^1 q^2(1-q)^2 dq = 1/30.
+    return matrix / (width / 30), response / (width / 30)
 
 
 def _latent_worker(candidate, context, result_path, arguments) -> None:
@@ -114,6 +150,7 @@ def matching_start(
     *,
     smoothing_points: int = 7,
     window_intervals: int = 8,
+    weak_quadrature: Literal["trapezoid-v1", "gauss5-linear-v2"] = "gauss5-linear-v2",
 ) -> dict:
     """Solve bounded linear equation errors only for a certified observed RHS.
 
@@ -135,6 +172,8 @@ def matching_start(
         )
     if method not in {"derivative_init", "integral_init", "weak_init"}:
         raise ValueError("unknown matching method")
+    if weak_quadrature not in {"trapezoid-v1", "gauss5-linear-v2"}:
+        raise ValueError("unknown weak quadrature policy")
     matrices, responses = [], []
     zero = np.zeros(len(system.names))
     for data in training.trajectories:
@@ -181,6 +220,12 @@ def matching_start(
                     )
                     / width
                 )
+            elif weak_quadrature == "gauss5-linear-v2":
+                matrix, response = _weak_window(
+                    system, forcing, times, smooth[left : right + 1]
+                )
+                matrices.append(matrix)
+                responses.append(response)
             else:
                 q = (times - times[0]) / width
                 weight = q**2 * (1 - q) ** 2
@@ -213,6 +258,7 @@ def matching_start(
         "equation_error_cost": float(solved.cost),
         "smoothing_points": smoothing_points,
         "window_intervals": window_intervals,
+        "weak_quadrature": weak_quadrature if method == "weak_init" else None,
         "training_only": True,
         "hidden_labels_used": False,
     }
