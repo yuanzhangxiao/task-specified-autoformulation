@@ -48,6 +48,8 @@ COMMON = ("production_fd", "compiled_fd", "forward_sensitivity")
 MATCHING = ("derivative_init", "integral_init", "weak_init")
 LATENT = ("shooting_init", "collocation_init")
 PAIRED = ("forward_sensitivity", "collocation_init", "collocation_sensitivity")
+SEPARABLE = ("joint_collocation_sensitivity", "alternating_collocation_sensitivity")
+BLOCK = ("collocation_sensitivity", *SEPARABLE)
 PORTFOLIO = (
     "forward_sensitivity",
     "collocation_sensitivity",
@@ -59,9 +61,9 @@ PORTFOLIO = (
 class MethodsPlan(StrictSchema):
     """Prespecify data, noise, starts, eligibility, and total fitting budgets."""
 
-    protocol: Literal["fitter-methods-1", "fitter-methods-2", "fitter-methods-3"] = (
-        "fitter-methods-1"
-    )
+    protocol: Literal[
+        "fitter-methods-1", "fitter-methods-2", "fitter-methods-3", "fitter-methods-4"
+    ] = "fitter-methods-1"
     reference: RecoveryPlan
     noise_fractions: tuple[FiniteFloat, ...] = (0.0, 0.03)
     seed: int = Field(default=20260909, ge=0)
@@ -80,6 +82,11 @@ class MethodsPlan(StrictSchema):
     long_pilot_seconds: FiniteFloat = Field(default=60, gt=0, le=60)
     long_pilot_calls: int = Field(default=24, ge=1, le=30)
     initializer_iterations: int = Field(default=150, ge=1, le=300)
+
+    collocation_penalty: FiniteFloat = Field(default=10000, gt=0, le=1e6)
+    alternating_cycles: int = Field(default=12, ge=1, le=30)
+    state_step_iterations: int = Field(default=15, ge=1, le=50)
+    stress_start: dict[str, FiniteFloat] | None = None
 
     @model_validator(mode="after")
     def valid_matrix(self):
@@ -101,6 +108,19 @@ class MethodsPlan(StrictSchema):
             raise ValueError(
                 "portfolio must reserve time and evaluations for continuation"
             )
+        if self.stress_start is not None:
+            if self.protocol != "fitter-methods-4":
+                raise ValueError("stress start requires methods-v4")
+            expected = {p.name for p in recovery_candidate().parameters}
+            if set(self.stress_start) != expected or any(
+                self.stress_start[n] <= 0 for n in expected - {"c"}
+            ):
+                raise ValueError("invalid prespecified stress start")
+            if (
+                not any(c.name == "separated" for c in self.reference.cases)
+                or 0 not in self.noise_fractions
+            ):
+                raise ValueError("stress start requires separated noiseless case")
         if len(set(self.replicate_seeds)) != len(self.replicate_seeds):
             raise ValueError("replicate seeds must be distinct")
         if self.protocol == "fitter-methods-1" and (
@@ -160,6 +180,7 @@ def launcher_identity() -> str:
         "scripts/hpc/submit_fitter_methods_delta.sh",
         "scripts/hpc/submit_fitter_methods_v2_delta.sh",
         "scripts/hpc/submit_fitter_methods_v3_delta.sh",
+        "scripts/hpc/submit_fitter_methods_v4_delta.sh",
     )
     return content_hash({p: sha256(root / p) for p in paths})
 
@@ -229,7 +250,13 @@ def prepare_methods(plan: MethodsPlan, output: Path) -> dict:
     if plan.protocol != "fitter-methods-1":
         tasks = [t for t in tasks if t["kind"] == "guard"]
         fits = []
-        methods = PORTFOLIO if plan.protocol == "fitter-methods-3" else PAIRED
+        methods = (
+            BLOCK
+            if plan.protocol == "fitter-methods-4"
+            else PORTFOLIO
+            if plan.protocol == "fitter-methods-3"
+            else PAIRED
+        )
         for case in cases:
             for noise_index, noise in enumerate(plan.noise_fractions):
                 for replicate, seed in enumerate(plan.replicate_seeds):
@@ -244,9 +271,12 @@ def prepare_methods(plan: MethodsPlan, output: Path) -> dict:
                         "pair": pair,
                         "initializer_task": f"init_{pair}",
                     }
-                    tasks.append(
-                        {**shared, "name": f"init_{pair}", "kind": "initializer"}
-                    )
+                    if plan.protocol == "fitter-methods-4":
+                        shared.pop("initializer_task")
+                    else:
+                        tasks.append(
+                            {**shared, "name": f"init_{pair}", "kind": "initializer"}
+                        )
                     # Rotate scheduler order; every pair still contains every arm.
                     shift = (replicate + noise_index) % len(methods)
                     for method in methods[shift:] + methods[:shift]:
@@ -258,6 +288,24 @@ def prepare_methods(plan: MethodsPlan, output: Path) -> dict:
                                 "method": method,
                             }
                         )
+        if plan.stress_start is not None:
+            for method in BLOCK:
+                fits.append(
+                    {
+                        "name": f"fit_separated_noise0_stress_{method}",
+                        "kind": "fit",
+                        "method": method,
+                        "case": "separated",
+                        "noise_index": 0,
+                        "noise_fraction": 0.0,
+                        "replicate": 3,
+                        "start_kind": "stress",
+                        "start_seed": None,
+                        "noise_seed": plan.seed,
+                        "pair": "separated_noise0_stress",
+                        "start_override": plan.stress_start,
+                    }
+                )
         tasks.extend(fits)
     freeze = {
         "plan": plan.model_dump(mode="json"),
@@ -455,6 +503,8 @@ def _guard(output, root, frozen, task, identity):
             for i, p in enumerate(frozen["paired_starts"][case["name"]])
             if i > 0
         )
+    if plan.stress_start is not None and case["name"] == "separated":
+        anchors.append(("stress", plan.stress_start))
     for name, params in anchors:
         path = root / f"profile_{name}.json"
         key = content_hash([identity, name])
@@ -462,10 +512,19 @@ def _guard(output, root, frozen, task, identity):
         if report is None:
             theta = np.array([params[n] for n in system.names])
             before = monotonic()
-            value, jac, _, _ = symbolic_rollout(
+            value, jac, states, _ = symbolic_rollout(
                 system, data, theta, plan.settings(), deadline, sensitivities=True
             )
             sensitivity_seconds = monotonic() - before
+            lifted_error = None
+            if plan.protocol == "fitter-methods-4":
+                from autoformalism.fitting.separable_collocation import (
+                    lifted_equivalence,
+                )
+
+                lifted_error = lifted_equivalence(system, data, theta, states, value)
+                if lifted_error > 1e-10:
+                    raise ValueError("lifted equations differ from expanded evaluator")
             production = simulate_trajectory(
                 model,
                 data,
@@ -508,6 +567,7 @@ def _guard(output, root, frozen, task, identity):
             report = {
                 "identity": key,
                 "ad_central_relative_errors": differences,
+                "lifted_equation_relative_error": lifted_error,
                 "production_maximum_normalized_difference": value_error,
                 "sensitivity_seconds": sensitivity_seconds,
                 "central_difference_seconds": derivative_seconds,
@@ -567,6 +627,8 @@ def _fit_inputs(output, frozen, task):
 
 def _start(frozen, task):
     """Select a prespecified start, independently of fit or reference quality."""
+    if "start_override" in task:
+        return task["start_override"]
     if "replicate" in task:
         return frozen["paired_starts"][task["case"]][task["replicate"]]
     return frozen["starts"][task["case"]]
@@ -651,7 +713,10 @@ def _fit(output, root, frozen, task, identity):
     method = task["method"]
     start = _start(frozen, task)
     shared_initializer = None
-    if plan.protocol != "fitter-methods-1" and method != "forward_sensitivity":
+    if (
+        plan.protocol in {"fitter-methods-2", "fitter-methods-3"}
+        and method != "forward_sensitivity"
+    ):
         shared_initializer = _paired_initializer(output, frozen, task, plan)
     fitted = checkpoint(root / "fit.json", identity)
     if (
@@ -726,7 +791,29 @@ def _fit(output, root, frozen, task, identity):
                     if plan.protocol == "fitter-methods-1"
                     else "gauss5-linear-v2",
                 )
-            elif method in LATENT:
+            elif method in SEPARABLE:
+                from autoformalism.fitting.alternating_probe import (
+                    bounded_separable_start,
+                )
+
+                initializer = bounded_separable_start(
+                    system,
+                    training=dataset.train,
+                    lower=layout.lower,
+                    upper=layout.upper,
+                    start=theta,
+                    scale=scale,
+                    settings=settings,
+                    method=method.removesuffix("_sensitivity"),
+                    seconds=plan.initializer_seconds,
+                    directory=root / "block_initializer",
+                    penalty=plan.collocation_penalty,
+                    cycles=plan.alternating_cycles,
+                    state_iterations=plan.state_step_iterations,
+                    joint_iterations=plan.initializer_iterations,
+                    identity=identity,
+                )
+            elif method in LATENT or method == "collocation_sensitivity":
                 initializer = bounded_latent_start(
                     system,
                     training=dataset.train,
@@ -735,11 +822,18 @@ def _fit(output, root, frozen, task, identity):
                     start=theta,
                     scale=scale,
                     settings=settings,
-                    method=method,
+                    method="collocation_init"
+                    if method == "collocation_sensitivity"
+                    else method,
                     seconds=min(
                         plan.initializer_seconds, max(0, deadline - monotonic())
                     ),
                     directory=attempt_root / "initializer",
+                    **(
+                        {"maximum_iterations": plan.initializer_iterations}
+                        if plan.protocol == "fitter-methods-4"
+                        else {}
+                    ),
                 )
             else:
                 initializer = {
@@ -764,10 +858,15 @@ def _fit(output, root, frozen, task, identity):
                 attempt_root / "calls",
                 deadline,
                 sensitivities=method
-                in {"forward_sensitivity", "collocation_sensitivity"},
+                in {"forward_sensitivity", "collocation_sensitivity", *SEPARABLE},
             )
             if method
-            in {"compiled_fd", "forward_sensitivity", "collocation_sensitivity"}
+            in {
+                "compiled_fd",
+                "forward_sensitivity",
+                "collocation_sensitivity",
+                *SEPARABLE,
+            }
             else RolloutOracle(
                 model,
                 dataset.train,
@@ -779,7 +878,7 @@ def _fit(output, root, frozen, task, identity):
         )
 
         def optimizer(fun, x, **kwargs):
-            if method in {"forward_sensitivity", "collocation_sensitivity"}:
+            if method in {"forward_sensitivity", "collocation_sensitivity", *SEPARABLE}:
                 kwargs["jac"] = oracle.jacobian
             return least_squares(fun, x, **kwargs)
 
@@ -800,7 +899,8 @@ def _fit(output, root, frozen, task, identity):
             "symbolic_solver_counts": getattr(oracle, "solver_counts", None),
             "ordinary_start": start,
             "initializer_fallback": (
-                method in MATCHING + LATENT or method == "collocation_sensitivity"
+                method in MATCHING + LATENT + SEPARABLE
+                or method == "collocation_sensitivity"
             )
             and not initializer["success"],
             "refinement_start": selected,
@@ -854,6 +954,11 @@ def _fit(output, root, frozen, task, identity):
 def verify_result_arrays(output, result):
     root = output / "results" / result["task"]["name"]
     initializer = result.get("initializer", {})
+    if "checkpoint_array" in initializer:
+        read_array(
+            root / "block_initializer" / initializer["checkpoint_array"],
+            initializer["checkpoint_sha256"],
+        )
     if "shared_task" in initializer:
         shared = read_json(
             output / "results" / initializer["shared_task"] / "result.json"

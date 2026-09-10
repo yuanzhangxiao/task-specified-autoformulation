@@ -58,12 +58,15 @@ def _number(value) -> str:
 def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
     """Retain failed outcomes and separate verification from output recovery."""
     names = {
+        "joint_collocation_sensitivity": "J+S",
+        "alternating_collocation_sensitivity": "A+S",
         "forward_sensitivity": "S",
         "collocation_init": "C+FD",
         "collocation_sensitivity": "C+S",
         "start_portfolio": "Portfolio-12",
         "start_portfolio_long": "Portfolio-24",
     }
+    block_mode = frozen["plan"]["protocol"] == "fitter-methods-4"
     portfolio_mode = frozen["plan"]["protocol"] == "fitter-methods-3"
     threshold = frozen["plan"]["reference"]["recovery_nmse"]
     fits, groups, pairs = [], {}, {}
@@ -79,6 +82,7 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         )
         item = {
             "case": t["case"],
+            "start_kind": t.get("start_kind", "broad"),
             "noise": t["noise_fraction"],
             "replicate": t["replicate"],
             "method": t["method"],
@@ -98,12 +102,13 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
             "collocation_source": r.get("portfolio", {}).get("collocation_source"),
         }
         fits.append(item)
-        groups.setdefault((t["case"], t["noise_fraction"], t["method"]), []).append(
-            item
-        )
+        groups.setdefault(
+            (t["case"], t["noise_fraction"], t.get("start_kind", "broad"), t["method"]),
+            [],
+        ).append(item)
         pairs.setdefault(t["pair"], {})[t["method"]] = r
     aggregates = []
-    for (case, noise, method), items in groups.items():
+    for (case, noise, start_kind, method), items in groups.items():
         times = [
             r["seconds"] for r in items if r["verified"] and r["seconds"] is not None
         ]
@@ -111,6 +116,7 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         aggregates.append(
             {
                 "case": case,
+                "start_kind": start_kind,
                 "noise": noise,
                 "method": method,
                 "planned": len(items),
@@ -123,6 +129,28 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         )
     pairing = []
     for pair, methods in pairs.items():
+        if block_mode:
+            joint = methods.get("joint_collocation_sensitivity", {})
+            alternating = methods.get("alternating_collocation_sensitivity", {})
+            a, b = joint.get("initializer", {}), alternating.get("initializer", {})
+            ready = bool(
+                a.get("initial_nodes_identity") and b.get("initial_nodes_identity")
+            )
+            same = ready and (
+                a["initial_nodes_identity"] == b["initial_nodes_identity"]
+                and a["initial_objective"] == b["initial_objective"]
+                and a["penalty"] == b["penalty"]
+                and joint["ordinary_start"] == alternating["ordinary_start"]
+                and joint["training_fingerprint"] == alternating["training_fingerprint"]
+            )
+            pairing.append(
+                {
+                    "pair": pair,
+                    "both_fit_records_present": ready,
+                    "same_data_and_initializer": same if ready else None,
+                }
+            )
+            continue
         comparisons = (
             ("start_portfolio", "start_portfolio_long")
             if portfolio_mode
@@ -162,7 +190,9 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
             kind: dict(Counter(r["status"] for r in rows if r["task"]["kind"] == kind))
             for kind in ("guard", "initializer", "fit")
         },
-        "pairing_compares": "initializer provenance, data and ordinary start"
+        "pairing_compares": "initial nodes, scales, objective, data and ordinary start"
+        if block_mode
+        else "initializer provenance, data and ordinary start"
         if portfolio_mode
         else "data and identical refinement start",
     }
@@ -190,6 +220,17 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         "s* | Worst val NMSE* |",
         "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if block_mode:
+        lines[0] = "# Joint and alternating collocation comparison"
+        lines[2] = (
+            "C+S = exact collocation; J+S = joint relaxed collocation; "
+            "A+S = alternating relaxed collocation. All use final sensitivity fitting."
+        )
+        lines[4] = (
+            "Seconds include each route's initializer and refinement. "
+            "Initializers are not shared. Missing/failed fits stay in denominators."
+        )
+        lines[7] = lines[7].replace("Shared-start", "Matched-formulation")
     if portfolio_mode:
         lines[0] = "# Sensitivity start-portfolio comparison"
         lines[2] = (
@@ -200,7 +241,8 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         lines[7] = lines[7].replace("Shared-start", "Shared-checkpoint")
     for a in aggregates:
         lines.append(
-            f"| {a['case']} | {a['noise']} | {names[a['method']]} | "
+            f"| {a['case']}{' / stress' if a['start_kind'] == 'stress' else ''} | "
+            f"{a['noise']} | {names[a['method']]} | "
             f"{a['verified']}/{a['planned']} | "
             f"{a['output_recovered']}/{a['planned']} | "
             f"{a['fallbacks']} | {_number(a['median_seconds_verified'])} | "
@@ -218,7 +260,9 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
     ]
     for r in fits:
         lines.append(
-            f"| {r['case']} | {r['noise']} | {r['replicate']} | {names[r['method']]} | "
+            f"| {r['case']} | {r['noise']} | "
+            f"{'stress' if r['start_kind'] == 'stress' else r['replicate']} | "
+            f"{names[r['method']]} | "
             f"{r['status']} | {r['fallback']} | {_number(r['seconds'])} | "
             f"{r['calls']} | "
             f"{_number(r['train_nmse'])} | {_number(r['validation_nmse'])} | "
@@ -248,6 +292,11 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
             "Init failed records IPOPT nonconvergence; Portfolio may still "
             "test a saved iterate through a fresh ODE rollout.",
         ]
+    if block_mode:
+        diagnostics = block_diagnostics(rows, names)
+        report["block_diagnostics"] = diagnostics["records"]
+        lines += diagnostics["lines"]
+        write_json(output / "compact.json", report)
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     return report
 
@@ -331,3 +380,59 @@ def portfolio_diagnostics(rows: list[dict]) -> dict:
             f"{r.get('fit', {}).get('actual_residual_calls')} |"
         )
     return {"initializers": initializers, "portfolios": portfolios, "lines": lines}
+
+
+def block_diagnostics(rows: list[dict], names: dict) -> dict:
+    """Keep initializer usability distinct from final free-rollout verification."""
+    records = []
+    lines = [
+        "",
+        "Relaxed initializer diagnostics (normalized squared errors):",
+        "",
+        "| Pair / route | Usable | Init s | Initial objective | Final objective | "
+        "Observed MSE | Dynamic defect MSE | Algebraic defect MSE | Linear updates |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in rows:
+        task, result = row["task"], row["result"] or {}
+        if task.get("method") not in {
+            "joint_collocation_sensitivity",
+            "alternating_collocation_sensitivity",
+        }:
+            continue
+        init = result.get("initializer", {})
+        weights = [e for e in init.get("progress", []) if e["block"] == "coefficients"]
+        components = init.get("components", [None, None, None])
+        item = {
+            "pair": task["pair"],
+            "method": task["method"],
+            "usable": init.get("success"),
+            "message": init.get("message"),
+            "acceptance": init.get("acceptance"),
+            "seconds": init.get("seconds"),
+            "initial_objective": init.get("initial_objective"),
+            "final_objective": init.get("initializer_objective"),
+            "components": components,
+            "completed_cycles": init.get("completed_cycles"),
+            "accepted_linear_updates": sum(e["accepted"] for e in weights),
+            "rejected_linear_updates": sum(not e["accepted"] for e in weights),
+            "linear_diagnostics": weights,
+            "initial_nodes_identity": init.get("initial_nodes_identity"),
+        }
+        records.append(item)
+        lines.append(
+            f"| {task['pair']} / {names[task['method']]} | {item['usable']} | "
+            f"{_number(item['seconds'])} | {_number(item['initial_objective'])} | "
+            f"{_number(item['final_objective'])} | {_number(components[0])} | "
+            f"{_number(components[1])} | {_number(components[2])} | "
+            f"{item['accepted_linear_updates']} |"
+        )
+    lines += [
+        "",
+        "Usable means a finite, in-domain initializer point was retained; "
+        "it does not mean native solver convergence or trajectory recovery. "
+        "Only final free-rollout replays determine verification and recovery.",
+        "The separately labelled stress pair uses the previously observed Delta "
+        "failed-initializer vector. It is an opened development case.",
+    ]
+    return {"records": records, "lines": lines}

@@ -101,7 +101,12 @@ def _latent_worker(candidate, context, result_path, arguments) -> None:
         arguments["training"] = DatasetSplit(
             SplitName.TRAIN, tuple(Trajectory(**row) for row in rows), fingerprint
         )
-        result = latent_start(system, **arguments)
+        if arguments["method"] in {"joint_collocation", "alternating_collocation"}:
+            from autoformalism.fitting.alternating_probe import separable_start
+
+            result = separable_start(system, **arguments)
+        else:
+            result = latent_start(system, **arguments)
     except (RuntimeError, ValueError, ArithmeticError) as error:
         result = {"success": False, "parameters": None, "message": str(error)[-1600:]}
     write_json(result_path, _finite_payload(result))
