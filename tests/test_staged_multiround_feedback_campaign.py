@@ -14,6 +14,7 @@ from autoformalism.rebuttal.fitter_recovery import CONTEXT, recovery_candidate
 from autoformalism.rebuttal.staged_multiround_feedback_campaign import (
     ComponentRevisionReply,
     MultiRoundFeedbackConfig,
+    RevisionContractError,
     _route,
     apply_component_revision,
     launcher_hash,
@@ -68,6 +69,34 @@ def test_selects_small_nonlinear_closed_feedback_component() -> None:
     assert select_revision_components(recovery_candidate()) == ("f", "v01")
 
 
+def test_dense_cycle_prefers_nonlinear_target_source_over_whole_scc() -> None:
+    dense = CandidateModel.model_validate(
+        {
+            "candidate_id": "dense_feedback",
+            "parent_candidate_id": None,
+            "states": [
+                {"name": name, "kind": "latent"} for name in ("c", "f", "m")
+            ],
+            "state_equations": [
+                {"state": "c", "rhs": "f**2 + m - c"},
+                {"state": "f", "rhs": "v01**2 + c - f"},
+                {"state": "m", "rhs": "u01 + c - m"},
+            ],
+            "processes": [
+                {"name": "v01", "expression": "f**2 + c + m + u01"}
+            ],
+            "observation_mappings": [{"channel": "v01", "expression": "v01"}],
+            "parameters": [],
+            "initial_conditions": [
+                {"state": name, "fixed_value": 0, "scope": "global"}
+                for name in ("c", "f", "m")
+            ],
+        }
+    )
+
+    assert select_revision_components(dense) == ("f", "v01")
+
+
 def test_function_revision_preserves_topology_and_compiles() -> None:
     candidate = recovery_candidate()
     revised, audit = apply_component_revision(
@@ -94,6 +123,121 @@ def test_function_revision_preserves_topology_and_compiles() -> None:
         "tau",
         "tau_p",
     }
+
+
+def test_reused_parameter_names_preserve_parent_roles() -> None:
+    candidate = recovery_candidate()
+    reply = ComponentRevisionReply.model_validate(
+        {
+            "revisions": [
+                {
+                    "component": "f",
+                    "expression": "k*sigmoid(v01) - f/tau_f",
+                    "parameters": [
+                        {"name": "k", "role": "positive_shape"},
+                        {"name": "tau_f", "role": "coefficient"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    revised, audit = apply_component_revision(
+        candidate,
+        reply,
+        CONTEXT,
+        selected=("f",),
+        route="function_revision",
+    )
+
+    roles = {item.name: item.role.value for item in revised.parameters}
+    assert roles["k"] == "nonnegative_coefficient"
+    assert roles["tau_f"] == "time_constant"
+    assert {item["parameter"] for item in audit["parameter_role_derivations"]} == {
+        "k",
+        "tau_f",
+    }
+    assert {
+        item["code"] for item in audit["parameter_role_derivations"]
+    } == {"REUSED_PARAMETER_ROLE_PRESERVED"}
+
+
+def test_new_direct_gains_and_offset_receive_runtime_roles() -> None:
+    reply = ComponentRevisionReply.model_validate(
+        {
+            "revisions": [
+                {
+                    "component": "v01",
+                    "expression": (
+                        "baseline + gain_f*sigmoid(f) + gain_m*m + "
+                        "gain_p*p + gain_u*u01"
+                    ),
+                    "parameters": [
+                        {"name": name, "role": None}
+                        for name in (
+                            "baseline",
+                            "gain_f",
+                            "gain_m",
+                            "gain_p",
+                            "gain_u",
+                        )
+                    ],
+                }
+            ]
+        }
+    )
+
+    revised, audit = apply_component_revision(
+        recovery_candidate(),
+        reply,
+        CONTEXT,
+        selected=("v01",),
+        route="function_revision",
+    )
+
+    roles = {item.name: item.role.value for item in revised.parameters}
+    assert roles["baseline"] == "offset"
+    assert all(
+        roles[name] == "nonnegative_coefficient"
+        for name in ("gain_f", "gain_m", "gain_p", "gain_u")
+    )
+    assert len(audit["parameter_role_derivations"]) == 5
+
+
+def test_ambiguous_internal_parameter_gets_named_shape_feedback() -> None:
+    reply = ComponentRevisionReply.model_validate(
+        {
+            "revisions": [
+                {
+                    "component": "v01",
+                    "expression": "sigmoid(theta*f) + m + p + u01 + baseline",
+                    "parameters": [
+                        {"name": "theta", "role": "coefficient"},
+                        {"name": "baseline", "role": "coefficient"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(RevisionContractError) as caught:
+        apply_component_revision(
+            recovery_candidate(),
+            reply,
+            CONTEXT,
+            selected=("v01",),
+            route="function_revision",
+        )
+    diagnostic = caught.value.diagnostic()
+    assert diagnostic["code"] == "AMBIGUOUS_INTERNAL_PARAMETER_ROLE"
+    assert diagnostic["details"]["parameter"] == "theta"
+    assert diagnostic["details"]["allowed_roles"] == [
+        "shape",
+        "positive_shape",
+        "rate",
+        "time_constant",
+        "scale",
+    ]
 
 
 def test_function_revision_rejects_dependency_change() -> None:
@@ -191,12 +335,72 @@ def test_topology_backtrack_must_preserve_existing_target_pathways() -> None:
 
 
 def test_frozen_campaign_configuration_and_launcher_are_valid() -> None:
-    path = Path("configs/staged_multiround_feedback_v1.json")
-    config = MultiRoundFeedbackConfig.model_validate_json(path.read_text())
-    assert config.source_task_indices == (3, 4)
-    assert config.round_count == 2
-    assert config.fit.protocol == "collocation-forward-sensitivity-1"
+    for version in ("v1", "v2"):
+        path = Path(f"configs/staged_multiround_feedback_{version}.json")
+        config = MultiRoundFeedbackConfig.model_validate_json(path.read_text())
+        assert config.source_task_indices == (3, 4)
+        assert config.round_count == 2
+        assert config.fit.protocol == "collocation-forward-sensitivity-1"
     assert len(launcher_hash()) == 64
+
+
+def test_revision_exhaustion_persists_full_responses_and_named_feedback(
+    tmp_path: Path,
+) -> None:
+    response = {
+        "revisions": [
+            {
+                "component": "v01",
+                "expression": "sigmoid(theta*f) + m + p + u01 + baseline",
+                "parameters": [
+                    {"name": "theta", "role": "coefficient"},
+                    {"name": "baseline", "role": "coefficient"},
+                ],
+            }
+        ]
+    }
+
+    class RejectingClient:
+        settings = SimpleNamespace(attempts_per_step=2)
+
+        def call(self, **kwargs):
+            attempt = kwargs["attempt"]
+            return {
+                "request_hash": f"request_{attempt}",
+                "status": "responded",
+                "raw_response": {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": json.dumps(response)},
+                        }
+                    ]
+                },
+            }
+
+    checkpoint = tmp_path / "revision_failures.json"
+    with pytest.raises(
+        RevisionContractError, match="bounded component revision exhausted"
+    ):
+        campaign._request_revision(
+            client=RejectingClient(),
+            route="function_revision",
+            candidate=recovery_candidate(),
+            selected=("v01",),
+            context=CONTEXT,
+            scientific_context="Public context",
+            numerical_feedback={"failure": "unstable"},
+            round_index=1,
+            failure_checkpoint=checkpoint,
+        )
+
+    ledger = json.loads(checkpoint.read_text())
+    assert len(ledger["attempts"]) == 2
+    assert all(item["rejected_response"] == response for item in ledger["attempts"])
+    assert all(
+        item["diagnostic"]["code"] == "AMBIGUOUS_INTERNAL_PARAMETER_ROLE"
+        for item in ledger["attempts"]
+    )
 
 
 def test_freeze_is_bound_to_exact_unresolved_source_artifacts(tmp_path: Path) -> None:

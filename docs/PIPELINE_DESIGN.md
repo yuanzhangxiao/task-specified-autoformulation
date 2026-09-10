@@ -782,3 +782,9 @@ uses train-only collocation followed by exact forward-sensitivity refinement,
 and routes the first revision to functions. Topology is revisited only when that
 bounded function repair remains numerically unstable. This is an opt-in research
 campaign and does not alter the production fitting or search defaults.
+Its version-2 repair policy preserves runtime-owned roles for reused parameter
+identities, derives only certifiable direct-gain and additive-offset roles for new
+parameters, and asks the proposer for a specific role only for ambiguous internal
+nonlinear parameters. Rejected responses and named diagnostics survive retry
+exhaustion. The initial function scope contains the directly superlinear
+component and its coupled target producer rather than the entire dense SCC.

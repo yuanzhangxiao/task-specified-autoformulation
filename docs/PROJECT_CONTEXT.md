@@ -577,3 +577,12 @@ only when the restricted AST certifies one direct outer scalar gain. Provider
 context and diagnostics retain short interaction-local names; executable
 namespaces never flow back into later LLM requests. A public-only offline replay
 must account for the reduction in LLM repair calls before a live confirmation.
+
+The first multiround collocation-feedback run failed before fitting because the
+revision schema redundantly allowed reused parameter roles to disagree with the
+parent. The version-2 campaign makes parent roles immutable, derives new direct
+gain and offset roles only from narrow AST certificates, and reserves proposer
+role decisions for internal nonlinear parameters. It persists every rejected
+reply and structured diagnostic and limits the first repair to the directly
+superlinear component plus its target-producing partner. An offline replay of
+the frozen failed responses precedes fresh provider calls.

@@ -41,13 +41,20 @@ from autoformalism.rebuttal.staged_topology_campaign import (
 )
 from autoformalism.schemas import (
     CandidateModel,
+    ParameterRole,
     ParameterScope,
     ParameterSpec,
 )
 from autoformalism.schemas.base import Identifier, StrictSchema
-from autoformalism.schemas.staged_functions import FunctionParameter
 from autoformalism.search.identity import candidate_identity
 from autoformalism.staged_topology import content_hash
+
+
+class RevisionParameter(StrictSchema):
+    """A parameter name plus a role only when runtime derivation is impossible."""
+
+    name: Identifier
+    role: ParameterRole | None = None
 
 
 class ComponentRevision(StrictSchema):
@@ -55,7 +62,7 @@ class ComponentRevision(StrictSchema):
 
     component: Identifier
     expression: str = Field(min_length=1, max_length=4096)
-    parameters: tuple[FunctionParameter, ...] = Field(max_length=64)
+    parameters: tuple[RevisionParameter, ...] = Field(max_length=64)
 
     @model_validator(mode="after")
     def unique_parameters(self) -> ComponentRevision:
@@ -81,7 +88,10 @@ class ComponentRevisionReply(StrictSchema):
 class MultiRoundFeedbackConfig(StagedCampaignConfig):
     """Frozen two-task, two-round function-first routing experiment."""
 
-    protocol: Literal["scientific-staged-multiround-feedback-1"]
+    protocol: Literal[
+        "scientific-staged-multiround-feedback-1",
+        "scientific-staged-multiround-feedback-2",
+    ]
     source_task_indices: tuple[int, int]
     round_count: Literal[2] = 2
     fit: CollocationSensitivityConfig
@@ -105,9 +115,15 @@ class MultiRoundFeedbackConfig(StagedCampaignConfig):
 FUNCTION_REVISION_SYSTEM_PROMPT = """You repair functions in a fitted
 continuous-time model.
 The runtime selected a small set of generated components implicated by a numerical
-failure. Return exactly one complete expression and its fitted parameter names and
-qualitative roles for every selected component. Preserve the displayed nonparameter
-source set exactly; therefore this is a function revision, not a topology revision.
+failure. Return exactly one complete expression and its fitted parameter names for
+every selected component. Preserve the displayed nonparameter source set exactly;
+therefore this is a function revision, not a topology revision. Existing parameter
+identities and roles are immutable: repeat their displayed names with role null. For a
+new direct scalar term gain or additive constant, use a natural name with role null;
+the runtime derives its role from the expression.
+For a new parameter nested inside a nonlinear function, denominator, exponent, or
+other internal law, choose a specific shape, positive_shape, rate, time_constant, or
+scale role rather than the generic coefficient role.
 Avoid positive superlinear closed-feedback growth and prefer bounded or saturating
 nonlinear response when scientifically compatible with the public requirement.
 Do not change states, processes, target mappings, initial values, or other equations.
@@ -116,13 +132,32 @@ Do not provide ranges, scopes, units, prose, scores, or a complete model."""
 TOPOLOGY_REVISION_SYSTEM_PROMPT = """You backtrack one equation-dependency
 decision in a continuous-time model after a bounded function repair remained
 numerically unstable.
-Return exactly one complete expression and its fitted parameter names and qualitative
-roles for every selected generated component. You may add or remove dependencies,
-but only from the displayed existing public and generated variables. Preserve the
-variable inventory, target mapping, all unselected equations, and the required causal
-pathway. Prefer the smallest scientifically motivated dependency correction that
-removes the diagnosed unstable closed loop. Do not provide ranges, scopes, units,
-prose, scores, or a complete model."""
+Return exactly one complete expression and its fitted parameter names for every
+selected generated component. Use role null for reused parameters, new direct scalar
+term gains, and new additive constants. Give a qualitative role only to a new internal
+parameter whose role cannot be derived from the outer expression. You may add or
+remove dependencies, but only from the displayed existing public and generated
+variables. Preserve the variable inventory, target mapping, all unselected equations,
+and the required causal pathway. Prefer the smallest scientifically motivated
+dependency correction that removes the diagnosed unstable closed loop. Do not
+provide ranges, scopes, units, prose, scores, or a complete model."""
+
+
+class RevisionContractError(ValueError):
+    """A provider-visible deterministic failure with named repair context."""
+
+    def __init__(self, code: str, message: str, **details: Any) -> None:
+        super().__init__(message)
+        self.code = code
+        self.details = details
+
+    def diagnostic(self) -> dict[str, Any]:
+        """Return the bounded structured feedback sent on the next attempt."""
+        return {
+            "code": self.code,
+            "message": str(self),
+            "details": self.details,
+        }
 
 
 def launcher_hash() -> str:
@@ -216,7 +251,11 @@ def freeze_campaign(
             }
         )
     plan = {
-        "schema_version": "scientific-staged-multiround-feedback-plan-1",
+        "schema_version": (
+            "scientific-staged-multiround-feedback-plan-2"
+            if config.protocol.endswith("-2")
+            else "scientific-staged-multiround-feedback-plan-1"
+        ),
         "config": config.model_dump(mode="json"),
         "source_rescue_plan_sha256": source_digest,
         "source_rescue_summary_file_sha256": _sha256(source_summary_path),
@@ -303,7 +342,9 @@ def run_campaign(
                     )
                     result = {
                         "schema_version": (
-                            "scientific-staged-multiround-feedback-result-1"
+                            "scientific-staged-multiround-feedback-result-2"
+                            if config.protocol.endswith("-2")
+                            else "scientific-staged-multiround-feedback-result-1"
                         ),
                         "status": "failed",
                         "task_id": task["task_id"],
@@ -312,6 +353,7 @@ def run_campaign(
                         "rounds": progress["rounds"],
                         "error_type": type(exc).__name__,
                         "error": str(exc)[:8000],
+                        "revision_failures": _revision_failure_records(root),
                         "physical_requests": len(client.records),
                         "observed_total_tokens": sum(
                             int(item.get("observed_total_tokens") or 0)
@@ -414,6 +456,7 @@ def run_task(
                 scientific_context=scientific_context,
                 numerical_feedback=prior_feedback,
                 round_index=round_index,
+                failure_checkpoint=round_root / "revision_failures.json",
             )
             _write_once_json(revision_checkpoint, revision_record)
             _write_once_json(candidate_checkpoint, revised.model_dump(mode="json"))
@@ -457,7 +500,11 @@ def run_task(
         current = revised
         prior_feedback = _round_feedback(round_record)
     return {
-        "schema_version": "scientific-staged-multiround-feedback-result-1",
+        "schema_version": (
+            "scientific-staged-multiround-feedback-result-2"
+            if config.protocol.endswith("-2")
+            else "scientific-staged-multiround-feedback-result-1"
+        ),
         "status": "complete",
         "task_id": task["task_id"],
         "benchmark_id": task["benchmark_id"],
@@ -480,7 +527,14 @@ def run_task(
 
 
 def select_revision_components(candidate: CandidateModel) -> tuple[str, ...]:
-    """Select the smallest nonlinear generated SCC implicated in blow-up risk."""
+    """Select a nonlinear component and its nearest target-producing partner.
+
+    The first pilot expanded an entire strongly connected component.  Dense
+    candidates therefore asked the proposer to rewrite four equations at once,
+    even when superlinear syntax directly implicated only one feedback state and
+    the readout.  This selector keeps the first repair local.  A later topology
+    route can still revise dependencies after the bounded function repair fails.
+    """
     expressions = _component_expressions(candidate)
     generated = set(expressions)
     parameters = {item.name for item in candidate.parameters}
@@ -502,25 +556,48 @@ def select_revision_components(candidate: CandidateModel) -> tuple[str, ...]:
                 frontier.extend(dependencies[item] - seen)
         return False
 
-    risky: list[tuple[str, ...]] = []
+    target_components: list[str] = []
+    for mapping in candidate.observation_mappings:
+        symbols = RestrictedParser().parse(
+            mapping.expression, location=f"mapping:{mapping.channel}"
+        ).symbols
+        target_components.extend(name for name in expressions if name in symbols)
+
+    primary: str | None = None
+    for target in target_components:
+        parsed = RestrictedParser().parse(expressions[target], location=target)
+        nonlinear_sources = _superlinear_source_names(parsed.tree, generated)
+        primary = next(
+            (
+                name
+                for name in expressions
+                if name in nonlinear_sources and name != target
+            ),
+            None,
+        )
+        if primary is not None:
+            break
+
+    risky: list[str] = []
     for name, expression in expressions.items():
         parsed = RestrictedParser().parse(expression, location=name)
         source_symbols = set(parsed.symbols) - parameters
         if not _has_superlinear_dependence(parsed.tree, source_symbols & generated):
             continue
-        component = tuple(
-            sorted(
-                item
-                for item in generated
-                if (item == name or reaches(name, item))
-                and (item == name or reaches(item, name))
-            )
-        )
-        if component and component not in risky:
-            risky.append(component)
+        risky.append(name)
     if risky:
-        selected = min(risky, key=lambda item: (len(item), item))
-        return selected[:4]
+        selected = [primary or risky[0]]
+        coupled_targets = [
+            name
+            for name in target_components
+            if name not in selected
+            and (reaches(selected[0], name) or reaches(name, selected[0]))
+        ]
+        if coupled_targets:
+            selected.append(coupled_targets[0])
+        elif len(risky) > 1:
+            selected.append(risky[1])
+        return tuple(selected)
     nonlinear = [
         name
         for name, expression in expressions.items()
@@ -556,6 +633,7 @@ def apply_component_revision(
     revised_parameters: dict[str, ParameterSpec] = {}
     replacement: dict[str, str] = {}
     source_diffs: dict[str, dict[str, list[str]]] = {}
+    role_derivations: list[dict[str, Any]] = []
     for item in reply.revisions:
         declared = {parameter.name for parameter in item.parameters}
         if declared & (generated | supplied):
@@ -582,20 +660,35 @@ def apply_component_revision(
             "added": sorted(actual - old_sources),
         }
         replacement[item.component] = item.expression
+        effective_roles, derivations = _effective_revision_parameter_roles(
+            item,
+            parsed.tree,
+            scientific_symbols=generated | supplied,
+            parent_parameters=old_parameters,
+        )
+        role_derivations.extend(derivations)
         for parameter in item.parameters:
             spec = ParameterSpec(
                 name=parameter.name,
                 scope=ParameterScope.GLOBAL,
-                role=parameter.role,
+                role=effective_roles[parameter.name],
             )
             previous = revised_parameters.get(parameter.name)
             if previous is not None and previous.role is not spec.role:
-                raise ValueError("parameter role conflicts across revised components")
-            if (
-                parameter.name in old_parameters
-                and old_parameters[parameter.name].role is not spec.role
-            ):
-                raise ValueError("reused parameter role conflicts with the parent")
+                raise RevisionContractError(
+                    "NEW_PARAMETER_ROLE_CONFLICT",
+                    (
+                        "one new parameter has incompatible roles across revised "
+                        "components"
+                    ),
+                    parameter=parameter.name,
+                    first_role=previous.role.value,
+                    second_role=spec.role.value,
+                    allowed_action=(
+                        "reuse one role consistently or give scientifically distinct "
+                        "parameters different names"
+                    ),
+                )
             revised_parameters[parameter.name] = spec
     final_expressions = {**expressions, **replacement}
     active_symbols = set().union(
@@ -669,7 +762,185 @@ def apply_component_revision(
         "topology_changed": topology_changed,
         "source_diffs": source_diffs,
         "target_reachability_preserved": not lost_reachability,
+        "parameter_role_derivations": role_derivations,
     }
+
+
+def _effective_revision_parameter_roles(
+    revision: ComponentRevision,
+    tree: ast.Expression,
+    *,
+    scientific_symbols: set[str],
+    parent_parameters: Mapping[str, ParameterSpec],
+) -> tuple[dict[str, ParameterRole], list[dict[str, Any]]]:
+    """Preserve old roles and derive only syntactically certified new roles."""
+    requested = {item.name: item.role for item in revision.parameters}
+    effective: dict[str, ParameterRole] = {}
+    derivations: list[dict[str, Any]] = []
+    for parameter in revision.parameters:
+        parent = parent_parameters.get(parameter.name)
+        if parent is not None:
+            effective[parameter.name] = parent.role
+            derivations.append(
+                {
+                    "code": "REUSED_PARAMETER_ROLE_PRESERVED",
+                    "parameter": parameter.name,
+                    "requested_role": (
+                        parameter.role.value if parameter.role is not None else None
+                    ),
+                    "effective_role": parent.role.value,
+                    "certificate": "parent_parameter_identity",
+                    "normalization_applied": parameter.role is not parent.role,
+                }
+            )
+            continue
+        certified = _certified_new_parameter_role(
+            parameter.name,
+            tree,
+            parameter_names=set(requested),
+            scientific_symbols=scientific_symbols,
+        )
+        if certified is not None:
+            role, certificate = certified
+            effective[parameter.name] = role
+            if parameter.role is not role:
+                derivations.append(
+                    {
+                        "code": "NEW_PARAMETER_ROLE_DERIVED",
+                        "parameter": parameter.name,
+                        "requested_role": (
+                            parameter.role.value if parameter.role is not None else None
+                        ),
+                        "effective_role": role.value,
+                        "certificate": certificate,
+                    }
+                )
+            continue
+        if parameter.role is None or parameter.role in {
+            ParameterRole.COEFFICIENT,
+            ParameterRole.NONNEGATIVE_COEFFICIENT,
+            ParameterRole.OFFSET,
+        }:
+            occurrences = _parameter_occurrences(tree, parameter.name)
+            raise RevisionContractError(
+                "AMBIGUOUS_INTERNAL_PARAMETER_ROLE",
+                (
+                    "a new parameter is not a certifiable direct term gain or "
+                    "additive offset"
+                ),
+                component=revision.component,
+                parameter=parameter.name,
+                requested_role=(
+                    parameter.role.value if parameter.role is not None else None
+                ),
+                occurrences=occurrences,
+                allowed_roles=[
+                    "shape",
+                    "positive_shape",
+                    "rate",
+                    "time_constant",
+                    "scale",
+                ],
+                reason=(
+                    "the parameter occurs inside a nonlinear/internal law, is "
+                    "repeated, "
+                    "or does not multiply one scientific source term directly"
+                ),
+            )
+        effective[parameter.name] = parameter.role
+    return effective, derivations
+
+
+def _certified_new_parameter_role(
+    parameter: str,
+    tree: ast.Expression,
+    *,
+    parameter_names: set[str],
+    scientific_symbols: set[str],
+) -> tuple[ParameterRole, str] | None:
+    """Recognize an additive offset or one direct nonnegative outer magnitude."""
+    if _parameter_occurrences(tree, parameter) != 1:
+        return None
+    for _sign, term in _top_level_additive_terms(tree.body):
+        stripped = _strip_unary_sign(term)
+        if isinstance(stripped, ast.Name) and stripped.id == parameter:
+            return ParameterRole.OFFSET, "single_top_level_additive_constant"
+        numerator, denominator = _multiplicative_shell(stripped)
+        direct_parameters = {
+            node.id
+            for node in (*numerator, *denominator)
+            if isinstance(node, ast.Name) and node.id in parameter_names
+        }
+        if direct_parameters != {parameter} or any(
+            isinstance(node, ast.Name) and node.id == parameter
+            for node in denominator
+        ):
+            continue
+        remainder = [
+            node
+            for node in numerator
+            if not (isinstance(node, ast.Name) and node.id == parameter)
+        ]
+        if not remainder:
+            continue
+        sources = {
+            child.id
+            for node in remainder
+            for child in ast.walk(node)
+            if isinstance(child, ast.Name) and child.id in scientific_symbols
+        }
+        if sources:
+            return (
+                ParameterRole.NONNEGATIVE_COEFFICIENT,
+                "single_direct_outer_gain_with_explicit_term_sign",
+            )
+    return None
+
+
+def _top_level_additive_terms(
+    node: ast.expr, sign: int = 1
+) -> list[tuple[int, ast.expr]]:
+    """Flatten only the outer additive shell, retaining each explicit sign."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [
+            *_top_level_additive_terms(node.left, sign),
+            *_top_level_additive_terms(node.right, sign),
+        ]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub):
+        return [
+            *_top_level_additive_terms(node.left, sign),
+            *_top_level_additive_terms(node.right, -sign),
+        ]
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return _top_level_additive_terms(node.operand, -sign)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
+        return _top_level_additive_terms(node.operand, sign)
+    return [(sign, node)]
+
+
+def _strip_unary_sign(node: ast.expr) -> ast.expr:
+    while isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        node = node.operand
+    return node
+
+
+def _multiplicative_shell(node: ast.expr) -> tuple[list[ast.expr], list[ast.expr]]:
+    """Flatten multiplication/division without inspecting grouped internal laws."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        left_num, left_den = _multiplicative_shell(node.left)
+        right_num, right_den = _multiplicative_shell(node.right)
+        return left_num + right_num, left_den + right_den
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left_num, left_den = _multiplicative_shell(node.left)
+        right_num, right_den = _multiplicative_shell(node.right)
+        return left_num + right_den, left_den + right_num
+    return [node], []
+
+
+def _parameter_occurrences(tree: ast.AST, parameter: str) -> int:
+    return sum(
+        isinstance(node, ast.Name) and node.id == parameter for node in ast.walk(tree)
+    )
 
 
 def _request_revision(
@@ -682,13 +953,14 @@ def _request_revision(
     scientific_context: str,
     numerical_feedback: Mapping[str, Any],
     round_index: int,
+    failure_checkpoint: Path | None = None,
 ) -> tuple[CandidateModel, dict[str, Any]]:
     diagnostic: dict[str, Any] | None = None
     attempts: list[dict[str, Any]] = []
     expressions = _component_expressions(candidate)
     parameter_names = {item.name for item in candidate.parameters}
     request = {
-        "schema_version": "component-revision-request-1",
+        "schema_version": "component-revision-request-2",
         "route": route,
         "scientific_context": scientific_context,
         "selected_components": [
@@ -709,6 +981,9 @@ def _request_revision(
             for name in selected
         ],
         "all_current_equations": expressions,
+        "parent_parameters": {
+            item.name: item.role.value for item in candidate.parameters
+        },
         "available_nonparameter_symbols": sorted(
             set(expressions) | set(context.forcing_channels) | {context.time_symbol}
         ),
@@ -745,19 +1020,32 @@ def _request_revision(
                 route=route,  # type: ignore[arg-type]
             )
         except (ValueError, TypeError, KeyError) as exc:
+            named = _named_revision_diagnostic(exc)
             diagnostic = {
                 "rejected_response": rejected,
-                "error": str(exc)[:6000],
-                "instruction": "repair only the stated contract failure",
+                "failure": named,
+                "instruction": _repair_instruction(named),
             }
             attempts.append(
                 {
                     "attempt": attempt,
                     "request_hash": record["request_hash"],
                     "accepted": False,
-                    "error": str(exc)[:6000],
+                    "rejected_response": rejected,
+                    "diagnostic": named,
                 }
             )
+            if failure_checkpoint is not None:
+                atomic_json(
+                    failure_checkpoint,
+                    {
+                        "schema_version": "component-revision-failures-1",
+                        "route": route,
+                        "parent_sha256": _candidate_hash(candidate),
+                        "selected_components": list(selected),
+                        "attempts": attempts,
+                    },
+                )
             continue
         attempts.append(
             {
@@ -767,14 +1055,83 @@ def _request_revision(
             }
         )
         return revised, {
-            "schema_version": "component-revision-record-1",
+            "schema_version": "component-revision-record-2",
             "route": route,
             "parent_sha256": _candidate_hash(candidate),
             "reply": reply.model_dump(mode="json"),
             "audit": audit,
             "attempts": attempts,
         }
-    raise ValueError(f"bounded component revision exhausted for {route}")
+    raise RevisionContractError(
+        "COMPONENT_REVISION_ATTEMPTS_EXHAUSTED",
+        f"bounded component revision exhausted for {route}",
+        route=route,
+        selected_components=list(selected),
+        rejected_attempt_count=len(attempts),
+        final_diagnostic=(attempts[-1]["diagnostic"] if attempts else None),
+        failure_checkpoint=str(failure_checkpoint) if failure_checkpoint else None,
+    )
+
+
+def _named_revision_diagnostic(exc: Exception) -> dict[str, Any]:
+    """Convert every local rejection into one stable provider-facing object."""
+    if isinstance(exc, RevisionContractError):
+        return exc.diagnostic()
+    message = str(exc)[:6000]
+    lowered = message.lower()
+    if "changed topology sources" in lowered:
+        code = "FUNCTION_REVISION_SOURCE_SET_CHANGED"
+    elif "unavailable symbols" in lowered:
+        code = "UNAVAILABLE_SYMBOL"
+    elif "match the selected order" in lowered:
+        code = "REVISION_COMPONENT_SET_MISMATCH"
+    elif "parameter collides" in lowered:
+        code = "PARAMETER_SCIENTIFIC_SYMBOL_COLLISION"
+    elif "did not change" in lowered:
+        code = "FUNCTIONAL_DUPLICATE"
+    elif "topology" in lowered:
+        code = "TOPOLOGY_CONTRACT_FAILURE"
+    else:
+        code = "REVISION_CONTRACT_FAILURE"
+    return {"code": code, "message": message, "details": {}}
+
+
+def _repair_instruction(diagnostic: Mapping[str, Any]) -> str:
+    """Name the smallest correction rather than asking for a blind retry."""
+    code = diagnostic.get("code")
+    details = diagnostic.get("details") or {}
+    if code == "AMBIGUOUS_INTERNAL_PARAMETER_ROLE":
+        return (
+            f"Change only parameter {details.get('parameter')} to one of the listed "
+            "internal roles, or rewrite it as one direct outer gain; preserve every "
+            "selected component and required source."
+        )
+    if code == "NEW_PARAMETER_ROLE_CONFLICT":
+        return (
+            f"Use one role for new parameter {details.get('parameter')} everywhere, "
+            "or rename scientifically distinct parameters; change nothing else."
+        )
+    if code == "FUNCTION_REVISION_SOURCE_SET_CHANGED":
+        return (
+            "Restore exactly the missing required sources and remove exactly the extra "
+            "sources; change no other component."
+        )
+    if code == "REVISION_COMPONENT_SET_MISMATCH":
+        return "Return exactly the selected components once and in the displayed order."
+    if code == "UNAVAILABLE_SYMBOL":
+        return "Remove or replace only the unavailable symbol using the displayed set."
+    return (
+        "Repair only the named deterministic contract failure and preserve all "
+        "other choices."
+    )
+
+
+def _revision_failure_records(task_root: Path) -> list[dict[str, Any]]:
+    """Read durable per-round rejection ledgers for terminal reporting."""
+    return [
+        _read_object(path)
+        for path in sorted(task_root.glob("round_*/revision_failures.json"))
+    ]
 
 
 def _route(round_index: int, rounds: list[dict[str, Any]]) -> str:
@@ -847,6 +1204,7 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
                 "rounds": compact_rounds,
                 "error_type": result.get("error_type"),
                 "error": result.get("error"),
+                "revision_failures": result.get("revision_failures", []),
                 "physical_requests": result["physical_requests"],
                 "observed_total_tokens": result["observed_total_tokens"],
                 "provider_seconds": result["provider_seconds"],
@@ -857,8 +1215,25 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
     stable = [item for item in rounds if item["numerically_stable"]]
     first_rounds = [item for item in rounds if item["round_index"] == 1]
     final_rounds = [row["rounds"][-1] for row in rows if row.get("rounds")]
+    rejected_revision_attempts = sum(
+        int(item.get("rejected_revision_attempt_count", 0)) for item in rounds
+    ) + sum(
+        len(ledger.get("attempts", []))
+        for row in rows
+        for ledger in row.get("revision_failures", [])
+    )
+    parent_role_preservations = sum(
+        int(item.get("parent_role_preservation_count", 0)) for item in rounds
+    )
+    new_role_derivations = sum(
+        int(item.get("new_role_derivation_count", 0)) for item in rounds
+    )
     return {
-        "schema_version": "scientific-staged-multiround-feedback-summary-1",
+        "schema_version": (
+            "scientific-staged-multiround-feedback-summary-2"
+            if str(plan["config"]["protocol"]).endswith("-2")
+            else "scientific-staged-multiround-feedback-summary-1"
+        ),
         "status": "complete"
         if all(row["result_present"] for row in rows)
         else "incomplete",
@@ -877,6 +1252,9 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         ),
         "route_counts": dict(sorted(route_counts.items())),
         "topology_backtrack_count": route_counts.get("topology_revision", 0),
+        "rejected_revision_attempt_count": rejected_revision_attempts,
+        "parent_role_preservation_count": parent_role_preservations,
+        "new_role_derivation_count": new_role_derivations,
         "collocation_initializer_success_rate": _rate(
             sum(
                 bool((item["fit"].get("initializer") or {}).get("success"))
@@ -917,6 +1295,7 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
     fit = item["fit"]
     revision = item.get("revision") or {}
     audit = revision.get("audit") or {}
+    role_derivations = audit.get("parameter_role_derivations") or []
     initializer = fit.get("initializer") or {}
     refinement = fit.get("refinement") or {}
     return {
@@ -925,6 +1304,17 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
         "selected_components": item["selected_components"],
         "candidate_sha256": item["candidate_sha256"],
         "topology_changed": audit.get("topology_changed"),
+        "rejected_revision_attempt_count": sum(
+            not bool(item.get("accepted")) for item in revision.get("attempts", [])
+        ),
+        "parent_role_preservation_count": sum(
+            item.get("code") == "REUSED_PARAMETER_ROLE_PRESERVED"
+            for item in role_derivations
+        ),
+        "new_role_derivation_count": sum(
+            item.get("code") == "NEW_PARAMETER_ROLE_DERIVED"
+            for item in role_derivations
+        ),
         "numerically_stable": item["numerically_stable"],
         "training_normalized_mse": item["training_normalized_mse"],
         "validation_normalized_mse": item["validation_normalized_mse"],
@@ -973,6 +1363,32 @@ def _has_superlinear_dependence(tree: ast.AST, sources: set[str]) -> bool:
         ):
             return True
     return False
+
+
+def _superlinear_source_names(tree: ast.AST, sources: set[str]) -> set[str]:
+    """Return generated symbols participating in explicit superlinear syntax."""
+
+    def names(node: ast.AST) -> set[str]:
+        return {
+            item.id
+            for item in ast.walk(node)
+            if isinstance(item, ast.Name) and item.id in sources
+        }
+
+    result: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Pow)
+            and (not isinstance(node.right, ast.Constant) or node.right.value > 1)
+        ):
+            result.update(names(node.left))
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+            left = names(node.left)
+            right = names(node.right)
+            if left and right:
+                result.update(left | right)
+    return result
 
 
 def _target_reachability(
@@ -1098,6 +1514,8 @@ __all__ = [
     "ComponentRevision",
     "ComponentRevisionReply",
     "MultiRoundFeedbackConfig",
+    "RevisionContractError",
+    "RevisionParameter",
     "apply_component_revision",
     "freeze_campaign",
     "run_campaign",

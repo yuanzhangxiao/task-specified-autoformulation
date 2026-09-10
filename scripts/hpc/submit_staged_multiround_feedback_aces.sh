@@ -7,10 +7,9 @@ readonly repository="${AF_REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 readonly python="${AF_PYTHON:-${repository}/.venv/bin/python}"
 readonly scratch_root="${SCRATCH:-/scratch/user/${USER}}"
 readonly project_root="${PROJECT:-${scratch_root}}"
-readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-multiround-feedback-v1-aces-h100x1}"
-readonly image="${AF_VLLM_IMAGE:-${project_root}/containers/vllm-openai-v0.27.1.sif}"
+readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-multiround-feedback-v2-aces-h100x1}"
 readonly account="${AF_ACCOUNT:-156264627414}"
-readonly config="${AF_CONFIG:-${repository}/configs/staged_multiround_feedback_v1.json}"
+readonly config="${AF_CONFIG:-${repository}/configs/staged_multiround_feedback_v2.json}"
 readonly plan="${output_root}/plan.json"
 readonly manifest="${output_root}/submission_manifest.json"
 git -C "${repository}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
@@ -18,9 +17,29 @@ git -C "${repository}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
   exit 2
 }
 [[ -x "${python}" ]] || { echo "missing Python: ${python}" >&2; exit 2; }
+[[ -f "${config}" ]] || { echo "missing config: ${config}" >&2; exit 2; }
 [[ -f "${AF_SOURCE_RESCUE_ROOT}/plan.json" ]] || { echo "missing source rescue plan" >&2; exit 2; }
 [[ -f "${AF_SOURCE_RESCUE_ROOT}/summary/summary.json" ]] || { echo "missing source rescue summary" >&2; exit 2; }
+expected_image_sha="$(jq -r '.serving_image_sha256' "${config}")"
+if [[ -n "${AF_VLLM_IMAGE:-}" ]]; then
+  image="${AF_VLLM_IMAGE}"
+else
+  image=""
+  while IFS= read -r -d '' candidate; do
+    candidate_sha="$(sha256sum "${candidate}")"
+    if [[ "${candidate_sha%% *}" == "${expected_image_sha}" ]]; then
+      image="${candidate}"
+      break
+    fi
+  done < <(find "${scratch_root}" "${project_root}" -maxdepth 4 -type f -name '*.sif' -print0 2>/dev/null)
+fi
 [[ -f "${image}" ]] || { echo "missing vLLM image: ${image}" >&2; exit 2; }
+actual_image_sha="$(sha256sum "${image}")"
+[[ "${actual_image_sha%% *}" == "${expected_image_sha}" ]] || {
+  echo "vLLM image does not match frozen config SHA" >&2
+  exit 2
+}
+readonly image
 [[ -z "$(git -C "${repository}" status --porcelain)" ]] || {
   echo "multiround checkout must be clean before freezing" >&2
   exit 2
@@ -58,7 +77,7 @@ plan_path = Path(sys.argv[3])
 source_root = Path(sys.argv[4])
 commit = sys.argv[5]
 payload = {
-    "schema_version": "scientific-staged-multiround-feedback-submission-1",
+    "schema_version": "scientific-staged-multiround-feedback-submission-2",
     "job_id": job_id,
     "commit": commit,
     "plan_path": str(plan_path),
