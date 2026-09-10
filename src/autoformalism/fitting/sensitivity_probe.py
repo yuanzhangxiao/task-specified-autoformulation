@@ -1,8 +1,8 @@
 """Restricted symbolic derivatives and forward sensitivities for frozen probes.
 
-This opt-in diagnostic supports global parameters, fixed numeric initial states,
-open rollouts, smooth expressions and no state constraints. It never evaluates
-proposer text as Python and does not change the production fitter defaults.
+This opt-in diagnostic supports global parameters, parameter-independent causal
+initializers, open rollouts, smooth expressions and no state constraints. It never
+evaluates proposer text as Python and does not change the production fitter defaults.
 """
 
 from __future__ import annotations
@@ -21,9 +21,17 @@ from autoformalism.data import DatasetSplit, Trajectory
 from autoformalism.expressions import CompiledModel
 from autoformalism.fitting.casadi_initializer import _translate
 from autoformalism.fitting.models import FitConfig
-from autoformalism.fitting.simulation import forcing_segment_indices, trajectory_forcing
+from autoformalism.fitting.simulation import (
+    forcing_segment_indices,
+    trajectory_forcing,
+    trajectory_initial_state,
+)
 from autoformalism.fitting.stagnation import RolloutOracle
 from autoformalism.rebuttal.fitter_diagnostic import _finite_payload, write_json
+
+
+class SensitivityContractError(ValueError):
+    """The candidate needs a feature outside this numerical adapter's contract."""
 
 
 @dataclass
@@ -35,16 +43,28 @@ class SymbolicODE:
     def __post_init__(self) -> None:
         candidate = self.model.validated.candidate
         if self.model.validated.context.lagged_targets or candidate.constraints:
-            raise ValueError(
+            raise SensitivityContractError(
                 "sensitivity probe requires open rollouts without constraints"
             )
         if any(p.scope.value != "global" for p in candidate.parameters):
-            raise ValueError("sensitivity probe requires global parameters")
-        initial = {i.state: i.fixed_value for i in candidate.initial_conditions}
-        if set(initial) != set(self.model.state_names) or any(
-            v is None for v in initial.values()
-        ):
-            raise ValueError("sensitivity probe requires fixed numeric initial states")
+            raise SensitivityContractError(
+                "sensitivity probe requires global parameters"
+            )
+        initials = {item.state: item for item in candidate.initial_conditions}
+        if set(initials) != set(self.model.state_names):
+            raise SensitivityContractError(
+                "sensitivity probe requires one initializer per state"
+            )
+        fitted_initials = sorted(
+            name
+            for name, item in initials.items()
+            if item.initialization_range is not None
+        )
+        if fitted_initials:
+            raise SensitivityContractError(
+                "sensitivity probe does not yet optimize fitted initial states: "
+                f"{fitted_initials}"
+            )
         expressions = [
             *self.model.validated.process_expressions.values(),
             *self.model.validated.equation_expressions.values(),
@@ -59,7 +79,9 @@ class SymbolicODE:
                         not isinstance(node.right, ast.Constant) or node.right.value < 0
                     )
                 ):
-                    raise ValueError("probe declines negative or variable powers")
+                    raise SensitivityContractError(
+                        "probe declines negative or variable powers"
+                    )
                 if isinstance(node, ast.Call) and node.func.id in {
                     "abs",
                     "min",
@@ -67,16 +89,22 @@ class SymbolicODE:
                     "sqrt",
                     "log",
                 }:
-                    raise ValueError(
+                    raise SensitivityContractError(
                         "probe declines nonsmooth or domain-restricted functions"
                     )
         self.names = self.model.parameter_names
         self.channels = tuple(self.model.validated.context.targets)
         self.inputs = tuple(sorted(self.model.validated.forcing_symbols))
-        self.initial = np.array(
-            [initial[n] for n in self.model.state_names], dtype=float
+        self.state_count = len(self.model.state_names)
+        self._fixed_initial = (
+            np.asarray(
+                [initials[name].fixed_value for name in self.model.state_names],
+                dtype=float,
+            )
+            if all(item.fixed_value is not None for item in initials.values())
+            else None
         )
-        n, p = len(self.initial), len(self.names)
+        n, p = self.state_count, len(self.names)
         x, theta = ca.SX.sym("x", n), ca.SX.sym("theta", p)
         u, time = ca.SX.sym("u", len(self.inputs)), ca.SX.sym("time")
         env = {
@@ -128,8 +156,23 @@ class SymbolicODE:
             "rhs_parameter_affine_certified": self.rhs_affine,
             "joint_rhs_observation_affine_certified": self.affine,
             "local_parameter_partials": str(ft),
+            "trajectory_specific_initialization": self._fixed_initial is None,
+            "initial_parameter_sensitivity_zero_certified": True,
             "rollout_linearity_claimed": False,
         }
+
+    @property
+    def initial(self) -> np.ndarray:
+        """Return the common fixed initial vector for legacy scalar matching probes."""
+        if self._fixed_initial is None:
+            raise SensitivityContractError(
+                "candidate has trajectory-specific analytic initial states"
+            )
+        return self._fixed_initial.copy()
+
+    def initial_for(self, trajectory: Trajectory) -> np.ndarray:
+        """Resolve the parameter-independent causal initializer for one trajectory."""
+        return trajectory_initial_state(self.model, trajectory, {})
 
 
 def symbolic_rollout(
@@ -142,16 +185,17 @@ def symbolic_rollout(
     sensitivities: bool = False,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray, dict]:
     """Integrate states and optionally S'=F_x S+F_theta with exact local AD."""
-    n, p = len(system.initial), len(theta)
+    initial = system.initial_for(trajectory)
+    n, p = system.state_count, len(theta)
     time = trajectory.time
     forcing = trajectory_forcing(system.model, trajectory)
     states = np.empty((len(time), n))
     values = np.empty((len(time), len(system.channels)))
     jacobian = np.empty((len(time), len(system.channels), p)) if sensitivities else None
     current = (
-        np.concatenate((system.initial, np.zeros(n * p)))
+        np.concatenate((initial, np.zeros(n * p)))
         if sensitivities
-        else system.initial.copy()
+        else initial.copy()
     )
     all_values = np.empty((len(time), len(current)))
     all_values[0] = current

@@ -608,6 +608,7 @@ def test_summary_counts_initializer_and_refinement_from_compact_rounds(
                             "revision": {"attempts": [], "audit": {}},
                             "fit": {
                                 "status": "fit_failed",
+                                "failure_class": "fitter_contract",
                                 "initializer": {"success": True},
                                 "refinement": {"optimizer_success": False},
                             },
@@ -630,3 +631,24 @@ def test_summary_counts_initializer_and_refinement_from_compact_rounds(
     assert summary["completed_rounds"] == 1
     assert summary["collocation_initializer_success_rate"] == 1.0
     assert summary["forward_sensitivity_optimizer_success_rate"] == 0.0
+    assert summary["fitter_contract_failure_round_count"] == 1
+
+
+def test_fitter_contract_failure_cannot_route_scientific_revision() -> None:
+    rounds = [
+        {
+            "fit": {"failure_class": "fitter_contract"},
+            "numerically_stable": False,
+        }
+    ]
+    with pytest.raises(ValueError, match="cannot route scientific revision"):
+        _route(2, rounds)
+
+
+def test_v3_config_freezes_analytic_initializer_contract() -> None:
+    config = MultiRoundFeedbackConfig.model_validate_json(
+        Path("configs/staged_multiround_feedback_v3.json").read_text()
+    )
+
+    assert config.protocol == "scientific-staged-multiround-feedback-3"
+    assert campaign._artifact_schema(config.protocol, "summary").endswith("-3")

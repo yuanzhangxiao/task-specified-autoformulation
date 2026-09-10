@@ -22,7 +22,11 @@ from autoformalism.expressions import CompiledModel
 from autoformalism.fitting.fitter import evaluate_fitted_candidate
 from autoformalism.fitting.matching_probe import bounded_latent_start
 from autoformalism.fitting.models import FitConfig
-from autoformalism.fitting.sensitivity_probe import SymbolicODE, SymbolicOracle
+from autoformalism.fitting.sensitivity_probe import (
+    SensitivityContractError,
+    SymbolicODE,
+    SymbolicOracle,
+)
 from autoformalism.fitting.stagnation import RolloutOracle, instrumented_fit
 from autoformalism.schemas import CandidateModel, ParameterDomain, ParameterRole
 from autoformalism.schemas.base import StrictSchema
@@ -74,16 +78,24 @@ def fit_collocation_forward_sensitivity(
     metrics are fresh causal rollouts from the candidate's fixed initials.
     """
     if training.name is not SplitName.TRAIN:
-        raise ValueError("collocation-sensitivity fitting requires training data")
+        raise SensitivityContractError(
+            "collocation-sensitivity fitting requires training data"
+        )
     if validation.name is not SplitName.VALIDATION:
-        raise ValueError("collocation-sensitivity scoring requires validation data")
+        raise SensitivityContractError(
+            "collocation-sensitivity scoring requires validation data"
+        )
     if tuple(model.validated.context.targets) != ("v01",):
-        raise ValueError("current transfer adapter requires the single target v01")
+        raise SensitivityContractError(
+            "current transfer adapter requires the single target v01"
+        )
     system = SymbolicODE(model)
     settings = config.fit_config()
     scale = TrainingScaler().fit(training).scales["target:v01"].standard_deviation
     if not np.isfinite(scale) or scale <= 0.0:
-        raise ValueError("training target scale must be positive and finite")
+        raise SensitivityContractError(
+            "training target scale must be positive and finite"
+        )
     directory.mkdir(parents=True, exist_ok=True)
     layout = RolloutOracle(
         model,

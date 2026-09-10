@@ -7,9 +7,9 @@ readonly repository="${AF_REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 readonly python="${AF_PYTHON:-${repository}/.venv/bin/python}"
 readonly scratch_root="${SCRATCH:-/scratch/user/${USER}}"
 readonly project_root="${PROJECT:-${scratch_root}}"
-readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-multiround-feedback-v2-aces-h100x1}"
+readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-multiround-feedback-v3-aces-h100x1}"
 readonly account="${AF_ACCOUNT:-156264627414}"
-readonly config="${AF_CONFIG:-${repository}/configs/staged_multiround_feedback_v2.json}"
+readonly config="${AF_CONFIG:-${repository}/configs/staged_multiround_feedback_v3.json}"
 readonly plan="${output_root}/plan.json"
 readonly manifest="${output_root}/submission_manifest.json"
 git -C "${repository}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
@@ -71,6 +71,7 @@ job_id="${job_id%%;*}"
 commit="$(git -C "${repository}" rev-parse HEAD)"
 "${python}" - "${manifest}" "${job_id}" "${plan}" "${AF_SOURCE_RESCUE_ROOT}" "${commit}" <<'PY'
 import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -81,8 +82,10 @@ job_id = sys.argv[2]
 plan_path = Path(sys.argv[3])
 source_root = Path(sys.argv[4])
 commit = sys.argv[5]
+plan_payload = json.loads(plan_path.read_text())
+revision = plan_payload["config"]["protocol"].rsplit("-", 1)[-1]
 payload = {
-    "schema_version": "scientific-staged-multiround-feedback-submission-2",
+    "schema_version": f"scientific-staged-multiround-feedback-submission-{revision}",
     "job_id": job_id,
     "commit": commit,
     "plan_path": str(plan_path),

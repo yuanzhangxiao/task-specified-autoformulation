@@ -70,46 +70,9 @@ def simulate_trajectory(
     try:
         if len(time) < 2 or np.any(np.diff(time) <= 0.0):
             raise ValueError("simulation needs at least two increasing time points")
-        resettable = set(model.observed_state_channels)
-        known_initial_values = _known_initial_values(model, trajectory)
-        derived_initials = {
-            name: model.initial_condition_value(name, known_initial_values)
-            for name in model.state_names
-            if name not in resettable
-        }
-        missing_initials = sorted(
-            name
-            for name in model.state_names
-            if name not in resettable
-            and derived_initials[name] is None
-            and name not in initial_conditions
-            and name not in model.validated.causal_derivative_initials
+        initial_state = trajectory_initial_state(
+            model, trajectory, initial_conditions
         )
-        extra_initials = sorted(set(initial_conditions) - set(model.state_names))
-        if missing_initials or extra_initials:
-            raise ValueError(
-                f"initial-condition mismatch: missing={missing_initials}, "
-                f"extra={extra_initials}"
-            )
-        initial_state = np.asarray(
-            [
-                _observed_state_value(model, trajectory, name, 0)
-                if name in resettable
-                else (
-                    0.0
-                    if name in model.validated.causal_derivative_initials
-                    else (
-                        derived_initials[name]
-                        if derived_initials[name] is not None
-                        else initial_conditions[name]
-                    )
-                )
-                for name in model.state_names
-            ],
-            dtype=float,
-        )
-        if not np.isfinite(initial_state).all():
-            raise ValueError("initial conditions contain nonfinite values")
         _check_deadline(deadline)
         use_resets = (
             bool(model.validated.context.lagged_targets)
@@ -478,6 +441,61 @@ def _known_initial_values(
         if np.isfinite(numeric_value):
             values[name] = numeric_value
     return values
+
+
+def trajectory_initial_state(
+    model: CompiledModel,
+    trajectory: Trajectory,
+    initial_conditions: Mapping[str, float],
+) -> np.ndarray:
+    """Resolve one causal initial state using only this trajectory's public boundary.
+
+    Fixed and analytic initializers use the same restricted compiled expressions as
+    production simulation.  Directly observed states read their own channel at the
+    first time point.  Fitted initial values are accepted only for states whose
+    declaration does not already determine a value.
+    """
+    resettable = set(model.observed_state_channels)
+    known_initial_values = _known_initial_values(model, trajectory)
+    derived_initials = {
+        name: model.initial_condition_value(name, known_initial_values)
+        for name in model.state_names
+        if name not in resettable
+    }
+    missing_initials = sorted(
+        name
+        for name in model.state_names
+        if name not in resettable
+        and derived_initials[name] is None
+        and name not in initial_conditions
+        and name not in model.validated.causal_derivative_initials
+    )
+    extra_initials = sorted(set(initial_conditions) - set(model.state_names))
+    if missing_initials or extra_initials:
+        raise ValueError(
+            f"initial-condition mismatch: missing={missing_initials}, "
+            f"extra={extra_initials}"
+        )
+    result = np.asarray(
+        [
+            _observed_state_value(model, trajectory, name, 0)
+            if name in resettable
+            else (
+                0.0
+                if name in model.validated.causal_derivative_initials
+                else (
+                    derived_initials[name]
+                    if derived_initials[name] is not None
+                    else initial_conditions[name]
+                )
+            )
+            for name in model.state_names
+        ],
+        dtype=float,
+    )
+    if not np.isfinite(result).all():
+        raise ValueError("initial conditions contain nonfinite values")
+    return result
 
 
 def causal_interval_state(

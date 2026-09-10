@@ -164,7 +164,7 @@ def matching_start(
     mapping = system.model.direct_state_observation_channels
     if (
         not system.rhs_affine
-        or len(system.initial) != 1
+        or system.state_count != 1
         or mapping != {system.model.state_names[0]: "v01"}
     ):
         raise ValueError(
@@ -297,7 +297,7 @@ def latent_start(
             opti.subject_to(theta[i] >= lower[i])
         if np.isfinite(upper[i]):
             opti.subject_to(theta[i] <= upper[i])
-    n = len(system.initial)
+    n = system.state_count
     integrator = None
     if method == "shooting_init":
         x = ca.MX.sym("x", n)
@@ -329,7 +329,7 @@ def latent_start(
         for data in training.trajectories:
             forcing = trajectory_forcing(system.model, data)
             _, _, guess, _ = symbolic_rollout(system, data, start, settings, deadline)
-            current = ca.DM(system.initial)
+            current = ca.DM(system.initial_for(data))
             inputs = [
                 [forcing.value(name, t) for name in system.inputs] for t in data.time
             ]

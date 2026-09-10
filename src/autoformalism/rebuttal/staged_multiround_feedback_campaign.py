@@ -28,6 +28,7 @@ from autoformalism.fitting.collocation_sensitivity import (
     CollocationSensitivityConfig,
     fit_collocation_forward_sensitivity,
 )
+from autoformalism.fitting.sensitivity_probe import SensitivityContractError
 from autoformalism.llm.staged_topology import (
     DeferredCall,
     StagedTopologyClient,
@@ -91,6 +92,7 @@ class MultiRoundFeedbackConfig(StagedCampaignConfig):
     protocol: Literal[
         "scientific-staged-multiround-feedback-1",
         "scientific-staged-multiround-feedback-2",
+        "scientific-staged-multiround-feedback-3",
     ]
     source_task_indices: tuple[int, int]
     round_count: Literal[2] = 2
@@ -251,11 +253,7 @@ def freeze_campaign(
             }
         )
     plan = {
-        "schema_version": (
-            "scientific-staged-multiround-feedback-plan-2"
-            if config.protocol.endswith("-2")
-            else "scientific-staged-multiround-feedback-plan-1"
-        ),
+        "schema_version": _artifact_schema(config.protocol, "plan"),
         "config": config.model_dump(mode="json"),
         "source_rescue_plan_sha256": source_digest,
         "source_rescue_summary_file_sha256": _sha256(source_summary_path),
@@ -341,11 +339,7 @@ def run_campaign(
                         else {"rounds": []}
                     )
                     result = {
-                        "schema_version": (
-                            "scientific-staged-multiround-feedback-result-2"
-                            if config.protocol.endswith("-2")
-                            else "scientific-staged-multiround-feedback-result-1"
-                        ),
+                        "schema_version": _artifact_schema(config.protocol, "result"),
                         "status": "failed",
                         "task_id": task["task_id"],
                         "benchmark_id": task["benchmark_id"],
@@ -478,6 +472,11 @@ def run_task(
                     "status": "fit_failed",
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:8000],
+                    "failure_class": (
+                        "fitter_contract"
+                        if isinstance(exc, SensitivityContractError)
+                        else "fit_runtime"
+                    ),
                     "training": None,
                     "validation": None,
                 }
@@ -499,13 +498,14 @@ def run_task(
         atomic_json(output / "progress.json", {"rounds": rounds})
         current = revised
         prior_feedback = _round_feedback(round_record)
+        if fit.get("failure_class") == "fitter_contract":
+            break
+    blocked_by_contract = bool(
+        rounds and rounds[-1]["fit"].get("failure_class") == "fitter_contract"
+    )
     return {
-        "schema_version": (
-            "scientific-staged-multiround-feedback-result-2"
-            if config.protocol.endswith("-2")
-            else "scientific-staged-multiround-feedback-result-1"
-        ),
-        "status": "complete",
+        "schema_version": _artifact_schema(config.protocol, "result"),
+        "status": "fitter_contract_blocked" if blocked_by_contract else "complete",
         "task_id": task["task_id"],
         "benchmark_id": task["benchmark_id"],
         "seed": task["seed"],
@@ -1137,6 +1137,8 @@ def _revision_failure_records(task_root: Path) -> list[dict[str, Any]]:
 def _route(round_index: int, rounds: list[dict[str, Any]]) -> str:
     if round_index == 1:
         return "function_revision"
+    if (rounds[-1].get("fit") or {}).get("failure_class") == "fitter_contract":
+        raise ValueError("fitter-contract failure cannot route scientific revision")
     if rounds[-1]["numerically_stable"]:
         return "function_refinement"
     return "topology_revision"
@@ -1228,11 +1230,12 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
     new_role_derivations = sum(
         int(item.get("new_role_derivation_count", 0)) for item in rounds
     )
+    fitter_contract_failures = sum(
+        item.get("fit_failure_class") == "fitter_contract" for item in rounds
+    )
     return {
-        "schema_version": (
-            "scientific-staged-multiround-feedback-summary-2"
-            if str(plan["config"]["protocol"]).endswith("-2")
-            else "scientific-staged-multiround-feedback-summary-1"
+        "schema_version": _artifact_schema(
+            str(plan["config"]["protocol"]), "summary"
         ),
         "status": "complete"
         if all(row["result_present"] for row in rows)
@@ -1255,6 +1258,7 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         "rejected_revision_attempt_count": rejected_revision_attempts,
         "parent_role_preservation_count": parent_role_preservations,
         "new_role_derivation_count": new_role_derivations,
+        "fitter_contract_failure_round_count": fitter_contract_failures,
         "collocation_initializer_success_rate": _rate(
             sum(
                 bool(item.get("collocation_initializer_success"))
@@ -1321,6 +1325,7 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
         "fit_status": fit.get("status"),
         "fit_error_type": fit.get("error_type"),
         "fit_error": fit.get("error"),
+        "fit_failure_class": fit.get("failure_class"),
         "collocation_initializer_success": initializer.get("success"),
         "collocation_initializer_message": initializer.get("message"),
         "forward_sensitivity_optimizer_success": refinement.get("optimizer_success"),
@@ -1337,6 +1342,14 @@ def _component_expressions(candidate: CandidateModel) -> dict[str, str]:
 
 def _candidate_hash(candidate: CandidateModel) -> str:
     return content_hash(candidate.model_dump(mode="json"))
+
+
+def _artifact_schema(protocol: str, artifact: str) -> str:
+    """Keep plan/result/summary revisions aligned with the frozen protocol."""
+    revision = protocol.rsplit("-", 1)[-1]
+    if revision not in {"1", "2", "3"}:
+        raise ValueError(f"unsupported multi-round protocol revision: {protocol}")
+    return f"scientific-staged-multiround-feedback-{artifact}-{revision}"
 
 
 def _has_superlinear_dependence(tree: ast.AST, sources: set[str]) -> bool:

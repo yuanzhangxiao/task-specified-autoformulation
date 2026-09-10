@@ -25,17 +25,21 @@ Each revised candidate is compiled through the restricted expression grammar.
 Eligible smooth, single-target candidates then use:
 
 1. train-only CasADi integral collocation with two-stage Radau IIA constraints to
-   obtain a global-parameter start while retaining the candidate's fixed latent
-   initial values;
+   obtain a global-parameter start while retaining initial values resolved
+   causally at each trajectory boundary;
 2. a SciPy trust-region least-squares refinement whose Jacobian is computed by
    integrating the exact forward-sensitivity equations derived with CasADi AD;
 3. fresh causal train and validation rollouts from the declared initial values.
 
 The collocation node states are discarded and never enter the reported score.
 Unsupported nonsmooth/domain-restricted expression graphs fail closed. The
-current adapter supports one output (`v01`), global parameters, fixed numeric
-state initials, and open rollouts. These constraints make this a transfer pilot,
-not a general production-fitter replacement.
+current adapter supports one output (`v01`), global parameters,
+parameter-independent fixed or restricted analytic state initials, and open
+rollouts. Direct-observation initializers such as `v01(t0) = observed v01(t0)`
+are resolved independently for each trajectory by the same runtime path as final
+causal simulation, with certified zero initial parameter sensitivity. Fitted
+initial-state ranges remain outside this adapter's contract. These constraints
+make this a transfer pilot, not a general production-fitter replacement.
 
 ## Feedback priority and routing
 
@@ -62,6 +66,10 @@ that it is universally optimal. The selector is a conservative structural proxy
 for likely impact, not an estimate of validation improvement. A future campaign
 can compare it with counterfactual repair ranking once enough paired revisions
 exist to estimate impact without test leakage.
+
+A numerical-adapter contract failure is not scientific evidence against either
+the functions or topology. It terminates that task's fitting attempt with the
+typed `fitter_contract` class and is never routed into a proposer revision.
 
 Every rejected LLM response receives the exact deterministic contract error on
 the next bounded retry. Every accepted revision, fit, call, and progress record is

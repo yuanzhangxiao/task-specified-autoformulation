@@ -8,7 +8,11 @@ pytest.importorskip("casadi")
 from autoformalism.data import Trajectory
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.fitting import FitConfig, simulate_trajectory
-from autoformalism.fitting.sensitivity_probe import SymbolicODE, symbolic_rollout
+from autoformalism.fitting.sensitivity_probe import (
+    SensitivityContractError,
+    SymbolicODE,
+    symbolic_rollout,
+)
 from autoformalism.rebuttal.fitter_recovery import CONTEXT, recovery_candidate
 from autoformalism.schemas import CandidateModel
 
@@ -90,10 +94,42 @@ def test_sensitivity_includes_hidden_states_and_algebraic_feedback():
         assert np.max(abs(jac[:, 0, col] - (high - low) / 2e-4)) < 1e-5
 
 
-def test_unsupported_initial_state_and_nonsmooth_rhs_fail_closed():
+def test_direct_observation_initial_state_is_trajectory_specific():
     payload = decay_model().validated.candidate.model_dump(mode="json")
     payload["initial_conditions"][0].update(fixed_value=None, expression="v01")
-    with pytest.raises(ValueError, match="fixed numeric"):
+    system = SymbolicODE(
+        compile_candidate(
+            CandidateModel.model_validate(payload),
+            ValidationContext(targets=("v01",)),
+        )
+    )
+    source = trajectory()
+    data = Trajectory(
+        source.trajectory_id,
+        source.time,
+        {"v01": np.concatenate(([3.5], source.targets["v01"][1:]))},
+        source.auxiliaries,
+        source.external_inputs,
+        source.fixed_covariates,
+        source.derivatives,
+    )
+    predicted, jac, _, _ = symbolic_rollout(
+        system, data, np.array([0.6]), settings(), None, sensitivities=True
+    )
+    expected = 3.5 * np.exp(-0.6 * data.time)
+    assert system.audit["trajectory_specific_initialization"]
+    assert system.audit["initial_parameter_sensitivity_zero_certified"]
+    assert np.max(abs(predicted[:, 0] - expected)) < 1e-8
+    assert np.max(abs(jac[:, 0, 0] + data.time * expected)) < 1e-8
+
+
+def test_fitted_initial_state_and_nonsmooth_rhs_fail_closed():
+    payload = decay_model().validated.candidate.model_dump(mode="json")
+    payload["initial_conditions"][0].update(
+        fixed_value=None,
+        initialization_range={"lower": 0.0, "upper": 4.0},
+    )
+    with pytest.raises(SensitivityContractError, match="fitted initial"):
         SymbolicODE(
             compile_candidate(
                 CandidateModel.model_validate(payload),
@@ -102,7 +138,7 @@ def test_unsupported_initial_state_and_nonsmooth_rhs_fail_closed():
         )
     payload = decay_model().validated.candidate.model_dump(mode="json")
     payload["state_equations"][0]["rhs"] = "-a*abs(x)"
-    with pytest.raises(ValueError, match="nonsmooth"):
+    with pytest.raises(SensitivityContractError, match="nonsmooth"):
         SymbolicODE(
             compile_candidate(
                 CandidateModel.model_validate(payload),
