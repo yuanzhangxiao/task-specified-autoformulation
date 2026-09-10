@@ -1,0 +1,49 @@
+{
+  "protocol": "scientific-staged-multiround-feedback-1",
+  "purpose": "Two-round public-only repair pilot on the two anonymous candidates that remained unstable after bounded fitter rescue; collocation initialization and exact forward-sensitivity refinement are followed by function-first feedback and topology backtracking only after persistent instability",
+  "platform": "aces-h100x1",
+  "serving_image_sha256": "2f77a130b950c44610ad8b60c2b28703ddfe3107d4cadc9bab44683ac9badf5d",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 16,
+    "maximum_total_tokens": 196608,
+    "attempts_per_step": 3
+  },
+  "served_context_tokens": 32768,
+  "public_cells": [
+    "phase_b_anonymous_system_task_canonical_opaque_hard"
+  ],
+  "seeds": [
+    0,
+    1
+  ],
+  "diagnostic_fixtures": [],
+  "limits": {
+    "generated_variables": 12,
+    "terms_per_equation": 8,
+    "total_terms": 32
+  },
+  "wall_seconds": 3000,
+  "shutdown_margin_seconds": 300,
+  "source_task_indices": [
+    3,
+    4
+  ],
+  "round_count": 2,
+  "fit": {
+    "protocol": "collocation-forward-sensitivity-1",
+    "initializer_seconds": 120.0,
+    "refinement_seconds": 360.0,
+    "maximum_function_evaluations": 80,
+    "integration_method": "Radau",
+    "relative_tolerance": 1e-7,
+    "absolute_tolerance": 1e-9,
+    "failure_penalty": 1000000.0
+  },
+  "routing_policy": "function_first_then_topology_if_persistent_instability"
+}

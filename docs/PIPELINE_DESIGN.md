@@ -773,3 +773,12 @@ other operators and ambiguous multiple or repeated coefficients still require
 a provider repair. Provider requests retain short local mnemonics and never
 expose interaction-namespaced executable identities. An offline replay over
 version-1 responses is required before the separate live confirmation.
+
+## Bounded multi-round numerical feedback pilot
+
+The first implementation of fitting feedback is documented in
+`STAGED_MULTIROUND_FEEDBACK.md`. It freezes two unresolved public candidates,
+uses train-only collocation followed by exact forward-sensitivity refinement,
+and routes the first revision to functions. Topology is revisited only when that
+bounded function repair remains numerically unstable. This is an opt-in research
+campaign and does not alter the production fitting or search defaults.
