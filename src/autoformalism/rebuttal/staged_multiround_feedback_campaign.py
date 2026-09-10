@@ -1257,14 +1257,14 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         "new_role_derivation_count": new_role_derivations,
         "collocation_initializer_success_rate": _rate(
             sum(
-                bool((item["fit"].get("initializer") or {}).get("success"))
+                bool(item.get("collocation_initializer_success"))
                 for item in rounds
             ),
             len(rounds),
         ),
         "forward_sensitivity_optimizer_success_rate": _rate(
             sum(
-                bool((item["fit"].get("refinement") or {}).get("optimizer_success"))
+                bool(item.get("forward_sensitivity_optimizer_success"))
                 for item in rounds
             ),
             len(rounds),

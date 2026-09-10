@@ -573,3 +573,60 @@ def test_task_routes_persistent_instability_from_function_to_topology(
         ("topology_revision", ("f", "v01")),
     ]
     assert [item["numerically_stable"] for item in result["rounds"]] == [False, True]
+
+
+def test_summary_counts_initializer_and_refinement_from_compact_rounds(
+    tmp_path: Path,
+) -> None:
+    task_id = "hard_seed0_multiround"
+    plan = {
+        "config": {
+            "protocol": "scientific-staged-multiround-feedback-2",
+            "round_count": 2,
+        },
+        "tasks": [
+            {
+                "task_id": task_id,
+                "benchmark_id": "hard",
+                "seed": 0,
+            }
+        ],
+    }
+    terminal = tmp_path / task_id / "terminal.json"
+    terminal.parent.mkdir(parents=True)
+    terminal.write_text(
+        json.dumps(
+            {
+                "result": {
+                    "status": "complete",
+                    "rounds": [
+                        {
+                            "round_index": 1,
+                            "route": "function_revision",
+                            "selected_components": ["f", "v01"],
+                            "candidate_sha256": "a" * 64,
+                            "revision": {"attempts": [], "audit": {}},
+                            "fit": {
+                                "status": "fit_failed",
+                                "initializer": {"success": True},
+                                "refinement": {"optimizer_success": False},
+                            },
+                            "numerically_stable": False,
+                            "training_normalized_mse": None,
+                            "validation_normalized_mse": None,
+                        }
+                    ],
+                    "physical_requests": 1,
+                    "observed_total_tokens": 100,
+                    "provider_seconds": 1.5,
+                }
+            }
+        )
+    )
+
+    summary = campaign.summarize(plan, tmp_path)
+
+    assert summary["status"] == "complete"
+    assert summary["completed_rounds"] == 1
+    assert summary["collocation_initializer_success_rate"] == 1.0
+    assert summary["forward_sensitivity_optimizer_success_rate"] == 0.0
