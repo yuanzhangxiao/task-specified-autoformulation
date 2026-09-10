@@ -326,6 +326,7 @@ def run_task(output_root: Path, task_index: int) -> dict[str, Any]:
         ),
     )
     selected = ranked[: config.selected_start_count]
+    train_only_validation = _training_only_validation_surrogate(dataset.train)
     attempts: list[dict[str, Any]] = []
     for attempt_index, screen in enumerate(selected):
         attempt_started = monotonic()
@@ -336,7 +337,7 @@ def run_task(output_root: Path, task_index: int) -> dict[str, Any]:
             fitted = fit_candidate(
                 model,
                 dataset.train,
-                dataset.train,
+                train_only_validation,
                 settings,
                 initial_global_parameters=screen["parameters"],
             )
@@ -712,6 +713,17 @@ def _screen_split(
         for item in split.trajectories[:trajectory_count]
     )
     return DatasetSplit(SplitName.TRAIN, trajectories, f"{split.fingerprint}:screen")
+
+
+def _training_only_validation_surrogate(training: DatasetSplit) -> DatasetSplit:
+    """Satisfy the fit API without exposing the real validation trajectories."""
+    if training.name is not SplitName.TRAIN:
+        raise ValueError("training-only validation surrogate requires training data")
+    return DatasetSplit(
+        SplitName.VALIDATION,
+        training.trajectories,
+        f"{training.fingerprint}:training-only-validation-surrogate",
+    )
 
 
 def _truncate_trajectory(trajectory: Trajectory, sample_count: int) -> Trajectory:

@@ -255,7 +255,15 @@ def test_freeze_run_resume_and_summary_are_source_bound(
     )
 
     def fit(*args, initial_global_parameters=None, **kwargs):
-        assert args[1] is args[2]
+        assert args[1] is dataset.train
+        assert args[2] is not dataset.validation
+        assert args[2].name is SplitName.VALIDATION
+        assert all(
+            surrogate is training
+            for surrogate, training in zip(
+                args[2].trajectories, dataset.train.trajectories, strict=True
+            )
+        )
         if initial_global_parameters["b"] == 2.0:
             raise RuntimeError("synthetic first-start failure")
         return SimpleNamespace(
