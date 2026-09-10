@@ -25,13 +25,18 @@ if [[ -n "${AF_VLLM_IMAGE:-}" ]]; then
   image="${AF_VLLM_IMAGE}"
 else
   image=""
+  default_image="${project_root}/containers/vllm-openai-v0.27.1.sif"
   while IFS= read -r -d '' candidate; do
+    [[ -f "${candidate}" ]] || continue
     candidate_sha="$(sha256sum "${candidate}")"
     if [[ "${candidate_sha%% *}" == "${expected_image_sha}" ]]; then
       image="${candidate}"
       break
     fi
-  done < <(find "${scratch_root}" "${project_root}" -maxdepth 4 -type f -name '*.sif' -print0 2>/dev/null)
+  done < <(
+    printf '%s\0' "${default_image}"
+    find "${scratch_root}" "${project_root}" -maxdepth 6 \( -type f -o -type l \) -name '*.sif' -print0 2>/dev/null
+  )
 fi
 [[ -f "${image}" ]] || { echo "missing vLLM image: ${image}" >&2; exit 2; }
 actual_image_sha="$(sha256sum "${image}")"
