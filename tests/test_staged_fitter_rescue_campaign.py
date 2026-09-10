@@ -256,6 +256,8 @@ def test_freeze_run_resume_and_summary_are_source_bound(
 
     def fit(*args, initial_global_parameters=None, **kwargs):
         assert args[1] is args[2]
+        if initial_global_parameters["b"] == 2.0:
+            raise RuntimeError("synthetic first-start failure")
         return SimpleNamespace(
             success=True,
             message=None,
@@ -276,6 +278,8 @@ def test_freeze_run_resume_and_summary_are_source_bound(
     assert frozen["status"] == "frozen_before_rescue"
     first = campaign.run_task(output, 0)
     assert first["rescue_score"]["complete"]
+    assert first["rescue_attempts"][0]["fresh_training_score"] is None
+    assert first["rescue_attempts"][1]["fresh_training_score"]["complete"]
     assert first["attribution"] == "fitter_initialization_or_search_limited"
     assert campaign.run_task(output, 0) == first
     for index in range(1, 6):
@@ -291,3 +295,32 @@ def test_freeze_run_resume_and_summary_are_source_bound(
     source_result.write_text("{}")
     with pytest.raises(ValueError, match="frozen source artifact differs"):
         campaign.run_task(output, 1)
+
+
+def test_nonfinite_rollout_error_is_not_a_stable_screen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = compile_candidate(_candidate(), _context())
+    dataset = _dataset(DerivativeProvenance.ESTIMATED)
+    monkeypatch.setattr(
+        campaign,
+        "simulate_trajectory",
+        lambda *args, **kwargs: SimpleNamespace(
+            success=True,
+            predictions={"x": np.full(9, 1e308)},
+            message=None,
+        ),
+    )
+
+    score = campaign._score_split(
+        model,
+        dataset.train,
+        {"a": 1.0, "b": 1.0},
+        {"x": 1.0},
+        FitConfig(),
+        1.0,
+    )
+
+    assert not score["complete"]
+    assert score["failed_trajectory_count"] == 1
+    assert "non-finite normalized squared residuals" in score["failures"][0]["message"]

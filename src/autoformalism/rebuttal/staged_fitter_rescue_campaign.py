@@ -376,7 +376,7 @@ def run_task(output_root: Path, task_index: int) -> dict[str, Any]:
     eligible = [
         (index, row)
         for index, row in enumerate(attempts)
-        if row.get("fresh_training_score", {}).get("complete") is True
+        if (row.get("fresh_training_score") or {}).get("complete") is True
     ]
     if eligible:
         selected_index, selected_attempt = min(
@@ -817,13 +817,30 @@ def _score_split(
                 }
             )
             continue
+        trajectory_squared: dict[str, np.ndarray] = {}
         for channel in squared:
             start = 1 if model.validated.context.lagged_targets else 0
             residual = (
                 simulation.predictions[channel][start:]
                 - trajectory.targets[channel][start:]
             ) / scales[channel]
-            squared[channel].append(np.asarray(residual**2, dtype=float))
+            with np.errstate(over="ignore", invalid="ignore"):
+                squared_residual = np.asarray(np.square(residual), dtype=float)
+            if not np.all(np.isfinite(squared_residual)):
+                failures.append(
+                    {
+                        "trajectory_id": trajectory.trajectory_id,
+                        "message": (
+                            "causal rollout produced non-finite normalized "
+                            f"squared residuals for target {channel}"
+                        ),
+                    }
+                )
+                break
+            trajectory_squared[channel] = squared_residual
+        else:
+            for channel, values in trajectory_squared.items():
+                squared[channel].append(values)
     complete = not failures and all(squared.values())
     per_target = {
         channel: float(np.mean(np.concatenate(values))) if values else None
