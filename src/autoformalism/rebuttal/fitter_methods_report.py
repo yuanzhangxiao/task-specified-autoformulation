@@ -61,7 +61,10 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         "forward_sensitivity": "S",
         "collocation_init": "C+FD",
         "collocation_sensitivity": "C+S",
+        "start_portfolio": "Portfolio-12",
+        "start_portfolio_long": "Portfolio-24",
     }
+    portfolio_mode = frozen["plan"]["protocol"] == "fitter-methods-3"
     threshold = frozen["plan"]["reference"]["recovery_nmse"]
     fits, groups, pairs = [], {}, {}
     for row in rows:
@@ -91,6 +94,8 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
             "alias_distance": r.get("parameter_equivalence", {}).get(
                 "scaled_linf_distance"
             ),
+            "pilot_winner": r.get("portfolio", {}).get("pilot_winner"),
+            "collocation_source": r.get("portfolio", {}).get("collocation_source"),
         }
         fits.append(item)
         groups.setdefault((t["case"], t["noise_fraction"], t["method"]), []).append(
@@ -118,26 +123,36 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         )
     pairing = []
     for pair, methods in pairs.items():
-        fd, sensitivity = (
-            methods.get("collocation_init", {}),
-            methods.get("collocation_sensitivity", {}),
+        comparisons = (
+            ("start_portfolio", "start_portfolio_long")
+            if portfolio_mode
+            else ("collocation_init",)
         )
-        a, b = fd.get("initializer", {}), sensitivity.get("initializer", {})
-        ready = bool(a and b)
-        same = ready and (
-            a.get("shared_result_sha256") is not None
-            and a["shared_result_sha256"] == b.get("shared_result_sha256")
-            and fd.get("refinement_start") == sensitivity.get("refinement_start")
-            and fd.get("training_fingerprint")
-            == sensitivity.get("training_fingerprint")
-        )
-        pairing.append(
-            {
-                "pair": pair,
-                "both_fit_records_present": ready,
-                "same_data_and_initializer": same if ready else None,
-            }
-        )
+        for comparison in comparisons:
+            fd, sensitivity = (
+                methods.get(comparison, {}),
+                methods.get("collocation_sensitivity", {}),
+            )
+            a, b = fd.get("initializer", {}), sensitivity.get("initializer", {})
+            ready = bool(a and b)
+            same = ready and (
+                a.get("shared_result_sha256") is not None
+                and a["shared_result_sha256"] == b.get("shared_result_sha256")
+                and fd.get("ordinary_start" if portfolio_mode else "refinement_start")
+                == sensitivity.get(
+                    "ordinary_start" if portfolio_mode else "refinement_start"
+                )
+                and fd.get("training_fingerprint")
+                == sensitivity.get("training_fingerprint")
+            )
+            pairing.append(
+                {
+                    "pair": pair,
+                    "comparison_route": comparison,
+                    "both_fit_records_present": ready,
+                    "same_data_and_initializer": same if ready else None,
+                }
+            )
     report = {
         "aggregates": aggregates,
         "fits": fits,
@@ -147,6 +162,9 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
             kind: dict(Counter(r["status"] for r in rows if r["task"]["kind"] == kind))
             for kind in ("guard", "initializer", "fit")
         },
+        "pairing_compares": "initializer provenance, data and ordinary start"
+        if portfolio_mode
+        else "data and identical refinement start",
     }
     write_json(output / "compact.json", report)
     passed = sum(p["same_data_and_initializer"] is True for p in pairing)
@@ -172,6 +190,14 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         "s* | Worst val NMSE* |",
         "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if portfolio_mode:
+        lines[0] = "# Sensitivity start-portfolio comparison"
+        lines[2] = (
+            "S = ordinary sensitivity fit; C+S = always collocation + sensitivity; "
+            "Portfolio-12/-24 = compare starts after 12/24 calls "
+            "(30/60 seconds per pilot)."
+        )
+        lines[7] = lines[7].replace("Shared-start", "Shared-checkpoint")
     for a in aggregates:
         lines.append(
             f"| {a['case']} | {a['noise']} | {names[a['method']]} | "
@@ -205,5 +231,103 @@ def write_paired_summary(output: Path, frozen: dict, rows: list[dict]) -> dict:
         "See compact.json for aliases per fit, details.md for diagnostics, "
         "and summary.json for complete records.",
     ]
+    if portfolio_mode:
+        diagnostics = portfolio_diagnostics(rows)
+        report["initializer_diagnostics"] = diagnostics["initializers"]
+        report["portfolio_diagnostics"] = diagnostics["portfolios"]
+        write_json(output / "compact.json", report)
+        lines += diagnostics["lines"]
+        lines = [
+            line.replace("| Fallbacks |", "| Init failed |").replace(
+                "| Fallback |", "| Init failed |"
+            )
+            for line in lines
+        ]
+        lines += [
+            "",
+            "Init failed records IPOPT nonconvergence; Portfolio may still "
+            "test a saved iterate through a fresh ODE rollout.",
+        ]
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     return report
+
+
+def portfolio_diagnostics(rows: list[dict]) -> dict:
+    """Expose initializer failure details and the exact training-only pilot decision."""
+    initializers, portfolios = [], []
+    lines = [
+        "",
+        "Initializer progress (node objective; constraint violations are raw):",
+        "",
+        "| Pair | Status | Iter | s | First objective | Last objective | "
+        "Max violation | Saved point |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for row in rows:
+        t, r = row["task"], row["result"] or {}
+        if t["kind"] != "initializer":
+            continue
+        init = r.get("initializer", {})
+        progress = init.get("progress", [])
+        first, last = (progress[0], progress[-1]) if progress else ({}, {})
+        item = {
+            "pair": t["pair"],
+            "status": row["status"],
+            "seconds": init.get("seconds"),
+            "iteration": last.get("iteration"),
+            "first_objective": first.get("objective"),
+            "last_objective": last.get("objective"),
+            "constraint_maximum": last.get("constraint_maximum"),
+            "message": init.get("message"),
+            "last_finite_iterate": init.get("last_finite_iterate"),
+        }
+        initializers.append(item)
+        lines.append(
+            f"| {t['pair']} | {row['status']} | {item['iteration']} | "
+            f"{_number(item['seconds'])} | {_number(item['first_objective'])} | "
+            f"{_number(item['last_objective'])} | "
+            f"{_number(item['constraint_maximum'])} | "
+            f"{item['last_finite_iterate'] is not None} |"
+        )
+    lines += [
+        "",
+        "Portfolio decisions (observed training NMSE, before final replay):",
+        "",
+        "| Pair / policy | Collocation source | Ordinary initial → pilot | "
+        "Collocation initial → pilot | Winner | Calls |",
+        "| --- | --- | --- | --- | --- | ---: |",
+    ]
+    for row in rows:
+        t, r = row["task"], row["result"] or {}
+        if t.get("method") not in {"start_portfolio", "start_portfolio_long"}:
+            continue
+        p = r.get("portfolio", {})
+        count = p.get("training_rows", 1)
+        item = {
+            "pair": t["pair"],
+            "method": t["method"],
+            "pilot_winner": p.get("pilot_winner"),
+            "collocation_source": p.get("collocation_source"),
+            "unfinished_iterate_usable": p.get("unfinished_iterate_usable"),
+            "pilots": {},
+        }
+        for name in ("ordinary_pilot", "collocation_pilot"):
+            stage = p.get("stages", {}).get(name, {})
+            cost = stage.get("initial_cost")
+            best = (stage.get("best") or {}).get("cost")
+            item["pilots"][name] = {
+                "initial_nmse": 2 * cost / count if cost is not None else None,
+                "best_nmse": 2 * best / count if best is not None else None,
+                "calls": stage.get("calls"),
+                "seconds": stage.get("seconds"),
+            }
+        portfolios.append(item)
+        a, b = item["pilots"].values()
+        lines.append(
+            f"| {t['pair']} / {p.get('pilot_calls')} | {item['collocation_source']} | "
+            f"{_number(a['initial_nmse'])} → {_number(a['best_nmse'])} | "
+            f"{_number(b['initial_nmse'])} → {_number(b['best_nmse'])} | "
+            f"{item['pilot_winner']} | "
+            f"{r.get('fit', {}).get('actual_residual_calls')} |"
+        )
+    return {"initializers": initializers, "portfolios": portfolios, "lines": lines}

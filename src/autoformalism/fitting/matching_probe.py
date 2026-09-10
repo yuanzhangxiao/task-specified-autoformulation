@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 from itertools import pairwise
 from pathlib import Path
@@ -25,6 +26,35 @@ from autoformalism.rebuttal.fitter_diagnostic import (
     write_json,
 )
 from autoformalism.schemas import CandidateModel
+
+
+def _iterate_snapshot(opti, theta, names, objective, lower, upper, iteration, seconds):
+    """Read solver diagnostics without treating collocation nodes as ODE solutions."""
+    entry = {"iteration": int(iteration), "seconds": float(seconds)}
+    try:
+        values = np.asarray(opti.debug.value(theta)).reshape(-1)
+        constraints = np.asarray(opti.debug.value(opti.g)).reshape(-1)
+        low = np.asarray(opti.debug.value(opti.lbg)).reshape(-1)
+        high = np.asarray(opti.debug.value(opti.ubg)).reshape(-1)
+        violation = np.maximum(np.maximum(low - constraints, constraints - high), 0)
+        loss = float(opti.debug.value(objective))
+        usable = bool(
+            np.isfinite(values).all()
+            and np.isfinite(loss)
+            and np.isfinite(constraints).all()
+            and np.all(values >= lower)
+            and np.all(values <= upper)
+        )
+        entry.update(
+            objective=loss,
+            constraint_maximum=float(np.max(violation, initial=0)),
+            parameters=dict(zip(names, map(float, values), strict=True)),
+            finite_in_domain=usable,
+            rollout_verified=False,
+        )
+    except (RuntimeError, ValueError, ArithmeticError) as error:
+        entry.update(finite_in_domain=False, diagnostic_error=str(error)[-400:])
+    return _finite_payload(entry)
 
 
 def _weak_window(system, forcing, time: np.ndarray, smooth: np.ndarray):
@@ -100,6 +130,9 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / "child_result.json"
     result_path.unlink(missing_ok=True)
+    if arguments.get("record_progress", False):
+        for filename in ("iterations.json", "last_finite.json"):
+            (directory / filename).unlink(missing_ok=True)
     worker = multiprocessing.get_context("spawn").Process(
         target=_latent_worker,
         args=(
@@ -131,6 +164,13 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
             worker.kill()
         worker.join()
         worker.close()
+    if arguments.get("record_progress", False):
+        path = directory / "last_finite.json"
+        if path.exists():
+            result["last_finite_iterate"] = read_json(path)
+        path = directory / "iterations.json"
+        if path.exists():
+            result["progress"] = json.loads(path.read_text())
     return {
         **result,
         "method": arguments["method"],
@@ -275,6 +315,8 @@ def latent_start(
     method: str,
     seconds: float,
     directory: Path,
+    record_progress: bool = False,
+    maximum_iterations: int = 150,
 ) -> dict:
     """Estimate latent trajectories with continuity and unchanged fixed initials.
 
@@ -286,6 +328,8 @@ def latent_start(
         raise ValueError("unknown latent initialization method")
     if training.name is not SplitName.TRAIN:
         raise ValueError("initializer requires training split")
+    if not 1 <= maximum_iterations <= 300:
+        raise ValueError("initializer iterations must be between 1 and 300")
     started = monotonic()
     deadline = started + seconds
     directory.mkdir(parents=True, exist_ok=True)
@@ -325,6 +369,27 @@ def latent_start(
         )
     objective = 0
     nodes = 0
+    events = []
+    last_finite = None
+
+    def record(iteration):
+        nonlocal last_finite
+        entry = _iterate_snapshot(
+            opti,
+            theta,
+            system.names,
+            objective,
+            lower,
+            upper,
+            iteration,
+            monotonic() - started,
+        )
+        events.append(entry)
+        write_json(directory / "iterations.json", events)
+        if entry["finite_in_domain"]:
+            last_finite = entry
+            write_json(directory / "last_finite.json", entry)
+
     try:
         for data in training.trajectories:
             forcing = trajectory_forcing(system.model, data)
@@ -361,13 +426,17 @@ def latent_start(
                 predicted = system.observe(t1, current, theta, u1)[0]
                 objective += ((predicted - data.targets["v01"][i + 1]) / scale) ** 2
         opti.minimize(objective)
-        events = []
 
         def callback(iteration):
+            if record_progress:
+                record(iteration)
             if monotonic() >= deadline:
                 raise RuntimeError("initializer iteration deadline reached")
-            events.append({"iteration": iteration, "seconds": monotonic() - started})
-            write_json(directory / "iterations.json", events)
+            if not record_progress:
+                events.append(
+                    {"iteration": iteration, "seconds": monotonic() - started}
+                )
+                write_json(directory / "iterations.json", events)
 
         opti.callback(callback)
         remaining = max(0.001, deadline - monotonic())
@@ -377,7 +446,7 @@ def latent_start(
             {
                 "print_level": 0,
                 "sb": "yes",
-                "max_iter": 150,
+                "max_iter": maximum_iterations,
                 "max_cpu_time": remaining,
                 "tol": 1e-7,
             },
@@ -400,6 +469,14 @@ def latent_start(
         }
     except (RuntimeError, ValueError, TimeoutError) as error:
         result = {"success": False, "parameters": None, "message": str(error)[-1600:]}
+    if record_progress:
+        # The last callback is persisted even when the native process is killed.
+        # These parameters remain proposals for a fresh rollout, not accepted fits.
+        result.update(
+            progress=events,
+            last_finite_iterate=last_finite,
+            maximum_iterations=maximum_iterations,
+        )
     return _finite_payload(
         {
             **result,

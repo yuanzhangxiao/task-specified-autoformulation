@@ -48,12 +48,20 @@ COMMON = ("production_fd", "compiled_fd", "forward_sensitivity")
 MATCHING = ("derivative_init", "integral_init", "weak_init")
 LATENT = ("shooting_init", "collocation_init")
 PAIRED = ("forward_sensitivity", "collocation_init", "collocation_sensitivity")
+PORTFOLIO = (
+    "forward_sensitivity",
+    "collocation_sensitivity",
+    "start_portfolio",
+    "start_portfolio_long",
+)
 
 
 class MethodsPlan(StrictSchema):
     """Prespecify data, noise, starts, eligibility, and total fitting budgets."""
 
-    protocol: Literal["fitter-methods-1", "fitter-methods-2"] = "fitter-methods-1"
+    protocol: Literal["fitter-methods-1", "fitter-methods-2", "fitter-methods-3"] = (
+        "fitter-methods-1"
+    )
     reference: RecoveryPlan
     noise_fractions: tuple[FiniteFloat, ...] = (0.0, 0.03)
     seed: int = Field(default=20260909, ge=0)
@@ -67,6 +75,11 @@ class MethodsPlan(StrictSchema):
     grace_seconds: FiniteFloat = Field(default=60, gt=0, le=60)
     accuracy_rms: FiniteFloat = Field(default=1e-6, gt=0)
     accuracy_maximum: FiniteFloat = Field(default=1e-5, gt=0)
+    pilot_seconds: FiniteFloat = Field(default=30, gt=0, le=60)
+    pilot_calls: int = Field(default=12, ge=1, le=30)
+    long_pilot_seconds: FiniteFloat = Field(default=60, gt=0, le=60)
+    long_pilot_calls: int = Field(default=24, ge=1, le=30)
+    initializer_iterations: int = Field(default=150, ge=1, le=300)
 
     @model_validator(mode="after")
     def valid_matrix(self):
@@ -78,6 +91,16 @@ class MethodsPlan(StrictSchema):
             raise ValueError("provide one or two distinct noise fractions in [0,0.1]")
         if self.initializer_seconds >= self.fit_seconds:
             raise ValueError("initialization must fit within the total fit budget")
+        if self.protocol == "fitter-methods-3" and (
+            self.initializer_seconds
+            + 2 * max(self.pilot_seconds, self.long_pilot_seconds)
+            >= self.fit_seconds
+            or 2 * max(self.pilot_calls, self.long_pilot_calls)
+            >= self.reference.maximum_nfev
+        ):
+            raise ValueError(
+                "portfolio must reserve time and evaluations for continuation"
+            )
         if len(set(self.replicate_seeds)) != len(self.replicate_seeds):
             raise ValueError("replicate seeds must be distinct")
         if self.protocol == "fitter-methods-1" and (
@@ -136,6 +159,7 @@ def launcher_identity() -> str:
         "scripts/hpc/fitter_methods_delta.slurm",
         "scripts/hpc/submit_fitter_methods_delta.sh",
         "scripts/hpc/submit_fitter_methods_v2_delta.sh",
+        "scripts/hpc/submit_fitter_methods_v3_delta.sh",
     )
     return content_hash({p: sha256(root / p) for p in paths})
 
@@ -155,7 +179,7 @@ def prepare_methods(plan: MethodsPlan, output: Path) -> dict:
             "observed_state": True,
         }
     ]
-    if plan.protocol == "fitter-methods-2":
+    if plan.protocol != "fitter-methods-1":
         cases = []
     cases += [
         {"name": c.name, "truth": c.truth.model_dump(), "observed_state": False}
@@ -172,7 +196,7 @@ def prepare_methods(plan: MethodsPlan, output: Path) -> dict:
         assets[path.name] = sha256(path)
         seeds = (
             plan.replicate_seeds
-            if plan.protocol == "fitter-methods-2"
+            if plan.protocol != "fitter-methods-1"
             else (plan.seed,)
         )
         paired_starts[name] = []
@@ -202,9 +226,10 @@ def prepare_methods(plan: MethodsPlan, output: Path) -> dict:
                         "method": method,
                     }
                 )
-    if plan.protocol == "fitter-methods-2":
+    if plan.protocol != "fitter-methods-1":
         tasks = [t for t in tasks if t["kind"] == "guard"]
         fits = []
+        methods = PORTFOLIO if plan.protocol == "fitter-methods-3" else PAIRED
         for case in cases:
             for noise_index, noise in enumerate(plan.noise_fractions):
                 for replicate, seed in enumerate(plan.replicate_seeds):
@@ -223,8 +248,8 @@ def prepare_methods(plan: MethodsPlan, output: Path) -> dict:
                         {**shared, "name": f"init_{pair}", "kind": "initializer"}
                     )
                     # Rotate scheduler order; every pair still contains every arm.
-                    shift = (replicate + noise_index) % len(PAIRED)
-                    for method in PAIRED[shift:] + PAIRED[:shift]:
+                    shift = (replicate + noise_index) % len(methods)
+                    for method in methods[shift:] + methods[:shift]:
                         fits.append(
                             {
                                 **shared,
@@ -424,7 +449,7 @@ def _guard(output, root, frozen, task, identity):
     profiles = {}
     data = dataset.train.trajectories[0]
     anchors = [("truth", case["truth"]), ("broad", frozen["starts"][case["name"]])]
-    if plan.protocol == "fitter-methods-2":
+    if plan.protocol != "fitter-methods-1":
         anchors.extend(
             (f"broad_rep{i}", p)
             for i, p in enumerate(frozen["paired_starts"][case["name"]])
@@ -575,6 +600,10 @@ def _initializer(output, root, frozen, task, identity):
         method="collocation_init",
         seconds=max(0, plan.initializer_seconds - (monotonic() - started)),
         directory=root / "initializer",
+        record_progress=plan.protocol == "fitter-methods-3",
+        maximum_iterations=plan.initializer_iterations
+        if plan.protocol == "fitter-methods-3"
+        else 150,
     )
     initializer.update(identity=identity, seconds=monotonic() - started)
     return {
@@ -606,7 +635,7 @@ def _paired_initializer(output, frozen, task, plan):
             "message": shared.get("error", shared["status"]),
         }
     return {
-        **initializer,
+        **{k: v for k, v in initializer.items() if k != "progress"},
         "shared_task": shared_task["name"],
         "shared_result_sha256": content_hash(shared),
     }
@@ -622,7 +651,7 @@ def _fit(output, root, frozen, task, identity):
     method = task["method"]
     start = _start(frozen, task)
     shared_initializer = None
-    if plan.protocol == "fitter-methods-2" and method != "forward_sensitivity":
+    if plan.protocol != "fitter-methods-1" and method != "forward_sensitivity":
         shared_initializer = _paired_initializer(output, frozen, task, plan)
     fitted = checkpoint(root / "fit.json", identity)
     if (
@@ -634,6 +663,27 @@ def _fit(output, root, frozen, task, identity):
         )
     ):
         raise ValueError("shared initializer changed after fitting")
+    if fitted is None and method in {"start_portfolio", "start_portfolio_long"}:
+        from autoformalism.fitting.start_portfolio import portfolio_fit
+
+        fitted = portfolio_fit(
+            system,
+            dataset.train,
+            scale,
+            settings,
+            start,
+            shared_initializer,
+            root / "portfolio",
+            identity,
+            total_seconds=plan.fit_seconds,
+            pilot_seconds=plan.long_pilot_seconds
+            if method == "start_portfolio_long"
+            else plan.pilot_seconds,
+            pilot_calls=plan.long_pilot_calls
+            if method == "start_portfolio_long"
+            else plan.pilot_calls,
+        )
+        write_json(root / "fit.json", _finite_payload(fitted))
     if fitted is None:
         attempt = 0
         while (root / f"attempt-{attempt}").exists():
@@ -899,7 +949,7 @@ def summarize_methods(output: Path) -> dict:
         "Clean validation NMSE |",
         "| --- | ---: | --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
-    if frozen["plan"]["protocol"] == "fitter-methods-2":
+    if frozen["plan"]["protocol"] != "fitter-methods-1":
         lines[2:4] = [
             "Paired noisy observations and broad starts, equal total fitting budgets.",
             "Both latent cases expose v01 only; initializers share no hidden labels.",
@@ -951,7 +1001,7 @@ def summarize_methods(output: Path) -> dict:
                 f"failures={replay.get('failures')}"
             )
     (output / "summary.md").write_text("\n".join(lines) + "\n")
-    if frozen["plan"]["protocol"] == "fitter-methods-2":
+    if frozen["plan"]["protocol"] != "fitter-methods-1":
         from autoformalism.rebuttal.fitter_methods_report import write_paired_summary
 
         (output / "details.md").write_text("\n".join(lines) + "\n")

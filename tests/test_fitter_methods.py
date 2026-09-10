@@ -294,7 +294,7 @@ def test_bounded_initializer_accepts_only_observed_outputs_of_hidden_system(
     assert not result["hidden_labels_used"]
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_launcher_accounts_for_matrix_and_rejects_partial_submission(tmp_path, version):
     import subprocess
     import sys
@@ -327,14 +327,14 @@ def test_launcher_accounts_for_matrix_and_rejects_partial_submission(tmp_path, v
     launcher = (
         "submit_fitter_methods_delta.sh"
         if version == 1
-        else "submit_fitter_methods_v2_delta.sh"
+        else f"submit_fitter_methods_v{version}_delta.sh"
     )
     command = ["bash", str(root / "scripts/hpc" / launcher)]
     one = subprocess.run(command, env=env, text=True, capture_output=True)
     assert one.returncode == 0, one.stderr
     jobs = read_json(output / "submission.json")
     assert jobs["guard_tasks"] == (3 if version == 1 else 2)
-    assert jobs["fit_tasks"] == (32 if version == 1 else 36)
+    assert jobs["fit_tasks"] == {1: 32, 2: 36, 3: 48}[version]
     assert jobs["initializer_tasks"] == (0 if version == 1 else 12)
     assert jobs["submission_complete"]
     text = log.read_text()
