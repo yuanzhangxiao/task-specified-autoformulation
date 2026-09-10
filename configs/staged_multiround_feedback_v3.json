@@ -2,7 +2,7 @@
   "protocol": "scientific-staged-multiround-feedback-3",
   "purpose": "Two-round public-only localized repair pilot with trajectory-specific causal analytic initialization, typed fitter-contract termination, parent-role preservation, collocation initialization, and exact forward-sensitivity refinement",
   "platform": "aces-h100x1",
-  "serving_image_sha256": "2f77a130b950c44610ad8b60c2b28703ddfe3107d4cadc9bab44683ac9badf5d",
+  "serving_image_sha256": "9c56389af06cafbf4aa8bd825393f606ac7f2a18e1a700c5999b1ed47f7f9c1e",
   "model_settings": {
     "model": "openai/gpt-oss-20b",
     "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
