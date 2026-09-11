@@ -1,5 +1,6 @@
 """Portable public export, paired policies, split boundaries and resume."""
 
+import ast
 import os
 import shutil
 import subprocess
@@ -102,6 +103,46 @@ def test_export_keeps_failed_round_and_never_copies_test(exported):
     write_json(path, payload)
     with pytest.raises(ValueError, match="candidate differs"):
         exporter.export_cases(source, output)
+
+
+def test_exporter_legacy_python_stdin(exported, tmp_path):
+    """Check legacy syntax/APIs and exercise stdin without project dependencies."""
+    source, _, expected = exported
+    script = Path(exporter.__file__).read_text()
+    tree = ast.parse(script, feature_version=(3, 6))
+    assert "from __future__ import annotations" not in script
+    assert not any(
+        isinstance(node, ast.Attribute)
+        and node.attr in {"is_relative_to", "removeprefix", "removesuffix"}
+        for node in ast.walk(tree)
+    )
+    output = tmp_path / "standalone"
+    command = [
+        sys.executable, "-I", "-S", "-",
+        "--source-root", str(source), "--output", str(output),
+    ]
+    for _ in range(2):
+        subprocess.run(
+            command, input=script, text=True,
+            check=True, capture_output=True, timeout=15,
+        )
+        assert read_json(output / "bundle.json") == expected
+
+
+def test_exporter_containment_rejects_traversal_and_symlink_escape(tmp_path):
+    """The legacy-compatible containment check preserves export boundaries."""
+    source = tmp_path / "source"
+    source.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (source / "link").symlink_to(outside, target_is_directory=True)
+    assert exporter.checked(source, "new/subdir.json") == source / "new/subdir.json"
+    for relative in ("../outside/secret.json", "link/secret.json", str(outside)):
+        with pytest.raises(ValueError, match="escapes"):
+            exporter.checked(source, relative)
+    for output in (source, source / "nested", tmp_path):
+        with pytest.raises(ValueError, match="separate"):
+            exporter.export_cases(source, output)
 
 
 @pytest.mark.parametrize("corruption", ["asset", "identity", "escape", "test"])

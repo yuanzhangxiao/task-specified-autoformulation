@@ -75,17 +75,25 @@ job also gets 30 minutes; duplicate and partial submissions are guarded.
 
 ## Export on ACES and transfer from the Mac
 
-The exporter uses only Python's standard library and can run through stdin. From
-the Mac, using its existing `aces` and `delta` SSH aliases:
+The exporter supports Python 3.6+ using only its standard library and can run
+through stdin. The earlier version failed on ACES system Python at its postponed
+annotations import; the standalone exporter now avoids that import and newer
+typing, pathlib, and string APIs. The fitting runtime still uses its existing
+Python 3.12 environment on Delta.
+
+From the Mac, using its existing `aces` and `delta` SSH aliases:
 
 ```bash
-ssh aces 'python3 - --source-root /scratch/user/u.yx126462/phase_b/staged-multiround-feedback-v3-a865f8a --output /scratch/user/u.yx126462/phase_b/collocation-node-cases-v1' < /private/tmp/autoformalism-astra-collocation-node-start/scripts/export_collocation_node_cases.py
+ssh aces 'python3 - --source-root /scratch/user/u.yx126462/phase_b/staged-multiround-feedback-v3-a865f8a --output /scratch/user/u.yx126462/phase_b/collocation-node-cases-v1' < /private/tmp/autoformalism-astra-collocation-node-start/scripts/export_collocation_node_cases.py &&
 scp -3 -r aces:/scratch/user/u.yx126462/phase_b/collocation-node-cases-v1 delta:/work/hdd/bibo/yxiao2/phase_b/
 ```
 
-The second command routes the copy through the Mac. The original campaign remains
-untouched. Repeated export requires byte-identical contents; a changed source
+The second command runs only if export succeeds and routes the copy through the
+Mac. The original campaign remains untouched. Repeated export requires
+byte-identical contents; a changed source
 requires a newly named bundle directory. SSH/MFA is handled by the user's terminal.
+The compatibility update preserves bundle bytes and format. The previously
+supplied Delta commands pinned to `f92d07a` remain valid.
 
 ## Run on Delta
 
@@ -126,7 +134,7 @@ require the user-run cluster experiment; local verification uses synthetic data.
 
 ## Local verification
 
-- Full repository suite: **1,268 passed, 3 skipped** (optional PyTorch unavailable).
+- Initial milestone suite: **1,268 passed, 3 skipped** (optional PyTorch unavailable).
 - Ruff and shell syntax checks passed.
 - Actual explosive-start controls recovered `a=0.1` with validation NMSE below
   `1e-9` using the optional policy, for both direct and algebraic observations;
@@ -135,3 +143,8 @@ require the user-run cluster experiment; local verification uses synthetic data.
   checkpoint reuse, interruption/timeout handling, and supervised CLI execution.
 - The standard-library exporter also passed a standalone stdin smoke test,
   matching the ACES invocation above.
+- The compatibility regression checks Python 3.6 syntax, rejects newer
+  pathlib/string API calls, and exercises export and identical resume in an
+  isolated subprocess without site packages. Containment tests cover traversal
+  and symlink escapes.
+  The local machine has Python 3.12, so this does not claim an actual ACES run.
