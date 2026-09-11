@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Export frozen public multiround candidates with Python's standard library only."""
+"""Export frozen public multiround candidates using Python 3.6+ standard library."""
 
-from __future__ import annotations
+# ACES system Python predates postponed annotations and newer typing syntax.
+# ruff: noqa: UP045
 
 import argparse
 import hashlib
 import json
 from pathlib import Path
+from typing import Optional
 
 PUBLIC = ("manifest.json", "proposer_prompt.txt", "train.csv", "validation.csv")
 
@@ -16,21 +18,26 @@ def digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
+def within(path: Path, root: Path) -> bool:
+    """Check resolved containment without the Python 3.9 is_relative_to API."""
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
 def checked(root: Path, relative: str) -> Path:
     """Reject absolute paths, traversal and symlink escapes from the source."""
     path = root / relative
-    if Path(relative).is_absolute() or not path.resolve().is_relative_to(
-        root.resolve()
-    ):
+    if Path(relative).is_absolute() or not within(path, root):
         raise ValueError("artifact path escapes its root")
     return path
 
 
 def export_cases(source: Path, output: Path) -> dict:
     """Copy every frozen parent and committed round, without selecting on metrics."""
-    if source.resolve().is_relative_to(
-        output.resolve()
-    ) or output.resolve().is_relative_to(source.resolve()):
+    if within(source, output) or within(output, source):
         raise ValueError("source and export must be separate")
     plan = json.loads((source / "plan.json").read_text())
     if (
@@ -42,10 +49,10 @@ def export_cases(source: Path, output: Path) -> dict:
         or plan.get("public_asset_ledger_sha256") != digest(plan["public_asset_ledger"])
     ):
         raise ValueError("source multiround plan or public-data declaration differs")
-    files: dict[str, str] = {}
+    files = {}
     cases = []
 
-    def copy(relative: str, destination: str, expected: str | None = None):
+    def copy(relative: str, destination: str, expected: Optional[str] = None):
         payload = checked(source, relative).read_bytes()
         sha = hashlib.sha256(payload).hexdigest()
         if expected is not None and expected != sha:
@@ -65,7 +72,7 @@ def export_cases(source: Path, output: Path) -> dict:
             relative = f"frozen/public/phase_b_v1/{benchmark}/{name}"
             copy(
                 relative,
-                relative.removeprefix("frozen/"),
+                relative[len("frozen/") :],
                 plan["public_asset_ledger"][relative],
             )
         ordinal = len(cases)
