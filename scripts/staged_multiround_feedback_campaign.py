@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze or run the public two-round function-first feedback pilot."""
+"""Freeze or run the public bounded function-first feedback pilot."""
 
 from __future__ import annotations
 

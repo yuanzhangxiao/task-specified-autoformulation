@@ -27,7 +27,7 @@ case "$(jq -r '.config.protocol' "${plan}")" in
     worker_script=staged_function_hybrid_campaign.py ;;
   scientific-staged-function-prefit-handoff-1) \
     worker_script=staged_function_prefit_campaign.py ;;
-  scientific-staged-multiround-feedback-1|scientific-staged-multiround-feedback-2|scientific-staged-multiround-feedback-3) \
+  scientific-staged-multiround-feedback-1|scientific-staged-multiround-feedback-2|scientific-staged-multiround-feedback-3|scientific-staged-multiround-feedback-4) \
     worker_script=staged_multiround_feedback_campaign.py ;;
   *) echo 'unsupported frozen worker protocol' >&2; exit 2 ;;
 esac

@@ -1,4 +1,4 @@
-"""Two-round public function-first feedback pilot on frozen failed candidates."""
+"""Public function-first feedback pilot on frozen failed candidates."""
 
 from __future__ import annotations
 
@@ -87,15 +87,16 @@ class ComponentRevisionReply(StrictSchema):
 
 
 class MultiRoundFeedbackConfig(StagedCampaignConfig):
-    """Frozen two-task, two-round function-first routing experiment."""
+    """Frozen two-task, bounded function-first routing experiment."""
 
     protocol: Literal[
         "scientific-staged-multiround-feedback-1",
         "scientific-staged-multiround-feedback-2",
         "scientific-staged-multiround-feedback-3",
+        "scientific-staged-multiround-feedback-4",
     ]
     source_task_indices: tuple[int, int]
-    round_count: Literal[2] = 2
+    round_count: int = Field(default=2, ge=2, le=4)
     fit: CollocationSensitivityConfig
     routing_policy: Literal[
         "function_first_then_topology_if_persistent_instability"
@@ -118,16 +119,22 @@ FUNCTION_REVISION_SYSTEM_PROMPT = """You repair functions in a fitted
 continuous-time model.
 The runtime selected a small set of generated components implicated by a numerical
 failure. Return exactly one complete expression and its fitted parameter names for
-every selected component. Preserve the displayed nonparameter source set exactly;
+every selected pending component. A retry contains only components that remain
+invalid; do not resend a component retained provisionally by the runtime. Preserve
+the displayed nonparameter source set exactly;
 therefore this is a function revision, not a topology revision. Existing parameter
-identities and roles are immutable: repeat their displayed names with role null. For a
-new direct scalar term gain or additive constant, use a natural name with role null;
-the runtime derives its role from the expression.
+identities and roles are immutable and may be reused without redeclaring them. The
+parameters list contains only genuinely new parameter names. For a new direct scalar
+term gain or additive constant, use a natural name with role null; the runtime derives
+its role from the expression.
 For a new parameter nested inside a nonlinear function, denominator, exponent, or
 other internal law, choose a specific shape, positive_shape, rate, time_constant, or
 scale role rather than the generic coefficient role.
-Avoid positive superlinear closed-feedback growth and prefer bounded or saturating
-nonlinear response when scientifically compatible with the public requirement.
+Avoid positive superlinear closed-feedback growth and prefer total-domain bounded or
+saturating nonlinear response when scientifically compatible with the public
+requirement. A law such as x/(1+x) is not total-domain bounded when x can reach -1;
+do not use a state-dependent denominator unless the displayed diagnostic certifies it
+away from zero.
 Do not change states, processes, target mappings, initial values, or other equations.
 Do not provide ranges, scopes, units, prose, scores, or a complete model."""
 
@@ -135,8 +142,10 @@ TOPOLOGY_REVISION_SYSTEM_PROMPT = """You backtrack one equation-dependency
 decision in a continuous-time model after a bounded function repair remained
 numerically unstable.
 Return exactly one complete expression and its fitted parameter names for every
-selected generated component. Use role null for reused parameters, new direct scalar
-term gains, and new additive constants. Give a qualitative role only to a new internal
+selected pending generated component. A retry contains only components that remain
+invalid; do not resend a provisionally retained component. Reuse existing parameter
+names without redeclaring them. Use role null for new direct scalar term gains and new
+additive constants. Give a qualitative role only to a new internal
 parameter whose role cannot be derived from the outer expression. You may add or
 remove dependencies, but only from the displayed existing public and generated
 variables. Preserve the variable inventory, target mapping, all unselected equations,
@@ -268,6 +277,10 @@ def freeze_campaign(
             "topology_dependency_backtrack_after_persistent_instability",
         ],
         "parameter_fitting_method": "collocation_then_forward_sensitivity",
+        "latent_initialization_policy": (
+            "source_candidate_fixed_or_causal_initializer_held_fixed"
+        ),
+        "latent_initial_values_learned_during_training": False,
         "validation_used_for_parameter_fitting": False,
         "scientific_judge_called": False,
         "test_data_opened": False,
@@ -360,6 +373,10 @@ def run_campaign(
                         "parameter_fitting_method": (
                             "collocation_then_forward_sensitivity"
                         ),
+                        "latent_initialization_policy": (
+                            "source_candidate_fixed_or_causal_initializer_held_fixed"
+                        ),
+                        "latent_initial_values_learned_during_training": False,
                         "validation_used_for_parameter_fitting": False,
                         "scientific_judge_called": False,
                         "test_data_opened": False,
@@ -425,14 +442,22 @@ def run_task(
         candidate_checkpoint = round_root / "candidate.json"
         revision_checkpoint = round_root / "revision.json"
         fit_checkpoint = round_root / "fit.json"
-        route = _route(round_index, rounds)
-        selected = (
+        domain_findings_before = state_dependent_denominator_findings(current)
+        route = _route(round_index, rounds, domain_findings_before)
+        domain_components = tuple(
+            dict.fromkeys(item["component"] for item in domain_findings_before)
+        )
+        selected = domain_components[:4] or (
             tuple(rounds[-1]["selected_components"])
             if rounds
             else select_revision_components(current)
         )
         if not selected:
             raise ValueError("runtime could not identify a bounded revision scope")
+        revision_feedback = {
+            **dict(prior_feedback),
+            "prefit_domain_findings": domain_findings_before,
+        }
         if candidate_checkpoint.exists() and revision_checkpoint.exists():
             revised = CandidateModel.model_validate_json(
                 candidate_checkpoint.read_text()
@@ -441,21 +466,84 @@ def run_task(
             if revision_record.get("parent_sha256") != _candidate_hash(current):
                 raise ValueError("revision checkpoint parent differs")
         else:
-            revised, revision_record = _request_revision(
-                client=client,
-                route=route,
-                candidate=current,
-                selected=selected,
-                context=context,
-                scientific_context=scientific_context,
-                numerical_feedback=prior_feedback,
-                round_index=round_index,
-                failure_checkpoint=round_root / "revision_failures.json",
-            )
+            try:
+                revised, revision_record = _request_revision(
+                    client=client,
+                    route=route,
+                    candidate=current,
+                    selected=selected,
+                    context=context,
+                    scientific_context=scientific_context,
+                    numerical_feedback=revision_feedback,
+                    round_index=round_index,
+                    failure_checkpoint=round_root / "revision_failures.json",
+                )
+            except RevisionContractError as exc:
+                ledger_path = round_root / "revision_failures.json"
+                ledger = _read_object(ledger_path) if ledger_path.exists() else {}
+                revision_record = {
+                    "schema_version": "component-revision-record-3",
+                    "status": "failed",
+                    "route": route,
+                    "parent_sha256": _candidate_hash(current),
+                    "audit": {},
+                    "attempts": ledger.get("attempts", []),
+                    "diagnostic": exc.diagnostic(),
+                }
+                fit = {
+                    "schema_version": "collocation-forward-sensitivity-fit-1",
+                    "status": "not_run",
+                    "failure_class": "revision_contract",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "training": None,
+                    "validation": None,
+                }
+                round_record = {
+                    "round_index": round_index,
+                    "route": route,
+                    "selected_components": list(selected),
+                    "parent_candidate_sha256": _candidate_hash(current),
+                    "candidate_sha256": _candidate_hash(current),
+                    "revision": revision_record,
+                    "fit": fit,
+                    "candidate_equations": _component_expressions(current),
+                    "prefit_domain_findings_before": domain_findings_before,
+                    "prefit_domain_findings_after": domain_findings_before,
+                    "numerically_stable": False,
+                    "training_normalized_mse": None,
+                    "validation_normalized_mse": None,
+                }
+                rounds.append(round_record)
+                atomic_json(output / "progress.json", {"rounds": rounds})
+                prior_feedback = {
+                    "revision_contract_failure": exc.diagnostic(),
+                    "prefit_domain_findings": domain_findings_before,
+                    "instruction": (
+                        "The parent candidate remains unchanged. Repair only the "
+                        "same pending components in the next bounded round."
+                    ),
+                }
+                continue
             _write_once_json(revision_checkpoint, revision_record)
             _write_once_json(candidate_checkpoint, revised.model_dump(mode="json"))
+        domain_findings_after = state_dependent_denominator_findings(revised)
         if fit_checkpoint.exists():
             fit = _read_object(fit_checkpoint)
+        elif domain_findings_after:
+            fit = {
+                "schema_version": "collocation-forward-sensitivity-fit-1",
+                "status": "not_run",
+                "failure_class": "function_domain",
+                "error_type": "PrefitDomainAudit",
+                "error": "state-dependent denominator is not certified away from zero",
+                "domain_findings": domain_findings_after,
+                "initializer": None,
+                "refinement": None,
+                "training": None,
+                "validation": None,
+            }
+            _write_once_json(fit_checkpoint, fit)
         else:
             try:
                 model = compile_candidate(revised, context)
@@ -490,6 +578,8 @@ def run_task(
             "revision": revision_record,
             "fit": fit,
             "candidate_equations": _component_expressions(revised),
+            "prefit_domain_findings_before": domain_findings_before,
+            "prefit_domain_findings_after": domain_findings_after,
             "numerically_stable": fit.get("status") == "complete",
             "training_normalized_mse": _score(fit, "training"),
             "validation_normalized_mse": _score(fit, "validation"),
@@ -518,6 +608,10 @@ def run_task(
             float(item.get("latency_seconds") or 0.0) for item in client.records
         ),
         "parameter_fitting_method": "collocation_then_forward_sensitivity",
+        "latent_initialization_policy": (
+            "source_candidate_fixed_or_causal_initializer_held_fixed"
+        ),
+        "latent_initial_values_learned_during_training": False,
         "validation_used_for_parameter_fitting": False,
         "scientific_judge_called": False,
         "test_data_opened": False,
@@ -609,6 +703,215 @@ def select_revision_components(candidate: CandidateModel) -> tuple[str, ...]:
     return tuple(nonlinear[:2] or list(expressions)[:2])
 
 
+def state_dependent_denominator_findings(
+    candidate: CandidateModel,
+) -> list[dict[str, Any]]:
+    """Report generated-symbol denominators not certified strictly positive.
+
+    This is a deliberately narrow pilot certificate.  It accepts total-domain
+    constructions such as ``1 + x**2`` and ``1 + abs(x)``.  It does not infer a
+    hidden physical state domain, so ``1 + x`` remains uncertified.  Findings
+    identify a possible singular condition; they do not claim that a fitted
+    trajectory will reach it.
+    """
+    generated = set(_component_expressions(candidate))
+    positive_parameters = {
+        item.name
+        for item in candidate.parameters
+        if item.role.domain.value == "positive"
+    }
+    nonnegative_parameters = {
+        item.name
+        for item in candidate.parameters
+        if item.role.domain.value in {"positive", "nonnegative"}
+    }
+    findings: list[dict[str, Any]] = []
+    for component, expression in _component_expressions(candidate).items():
+        tree = RestrictedParser().parse(expression, location=component).tree
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Div):
+                continue
+            state_symbols = sorted(
+                child.id
+                for child in ast.walk(node.right)
+                if isinstance(child, ast.Name) and child.id in generated
+            )
+            if not state_symbols or _strictly_positive_expression(
+                node.right,
+                positive_parameters=positive_parameters,
+                nonnegative_parameters=nonnegative_parameters,
+            ):
+                continue
+            denominator = ast.unparse(node.right)
+            findings.append(
+                {
+                    "component": component,
+                    "denominator": denominator,
+                    "generated_symbols": sorted(set(state_symbols)),
+                    "possible_singularity": _possible_zero_condition(node.right),
+                    "certificate_status": "not_certified_away_from_zero",
+                    "interpretation": (
+                        "potential domain defect only; numerical reachability has "
+                        "not been inferred"
+                    ),
+                }
+            )
+    return findings
+
+
+def _strictly_positive_expression(
+    node: ast.expr,
+    *,
+    positive_parameters: set[str],
+    nonnegative_parameters: set[str],
+) -> bool:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value) > 0.0
+    if isinstance(node, ast.Name):
+        return node.id in positive_parameters
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
+        return _strictly_positive_expression(
+            node.operand,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        )
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"exp", "softplus", "sigmoid"}
+    ):
+        return True
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left_nonnegative = _nonnegative_expression(
+            node.left,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        )
+        right_nonnegative = _nonnegative_expression(
+            node.right,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        )
+        return left_nonnegative and right_nonnegative and (
+            _strictly_positive_expression(
+                node.left,
+                positive_parameters=positive_parameters,
+                nonnegative_parameters=nonnegative_parameters,
+            )
+            or _strictly_positive_expression(
+                node.right,
+                positive_parameters=positive_parameters,
+                nonnegative_parameters=nonnegative_parameters,
+            )
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _strictly_positive_expression(
+            node.left,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        ) and _strictly_positive_expression(
+            node.right,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        return (
+            isinstance(node.right, ast.Constant)
+            and isinstance(node.right.value, int)
+            and node.right.value > 0
+            and _strictly_positive_expression(
+                node.left,
+                positive_parameters=positive_parameters,
+                nonnegative_parameters=nonnegative_parameters,
+            )
+        )
+    return False
+
+
+def _nonnegative_expression(
+    node: ast.expr,
+    *,
+    positive_parameters: set[str],
+    nonnegative_parameters: set[str],
+) -> bool:
+    if _strictly_positive_expression(
+        node,
+        positive_parameters=positive_parameters,
+        nonnegative_parameters=nonnegative_parameters,
+    ):
+        return True
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value) >= 0.0
+    if isinstance(node, ast.Name):
+        return node.id in nonnegative_parameters
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id in {"abs", "sqrt"}
+    if (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Pow)
+        and isinstance(node.right, ast.Constant)
+        and isinstance(node.right.value, int)
+        and node.right.value > 0
+        and node.right.value % 2 == 0
+    ):
+        return True
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _nonnegative_expression(
+            node.left,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        ) and _nonnegative_expression(
+            node.right,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _nonnegative_expression(
+            node.left,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        ) and _nonnegative_expression(
+            node.right,
+            positive_parameters=positive_parameters,
+            nonnegative_parameters=nonnegative_parameters,
+        )
+    return False
+
+
+def _possible_zero_condition(node: ast.expr) -> str:
+    """Return a factual symbolic condition, with a numeric affine root when easy."""
+    affine = _single_name_affine(node)
+    if affine is not None:
+        name, coefficient, constant = affine
+        if coefficient != 0.0:
+            return f"{name} = {-constant / coefficient:.12g}"
+    return f"{ast.unparse(node)} = 0"
+
+
+def _single_name_affine(node: ast.expr) -> tuple[str, float, float] | None:
+    if isinstance(node, ast.Name):
+        return node.id, 1.0, 0.0
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return "", 0.0, float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        value = _single_name_affine(node.operand)
+        if value is None:
+            return None
+        return value[0], -value[1], -value[2]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
+        left = _single_name_affine(node.left)
+        right = _single_name_affine(node.right)
+        if left is None or right is None:
+            return None
+        sign = -1.0 if isinstance(node.op, ast.Sub) else 1.0
+        names = {name for name in (left[0], right[0]) if name}
+        if len(names) > 1:
+            return None
+        name = next(iter(names), "")
+        return name, left[1] + sign * right[1], left[2] + sign * right[2]
+    return None
+
+
 def apply_component_revision(
     candidate: CandidateModel,
     reply: ComponentRevisionReply,
@@ -639,7 +942,8 @@ def apply_component_revision(
         if declared & (generated | supplied):
             raise ValueError("revision parameter collides with a scientific symbol")
         parsed = RestrictedParser().parse(item.expression, location=item.component)
-        actual = set(parsed.symbols) - declared
+        used_parent_parameters = set(parsed.symbols) & set(old_parameters)
+        actual = set(parsed.symbols) - declared - used_parent_parameters
         illegal = actual - generated - supplied
         if illegal:
             raise ValueError(
@@ -667,6 +971,18 @@ def apply_component_revision(
             parent_parameters=old_parameters,
         )
         role_derivations.extend(derivations)
+        role_derivations.extend(
+            {
+                "code": "REUSED_PARAMETER_ROLE_PRESERVED",
+                "parameter": name,
+                "requested_role": None,
+                "effective_role": old_parameters[name].role.value,
+                "certificate": "parent_parameter_identity",
+                "normalization_applied": False,
+                "declaration_omitted": True,
+            }
+            for name in sorted(used_parent_parameters - declared)
+        )
         for parameter in item.parameters:
             spec = ParameterSpec(
                 name=parameter.name,
@@ -734,6 +1050,26 @@ def apply_component_revision(
     )
     revised = CandidateModel.model_validate(payload)
     compile_candidate(revised, context)
+    unsafe = [
+        item
+        for item in state_dependent_denominator_findings(revised)
+        if item["component"] in selected
+    ]
+    if unsafe:
+        first = unsafe[0]
+        raise RevisionContractError(
+            "STATE_DEPENDENT_DENOMINATOR_NOT_CERTIFIED_NONZERO",
+            (
+                f"component {first['component']} uses denominator "
+                f"{first['denominator']!r}, which is not certified away from zero"
+            ),
+            **first,
+            all_findings=unsafe,
+            allowed_action=(
+                "replace only the affected functional law with a total-domain "
+                "expression while preserving its required nonparameter sources"
+            ),
+        )
     revised_identity = candidate_identity(revised)
     if revised_identity.functional_sha256 == parent_identity.functional_sha256:
         raise ValueError("revision did not change the executable functions")
@@ -763,6 +1099,7 @@ def apply_component_revision(
         "source_diffs": source_diffs,
         "target_reachability_preserved": not lost_reachability,
         "parameter_role_derivations": role_derivations,
+        "state_dependent_denominator_findings": unsafe,
     }
 
 
@@ -957,49 +1294,62 @@ def _request_revision(
 ) -> tuple[CandidateModel, dict[str, Any]]:
     diagnostic: dict[str, Any] | None = None
     attempts: list[dict[str, Any]] = []
-    expressions = _component_expressions(candidate)
-    parameter_names = {item.name for item in candidate.parameters}
-    request = {
-        "schema_version": "component-revision-request-2",
-        "route": route,
-        "scientific_context": scientific_context,
-        "selected_components": [
-            {
-                "component": name,
-                "current_expression": expressions[name],
-                "required_nonparameter_sources": sorted(
-                    set(
-                        RestrictedParser()
-                        .parse(expressions[name], location=name)
-                        .symbols
-                    )
-                    - parameter_names
-                )
-                if route != "topology_revision"
-                else None,
-            }
-            for name in selected
-        ],
-        "all_current_equations": expressions,
-        "parent_parameters": {
-            item.name: item.role.value for item in candidate.parameters
-        },
-        "available_nonparameter_symbols": sorted(
-            set(expressions) | set(context.forcing_channels) | {context.time_symbol}
-        ),
-        "numerical_feedback": dict(numerical_feedback),
-        "runtime_priority": (
-            "repair numerical instability at function level before topology"
-            if route != "topology_revision"
-            else "function repair was exhausted; minimally backtrack dependencies"
-        ),
-    }
+    provisional = candidate
+    pending = list(selected)
+    accepted: dict[str, dict[str, Any]] = {}
     system = (
         TOPOLOGY_REVISION_SYSTEM_PROMPT
         if route == "topology_revision"
         else FUNCTION_REVISION_SYSTEM_PROMPT
     )
     for attempt in range(client.settings.attempts_per_step):
+        expressions = _component_expressions(provisional)
+        parameter_names = {item.name for item in provisional.parameters}
+        request = {
+            "schema_version": "component-revision-request-3",
+            "route": route,
+            "scientific_context": scientific_context,
+            "selected_pending_components": [
+                {
+                    "component": name,
+                    "current_expression": expressions[name],
+                    "required_nonparameter_sources": sorted(
+                        set(
+                            RestrictedParser()
+                            .parse(expressions[name], location=name)
+                            .symbols
+                        )
+                        - parameter_names
+                    )
+                    if route != "topology_revision"
+                    else None,
+                }
+                for name in pending
+            ],
+            "provisionally_retained_components": sorted(accepted),
+            "all_current_equations": expressions,
+            "available_parent_parameters": {
+                item.name: item.role.value for item in provisional.parameters
+            },
+            "new_parameter_policy": (
+                "List only genuinely new parameters. Existing parent parameter "
+                "names may be reused without declaration and retain their roles."
+            ),
+            "available_nonparameter_symbols": sorted(
+                set(expressions)
+                | set(context.forcing_channels)
+                | {context.time_symbol}
+            ),
+            "numerical_feedback": dict(numerical_feedback),
+            "runtime_priority": (
+                "repair named function/domain evidence before topology"
+                if route != "topology_revision"
+                else (
+                    "function repair passed its static audit; minimally backtrack "
+                    "dependencies"
+                )
+            ),
+        }
         payload = {**request, "runtime_diagnostic": diagnostic}
         record = client.call(
             system=system,
@@ -1012,13 +1362,6 @@ def _request_revision(
         try:
             rejected = visible_response(record)
             reply = ComponentRevisionReply.model_validate(rejected)
-            revised, audit = apply_component_revision(
-                candidate,
-                reply,
-                context,
-                selected=selected,
-                route=route,  # type: ignore[arg-type]
-            )
         except (ValueError, TypeError, KeyError) as exc:
             named = _named_revision_diagnostic(exc)
             diagnostic = {
@@ -1033,44 +1376,250 @@ def _request_revision(
                     "accepted": False,
                     "rejected_response": rejected,
                     "diagnostic": named,
+                    "pending_components_after": list(pending),
                 }
             )
-            if failure_checkpoint is not None:
-                atomic_json(
-                    failure_checkpoint,
-                    {
-                        "schema_version": "component-revision-failures-1",
-                        "route": route,
-                        "parent_sha256": _candidate_hash(candidate),
-                        "selected_components": list(selected),
-                        "attempts": attempts,
-                    },
-                )
+            _checkpoint_revision_failures(
+                failure_checkpoint,
+                route=route,
+                candidate=candidate,
+                selected=selected,
+                pending=pending,
+                accepted=accepted,
+                attempts=attempts,
+            )
             continue
-        attempts.append(
-            {
-                "attempt": attempt,
-                "request_hash": record["request_hash"],
-                "accepted": True,
+        component_results: list[dict[str, Any]] = []
+        returned = {item.component for item in reply.revisions}
+        for item in reply.revisions:
+            if item.component not in pending:
+                component_results.append(
+                    {
+                        "component": item.component,
+                        "accepted": False,
+                        "diagnostic": {
+                            "code": "UNREQUESTED_COMPONENT_REVISION",
+                            "message": (
+                                f"component {item.component} is not pending; "
+                                "do not resend provisionally retained components"
+                            ),
+                            "details": {"pending_components": list(pending)},
+                        },
+                    }
+                )
+                continue
+            try:
+                provisional, audit = apply_component_revision(
+                    provisional,
+                    ComponentRevisionReply(revisions=(item,)),
+                    context,
+                    selected=(item.component,),
+                    route=route,  # type: ignore[arg-type]
+                )
+            except (ValueError, TypeError, KeyError) as exc:
+                component_results.append(
+                    {
+                        "component": item.component,
+                        "accepted": False,
+                        "diagnostic": _named_revision_diagnostic(exc),
+                    }
+                )
+                continue
+            accepted[item.component] = {
+                "revision": item.model_dump(mode="json"),
+                "audit": audit,
             }
-        )
-        return revised, {
-            "schema_version": "component-revision-record-2",
-            "route": route,
-            "parent_sha256": _candidate_hash(candidate),
-            "reply": reply.model_dump(mode="json"),
-            "audit": audit,
-            "attempts": attempts,
+            pending.remove(item.component)
+            component_results.append(
+                {
+                    "component": item.component,
+                    "accepted": True,
+                    "audit": audit,
+                }
+            )
+        for component in pending:
+            if component not in returned:
+                component_results.append(
+                    {
+                        "component": component,
+                        "accepted": False,
+                        "diagnostic": {
+                            "code": "MISSING_COMPONENT_REVISION",
+                            "message": f"pending component {component} was omitted",
+                            "details": {"pending_components": list(pending)},
+                        },
+                    }
+                )
+        attempt_record = {
+            "attempt": attempt,
+            "request_hash": record["request_hash"],
+            "accepted": not pending,
+            "rejected_response": rejected,
+            "component_results": component_results,
+            "pending_components_after": list(pending),
+            "provisionally_retained_components": sorted(accepted),
         }
+        attempts.append(attempt_record)
+        if not pending:
+            final_payload = provisional.model_dump(mode="json")
+            final_payload.update(
+                parent_candidate_id=candidate.candidate_id,
+                change_summary=(
+                    f"runtime-applied atomic {route} of {', '.join(selected)}"
+                ),
+            )
+            provisional = CandidateModel.model_validate(final_payload)
+            compile_candidate(provisional, context)
+            audit = _combined_revision_audit(candidate, provisional, accepted, context)
+            return provisional, {
+                "schema_version": "component-revision-record-3",
+                "route": route,
+                "parent_sha256": _candidate_hash(candidate),
+                "accepted_component_revisions": accepted,
+                "audit": audit,
+                "attempts": attempts,
+            }
+        failures = [
+            item["diagnostic"]
+            for item in component_results
+            if not item["accepted"]
+        ]
+        diagnostic = {
+            "code": "PARTIAL_COMPONENT_REVISION_REQUIRED",
+            "message": (
+                "Some component revisions were retained; repair only the displayed "
+                "pending components"
+            ),
+            "details": {
+                "pending_components": list(pending),
+                "provisionally_retained_components": sorted(accepted),
+                "component_failures": failures,
+            },
+            "instruction": (
+                "Return each pending component exactly once. Do not resend retained "
+                "components. Repair only its named failure."
+            ),
+        }
+        _checkpoint_revision_failures(
+            failure_checkpoint,
+            route=route,
+            candidate=candidate,
+            selected=selected,
+            pending=pending,
+            accepted=accepted,
+            attempts=attempts,
+        )
     raise RevisionContractError(
         "COMPONENT_REVISION_ATTEMPTS_EXHAUSTED",
         f"bounded component revision exhausted for {route}",
         route=route,
         selected_components=list(selected),
         rejected_attempt_count=len(attempts),
-        final_diagnostic=(attempts[-1]["diagnostic"] if attempts else None),
+        pending_components=list(pending),
+        provisionally_retained_components=sorted(accepted),
+        final_diagnostic=_last_attempt_diagnostic(attempts),
         failure_checkpoint=str(failure_checkpoint) if failure_checkpoint else None,
     )
+
+
+def _last_attempt_diagnostic(attempts: list[dict[str, Any]]) -> Any:
+    if not attempts:
+        return None
+    if attempts[-1].get("diagnostic") is not None:
+        return attempts[-1]["diagnostic"]
+    failures = [
+        item.get("diagnostic")
+        for item in attempts[-1].get("component_results", [])
+        if not item.get("accepted")
+    ]
+    return next((item for item in failures if item is not None), None)
+
+
+def _checkpoint_revision_failures(
+    path: Path | None,
+    *,
+    route: str,
+    candidate: CandidateModel,
+    selected: tuple[str, ...],
+    pending: list[str],
+    accepted: Mapping[str, Any],
+    attempts: list[dict[str, Any]],
+) -> None:
+    if path is None:
+        return
+    atomic_json(
+        path,
+        {
+            "schema_version": "component-revision-failures-2",
+            "route": route,
+            "parent_sha256": _candidate_hash(candidate),
+            "selected_components": list(selected),
+            "pending_components": list(pending),
+            "provisionally_retained_components": dict(accepted),
+            "attempts": attempts,
+        },
+    )
+
+
+def _combined_revision_audit(
+    before: CandidateModel,
+    after: CandidateModel,
+    accepted: Mapping[str, Mapping[str, Any]],
+    context: ValidationContext,
+) -> dict[str, Any]:
+    before_identity = candidate_identity(before)
+    after_identity = candidate_identity(after)
+    before_expressions = _component_expressions(before)
+    after_expressions = _component_expressions(after)
+    before_parameters = {item.name for item in before.parameters}
+    after_parameters = {item.name for item in after.parameters}
+    source_diffs: dict[str, dict[str, list[str]]] = {}
+    derivations: list[dict[str, Any]] = []
+    for component, record in accepted.items():
+        old_sources = (
+            set(
+                RestrictedParser()
+                .parse(before_expressions[component], location=component)
+                .symbols
+            )
+            - before_parameters
+        )
+        new_sources = (
+            set(
+                RestrictedParser()
+                .parse(after_expressions[component], location=component)
+                .symbols
+            )
+            - after_parameters
+        )
+        source_diffs[component] = {
+            "removed": sorted(old_sources - new_sources),
+            "added": sorted(new_sources - old_sources),
+        }
+        derivations.extend(
+            (record.get("audit") or {}).get("parameter_role_derivations", [])
+        )
+    old_reachability = _target_reachability(before, context)
+    revised_reachability = _target_reachability(after, context)
+    lost_reachability = {
+        target: sorted(old_reachability[target] - revised_reachability[target])
+        for target in old_reachability
+        if old_reachability[target] - revised_reachability[target]
+    }
+    return {
+        "parent_identity": before_identity.model_dump(mode="json"),
+        "revised_identity": after_identity.model_dump(mode="json"),
+        "topology_changed": (
+            before_identity.topology_sha256 != after_identity.topology_sha256
+        ),
+        "source_diffs": source_diffs,
+        "target_reachability_preserved": not lost_reachability,
+        "parameter_role_derivations": derivations,
+        "provisionally_retained_component_count": len(accepted),
+        "state_dependent_denominator_findings": (
+            state_dependent_denominator_findings(after)
+        ),
+    }
 
 
 def _named_revision_diagnostic(exc: Exception) -> dict[str, Any]:
@@ -1119,7 +1668,21 @@ def _repair_instruction(diagnostic: Mapping[str, Any]) -> str:
     if code == "REVISION_COMPONENT_SET_MISMATCH":
         return "Return exactly the selected components once and in the displayed order."
     if code == "UNAVAILABLE_SYMBOL":
-        return "Remove or replace only the unavailable symbol using the displayed set."
+        return (
+            "Use an available parent parameter without redeclaring it, declare a "
+            "genuinely new parameter, or replace the unavailable symbol; change "
+            "nothing else."
+        )
+    if code == "STATE_DEPENDENT_DENOMINATOR_NOT_CERTIFIED_NONZERO":
+        return (
+            "Replace only the named denominator-dependent law with a total-domain "
+            "expression, preserving every required nonparameter source."
+        )
+    if code == "PARTIAL_COMPONENT_REVISION_REQUIRED":
+        return (
+            "Return only the pending components, once each. Do not resend retained "
+            "components."
+        )
     return (
         "Repair only the named deterministic contract failure and preserve all "
         "other choices."
@@ -1134,13 +1697,23 @@ def _revision_failure_records(task_root: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _route(round_index: int, rounds: list[dict[str, Any]]) -> str:
+def _route(
+    round_index: int,
+    rounds: list[dict[str, Any]],
+    domain_findings: list[dict[str, Any]] | None = None,
+) -> str:
+    if domain_findings:
+        return "function_revision"
     if round_index == 1:
         return "function_revision"
     if (rounds[-1].get("fit") or {}).get("failure_class") == "fitter_contract":
         raise ValueError("fitter-contract failure cannot route scientific revision")
+    if (rounds[-1].get("fit") or {}).get("failure_class") == "revision_contract":
+        return str(rounds[-1]["route"])
     if rounds[-1]["numerically_stable"]:
         return "function_refinement"
+    if rounds[-1].get("route", "function_revision") == "topology_revision":
+        return "function_revision"
     return "topology_revision"
 
 
@@ -1184,6 +1757,18 @@ def _round_feedback(round_record: Mapping[str, Any]) -> dict[str, Any]:
         "optimizer_message": (fit.get("refinement") or {}).get("message"),
         "fit_error": fit.get("error"),
         "failure_messages": failures[:5],
+        "prefit_domain_findings": round_record.get(
+            "prefit_domain_findings_after", []
+        ),
+        "numerical_status": (fit.get("refinement") or {}).get(
+            "numerical_status"
+        ),
+        "valid_residual_evaluations": (fit.get("refinement") or {}).get(
+            "valid_residual_evaluations"
+        ),
+        "training_failure_evidence": (fit.get("refinement") or {}).get(
+            "failure_evidence", []
+        ),
     }
 
 
@@ -1219,10 +1804,6 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
     final_rounds = [row["rounds"][-1] for row in rows if row.get("rounds")]
     rejected_revision_attempts = sum(
         int(item.get("rejected_revision_attempt_count", 0)) for item in rounds
-    ) + sum(
-        len(ledger.get("attempts", []))
-        for row in rows
-        for ledger in row.get("revision_failures", [])
     )
     parent_role_preservations = sum(
         int(item.get("parent_role_preservation_count", 0)) for item in rounds
@@ -1232,6 +1813,14 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
     )
     fitter_contract_failures = sum(
         item.get("fit_failure_class") == "fitter_contract" for item in rounds
+    )
+    revision_diagnostics = [
+        diagnostic
+        for item in rounds
+        for diagnostic in item.get("revision_diagnostics", [])
+    ]
+    revision_diagnostic_counts = Counter(
+        str(item.get("code", "UNKNOWN")) for item in revision_diagnostics
     )
     return {
         "schema_version": _artifact_schema(
@@ -1259,6 +1848,14 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         "parent_role_preservation_count": parent_role_preservations,
         "new_role_derivation_count": new_role_derivations,
         "fitter_contract_failure_round_count": fitter_contract_failures,
+        "function_domain_failure_round_count": sum(
+            item.get("fit_failure_class") == "function_domain" for item in rounds
+        ),
+        "revision_contract_failure_round_count": sum(
+            item.get("fit_failure_class") == "revision_contract" for item in rounds
+        ),
+        "revision_diagnostic_counts": dict(sorted(revision_diagnostic_counts.items())),
+        "revision_failure_examples": revision_diagnostics[:12],
         "collocation_initializer_success_rate": _rate(
             sum(
                 bool(item.get("collocation_initializer_success"))
@@ -1272,6 +1869,22 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
                 for item in rounds
             ),
             len(rounds),
+        ),
+        "forward_sensitivity_optimizer_native_success_rate": _rate(
+            sum(
+                bool(item.get("forward_sensitivity_optimizer_native_success"))
+                for item in rounds
+            ),
+            len(rounds),
+        ),
+        "rounds_with_finite_residual_evaluations": sum(
+            int(item.get("valid_residual_evaluations") or 0) > 0 for item in rounds
+        ),
+        "selected_training_rollout_verified_round_count": sum(
+            bool(item.get("selected_training_rollout_verified")) for item in rounds
+        ),
+        "production_training_rollout_verified_round_count": sum(
+            bool(item.get("production_training_rollout_verified")) for item in rounds
         ),
         "median_validation_nmse_stable_rounds": (
             float(np.median([item["validation_normalized_mse"] for item in stable]))
@@ -1287,6 +1900,10 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         ),
         "rows": rows,
         "parameter_fitting_method": "collocation_then_forward_sensitivity",
+        "latent_initialization_policy": (
+            "source_candidate_fixed_or_causal_initializer_held_fixed"
+        ),
+        "latent_initial_values_learned_during_training": False,
         "validation_used_for_parameter_fitting": False,
         "scientific_judge_called": False,
         "test_data_opened": False,
@@ -1302,6 +1919,7 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
     role_derivations = audit.get("parameter_role_derivations") or []
     initializer = fit.get("initializer") or {}
     refinement = fit.get("refinement") or {}
+    revision_diagnostics = list(_revision_attempt_diagnostics(revision))
     return {
         "round_index": item["round_index"],
         "route": item["route"],
@@ -1309,8 +1927,9 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
         "candidate_sha256": item["candidate_sha256"],
         "topology_changed": audit.get("topology_changed"),
         "rejected_revision_attempt_count": sum(
-            not bool(item.get("accepted")) for item in revision.get("attempts", [])
+            _attempt_rejection_count(item) for item in revision.get("attempts", [])
         ),
+        "revision_diagnostics": revision_diagnostics,
         "parent_role_preservation_count": sum(
             item.get("code") == "REUSED_PARAMETER_ROLE_PRESERVED"
             for item in role_derivations
@@ -1326,11 +1945,57 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
         "fit_error_type": fit.get("error_type"),
         "fit_error": fit.get("error"),
         "fit_failure_class": fit.get("failure_class"),
+        "prefit_domain_findings_before": item.get(
+            "prefit_domain_findings_before", []
+        ),
+        "prefit_domain_findings_after": item.get(
+            "prefit_domain_findings_after", []
+        ),
         "collocation_initializer_success": initializer.get("success"),
         "collocation_initializer_message": initializer.get("message"),
         "forward_sensitivity_optimizer_success": refinement.get("optimizer_success"),
+        "forward_sensitivity_optimizer_native_success": refinement.get(
+            "optimizer_native_success"
+        ),
+        "forward_sensitivity_numerical_status": refinement.get("numerical_status"),
+        "valid_residual_evaluations": refinement.get("valid_residual_evaluations"),
+        "selected_training_rollout_verified": refinement.get(
+            "selected_training_rollout_verified"
+        ),
+        "production_training_rollout_verified": refinement.get(
+            "production_training_rollout_verified"
+        ),
+        "training_failure_evidence": refinement.get("failure_evidence", []),
         "forward_sensitivity_optimizer_message": refinement.get("message"),
     }
+
+
+def _attempt_rejection_count(attempt: Mapping[str, Any]) -> int:
+    components = attempt.get("component_results") or []
+    if components:
+        return sum(not bool(item.get("accepted")) for item in components)
+    return int(not bool(attempt.get("accepted")))
+
+
+def _revision_attempt_diagnostics(
+    revision: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    result: list[dict[str, Any]] = []
+    for attempt in revision.get("attempts", []):
+        direct = attempt.get("diagnostic")
+        if isinstance(direct, dict):
+            result.append(direct)
+        for component in attempt.get("component_results", []):
+            diagnostic = component.get("diagnostic")
+            if isinstance(diagnostic, dict):
+                result.append(
+                    {
+                        **diagnostic,
+                        "component": component.get("component"),
+                        "attempt": attempt.get("attempt"),
+                    }
+                )
+    return tuple(result)
 
 
 def _component_expressions(candidate: CandidateModel) -> dict[str, str]:
@@ -1347,7 +2012,7 @@ def _candidate_hash(candidate: CandidateModel) -> str:
 def _artifact_schema(protocol: str, artifact: str) -> str:
     """Keep plan/result/summary revisions aligned with the frozen protocol."""
     revision = protocol.rsplit("-", 1)[-1]
-    if revision not in {"1", "2", "3"}:
+    if revision not in {"1", "2", "3", "4"}:
         raise ValueError(f"unsupported multi-round protocol revision: {protocol}")
     return f"scientific-staged-multiround-feedback-{artifact}-{revision}"
 

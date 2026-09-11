@@ -19,6 +19,7 @@ from autoformalism.rebuttal.staged_multiround_feedback_campaign import (
     apply_component_revision,
     launcher_hash,
     select_revision_components,
+    state_dependent_denominator_findings,
 )
 from autoformalism.schemas import CandidateModel
 from autoformalism.search.identity import candidate_identity
@@ -160,6 +161,160 @@ def test_reused_parameter_names_preserve_parent_roles() -> None:
     assert {
         item["code"] for item in audit["parameter_role_derivations"]
     } == {"REUSED_PARAMETER_ROLE_PRESERVED"}
+
+
+def test_parent_parameters_are_available_without_redeclaration() -> None:
+    candidate = recovery_candidate()
+    reply = ComponentRevisionReply.model_validate(
+        {
+            "revisions": [
+                {
+                    "component": "f",
+                    "expression": "k*tanh(v01) - f/tau_f",
+                    "parameters": [],
+                }
+            ]
+        }
+    )
+
+    revised, audit = apply_component_revision(
+        candidate,
+        reply,
+        CONTEXT,
+        selected=("f",),
+        route="function_revision",
+    )
+
+    assert next(item.rhs for item in revised.state_equations if item.state == "f") == (
+        "k*tanh(v01) - f/tau_f"
+    )
+    inherited = {
+        item["parameter"]
+        for item in audit["parameter_role_derivations"]
+        if item.get("declaration_omitted")
+    }
+    assert inherited == {"k", "tau_f"}
+
+
+def test_state_dependent_denominator_audit_is_exact_and_conservative() -> None:
+    candidate = recovery_candidate()
+    assert state_dependent_denominator_findings(candidate) == []
+    payload = candidate.model_dump(mode="json")
+    for equation in payload["state_equations"]:
+        if equation["state"] == "f":
+            equation["rhs"] = "k*v01/(1+v01) - f/tau_f"
+    unsafe = CandidateModel.model_validate(payload)
+
+    findings = state_dependent_denominator_findings(unsafe)
+
+    assert findings == [
+        {
+            "component": "f",
+            "denominator": "1 + v01",
+            "generated_symbols": ["v01"],
+            "possible_singularity": "v01 = -1",
+            "certificate_status": "not_certified_away_from_zero",
+            "interpretation": (
+                "potential domain defect only; numerical reachability has not "
+                "been inferred"
+            ),
+        }
+    ]
+
+
+def test_domain_finding_keeps_next_route_at_function_level() -> None:
+    finding = {
+        "component": "f",
+        "denominator": "1 + f",
+    }
+    assert _route(
+        2,
+        [
+            {
+                "route": "function_revision",
+                "fit": {"failure_class": "function_domain"},
+                "numerically_stable": False,
+            }
+        ],
+        [finding],
+    ) == "function_revision"
+
+
+def test_revision_retry_retains_valid_component_and_requests_only_pending(
+    tmp_path: Path,
+) -> None:
+    responses = [
+        {
+            "revisions": [
+                {
+                    "component": "f",
+                    "expression": "k*tanh(v01) - f/tau_f",
+                    "parameters": [],
+                },
+                {
+                    "component": "v01",
+                    "expression": "invented*f + m + k_p*p + k_u*u01 + c",
+                    "parameters": [],
+                },
+            ]
+        },
+        {
+            "revisions": [
+                {
+                    "component": "v01",
+                    "expression": "k*tanh(f) + m + k_p*p + k_u*u01 + c",
+                    "parameters": [],
+                }
+            ]
+        },
+    ]
+
+    class PartialClient:
+        settings = SimpleNamespace(attempts_per_step=2)
+
+        def __init__(self) -> None:
+            self.users = []
+
+        def call(self, **kwargs):
+            attempt = kwargs["attempt"]
+            self.users.append(json.loads(kwargs["user"]))
+            return {
+                "request_hash": f"request_{attempt}",
+                "status": "responded",
+                "raw_response": {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": json.dumps(responses[attempt])},
+                        }
+                    ]
+                },
+            }
+
+    client = PartialClient()
+    revised, record = campaign._request_revision(
+        client=client,
+        route="function_revision",
+        candidate=recovery_candidate(),
+        selected=("f", "v01"),
+        context=CONTEXT,
+        scientific_context="Public context",
+        numerical_feedback={"failure": "unstable"},
+        round_index=1,
+        failure_checkpoint=tmp_path / "revision_failures.json",
+    )
+
+    assert [
+        item["component"]
+        for item in client.users[1]["selected_pending_components"]
+    ] == ["v01"]
+    assert client.users[1]["provisionally_retained_components"] == ["f"]
+    assert record["audit"]["provisionally_retained_component_count"] == 2
+    assert record["attempts"][0]["pending_components_after"] == ["v01"]
+    assert record["attempts"][1]["pending_components_after"] == []
+    equations = campaign._component_expressions(revised)
+    assert equations["f"] == "k*tanh(v01) - f/tau_f"
+    assert equations["v01"] == "k*tanh(f) + m + k_p*p + k_u*u01 + c"
 
 
 def test_new_direct_gains_and_offset_receive_runtime_roles() -> None:
@@ -335,12 +490,18 @@ def test_topology_backtrack_must_preserve_existing_target_pathways() -> None:
 
 
 def test_frozen_campaign_configuration_and_launcher_are_valid() -> None:
-    for version in ("v1", "v2"):
+    for version in ("v1", "v2", "v3"):
         path = Path(f"configs/staged_multiround_feedback_{version}.json")
         config = MultiRoundFeedbackConfig.model_validate_json(path.read_text())
         assert config.source_task_indices == (3, 4)
         assert config.round_count == 2
         assert config.fit.protocol == "collocation-forward-sensitivity-1"
+    v4 = MultiRoundFeedbackConfig.model_validate_json(
+        Path("configs/staged_multiround_feedback_v4.json").read_text()
+    )
+    assert v4.protocol == "scientific-staged-multiround-feedback-4"
+    assert v4.round_count == 4
+    assert v4.model_settings.attempts_per_step == 5
     assert len(launcher_hash()) == 64
 
 
@@ -398,7 +559,8 @@ def test_revision_exhaustion_persists_full_responses_and_named_feedback(
     assert len(ledger["attempts"]) == 2
     assert all(item["rejected_response"] == response for item in ledger["attempts"])
     assert all(
-        item["diagnostic"]["code"] == "AMBIGUOUS_INTERNAL_PARAMETER_ROLE"
+        item["component_results"][0]["diagnostic"]["code"]
+        == "AMBIGUOUS_INTERNAL_PARAMETER_ROLE"
         for item in ledger["attempts"]
     )
 
@@ -472,6 +634,10 @@ def test_freeze_is_bound_to_exact_unresolved_source_artifacts(tmp_path: Path) ->
     )
 
     assert len(frozen["tasks"]) == 2
+    assert frozen["latent_initialization_policy"] == (
+        "source_candidate_fixed_or_causal_initializer_held_fixed"
+    )
+    assert frozen["latent_initial_values_learned_during_training"] is False
     assert campaign._verified_plan(output) == frozen
     copied = output / frozen["tasks"][0]["candidate_path"]
     copied.write_text(copied.read_text() + " ")
@@ -575,6 +741,106 @@ def test_task_routes_persistent_instability_from_function_to_topology(
     assert [item["numerically_stable"] for item in result["rounds"]] == [False, True]
 
 
+def test_revision_exhaustion_retains_parent_and_continues_later_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = MultiRoundFeedbackConfig.model_validate_json(
+        Path("configs/staged_multiround_feedback_v4.json").read_text()
+    )
+    plan = {"config": config.model_dump(mode="json")}
+    monkeypatch.setattr(campaign, "_verified_plan", lambda _path: plan)
+    monkeypatch.setattr(
+        campaign,
+        "load_public_data",
+        lambda *_args: (
+            SimpleNamespace(train=object(), validation=object()),
+            CONTEXT,
+        ),
+    )
+    calls = []
+
+    def revise(**kwargs):
+        calls.append(kwargs["route"])
+        if len(calls) == 1:
+            campaign.atomic_json(
+                kwargs["failure_checkpoint"],
+                {
+                    "schema_version": "component-revision-failures-2",
+                    "attempts": [],
+                },
+            )
+            raise RevisionContractError(
+                "COMPONENT_REVISION_ATTEMPTS_EXHAUSTED",
+                "bounded component revision exhausted for function_revision",
+            )
+        parent = kwargs["candidate"]
+        payload = parent.model_dump(mode="json")
+        payload.update(
+            candidate_id=f"revision_{len(calls)}",
+            parent_candidate_id=parent.candidate_id,
+            change_summary="mocked revision",
+        )
+        return CandidateModel.model_validate(payload), {
+            "parent_sha256": campaign._candidate_hash(parent),
+            "attempts": [],
+            "audit": {"topology_changed": False},
+        }
+
+    monkeypatch.setattr(campaign, "_request_revision", revise)
+    monkeypatch.setattr(
+        campaign,
+        "fit_collocation_forward_sensitivity",
+        lambda *_args, **_kwargs: {
+            "status": "complete",
+            "initializer": {"success": True},
+            "refinement": {"optimizer_success": True},
+            "training": {"normalized_mse": 1.0, "failed_trajectories": []},
+            "validation": {"normalized_mse": 1.1, "failed_trajectories": []},
+        },
+    )
+    root = tmp_path / "campaign"
+    candidate_path = root / "candidate.json"
+    rescue_path = root / "rescue.json"
+    candidate_path.parent.mkdir(parents=True)
+    candidate_path.write_text(recovery_candidate().model_dump_json())
+    rescue_path.write_text(
+        json.dumps({"attribution": "unresolved_after_bounded_rescue"})
+    )
+    benchmark = "phase_b_anonymous_system_task_canonical_opaque_hard"
+    prompt = (
+        root / "frozen" / "public" / "phase_b_v1" / benchmark / "proposer_prompt.txt"
+    )
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text("Public requirement.\nF. Required response\nSchema.")
+    task = {
+        "task_id": f"{benchmark}_seed0_multiround",
+        "benchmark_id": benchmark,
+        "tier": "hard",
+        "seed": 0,
+        "candidate_path": str(candidate_path.relative_to(root)),
+        "candidate_file_sha256": hashlib.sha256(
+            candidate_path.read_bytes()
+        ).hexdigest(),
+        "source_rescue_path": str(rescue_path.relative_to(root)),
+        "source_rescue_file_sha256": hashlib.sha256(
+            rescue_path.read_bytes()
+        ).hexdigest(),
+    }
+
+    result = campaign.run_task(
+        root, task, root / "result", SimpleNamespace(records=[])
+    )
+
+    assert result["status"] == "complete"
+    assert len(result["rounds"]) == 4
+    assert result["rounds"][0]["fit"]["failure_class"] == "revision_contract"
+    assert result["rounds"][0]["candidate_sha256"] == (
+        result["rounds"][0]["parent_candidate_sha256"]
+    )
+    assert calls[:2] == ["function_revision", "function_revision"]
+    assert result["rounds"][1]["numerically_stable"] is True
+
+
 def test_summary_counts_initializer_and_refinement_from_compact_rounds(
     tmp_path: Path,
 ) -> None:
@@ -631,6 +897,8 @@ def test_summary_counts_initializer_and_refinement_from_compact_rounds(
     assert summary["completed_rounds"] == 1
     assert summary["collocation_initializer_success_rate"] == 1.0
     assert summary["forward_sensitivity_optimizer_success_rate"] == 0.0
+    assert summary["forward_sensitivity_optimizer_native_success_rate"] == 0.0
+    assert summary["rounds_with_finite_residual_evaluations"] == 0
     assert summary["fitter_contract_failure_round_count"] == 1
 
 

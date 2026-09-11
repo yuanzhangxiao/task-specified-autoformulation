@@ -1,4 +1,4 @@
-# Two-round collocation-and-sensitivity feedback pilot
+# Bounded collocation-and-sensitivity feedback pilot
 
 This development-only experiment is the first numerical feedback loop over
 complete staged candidates. It is deliberately narrow: it reuses the two
@@ -127,3 +127,47 @@ separate.
 The summary reports completion, route counts, stability by round, collocation and
 forward-sensitivity success rates, stable validation NMSE, LLM resources, and all
 per-round records. There is intentionally no scalar winner.
+
+## Revision-4 failure-harvesting protocol
+
+Revision 4 extends the same two frozen public candidates to four bounded rounds
+inside one allocation.  It is an engineering campaign for revision transport,
+static function-domain evidence, numerical diagnostics, and feedback routing; it
+does not change the benchmark prompts or define a model winner.
+
+Revision replies are no longer all-or-nothing.  Every named component is checked
+independently against the frozen parent topology.  A valid component is retained
+provisionally, the parent candidate remains externally unchanged, and the next
+request contains only components that are still invalid.  The complete candidate
+is committed only after every originally selected component passes.  Exhausting
+one bounded revision action records the complete responses and named diagnostics,
+retains the last valid parent, and continues the next campaign round instead of
+terminating the task.
+
+Existing parent parameter names may be used without another declaration.  Their
+roles are inherited exactly.  Only genuinely new parameter names are declared;
+direct outer gains and additive offsets receive runtime-derived roles, while an
+ambiguous nonlinear internal parameter still requires a qualitative role.
+
+Before each fit, a narrow static audit reports state-dependent denominators that
+are not certified away from zero on the unrestricted generated-state domain.  It
+accepts total-domain constructions such as `1 + x**2` and `1 + abs(x)`, and it
+records a symbolic possible-zero condition for expressions such as `1 + x`.
+This certificate does not claim that a trajectory reaches the singular set.  A
+finding keeps the repair at function level and prevents an expensive fit until
+the affected function is replaced.  Once the static function audit passes,
+persistent rollout instability may route to a topology backtrack; later rounds
+alternate back to function repair after a topology change.
+
+Numerical success uses the verified fitter-validity contract.  Native optimizer
+termination is reported separately and is insufficient: at least one finite
+training residual evaluation, a fresh returned-point training check, and a fresh
+production training replay are required before the fit is accepted.  Bounded
+observed rollout-failure evidence is preserved for feedback without asserting an
+unproven scientific cause.
+
+Latent initial values remain the fixed or causal proposer-originated values in
+this revision.  Learning global latent initial values from training data, and
+defining a causal validation/test initializer without outcome leakage, are a
+separate numerical milestone so their effect is not confounded with revision
+transport and diagnostic changes.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Freeze and submit the public function-first two-round feedback pilot.
+# Freeze and submit the public function-first bounded feedback pilot.
 
 set -euo pipefail
 : "${AF_SOURCE_RESCUE_ROOT:?set AF_SOURCE_RESCUE_ROOT to the completed staged-fitter-rescue root}"
@@ -7,9 +7,9 @@ readonly repository="${AF_REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 readonly python="${AF_PYTHON:-${repository}/.venv/bin/python}"
 readonly scratch_root="${SCRATCH:-/scratch/user/${USER}}"
 readonly project_root="${PROJECT:-${scratch_root}}"
-readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-multiround-feedback-v3-aces-h100x1}"
+readonly output_root="${AF_OUTPUT_ROOT:-${scratch_root}/phase_b/staged-multiround-feedback-v4-aces-h100x1}"
 readonly account="${AF_ACCOUNT:-156264627414}"
-readonly config="${AF_CONFIG:-${repository}/configs/staged_multiround_feedback_v3.json}"
+readonly config="${AF_CONFIG:-${repository}/configs/staged_multiround_feedback_v4.json}"
 readonly plan="${output_root}/plan.json"
 readonly manifest="${output_root}/submission_manifest.json"
 git -C "${repository}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
