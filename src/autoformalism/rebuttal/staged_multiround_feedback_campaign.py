@@ -35,6 +35,7 @@ from autoformalism.llm.staged_topology import (
     atomic_json,
     visible_response,
 )
+from autoformalism.rebuttal.revision_decision import decision_snapshot, interaction_diff
 from autoformalism.rebuttal.staged_prefit_fitting_campaign import load_public_data
 from autoformalism.rebuttal.staged_topology_campaign import (
     StagedCampaignConfig,
@@ -95,10 +96,14 @@ class MultiRoundFeedbackConfig(StagedCampaignConfig):
         "scientific-staged-multiround-feedback-3",
         "scientific-staged-multiround-feedback-4",
         "scientific-staged-multiround-feedback-5",
+        "scientific-staged-multiround-feedback-6",
     ]
     source_task_indices: tuple[int, int]
     round_count: int = Field(default=2, ge=2, le=4)
     fit: CollocationSensitivityConfig
+    public_nonlinearity_targets: tuple[str, ...] = ()
+    public_obligation_quote: str = ""
+    public_obligation_prompt_sha256: str = ""
     routing_policy: Literal[
         "function_first_then_topology_if_persistent_instability"
     ] = "function_first_then_topology_if_persistent_instability"
@@ -113,6 +118,12 @@ class MultiRoundFeedbackConfig(StagedCampaignConfig):
             raise ValueError("pilot is fixed to unresolved source tasks 3 and 4")
         if self.diagnostic_fixtures:
             raise ValueError("pilot excludes diagnostic fixtures")
+        if self.protocol.endswith("-6") and (
+            self.public_nonlinearity_targets != ("v01",)
+            or not self.public_obligation_quote
+            or len(self.public_obligation_prompt_sha256) != 64
+        ):
+            raise ValueError("v6 requires the reviewed public nonlinearity obligation")
         return self
 
 
@@ -200,6 +211,18 @@ def freeze_campaign(
     source_summary_path = source_rescue_root / "summary" / "summary.json"
     source_plan = _read_object(source_plan_path)
     source_summary = _read_object(source_summary_path)
+    if config.public_nonlinearity_targets:
+        public_prompt = (
+            source_rescue_root
+            / "frozen/public/phase_b_v1"
+            / config.public_cells[0]
+            / "proposer_prompt.txt"
+        )
+        if (
+            _sha256(public_prompt) != config.public_obligation_prompt_sha256
+            or config.public_obligation_quote not in public_prompt.read_text()
+        ):
+            raise ValueError("reviewed public obligation prompt differs")
     source_digest = content_hash(
         {key: value for key, value in source_plan.items() if key != "plan_sha256"}
     )
@@ -437,14 +460,40 @@ def run_task(
     )[0].rstrip()
     rounds: list[dict[str, Any]] = []
     prior_feedback = _source_feedback(source_rescue)
+    action_v2 = config.protocol.endswith("-6")
+    transaction_path = output / "pending_revision.json"
+    public_facts = _public_fit_context(dataset) if action_v2 else {}
     for round_index in range(1, config.round_count + 1):
         round_root = output / f"round_{round_index:03d}"
         round_root.mkdir(parents=True, exist_ok=True)
         candidate_checkpoint = round_root / "candidate.json"
         revision_checkpoint = round_root / "revision.json"
         fit_checkpoint = round_root / "fit.json"
+        round_checkpoint = round_root / "round_record.json"
+        if action_v2 and round_checkpoint.exists():
+            saved_round = _read_object(round_checkpoint)
+            if saved_round["parent_candidate_sha256"] != _candidate_hash(current):
+                raise ValueError("round decision checkpoint parent differs")
+            rounds.append(saved_round)
+            if candidate_checkpoint.exists():
+                current = CandidateModel.model_validate_json(
+                    candidate_checkpoint.read_text()
+                )
+            if saved_round["fit"].get("status") != "not_run":
+                prior_feedback = _round_feedback(saved_round)
+            if saved_round["fit"].get("failure_class") in {
+                "fitter_contract",
+                "fit_runtime",
+            }:
+                break
+            continue
         domain_findings_before = state_dependent_denominator_findings(current)
-        route = _route(round_index, rounds, domain_findings_before)
+        routing_rounds = (
+            [item for item in rounds if item["fit"].get("failure_class") != "no_change"]
+            if action_v2
+            else rounds
+        )
+        route = _route(len(routing_rounds) + 1, routing_rounds, domain_findings_before)
         domain_components = tuple(
             dict.fromkeys(item["component"] for item in domain_findings_before)
         )
@@ -453,12 +502,30 @@ def run_task(
             if rounds
             else select_revision_components(current)
         )
+        pending = (
+            _read_object(transaction_path)
+            if action_v2 and transaction_path.exists()
+            else None
+        )
+        if pending and pending.get("status") == "pending":
+            route = pending["route"]
+            selected = tuple(pending["selected"])
         if not selected:
             raise ValueError("runtime could not identify a bounded revision scope")
         revision_feedback = {
             **dict(prior_feedback),
             "prefit_domain_findings": domain_findings_before,
         }
+        if action_v2:
+            state = decision_snapshot(current, rounds, prior_feedback, pending)
+            atomic_json(output / "decision_state.json", state.model_dump(mode="json"))
+            revision_feedback.update(
+                decision_state=state.model_dump(mode="json"),
+                public_training_facts=public_facts,
+                fixed_initial_conditions=[
+                    item.model_dump(mode="json") for item in current.initial_conditions
+                ],
+            )
         if candidate_checkpoint.exists() and revision_checkpoint.exists():
             revised = CandidateModel.model_validate_json(
                 candidate_checkpoint.read_text()
@@ -468,7 +535,19 @@ def run_task(
                 raise ValueError("revision checkpoint parent differs")
         else:
             try:
-                revised, revision_record = _request_revision(
+                request_options = {}
+                request_function = _request_revision
+                if action_v2:
+                    from autoformalism.rebuttal.revision_actions import (
+                        request_revision_action,
+                    )
+
+                    request_function = request_revision_action
+                    request_options = {
+                        "transaction_path": transaction_path,
+                        "nonlinear_targets": config.public_nonlinearity_targets,
+                    }
+                revised, revision_record = request_function(
                     client=client,
                     route=route,
                     candidate=current,
@@ -478,6 +557,7 @@ def run_task(
                     numerical_feedback=revision_feedback,
                     round_index=round_index,
                     failure_checkpoint=round_root / "revision_failures.json",
+                    **request_options,
                 )
             except RevisionContractError as exc:
                 ledger_path = round_root / "revision_failures.json"
@@ -516,21 +596,35 @@ def run_task(
                     "validation_normalized_mse": None,
                 }
                 rounds.append(round_record)
+                if action_v2:
+                    _write_once_json(round_checkpoint, round_record)
                 atomic_json(output / "progress.json", {"rounds": rounds})
-                prior_feedback = {
-                    "revision_contract_failure": exc.diagnostic(),
-                    "prefit_domain_findings": domain_findings_before,
-                    "instruction": (
-                        "The parent candidate remains unchanged. Repair only the "
-                        "same pending components in the next bounded round."
-                    ),
-                }
+                if not action_v2:
+                    prior_feedback = {
+                        "revision_contract_failure": exc.diagnostic(),
+                        "prefit_domain_findings": domain_findings_before,
+                        "instruction": (
+                            "The parent candidate remains unchanged. Repair only the "
+                            "same pending components in the next bounded round."
+                        ),
+                    }
                 continue
             _write_once_json(revision_checkpoint, revision_record)
             _write_once_json(candidate_checkpoint, revised.model_dump(mode="json"))
         domain_findings_after = state_dependent_denominator_findings(revised)
         if fit_checkpoint.exists():
             fit = _read_object(fit_checkpoint)
+        elif action_v2 and revision_record.get("status") == "no_change":
+            fit = {
+                "status": "not_run",
+                "failure_class": "no_change",
+                "training": None,
+                "validation": None,
+                "error": (
+                    "all selected components intentionally kept; no duplicate fitting"
+                ),
+            }
+            _write_once_json(fit_checkpoint, fit)
         elif domain_findings_after:
             fit = {
                 "schema_version": "collocation-forward-sensitivity-fit-1",
@@ -586,21 +680,48 @@ def run_task(
             "validation_normalized_mse": _score(fit, "validation"),
         }
         rounds.append(round_record)
+        if action_v2:
+            _write_once_json(round_checkpoint, round_record)
         atomic_json(output / "progress.json", {"rounds": rounds})
         current = revised
-        prior_feedback = _round_feedback(round_record)
-        if fit.get("failure_class") == "fitter_contract":
+        if not action_v2 or fit.get("status") != "not_run":
+            prior_feedback = _round_feedback(round_record)
+        if fit.get("failure_class") == "fitter_contract" or (
+            action_v2 and fit.get("failure_class") == "fit_runtime"
+        ):
             break
     blocked_by_contract = bool(
         rounds and rounds[-1]["fit"].get("failure_class") == "fitter_contract"
     )
+    if action_v2:
+        pending = _read_object(transaction_path) if transaction_path.exists() else None
+        state = decision_snapshot(current, rounds, prior_feedback, pending)
+        atomic_json(output / "decision_state.json", state.model_dump(mode="json"))
+        if state.best_evaluated:
+            best_path = (
+                output
+                / f"round_{state.best_evaluated['round_index']:03d}"
+                / "candidate.json"
+            )
+            atomic_json(
+                output / "best_evaluated_candidate.json", _read_object(best_path)
+            )
     return {
         "schema_version": _artifact_schema(config.protocol, "result"),
-        "status": "fitter_contract_blocked" if blocked_by_contract else "complete",
+        "status": (
+            "fitter_contract_blocked"
+            if blocked_by_contract
+            else "numerical_unavailable"
+            if action_v2
+            and rounds
+            and rounds[-1]["fit"].get("failure_class") == "fit_runtime"
+            else "complete"
+        ),
         "task_id": task["task_id"],
         "benchmark_id": task["benchmark_id"],
         "seed": task["seed"],
         "rounds": rounds,
+        "decision_state": state.model_dump(mode="json") if action_v2 else None,
         "physical_requests": len(client.records),
         "observed_total_tokens": sum(
             int(item.get("observed_total_tokens") or 0) for item in client.records
@@ -653,9 +774,11 @@ def select_revision_components(candidate: CandidateModel) -> tuple[str, ...]:
 
     target_components: list[str] = []
     for mapping in candidate.observation_mappings:
-        symbols = RestrictedParser().parse(
-            mapping.expression, location=f"mapping:{mapping.channel}"
-        ).symbols
+        symbols = (
+            RestrictedParser()
+            .parse(mapping.expression, location=f"mapping:{mapping.channel}")
+            .symbols
+        )
         target_components.extend(name for name in expressions if name in symbols)
 
     primary: str | None = None
@@ -793,16 +916,20 @@ def _strictly_positive_expression(
             positive_parameters=positive_parameters,
             nonnegative_parameters=nonnegative_parameters,
         )
-        return left_nonnegative and right_nonnegative and (
-            _strictly_positive_expression(
-                node.left,
-                positive_parameters=positive_parameters,
-                nonnegative_parameters=nonnegative_parameters,
-            )
-            or _strictly_positive_expression(
-                node.right,
-                positive_parameters=positive_parameters,
-                nonnegative_parameters=nonnegative_parameters,
+        return (
+            left_nonnegative
+            and right_nonnegative
+            and (
+                _strictly_positive_expression(
+                    node.left,
+                    positive_parameters=positive_parameters,
+                    nonnegative_parameters=nonnegative_parameters,
+                )
+                or _strictly_positive_expression(
+                    node.right,
+                    positive_parameters=positive_parameters,
+                    nonnegative_parameters=nonnegative_parameters,
+                )
             )
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
@@ -920,6 +1047,7 @@ def apply_component_revision(
     *,
     selected: tuple[str, ...],
     route: Literal["function_revision", "function_refinement", "topology_revision"],
+    detailed_contract: bool = False,
 ) -> tuple[CandidateModel, dict[str, Any]]:
     """Apply one closed-schema revision and certify its structural granularity."""
     if tuple(item.component for item in reply.revisions) != selected:
@@ -947,6 +1075,17 @@ def apply_component_revision(
         actual = set(parsed.symbols) - declared - used_parent_parameters
         illegal = actual - generated - supplied
         if illegal:
+            if detailed_contract:
+                raise RevisionContractError(
+                    "UNAVAILABLE_SYMBOL",
+                    "revision contains unavailable symbols",
+                    component=item.component,
+                    unavailable_symbols=sorted(illegal),
+                    allowed_action=(
+                        "reuse a displayed parent alias or declare "
+                        "a genuinely new parameter"
+                    ),
+                )
             raise ValueError(
                 f"revision contains unavailable symbols: {sorted(illegal)}"
             )
@@ -955,6 +1094,15 @@ def apply_component_revision(
         )
         old_sources = set(old.symbols) - set(old_parameters)
         if route != "topology_revision" and actual != old_sources:
+            if detailed_contract:
+                raise RevisionContractError(
+                    "FUNCTION_REVISION_SOURCE_SET_CHANGED",
+                    "function action changed whole-equation sources",
+                    component=item.component,
+                    missing=sorted(old_sources - actual),
+                    extra=sorted(actual - old_sources),
+                    required_action_if_intentional="topology_revision",
+                )
             raise ValueError(
                 "function revision changed topology sources: "
                 f"missing={sorted(old_sources - actual)}, "
@@ -985,7 +1133,7 @@ def apply_component_revision(
             for name in sorted(used_parent_parameters - declared)
         )
         for parameter in item.parameters:
-            spec = ParameterSpec(
+            spec = old_parameters.get(parameter.name) or ParameterSpec(
                 name=parameter.name,
                 scope=ParameterScope.GLOBAL,
                 role=effective_roles[parameter.name],
@@ -1020,6 +1168,15 @@ def apply_component_revision(
                 .symbols
             )
             for item in candidate.observation_mappings
+        ),
+        *(
+            set(
+                RestrictedParser()
+                .parse(item.expression, location=f"initial:{item.state}")
+                .symbols
+            )
+            for item in candidate.initial_conditions
+            if item.expression is not None
         ),
     )
     parameters = {
@@ -1079,8 +1236,31 @@ def apply_component_revision(
     )
     if route == "topology_revision" and not topology_changed:
         raise ValueError("topology backtrack did not change any dependency")
+    if route != "topology_revision" and detailed_contract:
+        diffs = [interaction_diff(candidate, revised, name) for name in selected]
+        changed = [
+            item
+            for item in diffs
+            if item["removed_interactions"] or item["added_interactions"]
+        ]
+        if changed:
+            raise RevisionContractError(
+                "SIGNED_INTERACTION_CONTRACT_CHANGED",
+                "function action changed signed additive interactions",
+                component=changed[0]["component"],
+                interaction_diffs=changed,
+                allowed_action=(
+                    "preserve the displayed interaction multiset or use topology scope"
+                ),
+            )
     if route != "topology_revision" and topology_changed:
-        raise ValueError("function revision changed the topology identity")
+        raise RevisionContractError(
+            "TOPOLOGY_CONTRACT_FAILURE",
+            "function revision changed the topology identity",
+            interaction_diffs=[
+                interaction_diff(candidate, revised, name) for name in selected
+            ],
+        )
     old_reachability = _target_reachability(candidate, context)
     revised_reachability = _target_reachability(revised, context)
     lost_reachability = {
@@ -1210,8 +1390,7 @@ def _certified_new_parameter_role(
             if isinstance(node, ast.Name) and node.id in parameter_names
         }
         if direct_parameters != {parameter} or any(
-            isinstance(node, ast.Name) and node.id == parameter
-            for node in denominator
+            isinstance(node, ast.Name) and node.id == parameter for node in denominator
         ):
             continue
         remainder = [
@@ -1232,6 +1411,13 @@ def _certified_new_parameter_role(
                 ParameterRole.NONNEGATIVE_COEFFICIENT,
                 "single_direct_outer_gain_with_explicit_term_sign",
             )
+        if remainder and all(
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, (int, float))
+            and np.isfinite(node.value)
+            for node in (*remainder, *denominator)
+        ):
+            return ParameterRole.OFFSET, "constant_scaled_top_level_additive_offset"
     return None
 
 
@@ -1337,9 +1523,7 @@ def _request_revision(
                 "names may be reused without declaration and retain their roles."
             ),
             "available_nonparameter_symbols": sorted(
-                set(expressions)
-                | set(context.forcing_channels)
-                | {context.time_symbol}
+                set(expressions) | set(context.forcing_channels) | {context.time_symbol}
             ),
             "numerical_feedback": dict(numerical_feedback),
             "runtime_priority": (
@@ -1481,9 +1665,7 @@ def _request_revision(
                 "attempts": attempts,
             }
         failures = [
-            item["diagnostic"]
-            for item in component_results
-            if not item["accepted"]
+            item["diagnostic"] for item in component_results if not item["accepted"]
         ]
         diagnostic = {
             "code": "PARTIAL_COMPONENT_REVISION_REQUIRED",
@@ -1747,7 +1929,17 @@ def _round_feedback(round_record: Mapping[str, Any]) -> dict[str, Any]:
         failures.extend(str(item) for item in payload.get("failed_trajectories", []))
     return {
         "previous_route": round_record["route"],
-        "full_training_rollout_complete": round_record["numerically_stable"],
+        "full_training_rollout_complete": bool(fit.get("training"))
+        and not ((fit.get("training") or {}).get("failed_trajectories"))
+        and _score(fit, "training") is not None,
+        "evidence_candidate_sha256": round_record.get("candidate_sha256"),
+        "evidence_round_index": round_record["round_index"],
+        "fitted_parameters": fit.get("parameters"),
+        "fit_status": fit.get("status"),
+        "failure_class": fit.get("failure_class"),
+        "interpretation": (
+            "fit outcome at the evaluated starts, not proof of structural impossibility"
+        ),
         "training_normalized_mse": round_record["training_normalized_mse"],
         "validation_normalized_mse": round_record["validation_normalized_mse"],
         "initializer_success": bool((fit.get("initializer") or {}).get("success")),
@@ -1758,12 +1950,8 @@ def _round_feedback(round_record: Mapping[str, Any]) -> dict[str, Any]:
         "optimizer_message": (fit.get("refinement") or {}).get("message"),
         "fit_error": fit.get("error"),
         "failure_messages": failures[:5],
-        "prefit_domain_findings": round_record.get(
-            "prefit_domain_findings_after", []
-        ),
-        "numerical_status": (fit.get("refinement") or {}).get(
-            "numerical_status"
-        ),
+        "prefit_domain_findings": round_record.get("prefit_domain_findings_after", []),
+        "numerical_status": (fit.get("refinement") or {}).get("numerical_status"),
         "valid_residual_evaluations": (fit.get("refinement") or {}).get(
             "valid_residual_evaluations"
         ),
@@ -1771,6 +1959,38 @@ def _round_feedback(round_record: Mapping[str, Any]) -> dict[str, Any]:
             "failure_evidence", []
         ),
     }
+
+
+def _public_fit_context(dataset: Any) -> dict[str, Any]:
+    """Report training observations and a zero baseline, never reference dynamics."""
+    from autoformalism.data import TrainingScaler
+
+    scaler = TrainingScaler().fit(dataset.train)
+    result = {}
+    for target in dataset.train.trajectories[0].targets:
+        scale = scaler.scales[f"target:{target}"].standard_deviation
+        observed = np.concatenate(
+            [item.targets[target] for item in dataset.train.trajectories]
+        )
+        zero_input = [
+            item.trajectory_id
+            for item in dataset.train.trajectories
+            if item.external_inputs
+            and all(np.all(values == 0) for values in item.external_inputs.values())
+            and np.any(item.targets[target] != item.targets[target][0])
+        ]
+        result[target] = {
+            "observed_rms": float(np.sqrt(np.mean(observed**2))),
+            "zero_prediction_pooled_training_nmse": float(
+                np.mean(observed**2) / scale**2
+            ),
+            "zero_input_with_changing_output": zero_input,
+            "interpretation": (
+                "zero input does not require equilibrium; "
+                "assess equations AND initialization together"
+            ),
+        }
+    return result
 
 
 def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
@@ -1789,6 +2009,7 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
                 "seed": task["seed"],
                 "result_present": True,
                 "status": result["status"],
+                "decision_state": result.get("decision_state"),
                 "rounds": compact_rounds,
                 "error_type": result.get("error_type"),
                 "error": result.get("error"),
@@ -1816,17 +2037,21 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         item.get("fit_failure_class") == "fitter_contract" for item in rounds
     )
     revision_diagnostics = [
-        diagnostic
-        for item in rounds
+        {
+            **diagnostic,
+            "task_id": row["task_id"],
+            "seed": row.get("seed"),
+            "round_index": item["round_index"],
+        }
+        for row in rows
+        for item in row.get("rounds", [])
         for diagnostic in item.get("revision_diagnostics", [])
     ]
     revision_diagnostic_counts = Counter(
         str(item.get("code", "UNKNOWN")) for item in revision_diagnostics
     )
     return {
-        "schema_version": _artifact_schema(
-            str(plan["config"]["protocol"]), "summary"
-        ),
+        "schema_version": _artifact_schema(str(plan["config"]["protocol"]), "summary"),
         "status": "complete"
         if all(row["result_present"] for row in rows)
         else "incomplete",
@@ -1834,6 +2059,25 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         "terminal_results": sum(row["result_present"] for row in rows),
         "planned_rounds": len(rows) * int(plan["config"]["round_count"]),
         "completed_rounds": len(rounds),
+        "recorded_rounds": len(rounds),
+        "attempted_fit_rounds": sum(
+            item.get("fit_status") != "not_run" for item in rounds
+        ),
+        "no_change_rounds": sum(
+            item.get("fit_failure_class") == "no_change" for item in rounds
+        ),
+        "rejected_component_count": rejected_revision_attempts,
+        "rejected_provider_attempt_count": sum(
+            item.get("rejected_provider_attempt_count", 0) for item in rounds
+        ),
+        "tasks_with_best_evaluated_candidate": sum(
+            bool((row.get("decision_state") or {}).get("best_evaluated"))
+            for row in rows
+        ),
+        "tasks_with_pending_transaction": sum(
+            bool((row.get("decision_state") or {}).get("pending_transaction"))
+            for row in rows
+        ),
         "numerically_stable_round_rate": _rate(len(stable), len(rounds)),
         "round_one_numerically_stable_rate": _rate(
             sum(item["numerically_stable"] for item in first_rounds),
@@ -1858,10 +2102,7 @@ def summarize(plan: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
         "revision_diagnostic_counts": dict(sorted(revision_diagnostic_counts.items())),
         "revision_failure_examples": revision_diagnostics[:12],
         "collocation_initializer_success_rate": _rate(
-            sum(
-                bool(item.get("collocation_initializer_success"))
-                for item in rounds
-            ),
+            sum(bool(item.get("collocation_initializer_success")) for item in rounds),
             len(rounds),
         ),
         "forward_sensitivity_optimizer_success_rate": _rate(
@@ -1930,6 +2171,11 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
         "rejected_revision_attempt_count": sum(
             _attempt_rejection_count(item) for item in revision.get("attempts", [])
         ),
+        "rejected_provider_attempt_count": sum(
+            not bool(attempt.get("accepted"))
+            for attempt in revision.get("attempts", [])
+        ),
+        "kept_components": revision.get("kept_components", []),
         "revision_diagnostics": revision_diagnostics,
         "parent_role_preservation_count": sum(
             item.get("code") == "REUSED_PARAMETER_ROLE_PRESERVED"
@@ -1946,12 +2192,8 @@ def _compact_round(item: Mapping[str, Any]) -> dict[str, Any]:
         "fit_error_type": fit.get("error_type"),
         "fit_error": fit.get("error"),
         "fit_failure_class": fit.get("failure_class"),
-        "prefit_domain_findings_before": item.get(
-            "prefit_domain_findings_before", []
-        ),
-        "prefit_domain_findings_after": item.get(
-            "prefit_domain_findings_after", []
-        ),
+        "prefit_domain_findings_before": item.get("prefit_domain_findings_before", []),
+        "prefit_domain_findings_after": item.get("prefit_domain_findings_after", []),
         "collocation_initializer_success": initializer.get("success"),
         "collocation_initializer_message": initializer.get("message"),
         "forward_sensitivity_optimizer_success": refinement.get("optimizer_success"),
@@ -2013,7 +2255,7 @@ def _candidate_hash(candidate: CandidateModel) -> str:
 def _artifact_schema(protocol: str, artifact: str) -> str:
     """Keep plan/result/summary revisions aligned with the frozen protocol."""
     revision = protocol.rsplit("-", 1)[-1]
-    if revision not in {"1", "2", "3", "4", "5"}:
+    if revision not in {"1", "2", "3", "4", "5", "6"}:
         raise ValueError(f"unsupported multi-round protocol revision: {protocol}")
     return f"scientific-staged-multiround-feedback-{artifact}-{revision}"
 

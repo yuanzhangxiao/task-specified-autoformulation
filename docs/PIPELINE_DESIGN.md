@@ -797,3 +797,10 @@ compiler separately certifies supported smooth composites involving piecewise
 primitives and records whether only first-order derivatives are valid. It preserves
 analytic parameter sensitivities while avoiding invalid second-order AD curvature;
 uncertified kink crossings remain explicit fitter-contract failures.
+
+The version-6 action contract is documented in `REVISION_DECISION_STATE.md`.
+Decision state keeps the last numerical evidence separately from revision errors,
+and pending edits survive bounded retries without changing the committed model.
+An unchanged companion is an explicit keep, not a mandatory scientific edit.
+Function requests expose the same signed additive hyperedge contract that the
+runtime enforces. The fitter and routing heuristic are held fixed in this milestone.

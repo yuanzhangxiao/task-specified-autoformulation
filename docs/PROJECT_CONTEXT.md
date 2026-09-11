@@ -595,3 +595,10 @@ narrow, audited set of classically differentiable composites such as
 `f/(1+abs(f))`; genuinely kinked or domain-unsafe laws still fail closed. A paired
 CPU harness compares the historical and optional node-start policies on every
 committed version-4 candidate before attributing recovery to the new fitter.
+
+The version-6 search-interface milestone keeps that fitter/settings fixed. It
+separates committed candidates, numerical evidence, and durable partial revision
+transactions; permits explicit keep actions; exposes signed interaction contracts;
+and retains the best evaluated candidate. Public nonlinearity is rechecked as a
+necessary syntax/path condition, not a scientific score. See
+`docs/REVISION_DECISION_STATE.md` for the offline replay and remaining milestones.
