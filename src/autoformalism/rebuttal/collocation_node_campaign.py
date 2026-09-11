@@ -115,6 +115,8 @@ def launcher_identity() -> str:
         "scripts/export_collocation_node_cases.py",
         "scripts/hpc/collocation_node_delta.slurm",
         "scripts/hpc/submit_collocation_node_delta.sh",
+        "scripts/hpc/collocation_node_aces.slurm",
+        "scripts/hpc/submit_collocation_node_aces.sh",
     )
     return content_hash({n: sha256(root / n) for n in names})
 

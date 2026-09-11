@@ -292,8 +292,14 @@ def test_scheduler_resources_and_budget():
     root = Path(__file__).resolve().parents[1]
     worker = (root / "scripts/hpc/collocation_node_delta.slurm").read_text()
     submit = (root / "scripts/hpc/submit_collocation_node_delta.sh").read_text()
+    aces_worker = (root / "scripts/hpc/collocation_node_aces.slurm").read_text()
+    aces_submit = (root / "scripts/hpc/submit_collocation_node_aces.sh").read_text()
     assert "--cpus-per-task=1" in worker and "--gres" not in worker
     assert "submission.intent" in submit and "submission_complete" in submit
+    assert "--cpus-per-task=1" in aces_worker and "--gres" not in aces_worker
+    assert "--partition=cpu" in aces_worker
+    assert "submission.intent" in aces_submit and "submission_complete" in aces_submit
+    assert "AF_SOURCE_MULTIROUND_ROOT" in aces_submit
     assert campaign.NodeCampaignPlan().worker_seconds < 30 * 60
     with pytest.raises(ValueError, match="scheduler limit"):
         campaign.NodeCampaignPlan(fit={"refinement_seconds": 900})

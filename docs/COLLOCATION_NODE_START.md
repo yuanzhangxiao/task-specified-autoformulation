@@ -127,6 +127,17 @@ accepted optimizer outcomes, valid residual counts, parameters, failure evidence
 and production metrics. Distinguish reaching IPOPT, finding a feasible model,
 fitting accurately, and satisfying the public scientific requirements.
 
+## Run entirely on ACES
+
+The ACES launcher performs the same standard-library public export, freezes the
+same paired task matrix, and submits a one-CPU array on the ACES `cpu` partition.
+It uses the existing repository environment and requests no GPU. The source bundle
+and campaign output must be separate immutable roots. Up to six tasks may run
+concurrently; this affects only scheduling, not any numerical setting or seed.
+
+The comparison is therefore safe to run beside the GPU multi-round campaign. It
+does not make LLM calls, open test/private data, or regenerate candidates.
+
 ## Remaining limits
 
 Neutral latent guesses can be poor and collocation can still fail or find a local
