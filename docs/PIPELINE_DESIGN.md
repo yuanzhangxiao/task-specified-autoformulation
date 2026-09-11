@@ -788,3 +788,12 @@ parameters, and asks the proposer for a specific role only for ambiguous interna
 nonlinear parameters. Rejected responses and named diagnostics survive retry
 exhaustion. The initial function scope contains the directly superlinear
 component and its coupled target producer rather than the entire dense SCC.
+
+The version-5 fitting integration makes an unsuccessful ordinary starting rollout
+optional for collocation: observed training channels can seed their corresponding
+nodes while latent nodes repeat only the causally prescribed initial value. These
+are optimization guesses, never revealed latent trajectories. The sensitivity
+compiler separately certifies supported smooth composites involving piecewise
+primitives and records whether only first-order derivatives are valid. It preserves
+analytic parameter sensitivities while avoiding invalid second-order AD curvature;
+uncertified kink crossings remain explicit fitter-contract failures.

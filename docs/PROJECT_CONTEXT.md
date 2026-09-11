@@ -586,3 +586,12 @@ role decisions for internal nonlinear parameters. It persists every rejected
 reply and structured diagnostic and limits the first repair to the directly
 superlinear component plus its target-producing partner. An offline replay of
 the frozen failed responses precedes fresh provider calls.
+
+The version-5 multiround campaign uses the latest collocation initializer without
+changing the frozen scientific search boundary. A bounded ordinary-rollout warm-up
+may fall back to observed training nodes plus prescribed latent initials, allowing
+IPOPT to begin from jointly optimized state nodes. Forward sensitivities now admit a
+narrow, audited set of classically differentiable composites such as
+`f/(1+abs(f))`; genuinely kinked or domain-unsafe laws still fail closed. A paired
+CPU harness compares the historical and optional node-start policies on every
+committed version-4 candidate before attributing recovery to the new fitter.

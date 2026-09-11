@@ -171,3 +171,29 @@ this revision.  Learning global latent initial values from training data, and
 defining a causal validation/test initializer without outcome leakage, are a
 separate numerical milestone so their effect is not confounded with revision
 transport and diagnostic changes.
+
+## Revision-5 fitting integration
+
+Revision 5 keeps the revision-4 candidates, prompts, routes, budgets, seeds, and
+verified rollout acceptance rules, but opts into the latest collocation node-start
+policy. The initializer first tries the ordinary starting rollout for at most ten
+shared seconds. If that rollout is unavailable, directly observed state nodes use
+training observations as an optimization guess and remaining latent nodes repeat
+their prescribed causal initial value. IPOPT still jointly optimizes every node and
+parameter; validation values never initialize or constrain the fit. The historical
+rollout-required policy remains available as the paired offline control described in
+`COLLOCATION_NODE_START.md`.
+
+The sensitivity contract no longer rejects every occurrence of `abs`, `min`, or
+`max` syntactically. It certifies a narrow set of classically differentiable
+composites, including `f/(1+abs(f))`, and records the exact rule and solver policy.
+Analytic first-order parameter sensitivities remain in use. When a certified law is
+only once differentiable at an isolated point, the augmented ODE solver constructs
+its Newton matrix numerically and IPOPT uses limited-memory curvature rather than an
+invalid second derivative. A genuine uncertified kink or domain restriction still
+fails closed with a named diagnostic; no smoothing or generalized derivative is
+silently introduced.
+
+This integration improves access to the intended collocation-plus-sensitivity
+fitter. It does not learn latent initial values, guarantee a feasible trajectory,
+or turn numerical convergence into evidence of scientific correctness.
