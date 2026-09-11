@@ -1,13 +1,12 @@
 """Restricted symbolic derivatives and forward sensitivities for frozen probes.
 
 This opt-in diagnostic supports global parameters, parameter-independent causal
-initializers, open rollouts, smooth expressions and no state constraints. It never
-evaluates proposer text as Python and does not change the production fitter defaults.
+initializers, open rollouts, certified smooth composites and no state constraints.
+It never evaluates proposer text as Python or changes production fitter defaults.
 """
 
 from __future__ import annotations
 
-import ast
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -21,6 +20,10 @@ from autoformalism.data import DatasetSplit, Trajectory
 from autoformalism.expressions import CompiledModel
 from autoformalism.fitting.casadi_initializer import _translate
 from autoformalism.fitting.models import FitConfig
+from autoformalism.fitting.sensitivity_contract import (
+    SensitivityContractError,
+    certify_expressions,
+)
 from autoformalism.fitting.simulation import (
     forcing_segment_indices,
     trajectory_forcing,
@@ -28,10 +31,6 @@ from autoformalism.fitting.simulation import (
 )
 from autoformalism.fitting.stagnation import RolloutOracle
 from autoformalism.rebuttal.fitter_diagnostic import _finite_payload, write_json
-
-
-class SensitivityContractError(ValueError):
-    """The candidate needs a feature outside this numerical adapter's contract."""
 
 
 @dataclass
@@ -65,33 +64,8 @@ class SymbolicODE:
                 "sensitivity probe does not yet optimize fitted initial states: "
                 f"{fitted_initials}"
             )
-        expressions = [
-            *self.model.validated.process_expressions.values(),
-            *self.model.validated.equation_expressions.values(),
-            *self.model.validated.observation_expressions.values(),
-        ]
-        for expression in expressions:
-            for node in ast.walk(expression.tree):
-                if (
-                    isinstance(node, ast.BinOp)
-                    and isinstance(node.op, ast.Pow)
-                    and (
-                        not isinstance(node.right, ast.Constant) or node.right.value < 0
-                    )
-                ):
-                    raise SensitivityContractError(
-                        "probe declines negative or variable powers"
-                    )
-                if isinstance(node, ast.Call) and node.func.id in {
-                    "abs",
-                    "min",
-                    "max",
-                    "sqrt",
-                    "log",
-                }:
-                    raise SensitivityContractError(
-                        "probe declines nonsmooth or domain-restricted functions"
-                    )
+        equations, observations, smoothness = certify_expressions(self.model)
+        self.requires_first_order_solver = smoothness.c1_only
         self.names = self.model.parameter_names
         self.channels = tuple(self.model.validated.context.targets)
         self.inputs = tuple(sorted(self.model.validated.forcing_symbols))
@@ -113,19 +87,15 @@ class SymbolicODE:
             **dict(zip(self.inputs, ca.vertsplit(u), strict=True)),
             self.model.validated.context.time_symbol: time,
         }
-        for name in self.model.validated.process_order:
-            env[name] = _translate(
-                ca, self.model.validated.process_expressions[name], env
-            )
         rhs = ca.vertcat(
             *[
-                _translate(ca, self.model.validated.equation_expressions[n], env)
+                _translate(ca, equations[n], env)
                 for n in self.model.state_names
             ]
         )
         obs = ca.vertcat(
             *[
-                _translate(ca, self.model.validated.observation_expressions[n], env)
+                _translate(ca, observations[n], env)
                 for n in self.channels
             ]
         )
@@ -144,10 +114,14 @@ class SymbolicODE:
         self.augmented_rhs = ca.Function(
             "augmented_rhs", [time, augmented, theta, u], [augmented_rhs]
         )
-        self.augmented_jacobian = ca.Function(
-            "augmented_jacobian",
-            [time, augmented, theta, u],
-            [ca.jacobian(augmented_rhs, augmented)],
+        self.augmented_jacobian = (
+            None
+            if smoothness.rhs_c1_only
+            else ca.Function(
+                "augmented_jacobian",
+                [time, augmented, theta, u],
+                [ca.jacobian(augmented_rhs, augmented)],
+            )
         )
         self.audit = {
             "parameter_order": self.names,
@@ -159,6 +133,20 @@ class SymbolicODE:
             "trajectory_specific_initialization": self._fixed_initial is None,
             "initial_parameter_sensitivity_zero_certified": True,
             "rollout_linearity_claimed": False,
+            "smoothness_contract": "certified-composites-1",
+            "smooth_composite_certificates": smoothness.certificates,
+            "uncertified_crossing_policy": "reject_before_optimization",
+            "c1_composites_require_first_order_solver": (
+                self.requires_first_order_solver
+            ),
+            "augmented_solver_jacobian": (
+                "numerical_newton_approximation"
+                if smoothness.rhs_c1_only else "automatic_differentiation"
+            ),
+            "collocation_hessian": (
+                "limited-memory" if self.requires_first_order_solver else "exact"
+            ),
+            "division_policy": "existing_production_guard_unchanged",
         }
 
     @property
@@ -279,7 +267,9 @@ def symbolic_rollout(
                 method=settings.integration_method,
                 rtol=settings.relative_tolerance,
                 atol=settings.absolute_tolerance,
-                jac=jac,
+                # First parameter sensitivities remain analytic. Only the
+                # integrator's Newton matrix is approximated for C1-only laws.
+                jac=jac if jac_function is not None else None,
             )
         except TimeoutError as error:
             raise SymbolicRolloutTimeout(str(error), diagnostic(left, right)) from error
