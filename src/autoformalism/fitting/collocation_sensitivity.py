@@ -20,7 +20,7 @@ from scipy.optimize import least_squares
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import CompiledModel
 from autoformalism.fitting.fitter import evaluate_fitted_candidate
-from autoformalism.fitting.matching_probe import bounded_latent_start
+from autoformalism.fitting.matching_probe import NodeStartPolicy, bounded_latent_start
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.sensitivity_probe import (
     SensitivityContractError,
@@ -45,6 +45,8 @@ class CollocationSensitivityConfig(StrictSchema):
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
     absolute_tolerance: float = Field(default=1e-9, gt=0.0)
     failure_penalty: float = Field(default=1e6, gt=0.0)
+    collocation_node_start: NodeStartPolicy = "rollout_required"
+    node_warmup_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
 
     def fit_config(self) -> FitConfig:
         """Build the common integration and runtime-domain policy."""
@@ -118,6 +120,8 @@ def fit_collocation_forward_sensitivity(
         method="collocation_init",
         seconds=config.initializer_seconds,
         directory=directory / "collocation",
+        node_start=config.collocation_node_start,
+        warmup_seconds=config.node_warmup_seconds,
     )
     selected = initializer.get("parameters") if initializer.get("success") else start
     deadline = monotonic() + config.refinement_seconds
