@@ -26,6 +26,79 @@ from autoformalism.rebuttal.fitter_diagnostic import (
 )
 from autoformalism.schemas import CandidateModel
 
+NodeStartPolicy = Literal["rollout_required", "rollout_or_observed"]
+
+
+def observed_node_guess(system: SymbolicODE, data: Trajectory) -> np.ndarray:
+    """Seed observed states from training data and latent states from their initials.
+
+    These are optimization guesses, not estimates used in final simulation.
+    Prescribed initial conditions override the first observed sample.
+    """
+    initial = system.initial_for(data)
+    guess = np.tile(initial, (data.number_of_rows, 1))
+    direct = system.model.direct_state_observation_channels
+    for column, state in enumerate(system.model.state_names):
+        channel = direct.get(state)
+        if channel in data.targets:
+            guess[:, column] = data.targets[channel]
+        elif channel in data.auxiliaries:
+            guess[:, column] = data.auxiliaries[channel]
+    guess[0] = initial
+    if not np.isfinite(guess).all():
+        raise ValueError("collocation node guess is nonfinite")
+    return guess
+
+
+def collocation_node_guess(
+    system: SymbolicODE,
+    data: Trajectory,
+    start: np.ndarray,
+    settings: FitConfig,
+    policy: NodeStartPolicy,
+    warmup_deadline: float,
+) -> tuple[np.ndarray, dict]:
+    """Use a bounded rollout when available; otherwise construct finite node guesses."""
+    record = {"trajectory_id": data.trajectory_id, "policy": policy}
+    started = monotonic()
+    try:
+        if monotonic() >= warmup_deadline:
+            raise TimeoutError("shared node warm-up budget exhausted")
+        _, _, guess, _ = symbolic_rollout(
+            system, data, start, settings, warmup_deadline
+        )
+        record["source"] = "rollout"
+    except (ValueError, RuntimeError, ArithmeticError, TimeoutError) as error:
+        if policy == "rollout_required":
+            raise
+        record.update(
+            source="observed_and_fixed_initials",
+            rollout_error=str(error)[-1600:],
+            rollout_diagnostic=getattr(error, "diagnostic", None),
+        )
+        guess = observed_node_guess(system, data)
+    record["seconds"] = monotonic() - started
+    return guess, record
+
+
+def check_node_guess(
+    system: SymbolicODE,
+    t: float,
+    states: np.ndarray,
+    theta: np.ndarray,
+    inputs,
+) -> None:
+    """Reject undefined local equations/derivatives without integrating an ODE."""
+    parts = (
+        system.rhs(t, states, theta, inputs),
+        system.observe(t, states, theta, inputs),
+        *system.local(t, states, theta, inputs),
+    )
+    if any(not np.isfinite(np.asarray(part)).all() for part in parts):
+        raise ValueError(
+            f"collocation node equations or derivatives are nonfinite at t={t:g}"
+        )
+
 
 def _weak_window(system, forcing, time: np.ndarray, smooth: np.ndarray):
     """Integrate one weak equation on the piecewise-linear observed interpolant.
@@ -98,6 +171,15 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
     worker_arguments = {**arguments, "training": (rows, training.fingerprint)}
     directory = arguments["directory"]
     directory.mkdir(parents=True, exist_ok=True)
+    journal = directory / "node_initialization.json"
+    write_json(
+        journal,
+        {
+            "policy": arguments.get("node_start", "rollout_required"),
+            "trajectories": [],
+            "optimizer_started": False,
+        },
+    )
     result_path = directory / "child_result.json"
     result_path.unlink(missing_ok=True)
     worker = multiprocessing.get_context("spawn").Process(
@@ -131,8 +213,15 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
             worker.kill()
         worker.join()
         worker.close()
+    node_record = read_json(journal)
     return {
         **result,
+        "node_start": node_record["policy"],
+        "node_initialization": node_record["trajectories"],
+        "collocation_optimizer_started": (
+            node_record["optimizer_started"]
+            and arguments["method"] == "collocation_init"
+        ),
         "method": arguments["method"],
         "seconds": monotonic() - started,
         "training_only": True,
@@ -275,6 +364,8 @@ def latent_start(
     method: str,
     seconds: float,
     directory: Path,
+    node_start: NodeStartPolicy = "rollout_required",
+    warmup_seconds: float = 10.0,
 ) -> dict:
     """Estimate latent trajectories with continuity and unchanged fixed initials.
 
@@ -286,8 +377,19 @@ def latent_start(
         raise ValueError("unknown latent initialization method")
     if training.name is not SplitName.TRAIN:
         raise ValueError("initializer requires training split")
+    if node_start not in {"rollout_required", "rollout_or_observed"}:
+        raise ValueError("unknown collocation node initialization policy")
+    if node_start != "rollout_required" and method != "collocation_init":
+        raise ValueError("optional rollout seeding is only supported for collocation")
+    if not np.isfinite(warmup_seconds) or warmup_seconds <= 0:
+        raise ValueError("node warm-up budget must be positive and finite")
     started = monotonic()
     deadline = started + seconds
+    warmup_deadline = (
+        min(deadline, started + min(warmup_seconds, seconds / 4))
+        if node_start == "rollout_or_observed"
+        else deadline
+    )
     directory.mkdir(parents=True, exist_ok=True)
     opti = ca.Opti()
     theta = opti.variable(len(start))
@@ -325,14 +427,29 @@ def latent_start(
         )
     objective = 0
     nodes = 0
+    guesses = []
+    optimizer_started = False
     try:
         for data in training.trajectories:
             forcing = trajectory_forcing(system.model, data)
-            _, _, guess, _ = symbolic_rollout(system, data, start, settings, deadline)
+            guess, guess_record = collocation_node_guess(
+                system, data, start, settings, node_start, warmup_deadline
+            )
+            guesses.append(guess_record)
+            write_json(
+                directory / "node_initialization.json",
+                {
+                    "policy": node_start,
+                    "trajectories": guesses,
+                    "optimizer_started": False,
+                },
+            )
             current = ca.DM(system.initial_for(data))
             inputs = [
                 [forcing.value(name, t) for name in system.inputs] for t in data.time
             ]
+            if node_start == "rollout_or_observed":
+                check_node_guess(system, data.time[0], guess[0], start, inputs[0])
             predicted = system.observe(data.time[0], current, theta, inputs[0])[0]
             objective += ((predicted - data.targets["v01"][0]) / scale) ** 2
             for i in range(len(data.time) - 1):
@@ -341,6 +458,15 @@ def latent_start(
                 t0, t1 = float(data.time[i]), float(data.time[i + 1])
                 dt = t1 - t0
                 u0, u1 = np.asarray(inputs[i]), np.asarray(inputs[i + 1])
+                if node_start == "rollout_or_observed":
+                    check_node_guess(system, t1, guess[i + 1], start, u1)
+                    check_node_guess(
+                        system,
+                        t0 + dt / 3,
+                        (2 * guess[i] + guess[i + 1]) / 3,
+                        start,
+                        u0 + (u1 - u0) / 3,
+                    )
                 end = opti.variable(n)
                 opti.set_initial(end, guess[i + 1])
                 nodes += n
@@ -382,6 +508,15 @@ def latent_start(
                 "tol": 1e-7,
             },
         )
+        optimizer_started = True
+        write_json(
+            directory / "node_initialization.json",
+            {
+                "policy": node_start,
+                "trajectories": guesses,
+                "optimizer_started": True,
+            },
+        )
         solved = opti.solve()
         values = np.asarray(solved.value(theta)).reshape(-1)
         if (
@@ -398,7 +533,7 @@ def latent_start(
             "iterations": solved.stats().get("iter_count"),
             "message": "converged",
         }
-    except (RuntimeError, ValueError, TimeoutError) as error:
+    except (RuntimeError, ValueError, TimeoutError, ArithmeticError) as error:
         result = {"success": False, "parameters": None, "message": str(error)[-1600:]}
     return _finite_payload(
         {
@@ -409,5 +544,9 @@ def latent_start(
             "training_only": True,
             "hidden_labels_used": False,
             "initial_conditions_optimized": False,
+            "node_start": node_start,
+            "node_initialization": guesses,
+            "collocation_optimizer_started": optimizer_started
+            and method == "collocation_init",
         }
     )
