@@ -1,0 +1,12 @@
+{
+  "protocol": "piecewise-fitting-comparison-1",
+  "fit": {
+    "initializer_seconds": 45,
+    "refinement_seconds": 120,
+    "maximum_function_evaluations": 240,
+    "collocation_node_start": "rollout_or_observed",
+    "node_warmup_seconds": 5,
+    "relative_tolerance": 1e-7,
+    "absolute_tolerance": 1e-9
+  }
+}

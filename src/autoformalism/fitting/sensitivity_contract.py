@@ -74,6 +74,9 @@ class SmoothnessAudit:
     c1_only: bool = False
     rhs_c1_only: bool = False
     certificates: list[dict] = field(default_factory=list)
+    allow_piecewise: bool = False
+    piecewise: list[dict] = field(default_factory=list)
+    rhs_piecewise: bool = False
 
     def record(self, node: ast.AST, rule: str, *, c1_only: bool = False) -> None:
         self.c1_only |= c1_only
@@ -121,6 +124,17 @@ class SmoothnessAudit:
                 ):
                     self.record(node, "identical_branches")
                     return self.visit(node.args[0])
+                if self.allow_piecewise:
+                    arguments = [self.visit(arg) for arg in node.args]
+                    self.piecewise.append(
+                        {
+                            "location": self.location,
+                            "expression": ast.unparse(node)[:512],
+                            "primitive": name,
+                        }
+                    )
+                    self.c1_only = True  # Never request exact second derivatives.
+                    return ast.Call(node.func, arguments, [])
                 raise SensitivityContractError(
                     f"{self.location}: uncertified nonsmooth {name} crossing; "
                     "no classical derivative is assigned at abs(0) or unequal "
@@ -181,11 +195,13 @@ class SmoothnessAudit:
 
 def certify_expressions(
     model: CompiledModel,
+    *,
+    allow_piecewise: bool = False,
 ) -> tuple[dict[str, ParsedExpression], dict[str, ParsedExpression], SmoothnessAudit]:
     """Resolve process aliases before checking complete equations and mappings."""
     validated = model.validated
     processes: dict[str, ast.AST] = {}
-    audit = SmoothnessAudit()
+    audit = SmoothnessAudit(allow_piecewise=allow_piecewise)
 
     def expanded(expression: ParsedExpression) -> ast.Expression:
         tree = _Expand(processes).visit(deepcopy(expression.tree))
@@ -221,5 +237,6 @@ def certify_expressions(
 
     equations = certify(validated.equation_expressions, "equation")
     audit.rhs_c1_only = audit.c1_only
+    audit.rhs_piecewise = bool(audit.piecewise)
     observations = certify(validated.observation_expressions, "observation")
     return equations, observations, audit

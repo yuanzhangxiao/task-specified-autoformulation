@@ -38,6 +38,7 @@ class SymbolicODE:
     """Expand processes before differentiating both dynamics and observations."""
 
     model: CompiledModel
+    allow_piecewise: bool = False
 
     def __post_init__(self) -> None:
         candidate = self.model.validated.candidate
@@ -64,7 +65,10 @@ class SymbolicODE:
                 "sensitivity probe does not yet optimize fitted initial states: "
                 f"{fitted_initials}"
             )
-        equations, observations, smoothness = certify_expressions(self.model)
+        equations, observations, smoothness = certify_expressions(
+            self.model, allow_piecewise=self.allow_piecewise
+        )
+        self.has_piecewise = bool(smoothness.piecewise)
         self.requires_first_order_solver = smoothness.c1_only
         self.names = self.model.parameter_names
         self.channels = tuple(self.model.validated.context.targets)
@@ -88,17 +92,9 @@ class SymbolicODE:
             self.model.validated.context.time_symbol: time,
         }
         rhs = ca.vertcat(
-            *[
-                _translate(ca, equations[n], env)
-                for n in self.model.state_names
-            ]
+            *[_translate(ca, equations[n], env) for n in self.model.state_names]
         )
-        obs = ca.vertcat(
-            *[
-                _translate(ca, observations[n], env)
-                for n in self.channels
-            ]
-        )
+        obs = ca.vertcat(*[_translate(ca, observations[n], env) for n in self.channels])
         fx, ft = ca.jacobian(rhs, x), ca.jacobian(rhs, theta)
         hx, ht = ca.jacobian(obs, x), ca.jacobian(obs, theta)
         args = [time, x, theta, u]
@@ -133,15 +129,36 @@ class SymbolicODE:
             "trajectory_specific_initialization": self._fixed_initial is None,
             "initial_parameter_sensitivity_zero_certified": True,
             "rollout_linearity_claimed": False,
-            "smoothness_contract": "certified-composites-1",
+            "smoothness_contract": "piecewise-branches-1"
+            if self.allow_piecewise
+            else "certified-composites-1",
             "smooth_composite_certificates": smoothness.certificates,
-            "uncertified_crossing_policy": "reject_before_optimization",
+            "uncertified_crossing_policy": (
+                "allow_exact_values_with_branch_derivative_policy"
+                if self.allow_piecewise
+                else "reject_before_optimization"
+            ),
+            "piecewise_expressions": smoothness.piecewise,
+            "classical_sensitivity_claimed": not self.has_piecewise,
+            "branch_derivative_policy": (
+                "CasADi abs(0)=0; binary min/max ties average branch derivatives; "
+                "multiargument folds left"
+            ),
+            "branch_sensitivity_guarantee": (
+                "heuristic_at_nonsmooth_points; no classical or Clarke-Jacobian "
+                "certificate for arbitrary composites"
+            ),
+            "piecewise_collocation_policy": (
+                "IPOPT limited-memory is a nonsmooth heuristic; "
+                "final exact rollouts required"
+            ),
             "c1_composites_require_first_order_solver": (
                 self.requires_first_order_solver
             ),
             "augmented_solver_jacobian": (
                 "numerical_newton_approximation"
-                if smoothness.rhs_c1_only else "automatic_differentiation"
+                if smoothness.rhs_c1_only
+                else "automatic_differentiation"
             ),
             "collocation_hessian": (
                 "limited-memory" if self.requires_first_order_solver else "exact"

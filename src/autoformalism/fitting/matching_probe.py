@@ -138,7 +138,8 @@ def _latent_worker(candidate, context, result_path, arguments) -> None:
     """Rebuild the symbolic graph in an isolated, killable initializer process."""
     try:
         system = SymbolicODE(
-            compile_candidate(CandidateModel.model_validate(candidate), context)
+            compile_candidate(CandidateModel.model_validate(candidate), context),
+            allow_piecewise=arguments.pop("allow_piecewise", False),
         )
         rows, fingerprint = arguments["training"]
         arguments["training"] = DatasetSplit(
@@ -168,7 +169,11 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
         }
         for t in training.trajectories
     ]
-    worker_arguments = {**arguments, "training": (rows, training.fingerprint)}
+    worker_arguments = {
+        **arguments,
+        "training": (rows, training.fingerprint),
+        "allow_piecewise": system.allow_piecewise,
+    }
     directory = arguments["directory"]
     directory.mkdir(parents=True, exist_ok=True)
     journal = directory / "node_initialization.json"
@@ -366,6 +371,7 @@ def latent_start(
     directory: Path,
     node_start: NodeStartPolicy = "rollout_required",
     warmup_seconds: float = 10.0,
+    mesh_substeps: int = 1,
 ) -> dict:
     """Estimate latent trajectories with continuity and unchanged fixed initials.
 
@@ -375,6 +381,10 @@ def latent_start(
     """
     if method not in {"shooting_init", "collocation_init"}:
         raise ValueError("unknown latent initialization method")
+    if not isinstance(mesh_substeps, int) or not 1 <= mesh_substeps <= 8:
+        raise ValueError("collocation mesh substeps must be an integer from 1 to 8")
+    if method != "collocation_init" and mesh_substeps != 1:
+        raise ValueError("mesh refinement is only supported for collocation")
     if training.name is not SplitName.TRAIN:
         raise ValueError("initializer requires training split")
     if node_start not in {"rollout_required", "rollout_or_observed"}:
@@ -467,23 +477,42 @@ def latent_start(
                         start,
                         u0 + (u1 - u0) / 3,
                     )
-                end = opti.variable(n)
-                opti.set_initial(end, guess[i + 1])
-                nodes += n
-                if method == "shooting_init":
-                    propagated = integrator(
-                        x0=current, p=ca.vertcat(theta, t0, dt, u0, u1)
-                    )["xf"]
-                    opti.subject_to(end == propagated)
-                else:
-                    inner = opti.variable(n)
-                    opti.set_initial(inner, (2 * guess[i] + guess[i + 1]) / 3)
+                interval_start, interval_end = t0, t1
+                input_start, input_end = u0, u1
+                for substep in range(mesh_substeps):
+                    left_fraction = substep / mesh_substeps
+                    right_fraction = (substep + 1) / mesh_substeps
+                    t0 = (
+                        interval_start + (interval_end - interval_start) * left_fraction
+                    )
+                    t1 = (
+                        interval_start
+                        + (interval_end - interval_start) * right_fraction
+                    )
+                    dt = t1 - t0
+                    u0 = input_start + (input_end - input_start) * left_fraction
+                    u1 = input_start + (input_end - input_start) * right_fraction
+                    left_guess = guess[i] + (guess[i + 1] - guess[i]) * left_fraction
+                    right_guess = guess[i] + (guess[i + 1] - guess[i]) * right_fraction
+                    end = opti.variable(n)
+                    opti.set_initial(end, right_guess)
                     nodes += n
-                    first = system.rhs(t0 + dt / 3, inner, theta, u0 + (u1 - u0) / 3)
-                    last = system.rhs(t1, end, theta, u1)
-                    opti.subject_to(inner == current + dt * (5 * first - last) / 12)
-                    opti.subject_to(end == current + dt * (3 * first + last) / 4)
-                current = end
+                    if method == "shooting_init":
+                        propagated = integrator(
+                            x0=current, p=ca.vertcat(theta, t0, dt, u0, u1)
+                        )["xf"]
+                        opti.subject_to(end == propagated)
+                    else:
+                        inner = opti.variable(n)
+                        opti.set_initial(inner, (2 * left_guess + right_guess) / 3)
+                        nodes += n
+                        first = system.rhs(
+                            t0 + dt / 3, inner, theta, u0 + (u1 - u0) / 3
+                        )
+                        last = system.rhs(t1, end, theta, u1)
+                        opti.subject_to(inner == current + dt * (5 * first - last) / 12)
+                        opti.subject_to(end == current + dt * (3 * first + last) / 4)
+                    current = end
                 predicted = system.observe(t1, current, theta, u1)[0]
                 objective += ((predicted - data.targets["v01"][i + 1]) / scale) ** 2
         opti.minimize(objective)
@@ -544,6 +573,7 @@ def latent_start(
             "method": method,
             "seconds": monotonic() - started,
             "latent_decision_variables": nodes,
+            "mesh_substeps": mesh_substeps,
             "training_only": True,
             "hidden_labels_used": False,
             "initial_conditions_optimized": False,
