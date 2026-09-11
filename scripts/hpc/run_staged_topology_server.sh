@@ -1,20 +1,27 @@
 #!/bin/bash
-# Shared one-server/multiple-task worker, without numerical data or fitting.
+# Shared one-server/multiple-task launcher, including bounded fitting campaigns.
 set -euo pipefail
-: "${AF_REPO_ROOT:?required}"
-: "${AF_PYTHON:?required}"
-: "${AF_OUTPUT_ROOT:?required}"
-: "${AF_VLLM_IMAGE:?required}"
-: "${AF_HF_HOME:?required}"
-: "${AF_COMPUTE_CACHE_ROOT:?required}"
-: "${AF_IPC_TMP_ROOT:?required}"
-readonly plan="${AF_OUTPUT_ROOT}/plan.json"
-readonly model="$(jq -r '.config.model_settings.model' "${plan}")"
-readonly model_revision="$(jq -r '.config.model_settings.model_revision' "${plan}")"
-readonly expected_image_sha="$(jq -r '.config.serving_image_sha256' "${plan}")"
-readonly context_tokens="$(jq -r '.config.served_context_tokens' "${plan}")"
-readonly worker_seconds="$(jq -r '.config.wall_seconds' "${plan}")"
-case "$(jq -r '.config.protocol' "${plan}")" in
+check_only=false
+if [[ "${1:-}" == --check-config ]]; then
+  [[ "$#" == 2 ]] || { echo 'usage: --check-config CONFIG' >&2; exit 2; }
+  check_only=true
+  protocol="$(jq -er '.protocol' "$2")"
+  platform="$(jq -er '.platform' "$2")"
+else
+  [[ "$#" == 0 ]] || { echo 'unexpected launcher arguments' >&2; exit 2; }
+  : "${AF_REPO_ROOT:?required}"
+  : "${AF_PYTHON:?required}"
+  : "${AF_OUTPUT_ROOT:?required}"
+  : "${AF_VLLM_IMAGE:?required}"
+  : "${AF_HF_HOME:?required}"
+  : "${AF_COMPUTE_CACHE_ROOT:?required}"
+  : "${AF_IPC_TMP_ROOT:?required}"
+  readonly plan="${AF_OUTPUT_ROOT}/plan.json"
+  protocol="$(jq -er '.config.protocol' "${plan}")"
+  platform="$(jq -er '.config.platform' "${plan}")"
+fi
+readonly protocol platform
+case "${protocol}" in
   scientific-staged-topology-1) worker_script=staged_topology_campaign.py ;;
   scientific-staged-functions-1) worker_script=staged_function_campaign.py ;;
   scientific-staged-sign-contract-1) worker_script=staged_sign_contract_campaign.py ;;
@@ -27,16 +34,25 @@ case "$(jq -r '.config.protocol' "${plan}")" in
     worker_script=staged_function_hybrid_campaign.py ;;
   scientific-staged-function-prefit-handoff-1) \
     worker_script=staged_function_prefit_campaign.py ;;
-  scientific-staged-multiround-feedback-1|scientific-staged-multiround-feedback-2|scientific-staged-multiround-feedback-3|scientific-staged-multiround-feedback-4|scientific-staged-multiround-feedback-5) \
+  scientific-staged-multiround-feedback-1|scientific-staged-multiround-feedback-2|scientific-staged-multiround-feedback-3|scientific-staged-multiround-feedback-4|scientific-staged-multiround-feedback-5|scientific-staged-multiround-feedback-6) \
     worker_script=staged_multiround_feedback_campaign.py ;;
   *) echo 'unsupported frozen worker protocol' >&2; exit 2 ;;
 esac
 readonly worker_script
-case "$(jq -r '.config.platform' "${plan}")" in
+case "${platform}" in
   aces-h100x1|delta-a40x1) expected_tensor_parallel=1 ;;
   aces-h100x2) expected_tensor_parallel=2 ;;
   *) echo 'unsupported frozen platform' >&2; exit 2 ;;
 esac
+if [[ "${check_only}" == true ]]; then
+  printf '%s\n' "${worker_script}"
+  exit 0
+fi
+readonly model="$(jq -r '.config.model_settings.model' "${plan}")"
+readonly model_revision="$(jq -r '.config.model_settings.model_revision' "${plan}")"
+readonly expected_image_sha="$(jq -r '.config.serving_image_sha256' "${plan}")"
+readonly context_tokens="$(jq -r '.config.served_context_tokens' "${plan}")"
+readonly worker_seconds="$(jq -r '.config.wall_seconds' "${plan}")"
 [[ "${AF_TENSOR_PARALLEL_SIZE:-${expected_tensor_parallel}}" == "${expected_tensor_parallel}" ]] || {
   echo 'tensor parallel size differs from frozen platform' >&2
   exit 2

@@ -18,6 +18,7 @@ git -C "${repository}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
 }
 [[ -x "${python}" ]] || { echo "missing Python: ${python}" >&2; exit 2; }
 [[ -f "${config}" ]] || { echo "missing config: ${config}" >&2; exit 2; }
+bash "${repository}/scripts/hpc/run_staged_topology_server.sh" --check-config "${config}" >/dev/null
 [[ -f "${AF_SOURCE_RESCUE_ROOT}/plan.json" ]] || { echo "missing source rescue plan" >&2; exit 2; }
 [[ -f "${AF_SOURCE_RESCUE_ROOT}/summary/summary.json" ]] || { echo "missing source rescue summary" >&2; exit 2; }
 expected_image_sha="$(jq -r '.serving_image_sha256' "${config}")"

@@ -99,6 +99,13 @@ script and the completed `staged-fitter-rescue-v1-c1754fe` source. Use a fresh o
 root; never resume v5 artifacts under changed source code. Explicitly set the
 existing vLLM image path and shared Python executable.
 
+The shared shell launcher supports protocol v6. The submitter runs its actual
+protocol/platform dispatch using `--check-config` before checking large inputs or
+calling Slurm. Regression tests exercise every committed multiround config,
+unknown-protocol rejection, and the production v6 dispatch path without GPUs.
+Job 2110814 stopped at the previously missing shell allowlist entry before any
+provider or fitting work; retry in a fresh root with the corrected launcher hash.
+
 The summary separates recorded rounds, attempted fits, all-keep rounds, rejected
 provider attempts and rejected component entries. Legacy rates remain for
 historical comparison; their denominators include not-run round records.
