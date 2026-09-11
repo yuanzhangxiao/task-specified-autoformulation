@@ -40,8 +40,12 @@ def export_cases(source: Path, output: Path) -> dict:
     if within(source, output) or within(output, source):
         raise ValueError("source and export must be separate")
     plan = json.loads((source / "plan.json").read_text())
+    accepted_plan_schemas = {
+        "scientific-staged-multiround-feedback-plan-3",
+        "scientific-staged-multiround-feedback-plan-4",
+    }
     if (
-        plan.get("schema_version") != "scientific-staged-multiround-feedback-plan-3"
+        plan.get("schema_version") not in accepted_plan_schemas
         or plan.get("plan_sha256")
         != digest({k: v for k, v in plan.items() if k != "plan_sha256"})
         or plan.get("test_data_opened") is not False
@@ -51,6 +55,7 @@ def export_cases(source: Path, output: Path) -> dict:
         raise ValueError("source multiround plan or public-data declaration differs")
     files = {}
     cases = []
+    skipped_uncommitted_rounds = []
 
     def copy(relative: str, destination: str, expected: Optional[str] = None):
         payload = checked(source, relative).read_bytes()
@@ -112,12 +117,28 @@ def export_cases(source: Path, output: Path) -> dict:
         copy(
             relative + "/terminal.json", f"provenance/seed{task['seed']}_terminal.json"
         )
-        for index, record in enumerate(result.get("rounds", []), 1):
-            if record["round_index"] != index or record[
+        for expected_index, record in enumerate(result.get("rounds", []), 1):
+            round_index = record["round_index"]
+            if round_index != expected_index or record[
                 "parent_candidate_sha256"
             ] != digest(parent):
                 raise ValueError("committed round parent chain differs")
-            candidate_path = f"{relative}/round_{index:03d}/candidate.json"
+            candidate_path = f"{relative}/round_{round_index:03d}/candidate.json"
+            if not checked(source, candidate_path).is_file():
+                failure_class = (record.get("fit") or {}).get("failure_class")
+                if (
+                    failure_class == "revision_contract"
+                    and record.get("candidate_sha256") == digest(parent)
+                ):
+                    skipped_uncommitted_rounds.append(
+                        {
+                            "source_task": task["task_id"],
+                            "source_round": round_index,
+                            "failure_class": failure_class,
+                        }
+                    )
+                    continue
+                raise ValueError("committed round candidate is missing")
             candidate = json.loads(checked(source, candidate_path).read_text())
             if record["candidate_sha256"] != digest(candidate):
                 raise ValueError("committed round candidate differs")
@@ -126,9 +147,9 @@ def export_cases(source: Path, output: Path) -> dict:
             cases.append(
                 {
                     **base,
-                    "name": f"seed{task['seed']}_round{index}",
+                    "name": f"seed{task['seed']}_round{round_index}",
                     "candidate": destination,
-                    "source_round": index,
+                    "source_round": round_index,
                 }
             )
             parent = candidate
@@ -138,7 +159,9 @@ def export_cases(source: Path, output: Path) -> dict:
     manifest = {
         "protocol": "collocation-node-cases-1",
         "source_plan_sha256": plan["plan_sha256"],
+        "source_plan_schema_version": plan["schema_version"],
         "selection": "all_frozen_parents_and_all_committed_rounds",
+        "skipped_uncommitted_rounds": skipped_uncommitted_rounds,
         "cases": cases,
         "files": files,
         "llm_calls": 0,

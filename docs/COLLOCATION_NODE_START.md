@@ -42,12 +42,17 @@ shooting retains its original initialization policy.
 
 ## CPU comparison
 
-The exporter takes the existing version-3 multiround campaign. It verifies its
-plan, public ledger, terminal identities, committed candidate hashes, and parent
-chain. It exports **all original parents and all committed round candidates**,
+The exporter accepts the existing version-3 and version-4 multiround campaigns.
+It verifies their plan, public ledger, terminal identities, committed candidate
+hashes, and parent chain. It exports **all original parents and all committed round candidates**,
 including failed fits. It does not choose candidates by training or validation
 score. Files are restricted to public prompt/manifest/train/validation, candidate
 JSON, and provenance records; no test table or LLM cache is copied.
+
+A revision-contract failure has no committed candidate checkpoint. The exporter
+retains its unchanged parent, records the skipped round in provenance, and continues
+the parent chain. A missing checkpoint for any round that claims a changed candidate
+still fails closed.
 
 The new experiment imports that bundle into a separate immutable snapshot. It
 freezes the exact role-based ordinary starting vector for each candidate before
@@ -57,8 +62,8 @@ an explosive latent-state start with an algebraic observation, and a successful
 starting rollout. The controls use x'=a*x^2 with finite observed trajectories
 generated at a=0.1; the unstable start is a=1.0 over [0,2].
 
-For the reported ACES run, two parents plus two completed revisions and three
-controls give **14 fits** (seven cases, two policies). The exporter reports the
+For the version-4 ACES run, two parents plus four committed revisions and three
+controls give **18 fits** (nine cases, two policies). The exporter reports the
 actual frozen count if the source differs. Each arm receives 120 seconds for
 initialization and 360 for refinement, with 80 maximum optimizer evaluations.
 Forward sensitivities, parameter roles, Radau tolerances, ordinary starts, and
@@ -84,8 +89,8 @@ Python 3.12 environment on Delta.
 From the Mac, using its existing `aces` and `delta` SSH aliases:
 
 ```bash
-ssh aces 'python3 - --source-root /scratch/user/u.yx126462/phase_b/staged-multiround-feedback-v3-a865f8a --output /scratch/user/u.yx126462/phase_b/collocation-node-cases-v1' < /private/tmp/autoformalism-astra-collocation-node-start/scripts/export_collocation_node_cases.py &&
-scp -3 -r aces:/scratch/user/u.yx126462/phase_b/collocation-node-cases-v1 delta:/work/hdd/bibo/yxiao2/phase_b/
+ssh aces 'python3 - --source-root /scratch/user/u.yx126462/phase_b/staged-multiround-feedback-v4-145f4d0 --output /scratch/user/u.yx126462/phase_b/collocation-node-cases-v4' < scripts/export_collocation_node_cases.py &&
+scp -3 -r aces:/scratch/user/u.yx126462/phase_b/collocation-node-cases-v4 delta:/work/hdd/bibo/yxiao2/phase_b/
 ```
 
 The second command runs only if export succeeds and routes the copy through the
@@ -102,8 +107,8 @@ From a clean checkout of this commit:
 ```bash
 export AF_REPO_ROOT="$PWD"
 export AF_CONFIG="$PWD/configs/collocation_node_v1.json"
-export AF_SOURCE_ROOT=/work/hdd/bibo/yxiao2/phase_b/collocation-node-cases-v1
-export AF_OUTPUT_ROOT=/work/hdd/bibo/yxiao2/phase_b/collocation-node-v1
+export AF_SOURCE_ROOT=/work/hdd/bibo/yxiao2/phase_b/collocation-node-cases-v4
+export AF_OUTPUT_ROOT=/work/hdd/bibo/yxiao2/phase_b/collocation-node-v4
 bash scripts/hpc/submit_collocation_node_delta.sh
 ```
 
@@ -114,7 +119,7 @@ The launcher uses the existing Python at
 After completion:
 
 ```bash
-cat /work/hdd/bibo/yxiao2/phase_b/collocation-node-v1/summary.md
+cat /work/hdd/bibo/yxiao2/phase_b/collocation-node-v4/summary.md
 ```
 
 `results/case_NNN_POLICY/fit.json` retains the initializer journal, native and

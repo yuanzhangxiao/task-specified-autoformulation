@@ -94,6 +94,7 @@ class MultiRoundFeedbackConfig(StagedCampaignConfig):
         "scientific-staged-multiround-feedback-2",
         "scientific-staged-multiround-feedback-3",
         "scientific-staged-multiround-feedback-4",
+        "scientific-staged-multiround-feedback-5",
     ]
     source_task_indices: tuple[int, int]
     round_count: int = Field(default=2, ge=2, le=4)
@@ -2012,7 +2013,7 @@ def _candidate_hash(candidate: CandidateModel) -> str:
 def _artifact_schema(protocol: str, artifact: str) -> str:
     """Keep plan/result/summary revisions aligned with the frozen protocol."""
     revision = protocol.rsplit("-", 1)[-1]
-    if revision not in {"1", "2", "3", "4"}:
+    if revision not in {"1", "2", "3", "4", "5"}:
         raise ValueError(f"unsupported multi-round protocol revision: {protocol}")
     return f"scientific-staged-multiround-feedback-{artifact}-{revision}"
 

@@ -502,6 +502,14 @@ def test_frozen_campaign_configuration_and_launcher_are_valid() -> None:
     assert v4.protocol == "scientific-staged-multiround-feedback-4"
     assert v4.round_count == 4
     assert v4.model_settings.attempts_per_step == 5
+    v5 = MultiRoundFeedbackConfig.model_validate_json(
+        Path("configs/staged_multiround_feedback_v5.json").read_text()
+    )
+    assert v5.protocol == "scientific-staged-multiround-feedback-5"
+    assert v5.round_count == 4
+    assert v5.fit.collocation_node_start == "rollout_or_observed"
+    assert v5.fit.node_warmup_seconds == 10.0
+    assert campaign._artifact_schema(v5.protocol, "summary").endswith("-5")
     assert len(launcher_hash()) == 64
 
 

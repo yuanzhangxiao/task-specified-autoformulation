@@ -1,0 +1,51 @@
+{
+  "protocol": "scientific-staged-multiround-feedback-5",
+  "purpose": "Four-round public-only feedback pilot using optional observed-node collocation starts, verified forward-sensitivity refinement, atomic component salvage, inherited parent parameters, and conservative function-domain diagnostics",
+  "platform": "aces-h100x1",
+  "serving_image_sha256": "9c56389af06cafbf4aa8bd825393f606ac7f2a18e1a700c5999b1ed47f7f9c1e",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 40,
+    "maximum_total_tokens": 393216,
+    "attempts_per_step": 5
+  },
+  "served_context_tokens": 32768,
+  "public_cells": [
+    "phase_b_anonymous_system_task_canonical_opaque_hard"
+  ],
+  "seeds": [
+    0,
+    1
+  ],
+  "diagnostic_fixtures": [],
+  "limits": {
+    "generated_variables": 12,
+    "terms_per_equation": 8,
+    "total_terms": 32
+  },
+  "wall_seconds": 3000,
+  "shutdown_margin_seconds": 240,
+  "source_task_indices": [
+    3,
+    4
+  ],
+  "round_count": 4,
+  "fit": {
+    "protocol": "collocation-forward-sensitivity-1",
+    "initializer_seconds": 90.0,
+    "refinement_seconds": 180.0,
+    "maximum_function_evaluations": 50,
+    "integration_method": "Radau",
+    "relative_tolerance": 1E-7,
+    "absolute_tolerance": 1E-9,
+    "failure_penalty": 1000000.0,
+    "collocation_node_start": "rollout_or_observed",
+    "node_warmup_seconds": 10.0
+  },
+  "routing_policy": "function_first_then_topology_if_persistent_instability"
+}

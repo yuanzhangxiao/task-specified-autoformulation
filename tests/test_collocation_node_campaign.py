@@ -44,7 +44,7 @@ def exported(diagnostic_bundle, tmp_path):  # noqa: F811
         "candidate_file_sha256": sha256(source / "frozen/candidates/parent.json"),
     }
     parent = {
-        "schema_version": "scientific-staged-multiround-feedback-plan-3",
+        "schema_version": "scientific-staged-multiround-feedback-plan-4",
         "tasks": [task],
         "public_asset_ledger": ledger,
         "public_asset_ledger_sha256": content_hash(ledger),
@@ -54,7 +54,9 @@ def exported(diagnostic_bundle, tmp_path):  # noqa: F811
     parent["plan_sha256"] = content_hash(parent)
     write_json(source / "plan.json", parent)
     revised = {**candidate, "candidate_id": "revised"}
+    revised_again = {**candidate, "candidate_id": "revised_again"}
     write_json(source / "results/source_seed0/round_001/candidate.json", revised)
+    write_json(source / "results/source_seed0/round_003/candidate.json", revised_again)
     terminal = {
         "identity": content_hash([parent["plan_sha256"], task]),
         "result": {
@@ -71,7 +73,28 @@ def exported(diagnostic_bundle, tmp_path):  # noqa: F811
                         "training": None,
                         "validation": None,
                     },
-                }
+                },
+                {
+                    "round_index": 2,
+                    "parent_candidate_sha256": content_hash(revised),
+                    "candidate_sha256": content_hash(revised),
+                    "fit": {
+                        "status": "not_run",
+                        "failure_class": "revision_contract",
+                        "training": None,
+                        "validation": None,
+                    },
+                },
+                {
+                    "round_index": 3,
+                    "parent_candidate_sha256": content_hash(revised),
+                    "candidate_sha256": content_hash(revised_again),
+                    "fit": {
+                        "status": "complete",
+                        "training": None,
+                        "validation": None,
+                    },
+                },
             ],
         },
     }
@@ -91,9 +114,19 @@ def small_plan():
     )
 
 
-def test_export_keeps_failed_round_and_never_copies_test(exported):
+def test_export_keeps_committed_rounds_skips_uncommitted_and_never_copies_test(
+    exported,
+):
     source, output, bundle = exported
-    assert [c["source_round"] for c in bundle["cases"]] == [0, 1]
+    assert [c["source_round"] for c in bundle["cases"]] == [0, 1, 3]
+    assert bundle["source_plan_schema_version"].endswith("-4")
+    assert bundle["skipped_uncommitted_rounds"] == [
+        {
+            "source_task": "source_seed0",
+            "source_round": 2,
+            "failure_class": "revision_contract",
+        }
+    ]
     assert exporter.export_cases(source, output) == bundle
     assert not list(output.rglob("test.csv"))
     assert campaign.verify_bundle(output) == bundle
@@ -171,7 +204,7 @@ def test_paired_starts_run_and_restore_completed_fit(exported, tmp_path, monkeyp
     _, source, _ = exported
     root = tmp_path / "campaign"
     frozen = campaign.prepare_nodes(small_plan(), source, root)
-    assert len(frozen["tasks"]) == 10  # Two saved candidates + three controls.
+    assert len(frozen["tasks"]) == 12  # Three saved candidates + three controls.
     assert [t["policy"] for t in frozen["tasks"][:2]] == list(campaign.POLICIES)
     assert frozen["tasks"][0]["case"] == frozen["tasks"][1]["case"]
     result = campaign.execute_nodes(root, 1)
@@ -188,10 +221,10 @@ def test_paired_starts_run_and_restore_completed_fit(exported, tmp_path, monkeyp
     restored = campaign.execute_nodes(root, 1)
     assert restored["fit"] == read_json(task_root / "fit.json")["fit"]
     summary = campaign.summarize_nodes(root)
-    assert len(summary["rows"]) == 10
+    assert len(summary["rows"]) == 12
     assert len([r for r in summary["rows"] if r["group"] == "parent"]) == 2
-    assert len([r for r in summary["rows"] if r["group"] == "accepted_round"]) == 2
-    assert sum(r["status"] == "missing" for r in summary["rows"]) == 9
+    assert len([r for r in summary["rows"] if r["group"] == "accepted_round"]) == 4
+    assert sum(r["status"] == "missing" for r in summary["rows"]) == 11
 
 
 def test_interrupted_fit_never_receives_new_budget(exported, tmp_path, monkeypatch):
