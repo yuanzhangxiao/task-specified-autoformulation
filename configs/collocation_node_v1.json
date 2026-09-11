@@ -1,0 +1,16 @@
+{
+  "protocol": "collocation-node-comparison-1",
+  "include_synthetic_controls": true,
+  "fit": {
+    "protocol": "collocation-forward-sensitivity-1",
+    "initializer_seconds": 120,
+    "refinement_seconds": 360,
+    "maximum_function_evaluations": 80,
+    "integration_method": "Radau",
+    "relative_tolerance": 1e-7,
+    "absolute_tolerance": 1e-9,
+    "failure_penalty": 1000000,
+    "collocation_node_start": "rollout_required",
+    "node_warmup_seconds": 10
+  }
+}
