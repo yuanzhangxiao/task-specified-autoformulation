@@ -28,6 +28,7 @@ from autoformalism.fitting.sensitivity_probe import (
     SymbolicOracle,
 )
 from autoformalism.fitting.stagnation import RolloutOracle, instrumented_fit
+from autoformalism.rebuttal.fitter_diagnostic import write_json
 from autoformalism.schemas import CandidateModel, ParameterDomain, ParameterRole
 from autoformalism.schemas.base import StrictSchema
 
@@ -99,6 +100,7 @@ def fit_collocation_forward_sensitivity(
             "training target scale must be positive and finite"
         )
     directory.mkdir(parents=True, exist_ok=True)
+    write_json(directory / "sensitivity_audit.json", system.audit)
     layout = RolloutOracle(
         model,
         training,
@@ -159,6 +161,7 @@ def fit_collocation_forward_sensitivity(
             "validation": None,
             "training_only_parameter_estimation": True,
             "validation_used_for_fitting": False,
+            "sensitivity_audit": system.audit,
         }
     train_initials, train_metrics = evaluate_fitted_candidate(
         model,
@@ -203,6 +206,7 @@ def fit_collocation_forward_sensitivity(
         "validation_used_for_fitting": False,
         "collocation_states_used_for_final_score": False,
         "forward_sensitivity_jacobian_used": True,
+        "sensitivity_audit": system.audit,
     }
 
 

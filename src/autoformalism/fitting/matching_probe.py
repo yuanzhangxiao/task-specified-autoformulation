@@ -506,6 +506,9 @@ def latent_start(
                 "max_iter": 150,
                 "max_cpu_time": remaining,
                 "tol": 1e-7,
+                "hessian_approximation": (
+                    "limited-memory" if system.requires_first_order_solver else "exact"
+                ),
             },
         )
         optimizer_started = True
@@ -544,6 +547,9 @@ def latent_start(
             "training_only": True,
             "hidden_labels_used": False,
             "initial_conditions_optimized": False,
+            "hessian_approximation": (
+                "limited-memory" if system.requires_first_order_solver else "exact"
+            ),
             "node_start": node_start,
             "node_initialization": guesses,
             "collocation_optimizer_started": optimizer_started
