@@ -9,6 +9,7 @@ finite differences.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
 from typing import Any, Literal
@@ -19,6 +20,7 @@ from scipy.optimize import least_squares
 
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import CompiledModel
+from autoformalism.fitting.directional_poll import poll_fit
 from autoformalism.fitting.fitter import evaluate_fitted_candidate
 from autoformalism.fitting.matching_probe import NodeStartPolicy, bounded_latent_start
 from autoformalism.fitting.models import FitConfig
@@ -28,9 +30,14 @@ from autoformalism.fitting.sensitivity_probe import (
     SymbolicOracle,
 )
 from autoformalism.fitting.stagnation import RolloutOracle, instrumented_fit
-from autoformalism.rebuttal.fitter_diagnostic import write_json
+from autoformalism.rebuttal.fitter_diagnostic import (
+    read_json,
+    runtime_identity,
+    write_json,
+)
 from autoformalism.schemas import CandidateModel, ParameterDomain, ParameterRole
 from autoformalism.schemas.base import StrictSchema
+from autoformalism.staged_topology import content_hash
 
 
 class CollocationSensitivityConfig(StrictSchema):
@@ -41,13 +48,18 @@ class CollocationSensitivityConfig(StrictSchema):
     )
     initializer_seconds: float = Field(default=120.0, gt=0.0, le=300.0)
     refinement_seconds: float = Field(default=360.0, gt=0.0, le=900.0)
-    maximum_function_evaluations: int = Field(default=80, ge=1, le=300)
+    maximum_function_evaluations: int = Field(default=80, ge=1, le=3000)
     integration_method: Literal["Radau", "BDF"] = "Radau"
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
     absolute_tolerance: float = Field(default=1e-9, gt=0.0)
     failure_penalty: float = Field(default=1e6, gt=0.0)
     collocation_node_start: NodeStartPolicy = "rollout_required"
     node_warmup_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
+    piecewise_policy: Literal["allow", "reject"] = "allow"
+    piecewise_refinement: Literal["auto", "directional_poll", "branch_sensitivity"] = (
+        "auto"
+    )
+    collocation_mesh_substeps: int = Field(default=1, ge=1, le=8)
 
     def fit_config(self) -> FitConfig:
         """Build the common integration and runtime-domain policy."""
@@ -74,7 +86,7 @@ def fit_collocation_forward_sensitivity(
     *,
     initial_parameters: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Fit on training by collocation then exact forward sensitivities.
+    """Fit on training by collocation then sensitivity or exact-cost polling.
 
     Validation is opened only after the training optimizer has returned a
     parameter vector.  Collocation node states are discarded; all reported
@@ -92,7 +104,7 @@ def fit_collocation_forward_sensitivity(
         raise SensitivityContractError(
             "current transfer adapter requires the single target v01"
         )
-    system = SymbolicODE(model)
+    system = SymbolicODE(model, allow_piecewise=config.piecewise_policy == "allow")
     settings = config.fit_config()
     scale = TrainingScaler().fit(training).scales["target:v01"].standard_deviation
     if not np.isfinite(scale) or scale <= 0.0:
@@ -100,7 +112,6 @@ def fit_collocation_forward_sensitivity(
             "training target scale must be positive and finite"
         )
     directory.mkdir(parents=True, exist_ok=True)
-    write_json(directory / "sensitivity_audit.json", system.audit)
     layout = RolloutOracle(
         model,
         training,
@@ -111,21 +122,57 @@ def fit_collocation_forward_sensitivity(
     )
     start = dict(initial_parameters or _role_start(model.validated.candidate, training))
     theta = layout.vector(start)
-    initializer = bounded_latent_start(
-        system,
-        training=training,
-        lower=layout.lower,
-        upper=layout.upper,
-        start=theta,
-        scale=scale,
-        settings=settings,
-        method="collocation_init",
-        seconds=config.initializer_seconds,
-        directory=directory / "collocation",
-        node_start=config.collocation_node_start,
-        warmup_seconds=config.node_warmup_seconds,
+    identity = content_hash(
+        {
+            "candidate": model.validated.candidate.model_dump(mode="json"),
+            "training": training.fingerprint,
+            "context": model.validated.context.model_dump(mode="json"),
+            "config": config.model_dump(mode="json"),
+            "start": start,
+            "runtime": runtime_identity(),
+            "casadi": version("casadi"),
+        }
     )
+    identity_file = directory / "fit_identity.json"
+    write_json(identity_file, {"identity": identity}, immutable=True)
+    write_json(directory / "sensitivity_audit.json", system.audit)
+    initializer_file = directory / "initializer.json"
+    initializer_started = directory / "initializer_started.json"
+    if initializer_file.exists():
+        initializer = read_json(initializer_file)
+    elif initializer_started.exists():
+        # Native IPOPT iteration state cannot be resumed exactly. Do not grant
+        # an interrupted initializer a fresh budget; continue from ordinary start.
+        initializer = {
+            "success": False,
+            "parameters": None,
+            "message": "interrupted initializer; continuing from ordinary start",
+            "seconds": config.initializer_seconds,
+            "training_only": True,
+            "hidden_labels_used": False,
+        }
+    else:
+        write_json(initializer_started, {"identity": identity}, immutable=True)
+        initializer = bounded_latent_start(
+            system,
+            training=training,
+            lower=layout.lower,
+            upper=layout.upper,
+            start=theta,
+            scale=scale,
+            settings=settings,
+            method="collocation_init",
+            seconds=config.initializer_seconds,
+            directory=directory / "collocation",
+            node_start=config.collocation_node_start,
+            warmup_seconds=config.node_warmup_seconds,
+            mesh_substeps=config.collocation_mesh_substeps,
+        )
+    write_json(initializer_file, initializer)
     selected = initializer.get("parameters") if initializer.get("success") else start
+    use_poll = config.piecewise_refinement == "directional_poll" or (
+        system.has_piecewise and config.piecewise_refinement == "auto"
+    )
     deadline = monotonic() + config.refinement_seconds
     oracle = SymbolicOracle(
         system,
@@ -134,21 +181,37 @@ def fit_collocation_forward_sensitivity(
         settings,
         directory / "sensitivity_calls",
         deadline,
-        sensitivities=True,
+        sensitivities=not use_poll,
     )
 
     def optimizer(fun: Any, x: np.ndarray, **kwargs: Any) -> Any:
         kwargs["jac"] = oracle.jacobian
         return least_squares(fun, x, **kwargs)
 
-    refinement = instrumented_fit(
-        oracle,
-        selected,
-        diff_step=None,
-        max_nfev=config.maximum_function_evaluations,
-        settings=settings,
-        optimizer=optimizer,
-    )
+    if use_poll:
+        refinement = poll_fit(
+            oracle,
+            [selected, start],
+            scales=np.maximum(np.abs(theta), 1.0),
+            max_calls=config.maximum_function_evaluations,
+            seconds=config.refinement_seconds,
+            checkpoint=directory / "poll_checkpoint.json",
+            identity=identity,
+        )
+    else:
+        refinement = instrumented_fit(
+            oracle,
+            selected,
+            diff_step=None,
+            max_nfev=config.maximum_function_evaluations,
+            settings=settings,
+            optimizer=optimizer,
+        )
+        refinement["derivative_policy"] = (
+            "branch_sensitivity_heuristic"
+            if system.has_piecewise
+            else "classical_sensitivity"
+        )
     parameters = refinement.get("parameters")
     if not isinstance(parameters, dict):
         return {
@@ -176,6 +239,11 @@ def fit_collocation_forward_sensitivity(
         train_metrics.normalized_mse
     )
     refinement["production_training_rollout_verified"] = bool(training_verified)
+    if use_poll:
+        refinement["selected_training_rollout_verified"] = bool(training_verified)
+        refinement["numerical_status"] = (
+            "verified" if training_verified else "production_training_rollout_failed"
+        )
     if not training_verified:
         refinement["optimizer_success"] = False
         refinement["numerical_status"] = "production_training_rollout_failed"
@@ -205,7 +273,11 @@ def fit_collocation_forward_sensitivity(
         "training_only_parameter_estimation": True,
         "validation_used_for_fitting": False,
         "collocation_states_used_for_final_score": False,
-        "forward_sensitivity_jacobian_used": True,
+        "forward_sensitivity_jacobian_used": not use_poll,
+        "classical_sensitivity_claimed": not system.has_piecewise,
+        "piecewise_refinement": config.piecewise_refinement
+        if system.has_piecewise
+        else None,
         "sensitivity_audit": system.audit,
     }
 
