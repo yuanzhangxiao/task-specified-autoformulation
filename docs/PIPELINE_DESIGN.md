@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+The opt-in fitter feasibility milestone adds retained collocation parameter
+checkpoints, stage/constraint diagnostics, state-only screening before
+sensitivities, and bounded branch-aware restarts. Failed augmented simulations
+cannot masquerade as zero-gradient convergence in the new policy. The paired
+Delta campaign distinguishes model features and starting conditions from the
+public/synthetic dataset label; see `docs/FITTER_FEASIBILITY.md`. Legacy defaults
+and the active proposer protocol remain unchanged.
+
 An opt-in boundary extension, `shared-latent-initialization-1`, lowers unknown
 latent initial values and parameterized causal initial maps to shared fitted
 parameters. Collocation and production replay use the same boundary, and

@@ -22,6 +22,11 @@ from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import CompiledModel
 from autoformalism.expressions.diagnostics import RuntimeExpressionError
 from autoformalism.fitting.directional_poll import poll_fit
+from autoformalism.fitting.feasibility import (
+    EvaluationBudget,
+    GuardedOracle,
+    recover_refinement,
+)
 from autoformalism.fitting.fitter import evaluate_fitted_candidate
 from autoformalism.fitting.initialization import (
     LatentInitializationPlan,
@@ -36,7 +41,9 @@ from autoformalism.fitting.sensitivity_probe import (
 )
 from autoformalism.fitting.simulation import trajectory_initial_state
 from autoformalism.fitting.stagnation import RolloutOracle, instrumented_fit
+from autoformalism.fitting.start_design import designed_starts, model_features
 from autoformalism.rebuttal.fitter_diagnostic import (
+    _finite_payload,
     read_json,
     runtime_identity,
     write_json,
@@ -67,6 +74,11 @@ class CollocationSensitivityConfig(StrictSchema):
     )
     collocation_mesh_substeps: int = Field(default=1, ge=1, le=8)
     least_squares_ftol: float | None = Field(default=1e-8, gt=0.0)
+
+    recovery_policy: Literal["legacy", "feasible", "branch_aware"] = "legacy"
+    collocation_diagnostics: bool = False
+    recovery_max_starts: int = Field(default=10, ge=1, le=24)
+    recovery_probe_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
 
     def fit_config(self) -> FitConfig:
         """Build the common integration and runtime-domain policy."""
@@ -168,6 +180,27 @@ def fit_collocation_forward_sensitivity(
             immutable=True,
         )
     write_json(directory / "sensitivity_audit.json", system.audit)
+    initializer_clock = monotonic()
+    design, design_audit = (
+        designed_starts(
+            system,
+            training,
+            theta,
+            layout.lower,
+            layout.upper,
+            branches=config.recovery_policy == "branch_aware",
+        )
+        if config.recovery_policy != "legacy"
+        else ([], {})
+    )
+    if config.collocation_diagnostics:
+        write_json(
+            directory / "model_features.json",
+            _finite_payload(model_features(system, training, theta)),
+        )
+    write_json(
+        directory / "start_design.json", {"points": design, "audit": design_audit}
+    )
     initializer_file = directory / "initializer.json"
     initializer_started = directory / "initializer_started.json"
     if initializer_file.exists():
@@ -194,12 +227,59 @@ def fit_collocation_forward_sensitivity(
             scale=scale,
             settings=settings,
             method="collocation_init",
-            seconds=config.initializer_seconds,
+            seconds=max(
+                0.001, config.initializer_seconds - (monotonic() - initializer_clock)
+            ),
             directory=directory / "collocation",
             node_start=config.collocation_node_start,
             warmup_seconds=config.node_warmup_seconds,
             mesh_substeps=config.collocation_mesh_substeps,
+            record_progress=config.collocation_diagnostics,
         )
+        primary = dict(initializer)
+        portfolio = [primary]
+        if config.recovery_policy == "branch_aware":
+            alternatives = [
+                p
+                for p in design
+                if p["source"].startswith(("branch:", "branch_nodes:"))
+            ][:2]
+            for index, point in enumerate(alternatives):
+                remaining = config.initializer_seconds - (
+                    monotonic() - initializer_clock
+                )
+                if remaining <= 1:
+                    break
+                attempt = bounded_latent_start(
+                    system,
+                    training=training,
+                    lower=layout.lower,
+                    upper=layout.upper,
+                    start=layout.vector(point["parameters"]),
+                    scale=scale,
+                    settings=settings,
+                    method="collocation_init",
+                    seconds=remaining / (len(alternatives) - index),
+                    directory=directory / f"collocation_branch_{index}",
+                    node_start=config.collocation_node_start,
+                    warmup_seconds=config.node_warmup_seconds,
+                    mesh_substeps=config.collocation_mesh_substeps,
+                    record_progress=config.collocation_diagnostics,
+                    branch_node_target=point.get("node_target"),
+                )
+                attempt["start_source"] = point["source"]
+                portfolio.append(attempt)
+        successes = [p for p in portfolio if p.get("success")]
+        selected_initializer = (
+            min(successes, key=lambda p: p["initializer_objective"])
+            if successes
+            else primary
+        )
+        initializer = {
+            **selected_initializer,
+            "portfolio": portfolio,
+            "portfolio_total_seconds": monotonic() - initializer_clock,
+        }
     write_json(initializer_file, initializer)
     selected = initializer.get("parameters") if initializer.get("success") else start
     use_poll = config.piecewise_refinement == "directional_poll" or (
@@ -216,12 +296,42 @@ def fit_collocation_forward_sensitivity(
         sensitivities=not use_poll,
     )
 
+    if config.recovery_policy == "legacy" and config.collocation_diagnostics:
+        # In the paired diagnostic, even legacy verification consumes the same
+        # hard call cap. Preserve its old failure-penalty transition as control.
+        oracle = GuardedOracle(
+            system,
+            training,
+            scale,
+            settings,
+            directory / "sensitivity_calls",
+            deadline,
+            sensitivities=not use_poll,
+            budget=EvaluationBudget(deadline, config.maximum_function_evaluations),
+            point_seconds=config.refinement_seconds,
+            fail_fast=False,
+        )
+
     def optimizer(fun: Any, x: np.ndarray, **kwargs: Any) -> Any:
         kwargs["jac"] = oracle.jacobian
         kwargs["ftol"] = config.least_squares_ftol
         return least_squares(fun, x, **kwargs)
 
-    if use_poll:
+    if config.recovery_policy != "legacy":
+        refinement = recover_refinement(
+            system,
+            training,
+            scale,
+            settings,
+            config,
+            directory / "recovery",
+            initializer,
+            start,
+            design,
+            identity,
+            use_poll,
+        )
+    elif use_poll:
         refinement = poll_fit(
             oracle,
             [selected, start],
@@ -317,7 +427,14 @@ def fit_collocation_forward_sensitivity(
         "training_only_parameter_estimation": True,
         "validation_used_for_fitting": False,
         "collocation_states_used_for_final_score": False,
-        "forward_sensitivity_jacobian_used": not use_poll,
+        "forward_sensitivity_jacobian_used": (
+            any(
+                stage["mode"] == "sensitivity" for stage in refinement.get("stages", [])
+            )
+            if config.recovery_policy != "legacy"
+            else not use_poll
+        ),
+        "recovery_policy": config.recovery_policy,
         "classical_sensitivity_claimed": not system.has_piecewise,
         "piecewise_refinement": config.piecewise_refinement
         if system.has_piecewise
