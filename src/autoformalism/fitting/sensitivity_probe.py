@@ -1,7 +1,7 @@
 """Restricted symbolic derivatives and forward sensitivities for frozen probes.
 
-This opt-in diagnostic supports global parameters, parameter-independent causal
-initializers, open rollouts, certified smooth composites and no state constraints.
+This opt-in diagnostic supports global parameters, fixed or explicitly fitted
+causal initializers, open rollouts, certified composites and no state constraints.
 It never evaluates proposer text as Python or changes production fitter defaults.
 """
 
@@ -18,6 +18,7 @@ from scipy.integrate import solve_ivp
 
 from autoformalism.data import DatasetSplit, Trajectory
 from autoformalism.expressions import CompiledModel
+from autoformalism.expressions.diagnostics import RuntimeExpressionError
 from autoformalism.fitting.casadi_initializer import _translate
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.sensitivity_contract import (
@@ -25,6 +26,7 @@ from autoformalism.fitting.sensitivity_contract import (
     certify_expressions,
 )
 from autoformalism.fitting.simulation import (
+    _known_initial_values,
     forcing_segment_indices,
     trajectory_forcing,
     trajectory_initial_state,
@@ -84,6 +86,46 @@ class SymbolicODE:
         )
         n, p = self.state_count, len(self.names)
         x, theta = ca.SX.sym("x", n), ca.SX.sym("theta", p)
+        self.initial_function = self.initial_jacobian = None
+        self.initial_symbols = ()
+        self.initial_parameter_names = ()
+        if self.model.validated.context.fitted_initialization:
+            direct = self.model.direct_state_observation_channels
+            expressions = {
+                name: expr
+                for name, expr in smoothness.initial_expressions.items()
+                if name not in direct
+            }
+            symbols = set(direct.values()).union(
+                *(v.symbols for v in expressions.values())
+            )
+            self.initial_symbols = tuple(sorted(symbols - set(self.names)))
+            self.initial_parameter_names = tuple(
+                name for name in self.names if name in symbols
+            )
+            known = ca.SX.sym("initial_data", len(self.initial_symbols))
+            initial_env = {
+                **dict(zip(self.names, ca.vertsplit(theta), strict=True)),
+                **dict(zip(self.initial_symbols, ca.vertsplit(known), strict=True)),
+            }
+            initial_expr = ca.vertcat(
+                *[
+                    initial_env[direct[name]]
+                    if name in direct
+                    else _translate(ca, expressions[name], initial_env)
+                    if name in expressions
+                    else initials[name].fixed_value
+                    for name in self.model.state_names
+                ]
+            )
+            self.initial_function = ca.Function(
+                "physical_initial_state", [theta, known], [initial_expr]
+            )
+            self.initial_jacobian = ca.Function(
+                "initial_parameter_jacobian",
+                [theta, known],
+                [ca.jacobian(initial_expr, theta)],
+            )
         u, time = ca.SX.sym("u", len(self.inputs)), ca.SX.sym("time")
         env = {
             **dict(zip(self.model.state_names, ca.vertsplit(x), strict=True)),
@@ -127,7 +169,10 @@ class SymbolicODE:
             "joint_rhs_observation_affine_certified": self.affine,
             "local_parameter_partials": str(ft),
             "trajectory_specific_initialization": self._fixed_initial is None,
-            "initial_parameter_sensitivity_zero_certified": True,
+            "initial_parameter_sensitivity_zero_certified": (
+                not self.initial_parameter_names
+            ),
+            "fitted_initial_parameter_names": list(self.initial_parameter_names),
             "rollout_linearity_claimed": False,
             "smoothness_contract": "piecewise-branches-1"
             if self.allow_piecewise
@@ -175,9 +220,42 @@ class SymbolicODE:
             )
         return self._fixed_initial.copy()
 
-    def initial_for(self, trajectory: Trajectory) -> np.ndarray:
-        """Resolve the parameter-independent causal initializer for one trajectory."""
-        return trajectory_initial_state(self.model, trajectory, {})
+    def initial_for(
+        self, trajectory: Trajectory, theta: np.ndarray | None = None
+    ) -> np.ndarray:
+        """Resolve a physical boundary using frozen globals and initial data only."""
+        parameters = (
+            dict(zip(self.names, theta, strict=True)) if theta is not None else {}
+        )
+        try:
+            return trajectory_initial_state(
+                self.model, trajectory, {}, parameters=parameters
+            )
+        except RuntimeExpressionError as error:
+            raise SymbolicRolloutFailure(
+                f"physical initialization failed: {error}",
+                {
+                    "stage": "physical_initialization",
+                    "trajectory_id": trajectory.trajectory_id,
+                },
+            ) from error
+
+    def initial_symbolic(self, trajectory: Trajectory, theta):
+        """Return the same causal boundary as an optimization expression."""
+        if self.initial_function is None:
+            return ca.DM(self.initial_for(trajectory))
+        known = _known_initial_values(self.model, trajectory)
+        return self.initial_function(theta, [known[n] for n in self.initial_symbols])
+
+    def initial_sensitivity(self, trajectory: Trajectory, theta) -> np.ndarray:
+        """Seed S(0)=dI/dtheta, including shared initial values and map parameters."""
+        if self.initial_jacobian is None:
+            return np.zeros((self.state_count, len(self.names)))
+        known = _known_initial_values(self.model, trajectory)
+        return np.asarray(
+            self.initial_jacobian(theta, [known[n] for n in self.initial_symbols]),
+            dtype=float,
+        )
 
 
 class SymbolicRolloutFailure(ValueError):
@@ -206,7 +284,7 @@ def symbolic_rollout(
     sensitivities: bool = False,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray, dict]:
     """Integrate states and optionally S'=F_x S+F_theta with exact local AD."""
-    initial = system.initial_for(trajectory)
+    initial = system.initial_for(trajectory, theta)
     n, p = system.state_count, len(theta)
     time = trajectory.time
     forcing = trajectory_forcing(system.model, trajectory)
@@ -214,7 +292,11 @@ def symbolic_rollout(
     values = np.empty((len(time), len(system.channels)))
     jacobian = np.empty((len(time), len(system.channels), p)) if sensitivities else None
     current = (
-        np.concatenate((initial, np.zeros(n * p))) if sensitivities else initial.copy()
+        np.concatenate(
+            (initial, system.initial_sensitivity(trajectory, theta).ravel(order="F"))
+        )
+        if sensitivities
+        else initial.copy()
     )
     all_values = np.empty((len(time), len(current)))
     all_values[0] = current

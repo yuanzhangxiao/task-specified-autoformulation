@@ -71,7 +71,7 @@ def simulate_trajectory(
         if len(time) < 2 or np.any(np.diff(time) <= 0.0):
             raise ValueError("simulation needs at least two increasing time points")
         initial_state = trajectory_initial_state(
-            model, trajectory, initial_conditions
+            model, trajectory, initial_conditions, parameters=parameters
         )
         _check_deadline(deadline)
         use_resets = (
@@ -399,7 +399,7 @@ def _observed_state_value(
     index: int,
 ) -> float:
     """Read one causally available value for a directly observed state."""
-    channel = model.observed_state_channels[state_name]
+    channel = model.direct_state_observation_channels[state_name]
     if channel in trajectory.targets:
         return float(trajectory.targets[channel][index])
     if channel in trajectory.auxiliaries:
@@ -447,6 +447,8 @@ def trajectory_initial_state(
     model: CompiledModel,
     trajectory: Trajectory,
     initial_conditions: Mapping[str, float],
+    *,
+    parameters: Mapping[str, float] | None = None,
 ) -> np.ndarray:
     """Resolve one causal initial state using only this trajectory's public boundary.
 
@@ -455,8 +457,14 @@ def trajectory_initial_state(
     first time point.  Fitted initial values are accepted only for states whose
     declaration does not already determine a value.
     """
-    resettable = set(model.observed_state_channels)
+    resettable = set(
+        model.direct_state_observation_channels
+        if model.validated.context.fitted_initialization
+        else model.observed_state_channels
+    )
     known_initial_values = _known_initial_values(model, trajectory)
+    if model.validated.context.fitted_initialization:
+        known_initial_values.update(parameters or {})
     derived_initials = {
         name: model.initial_condition_value(name, known_initial_values)
         for name in model.state_names

@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+An opt-in boundary extension, `shared-latent-initialization-1`, lowers unknown
+latent initial values and parameterized causal initial maps to shared fitted
+parameters. Collocation and production replay use the same boundary, and
+forward sensitivities include its parameter derivative. Observed initials are
+measured; validation/test initializer parameters are frozen from training.
+Legacy initialization contracts retain their original meaning. See
+`docs/PHYSICAL_INITIALIZATION.md` for the new contract and evaluation protocol.
+
 ## Purpose and invariants
 
 Phase 1 discovers a task-sufficient continuous-time model from

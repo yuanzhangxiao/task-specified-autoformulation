@@ -20,8 +20,13 @@ from scipy.optimize import least_squares
 
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import CompiledModel
+from autoformalism.expressions.diagnostics import RuntimeExpressionError
 from autoformalism.fitting.directional_poll import poll_fit
 from autoformalism.fitting.fitter import evaluate_fitted_candidate
+from autoformalism.fitting.initialization import (
+    LatentInitializationPlan,
+    apply_initialization_plan,
+)
 from autoformalism.fitting.matching_probe import NodeStartPolicy, bounded_latent_start
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.sensitivity_probe import (
@@ -29,6 +34,7 @@ from autoformalism.fitting.sensitivity_probe import (
     SymbolicODE,
     SymbolicOracle,
 )
+from autoformalism.fitting.simulation import trajectory_initial_state
 from autoformalism.fitting.stagnation import RolloutOracle, instrumented_fit
 from autoformalism.rebuttal.fitter_diagnostic import (
     read_json,
@@ -60,6 +66,7 @@ class CollocationSensitivityConfig(StrictSchema):
         "auto"
     )
     collocation_mesh_substeps: int = Field(default=1, ge=1, le=8)
+    least_squares_ftol: float | None = Field(default=1e-8, gt=0.0)
 
     def fit_config(self) -> FitConfig:
         """Build the common integration and runtime-domain policy."""
@@ -85,12 +92,13 @@ def fit_collocation_forward_sensitivity(
     directory: Path,
     *,
     initial_parameters: Mapping[str, float] | None = None,
+    initialization_plan: LatentInitializationPlan | None = None,
 ) -> dict[str, Any]:
     """Fit on training by collocation then sensitivity or exact-cost polling.
 
     Validation is opened only after the training optimizer has returned a
     parameter vector.  Collocation node states are discarded; all reported
-    metrics are fresh causal rollouts from the candidate's fixed initials.
+    metrics are fresh causal rollouts from the candidate's initialization rule.
     """
     if training.name is not SplitName.TRAIN:
         raise SensitivityContractError(
@@ -104,6 +112,16 @@ def fit_collocation_forward_sensitivity(
         raise SensitivityContractError(
             "current transfer adapter requires the single target v01"
         )
+    initialization_audit = None
+    if initialization_plan is not None:
+        model, guesses, initialization_audit = apply_initialization_plan(
+            model, initialization_plan
+        )
+        initial_parameters = {
+            **_role_start(model.validated.candidate, training),
+            **guesses,
+            **dict(initial_parameters or {}),
+        }
     system = SymbolicODE(model, allow_piecewise=config.piecewise_policy == "allow")
     settings = config.fit_config()
     scale = TrainingScaler().fit(training).scales["target:v01"].standard_deviation
@@ -129,12 +147,26 @@ def fit_collocation_forward_sensitivity(
             "context": model.validated.context.model_dump(mode="json"),
             "config": config.model_dump(mode="json"),
             "start": start,
+            "initialization_plan": initialization_plan.model_dump(mode="json")
+            if initialization_plan is not None
+            else None,
             "runtime": runtime_identity(),
             "casadi": version("casadi"),
         }
     )
     identity_file = directory / "fit_identity.json"
     write_json(identity_file, {"identity": identity}, immutable=True)
+    if initialization_plan is not None:
+        write_json(
+            directory / "initialization_contract.json",
+            {
+                "plan": initialization_plan.model_dump(mode="json"),
+                "audit": initialization_audit,
+                "candidate": model.validated.candidate.model_dump(mode="json"),
+                "context": model.validated.context.model_dump(mode="json"),
+            },
+            immutable=True,
+        )
     write_json(directory / "sensitivity_audit.json", system.audit)
     initializer_file = directory / "initializer.json"
     initializer_started = directory / "initializer_started.json"
@@ -186,6 +218,7 @@ def fit_collocation_forward_sensitivity(
 
     def optimizer(fun: Any, x: np.ndarray, **kwargs: Any) -> Any:
         kwargs["jac"] = oracle.jacobian
+        kwargs["ftol"] = config.least_squares_ftol
         return least_squares(fun, x, **kwargs)
 
     if use_poll:
@@ -217,6 +250,7 @@ def fit_collocation_forward_sensitivity(
         return {
             "schema_version": "collocation-forward-sensitivity-fit-1",
             "status": "fit_failed",
+            "initialization_audit": initialization_audit,
             "initializer": initializer,
             "refinement": refinement,
             "parameters": None,
@@ -262,12 +296,22 @@ def fit_collocation_forward_sensitivity(
     )
     complete = training_verified and not validation_metrics.failed_trajectories
     complete = complete and np.isfinite(validation_metrics.normalized_mse)
+    initial_errors = {}
+    if model.validated.context.fitted_initialization:
+        train_initials, initial_errors["train"] = _physical_initial_report(
+            model, training, parameters
+        )
+        validation_initials, initial_errors["val"] = _physical_initial_report(
+            model, validation, parameters
+        )
     return {
         "schema_version": "collocation-forward-sensitivity-fit-1",
         "status": "complete" if complete else "rollout_failed",
         "initializer": initializer,
         "refinement": refinement,
         "parameters": parameters,
+        "initialization_audit": initialization_audit,
+        "initialization_errors": initial_errors,
         "training": _metrics_payload(train_metrics, train_initials),
         "validation": _metrics_payload(validation_metrics, validation_initials),
         "training_only_parameter_estimation": True,
@@ -280,6 +324,25 @@ def fit_collocation_forward_sensitivity(
         else None,
         "sensitivity_audit": system.audit,
     }
+
+
+def _physical_initial_report(model, split, parameters) -> tuple[dict, dict]:
+    """Retain failed boundary diagnostics without losing an already completed fit."""
+    initials, errors = {}, {}
+    for row in split.trajectories:
+        try:
+            values = trajectory_initial_state(model, row, {}, parameters=parameters)
+            initials[row.trajectory_id] = dict(
+                zip(model.state_names, values, strict=True)
+            )
+        except (
+            ValueError,
+            RuntimeError,
+            ArithmeticError,
+            RuntimeExpressionError,
+        ) as error:
+            errors[row.trajectory_id] = str(error)[-1600:]
+    return initials, errors
 
 
 def _metrics_payload(metrics: Any, initials: Mapping[str, Mapping[str, float]]) -> dict:
