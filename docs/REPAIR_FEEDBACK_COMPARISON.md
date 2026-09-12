@@ -240,6 +240,13 @@ submission may leave an intent directory without a job ID; do not delete guards
 after an ambiguous scheduler timeout. For a launcher fix, use a new pinned worktree
 and output root, preserving the rejected attempt and its frozen plan for audit.
 
+CPU preparation discovers Python inside the pinned image (`python3`, then
+`python`) and invokes the returned absolute path, matching the image-build
+launcher rather than assuming a `python` alias. The result is recorded in
+`runtime/container-python-<job>.txt`. Local container stubs cover python3-only,
+python-only and missing-interpreter images for both arms. This changes neither
+the SIF nor any model or fitter setting; an image rebuild is not needed.
+
 For Delta, use the focused regression suite and
 `scripts/smoke_repair_feedback_comparison.py` in its existing Python 3.12 venv.
 Do not duplicate the GPU comparison on a different configuration until this matched
@@ -247,7 +254,7 @@ ACES integration result is reviewed. Scripts work independently of notebooks.
 
 ## Local evidence and limits
 
-- Forty-nine focused tests exercise failure and success paths, the real paired-judge
+- Fifty-three focused tests exercise failure and success paths, the real paired-judge
   adapter with recorded-style synthetic replies, budget/resume, and scheduler stubs.
   Split-launcher regressions cover independent dependencies/resources, ambiguous
   submissions, selected snapshot downloads, arm isolation, locking and summaries.

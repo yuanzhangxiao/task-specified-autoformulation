@@ -23,12 +23,19 @@ mkdir -p "$AF_OUTPUT_ROOT/runtime"
 git -C "$AF_REPO_ROOT" rev-parse HEAD > "$AF_OUTPUT_ROOT/runtime/commit-${SLURM_JOB_ID}.txt"
 printf '%s\n' "$actual" > "$AF_OUTPUT_ROOT/runtime/image-${SLURM_JOB_ID}.sha256"
 if [[ "${1:-}" == prepare ]]; then
+  # Match the image-build launcher: the image may expose python3 without python.
+  if ! container_python="$("$runtime" exec "$AF_VLLM_IMAGE" sh -c 'command -v python3 || command -v python')"; then
+    echo 'Container exposes neither python3 nor python; inspect the pinned image' >&2
+    exit 2
+  fi
+  [[ "$container_python" == /* && "$container_python" != *$'\n'* ]] || { echo 'Container Python discovery did not return one absolute path' >&2; exit 2; }
+  printf '%s\n' "$container_python" > "$AF_OUTPUT_ROOT/runtime/container-python-${SLURM_JOB_ID}.txt"
   cd "$AF_REPO_ROOT"
   "$AF_PYTHON" -m pytest -q tests/test_repair_comparison.py > "$AF_OUTPUT_ROOT/runtime/preflight-tests-${SLURM_JOB_ID}.log" 2>&1
   "$AF_PYTHON" "$AF_REPO_ROOT/scripts/smoke_repair_feedback_comparison.py" > "$AF_OUTPUT_ROOT/runtime/preflight-smoke-${SLURM_JOB_ID}.json"
   judge_revision="$(jq -er '.config.judge_revision' "$plan")"
   proposer_revision="$(jq -er '.proposer_settings.model_revision' "$plan")"
-  "$runtime" exec --bind "$AF_HF_HOME:$AF_HF_HOME" --env "HF_HOME=$AF_HF_HOME" "$AF_VLLM_IMAGE" python -c 'from huggingface_hub import snapshot_download; import sys; snapshot_download("openai/gpt-oss-20b", revision=sys.argv[1]); sys.argv[3] == "redesigned_prefit_judge" and snapshot_download("openai/gpt-oss-120b", revision=sys.argv[2])' "$proposer_revision" "$judge_revision" "$AF_ARM"
+  "$runtime" exec --bind "$AF_HF_HOME:$AF_HF_HOME" --env "HF_HOME=$AF_HF_HOME" "$AF_VLLM_IMAGE" "$container_python" -c 'from huggingface_hub import snapshot_download; import sys; snapshot_download("openai/gpt-oss-20b", revision=sys.argv[1]); sys.argv[3] == "redesigned_prefit_judge" and snapshot_download("openai/gpt-oss-120b", revision=sys.argv[2])' "$proposer_revision" "$judge_revision" "$AF_ARM"
   exit 0
 fi
 nvidia-smi > "$AF_OUTPUT_ROOT/runtime/gpu-${SLURM_JOB_ID}.txt"

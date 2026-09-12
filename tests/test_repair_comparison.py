@@ -989,7 +989,10 @@ def test_arm_selection_rejects_unknown_and_preserves_budget_deadline(
 
 
 @pytest.mark.parametrize("arm", campaign.ARMS)
-def test_aces_preparation_downloads_only_selected_arm_models(tmp_path, arm):
+@pytest.mark.parametrize("container_python", ["python3", "python", None])
+def test_aces_preparation_downloads_only_selected_arm_models(
+    tmp_path, arm, container_python
+):
     if not all(shutil.which(c) for c in ("bash", "jq", "sha256sum")):
         pytest.skip("shell launcher tools unavailable")
     repo = Path(__file__).resolve().parents[1]
@@ -1018,7 +1021,16 @@ def snapshot_download(model, revision):
         "fakepython": "#!/bin/sh\nexit 0\n",
         "apptainer": f"""#!{sys.executable}
 import os, subprocess, sys
-args = sys.argv[sys.argv.index("python") + 1:]
+args = sys.argv[sys.argv.index({str(image)!r}) + 1:]
+interpreter = {container_python!r}
+if args[0] == "sh":
+    assert args == ["sh", "-c", "command -v python3 || command -v python"]
+    if interpreter is None: sys.exit(1)
+    print("/container/bin/" + interpreter)
+    sys.exit(0)
+assert interpreter is not None
+assert args[0] == "/container/bin/" + interpreter, "unresolved container interpreter"
+args = args[1:]
 sys.exit(subprocess.run([sys.executable, *args],
     env=dict(os.environ, PYTHONPATH={str(bins)!r})).returncode)
 """,
@@ -1045,7 +1057,16 @@ sys.exit(subprocess.run([sys.executable, *args],
         capture_output=True,
         text=True,
     )
+    if container_python is None:
+        assert result.returncode == 2
+        assert "neither python3 nor python" in result.stderr
+        assert not downloads.exists()
+        assert not (root / "runtime/preflight-tests-test.log").exists()
+        return
     assert result.returncode == 0, result.stderr
+    assert (root / "runtime/container-python-test.txt").read_text().strip() == (
+        "/container/bin/" + container_python
+    )
     recorded = [json.loads(line) for line in downloads.read_text().splitlines()]
     expected = [["openai/gpt-oss-20b", "a" * 40]]
     if arm == "redesigned_prefit_judge":
