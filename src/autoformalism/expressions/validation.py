@@ -46,6 +46,8 @@ class ValidationContext(StrictSchema):
     fixed_covariates: IdentifierTuple = ()
     unavailable_observed_channels: IdentifierTuple = ()
     forbid_latent_states: bool = False
+    # Explicit opt-in: old frozen candidates keep their initializer semantics.
+    fitted_initialization: bool = False
     time_symbol: Identifier = "t"
     forcing_bounds: Mapping[Identifier, tuple[FiniteFloat, FiniteFloat]] = Field(
         default_factory=dict
@@ -544,6 +546,11 @@ class CandidateValidator:
                 continue
             initial_condition_expressions[initial.state] = parsed
             allowed_initial_symbols = forcing_names | {context.time_symbol}
+            if context.fitted_initialization:
+                allowed_initial_symbols |= set(context.targets) | {
+                    item.name for item in candidate.parameters
+                    if item.scope is ParameterScope.GLOBAL
+                }
             if initial.state in observed_states:
                 # A target is unavailable as a continuous exogenous forcing but
                 # its value at the first time point is a causal initial
@@ -618,7 +625,11 @@ class CandidateValidator:
         )
         self._validate_parameter_usage(
             candidate,
-            all_expressions,
+            all_expressions + tuple(
+                (f"initial_condition:{name}", expression)
+                for name, expression in initial_condition_expressions.items()
+                if context.fitted_initialization
+            ),
             diagnostics,
         )
         if len(process_order) == len(process_expressions):

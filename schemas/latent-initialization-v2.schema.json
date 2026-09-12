@@ -1,0 +1,167 @@
+{
+  "$defs": {
+    "InitialCausalMap": {
+      "additionalProperties": false,
+      "description": "A restricted map of initial public observations and shared parameters.",
+      "properties": {
+        "mode": {
+          "const": "map",
+          "default": "map",
+          "title": "Mode",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "parameters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InitialMapParameter"
+          },
+          "maxItems": 32,
+          "title": "Parameters",
+          "type": "array"
+        }
+      },
+      "required": [
+        "expression"
+      ],
+      "title": "InitialCausalMap",
+      "type": "object"
+    },
+    "InitialMapParameter": {
+      "additionalProperties": false,
+      "description": "A map-local scientific parameter; its numerical domain follows its role.",
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ParameterRole",
+          "default": "coefficient"
+        },
+        "guess": {
+          "default": 0.1,
+          "title": "Guess",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "InitialMapParameter",
+      "type": "object"
+    },
+    "InitialValueGuess": {
+      "additionalProperties": false,
+      "description": "One shared unknown initial value, with a suggested optimizer start.",
+      "properties": {
+        "mode": {
+          "const": "value",
+          "default": "value",
+          "title": "Mode",
+          "type": "string"
+        },
+        "guess": {
+          "title": "Guess",
+          "type": "number"
+        },
+        "role": {
+          "default": "coefficient",
+          "enum": [
+            "coefficient",
+            "nonnegative_coefficient"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "guess"
+      ],
+      "title": "InitialValueGuess",
+      "type": "object"
+    },
+    "KnownInitialValue": {
+      "additionalProperties": false,
+      "description": "Explicit exception for an initial value established by task preparation.",
+      "properties": {
+        "mode": {
+          "const": "known",
+          "default": "known",
+          "title": "Mode",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "justification": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Justification",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "justification"
+      ],
+      "title": "KnownInitialValue",
+      "type": "object"
+    },
+    "ParameterRole": {
+      "description": "Small operational role vocabulary used to derive parameter domains.",
+      "enum": [
+        "coefficient",
+        "nonnegative_coefficient",
+        "rate",
+        "time_constant",
+        "scale",
+        "offset",
+        "shape",
+        "positive_shape"
+      ],
+      "title": "ParameterRole",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One runtime-selected state; no proposer-owned state identifiers or scope.",
+  "properties": {
+    "initial": {
+      "discriminator": {
+        "mapping": {
+          "known": "#/$defs/KnownInitialValue",
+          "map": "#/$defs/InitialCausalMap",
+          "value": "#/$defs/InitialValueGuess"
+        },
+        "propertyName": "mode"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/InitialValueGuess"
+        },
+        {
+          "$ref": "#/$defs/InitialCausalMap"
+        },
+        {
+          "$ref": "#/$defs/KnownInitialValue"
+        }
+      ],
+      "title": "Initial"
+    }
+  },
+  "required": [
+    "initial"
+  ],
+  "title": "LatentInitializationReply",
+  "type": "object"
+}

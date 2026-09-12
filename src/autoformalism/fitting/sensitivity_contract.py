@@ -77,6 +77,7 @@ class SmoothnessAudit:
     allow_piecewise: bool = False
     piecewise: list[dict] = field(default_factory=list)
     rhs_piecewise: bool = False
+    initial_expressions: dict[str, ParsedExpression] = field(default_factory=dict)
 
     def record(self, node: ast.AST, rule: str, *, c1_only: bool = False) -> None:
         self.c1_only |= c1_only
@@ -239,4 +240,8 @@ def certify_expressions(
     audit.rhs_c1_only = audit.c1_only
     audit.rhs_piecewise = bool(audit.piecewise)
     observations = certify(validated.observation_expressions, "observation")
+    if validated.context.fitted_initialization:
+        audit.initial_expressions = certify(
+            validated.initial_condition_expressions, "initial_condition"
+        )
     return equations, observations, audit

@@ -1,0 +1,14 @@
+{
+  "protocol": "physical-initialization-comparison-1",
+  "starts": 3,
+  "noise": [0.0, 0.03],
+  "fit": {
+    "initializer_seconds": 120,
+    "refinement_seconds": 180,
+    "maximum_function_evaluations": 240,
+    "collocation_node_start": "rollout_or_observed",
+    "node_warmup_seconds": 5,
+    "piecewise_refinement": "auto",
+    "least_squares_ftol": null
+  }
+}

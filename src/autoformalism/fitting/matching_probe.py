@@ -29,13 +29,15 @@ from autoformalism.schemas import CandidateModel
 NodeStartPolicy = Literal["rollout_required", "rollout_or_observed"]
 
 
-def observed_node_guess(system: SymbolicODE, data: Trajectory) -> np.ndarray:
+def observed_node_guess(
+    system: SymbolicODE, data: Trajectory, theta: np.ndarray | None = None
+) -> np.ndarray:
     """Seed observed states from training data and latent states from their initials.
 
     These are optimization guesses, not estimates used in final simulation.
     Prescribed initial conditions override the first observed sample.
     """
-    initial = system.initial_for(data)
+    initial = system.initial_for(data, theta)
     guess = np.tile(initial, (data.number_of_rows, 1))
     direct = system.model.direct_state_observation_channels
     for column, state in enumerate(system.model.state_names):
@@ -76,7 +78,7 @@ def collocation_node_guess(
             rollout_error=str(error)[-1600:],
             rollout_diagnostic=getattr(error, "diagnostic", None),
         )
-        guess = observed_node_guess(system, data)
+        guess = observed_node_guess(system, data, start)
     record["seconds"] = monotonic() - started
     return guess, record
 
@@ -231,7 +233,8 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
         "seconds": monotonic() - started,
         "training_only": True,
         "hidden_labels_used": False,
-        "initial_conditions_optimized": False,
+        "initial_conditions_optimized": bool(system.initial_parameter_names)
+        and node_record["optimizer_started"],
     }
 
 
@@ -373,7 +376,7 @@ def latent_start(
     warmup_seconds: float = 10.0,
     mesh_substeps: int = 1,
 ) -> dict:
-    """Estimate latent trajectories with continuity and unchanged fixed initials.
+    """Estimate latent trajectories with continuity and the same physical boundary.
 
     Multiple shooting uses an adaptive CVODES step on every input sample interval.
     Integral collocation uses two-stage Radau IIA (order three, stiffly accurate).
@@ -454,7 +457,7 @@ def latent_start(
                     "optimizer_started": False,
                 },
             )
-            current = ca.DM(system.initial_for(data))
+            current = system.initial_symbolic(data, theta)
             inputs = [
                 [forcing.value(name, t) for name in system.inputs] for t in data.time
             ]
@@ -576,7 +579,9 @@ def latent_start(
             "mesh_substeps": mesh_substeps,
             "training_only": True,
             "hidden_labels_used": False,
-            "initial_conditions_optimized": False,
+            "initial_conditions_optimized": bool(system.initial_parameter_names)
+            and optimizer_started,
+            "initial_parameter_names": system.initial_parameter_names,
             "hessian_approximation": (
                 "limited-memory" if system.requires_first_order_solver else "exact"
             ),

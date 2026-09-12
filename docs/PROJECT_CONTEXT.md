@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `shared-latent-initialization-1` fitter milestone now permits shared
+training-fitted latent initial values and parameterized causal maps of initial
+public observations. It preserves observed-state identity boundaries and freezes
+all learned initializer parameters for validation. Legacy fixed-initial protocols
+remain unchanged; see `docs/PHYSICAL_INITIALIZATION.md` for the explicit adapter,
+new proposer reply contract, and controlled Delta comparison. This does not
+permit independent validation/test trajectory initial-state fitting.
+
 ## Scientific objective
 
 Implement task-specified dynamical-system discovery under partial
