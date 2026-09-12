@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in fitter feasibility milestone adds retained collocation parameter
+checkpoints, stage/constraint diagnostics, state-only screening before
+sensitivities, and bounded branch-aware restarts. Failed augmented simulations
+cannot masquerade as zero-gradient convergence in the new policy. The paired
+Delta campaign distinguishes model features and starting conditions from the
+public/synthetic dataset label; see `docs/FITTER_FEASIBILITY.md`. Legacy defaults
+and the active proposer protocol remain unchanged.
+
 The opt-in `shared-latent-initialization-1` fitter milestone now permits shared
 training-fitted latent initial values and parameterized causal maps of initial
 public observations. It preserves observed-state identity boundaries and freezes

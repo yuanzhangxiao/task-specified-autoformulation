@@ -16,9 +16,11 @@ from scipy.signal import savgol_filter
 
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.expressions import compile_candidate
+from autoformalism.fitting.collocation_progress import CollocationProgress
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.sensitivity_probe import SymbolicODE, symbolic_rollout
 from autoformalism.fitting.simulation import trajectory_forcing
+from autoformalism.fitting.start_design import target_node_branch
 from autoformalism.rebuttal.fitter_diagnostic import (
     _finite_payload,
     read_json,
@@ -221,7 +223,10 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
         worker.join()
         worker.close()
     node_record = read_json(journal)
+    progress_path = directory / "progress.json"
+    progress = read_json(progress_path) if progress_path.exists() else None
     return {
+        "progress": progress,
         **result,
         "node_start": node_record["policy"],
         "node_initialization": node_record["trajectories"],
@@ -375,6 +380,8 @@ def latent_start(
     node_start: NodeStartPolicy = "rollout_required",
     warmup_seconds: float = 10.0,
     mesh_substeps: int = 1,
+    record_progress: bool = False,
+    branch_node_target: tuple[int, int] | None = None,
 ) -> dict:
     """Estimate latent trajectories with continuity and the same physical boundary.
 
@@ -448,6 +455,11 @@ def latent_start(
             guess, guess_record = collocation_node_guess(
                 system, data, start, settings, node_start, warmup_deadline
             )
+            if branch_node_target is not None:
+                guess, branch_record = target_node_branch(
+                    system, data, start, guess, branch_node_target
+                )
+                guess_record["branch_node_design"] = branch_record
             guesses.append(guess_record)
             write_json(
                 directory / "node_initialization.json",
@@ -520,8 +532,17 @@ def latent_start(
                 objective += ((predicted - data.targets["v01"][i + 1]) / scale) ** 2
         opti.minimize(objective)
         events = []
+        progress = (
+            CollocationProgress(
+                opti, theta, system.names, lower, upper, directory, started
+            )
+            if record_progress
+            else None
+        )
 
         def callback(iteration):
+            if progress is not None:
+                progress.record(iteration)
             if monotonic() >= deadline:
                 raise RuntimeError("initializer iteration deadline reached")
             events.append({"iteration": iteration, "seconds": monotonic() - started})
@@ -553,6 +574,8 @@ def latent_start(
             },
         )
         solved = opti.solve()
+        if progress is not None:
+            progress.save("solver_returned")
         values = np.asarray(solved.value(theta)).reshape(-1)
         if (
             not np.isfinite(values).all()
