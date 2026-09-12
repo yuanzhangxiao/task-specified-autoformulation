@@ -48,7 +48,7 @@ if [[ "$resume" == 1 ]]; then
 else
   intent="$submission/submission-intent"
   mkdir "$intent" || { echo 'Submission intent exists: inspect squeue/sacct before resubmitting' >&2; exit 2; }
-  prepare=$(sbatch --parsable --account="$account" --job-name="$name-cache" --partition=cpu --time=01:00:00 --cpus-per-task=4 --mem=16G --output="$root/logs/prepare-%j.out" --error="$root/logs/prepare-%j.err" --export=ALL "$repo/scripts/hpc/run_repair_comparison_aces.sh" prepare)
+  prepare=$(sbatch --parsable --account="$account" --job-name="$name-cache" --partition=cpu --time=01:00:00 --nodes=1 --ntasks=1 --cpus-per-task=4 --mem=16G --output="$root/logs/prepare-%j.out" --error="$root/logs/prepare-%j.err" --export=ALL "$repo/scripts/hpc/run_repair_comparison_aces.sh" prepare)
   prepare="${prepare%%;*}"
   [[ "$prepare" =~ ^[0-9]+$ ]] || exit 2
   printf '%s\n' "$prepare" > "$intent/prepare_job.txt"

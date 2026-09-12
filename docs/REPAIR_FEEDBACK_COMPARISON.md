@@ -233,6 +233,13 @@ After an unambiguously terminal GPU job with successful CPU preparation, resume
 the same frozen experiment using `AF_RESUME=1` and the same `AF_ARM`; queued or
 uncertain jobs are refused. Preparation/resume has no cross-arm dependencies.
 
+CPU preparation and GPU workers both explicitly request one node and one task,
+as required by the ACES submission policy. The scheduler stub rejects missing
+allocation flags so this check runs locally before submission. A rejected initial
+submission may leave an intent directory without a job ID; do not delete guards
+after an ambiguous scheduler timeout. For a launcher fix, use a new pinned worktree
+and output root, preserving the rejected attempt and its frozen plan for audit.
+
 For Delta, use the focused regression suite and
 `scripts/smoke_repair_feedback_comparison.py` in its existing Python 3.12 venv.
 Do not duplicate the GPU comparison on a different configuration until this matched

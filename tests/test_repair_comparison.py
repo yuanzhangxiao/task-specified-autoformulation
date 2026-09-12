@@ -823,6 +823,9 @@ import json, pathlib, sys
 p = pathlib.Path({str(log)!r})
 calls = json.loads(p.read_text()) if p.exists() else []
 calls.append(sys.argv[1:]); p.write_text(json.dumps(calls))
+if not all(arg in sys.argv for arg in ("--nodes=1", "--ntasks=1")):
+    print("ACES job_submit: explicit node/task allocation required", file=sys.stderr)
+    sys.exit(2)
 if {timeout!r}: sys.exit(1)
 print(100 + len(calls))
 """,
@@ -872,6 +875,7 @@ print(100 + len(calls))
     env.update(AF_RESUME="0", AF_ARM=other)
     separate = subprocess.run(command, env=env, capture_output=True, text=True)
     all_calls = json.loads(log.read_text())
+    assert all("--nodes=1" in call and "--ntasks=1" in call for call in all_calls)
     if timeout:
         assert separate.returncode == 1 and len(all_calls) == 2
     else:
