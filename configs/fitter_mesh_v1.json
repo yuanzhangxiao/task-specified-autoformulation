@@ -1,0 +1,14 @@
+{
+  "protocol": "fitter-mesh-comparison-1",
+  "fit": {
+    "initializer_seconds": 120,
+    "refinement_seconds": 180,
+    "maximum_function_evaluations": 240,
+    "collocation_node_start": "rollout_or_observed",
+    "node_warmup_seconds": 5,
+    "least_squares_ftol": null,
+    "collocation_diagnostics": true,
+    "recovery_max_starts": 10,
+    "recovery_probe_seconds": 10
+  }
+}

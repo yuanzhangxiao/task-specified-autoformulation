@@ -16,6 +16,7 @@ from scipy.signal import savgol_filter
 
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.expressions import compile_candidate
+from autoformalism.fitting.collocation_assembly import mapped_collocation
 from autoformalism.fitting.collocation_progress import CollocationProgress
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.sensitivity_probe import SymbolicODE, symbolic_rollout
@@ -225,7 +226,11 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
     node_record = read_json(journal)
     progress_path = directory / "progress.json"
     progress = read_json(progress_path) if progress_path.exists() else None
+    mesh_path = directory / "mesh.json"
     return {
+        "mesh": read_json(mesh_path) if mesh_path.exists() else None,
+        "assembly": arguments.get("assembly", "unrolled"),
+        "maximum_iterations": arguments.get("maximum_iterations", 150),
         "progress": progress,
         **result,
         "node_start": node_record["policy"],
@@ -382,6 +387,9 @@ def latent_start(
     mesh_substeps: int = 1,
     record_progress: bool = False,
     branch_node_target: tuple[int, int] | None = None,
+    assembly: str = "unrolled",
+    target_variables: int | None = None,
+    maximum_iterations: int = 150,
 ) -> dict:
     """Estimate latent trajectories with continuity and the same physical boundary.
 
@@ -395,6 +403,12 @@ def latent_start(
         raise ValueError("collocation mesh substeps must be an integer from 1 to 8")
     if method != "collocation_init" and mesh_substeps != 1:
         raise ValueError("mesh refinement is only supported for collocation")
+    if assembly not in {"unrolled", "mapped"}:
+        raise ValueError("unknown collocation assembly")
+    if target_variables is not None and assembly != "mapped":
+        raise ValueError("independent mesh requires mapped assembly")
+    if assembly != "unrolled" and method != "collocation_init":
+        raise ValueError("mapped assembly requires collocation")
     if training.name is not SplitName.TRAIN:
         raise ValueError("initializer requires training split")
     if node_start not in {"rollout_required", "rollout_or_observed"}:
@@ -450,86 +464,123 @@ def latent_start(
     guesses = []
     optimizer_started = False
     try:
-        for data in training.trajectories:
-            forcing = trajectory_forcing(system.model, data)
-            guess, guess_record = collocation_node_guess(
-                system, data, start, settings, node_start, warmup_deadline
-            )
-            if branch_node_target is not None:
-                guess, branch_record = target_node_branch(
-                    system, data, start, guess, branch_node_target
+        if assembly == "mapped":
+
+            def seed(data):
+                guess, record = collocation_node_guess(
+                    system, data, start, settings, node_start, warmup_deadline
                 )
-                guess_record["branch_node_design"] = branch_record
-            guesses.append(guess_record)
-            write_json(
-                directory / "node_initialization.json",
-                {
-                    "policy": node_start,
-                    "trajectories": guesses,
-                    "optimizer_started": False,
-                },
+                if branch_node_target is not None:
+                    guess, branch_record = target_node_branch(
+                        system, data, start, guess, branch_node_target
+                    )
+                    record["branch_node_design"] = branch_record
+                return guess, record
+
+            objective, nodes, guesses = mapped_collocation(
+                system,
+                opti,
+                theta,
+                training,
+                start,
+                scale,
+                directory,
+                deadline,
+                seed,
+                target_variables,
+                mesh_substeps,
             )
-            current = system.initial_symbolic(data, theta)
-            inputs = [
-                [forcing.value(name, t) for name in system.inputs] for t in data.time
-            ]
-            if node_start == "rollout_or_observed":
-                check_node_guess(system, data.time[0], guess[0], start, inputs[0])
-            predicted = system.observe(data.time[0], current, theta, inputs[0])[0]
-            objective += ((predicted - data.targets["v01"][0]) / scale) ** 2
-            for i in range(len(data.time) - 1):
-                if monotonic() >= deadline:
-                    raise TimeoutError("initializer construction deadline reached")
-                t0, t1 = float(data.time[i]), float(data.time[i + 1])
-                dt = t1 - t0
-                u0, u1 = np.asarray(inputs[i]), np.asarray(inputs[i + 1])
+        else:
+            for data in training.trajectories:
+                forcing = trajectory_forcing(system.model, data)
+                guess, guess_record = collocation_node_guess(
+                    system, data, start, settings, node_start, warmup_deadline
+                )
+                if branch_node_target is not None:
+                    guess, branch_record = target_node_branch(
+                        system, data, start, guess, branch_node_target
+                    )
+                    guess_record["branch_node_design"] = branch_record
+                guesses.append(guess_record)
+                write_json(
+                    directory / "node_initialization.json",
+                    {
+                        "policy": node_start,
+                        "trajectories": guesses,
+                        "optimizer_started": False,
+                    },
+                )
+                current = system.initial_symbolic(data, theta)
+                inputs = [
+                    [forcing.value(name, t) for name in system.inputs]
+                    for t in data.time
+                ]
                 if node_start == "rollout_or_observed":
-                    check_node_guess(system, t1, guess[i + 1], start, u1)
-                    check_node_guess(
-                        system,
-                        t0 + dt / 3,
-                        (2 * guess[i] + guess[i + 1]) / 3,
-                        start,
-                        u0 + (u1 - u0) / 3,
-                    )
-                interval_start, interval_end = t0, t1
-                input_start, input_end = u0, u1
-                for substep in range(mesh_substeps):
-                    left_fraction = substep / mesh_substeps
-                    right_fraction = (substep + 1) / mesh_substeps
-                    t0 = (
-                        interval_start + (interval_end - interval_start) * left_fraction
-                    )
-                    t1 = (
-                        interval_start
-                        + (interval_end - interval_start) * right_fraction
-                    )
+                    check_node_guess(system, data.time[0], guess[0], start, inputs[0])
+                predicted = system.observe(data.time[0], current, theta, inputs[0])[0]
+                objective += ((predicted - data.targets["v01"][0]) / scale) ** 2
+                for i in range(len(data.time) - 1):
+                    if monotonic() >= deadline:
+                        raise TimeoutError("initializer construction deadline reached")
+                    t0, t1 = float(data.time[i]), float(data.time[i + 1])
                     dt = t1 - t0
-                    u0 = input_start + (input_end - input_start) * left_fraction
-                    u1 = input_start + (input_end - input_start) * right_fraction
-                    left_guess = guess[i] + (guess[i + 1] - guess[i]) * left_fraction
-                    right_guess = guess[i] + (guess[i + 1] - guess[i]) * right_fraction
-                    end = opti.variable(n)
-                    opti.set_initial(end, right_guess)
-                    nodes += n
-                    if method == "shooting_init":
-                        propagated = integrator(
-                            x0=current, p=ca.vertcat(theta, t0, dt, u0, u1)
-                        )["xf"]
-                        opti.subject_to(end == propagated)
-                    else:
-                        inner = opti.variable(n)
-                        opti.set_initial(inner, (2 * left_guess + right_guess) / 3)
-                        nodes += n
-                        first = system.rhs(
-                            t0 + dt / 3, inner, theta, u0 + (u1 - u0) / 3
+                    u0, u1 = np.asarray(inputs[i]), np.asarray(inputs[i + 1])
+                    if node_start == "rollout_or_observed":
+                        check_node_guess(system, t1, guess[i + 1], start, u1)
+                        check_node_guess(
+                            system,
+                            t0 + dt / 3,
+                            (2 * guess[i] + guess[i + 1]) / 3,
+                            start,
+                            u0 + (u1 - u0) / 3,
                         )
-                        last = system.rhs(t1, end, theta, u1)
-                        opti.subject_to(inner == current + dt * (5 * first - last) / 12)
-                        opti.subject_to(end == current + dt * (3 * first + last) / 4)
-                    current = end
-                predicted = system.observe(t1, current, theta, u1)[0]
-                objective += ((predicted - data.targets["v01"][i + 1]) / scale) ** 2
+                    interval_start, interval_end = t0, t1
+                    input_start, input_end = u0, u1
+                    for substep in range(mesh_substeps):
+                        left_fraction = substep / mesh_substeps
+                        right_fraction = (substep + 1) / mesh_substeps
+                        t0 = (
+                            interval_start
+                            + (interval_end - interval_start) * left_fraction
+                        )
+                        t1 = (
+                            interval_start
+                            + (interval_end - interval_start) * right_fraction
+                        )
+                        dt = t1 - t0
+                        u0 = input_start + (input_end - input_start) * left_fraction
+                        u1 = input_start + (input_end - input_start) * right_fraction
+                        left_guess = (
+                            guess[i] + (guess[i + 1] - guess[i]) * left_fraction
+                        )
+                        right_guess = (
+                            guess[i] + (guess[i + 1] - guess[i]) * right_fraction
+                        )
+                        end = opti.variable(n)
+                        opti.set_initial(end, right_guess)
+                        nodes += n
+                        if method == "shooting_init":
+                            propagated = integrator(
+                                x0=current, p=ca.vertcat(theta, t0, dt, u0, u1)
+                            )["xf"]
+                            opti.subject_to(end == propagated)
+                        else:
+                            inner = opti.variable(n)
+                            opti.set_initial(inner, (2 * left_guess + right_guess) / 3)
+                            nodes += n
+                            first = system.rhs(
+                                t0 + dt / 3, inner, theta, u0 + (u1 - u0) / 3
+                            )
+                            last = system.rhs(t1, end, theta, u1)
+                            opti.subject_to(
+                                inner == current + dt * (5 * first - last) / 12
+                            )
+                            opti.subject_to(
+                                end == current + dt * (3 * first + last) / 4
+                            )
+                        current = end
+                    predicted = system.observe(t1, current, theta, u1)[0]
+                    objective += ((predicted - data.targets["v01"][i + 1]) / scale) ** 2
         opti.minimize(objective)
         events = []
         progress = (
@@ -556,7 +607,7 @@ def latent_start(
             {
                 "print_level": 0,
                 "sb": "yes",
-                "max_iter": 150,
+                "max_iter": maximum_iterations,
                 "max_cpu_time": remaining,
                 "tol": 1e-7,
                 "hessian_approximation": (

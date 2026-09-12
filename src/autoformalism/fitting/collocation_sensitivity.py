@@ -15,7 +15,7 @@ from time import monotonic
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 from scipy.optimize import least_squares
 
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
@@ -79,6 +79,21 @@ class CollocationSensitivityConfig(StrictSchema):
     collocation_diagnostics: bool = False
     recovery_max_starts: int = Field(default=10, ge=1, le=24)
     recovery_probe_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
+    recovery_handoff: Literal["screened", "best_valid"] = "screened"
+    sensitivity_invalid_trials: Literal["abort", "reject"] = "abort"
+    collocation_assembly: Literal["unrolled", "mapped"] = "unrolled"
+    collocation_target_variables: int | None = Field(default=None, ge=20, le=1000000)
+    collocation_maximum_iterations: int = Field(default=150, ge=1, le=3000)
+
+    @model_validator(mode="after")
+    def compatible_mesh(self):
+        if self.collocation_target_variables is not None and (
+            self.collocation_assembly != "mapped" or self.collocation_mesh_substeps != 1
+        ):
+            raise ValueError(
+                "a variable target requires mapped assembly and no uniform substeps"
+            )
+        return self
 
     def fit_config(self) -> FitConfig:
         """Build the common integration and runtime-domain policy."""
@@ -235,6 +250,9 @@ def fit_collocation_forward_sensitivity(
             warmup_seconds=config.node_warmup_seconds,
             mesh_substeps=config.collocation_mesh_substeps,
             record_progress=config.collocation_diagnostics,
+            assembly=config.collocation_assembly,
+            target_variables=config.collocation_target_variables,
+            maximum_iterations=config.collocation_maximum_iterations,
         )
         primary = dict(initializer)
         portfolio = [primary]
@@ -266,6 +284,9 @@ def fit_collocation_forward_sensitivity(
                     mesh_substeps=config.collocation_mesh_substeps,
                     record_progress=config.collocation_diagnostics,
                     branch_node_target=point.get("node_target"),
+                    assembly=config.collocation_assembly,
+                    target_variables=config.collocation_target_variables,
+                    maximum_iterations=config.collocation_maximum_iterations,
                 )
                 attempt["start_source"] = point["source"]
                 portfolio.append(attempt)

@@ -42,16 +42,20 @@ class GuardedOracle(SymbolicOracle):
         budget: EvaluationBudget,
         point_seconds: float,
         fail_fast: bool = True,
+        reject_invalid_trials: bool = False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.budget, self.point_seconds = budget, point_seconds
         self.fail_fast = fail_fast
+        self.reject_invalid_trials = reject_invalid_trials
+        self.rejected_trials = 0
 
     def __call__(self, values):
         self.budget.take()
         self.deadline = min(self.budget.deadline, monotonic() + self.point_seconds)
         before = self.failures.count
+        valid_before = self.valid_calls
         try:
             residual = super().__call__(values)
         except TimeoutError as error:
@@ -60,7 +64,8 @@ class GuardedOracle(SymbolicOracle):
             self.failures.record(str(error))
             if self.with_sensitivities:
                 self.last_jac = None
-                raise SensitivityUnavailable(str(error)) from error
+                if not (self.reject_invalid_trials and valid_before):
+                    raise SensitivityUnavailable(str(error)) from error
             residual = np.full(
                 sum(t.number_of_rows for t in self.training.trajectories),
                 self.settings.failure_penalty,
@@ -69,10 +74,39 @@ class GuardedOracle(SymbolicOracle):
             # The legacy oracle records a penalty/zero J internally. Do not let
             # either reach least_squares in this opt-in policy.
             self.last_jac = None
+            if self.reject_invalid_trials and valid_before:
+                self.rejected_trials += 1
+                # TRF rejects nonfinite trial residuals and shrinks its radius.
+                # No Jacobian is supplied for this point; a failed first point
+                # still exits explicitly rather than pretending to converge.
+                return np.full_like(residual, np.inf)
             raise SensitivityUnavailable(
                 "augmented integration unavailable; no derivative supplied"
             )
         return residual
+
+    def jacobian(self, values):
+        matrix = super().jacobian(values)
+        if matrix is None or not np.isfinite(matrix).all():
+            raise SensitivityUnavailable("No finite Jacobian at the requested point")
+        return matrix
+
+
+def handoff_starts(oracles, screened: list[dict], ordinary: dict) -> list[dict]:
+    """Rank every finite full-training incumbent before older screened starts."""
+    candidates = [
+        {**o.best, "source": str(o.directory.name)}
+        for o in oracles
+        if o.best is not None
+    ] + screened
+    candidates.sort(key=lambda p: p["cost"])
+    seen, result = set(), []
+    for point in candidates:
+        key = tuple(sorted(point["parameters"].items()))
+        if key not in seen:
+            seen.add(key)
+            result.append(point)
+    return result or [{"source": "ordinary", "parameters": ordinary, "cost": None}]
 
 
 def restart_points(initializer, start: dict, design: list[dict]) -> list[dict]:
@@ -136,6 +170,7 @@ def recover_refinement(
             sensitivities=sensitivities,
             budget=budget,
             point_seconds=point_seconds,
+            reject_invalid_trials=config.sensitivity_invalid_trials == "reject",
         )
         oracles.append(item)
         return item
@@ -177,6 +212,8 @@ def recover_refinement(
         for index, point in enumerate(feasible[:2]):
             if budget.calls >= budget.maximum or monotonic() >= budget.deadline:
                 break
+            if index and config.recovery_handoff == "best_valid":
+                point = handoff_starts(oracles, feasible, start)[0]
             augmented = oracle(
                 f"augmented_{index}", True, max(30.0, config.recovery_probe_seconds)
             )
@@ -185,6 +222,7 @@ def recover_refinement(
                 kwargs.update(jac=_augmented.jacobian, ftol=config.least_squares_ftol)
                 return least_squares(fun, x, **kwargs)
 
+            stage_started = monotonic()
             try:
                 report = instrumented_fit(
                     augmented,
@@ -207,6 +245,8 @@ def recover_refinement(
                         "error": str(error),
                         "failure_evidence": augmented.failure_evidence,
                         "best_evaluated": augmented.best,
+                        "actual_residual_calls": augmented.calls,
+                        "fit_seconds": monotonic() - stage_started,
                         "optimizer_stationarity_claimed": False,
                     }
                 )
@@ -216,7 +256,13 @@ def recover_refinement(
         and monotonic() < budget.deadline
     ):
         polling = oracle("poll_calls", False, max(30.0, config.recovery_probe_seconds))
-        candidates = [point["parameters"] for point in feasible[:2]] or [start]
+        handoff = (
+            handoff_starts(oracles, feasible, start)
+            if config.recovery_handoff == "best_valid"
+            else feasible or [{"source": "ordinary", "parameters": start}]
+        )
+        candidates = [point["parameters"] for point in handoff[:2]]
+        write_json(directory / "poll_handoff.json", _finite_payload(handoff[:2]))
         report = poll_fit(
             polling,
             candidates,
@@ -248,6 +294,7 @@ def recover_refinement(
         "actual_residual_calls": budget.calls,
         "valid_residual_evaluations": sum(o.valid_calls for o in oracles),
         "integration_failures": sum(o.failures.count for o in oracles),
+        "rejected_sensitivity_trials": sum(o.rejected_trials for o in oracles),
         "fit_seconds": monotonic() - started,
         "initial_parameters": start,
         "screens": screens,
