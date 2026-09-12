@@ -1,5 +1,6 @@
 """Regression contracts for matched repair arms, not mocked scientific recovery."""
 
+import fcntl
 import hashlib
 import json
 import os
@@ -789,7 +790,10 @@ def test_freeze_matches_both_arms_and_verifies_launchers(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("timeout", [False, True])
-def test_aces_submission_is_bounded_and_refuses_ambiguous_retries(tmp_path, timeout):
+@pytest.mark.parametrize("arm", campaign.ARMS)
+def test_aces_submission_is_bounded_and_refuses_ambiguous_retries(
+    tmp_path, timeout, arm
+):
     if not all(shutil.which(c) for c in ("bash", "jq", "sha256sum")):
         pytest.skip("shell launcher tools unavailable")
     repo = Path(__file__).resolve().parents[1]
@@ -838,6 +842,7 @@ print(100 + len(calls))
         AF_HF_HOME=str(tmp_path / "hf"),
         AF_JUDGE_REVISION="a" * 40,
         AF_RESUME="0",
+        AF_ARM=arm,
     )
     command = ["bash", str(repo / "scripts/hpc/submit_repair_comparison_aces.sh")]
     first = subprocess.run(command, env=env, capture_output=True, text=True)
@@ -849,10 +854,196 @@ print(100 + len(calls))
     assert repeated.returncode != 0 if timeout else repeated.returncode == 0
     if not timeout:
         assert "--dependency=afterok:101" in calls[1]
-        assert "--gres=gpu:h100:2" in calls[1]
+        gpus = 1 if arm == "redesigned_runtime" else 2
+        assert f"--gres=gpu:h100:{gpus}" in calls[1]
+        assert f"--time=0{gpus * 2}:00:00" in calls[1]
         env["AF_RESUME"] = "1"
         resumed = subprocess.run(command, env=env, capture_output=True, text=True)
         assert resumed.returncode == 0, resumed.stderr
         assert len(json.loads(log.read_text())) == 3
-        manifest = json.loads((output / "submission_manifest.json").read_text())
+        manifest = json.loads(
+            (output / "submissions" / arm / "manifest.json").read_text()
+        )
         assert manifest["prior_job"] == "102" and manifest["job_id"] == "103"
+        assert manifest["arm"] == arm
+    # Other-arm preparation/submission never depends on the first GPU job or
+    # its model download, even when that arm's submission is ambiguous.
+    other = next(a for a in campaign.ARMS if a != arm)
+    env.update(AF_RESUME="0", AF_ARM=other)
+    separate = subprocess.run(command, env=env, capture_output=True, text=True)
+    all_calls = json.loads(log.read_text())
+    if timeout:
+        assert separate.returncode == 1 and len(all_calls) == 2
+    else:
+        assert separate.returncode == 0, separate.stderr
+        assert len(all_calls) == 5
+        assert "--dependency=afterok:104" in all_calls[-1]
+        other_manifest = json.loads(
+            (output / "submissions" / other / "manifest.json").read_text()
+        )
+        assert (
+            other_manifest["prepare_job"] == "104" and other_manifest["job_id"] == "105"
+        )
+        assert other_manifest["plan_sha256"] == manifest["plan_sha256"]
+
+
+def split_plan(tmp_path, monkeypatch):
+    """Minimal shared plan for execution/locking tests, with no provider or fit."""
+    plan = {
+        "plan_sha256": "shared-frozen-plan",
+        "proposer_settings": {"model": "openai/gpt-oss-20b"},
+        "tasks": [
+            {"task_id": f"{arm}_{seed}", "seed": seed, "arm": arm}
+            for seed in range(2)
+            for arm in campaign.ARMS
+        ],
+    }
+    campaign.atomic_json(tmp_path / "plan.json", plan)
+    monkeypatch.setattr(campaign, "verify", lambda root: plan)
+    monkeypatch.setattr(campaign, "BudgetedRepairClient", lambda **kwargs: kwargs)
+    return plan
+
+
+def test_split_arm_runs_without_other_arm_lock_or_reviews(tmp_path, monkeypatch):
+    plan = split_plan(tmp_path, monkeypatch)
+    calls = []
+
+    def run(root, task, client):
+        calls.append(task)
+        campaign.atomic_json(
+            root / "results" / task["task_id"] / "state.json", {"status": "complete"}
+        )
+
+    monkeypatch.setattr(campaign, "run_task", run)
+    monkeypatch.setattr(
+        campaign, "perform_review", lambda *a: pytest.fail("runtime called judge")
+    )
+    campaign.atomic_json(tmp_path / "reviews/pending/request.json", {"pending": True})
+    with (tmp_path / "worker-redesigned_prefit_judge.lock").open("w") as other:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = campaign.run_pass(
+            tmp_path, "proposer", "unused", arm="redesigned_runtime"
+        )
+    assert calls == [t for t in plan["tasks"] if t["arm"] == "redesigned_runtime"]
+    assert result["status"] == "complete" and result["terminal_tasks"] == 2
+    assert result["scientific_reviews"] == result["pending_scientific_reviews"] == 0
+    assert campaign.read(tmp_path / "results/summary-redesigned_runtime.json") == result
+    combined = campaign.read(tmp_path / "results/summary.json")
+    assert combined["status"] == "incomplete" and combined["planned_tasks"] == 4
+    assert (
+        combined["terminal_tasks"] == 2 and combined["pending_scientific_reviews"] == 1
+    )
+    with pytest.raises(ValueError, match="never calls"):
+        campaign.run_pass(tmp_path, "judge", "unused", arm="redesigned_runtime")
+
+
+def test_split_judge_arm_finishes_combined_summary(tmp_path, monkeypatch):
+    split_plan(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        campaign,
+        "run_task",
+        lambda root, task, client: campaign.atomic_json(
+            root / "results" / task["task_id"] / "state.json", {"status": "complete"}
+        ),
+    )
+    campaign.run_pass(tmp_path, "proposer", "unused", arm="redesigned_runtime")
+    campaign.run_pass(tmp_path, "proposer", "unused", arm="redesigned_prefit_judge")
+    combined = campaign.read(tmp_path / "results/summary.json")
+    assert combined["status"] == "complete" and combined["terminal_tasks"] == 4
+    assert {a["arm"] for a in combined["by_arm"]} == set(campaign.ARMS)
+
+
+@pytest.mark.parametrize("arm", [None, "redesigned_runtime"])
+def test_worker_lock_prevents_duplicate_arm_execution(tmp_path, monkeypatch, arm):
+    split_plan(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        campaign, "run_task", lambda *a: pytest.fail("duplicate worker")
+    )
+    with (tmp_path / "worker-redesigned_runtime.lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):
+            campaign.run_pass(tmp_path, "proposer", "unused", arm=arm)
+
+
+def test_arm_selection_rejects_unknown_and_preserves_budget_deadline(
+    tmp_path, monkeypatch
+):
+    split_plan(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        campaign, "run_task", lambda *a: pytest.fail("insufficient time")
+    )
+    for action in (
+        campaign.summarize,
+        lambda root, **kw: campaign.run_pass(root, "proposer", "unused", **kw),
+    ):
+        with pytest.raises(ValueError, match="unknown comparison arm"):
+            action(tmp_path, arm="typo")
+    summary = campaign.run_pass(
+        tmp_path, "proposer", "unused", wall_seconds=10, arm="redesigned_runtime"
+    )
+    assert summary["status"] == "incomplete" and summary["terminal_tasks"] == 0
+
+
+@pytest.mark.parametrize("arm", campaign.ARMS)
+def test_aces_preparation_downloads_only_selected_arm_models(tmp_path, arm):
+    if not all(shutil.which(c) for c in ("bash", "jq", "sha256sum")):
+        pytest.skip("shell launcher tools unavailable")
+    repo = Path(__file__).resolve().parents[1]
+    bins = tmp_path / "bin"
+    bins.mkdir()
+    image = tmp_path / "image.sif"
+    image.write_bytes(b"synthetic image fixture")
+    root = tmp_path / "output"
+    campaign.atomic_json(
+        root / "plan.json",
+        {
+            "config": {"judge_revision": "b" * 40},
+            "proposer_settings": {"model_revision": "a" * 40},
+            "serving_image_sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
+        },
+    )
+    downloads = tmp_path / "downloads.jsonl"
+    (bins / "huggingface_hub.py").write_text(f"""import json
+def snapshot_download(model, revision):
+    with open({str(downloads)!r}, "a") as stream:
+        stream.write(json.dumps([model, revision]) + "\\n")
+""")
+    scripts = {
+        "module": "#!/bin/sh\nexit 0\n",
+        "git": "#!/bin/sh\necho abc123\n",
+        "fakepython": "#!/bin/sh\nexit 0\n",
+        "apptainer": f"""#!{sys.executable}
+import os, subprocess, sys
+args = sys.argv[sys.argv.index("python") + 1:]
+sys.exit(subprocess.run([sys.executable, *args],
+    env=dict(os.environ, PYTHONPATH={str(bins)!r})).returncode)
+""",
+    }
+    for name, text in scripts.items():
+        path = bins / name
+        path.write_text(text)
+        path.chmod(0o755)
+    env = dict(
+        os.environ,
+        PATH=str(bins) + os.pathsep + os.environ["PATH"],
+        AF_ARM=arm,
+        AF_WORKER_SECONDS="6900",
+        AF_OUTPUT_ROOT=str(root),
+        AF_REPO_ROOT=str(repo),
+        AF_PYTHON=str(bins / "fakepython"),
+        AF_VLLM_IMAGE=str(image),
+        AF_HF_HOME=str(tmp_path / "hf"),
+        SLURM_JOB_ID="test",
+    )
+    result = subprocess.run(
+        ["bash", str(repo / "scripts/hpc/run_repair_comparison_aces.sh"), "prepare"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    recorded = [json.loads(line) for line in downloads.read_text().splitlines()]
+    expected = [["openai/gpt-oss-20b", "a" * 40]]
+    if arm == "redesigned_prefit_judge":
+        expected.append(["openai/gpt-oss-120b", "b" * 40])
+    assert recorded == expected

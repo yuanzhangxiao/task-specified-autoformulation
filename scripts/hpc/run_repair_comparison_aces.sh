@@ -1,8 +1,14 @@
 #!/bin/bash
-# Swap serving roles on two H100s; never replace the 20B proposer with the judge.
+# The runtime arm serves only 20B on one H100; the judge arm swaps on two H100s.
 set -euo pipefail
 : "${AF_REPO_ROOT:?required}" "${AF_OUTPUT_ROOT:?required}" "${AF_PYTHON:?required}"
 : "${AF_VLLM_IMAGE:?required}" "${AF_HF_HOME:?required}"
+: "${AF_ARM:?required}" "${AF_WORKER_SECONDS:?required}"
+case "$AF_ARM" in
+  redesigned_runtime) roles=(proposer) ;;
+  redesigned_prefit_judge) roles=(proposer judge) ;;
+  *) echo 'Unknown comparison arm' >&2; exit 2 ;;
+esac
 module load GCCcore/13.2.0 Python/3.11.5 WebProxy
 export PYTHONPATH="${AF_REPO_ROOT}/src" OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
@@ -22,7 +28,7 @@ if [[ "${1:-}" == prepare ]]; then
   "$AF_PYTHON" "$AF_REPO_ROOT/scripts/smoke_repair_feedback_comparison.py" > "$AF_OUTPUT_ROOT/runtime/preflight-smoke-${SLURM_JOB_ID}.json"
   judge_revision="$(jq -er '.config.judge_revision' "$plan")"
   proposer_revision="$(jq -er '.proposer_settings.model_revision' "$plan")"
-  "$runtime" exec --bind "$AF_HF_HOME:$AF_HF_HOME" --env "HF_HOME=$AF_HF_HOME" "$AF_VLLM_IMAGE" python -c 'from huggingface_hub import snapshot_download; import sys; snapshot_download("openai/gpt-oss-20b", revision=sys.argv[1]); snapshot_download("openai/gpt-oss-120b", revision=sys.argv[2])' "$proposer_revision" "$judge_revision"
+  "$runtime" exec --bind "$AF_HF_HOME:$AF_HF_HOME" --env "HF_HOME=$AF_HF_HOME" "$AF_VLLM_IMAGE" python -c 'from huggingface_hub import snapshot_download; import sys; snapshot_download("openai/gpt-oss-20b", revision=sys.argv[1]); sys.argv[3] == "redesigned_prefit_judge" and snapshot_download("openai/gpt-oss-120b", revision=sys.argv[2])' "$proposer_revision" "$judge_revision" "$AF_ARM"
   exit 0
 fi
 nvidia-smi > "$AF_OUTPUT_ROOT/runtime/gpu-${SLURM_JOB_ID}.txt"
@@ -38,10 +44,10 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 75' TERM INT
 cache="$(mktemp -d /tmp/af-repair-XXXXXX)"
-end=$((SECONDS+13800))
+end=$((SECONDS+AF_WORKER_SECONDS))
 for cycle in $(seq 1 10); do
-  for role in proposer judge; do
-    "$AF_PYTHON" "$AF_REPO_ROOT/scripts/repair_feedback_comparison.py" summary --root "$AF_OUTPUT_ROOT" > "$AF_OUTPUT_ROOT/runtime/summary-${SLURM_JOB_ID}.json"
+  for role in "${roles[@]}"; do
+    "$AF_PYTHON" "$AF_REPO_ROOT/scripts/repair_feedback_comparison.py" summary --root "$AF_OUTPUT_ROOT" --arm "$AF_ARM" > "$AF_OUTPUT_ROOT/runtime/summary-${SLURM_JOB_ID}.json"
     status="$(jq -r '.status' "$AF_OUTPUT_ROOT/runtime/summary-${SLURM_JOB_ID}.json")"
     [[ "$status" != complete ]] || exit 0
     if [[ "$role" == judge ]] && [[ "$(jq -r '.pending_scientific_reviews' "$AF_OUTPUT_ROOT/runtime/summary-${SLURM_JOB_ID}.json")" == 0 ]]; then continue; fi
@@ -69,7 +75,7 @@ for cycle in $(seq 1 10); do
       sleep 2
     done
     [[ "$ready" == true ]] || { tail -n 80 "$log"; exit 1; }
-    "$AF_PYTHON" "$AF_REPO_ROOT/scripts/repair_feedback_comparison.py" run --root "$AF_OUTPUT_ROOT" --role "$role" --base-url "http://127.0.0.1:$port" --wall-seconds "$((end-SECONDS))" > "$AF_OUTPUT_ROOT/runtime/worker-${SLURM_JOB_ID}-${cycle}-${role}.log" 2>&1 &
+    "$AF_PYTHON" "$AF_REPO_ROOT/scripts/repair_feedback_comparison.py" run --root "$AF_OUTPUT_ROOT" --arm "$AF_ARM" --role "$role" --base-url "http://127.0.0.1:$port" --wall-seconds "$((end-SECONDS))" > "$AF_OUTPUT_ROOT/runtime/worker-${SLURM_JOB_ID}-${cycle}-${role}.log" 2>&1 &
     worker_pid=$!
     wait "$worker_pid"
     worker_pid=''

@@ -16,8 +16,10 @@ arms. Each arm independently assesses the baseline and permits four repair round
 Thus there are four tasks, at most 16 repair rounds and 20 fitted candidate versions
 including baselines. Each task has 40 physical proposer requests, 393216 tokens,
 and five attempts per transaction. Both proposers are GPT-OSS-20B with the existing
-frozen revision and inference settings. Arm ordering is counterbalanced by seed;
-serving is grouped by model, not synchronized by round.
+frozen revision and inference settings. The plan lists counterbalanced arm order
+by seed, but the split jobs execute independently: there is no enforced temporal
+ordering across arms. Serving within the judge arm is grouped by model, not
+synchronized with the runtime-only job.
 
 The comparison isolates **adding pre-fit scientific feedback conditional on the
 redesigned repair mechanism**. Historical v6 is not a matched control for the
@@ -176,27 +178,60 @@ judge request/token costs. Missing usage is explicitly counted. Full transaction
 and numerical artifacts remain beside it. `status=complete` means all task outcomes
 are terminal, not that every model succeeded.
 
-ACES submission uses a CPU preparation job (regressions, real synthetic fitter
-smoke, download pinned model snapshots), then **one two-H100 allocation**, four-hour
-limit. It swaps the 20B proposer and 120B judge servers rather than requiring both
-to reside concurrently. More GPU memory and model startup time are the cost of
-using the established larger judge. The SIF has the previously confirmed SHA
+ACES now submits **two independent arm jobs**, each with its own CPU preparation
+dependency (regressions, real synthetic fitter smoke and pinned snapshots):
+
+| Arm | GPU allocation | Wall limit | Models downloaded/served |
+| --- | --- | --- | --- |
+| `redesigned_runtime` | 1 H100 | 2 hours | 20B proposer only |
+| `redesigned_prefit_judge` | 2 H100 | 4 hours | 20B proposer and 120B judge, swapping servers |
+
+The runtime-only job does not wait for the judge job or its 120B model download.
+Two H100s preserve the existing judge serving configuration (tensor parallelism 2,
+32768-token context); this is not a claim that all possible 120B serving setups
+require two GPUs. The proposer remains tensor parallelism 1 in both jobs. Smaller
+resource requests may schedule sooner, but queue time is not guaranteed. Per-fit,
+per-request and per-task scientific budgets are unchanged; allocation expiry uses
+the existing checkpoint/resume policy rather than silently shrinking those budgets.
+The SIF has the previously confirmed SHA
 `9c56389af06cafbf4aa8bd825393f606ac7f2a18e1a700c5999b1ed47f7f9c1e`.
 No automatic image rebuild or hash override occurs.
 
-Run from a clean pinned worktree with `AF_REPO_ROOT`, `AF_OUTPUT_ROOT` set:
+Run from a clean pinned worktree with `AF_REPO_ROOT`, `AF_OUTPUT_ROOT` set. Use
+a **new output root** for this launcher revision; do not run an old combined job
+and its split replacement. Run the two submissions sequentially (not concurrently
+while first freezing the shared plan). The GPU jobs can subsequently run in parallel.
+Either arm can be submitted later without changing the plan:
 
 ```bash
-bash scripts/hpc/submit_repair_comparison_aces.sh
+AF_ARM=redesigned_runtime bash scripts/hpc/submit_repair_comparison_aces.sh
+AF_ARM=redesigned_prefit_judge bash scripts/hpc/submit_repair_comparison_aces.sh
+```
+
+`AF_ARM` defaults to `redesigned_runtime`. Each invocation submits only that arm.
+Both use the same immutable plan and source hashes. Arm-specific worker locks
+prevent duplicate execution while allowing the other arm to proceed. Manual
+all-arm CLI execution takes both locks. Summary writes are serialized separately.
+
+Each manifest is `submissions/<arm>/manifest.json`, with `prepare_job`, `job_id`,
+and the common `plan_sha256`. Each result is `results/summary-<arm>.json`; it can
+be complete while the other arm is pending. `results/summary.json` remains the
+combined comparison and is incomplete until both arms are terminal. To inspect
+one arm without waiting for the other:
+
+```bash
+python scripts/repair_feedback_comparison.py summary --root "$AF_OUTPUT_ROOT" --arm redesigned_runtime
 ```
 
 Defaults use the known ACES venv, SIF, HF cache and the frozen
 `staged-fitter-rescue-v1-c1754fe` source. `AF_VLLM_IMAGE`, `AF_PYTHON`,
 `AF_HF_HOME`, `AF_SOURCE_RESCUE_ROOT`, `AF_JUDGE_REVISION` can be set explicitly.
-Repeating submission prints the existing manifest. An ambiguous scheduler timeout
-leaves an intent guard: inspect accounting before taking any further action.
+Repeating submission prints that arm's existing manifest. An ambiguous scheduler
+timeout leaves an arm-specific intent guard: inspect accounting before taking any
+further action. It does not block submission of the other arm.
 After an unambiguously terminal GPU job with successful CPU preparation, resume
-the same frozen experiment using `AF_RESUME=1`; queued or uncertain jobs are refused.
+the same frozen experiment using `AF_RESUME=1` and the same `AF_ARM`; queued or
+uncertain jobs are refused. Preparation/resume has no cross-arm dependencies.
 
 For Delta, use the focused regression suite and
 `scripts/smoke_repair_feedback_comparison.py` in its existing Python 3.12 venv.
@@ -205,12 +240,13 @@ ACES integration result is reviewed. Scripts work independently of notebooks.
 
 ## Local evidence and limits
 
-- Forty focused tests exercise failure and success paths, the real paired-judge
+- Forty-nine focused tests exercise failure and success paths, the real paired-judge
   adapter with recorded-style synthetic replies, budget/resume, and scheduler stubs.
-- The full local suite finished with 1370 passed, three optional Torch skips and
-  39 missing-benchmark-fixture failures. Ruff and shell syntax checks passed. The
-  two freeze/resume failures seen while source edits were concurrent disappeared
-  in the final frozen-source run.
+  Split-launcher regressions cover independent dependencies/resources, ambiguous
+  submissions, selected snapshot downloads, arm isolation, locking and summaries.
+- The split-launcher full local suite finished with 1379 passed, three optional
+  Torch skips and the same 39 missing-benchmark-fixture failures as the preceding
+  milestone. Ruff and shell syntax checks passed.
 - The real fitter smoke learned a shared latent boundary near 2.0 from a zero
   initial guess, with validation NMSE about 3e-16; no live LLM or hidden latent
   training data entered the fit.

@@ -8,6 +8,7 @@ import json
 import math
 import re
 from collections import Counter
+from contextlib import ExitStack
 from pathlib import Path
 from time import monotonic
 from typing import Literal
@@ -61,6 +62,15 @@ from autoformalism.schemas.base import StrictSchema
 from autoformalism.staged_topology import content_hash
 
 ARMS = ("redesigned_runtime", "redesigned_prefit_judge")
+
+
+def selected_arms(arm: str | None) -> tuple[str, ...]:
+    """Validate execution selection without changing the frozen comparison plan."""
+    if arm is None:
+        return ARMS
+    if arm not in ARMS:
+        raise ValueError(f"unknown comparison arm: {arm}")
+    return (arm,)
 
 
 class RepairComparisonConfig(StrictSchema):
@@ -528,12 +538,23 @@ def run_pass(
     role: Literal["proposer", "judge"],
     base_url: str,
     wall_seconds: float = 14400,
+    *,
+    arm: str | None = None,
 ) -> dict:
-    """Serve one role at a time on the same allocation; checkpoint before swaps."""
+    """Run selected arms independently; serialize only workers sharing an arm."""
+    arms = selected_arms(arm)
+    if role not in {"proposer", "judge"}:
+        raise ValueError(f"unknown serving role: {role}")
+    if role == "judge" and arms == ("redesigned_runtime",):
+        raise ValueError("the runtime-only arm never calls a scientific judge")
     plan = verify(root)
     deadline = monotonic() + wall_seconds
-    with (root / "worker.lock").open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with ExitStack() as stack:
+        # All-arm manual runs acquire the same locks in fixed order, so they
+        # cannot overlap a split job. ExitStack releases earlier locks on error.
+        for selected in arms:
+            lock = stack.enter_context((root / f"worker-{selected}.lock").open("w"))
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if role == "judge":
             for request_path in sorted((root / "reviews").glob("*/request.json")):
                 if monotonic() > deadline - 300:
@@ -543,6 +564,10 @@ def run_pass(
             from autoformalism.llm.staged_topology import StagedModelSettings
 
             for task in plan["tasks"]:
+                if task["arm"] not in arms:
+                    continue
+                if monotonic() >= deadline - 600:
+                    break
                 client = BudgetedRepairClient(
                     settings=StagedModelSettings.model_validate(
                         plan["proposer_settings"]
@@ -562,16 +587,25 @@ def run_pass(
                     state = read(path) if path.exists() else {}
                     state.update(status="budget_exhausted", error=str(exc))
                     atomic_json(path, state)
-    summary = summarize(root)
-    atomic_json(root / "results/summary.json", summary)
+    # Two arm jobs may finish simultaneously. Recompute the combined snapshot
+    # under its own lock instead of overwriting it with an earlier arm snapshot.
+    with (root / "summary.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        atomic_json(root / "results/summary.json", summarize(root))
+        summary = summarize(root, arm=arm)
+        if arm is not None:
+            atomic_json(root / "results" / f"summary-{arm}.json", summary)
     return summary
 
 
-def summarize(root: Path) -> dict:
+def summarize(root: Path, *, arm: str | None = None) -> dict:
     """Separate arm costs, hard failures, abstention, fit success and best fit."""
+    arms = selected_arms(arm)
     plan = read(root / "plan.json")
     rows = []
     for task in plan["tasks"]:
+        if task["arm"] not in arms:
+            continue
         directory = root / "results" / task["task_id"]
         state = (
             read(directory / "state.json")
@@ -642,14 +676,20 @@ def summarize(root: Path) -> dict:
                 "rounds": [compact_round(r) for r in state.get("rounds", [])],
             }
         )
-    reviews = list((root / "reviews").glob("*/review.json"))
-    pending = sum(
-        not (p.parent / "review.json").exists()
-        for p in (root / "reviews").glob("*/request.json")
+    review_enabled = "redesigned_prefit_judge" in arms
+    reviews = list((root / "reviews").glob("*/review.json")) if review_enabled else []
+    pending = (
+        sum(
+            not (p.parent / "review.json").exists()
+            for p in (root / "reviews").glob("*/request.json")
+        )
+        if review_enabled
+        else 0
     )
     return {
         "schema_version": "repair-feedback-comparison-summary-1",
         "plan_sha256": plan["plan_sha256"],
+        "selected_arm": arm,
         "status": "complete"
         if all(r["status"] not in {"pending", "running"} for r in rows)
         else "incomplete",
@@ -678,7 +718,7 @@ def summarize(root: Path) -> dict:
                     r["observed_judge_tokens"] for r in selected
                 ),
             }
-            for arm in ARMS
+            for arm in arms
             for selected in [[r for r in rows if r["arm"] == arm]]
         ],
         "rows": rows,

@@ -5,7 +5,13 @@ import argparse
 import json
 from pathlib import Path
 
-from autoformalism.rebuttal.repair_comparison import freeze, run_pass, summarize, verify
+from autoformalism.rebuttal.repair_comparison import (
+    ARMS,
+    freeze,
+    run_pass,
+    summarize,
+    verify,
+)
 
 
 def main():
@@ -20,19 +26,24 @@ def main():
     p.add_argument("--role", choices=("proposer", "judge"), required=True)
     p.add_argument("--base-url", required=True)
     p.add_argument("--wall-seconds", type=float, default=14400)
+    p.add_argument("--arm", choices=ARMS, help="run only this arm of the frozen plan")
     for command in ("summary", "verify"):
         p = sub.add_parser(command)
         p.add_argument("--root", type=Path, required=True)
+        if command == "summary":
+            p.add_argument("--arm", choices=ARMS)
     args = parser.parse_args()
     if args.command == "freeze":
         result = freeze(args.source_rescue_root, args.output, args.judge_revision)
         result = {"plan_sha256": result["plan_sha256"], "tasks": len(result["tasks"])}
     elif args.command == "run":
-        result = run_pass(args.root, args.role, args.base_url, args.wall_seconds)
+        result = run_pass(
+            args.root, args.role, args.base_url, args.wall_seconds, arm=args.arm
+        )
     elif args.command == "verify":
         result = {"verified": True, "plan_sha256": verify(args.root)["plan_sha256"]}
     else:
-        result = summarize(args.root)
+        result = summarize(args.root, arm=args.arm)
     print(json.dumps(result, indent=2))
 
 
