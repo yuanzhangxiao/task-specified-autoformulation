@@ -618,3 +618,14 @@ transactions; permits explicit keep actions; exposes signed interaction contract
 and retains the best evaluated candidate. Public nonlinearity is rechecked as a
 necessary syntax/path condition, not a scientific score. See
 `docs/REVISION_DECISION_STATE.md` for the offline replay and remaining milestones.
+
+The next opt-in campaign is `repair-feedback-comparison-1`, documented in
+`docs/REPAIR_FEEDBACK_COMPARISON.md`. Both matched arms use category-prioritized
+observations, proposer-owned bounded cross-level edits, transactional rechecks,
+and Astra's verified feasibility fitter with shared training-fitted latent initials.
+Only the second arm adds the established numerically blind paired scientific judge
+before fitting; neither uses the former ad hoc 20B pre-fit critic. Production and
+final-evaluation judge defaults are unchanged. Runtime findings, scientific
+concerns, and numerical outcomes are separate evidence streams. This pilot measures
+the incremental judge contribution conditional on the redesigned interface; it
+does not claim an isolated old-vs-new routing comparison from historical results.

@@ -820,3 +820,20 @@ and pending edits survive bounded retries without changing the committed model.
 An unchanged companion is an explicit keep, not a mandatory scientific edit.
 Function requests expose the same signed additive hyperedge contract that the
 runtime enforces. The fitter and routing heuristic are held fixed in this milestone.
+
+## Matched diagnosis/repair and pre-fitting scientific-judge comparison
+
+`REPAIR_FEEDBACK_COMPARISON.md` defines a separate opt-in campaign. A versioned
+evidence report selects a problem category without dictating a scientific cause.
+The proposer can explicitly request a coherent model-scope edit spanning functions,
+dependencies, variable inventory, target mappings and causal initialization.
+Runtime checks salvage local edits and commit only after whole-model validation.
+Unknown domains are reported as uncertainty, not automatically as reachable defects.
+
+Both arms use the same verified feasibility fitter and training-only latent-initial
+estimation policy. One has runtime/numerical feedback only; the other additionally
+reuses the established paired scientific judge before fitting. Scientific findings
+are advisory, independent of external feasibility certificates, and numerically
+blind. The ad hoc critic is absent from both. No-change and interrupted operations
+are explicit outcomes; neither erases the best evaluated candidate or prior numerical
+evidence. These changes do not switch production defaults or introduce MCTS.
