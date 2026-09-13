@@ -1,5 +1,10 @@
 # Phase 1 Pipeline Design
 
+The opt-in comparison-3 feedback contract is described in
+`REPAIR_FEEDBACK_EVIDENCE_V3.md`. It supplies actual initialization capabilities,
+before/after action effects and named scientific references without changing
+the fitted objective, solver, scientific rubric, or paired-judge transport.
+
 The opt-in comparison-2 successor uses typed repair drafts and explicit withdrawal
 instead of global keep inventories. Pending initializer failures cannot overwrite
 valid equation status. Reporting reads nested fitter evidence rather than wrapper

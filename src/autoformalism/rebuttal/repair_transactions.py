@@ -501,17 +501,38 @@ def commit_action(
     new_plan = LatentInitializationPlan(rules=rules)
     apply_initialization_plan(model, new_plan)
     unchanged = model_hash(revised) == model_hash(parent) and new_plan == plan
+    from autoformalism.rebuttal.repair_feedback import action_effects
+
+    effects = action_effects(parent, revised, plan, new_plan, action)
     return (
         (parent if unchanged else revised),
         new_plan,
         {
             "status": "no_change" if unchanged else "committed",
             "scope": action.scope,
-            "changed_components": [e.component for e in action.equations],
+            "changed_components": [
+                e["target"]
+                for e in effects
+                if e["kind"] == "equation" and e["status"] == "changed"
+            ],
+            "actual_effects": effects,
+            "no_change_reason": (
+                "equivalent_model_and_initialization" if effects else "empty_edit"
+            )
+            if unchanged
+            else None,
             "added_variables": sorted(new_names),
             "removed_variables": list(action.remove),
-            "mapping_changes": [m.channel for m in action.mappings],
-            "initializer_changes": [i.state for i in action.initializers],
+            "mapping_changes": [
+                e["target"]
+                for e in effects
+                if e["kind"] == "mapping" and e["status"] == "changed"
+            ],
+            "initializer_changes": [
+                e["target"]
+                for e in effects
+                if e["kind"] == "initializer" and e["status"] == "changed"
+            ],
             "ignored_known_keep": list(action.keep),
             "role_audit": role_audit,
             "rechecks": [

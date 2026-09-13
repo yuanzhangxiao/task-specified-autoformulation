@@ -38,12 +38,19 @@ from autoformalism.rebuttal.repair_evidence import (
     model_hash,
     numerical_findings,
 )
+from autoformalism.rebuttal.repair_feedback import (
+    PROTOCOL as FEEDBACK_PROTOCOL,
+)
+from autoformalism.rebuttal.repair_feedback import (
+    initialization_facts,
+)
 from autoformalism.rebuttal.repair_fit_reporting import fit_outcomes
 from autoformalism.rebuttal.repair_scientific_judge import (
     judge_protocol,
     perform_review,
     review_cost,
     review_request,
+    review_status,
 )
 from autoformalism.rebuttal.repair_transactions import (
     default_initialization,
@@ -77,7 +84,7 @@ def selected_arms(arm: str | None) -> tuple[str, ...]:
 class RepairComparisonConfig(StrictSchema):
     """One frozen fitter and one edit budget shared by the two arms."""
 
-    protocol: Literal["repair-feedback-comparison-2"] = "repair-feedback-comparison-2"
+    protocol: Literal["repair-feedback-comparison-3"] = "repair-feedback-comparison-3"
     rounds: int = Field(default=4, ge=1, le=8)
     max_consecutive_no_change: int = Field(default=2, ge=2, le=4)
     fit: CollocationSensitivityConfig = CollocationSensitivityConfig(
@@ -175,6 +182,7 @@ def freeze(source: Path, output: Path, judge_revision: str) -> dict:
         "tasks": tasks,
         "fitter_origin": "549e03945a90e817bd377b49bad76c68f85e7672",
         "repair_action_protocol": "repair-action-2",
+        "feedback_protocol": FEEDBACK_PROTOCOL,
         "fit_reporting_protocol": "stage-evidence-2",
         "public_obligation_quote": inputs["config"]["public_obligation_quote"],
         "public_obligation_prompt_sha256": inputs["config"][
@@ -438,6 +446,12 @@ def run_task(root: Path, task: dict, client: StagedTopologyClient) -> dict:
             state["history"],
         )
         report["public_training_facts"] = _public_fit_context(dataset)
+        report["initialization_facts"] = initialization_facts(
+            parent, initial, context, assessment.get("fit") or {}
+        )
+        report["scientific_review_status"] = review_status(
+            assessment.get("scientific_review")
+        )
         directory = output / f"round_{index:03d}"
         atomic_json(directory / "report.json", report)
         candidate, new_initial, transaction = request_repair(
@@ -516,6 +530,12 @@ def run_task(root: Path, task: dict, client: StagedTopologyClient) -> dict:
                 "outcome": outcome,
                 "hypothesis": transaction.get("hypothesis"),
                 "scope": (transaction.get("audit") or {}).get("scope"),
+                "no_change_reason": (transaction.get("audit") or {}).get(
+                    "no_change_reason"
+                ),
+                "actual_effects": (transaction.get("audit") or {}).get(
+                    "actual_effects", []
+                ),
                 "diagnostics": [
                     d for a in transaction["attempts"] for d in a["diagnostics"]
                 ],
@@ -639,6 +659,21 @@ def summarize(root: Path, *, arm: str | None = None) -> dict:
                 "outcomes": dict(
                     Counter(r["outcome"] for r in state.get("rounds", []))
                 ),
+                "no_change_reasons": dict(
+                    Counter(
+                        (r["transaction"].get("audit") or {}).get(
+                            "no_change_reason", "unrecorded"
+                        )
+                        for r in state.get("rounds", [])
+                        if r["outcome"] == "no_change"
+                    )
+                ),
+                "scientific_review_status_counts": dict(
+                    Counter(
+                        review_status(a.get("scientific_review"))["status"]
+                        for a in assessments
+                    )
+                ),
                 "diagnostic_counts": dict(diagnostics),
                 "best_round": (state.get("best") or {}).get("round"),
                 "best_validation_nmse": (
@@ -690,7 +725,7 @@ def summarize(root: Path, *, arm: str | None = None) -> dict:
         else 0
     )
     return {
-        "schema_version": "repair-feedback-comparison-summary-1",
+        "schema_version": "repair-feedback-comparison-summary-3",
         "plan_sha256": plan["plan_sha256"],
         "selected_arm": arm,
         "status": "complete"
@@ -699,6 +734,13 @@ def summarize(root: Path, *, arm: str | None = None) -> dict:
         "planned_tasks": len(rows),
         "terminal_tasks": sum(r["status"] not in {"pending", "running"} for r in rows),
         "scientific_reviews": len(reviews),
+        "scientific_review_status_counts": dict(
+            Counter(read(p).get("status", "unknown") for p in reviews)
+        ),
+        "scientific_review_diagnostics": [
+            dict(request_sha256=read(p).get("request_sha256"), **review_status(read(p)))
+            for p in reviews
+        ],
         "pending_scientific_reviews": pending,
         "by_arm": [
             {
@@ -740,6 +782,12 @@ def compact_round(record: dict) -> dict:
         "outcome": record["outcome"],
         "category": record["objective_category"],
         "scope": (record["transaction"].get("audit") or {}).get("scope"),
+        "no_change_reason": (record["transaction"].get("audit") or {}).get(
+            "no_change_reason"
+        ),
+        "actual_effects": (record["transaction"].get("audit") or {}).get(
+            "actual_effects", []
+        ),
         **compact_fit(fit),
     }
 

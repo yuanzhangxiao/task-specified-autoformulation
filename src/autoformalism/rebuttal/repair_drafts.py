@@ -13,6 +13,7 @@ from autoformalism.expressions import ModelValidationError
 from autoformalism.fitting.initialization import LatentInitializationPlan
 from autoformalism.llm.staged_topology import atomic_json, visible_response
 from autoformalism.rebuttal.repair_evidence import model_hash
+from autoformalism.rebuttal.repair_feedback import PROTOCOL as FEEDBACK_PROTOCOL
 from autoformalism.rebuttal.repair_transactions import (
     SYSTEM_PROMPT as LEGACY_PROMPT,
 )
@@ -96,6 +97,17 @@ and type edits. Directly measured states use their public initial measurement;
 algebraic variables and inputs have no fitted state initializer. causal_map=null
 requests a training-fitted shared latent value, NOT withdrawal. Use explicit
 withdrawal to cancel an initializer. scope=no_change abandons the entire draft.
+Read initialization_facts: latent-boundary policies and collocation optimizer
+initialization are different. A collocation timeout does not mean a latent
+initial-state policy is missing. mode=value is already training-fitted; guess=0
+is only an optimizer start. Do not numerically tune initial values yourself.
+Read recent_actions.actual_effects before proposing a repair: repeating the same
+equation, mapping or initializer is an executable no-op, not a recovered model.
+Only the runtime before/after diff establishes what changed; hypothesis is a
+proposed explanation, never evidence. Do not invent public sign requirements.
+Scientific evidence may include named term references with certified outer signs;
+these are syntax facts, not a claim that a state or the term value is positive.
+An indeterminate scientific review is unavailable advice, not scientific approval.
 No unseen data, arbitrary code, full model, or prose outside hypothesis.
 """
 )
@@ -148,7 +160,12 @@ def advance(
             {
                 **empty_draft(),
                 "status": "no_change",
-                "audit": {"scope": "no_change", "status": "no_change"},
+                "audit": {
+                    "scope": "no_change",
+                    "status": "no_change",
+                    "no_change_reason": "explicit_decline",
+                    "actual_effects": [],
+                },
             },
             [],
         )
@@ -232,6 +249,8 @@ def advance(
             "target": target,
             "status": "committed"
             if result["status"] == "committed"
+            else "unchanged"
+            if result["status"] == "no_change"
             else "pending_invalid"
             if (kind, target) in invalid
             else "locally_valid_provisional"
@@ -260,6 +279,7 @@ def request_repair(
     identity = content_hash(
         [
             PROTOCOL,
+            FEEDBACK_PROTOCOL,
             model_hash(parent),
             plan.model_dump(mode="json"),
             report,
@@ -288,6 +308,7 @@ def request_repair(
     for attempt in range(len(draft["attempts"]), client.settings.attempts_per_step):
         request = {
             "action_protocol": PROTOCOL,
+            "feedback_protocol": FEEDBACK_PROTOCOL,
             "public_task": public_prompt,
             "report": report,
             "equations": expressions(parent),

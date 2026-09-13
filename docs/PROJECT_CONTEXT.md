@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in comparison-3 milestone disambiguates train-fitted latent boundaries
+from collocation optimizer initialization, records actual no-op effects, and
+resolves judge occurrence IDs into named terms for proposer feedback only.
+Judge availability/contract failures are separate from scientific verdicts.
+Fitter, scientific judge requests, budgets and stopping policy remain frozen;
+see `docs/REPAIR_FEEDBACK_EVIDENCE_V3.md`.
+
 The opt-in repair-action-2 milestone removes redundant global keep inventories,
 adds typed withdrawal of pending equations/mappings/removals/initializers, and
 separates fitter stage convergence from finite retained candidates. See

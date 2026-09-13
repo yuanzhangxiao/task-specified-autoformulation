@@ -233,8 +233,16 @@ def numerical_findings(candidate: CandidateModel, fit: dict) -> list[Finding]:
     init, refinement = fit.get("initializer") or {}, fit.get("refinement") or {}
     for code, observation, evidence in (
         (
-            "INITIALIZER_STATUS" if init.get("success") else "INITIALIZER_UNAVAILABLE",
-            init.get("message"),
+            "COLLOCATION_INITIALIZER_STATUS"
+            if init.get("success")
+            else "COLLOCATION_INITIALIZER_UNAVAILABLE",
+            (
+                "Collocation optimizer initialization: "
+                + init["message"]
+                + ". This is not latent-state initialization coverage."
+            )
+            if init.get("message")
+            else None,
             init,
         ),
         ("REFINEMENT_STATUS", refinement.get("message"), refinement),
@@ -340,7 +348,7 @@ def decision_report(
     )
     unchanged = sum(r.get("outcome") == "no_change" for r in history[-2:])
     return {
-        "schema_version": "repair-decision-report-1",
+        "schema_version": "repair-decision-report-3",
         "candidate_sha256": model_hash(candidate),
         "objective_category": category,
         "scope_policy": "consider_other_components_or_explicit_topology"

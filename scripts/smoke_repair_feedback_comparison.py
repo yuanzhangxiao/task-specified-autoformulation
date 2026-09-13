@@ -11,6 +11,7 @@ from autoformalism.rebuttal.initialization_campaign import synthetic_problem
 from autoformalism.rebuttal.piecewise_campaign import unpack_split
 from autoformalism.rebuttal.repair_comparison import RepairComparisonConfig, _assess
 from autoformalism.rebuttal.repair_drafts import RepairActionV2, advance, empty_draft
+from autoformalism.rebuttal.repair_feedback import initialization_facts
 from autoformalism.rebuttal.repair_fit_reporting import fit_outcomes
 from autoformalism.rebuttal.repair_scientific_judge import review_request
 from autoformalism.rebuttal.repair_transactions import (
@@ -93,6 +94,8 @@ def main():
     fit = assessment["fit"]
     assert audit["status"] == "committed" and fit["status"] == "complete", fit
     assert fit["validation"]["normalized_mse"] < 1e-5, fit
+    facts = initialization_facts(revised, initial, context, fit)
+    assert all(b["selected_values_available"] for b in facts["latent_boundaries"])
     request = review_request(
         candidate, revised, context, "Synthetic public control", 0, "0" * 40
     )
@@ -102,7 +105,8 @@ def main():
     print(
         json.dumps(
             {
-                "schema_version": "repair-comparison-smoke-2",
+                "schema_version": "repair-comparison-smoke-3",
+                "initialization_facts": facts,
                 "status": "pass",
                 "transaction": audit["status"],
                 "fit_status": fit["status"],

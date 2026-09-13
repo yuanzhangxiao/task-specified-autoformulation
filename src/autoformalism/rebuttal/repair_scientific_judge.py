@@ -25,6 +25,7 @@ from autoformalism.judging.prompts import (
 from autoformalism.llm import LLMConfig, create_llm_client
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.repair_evidence import Finding, model_hash
+from autoformalism.rebuttal.repair_judge_evidence import named_references, review_status
 from autoformalism.schemas import CandidateModel
 from autoformalism.search.hybrid_pair import PairedHybridJudge
 from autoformalism.staged_topology import content_hash
@@ -167,6 +168,9 @@ def perform_review(request: dict, directory: Path, base_url: str) -> dict:
                         evidence={
                             "request_sha256": identity,
                             "subject_id": item.subject_id,
+                            **named_references(
+                                parent, candidate, item.candidate_b.evidence
+                            ),
                         },
                     ).model_dump(mode="json")
                 )
@@ -202,6 +206,7 @@ def perform_review(request: dict, directory: Path, base_url: str) -> dict:
         "protocol_validated_for_this_use": False,
         "cost": review_cost(directory),
     }
+    result["review_availability"] = review_status(result)
     atomic_json(path, result)
     return result
 
