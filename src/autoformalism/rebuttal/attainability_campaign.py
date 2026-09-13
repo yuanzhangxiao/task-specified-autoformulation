@@ -8,7 +8,7 @@ from time import monotonic
 from typing import Literal
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from autoformalism.data import TrainingScaler
 from autoformalism.expressions import ValidationContext, compile_candidate
@@ -33,6 +33,10 @@ from autoformalism.rebuttal.attainability_reference import (
 from autoformalism.rebuttal.fitter_diagnostic import read_json, sha256, write_json
 from autoformalism.rebuttal.fitter_methods import identity_runtime
 from autoformalism.rebuttal.piecewise_campaign import replay, safe_path, unpack_split
+from autoformalism.rebuttal.reference_audit import (
+    ReferenceAuditConfig,
+    scaled_reference_audit,
+)
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.staged_topology import content_hash
@@ -41,7 +45,11 @@ from autoformalism.staged_topology import content_hash
 class AttainabilityPlan(StrictSchema):
     """Budgets frozen before results; ordinary starts are independent of truth."""
 
-    protocol: Literal["fitter-attainability-1"] = "fitter-attainability-1"
+    protocol: Literal["fitter-attainability-1", "fitter-attainability-2"] = (
+        "fitter-attainability-1"
+    )
+    reference_audit: ReferenceAuditConfig | None = None
+    reference_rollout_seconds: float = Field(default=60, gt=0, le=240)
     generation_seconds: float = Field(default=600, gt=0, le=600)
     fit: CollocationSensitivityConfig = CollocationSensitivityConfig(
         initializer_seconds=300,
@@ -58,6 +66,30 @@ class AttainabilityPlan(StrictSchema):
         collocation_assembly="mapped",
     )
 
+    @model_validator(mode="after")
+    def audit_version(self):
+        """Never silently change the historical numerical gate."""
+        if (self.protocol == "fitter-attainability-2") != (
+            self.reference_audit is not None
+        ):
+            raise ValueError("scaled reference audit requires protocol 2")
+        if (
+            self.protocol == "fitter-attainability-1"
+            and self.reference_rollout_seconds != 60
+        ):
+            raise ValueError("extended reference rollouts require protocol 2")
+        return self
+
+
+def checked_replay(model, split, parameters, scale, reference, *, seconds):
+    """Keep an exhausted verification budget distinct from an optimization error."""
+    try:
+        return replay(
+            model, split, parameters, scale, reference, seconds_per_method=seconds
+        )
+    except TimeoutError as error:
+        return {"pass": False, "error": str(error), "status": "verification_timeout"}
+
 
 def code_identity():
     root = Path(__file__).resolve().parents[3]
@@ -66,6 +98,7 @@ def code_identity():
         root / "scripts/run_attainability_campaign.py",
         root / "scripts/hpc/attainability_delta.slurm",
         root / "scripts/hpc/submit_attainability_delta.sh",
+        root / "scripts/hpc/submit_reference_recovery_delta.sh",
     ]
     return content_hash({str(p.relative_to(root)): sha256(p) for p in paths})
 
@@ -189,6 +222,12 @@ def generate(output, index):
     """One supervised generation job per model, before the fitting array."""
     frozen = verify(output)
     case = frozen["cases"][index]
+    retained = frozen.get("retained_generations", {}).get(str(index))
+    if retained:
+        return _checkpoint(
+            safe_path(output, retained),
+            content_hash([frozen["recovery_of"], "generate", index]),
+        )
     identity = content_hash([frozen["identity"], "generate", index])
     root = output / f"generated/{index:03d}"
     path = root / "result.json"
@@ -218,19 +257,30 @@ def generate(output, index):
             stage("native_reference_audit")
             bundle = read_json(output / "reference_input.json")
             truth = bundle["truth"]
-            native = native_replay_audit(problem, bundle["spec"])
+            audited = None
+            if plan.reference_audit is not None:
+                audited = scaled_reference_audit(problem, bundle, plan.reference_audit)
+                native = audited["native_generator_audit"]
+                record["scaled_reference_audit"] = audited
+            else:
+                native = native_replay_audit(problem, bundle["spec"])
             record["native_generator_audit"] = native
             record["shared_initialization_limit"] = shared_boundary_lower_bound(problem)
             write_json(
                 root / "native_audit.json",
                 {
                     "native_generator_audit": native,
+                    "scaled_reference_audit": audited,
                     "shared_initialization_limit": record[
                         "shared_initialization_limit"
                     ],
                 },
             )
-            if (
+            if audited is not None and not audited["pass"]:
+                raise ValueError(
+                    "scaled reference replay agreement failed; see native_audit.json"
+                )
+            if audited is None and (
                 max(
                     r["maximum_absolute_difference"]
                     for rows in native.values()
@@ -240,7 +290,12 @@ def generate(output, index):
             ):
                 raise ValueError("original generator does not reproduce public data")
             stage("reference_training_simulation")
-            y, states = simulate_split(problem, truth, "train")
+            y, states = simulate_split(
+                problem,
+                truth,
+                "train",
+                plan.reference_rollout_seconds if plan.reference_audit else 120,
+            )
         else:
             stage("candidate_training_truth_design")
             truth, y, states, attempts = choose_truth(
@@ -252,7 +307,14 @@ def generate(output, index):
             root / "selected_truth.json", {"parameters": truth, "training_only": True}
         )
         stage("validation_simulation")
-        val, _ = simulate_split(problem, truth, "val")
+        val, _ = simulate_split(
+            problem,
+            truth,
+            "val",
+            plan.reference_rollout_seconds
+            if case["reference_skeleton"] and plan.reference_audit
+            else 120,
+        )
         clean = {"train": y, "val": val}
         synthetic = generated_problem(problem, clean)
         lowered, _ = system_for(synthetic)
@@ -266,12 +328,15 @@ def generate(output, index):
             raise ValueError("generated control has insufficient output variation")
         stage("independent_generating_replays")
         checks = {
-            k: replay(
+            k: checked_replay(
                 lowered.model,
                 unpack_split(synthetic["splits"][k]),
                 truth,
                 scale,
                 clean[k],
+                seconds=plan.reference_rollout_seconds
+                if case["reference_skeleton"]
+                else 60,
             )
             for k in ("train", "val")
         }
@@ -330,6 +395,11 @@ def execute(output, index):
     frozen = verify(output)
     task = frozen["tasks"][index]
     case = frozen["cases"][task["case_index"]]
+    retained = frozen.get("retained_results", {}).get(str(index))
+    if retained:
+        return _checkpoint(
+            safe_path(output, retained), content_hash([frozen["recovery_of"], task])
+        )
     identity = content_hash([frozen["identity"], task])
     directory = output / f"results/task_{index:03d}"
     result_file, fit_file = directory / "result.json", directory / "fit.json"
@@ -452,12 +522,15 @@ def execute(output, index):
                 for key in ("train", "val"):
                     path = directory / f"replay_{key}.json"
                     if not path.exists():
-                        check = replay(
+                        check = checked_replay(
                             system.model,
                             unpack_split(problem["splits"][key]),
                             fit["parameters"],
                             scale,
                             clean[key] if clean else None,
+                            seconds=plan.reference_rollout_seconds
+                            if case["reference_skeleton"]
+                            else 60,
                         )
                         write_json(
                             path, {"identity": identity, "check": check}, immutable=True

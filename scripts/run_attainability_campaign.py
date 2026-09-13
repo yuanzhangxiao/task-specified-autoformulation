@@ -25,7 +25,28 @@ def write(path, payload):
 def summarize(output):
     """Retain missing/failing arms and separate oracle information from recovery."""
     frozen = json.loads((output / "freeze.json").read_text())
-    rows, generation = [], []
+    expected_freeze = hashlib.sha256(
+        json.dumps(
+            {k: v for k, v in frozen.items() if k != "identity"}, sort_keys=True
+        ).encode()
+    ).hexdigest()
+    if expected_freeze != frozen.get("identity"):
+        raise ValueError("frozen manifest identity differs")
+    rows, generation, diagnostics = [], [], []
+
+    def retained_path(collection, index, default):
+        relative = frozen.get(collection, {}).get(str(index))
+        if relative is None:
+            return default, frozen["identity"], False
+        path = (output / relative).resolve()
+        if (
+            not path.is_relative_to(output.resolve())
+            or hashlib.sha256(path.read_bytes()).hexdigest()
+            != frozen["assets"][relative]
+        ):
+            raise ValueError("retained artifact path or hash differs")
+        return path, frozen["recovery_of"], True
+
     lines = [
         "# Fixed-skeleton attainability comparison",
         "",
@@ -36,18 +57,23 @@ def summarize(output):
         "Full/mesh use all observations and the same input interpolation. Fixed arms "
         "optimize only state nodes; near arms are explicitly truth-assisted starts. "
         "Ordinary starts never use the generating parameters.",
+        "Strict recovery means both synthetic NMSEs <= 1e-4; missing this target "
+        "does not imply an unusable fit. C accepted is the initializer acceptance "
+        "flag, not refinement convergence. Constraint refers to the last C iterate.",
         "",
     ]
     for case in frozen["cases"]:
         directory = output / f"generated/{case['index']:03d}"
-        path = directory / "result.json"
+        path, identity, retained = retained_path(
+            "retained_generations", case["index"], directory / "result.json"
+        )
         result = (
             json.loads(path.read_text()) if path.exists() else {"status": "missing"}
         )
         if path.exists():
             expected = hashlib.sha256(
                 json.dumps(
-                    [frozen["identity"], "generate", case["index"]], sort_keys=True
+                    [identity, "generate", case["index"]], sort_keys=True
                 ).encode()
             ).hexdigest()
             if result.get("identity") != expected:
@@ -59,11 +85,23 @@ def summarize(output):
             )
         if (directory / "stage.json").exists():
             result["last_stage"] = json.loads((directory / "stage.json").read_text())
-        generation.append({"case": case, **result})
+        generation.append({"case": case, **result, "retained": retained})
         lines.append(
             f"Generation {case['label']}: {result['status']}; "
             f"activity={result.get('activity')}; error={result.get('error')}"
         )
+        audit = result.get("scaled_reference_audit")
+        if audit:
+            checks = [r for rows in audit["checks"].values() for r in rows]
+            maximum = max(
+                r["tight_solver_agreement"]["maximum_scaled_difference"] for r in checks
+            )
+            lines.append(
+                f"Scaled reference audit: pass={audit['pass']}; "
+                f"training scale={audit['training_output_scale']}; "
+                f"worst tight-solver scaled difference="
+                f"{maximum}"
+            )
         if result.get("sampled_input_truth_scores"):
             lines.append(
                 "Reference parameters under sampled inputs: "
@@ -76,18 +114,20 @@ def summarize(output):
             )
     lines += [
         "",
-        "| Case | Data | Arm | Status | C success | Verified | Recovered | "
+        "| Case | Data | Arm | Status | C accepted | Verified | Strict recovery | "
         "Train NMSE | Validation NMSE | Calls | Fixed-node NMSE | Constraint |",
         "|---|---|---|---|---|---|---|---:|---:|---:|---:|---:|",
     ]
     for task in frozen["tasks"]:
         case = frozen["cases"][task["case_index"]]
         root = output / f"results/task_{task['index']:03d}"
-        path = root / "result.json"
+        path, identity, retained = retained_path(
+            "retained_results", task["index"], root / "result.json"
+        )
         if path.exists():
             row = json.loads(path.read_text())
             expected = hashlib.sha256(
-                json.dumps([frozen["identity"], task], sort_keys=True).encode()
+                json.dumps([identity, task], sort_keys=True).encode()
             ).hexdigest()
             if row.get("identity") != expected:
                 raise ValueError("saved result identity differs")
@@ -99,6 +139,21 @@ def summarize(output):
                 else "missing"
             )
             row = {"task": task, "case": case, "status": status}
+            prerequisite = generation[task["case_index"]]
+            if (
+                case["reference_skeleton"] or task["dataset"] == "synthetic"
+            ) and prerequisite["status"] in {
+                "generation_failed",
+                "interrupted",
+                "worker_failed",
+                "worker_timeout",
+            }:
+                row.update(
+                    status="blocked_by_generation",
+                    worker_status=status,
+                    error=prerequisite.get("error", prerequisite["status"]),
+                )
+        row["retained"] = retained
         rows.append(row)
         fit = row.get("fit") or {}
         fixed = task["arm"].startswith("fixed")
@@ -109,6 +164,42 @@ def summarize(output):
             else (((init.get("progress") or {}).get("iterations") or [{}])[-1])
         )
         ref = fit.get("refinement") or {}
+        diagnostics.append(
+            {
+                "task": task,
+                "case": case["label"],
+                "status": row["status"],
+                "retained": retained,
+                "error": row.get("error"),
+                "initializer_accepted": init.get("success"),
+                "initializer_message": init.get("message"),
+                "initializer_seconds": init.get("seconds"),
+                "last_constraint": last.get("constraint_maximum"),
+                "refinement_message": ref.get("message"),
+                "stages": [
+                    {
+                        "mode": stage.get("mode"),
+                        "source": stage.get("source"),
+                        **{
+                            k: (stage.get("result") or {}).get(k)
+                            for k in (
+                                "message",
+                                "optimizer_success",
+                                "optimizer_status",
+                                "optimality",
+                                "optimizer_native_success",
+                                "optimizer_verified_convergence",
+                                "actual_residual_calls",
+                            )
+                        },
+                        "selected_parameters_match": bool(fit.get("parameters"))
+                        and (stage.get("result") or {}).get("parameters")
+                        == fit["parameters"],
+                    }
+                    for stage in ref.get("stages", [])
+                ],
+            }
+        )
         lines.append(
             f"| {case['label']} | {task['dataset']} | "
             f"{task['arm']} | {row['status']} | "
@@ -121,6 +212,14 @@ def summarize(output):
         )
     counts = dict(Counter(r["status"] for r in rows))
     lines[1:1] = [f"Planned fitting arms: {len(rows)}. Status counts: {counts}.", ""]
+    if frozen.get("recovery_of"):
+        lines[3:3] = [
+            f"Retained original arms: {sum(r['retained'] for r in rows)}; "
+            f"selected new reference arms: {len(frozen['selected_tasks'])}. "
+            "Original identities and results are preserved; "
+            "timings are not a paired speed comparison.",
+            "",
+        ]
     write(
         output / "summary.json",
         {
@@ -132,6 +231,10 @@ def summarize(output):
         },
     )
     (output / "summary.md").write_text("\n".join(lines) + "\n")
+    write(
+        output / "diagnostics.json",
+        {"identity": frozen["identity"], "records": diagnostics},
+    )
     print(json.dumps(counts))
 
 
@@ -157,7 +260,11 @@ def supervised(output, index, generation):
                 command, stdout=log, stderr=log, start_new_session=True
             )
             try:
-                code = child.wait(timeout=1500 if generation else 2700)
+                extended = (
+                    json.loads((output / "freeze.json").read_text())["plan"]["protocol"]
+                    == "fitter-attainability-2"
+                )
+                code = child.wait(timeout=1500 if generation and not extended else 2700)
             except subprocess.TimeoutExpired:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait()
@@ -236,6 +343,7 @@ def main():
         choices=(
             "export-reference",
             "prepare",
+            "prepare-reference-recovery",
             "generate",
             "generation-worker",
             "run",
@@ -267,17 +375,25 @@ def main():
         from autoformalism.rebuttal.attainability_reference import export_reference
 
         print(export_reference(args.source, args.output)["identity"])
-    elif args.action == "prepare":
+    elif args.action in {"prepare", "prepare-reference-recovery"}:
         plan = AttainabilityPlan.model_validate(
             json.loads(args.config.read_text()) if args.config else {}
         )
-        frozen = prepare(plan, args.output, args.source, args.reference)
+        if args.action == "prepare-reference-recovery":
+            from autoformalism.rebuttal.attainability_restart import (
+                prepare_reference_recovery,
+            )
+
+            frozen = prepare_reference_recovery(args.source, args.output, plan)
+        else:
+            frozen = prepare(plan, args.output, args.source, args.reference)
         print(
             json.dumps(
                 {
                     "identity": frozen["identity"],
                     "generation_tasks": len(frozen["cases"]),
                     "fit_tasks": len(frozen["tasks"]),
+                    "selected_tasks": frozen.get("selected_tasks"),
                 }
             )
         )

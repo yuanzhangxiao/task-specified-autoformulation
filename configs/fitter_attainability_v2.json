@@ -1,0 +1,14 @@
+{
+  "protocol": "fitter-attainability-2",
+  "reference_rollout_seconds": 240,
+  "reference_audit": {
+    "protocol": "scaled-reference-audit-2",
+    "saved_absolute_tolerance": 1e-8,
+    "saved_scale_tolerance": 1e-4,
+    "solver_absolute_tolerance": 1e-10,
+    "solver_scale_tolerance": 1e-6,
+    "integration_rtol": 1e-10,
+    "integration_atol": 1e-12,
+    "maximum_seconds": 600
+  }
+}

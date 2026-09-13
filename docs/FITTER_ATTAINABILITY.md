@@ -1,5 +1,10 @@
 # Fixed-skeleton attainable-data and reference controls
 
+The completed v1 proposed-model controls are preserved by the reference-only
+v2 recovery described in [FITTER_REFERENCE_RECOVERY.md](FITTER_REFERENCE_RECOVERY.md).
+It corrects the native replay gate and schedules only the eleven untouched
+reference arms; the fitting algorithm and budgets remain unchanged.
+
 This is an isolated, user-authorized numerical diagnostic. It is not a proposer
 experiment or a production-default change. No reference equations, parameters,
 known hidden boundaries, or reference-control results may enter proposer or judge

@@ -388,18 +388,20 @@ def verify(output: Path) -> dict:
     return frozen
 
 
-def replay(model, split, parameters, scale, reference=None) -> dict:
+def replay(
+    model, split, parameters, scale, reference=None, *, seconds_per_method=60
+) -> dict:
     """Independent BDF and tighter Radau checks; clean labels are scoring-only."""
     scores, predictions = {}, {}
     settings = FitConfig(
         integration_method="BDF",
         relative_tolerance=1e-9,
         absolute_tolerance=1e-11,
-        maximum_wall_time_seconds=60,
+        maximum_wall_time_seconds=seconds_per_method,
     )
     for method in ("BDF", "Radau"):
         residuals, values, clean_errors = [], {}, []
-        deadline = monotonic() + 60
+        deadline = monotonic() + seconds_per_method
         for row in split.trajectories:
             result = simulate_trajectory(
                 model,

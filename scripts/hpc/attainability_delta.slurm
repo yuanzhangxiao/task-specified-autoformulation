@@ -20,7 +20,7 @@ case "${1:-run}" in
     timeout --signal=TERM --kill-after=10s 540s "${AF_PYTHON}" scripts/run_attainability_campaign.py "$1" --output "${AF_OUTPUT_ROOT}"
     ;;
   generate)
-    timeout --signal=TERM --kill-after=15s 1650s "${AF_PYTHON}" scripts/run_attainability_campaign.py generate --output "${AF_OUTPUT_ROOT}" --task-index "${SLURM_ARRAY_TASK_ID:?}"
+    timeout --signal=TERM --kill-after=15s 2850s "${AF_PYTHON}" scripts/run_attainability_campaign.py generate --output "${AF_OUTPUT_ROOT}" --task-index "${SLURM_ARRAY_TASK_ID:?}"
     ;;
   run)
     timeout --signal=TERM --kill-after=15s 2850s "${AF_PYTHON}" scripts/run_attainability_campaign.py run --output "${AF_OUTPUT_ROOT}" --task-index "${SLURM_ARRAY_TASK_ID:?}"
