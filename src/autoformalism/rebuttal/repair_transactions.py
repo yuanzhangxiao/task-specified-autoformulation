@@ -316,7 +316,13 @@ def commit_action(
             },
         )
     if set(action.remove) - set(existing):
-        raise ValueError("cannot remove a variable absent from the parent")
+        name = sorted(set(action.remove) - set(existing))[0]
+        raise RevisionContractError(
+            "REMOVAL_TARGET_ABSENT",
+            f"cannot remove absent variable {name}",
+            action_kind="remove",
+            target=name,
+        )
     new_names = {e.component for e in action.equations} - set(existing)
     if len(new_names) > 2 or len(set(existing) | new_names) - len(action.remove) > 12:
         raise ValueError("bounded variable budget exceeded")
@@ -370,7 +376,13 @@ def commit_action(
     }
     for mapping in action.mappings:
         if mapping.channel not in context.targets:
-            raise ValueError("mapping must name a public target")
+            raise RevisionContractError(
+                "MAPPING_TARGET_NOT_PUBLIC",
+                f"mapping {mapping.channel} must name a public target",
+                action_kind="mapping",
+                target=mapping.channel,
+                eligible_channels=list(context.targets),
+            )
         mappings[mapping.channel] = mapping.model_dump(mode="json")
     payload["observation_mappings"] = list(mappings.values())
     direct = {
@@ -460,10 +472,32 @@ def commit_action(
         rules[name] = LatentInitializationReply(initial=InitialValueGuess(guess=0.0))
     for edit in action.initializers:
         if edit.state not in latent:
-            raise ValueError("only latent initialization can be edited")
-        rules[edit.state] = LatentInitializationReply(
+            raise RevisionContractError(
+                "INITIALIZER_TARGET_NOT_LATENT",
+                f"initializer {edit.state} requires a latent dynamic state",
+                action_kind="initializer",
+                target=edit.state,
+                eligible_states=sorted(latent),
+                actual_kind="observed"
+                if edit.state in model.state_names
+                else "not_dynamic",
+                allowed_action="replace or explicitly withdraw this initializer edit",
+            )
+        rule = LatentInitializationReply(
             initial=edit.causal_map or InitialValueGuess(guess=0.0)
         )
+        try:
+            apply_initialization_plan(
+                model, LatentInitializationPlan(rules={**rules, edit.state: rule})
+            )
+        except (ValueError, ModelValidationError) as exc:
+            raise RevisionContractError(
+                "INITIALIZER_CONTRACT",
+                f"initializer {edit.state}: {exc}",
+                action_kind="initializer",
+                target=edit.state,
+            ) from exc
+        rules[edit.state] = rule
     new_plan = LatentInitializationPlan(rules=rules)
     apply_initialization_plan(model, new_plan)
     unchanged = model_hash(revised) == model_hash(parent) and new_plan == plan
@@ -496,7 +530,14 @@ def commit_action(
     )
 
 
-def request_repair(
+def request_repair(*args, **kwargs):
+    """Use version-2 drafts; frozen version-1 runs stay in their pinned checkout."""
+    from autoformalism.rebuttal.repair_drafts import request_repair as request_v2
+
+    return request_v2(*args, **kwargs)
+
+
+def request_repair_v1(
     parent: CandidateModel,
     plan: LatentInitializationPlan,
     context: ValidationContext,

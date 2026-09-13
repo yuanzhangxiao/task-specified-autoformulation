@@ -232,7 +232,11 @@ def numerical_findings(candidate: CandidateModel, fit: dict) -> list[Finding]:
     identity = model_hash(candidate)
     init, refinement = fit.get("initializer") or {}, fit.get("refinement") or {}
     for code, observation, evidence in (
-        ("INITIALIZER_UNAVAILABLE", init.get("message"), init),
+        (
+            "INITIALIZER_STATUS" if init.get("success") else "INITIALIZER_UNAVAILABLE",
+            init.get("message"),
+            init,
+        ),
         ("REFINEMENT_STATUS", refinement.get("message"), refinement),
     ):
         if observation:
@@ -298,6 +302,12 @@ def compact_numerics(raw: dict) -> dict:
         "iterations",
     )
     result = {k: raw[k] for k in fields if k in raw}
+    if raw.get("method") == "feasibility_then_refinement":
+        from autoformalism.rebuttal.repair_fit_reporting import refinement_report
+
+        result.pop("optimizer_success", None)
+        result.pop("optimizer_native_success", None)
+        result.update(refinement_report(raw))
     for key, value in list(result.items()):
         if isinstance(value, list):
             result[key] = value[:16]

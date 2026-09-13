@@ -290,7 +290,6 @@ def test_partial_valid_revisions_survive_retry_and_resume(tmp_path):
                     {"component": "f", "expression": "tanh(m)"},
                     {"component": "y", "expression": "unknown"},
                 ],
-                "keep": ["m", "u01"],
             },
             {
                 "scope": "function",
@@ -345,7 +344,8 @@ def test_pending_omission_cannot_silently_commit_a_partial_model(tmp_path):
         ("v01",),
     )
     assert revised == parent and result["status"] == "exhausted"
-    assert result["attempts"][-1]["diagnostics"][0]["code"] == "PENDING_ACTION_OMITTED"
+    assert result["attempts"][-1]["diagnostics"][0]["code"] == "UNAVAILABLE_SYMBOL"
+    assert result["pending_actions"][0]["target"] == "y"
 
 
 def test_structured_report_does_not_turn_timeout_into_scientific_cause():

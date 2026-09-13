@@ -1,5 +1,11 @@
 # Phase 1 Pipeline Design
 
+The opt-in comparison-2 successor uses typed repair drafts and explicit withdrawal
+instead of global keep inventories. Pending initializer failures cannot overwrite
+valid equation status. Reporting reads nested fitter evidence rather than wrapper
+placeholder flags. See `REPAIR_ACTION_CONTRACT_V2.md`; fitting algorithms and the
+established scientific judge are unchanged.
+
 The opt-in fitter feasibility milestone adds retained collocation parameter
 checkpoints, stage/constraint diagnostics, state-only screening before
 sensitivities, and bounded branch-aware restarts. Failed augmented simulations

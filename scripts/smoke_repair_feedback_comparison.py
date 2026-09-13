@@ -10,10 +10,10 @@ from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal.initialization_campaign import synthetic_problem
 from autoformalism.rebuttal.piecewise_campaign import unpack_split
 from autoformalism.rebuttal.repair_comparison import RepairComparisonConfig, _assess
+from autoformalism.rebuttal.repair_drafts import RepairActionV2, advance, empty_draft
+from autoformalism.rebuttal.repair_fit_reporting import fit_outcomes
 from autoformalism.rebuttal.repair_scientific_judge import review_request
 from autoformalism.rebuttal.repair_transactions import (
-    RepairAction,
-    commit_action,
     default_initialization,
 )
 from autoformalism.schemas import CandidateModel
@@ -24,10 +24,12 @@ def main():
     candidate = CandidateModel.model_validate(problem["candidate"])
     context = ValidationContext.model_validate(problem["context"])
     initial = default_initialization(candidate, context)
-    revised, initial, audit = commit_action(
+    revised, initial, draft, diagnostics = advance(
         candidate,
         initial,
-        RepairAction.model_validate(
+        context,
+        empty_draft(),
+        RepairActionV2.model_validate(
             {
                 "scope": "model",
                 "hypothesis": "Equivalent rate parameterization in an interface test",
@@ -38,12 +40,12 @@ def main():
                         "parameters": [{"name": "new_rate"}],
                     }
                 ],
-                "keep": ["y", "u01"],
             }
         ),
-        context,
         memory_targets=("v01",),
     )
+    assert not diagnostics, diagnostics
+    audit = draft["audit"]
     config = RepairComparisonConfig(judge_revision="0" * 40, nonlinear_targets=())
     config = config.model_copy(
         update={
@@ -100,13 +102,14 @@ def main():
     print(
         json.dumps(
             {
-                "schema_version": "repair-comparison-smoke-1",
+                "schema_version": "repair-comparison-smoke-2",
                 "status": "pass",
                 "transaction": audit["status"],
                 "fit_status": fit["status"],
                 "training_nmse": fit["training"]["normalized_mse"],
                 "validation_nmse": fit["validation"]["normalized_mse"],
                 "fitted_parameters": fit["parameters"],
+                "fit_outcomes": fit_outcomes(fit),
                 "resume_identical": True,
                 "llm_calls": 0,
                 "private_reference_opened": False,

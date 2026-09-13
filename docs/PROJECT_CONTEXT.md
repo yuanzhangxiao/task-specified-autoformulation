@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in repair-action-2 milestone removes redundant global keep inventories,
+adds typed withdrawal of pending equations/mappings/removals/initializers, and
+separates fitter stage convergence from finite retained candidates. See
+`docs/REPAIR_ACTION_CONTRACT_V2.md`. It holds fitter and judge settings fixed and
+does not resume or mutate the earlier comparison-1 experiment.
+
 The opt-in fitter feasibility milestone adds retained collocation parameter
 checkpoints, stage/constraint diagnostics, state-only screening before
 sensitivities, and bounded branch-aware restarts. Failed augmented simulations

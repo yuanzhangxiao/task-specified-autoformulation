@@ -1,5 +1,10 @@
 # Diagnosis/repair redesign and pre-fitting judge ablation
 
+**Current successor:** `REPAIR_ACTION_CONTRACT_V2.md` describes the new provider
+schema without global `keep`, typed draft withdrawals, named initializer failures,
+and stage-based fitter reporting. Use a fresh comparison-2 root. The version-1
+protocol below documents the frozen ACES run and remains reproducible at `af465d9`.
+
 This opt-in milestone replaces the special-case v6 repair loop in a **new campaign**,
 not in production search. It does not implement MCTS, change finalized prompts,
 alter benchmark data, or change the final evaluation judge.

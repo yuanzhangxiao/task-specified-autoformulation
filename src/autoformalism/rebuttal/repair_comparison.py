@@ -38,6 +38,7 @@ from autoformalism.rebuttal.repair_evidence import (
     model_hash,
     numerical_findings,
 )
+from autoformalism.rebuttal.repair_fit_reporting import fit_outcomes
 from autoformalism.rebuttal.repair_scientific_judge import (
     judge_protocol,
     perform_review,
@@ -76,7 +77,7 @@ def selected_arms(arm: str | None) -> tuple[str, ...]:
 class RepairComparisonConfig(StrictSchema):
     """One frozen fitter and one edit budget shared by the two arms."""
 
-    protocol: Literal["repair-feedback-comparison-1"] = "repair-feedback-comparison-1"
+    protocol: Literal["repair-feedback-comparison-2"] = "repair-feedback-comparison-2"
     rounds: int = Field(default=4, ge=1, le=8)
     max_consecutive_no_change: int = Field(default=2, ge=2, le=4)
     fit: CollocationSensitivityConfig = CollocationSensitivityConfig(
@@ -173,6 +174,8 @@ def freeze(source: Path, output: Path, judge_revision: str) -> dict:
         "judge_protocol": judge_protocol(),
         "tasks": tasks,
         "fitter_origin": "549e03945a90e817bd377b49bad76c68f85e7672",
+        "repair_action_protocol": "repair-action-2",
+        "fit_reporting_protocol": "stage-evidence-2",
         "public_obligation_quote": inputs["config"]["public_obligation_quote"],
         "public_obligation_prompt_sha256": inputs["config"][
             "public_obligation_prompt_sha256"
@@ -752,8 +755,7 @@ def compact_fit(fit: dict) -> dict:
         "validation_nmse": (fit.get("validation") or {}).get("normalized_mse"),
         "initializer_success": initializer.get("success"),
         "initializer_message": initializer.get("message"),
-        "native_optimizer_success": refinement.get("optimizer_native_success"),
-        "verified_optimizer_success": refinement.get("optimizer_success"),
+        **fit_outcomes(fit),
         "finite_residual_evaluations": refinement.get("valid_residual_evaluations"),
         "optimizer_message": refinement.get("message"),
         "training_failures": (fit.get("training") or {}).get("failed_trajectories", []),
