@@ -79,14 +79,24 @@ class CollocationSensitivityConfig(StrictSchema):
     collocation_diagnostics: bool = False
     recovery_max_starts: int = Field(default=10, ge=1, le=24)
     recovery_probe_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
+    recovery_sensitivity_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
+    recovery_retry_policy: Literal["repeat_best", "distinct"] = "repeat_best"
+    recovery_prioritize_initial: bool = False
+    sensitivity_jacobian_format: Literal["dense", "sparse"] = "dense"
     recovery_handoff: Literal["screened", "best_valid"] = "screened"
     sensitivity_invalid_trials: Literal["abort", "reject"] = "abort"
     collocation_assembly: Literal["unrolled", "mapped"] = "unrolled"
     collocation_target_variables: int | None = Field(default=None, ge=20, le=1000000)
     collocation_maximum_iterations: int = Field(default=150, ge=1, le=3000)
+    collocation_minimum_intervals: int = Field(default=1, ge=1, le=10000)
 
     @model_validator(mode="after")
     def compatible_mesh(self):
+        if (
+            self.collocation_minimum_intervals != 1
+            and self.collocation_assembly != "mapped"
+        ):
+            raise ValueError("resolution safeguard requires mapped assembly")
         if self.collocation_target_variables is not None and (
             self.collocation_assembly != "mapped" or self.collocation_mesh_substeps != 1
         ):
@@ -149,7 +159,11 @@ def fit_collocation_forward_sensitivity(
             **guesses,
             **dict(initial_parameters or {}),
         }
-    system = SymbolicODE(model, allow_piecewise=config.piecewise_policy == "allow")
+    system = SymbolicODE(
+        model,
+        allow_piecewise=config.piecewise_policy == "allow",
+        solver_jacobian_format=config.sensitivity_jacobian_format,
+    )
     settings = config.fit_config()
     scale = TrainingScaler().fit(training).scales["target:v01"].standard_deviation
     if not np.isfinite(scale) or scale <= 0.0:
@@ -253,6 +267,7 @@ def fit_collocation_forward_sensitivity(
             assembly=config.collocation_assembly,
             target_variables=config.collocation_target_variables,
             maximum_iterations=config.collocation_maximum_iterations,
+            minimum_intervals=config.collocation_minimum_intervals,
         )
         primary = dict(initializer)
         portfolio = [primary]
@@ -287,6 +302,7 @@ def fit_collocation_forward_sensitivity(
                     assembly=config.collocation_assembly,
                     target_variables=config.collocation_target_variables,
                     maximum_iterations=config.collocation_maximum_iterations,
+                    minimum_intervals=config.collocation_minimum_intervals,
                 )
                 attempt["start_source"] = point["source"]
                 portfolio.append(attempt)

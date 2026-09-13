@@ -56,7 +56,11 @@ def _mandatory(time: np.ndarray, inputs: np.ndarray) -> set[int]:
 
 
 def plan_meshes(
-    system, training: DatasetSplit, target_variables: int | None, substeps: int = 1
+    system,
+    training: DatasetSplit,
+    target_variables: int | None,
+    substeps: int = 1,
+    minimum_intervals: int = 1,
 ) -> tuple[list[StateMesh], dict]:
     """Allocate a global state-variable target, retaining forcing corners exactly.
 
@@ -65,12 +69,30 @@ def plan_meshes(
     """
     if training.name is not SplitName.TRAIN:
         raise ValueError("collocation mesh requires training data")
+    if not isinstance(minimum_intervals, int) or minimum_intervals < 1:
+        raise ValueError("minimum intervals must be a positive integer")
     if target_variables is not None and substeps != 1:
         raise ValueError("choose either a variable target or uniform substeps")
     rows = training.trajectories
     inputs = [forcing_values(system, row, row.time) for row in rows]
     mandatory = [_mandatory(row.time, u) for row, u in zip(rows, inputs, strict=True)]
     selected = [set(x) for x in mandatory]
+    # Resolve every trajectory before spending the optional global budget.
+    # Input complexity on one trajectory must not starve autonomous dynamics on
+    # another. A maximum gap is stronger than just a minimum count of points.
+    for row, points in zip(rows, selected, strict=True):
+        maximum_gap = (row.time[-1] - row.time[0]) / minimum_intervals
+        pending = list(pairwise(sorted(points)))
+        while pending:
+            left, right = pending.pop()
+            if right - left <= 1 or row.time[right] - row.time[left] <= maximum_gap * (
+                1 + 1e-12
+            ):
+                continue
+            middle = (row.time[left] + row.time[right]) / 2
+            index = int(np.clip(np.searchsorted(row.time, middle), left + 1, right - 1))
+            points.add(index)
+            pending.extend(((left, index), (index, right)))
     full_intervals = sum(len(row.time) - 1 for row in rows)
     floor = sum(len(x) - 1 for x in selected)
     desired = (
@@ -138,9 +160,15 @@ def plan_meshes(
     )
     return meshes, {
         "target_variables": target_variables,
+        "minimum_intervals": minimum_intervals,
         "actual_variables": count,
+        "target_exceeded_for_resolution": target_variables is not None
+        and len(system.names) + 2 * system.state_count * floor > target_variables
+        and any(len(s) > len(m) for s, m in zip(selected, mandatory, strict=True)),
         "target_exceeded_for_input_fidelity": target_variables is not None
-        and count > target_variables,
+        and len(system.names)
+        + 2 * system.state_count * sum(len(m) - 1 for m in mandatory)
+        > target_variables,
         "all_observations_retained": True,
         "input_interpolation_preserved": True,
         "trajectories": [
@@ -149,6 +177,14 @@ def plan_meshes(
                 "observations": len(row.time),
                 "intervals": len(mesh.time) - 1,
                 "mandatory_input_points": mesh.mandatory_points,
+                "maximum_interval": float(np.max(np.diff(mesh.time))),
+                "requested_maximum_interval": float(
+                    (row.time[-1] - row.time[0]) / minimum_intervals
+                ),
+                "resolution_limited_by_samples": bool(
+                    np.max(np.diff(row.time))
+                    > (row.time[-1] - row.time[0]) / minimum_intervals * (1 + 1e-12)
+                ),
                 "forcing_interpolation_error": mesh.forcing_interpolation_error,
                 "boundaries": mesh.time.tolist(),
             }

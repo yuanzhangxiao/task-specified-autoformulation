@@ -1,5 +1,6 @@
 """Attainability controls, oracle isolation, provenance and deterministic resume."""
 
+import json
 import os
 import subprocess
 import sys
@@ -773,3 +774,157 @@ def test_reference_verification_budget_is_explicit_and_legacy_stays_sixty(monkey
     }
     with pytest.raises(ValueError, match="protocol 2"):
         campaign.AttainabilityPlan(reference_rollout_seconds=240)
+
+
+def resolution_source(tmp_path):
+    """Completed artificial v2 generation for orchestration tests, without fitting."""
+    source = recovery_source_at(tmp_path)
+    frozen = read_json(source / "freeze.json")
+    frozen["plan"] = recovery_plan().model_dump(mode="json")
+    frozen["identity"] = content_hash(
+        {k: v for k, v in frozen.items() if k != "identity"}
+    )
+    write_json(source / "freeze.json", frozen)
+    case = next(c for c in frozen["cases"] if c["reference_skeleton"])
+    root = source / f"generated/{case['index']:03d}"
+    values = {
+        "synthetic.json": read_json(source / f"problems/{case['index']:03d}.json"),
+        "truth.json": read_json(source / "reference_input.json")["truth"],
+        "clean.json": {},
+    }
+    assets = {}
+    for name, value in values.items():
+        write_json(root / name, value)
+        assets[name] = sha256(root / name)
+    write_json(
+        root / "result.json",
+        {
+            "identity": content_hash([frozen["identity"], "generate", case["index"]]),
+            "status": "complete",
+            "case": case,
+            "scaled_reference_audit": {"pass": True},
+            "assets": assets,
+        },
+    )
+    return source
+
+
+def test_resolution_reuses_generation_and_freezes_small_matrix(tmp_path, monkeypatch):
+    from autoformalism.rebuttal.resolution_campaign import prepare_resolution
+
+    source = resolution_source(tmp_path)
+    plan = campaign.AttainabilityPlan.model_validate_json(
+        Path("configs/fitter_resolution_v3.json").read_text()
+    )
+    frozen = prepare_resolution(source, tmp_path / "new", plan)
+    assert len(frozen["tasks"]) == 8 and len(frozen["profiles"]) == 6
+    assert any(t["arm"] == "near_full" for t in frozen["tasks"])
+    assert plan.fit.refinement_seconds == 600 and plan.fit.initializer_seconds == 300
+    assert plan.fit.sensitivity_jacobian_format == "sparse"
+    assert prepare_resolution(source, tmp_path / "new", plan) == frozen
+    assert (source / "generated/001/synthetic.json").read_bytes() == (
+        tmp_path / "new/generated/000/synthetic.json"
+    ).read_bytes()
+    write_json(source / "generated/001/truth.json", {"tampered": 1})
+    with pytest.raises(ValueError, match="generated asset changed"):
+        prepare_resolution(source, tmp_path / "different", plan)
+
+
+def test_resolution_gate_blocks_unverified_fits_and_profile_resume_is_bounded(
+    tmp_path, monkeypatch
+):
+    from autoformalism.rebuttal import resolution_campaign as resolution
+
+    source = resolution_source(tmp_path)
+    output = tmp_path / "new"
+    plan = campaign.AttainabilityPlan.model_validate_json(
+        Path("configs/fitter_resolution_v3.json").read_text()
+    )
+    frozen = resolution.prepare_resolution(source, output, plan)
+    task = frozen["profiles"][0]
+    identity = content_hash([frozen["identity"], "profile", task])
+    write_json(output / "profiles/000/started.json", {"identity": identity})
+    row = resolution.run_profile(output, 0)
+    assert row["status"] == "interrupted"
+    assert resolution.run_profile(output, 0) == row
+    gate = resolution.preflight(output)
+    assert not gate["pass"]
+    with pytest.raises(ValueError, match="preflight"):
+        campaign.execute(output, 2)
+    assert not (output / "results/task_002/fit_started.json").exists()
+
+
+def test_resolution_gate_accepts_verified_sparse_profile_without_dense_completion(
+    tmp_path,
+):
+    from autoformalism.rebuttal import resolution_campaign as resolution
+
+    source = resolution_source(tmp_path)
+    output = tmp_path / "new"
+    plan = campaign.AttainabilityPlan.model_validate_json(
+        Path("configs/fitter_resolution_v3.json").read_text()
+    )
+    frozen = resolution.prepare_resolution(source, output, plan)
+    for task in frozen["tasks"][:2]:
+        write_json(
+            output / f"results/task_{task['index']:03d}/result.json",
+            {
+                "identity": content_hash([frozen["identity"], task]),
+                "fit": {
+                    "success": True,
+                    "collocation_training_nmse": 1e-8,
+                    "last_iteration": {"constraint_maximum": 1e-9},
+                },
+            },
+        )
+    task = frozen["profiles"][1]
+    write_json(
+        output / "profiles/001/result.json",
+        {
+            "identity": content_hash([frozen["identity"], "profile", task]),
+            "task": task,
+            "status": "complete",
+            "sensitivity": {"status": "complete", "nmse": 1e-12},
+        },
+    )
+    assert resolution.preflight(output)["pass"]
+
+
+def test_resolution_submission_gates_fits_and_does_not_duplicate_jobs(tmp_path):
+    source = resolution_source(tmp_path)
+    binpath = tmp_path / "bin"
+    binpath.mkdir()
+    git = binpath / "git"
+    git.write_text(
+        '#!/bin/sh\ncase "$1" in status) exit 0;; rev-parse) echo testcommit;; esac\n'
+    )
+    git.chmod(0o755)
+    sbatch = binpath / "sbatch"
+    calls = tmp_path / "sbatch-calls.json"
+    sbatch.write_text(
+        f"#!{sys.executable}\nimport json,sys\nfrom pathlib import Path\n"
+        f"p=Path({str(calls)!r})\n"
+        "rows=json.loads(p.read_text()) if p.exists() else []\n"
+        "rows.append(sys.argv[1:]);p.write_text(json.dumps(rows));print(30000+len(rows))\n"
+    )
+    sbatch.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": str(binpath) + os.pathsep + os.environ["PATH"],
+        "AF_REPO_ROOT": str(Path.cwd()),
+        "AF_PYTHON": sys.executable,
+        "AF_CASADI_ROOT": "",
+        "AF_SOURCE_ROOT": str(source),
+        "AF_OUTPUT_ROOT": str(tmp_path / "jobs"),
+    }
+    command = ["bash", "scripts/hpc/submit_resolution_delta.sh"]
+    first = subprocess.run(command, env=env, text=True, capture_output=True)
+    assert first.returncode == 0, first.stderr
+    second = subprocess.run(command, env=env, text=True, capture_output=True)
+    assert second.returncode == 0, second.stderr
+    rows = json.loads(calls.read_text())
+    assert len(rows) == 6
+    assert "--dependency=afterok:30004" in rows[4]
+    assert "--array=2-7%2" in rows[4]
+    assert "--dependency=afterany:30005:30004" in rows[5]
+    assert read_json(tmp_path / "jobs/submission.json")["submission_complete"]

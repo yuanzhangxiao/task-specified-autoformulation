@@ -61,13 +61,16 @@ def mapped_collocation(
     seed,
     target_variables=None,
     substeps=1,
+    minimum_intervals=1,
 ):
     """Keep every training observation and every forcing interpolation corner.
 
     The mesh changes only the state polynomial representation. All original
     observation times evaluate that polynomial, including nonlinear mappings.
     """
-    meshes, audit = plan_meshes(system, training, target_variables, substeps)
+    meshes, audit = plan_meshes(
+        system, training, target_variables, substeps, minimum_intervals
+    )
     write_json(directory / "mesh.json", audit)
     interval = interval_function(system)
     objective, nodes, guesses = 0, 0, []

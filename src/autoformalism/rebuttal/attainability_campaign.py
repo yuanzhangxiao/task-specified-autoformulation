@@ -45,9 +45,9 @@ from autoformalism.staged_topology import content_hash
 class AttainabilityPlan(StrictSchema):
     """Budgets frozen before results; ordinary starts are independent of truth."""
 
-    protocol: Literal["fitter-attainability-1", "fitter-attainability-2"] = (
-        "fitter-attainability-1"
-    )
+    protocol: Literal[
+        "fitter-attainability-1", "fitter-attainability-2", "fitter-attainability-3"
+    ] = "fitter-attainability-1"
     reference_audit: ReferenceAuditConfig | None = None
     reference_rollout_seconds: float = Field(default=60, gt=0, le=240)
     generation_seconds: float = Field(default=600, gt=0, le=600)
@@ -69,7 +69,7 @@ class AttainabilityPlan(StrictSchema):
     @model_validator(mode="after")
     def audit_version(self):
         """Never silently change the historical numerical gate."""
-        if (self.protocol == "fitter-attainability-2") != (
+        if (self.protocol in {"fitter-attainability-2", "fitter-attainability-3"}) != (
             self.reference_audit is not None
         ):
             raise ValueError("scaled reference audit requires protocol 2")
@@ -99,6 +99,9 @@ def code_identity():
         root / "scripts/hpc/attainability_delta.slurm",
         root / "scripts/hpc/submit_attainability_delta.sh",
         root / "scripts/hpc/submit_reference_recovery_delta.sh",
+        root / "scripts/run_resolution_campaign.py",
+        root / "scripts/hpc/resolution_delta.slurm",
+        root / "scripts/hpc/submit_resolution_delta.sh",
     ]
     return content_hash({str(p.relative_to(root)): sha256(p) for p in paths})
 
@@ -405,6 +408,12 @@ def execute(output, index):
     result_file, fit_file = directory / "result.json", directory / "fit.json"
     if result_file.exists():
         return _checkpoint(result_file, identity)
+    if frozen["plan"]["protocol"] == "fitter-attainability-3" and not task[
+        "arm"
+    ].startswith("fixed"):
+        gate = _checkpoint(output / "preflight.json", frozen["identity"])
+        if not gate.get("pass"):
+            raise ValueError("reference preflight did not pass; optimization blocked")
     record = {
         "identity": identity,
         "task": task,
@@ -485,6 +494,7 @@ def execute(output, index):
                     target,
                     directory / "fixed",
                     config.initializer_seconds,
+                    minimum_intervals=config.collocation_minimum_intervals,
                 )
             else:
                 model = compile_candidate(

@@ -1,0 +1,25 @@
+{
+  "protocol": "fitter-attainability-3",
+  "reference_rollout_seconds": 240,
+  "reference_audit": {},
+  "fit": {
+    "initializer_seconds": 300,
+    "refinement_seconds": 600,
+    "maximum_function_evaluations": 480,
+    "collocation_maximum_iterations": 1000,
+    "collocation_node_start": "rollout_or_observed",
+    "node_warmup_seconds": 5,
+    "least_squares_ftol": null,
+    "collocation_diagnostics": true,
+    "recovery_policy": "feasible",
+    "recovery_handoff": "best_valid",
+    "sensitivity_invalid_trials": "reject",
+    "collocation_assembly": "mapped",
+    "collocation_minimum_intervals": 120,
+    "sensitivity_jacobian_format": "sparse",
+    "recovery_probe_seconds": 60,
+    "recovery_sensitivity_seconds": 180,
+    "recovery_retry_policy": "distinct",
+    "recovery_prioritize_initial": true
+  }
+}

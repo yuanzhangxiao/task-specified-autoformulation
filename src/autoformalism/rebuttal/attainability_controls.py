@@ -194,7 +194,9 @@ def generated_problem(problem, values):
     return result
 
 
-def fixed_state_fit(problem, truth, target, directory, seconds=300):
+def fixed_state_fit(
+    problem, truth, target, directory, seconds=300, minimum_intervals=1
+):
     """Optimize only node states at fixed generating parameters and physical initials.
 
     Start from observed output plus constant hidden initial values, not generating
@@ -207,7 +209,7 @@ def fixed_state_fit(problem, truth, target, directory, seconds=300):
     scale = TrainingScaler().fit(train).scales["target:v01"].standard_deviation
     directory.mkdir(parents=True, exist_ok=True)
     opti, started = ca.Opti(), monotonic()
-    meshes, _ = plan_meshes(system, train, target)
+    meshes, _ = plan_meshes(system, train, target, minimum_intervals=minimum_intervals)
     scaling = []
 
     def seed(row):
@@ -232,6 +234,7 @@ def fixed_state_fit(problem, truth, target, directory, seconds=300):
         started + seconds,
         seed,
         target,
+        minimum_intervals=minimum_intervals,
     )
     opti.minimize(objective)
     records = []

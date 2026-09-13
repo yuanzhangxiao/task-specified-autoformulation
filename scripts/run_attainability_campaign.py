@@ -154,6 +154,14 @@ def summarize(output):
                     error=prerequisite.get("error", prerequisite["status"]),
                 )
         row["retained"] = retained
+        if (
+            row["status"] == "missing"
+            and frozen["plan"]["protocol"] == "fitter-attainability-3"
+            and not task["arm"].startswith("fixed")
+        ):
+            gate_path = output / "preflight.json"
+            if gate_path.exists() and not json.loads(gate_path.read_text()).get("pass"):
+                row["status"] = "blocked_by_preflight"
         rows.append(row)
         fit = row.get("fit") or {}
         fixed = task["arm"].startswith("fixed")
@@ -180,6 +188,10 @@ def summarize(output):
                     {
                         "mode": stage.get("mode"),
                         "source": stage.get("source"),
+                        "error": stage.get("error"),
+                        "evaluation_limit_seconds": stage.get(
+                            "evaluation_limit_seconds"
+                        ),
                         **{
                             k: (stage.get("result") or {}).get(k)
                             for k in (
@@ -276,7 +288,7 @@ def supervised(output, index, generation):
             )
 
 
-def smoke(output):
+def smoke(output, resolution=False):
     """Verify generation, fixed-node fitting and joint fitting on a control."""
     from autoformalism.expressions import ValidationContext, compile_candidate
     from autoformalism.fitting.collocation_sensitivity import (
@@ -323,6 +335,11 @@ def smoke(output):
             recovery_handoff="best_valid",
             sensitivity_invalid_trials="reject",
             least_squares_ftol=None,
+            collocation_target_variables=30 if resolution else None,
+            collocation_minimum_intervals=20 if resolution else 1,
+            sensitivity_jacobian_format="sparse" if resolution else "dense",
+            recovery_retry_policy="distinct" if resolution else "repeat_best",
+            recovery_prioritize_initial=resolution,
         ),
         output / "smoke/joint",
         initial_parameters=ordinary_start(problem),

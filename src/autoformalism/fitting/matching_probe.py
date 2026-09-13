@@ -390,6 +390,7 @@ def latent_start(
     assembly: str = "unrolled",
     target_variables: int | None = None,
     maximum_iterations: int = 150,
+    minimum_intervals: int = 1,
 ) -> dict:
     """Estimate latent trajectories with continuity and the same physical boundary.
 
@@ -489,6 +490,7 @@ def latent_start(
                 seed,
                 target_variables,
                 mesh_substeps,
+                minimum_intervals,
             )
         else:
             for data in training.trajectories:

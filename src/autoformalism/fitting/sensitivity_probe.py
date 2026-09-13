@@ -41,8 +41,11 @@ class SymbolicODE:
 
     model: CompiledModel
     allow_piecewise: bool = False
+    solver_jacobian_format: str = "dense"
 
     def __post_init__(self) -> None:
+        if self.solver_jacobian_format not in {"dense", "sparse"}:
+            raise ValueError("unknown solver Jacobian format")
         candidate = self.model.validated.candidate
         if self.model.validated.context.lagged_targets or candidate.constraints:
             raise SensitivityContractError(
@@ -162,6 +165,10 @@ class SymbolicODE:
             )
         )
         self.audit = {
+            "solver_jacobian_format": self.solver_jacobian_format,
+            "augmented_jacobian_nonzeros": self.augmented_jacobian.sparsity_out(0).nnz()
+            if self.augmented_jacobian is not None
+            else None,
             "parameter_order": self.names,
             "expanded_rhs": str(rhs),
             "expanded_observation": str(obs),
@@ -354,7 +361,12 @@ def symbolic_rollout(
         return result
 
     def jac(t, z):
-        return np.asarray(jac_function(t, z, theta, inputs(t)))
+        value = jac_function(t, z, theta, inputs(t))
+        return (
+            value.sparse()
+            if system.solver_jacobian_format == "sparse"
+            else np.asarray(value)
+        )
 
     for left, right in pairwise(forcing_segment_indices(system.model, trajectory)):
         try:
@@ -426,6 +438,7 @@ class SymbolicOracle(RolloutOracle):
         self.last_x = self.last_jac = None
         self.solver_counts = {"nfev": 0, "njev": 0, "nlu": 0, "segments": 0}
         self.failure_evidence: list[dict] = []
+        self.last_evaluation: dict = {}
 
     def __call__(self, values: np.ndarray) -> np.ndarray:
         self.calls += 1
@@ -496,6 +509,7 @@ class SymbolicOracle(RolloutOracle):
             seconds = monotonic() - started
             self.seconds += seconds
             record["seconds"] = seconds
+            self.last_evaluation = _finite_payload(dict(record))
             if (
                 record.get("status") in {"failed", "timeout"}
                 and len(self.failure_evidence) < 5

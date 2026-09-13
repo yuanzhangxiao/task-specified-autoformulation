@@ -109,9 +109,11 @@ def handoff_starts(oracles, screened: list[dict], ordinary: dict) -> list[dict]:
     return result or [{"source": "ordinary", "parameters": ordinary, "cost": None}]
 
 
-def restart_points(initializer, start: dict, design: list[dict]) -> list[dict]:
+def restart_points(
+    initializer, start: dict, design: list[dict], *, prioritize_initial=False
+) -> list[dict]:
     """Keep bounded collocation checkpoints, the ordinary start and diverse starts."""
-    points = []
+    points = [{"source": "ordinary", "parameters": start}] if prioritize_initial else []
     runs = initializer.get("portfolio", [initializer])
     for run in sorted(runs, key=lambda r: r.get("initializer_objective", float("inf"))):
         if run.get("success") and run.get("parameters"):
@@ -128,12 +130,14 @@ def restart_points(initializer, start: dict, design: list[dict]) -> list[dict]:
                     }
                 )
     points += [{"source": "ordinary", "parameters": start}, *design]
-    seen, unique = set(), []
+    seen, unique = {}, []
     for point in points:
         key = tuple(sorted(point["parameters"].items()))
         if key not in seen:
-            seen.add(key)
-            unique.append(point)
+            seen[key] = {**point, "sources": [point["source"]]}
+            unique.append(seen[key])
+        elif point["source"] not in seen[key]["sources"]:
+            seen[key]["sources"].append(point["source"])
     return unique
 
 
@@ -156,7 +160,12 @@ def recover_refinement(
         started + config.refinement_seconds, config.maximum_function_evaluations
     )
     screen_deadline = started + 0.4 * config.refinement_seconds
-    points = restart_points(initializer, start, design)
+    points = restart_points(
+        initializer,
+        start,
+        design,
+        prioritize_initial=config.recovery_prioritize_initial,
+    )
     screens, stages, oracles, feasible = [], [], [], []
 
     def oracle(path, sensitivities, point_seconds):
@@ -198,24 +207,54 @@ def recover_refinement(
         except (ValueError, TimeoutError) as error:
             row.update(valid=False, error=str(error))
         row["calls"] = primal.calls - before
-        if not row["valid"] and primal.failure_evidence:
-            row["failure"] = primal.failure_evidence[-1]
+        evidence = primal.last_evaluation
+        row["evaluation_status"] = evidence.get("status", "unavailable")
+        row["seconds"] = evidence.get("seconds")
+        if not row["valid"]:
+            row["error"] = row.get("error") or evidence.get("error")
+            row["failure"] = evidence.get("diagnostic")
+        row["evaluation_limit_seconds"] = primal.point_seconds
         screens.append(row)
         write_json(directory / "feasibility_screen.json", _finite_payload(screens))
         # A successfully converged smooth C start should not pay for irrelevant
         # restarts. Failed/poor-C and piecewise cases retain the bounded screen.
-        if row["valid"] and initializer.get("success") and not use_poll:
+        if (
+            row["valid"]
+            and initializer.get("success")
+            and not use_poll
+            and "collocation_converged" in point.get("sources", [point["source"]])
+        ):
             break
     feasible.sort(key=lambda point: point["cost"])
     augmented_failed = False
+    attempted = set()
+    retry_diagnostics = []
     if feasible and not use_poll:
         for index, point in enumerate(feasible[:2]):
             if budget.calls >= budget.maximum or monotonic() >= budget.deadline:
                 break
             if index and config.recovery_handoff == "best_valid":
-                point = handoff_starts(oracles, feasible, start)[0]
+                candidates = handoff_starts(oracles, feasible, start)
+                if config.recovery_retry_policy == "distinct":
+                    candidates = [
+                        p
+                        for p in candidates
+                        if tuple(sorted(p["parameters"].items())) not in attempted
+                    ]
+                if not candidates:
+                    retry_diagnostics.append(
+                        "No distinct evaluated start remains; identical retry skipped"
+                    )
+                    break
+                point = candidates[0]
+            key = tuple(sorted(point["parameters"].items()))
+            if config.recovery_retry_policy == "distinct" and key in attempted:
+                continue
+            attempted.add(key)
             augmented = oracle(
-                f"augmented_{index}", True, max(30.0, config.recovery_probe_seconds)
+                f"augmented_{index}",
+                True,
+                max(config.recovery_sensitivity_seconds, config.recovery_probe_seconds),
             )
 
             def optimizer(fun, x, _augmented=augmented, **kwargs):
@@ -242,6 +281,8 @@ def recover_refinement(
                     {
                         "mode": "sensitivity",
                         "source": point["source"],
+                        "start_parameters": point["parameters"],
+                        "evaluation_limit_seconds": augmented.point_seconds,
                         "error": str(error),
                         "failure_evidence": augmented.failure_evidence,
                         "best_evaluated": augmented.best,
@@ -299,6 +340,7 @@ def recover_refinement(
         "initial_parameters": start,
         "screens": screens,
         "stages": stages,
+        "retry_diagnostics": retry_diagnostics,
         "failure_evidence": [e for o in oracles for e in o.failure_evidence],
         "state_integration_succeeded": any(
             o.best is not None and not o.with_sensitivities for o in oracles
