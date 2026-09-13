@@ -611,3 +611,31 @@ MCTS, pruning and final evaluation. They are not completed by v3.
 ## 13. Paste this into the new chat
 
     Please read docs/REPAIR_FEEDBACK_CHAT_HANDOFF_2026-09-13.md as the handoff for our Autoformalism work. The relevant implementation is commit 9013e84f1f5a741c934a4fef4b19f6facd05acfe on codex/repair-feedback-evidence-v3, not the older dirty main checkout. Both v3 ACES arms have been submitted: preparation/GPU 2122762/2122763 without judge and 2122911/2122912 with judge, under /scratch/user/u.yx126462/phase_b/repair-feedback-split-v3-9013e84. First check status/results; do not resubmit or alter frozen runs. Preserve the fitter and judge rubric for this comparison, coordinate fitting findings with Astra's existing task, and give all shell commands on one physical line.
+
+## 14. Coordination update received after the initial handoff
+
+Astra subsequently reported the fitter milestone as **pushed**, superseding
+section 7's pending-implementation status:
+
+- Commit: 25a79f9dfad1505adc271ca7b4dfaa370ad215fb
+- Branch: codex/fitter-resolution-sensitivity-v3
+- Documentation: docs/FITTER_RESOLUTION_SENSITIVITY.md
+- Configuration: configs/fitter_resolution_v3.json
+
+The opt-in changes preserve sparse CasADi augmented Jacobians for Radau/BDF;
+enforce a per-trajectory collocation resolution floor before distributing the
+soft global node budget; preserve original-start aliases and valid handoff
+points; avoid retrying identical sensitivity starting vectors with the same
+allowance; record actual screening errors; and allow longer individual
+evaluations within the unchanged total fitting budget.
+
+Astra reported 1,385 full-suite tests passed with three optional Torch skips,
+plus focused checks, Ruff, numerical smoke/resume and mocked Slurm dependency
+tests. These are Astra's reported checks of that fitter checkout, not replacements
+for section 6's verification of 9013e84.
+
+The user is to run the gated CPU campaign on Delta. No Delta job IDs or campaign
+results were supplied in this update. No proposer changes are requested now.
+Keep private reference controls and their artifacts isolated from proposer/judge
+feedback. The active ACES v3 arms remain pinned to 9013e84; this update does not
+authorize merging the new fitter into them or resubmitting them.
