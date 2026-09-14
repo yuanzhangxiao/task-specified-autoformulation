@@ -117,7 +117,8 @@ complete preflight log and exit status.
 
 Correction verification: 32 focused tests passed; the full suite passed 1,595
 tests with three optional Torch skips in 524.78 seconds. Ruff, shell checks, and
-both fitting-free smokes passed. The corrected real ACES replay remains to be run.
+both fitting-free smokes passed. The subsequently completed real ACES replay and
+matched-feedback results are in [PREFIT_FEEDBACK_RESULTS_2026-09-14.md](PREFIT_FEEDBACK_RESULTS_2026-09-14.md).
 
 Use a new detached checkout named `autoformalism-prefit-feedback-v1-fix1` and a new
 output root named `prefit-feedback-v1-fix1` for this correction. Preserve the old
