@@ -9,6 +9,9 @@ Read these files before making architectural changes:
 
 ## General rules
 
+- Edit implementation files in the user's project checkout, not temporary worktrees.
+- Preserve unrelated local edits. Commit and push completed changes without
+  additional confirmation, subject to tool-enforced permissions.
 - Work incrementally.
 - Implement one milestone at a time.
 - Run tests after every meaningful change.

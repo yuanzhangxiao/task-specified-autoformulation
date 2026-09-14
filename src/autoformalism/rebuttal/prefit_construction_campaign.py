@@ -128,6 +128,8 @@ def launcher_hash() -> str:
     names = (
         "scripts/prefit_construction_campaign.py",
         "scripts/hpc/run_staged_topology_server.sh",
+        "scripts/hpc/run_prefit_construction_aces.sh",
+        "scripts/hpc/submit_prefit_construction_aces.sh",
     )
     return content_hash(
         {name: hashlib.sha256((repo / name).read_bytes()).hexdigest() for name in names}

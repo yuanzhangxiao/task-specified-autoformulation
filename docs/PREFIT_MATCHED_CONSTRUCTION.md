@@ -102,6 +102,56 @@ Ruff, shell checks and the repeated real CPU smoke passed after that correction.
 
 ## Bounded public run
 
+The ACES launcher `scripts/hpc/submit_prefit_construction_aces.sh` now freezes
+the plan and queues CPU preparation (one hour), construction on one H100
+(four-hour allocation, three-hour worker), and CPU fitting (two hours).
+Preparation runs the relevant tests and real synthetic smoke, verifies the SIF,
+and ensures the pinned 20B model is cached. Construction depends on successful
+preparation. CPU fitting runs after construction terminates, including after an
+interrupted GPU allocation, so completed models remain evaluable.
+
+In an ACES shell, create a clean experiment checkout from the pushed branch:
+
+```bash
+git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 fetch origin codex/prefit-aces-v1 && git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 worktree add --detach /scratch/user/u.yx126462/repos/autoformalism-prefit-aces-v1 FETCH_HEAD
+AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-prefit-aces-v1 AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/prefit-training-evidence-v1 bash /scratch/user/u.yx126462/repos/autoformalism-prefit-aces-v1/scripts/hpc/submit_prefit_construction_aces.sh
+cat /scratch/user/u.yx126462/phase_b/prefit-training-evidence-v1/submission_manifest.json
+squeue -u u.yx126462 -o '%.18i %.18j %.10T %.10M %.30R'
+```
+
+The launch defaults to the established project Python environment and the
+public-only snapshot under
+`/scratch/user/u.yx126462/phase_b/staged-fitter-rescue-v1-c1754fe/frozen/public`.
+It validates the required files and exact public prompt hashes. Override
+`AF_PUBLIC_ROOT` or `AF_PYTHON` explicitly if those installations have moved.
+No current queue state was verified from the local agent: ACES SSH authentication
+was unavailable. These commands are intended for the user's authenticated shell.
+
+After the workers finish, inspect the paired metrics and all failures:
+
+```bash
+module load GCCcore/13.2.0 Python/3.11.5 && PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-aces-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-aces-v1/scripts/prefit_construction_campaign.py summary --root /scratch/user/u.yx126462/phase_b/prefit-training-evidence-v1
+```
+
+Repeating the ordinary launch command prints the existing submission manifest.
+If the summary is partial, resume only after the prior jobs have terminated:
+
+```bash
+AF_RESUME=1 AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-prefit-aces-v1 AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/prefit-training-evidence-v1 bash /scratch/user/u.yx126462/repos/autoformalism-prefit-aces-v1/scripts/hpc/submit_prefit_construction_aces.sh
+```
+
+Resume checks scheduler/accounting state and retains completed work and spent
+budgets. It submits only CPU fitting if all construction is already terminal.
+It submits nothing when all fits are terminal. A failed or ambiguous submission
+leaves an intent directory and returned job IDs; inspect those records and the
+queue before resolving it. Failed preparation can leave a GPU dependency queued;
+inspect that failure and its dependencies before resubmitting. Do not remove an
+intent simply to force another submission.
+
+The local project checkout now contains these changes on `codex/prefit-aces-v1`.
+Existing unrelated local edits were preserved. Future implementation edits use
+the project checkout; the clean ACES checkout above is a pinned experiment copy.
+
 Set `AF_REPO_ROOT` to a clean checkout of this milestone, `AF_PYTHON` to the
 project Python environment, `AF_PUBLIC_ROOT` to the existing public root containing
 `phase_b_v1/<cell>/`, and `AF_OUTPUT_ROOT` to a new experiment directory. Do not
