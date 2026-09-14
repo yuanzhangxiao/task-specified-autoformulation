@@ -407,6 +407,8 @@ def latent_start(
     target_variables: int | None = None,
     maximum_iterations: int = 150,
     minimum_intervals: int = 1,
+    hessian_approximation: str = "auto",
+    solver_log: bool = False,
 ) -> dict:
     """Estimate latent trajectories with continuity and the same physical boundary.
 
@@ -416,6 +418,15 @@ def latent_start(
     """
     if method not in {"shooting_init", "collocation_init"}:
         raise ValueError("unknown latent initialization method")
+    if hessian_approximation not in {"auto", "exact", "limited-memory"}:
+        raise ValueError("unknown Hessian approximation")
+    if system.requires_first_order_solver and hessian_approximation == "exact":
+        raise ValueError("piecewise collocation requires a first-order Hessian policy")
+    hessian = (
+        ("limited-memory" if system.requires_first_order_solver else "exact")
+        if hessian_approximation == "auto"
+        else hessian_approximation
+    )
     if not isinstance(mesh_substeps, int) or not 1 <= mesh_substeps <= 8:
         raise ValueError("collocation mesh substeps must be an integer from 1 to 8")
     if method != "collocation_init" and mesh_substeps != 1:
@@ -624,16 +635,15 @@ def latent_start(
         remaining = max(0.001, deadline - monotonic())
         opti.solver(
             "ipopt",
-            {"print_time": False},
+            {"print_time": solver_log},
             {
-                "print_level": 0,
+                "print_level": 5 if solver_log else 0,
                 "sb": "yes",
                 "max_iter": maximum_iterations,
                 "max_cpu_time": remaining,
                 "tol": 1e-7,
-                "hessian_approximation": (
-                    "limited-memory" if system.requires_first_order_solver else "exact"
-                ),
+                "hessian_approximation": hessian,
+                **({"print_timing_statistics": "yes"} if solver_log else {}),
             },
         )
         optimizer_started = True
@@ -645,7 +655,11 @@ def latent_start(
                 "optimizer_started": True,
             },
         )
-        phase.update(phase="solver", solver_started_seconds=monotonic() - started)
+        phase.update(
+            phase="solver",
+            solver_started_seconds=monotonic() - started,
+            hessian_approximation=hessian,
+        )
         write_json(phase_path, phase)
         solved = opti.solve()
         if progress is not None:
@@ -681,9 +695,7 @@ def latent_start(
             "initial_conditions_optimized": bool(system.initial_parameter_names)
             and optimizer_started,
             "initial_parameter_names": system.initial_parameter_names,
-            "hessian_approximation": (
-                "limited-memory" if system.requires_first_order_solver else "exact"
-            ),
+            "hessian_approximation": hessian,
             "node_start": node_start,
             "node_initialization": guesses,
             "collocation_optimizer_started": optimizer_started

@@ -90,6 +90,8 @@ class CollocationSensitivityConfig(StrictSchema):
     collocation_assembly: Literal["unrolled", "mapped"] = "unrolled"
     collocation_target_variables: int | None = Field(default=None, ge=20, le=1000000)
     collocation_maximum_iterations: int = Field(default=150, ge=1, le=3000)
+    collocation_hessian: Literal["auto", "exact", "limited-memory"] = "auto"
+    collocation_solver_log: bool = False
     collocation_minimum_intervals: int = Field(default=1, ge=1, le=10000)
     defer_production_replay: bool = False
 
@@ -275,6 +277,8 @@ def fit_collocation_forward_sensitivity(
             target_variables=config.collocation_target_variables,
             maximum_iterations=config.collocation_maximum_iterations,
             minimum_intervals=config.collocation_minimum_intervals,
+            hessian_approximation=config.collocation_hessian,
+            solver_log=config.collocation_solver_log,
         )
         primary = dict(initializer)
         portfolio = [primary]
@@ -310,6 +314,8 @@ def fit_collocation_forward_sensitivity(
                     target_variables=config.collocation_target_variables,
                     maximum_iterations=config.collocation_maximum_iterations,
                     minimum_intervals=config.collocation_minimum_intervals,
+                    hessian_approximation=config.collocation_hessian,
+                    solver_log=config.collocation_solver_log,
                 )
                 attempt["start_source"] = point["source"]
                 portfolio.append(attempt)
