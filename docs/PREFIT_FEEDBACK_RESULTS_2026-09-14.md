@@ -116,3 +116,10 @@ small historical subset, and the strong error-text performance leaves little
 room for improvement on this subset. This result does not establish scientific
 quality, whole-model construction gains, or a benefit from redesigned routing.
 No new experiment or production-policy change accompanies these result notes.
+
+Subsequent user clarification: equation type belongs to the topology schema and
+expression fields should contain only the RHS. The follow-up therefore removes
+assignment suggestions from initializer prompts and feedback, retains the existing
+normalizer without expanding aliases, and enforces preservation of valid inputs
+without proposer calls. See [the updated contract](PREFIT_FEEDBACK_PILOT.md#rhs-only-proposer-contract).
+Those changes do not revise any measured result above.

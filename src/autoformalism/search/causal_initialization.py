@@ -52,7 +52,8 @@ class MappedBoundary(StrictSchema):
         min_length=1,
         max_length=4096,
         description=(
-            "Scalar RHS for the selected state's initial value, not its derivative."
+            "Scalar RHS only for the selected state's initial value. "
+            "No assignment, left-hand side, or derivative."
         ),
     )
     parameters: tuple[FunctionParameter, ...] = Field(default=(), max_length=32)
@@ -79,9 +80,11 @@ Different unexplained responses need not be resolvable by a causal point initial
 Zero input alone does not imply zero latent state. Directly measured state initials
 are runtime-bound to their own first measurements and are not part of this call.
 The requested quantity is the selected state's initial value, not its derivative
-or an algebraic law for every time. Prefer a scalar RHS expression. A single
-assignment to the selected state name (or its unoccupied name_0 alias) is accepted
-as initial-value notation; it cannot change the frozen differential topology.
+or an algebraic law for every time. For causal_map, put only the scalar RHS in
+expression, for example "a + b*u01" with a and b declared as parameters when
+u01 is allowed. Do not include an assignment, left-hand side, or derivative.
+The selected state and its differential definition are already fixed by topology;
+this call chooses only its initialization policy, not its equation type or dynamics.
 Use +, -, *, /, integer-literal ** (absolute exponent at most 16), abs, exp, log,
 sigmoid, softplus, sqrt, tanh, min or max in the restricted scalar grammar. No
 indexing, attributes, arbitrary calls, future values or other generated states.
@@ -107,9 +110,9 @@ def _normalize_choice(
     if alias not in reserved | {p.name for p in choice.initial.parameters}:
         targets.add(alias)
     guidance = (
-        f"This call sets only the initial value of {state}. Supply its scalar RHS "
-        f"or one assignment to {', '.join(sorted(targets))}. A derivative or "
-        "algebraic topology change requires a different stage. Preserve the intended "
+        f"This call sets only the initial value of {state}. Supply only its scalar "
+        "RHS in expression, without an assignment, left-hand side, or derivative. "
+        "The state and equation type are already fixed. Preserve the intended "
         "RHS formula when correcting notation."
     )
     try:

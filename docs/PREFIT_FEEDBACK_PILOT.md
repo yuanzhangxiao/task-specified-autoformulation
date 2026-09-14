@@ -44,12 +44,14 @@ or live LLM call and does not modify benchmark assets.
 controls from the replay, with identical source contexts, normalization, response
 schemas, model settings, seeds and budgets in both arms. The treatment is the
 feedback payload: ordinary error text versus named diagnostics with explicit scope
-and syntax facts. The common instruction asks both arms to preserve a valid
-response. Neither arm receives a runtime-invented replacement formula.
+and syntax facts. Both arms repair only invalid slots. Under the frozen
+`preserve-valid-slots-1` policy, valid controls are retained by the runtime without
+a proposer call. Neither arm receives a runtime-invented replacement formula.
 
 `configs/prefit_matched_feedback_v1.json` selects at most eight invalid slots and
 four valid controls, three seeds, two arms, and three attempts per episode:
-at most 72 episodes and 216 physical requests. Selection uses one failed response
+at most 72 episodes: 48 repair episodes with at most 144 physical requests, plus
+24 preservation controls with zero calls. Selection uses one failed response
 per historical task/component, ordered by original attempt then case hash, with
 round-robin coverage of component kind and first diagnostic code. A slot with any
 saved invalid response cannot also be a valid control. Controls are selected by
@@ -72,11 +74,42 @@ episode. Terminal failures remain terminal instead of receiving a new budget.
 Reports separate invalid-case repair from valid controls. They include first-call
 and eventual validity, repeated baseline codes, newly observed violation codes,
 physical calls, observed tokens, unknown usage, budget charges and provider time.
-Control changes compare the final accepted canonical structure with its original;
-intermediate violations and failed controls have separate counts. This is not a
-general symbolic-equivalence test. New codes are an operational indicator, not
-proof that every new defect was identified. Paired outcomes are also reported for
-each case/seed. Repeated seeds are not independent scientific tasks.
+`preserved_without_call` records runtime retention separately from
+`first_attempt_valid`; a preserved control has zero attempts and zero provider
+cost. The final diagnosis and canonical structure are the frozen baseline,
+including its parameters. This is a runtime guarantee, not evidence of proposer
+repair skill. New codes are an operational indicator, not proof that every new
+defect was identified. Paired repair outcomes are reported for each case/seed.
+Repeated seeds are not independent scientific tasks.
+
+The completed ACES pilot predates this policy and deliberately sent valid controls
+to the model. Its observed control changes and repair rates remain recorded in
+[the results report](PREFIT_FEEDBACK_RESULTS_2026-09-14.md). Existing plans without
+the preservation policy are rejected by the current runner. Read those results
+using their pinned checkout; create a fresh replay and campaign root for this
+policy. Do not combine preserved controls with the earlier model-reviewed controls.
+
+### RHS-only proposer contract
+
+The topology stage declares each variable's differential or algebraic definition.
+The function stage supplies only the scalar RHS contribution and parameter roles;
+it does not repeat that type or write an equation LHS. The causal-initializer
+stage likewise supplies its initialization mode and, for a causal map, only the
+initial-value RHS and parameter roles. It cannot change the selected state's
+dynamics or equation type.
+
+Initializer prompts, schema descriptions and rejection guidance now request only
+the RHS. They no longer suggest writing `x = ...` or `x_0 = ...`. The existing
+runtime adapter still accepts those unambiguous matching wrappers, logs their
+normalization and validates the RHS. This compatibility behavior does not require
+or encourage equation notation, infer a new equation type, or add new aliases.
+
+The production function constructor already repairs only invalid batch slots,
+retaining accepted siblings. The initializer constructor similarly retains
+accepted initializers across failures and checkpoint resume. The local feedback
+experiment now also retains a valid selected slot without asking the proposer to
+reconsider its expression or parameters. Separate scientific revision remains a
+different decision from deterministic repair.
 
 Routing, scientific judging and new full-model construction are later milestones.
 These two experiments can establish normalization coverage and local deterministic
@@ -89,11 +122,20 @@ identity initializers remain scientifically unassessed.
 The two implementation modules are `rebuttal/prefit_replay.py` and
 `rebuttal/prefit_feedback.py`. Each has a standalone CLI and a synthetic smoke.
 The ACES config and two new shell wrappers reuse the shared model-server launcher;
-the only shared-launcher changes select and verify the new protocol. No production
-constructor, fitter, judge, benchmark table or finalized benchmark prompt changes
-are needed by this pilot.
+the shared-launcher changes select and verify the experiment protocol. The RHS-only
+clarification updates the initializer's runtime prompt, schema description and
+diagnostic guidance. The fitter, judge, benchmark tables and finalized benchmark
+prompts are unchanged.
 
-The focused replay, feedback and old/new ACES submission checks passed 36 tests.
+The RHS-only and valid-slot preservation update passed the full suite: 1,601 tests
+passed with three optional Torch skips in 454.50 seconds. Ruff and all three
+relevant smokes (feedback, historical replay and causal initialization) passed.
+The feedback smoke retained eight valid controls with zero calls and zero changes,
+and completed four synthetic repairs. Resume and accepted-initializer preservation
+are covered. No live proposer improvement is inferred from these offline checks.
+
+For the initial pilot, the focused replay, feedback and old/new ACES submission
+checks passed 36 tests.
 The full suite passed 1,590 tests with three optional Torch skips in 457.42 seconds;
 Ruff and shell syntax/dispatch checks passed.
 Both new fitting-free smokes passed, including exact terminal resume. The existing
@@ -129,13 +171,15 @@ budgets are unchanged.
 
 ## ACES commands
 
-Run each command as one physical line. The following creates a detached experiment
-checkout from the pushed branch. The submission manifest records its exact commit.
+These commands use fresh preservation-policy roots and do not resume the completed
+`prefit-feedback-v1-fix1` experiment. Run each command as one physical line. The
+following creates a detached experiment checkout from the pushed branch. The
+submission manifest records its exact commit.
 Use a new checkout/output name for a later implementation version; do not update a
 checkout supporting an unfinished frozen campaign.
 
 ```bash
-git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 fetch origin codex/prefit-aces-v1 && git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 worktree add --detach /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1 FETCH_HEAD
+git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 fetch origin codex/prefit-aces-v1 && git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 worktree add --detach /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1 FETCH_HEAD
 ```
 
 Submit the CPU preparation followed by one H100 job. Preparation runs the new
@@ -145,7 +189,7 @@ No numerical fit job is submitted. All logs, pytest temporary files and results
 use scratch; pytest's home-directory cache is disabled.
 
 ```bash
-AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1 AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/prefit-feedback-v1 bash /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/scripts/hpc/submit_prefit_feedback_aces.sh
+AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1 AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/prefit-feedback-preserve-v1 bash /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/scripts/hpc/submit_prefit_feedback_aces.sh
 ```
 
 Repeating this command prints the existing submission manifest without new jobs.
@@ -158,17 +202,17 @@ blocked dependency rather than manufacturing a live experiment.
 Read the replay counts and selected cases after CPU preparation:
 
 ```bash
-jq '{counts, limitation}' /scratch/user/u.yx126462/phase_b/prefit-feedback-v1/replay.json
+jq '{counts, limitation}' /scratch/user/u.yx126462/phase_b/prefit-feedback-preserve-v1/replay.json
 ```
 
 ```bash
-cat /scratch/user/u.yx126462/phase_b/prefit-feedback-v1/runtime/selected-cases.json
+cat /scratch/user/u.yx126462/phase_b/prefit-feedback-preserve-v1/runtime/selected-cases.json
 ```
 
 Read live/terminal results with the exact Python environment and source path:
 
 ```bash
-module load GCCcore/13.2.0 Python/3.11.5 && PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/scripts/prefit_feedback_campaign.py summary --root /scratch/user/u.yx126462/phase_b/prefit-feedback-v1
+module load GCCcore/13.2.0 Python/3.11.5 && PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/scripts/prefit_feedback_campaign.py summary --root /scratch/user/u.yx126462/phase_b/prefit-feedback-preserve-v1
 ```
 
 The CLI prints cohort counts and paired outcomes; `summary.json` includes all
@@ -181,7 +225,7 @@ If the GPU job ended with pending episodes, this command verifies unchanged
 provenance and terminal scheduler state before resuming only the GPU stage:
 
 ```bash
-AF_RESUME=1 AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1 AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/prefit-feedback-v1 bash /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/scripts/hpc/submit_prefit_feedback_aces.sh
+AF_RESUME=1 AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1 AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/prefit-feedback-preserve-v1 bash /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/scripts/hpc/submit_prefit_feedback_aces.sh
 ```
 
 An ambiguous scheduler submission leaves an intent record under `submissions/`
@@ -191,13 +235,13 @@ resolving such an interruption.
 To run just the fitting-free tests and smokes independently on ACES:
 
 ```bash
-module load GCCcore/13.2.0 Python/3.11.5 && cd /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1 && TMPDIR=/scratch/user/u.yx126462 PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_prefit_replay.py tests/test_prefit_feedback.py tests/test_prefit_feedback_submission.py
+module load GCCcore/13.2.0 Python/3.11.5 && cd /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1 && TMPDIR=/scratch/user/u.yx126462 PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_prefit_replay.py tests/test_prefit_feedback.py tests/test_prefit_feedback_submission.py tests/test_causal_initialization_construction.py tests/test_staged_function_runner.py
 ```
 
 ```bash
-module load GCCcore/13.2.0 Python/3.11.5 && TMPDIR=/scratch/user/u.yx126462 PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/scripts/smoke_prefit_replay.py
+module load GCCcore/13.2.0 Python/3.11.5 && TMPDIR=/scratch/user/u.yx126462 PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/scripts/smoke_prefit_replay.py
 ```
 
 ```bash
-module load GCCcore/13.2.0 Python/3.11.5 && TMPDIR=/scratch/user/u.yx126462 PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-v1/scripts/smoke_prefit_feedback.py
+module load GCCcore/13.2.0 Python/3.11.5 && TMPDIR=/scratch/user/u.yx126462 PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-feedback-preserve-v1/scripts/smoke_prefit_feedback.py
 ```

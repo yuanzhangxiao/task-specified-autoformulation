@@ -36,7 +36,7 @@ def synthetic_plan(root: Path) -> dict:
 
 
 def synthetic_transport(calls: list):
-    """Repair only the prescribed missing-source defect; preserve valid controls."""
+    """Repair only the prescribed missing-source defect; valid inputs never call."""
 
     def transport(url, body, timeout):
         calls.append(body)
@@ -100,10 +100,17 @@ def main() -> None:
         for arm in report["arms"].values():
             assert arm["repair"]["valid_final"] == arm["repair"]["expected"]
             assert arm["valid_control"]["valid_control_changed"] == 0
+            assert (
+                arm["valid_control"]["preserved_without_call"]
+                == (arm["valid_control"]["expected"])
+            )
+            assert arm["valid_control"]["physical_requests"] == 0
+            assert arm["valid_control"]["first_attempt_valid"] == 0
         print(
             json.dumps(
                 {
                     "status": "pass",
+                    "valid_slot_policy": report["valid_slot_policy"],
                     "episodes": len(plan["tasks"]),
                     "arms": report["arms"],
                     "exact_resume": True,

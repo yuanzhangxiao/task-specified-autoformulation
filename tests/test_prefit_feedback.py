@@ -95,6 +95,9 @@ def test_resume_costs_and_summary_keep_control_denominator_separate(frozen):
         assert result["arms"][arm]["repair"]["valid_final"] == 2
         assert result["arms"][arm]["valid_control"]["expected"] == 4
         assert result["arms"][arm]["valid_control"]["valid_control_changed"] == 0
+        assert result["arms"][arm]["valid_control"]["preserved_without_call"] == 4
+        assert result["arms"][arm]["valid_control"]["first_attempt_valid"] == 0
+        assert result["arms"][arm]["valid_control"]["physical_requests"] == 0
     assert sum(r["physical_requests"] for r in result["rows"]) == len(calls)
 
 
@@ -244,54 +247,49 @@ def test_structured_feedback_contains_facts_not_a_replacement_formula(frozen):
     assert payload["feedback"]["scientific_status"] == "not_assessed"
 
 
-def test_valid_control_can_acquire_a_violation_and_change_after_repair(frozen):
+@pytest.mark.parametrize("kind", ["initializer", "function"])
+@pytest.mark.parametrize("arm", feedback.ARMS)
+def test_valid_slots_are_preserved_without_consulting_proposer(frozen, kind, arm):
     root, plan = frozen
     entry = next(
         e
         for e in plan["selected"]
-        if e["cohort"] == "valid_control" and e["case"]["kind"] == "initializer"
+        if e["cohort"] == "valid_control" and e["case"]["kind"] == kind
     )
-    task = next(t for t in plan["tasks"] if t["case_id"] == entry["case"]["case_id"])
-    client = client_for(root, plan, task, [])
-    replies = iter(
-        [
-            {
-                "initial": {
-                    "mode": "causal_map",
-                    "expression": "future",
-                    "parameters": [],
-                }
-            },
-            {
-                "initial": {
-                    "mode": "causal_map",
-                    "expression": "2*v01",
-                    "parameters": [],
-                }
-            },
-        ]
+    task = next(
+        t
+        for t in plan["tasks"]
+        if t["case_id"] == entry["case"]["case_id"] and t["arm"] == arm
     )
+    # Even an unavailable provider must not block retention of a valid slot.
+    client = client_for(root, plan, task, [], can_start=lambda: False)
 
-    def transport(*args):
-        return {
-            "choices": [
-                {
-                    "finish_reason": "stop",
-                    "message": {
-                        "content": json.dumps(next(replies)),
-                    },
-                }
-            ],
-            "usage": {"total_tokens": 100},
-        }
+    def forbidden(**kwargs):
+        pytest.fail("valid slots must not be sent to the proposer")
 
-    client.transport = transport
-    assert feedback.run_episode(root, plan, task, client)["final"]["valid"]
+    client.call = forbidden
+    first = feedback.run_episode(root, plan, task, client)
+    assert first["final"] == entry["baseline"]
+    assert first["attempts"] == []
+    assert first["stop_reason"] == "preserved_valid_input"
+    assert feedback.run_episode(root, plan, task, client) == first
+    assert not list(client.directory.glob("*.json"))
     row = next(
         r for r in feedback.summarize(root)["rows"] if r["task_id"] == task["task_id"]
     )
-    assert row["valid_control_changed"] and row["valid_final"]
-    assert not row["first_attempt_valid"] and row["new_violation_evaluations"] == 1
+    assert row["valid_final"] and row["preserved_without_call"]
+    assert not row["valid_control_changed"] and not row["first_attempt_valid"]
+    assert row["physical_requests"] == row["budget_charge"] == 0
+    assert row["new_violation_evaluations"] == 0
+
+
+def test_old_valid_slot_policy_cannot_be_silently_resumed(frozen):
+    root, plan = frozen
+    task = plan["tasks"][0]
+    old = copy.deepcopy(plan)
+    old.pop("valid_slot_policy")
+    with pytest.raises(ValueError, match="valid-slot policy differs"):
+        feedback.run_episode(root, old, task, client_for(root, old, task, []))
 
 
 def test_modified_inference_settings_require_a_separate_experiment(frozen):

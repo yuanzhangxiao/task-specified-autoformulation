@@ -9,7 +9,11 @@ import pytest
 
 from autoformalism.expressions import ValidationContext
 from autoformalism.fitting.simulation import trajectory_initial_state
-from autoformalism.llm.staged_topology import StagedModelSettings, StagedTopologyClient
+from autoformalism.llm.staged_topology import (
+    DeferredCall,
+    StagedModelSettings,
+    StagedTopologyClient,
+)
 from autoformalism.rebuttal.initialization_campaign import synthetic_problem
 from autoformalism.rebuttal.piecewise_campaign import unpack_split
 from autoformalism.rebuttal.staged_function_campaign import function_diagnostic
@@ -123,6 +127,47 @@ def test_exhaustion_does_not_reset_attempt_budget(tmp_path):
     assert len(requests) == 3
 
 
+def test_repairing_second_initializer_preserves_first_across_resume(tmp_path):
+    bad = {"initial": {"mode": "causal_map", "expression": "future", "parameters": []}}
+    candidate, context, client, requests, _ = setup(tmp_path, [MAP, bad])
+    data = candidate.model_dump(mode="json")
+    data["states"].append({"name": "z", "kind": "latent"})
+    data["state_equations"].append({"state": "z", "rhs": "-z"})
+    data["initial_conditions"].append(
+        {"state": "z", "scope": "global", "fixed_value": 0.0}
+    )
+    candidate = CandidateModel.model_validate(data)
+    client.can_start = lambda: len(requests) < 2
+    with pytest.raises(DeferredCall):
+        construct_initializers(candidate, context, {}, client, tmp_path / "result")
+    checkpoint = json.loads((tmp_path / "result/state.json").read_text())
+    accepted = copy.deepcopy(checkpoint["rules"]["m"])
+    assert checkpoint["choices"]["m"] == MAP
+    repaired = {
+        "initial": {"mode": "causal_map", "expression": "2*v01", "parameters": []}
+    }
+    _, _, resumed, new_requests, _ = setup(tmp_path, [repaired])
+    result = construct_initializers(
+        candidate, context, {}, resumed, tmp_path / "result"
+    )
+    assert result["plan"]["rules"]["m"] == accepted
+    assert result["plan"]["rules"]["z"]["initial"]["expression"] == "2*v01"
+    assert [r["selected_state"]["name"] for r in requests + new_requests] == [
+        "m",
+        "z",
+        "z",
+    ]
+    assert new_requests[0]["accepted_initializers"] == {"m": MAP}
+    assert result["candidate"]["state_equations"] == candidate.model_dump(mode="json")[
+        "state_equations"
+    ]
+    assert (
+        construct_initializers(candidate, context, {}, resumed, tmp_path / "result")
+        == result
+    )
+    assert len(new_requests) == 1
+
+
 @pytest.mark.parametrize("lhs", ["m", "m_0"])
 @pytest.mark.parametrize("rhs", ["a+b*v01", "(a +\n b*v01)"])
 def test_matching_assignment_preserves_formula_and_cached_resume(tmp_path, lhs, rhs):
@@ -178,6 +223,7 @@ def test_matching_assignment_preserves_formula_and_cached_resume(tmp_path, lhs, 
 @pytest.mark.parametrize(
     "expression, code",
     [
+        ("m0 = a+b*v01", "INITIALIZER_ASSIGNMENT_TARGET"),
         ("y = a+b*v01", "INITIALIZER_ASSIGNMENT_TARGET"),
         ("dm_dt = a+b*v01", "INITIALIZER_ASSIGNMENT_TARGET"),
         ("d(m)/dt = a+b*v01", "INITIALIZER_ASSIGNMENT_SYNTAX"),
@@ -202,6 +248,8 @@ def test_ambiguous_assignment_gets_actionable_feedback(tmp_path, expression, cod
     assert code in feedback["error"]
     assert "initial value of m" in feedback["error"]
     assert "Preserve the intended RHS formula" in feedback["error"]
+    assert "without an assignment, left-hand side, or derivative" in feedback["error"]
+    assert "or one assignment" not in feedback["error"]
     assert "normalization" not in feedback
 
 

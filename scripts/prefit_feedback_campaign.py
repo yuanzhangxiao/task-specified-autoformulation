@@ -30,9 +30,12 @@ def main() -> None:
         plan = freeze(args.corpus, args.config, args.output)
         result = {
             "plan_sha256": plan["artifact_sha256"],
+            "valid_slot_policy": plan["valid_slot_policy"],
             "cases": len(plan["selected"]),
             "episodes": len(plan["tasks"]),
-            "maximum_provider_calls": len(plan["tasks"])
+            "maximum_provider_calls": sum(
+                t["cohort"] == "repair" for t in plan["tasks"]
+            )
             * plan["config"]["model_settings"]["attempts_per_step"],
         }
     elif args.command == "verify":
