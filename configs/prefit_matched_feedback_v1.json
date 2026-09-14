@@ -1,0 +1,22 @@
+{
+  "protocol": "prefit-matched-feedback-1",
+  "platform": "aces-h100x1",
+  "serving_image_sha256": "9c56389af06cafbf4aa8bd825393f606ac7f2a18e1a700c5999b1ed47f7f9c1e",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 3,
+    "maximum_total_tokens": 262144,
+    "attempts_per_step": 3
+  },
+  "seeds": [0, 1, 2],
+  "maximum_failure_cases": 8,
+  "maximum_valid_controls": 4,
+  "served_context_tokens": 32768,
+  "wall_seconds": 10800,
+  "shutdown_margin_seconds": 300
+}

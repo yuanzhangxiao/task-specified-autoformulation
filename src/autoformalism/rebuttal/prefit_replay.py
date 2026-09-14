@@ -45,11 +45,13 @@ from autoformalism.search.causal_initialization import (
     _normalize_choice,
     _rule,
 )
+from autoformalism.search.staged_function_runner import _selected_term
 from autoformalism.staged_functions import (
     bind_function_reply,
     repair_certified_outer_gain_role,
 )
 from autoformalism.staged_topology import content_hash, lower_topology
+from autoformalism.staging import topology_commitment_sha256
 
 PROTOCOL = "prefit-response-replay-1"
 
@@ -131,20 +133,76 @@ def _brief_without_packet(payload: dict) -> dict:
 
 def diagnose(case: ReplayCase, reply: Any, *, normalize: bool = True) -> Diagnosis:
     """Apply production slot validators without fitting or advancing history."""
+    # Historical parent failures are experiment errors, never proposer diagnoses.
+    typed_request = {
+        **case.public_request,
+        "public_brief": _brief_without_packet(case.public_request["public_brief"]),
+    }
+    topology, aliases = _topology(
+        case.model_copy(update={"public_request": typed_request})
+    )
+    draft = FunctionalDraft.model_validate(case.draft)
+    if draft.topology_commitment_sha256 != topology_commitment_sha256(topology):
+        raise ValueError("captured draft belongs to a different topology")
+    if case.kind == "function":
+        selected = case.selected_term
+        if selected is None or not re.fullmatch(
+            r"term_\d+_\d+", case.selected_id or ""
+        ):
+            raise ValueError("missing selected function slot")
+        equation_index, term_index = map(int, case.selected_id.split("_")[1:])
+        equation = EquationDefinition.model_validate(
+            case.source_topology["equations"][equation_index]
+        )
+        obligation = InteractionFunctionObligation.model_validate(
+            selected["functional_obligation"]
+        )
+        expected = _selected_term(
+            equation,
+            equation.terms[term_index],
+            parameter_identity_policy=obligation.parameter_identity_policy,
+        )
+        if any(selected.get(k) != v for k, v in expected.items()):
+            raise ValueError("captured function slot differs from source equations")
+        for field, source_field in (
+            ("frozen_inventory", "inventory"),
+            ("frozen_equation_sketch", "equations"),
+        ):
+            if case.public_request[field] != case.source_topology[source_field]:
+                raise ValueError("captured public function context differs")
+    else:
+        base = finalize_functional_draft(topology, draft, case.context).candidate
+        model = compile_candidate(base, case.context)
+        if case.component not in set(model.state_names) - set(
+            model.direct_state_observation_channels
+        ):
+            raise ValueError("initializer must select a latent state")
+        expected_rhs = next(
+            e.rhs for e in base.state_equations if e.state == case.component
+        )
+        if case.public_request["selected_state"] != {
+            "name": case.component,
+            "rhs": expected_rhs,
+        }:
+            raise ValueError("captured initializer state RHS differs")
+        allowed = sorted(
+            set(case.context.targets)
+            | set(case.context.forcing_channels)
+            | {case.context.time_symbol}
+        )
+        if case.public_request["allowed_initial_symbols"] != allowed:
+            raise ValueError("captured initial information differs")
+        previous = case.public_request.get("accepted_initializers", {})
+        rules = {
+            name: _rule(InitializerChoice.model_validate(value))
+            for name, value in previous.items()
+        }
+        if case.component in rules:
+            raise ValueError("captured initializer was already accepted")
+        apply_initialization_plan(model, LatentInitializationPlan(rules=rules))
     repairs = []
     try:
-        typed_request = {
-            **case.public_request,
-            "public_brief": _brief_without_packet(case.public_request["public_brief"]),
-        }
-        topology, aliases = _topology(
-            case.model_copy(update={"public_request": typed_request})
-        )
-        draft = FunctionalDraft.model_validate(case.draft)
         if case.kind == "function":
-            selected = case.selected_term
-            if selected is None or case.selected_id is None:
-                raise ValueError("missing selected function slot")
             function = InteractionFunctionReply.model_validate(reply)
             if (
                 selected.get("deterministic_role_repair_policy")
@@ -181,17 +239,6 @@ def diagnose(case: ReplayCase, reply: Any, *, normalize: bool = True) -> Diagnos
             canonical_reply = canonical.model_dump(mode="json")
             result_value = result.model_dump(mode="json")
         else:
-            base = finalize_functional_draft(topology, draft, case.context).candidate
-            model = compile_candidate(base, case.context)
-            if case.component not in set(model.state_names) - set(
-                model.direct_state_observation_channels
-            ):
-                raise ValueError("initializer must select a latent state")
-            expected_rhs = next(
-                e.rhs for e in base.state_equations if e.state == case.component
-            )
-            if case.public_request["selected_state"]["rhs"] != expected_rhs:
-                raise ValueError("captured initializer state RHS differs")
             choice = InitializerChoice.model_validate(reply)
             if normalize:
                 reserved = (
@@ -207,13 +254,6 @@ def diagnose(case: ReplayCase, reply: Any, *, normalize: bool = True) -> Diagnos
                 if repair:
                     repair["original_expression"] = reply["initial"]["expression"]
                     repairs.append(repair)
-            previous = case.public_request.get("accepted_initializers", {})
-            rules = {
-                name: _rule(InitializerChoice.model_validate(value))
-                for name, value in previous.items()
-            }
-            if case.component in rules:
-                raise ValueError("captured initializer was already accepted")
             rules[case.component] = _rule(choice)
             compiled, _, _ = apply_initialization_plan(
                 model, LatentInitializationPlan(rules=rules)
@@ -547,7 +587,10 @@ def replay(source: Path, output: Path) -> dict:
                     }
                 )
     for relative, digest in ledger.items():
-        if hashlib.sha256((source / relative).read_bytes()).hexdigest() != digest:
+        path = (source / relative).resolve()
+        if not path.is_relative_to(source):
+            raise ValueError("source path escapes historical root")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError("historical source changed during replay")
     return sealed_write(
         output,
@@ -555,6 +598,7 @@ def replay(source: Path, output: Path) -> dict:
             "protocol": PROTOCOL,
             "source_root": str(source),
             "source_plan_sha256": plan["artifact_sha256"],
+            "source_model_settings": plan["config"]["model_settings"],
             "source_file_sha256": ledger,
             "runtime_source_sha256": runtime_source_hash(),
             "cases": cases,

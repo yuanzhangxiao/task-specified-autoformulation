@@ -72,3 +72,20 @@ def test_replay_refuses_source_overwrite_and_changed_output(tmp_path, monkeypatc
     output.write_text(json.dumps(changed))
     with pytest.raises(ValueError, match="digest differs"):
         replay(source, output)
+
+
+@pytest.mark.parametrize("kind", ["function", "initializer"])
+def test_invalid_historical_context_is_not_a_proposer_diagnosis(tmp_path, kind):
+    source = tmp_path / "source"
+    source_fixture(source)
+    corpus = replay(source, tmp_path / "replay.json")
+    data = copy.deepcopy(next(c for c in corpus["cases"] if c["kind"] == kind))
+    if kind == "function":
+        data["selected_term"]["sources"] = ["unrelated"]
+        message = "slot differs"
+    else:
+        data["public_request"]["selected_state"]["rhs"] = "0"
+        message = "state RHS differs"
+    case = ReplayCase.model_validate(data)
+    with pytest.raises(ValueError, match=message):
+        diagnose(case, case.original_reply)
