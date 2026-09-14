@@ -20,6 +20,8 @@ from autoformalism.rebuttal.staged_function_prefit_campaign import (
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.staged_topology import ModelingLimits, PublicScientificBrief
 from autoformalism.search.causal_initialization import (
+    EXPRESSION_NORMALIZATION,
+    PROTOCOL,
     InitializerChoice,
     compile_initialization_result,
     construct_initializers,
@@ -121,6 +123,133 @@ def test_exhaustion_does_not_reset_attempt_budget(tmp_path):
     assert len(requests) == 3
 
 
+@pytest.mark.parametrize("lhs", ["m", "m_0"])
+@pytest.mark.parametrize("rhs", ["a+b*v01", "(a +\n b*v01)"])
+def test_matching_assignment_preserves_formula_and_cached_resume(tmp_path, lhs, rhs):
+    reply = copy.deepcopy(MAP)
+    reply["initial"]["expression"] = f" {lhs} = {rhs} "
+    candidate, context, client, requests, problem = setup(tmp_path, [reply])
+    result = construct_initializers(candidate, context, {}, client, tmp_path / "result")
+    (event,) = result["attempts"]
+    assert event["accepted"]
+    assert event["normalization"] == {
+        "policy": EXPRESSION_NORMALIZATION,
+        "kind": "matching_initial_assignment",
+        "target": lhs,
+        "quantity": "initial_value",
+        "original_expression": reply["initial"]["expression"],
+        "normalized_expression": rhs,
+    }
+    assert result["plan"]["rules"]["m"]["initial"]["expression"] == rhs
+    assert (
+        result["candidate"]["state_equations"]
+        == problem["candidate"]["state_equations"]
+    )
+    assert (
+        result["candidate"]["processes"]
+        == candidate.model_dump(mode="json")["processes"]
+    )
+    model = compile_initialization_result(candidate, context, result)
+    row = unpack_split(problem["splits"]["val"]).trajectories[0]
+    np.testing.assert_allclose(
+        trajectory_initial_state(
+            model,
+            row,
+            {},
+            parameters={"rate": 0.3, "gain": 0.8, "init_m_a": 1.0, "init_m_b": 2.0},
+        ),
+        [4.0, 1.5],
+    )
+    cached = json.loads(
+        (client.directory / f"{event['request_hash']}.json").read_text()
+    )
+    assert (
+        json.loads(cached["raw_response"]["choices"][0]["message"]["content"]) == reply
+    )
+    _, _, resumed, repeated, _ = setup(tmp_path, [reply])
+    assert (
+        construct_initializers(candidate, context, {}, resumed, tmp_path / "result")
+        == result
+    )
+    assert len(requests) == len(resumed.records) == 1
+    assert repeated == []
+
+
+@pytest.mark.parametrize(
+    "expression, code",
+    [
+        ("y = a+b*v01", "INITIALIZER_ASSIGNMENT_TARGET"),
+        ("dm_dt = a+b*v01", "INITIALIZER_ASSIGNMENT_TARGET"),
+        ("d(m)/dt = a+b*v01", "INITIALIZER_ASSIGNMENT_SYNTAX"),
+        ("m' = a+b*v01", "INITIALIZER_ASSIGNMENT_SYNTAX"),
+        ("m = a+", "INITIALIZER_ASSIGNMENT_SYNTAX"),
+        ("m = y = a+b*v01", "INITIALIZER_ASSIGNMENT_FORM"),
+        ("m = a+b*v01; y = 0", "INITIALIZER_ASSIGNMENT_FORM"),
+        ("m = a+b*v01\ny = 0", "INITIALIZER_ASSIGNMENT_FORM"),
+        ("m += a+b*v01", "INITIALIZER_ASSIGNMENT_FORM"),
+        ("m[0] = a+b*v01", "INITIALIZER_ASSIGNMENT_FORM"),
+        ("m.value = a+b*v01", "INITIALIZER_ASSIGNMENT_FORM"),
+        ("m, y = a+b*v01, 0", "INITIALIZER_ASSIGNMENT_FORM"),
+    ],
+)
+def test_ambiguous_assignment_gets_actionable_feedback(tmp_path, expression, code):
+    reply = copy.deepcopy(MAP)
+    reply["initial"]["expression"] = expression
+    candidate, context, client, requests, _ = setup(tmp_path, [reply, MAP])
+    result = construct_initializers(candidate, context, {}, client, tmp_path / "result")
+    assert [a["accepted"] for a in result["attempts"]] == [False, True]
+    feedback = requests[1]["diagnostics"][0]
+    assert code in feedback["error"]
+    assert "initial value of m" in feedback["error"]
+    assert "Preserve the intended RHS formula" in feedback["error"]
+    assert "normalization" not in feedback
+
+
+@pytest.mark.parametrize(
+    "rhs",
+    ["v01[1]", "m", "future", "log(-1)", "open('forbidden')", "(v01 := 2)", "v01 == 0"],
+)
+def test_normalized_rhs_still_requires_full_validation(tmp_path, rhs):
+    reply = {"initial": {"mode": "causal_map", "expression": f"m = {rhs}"}}
+    candidate, context, client, requests, _ = setup(tmp_path, [reply, MAP])
+    result = construct_initializers(candidate, context, {}, client, tmp_path / "result")
+    assert [a["accepted"] for a in result["attempts"]] == [False, True]
+    rejected = requests[1]["diagnostics"][0]
+    assert rejected["normalization"]["normalized_expression"] == rhs
+    assert rejected["error"]
+
+
+def test_initial_alias_cannot_override_an_existing_parameter(tmp_path):
+    reply = copy.deepcopy(MAP)
+    reply["initial"]["expression"] = "m_0 = m_0+b*v01"
+    reply["initial"]["parameters"][0]["name"] = "m_0"
+    candidate, context, client, requests, _ = setup(tmp_path, [reply, MAP])
+    result = construct_initializers(candidate, context, {}, client, tmp_path / "result")
+    assert [a["accepted"] for a in result["attempts"]] == [False, True]
+    assert "INITIALIZER_ASSIGNMENT_TARGET" in requests[1]["diagnostics"][0]["error"]
+
+
+@pytest.mark.parametrize("field", ["external_inputs", "unavailable_observed_channels"])
+def test_initial_alias_cannot_override_a_public_channel(tmp_path, field):
+    reply = copy.deepcopy(MAP)
+    reply["initial"]["expression"] = "m_0 = a+b*v01"
+    candidate, context, client, requests, _ = setup(tmp_path, [reply, MAP])
+    context = context.model_copy(update={field: (*getattr(context, field), "m_0")})
+    result = construct_initializers(candidate, context, {}, client, tmp_path / "result")
+    assert [a["accepted"] for a in result["attempts"]] == [False, True]
+    assert "INITIALIZER_ASSIGNMENT_TARGET" in requests[1]["diagnostics"][0]["error"]
+
+
+def test_changed_normalization_policy_cannot_resume_checkpoint(tmp_path, monkeypatch):
+    candidate, context, client, _, _ = setup(tmp_path)
+    construct_initializers(candidate, context, {}, client, tmp_path / "result")
+    monkeypatch.setattr(
+        "autoformalism.search.causal_initialization.EXPRESSION_NORMALIZATION", "changed"
+    )
+    with pytest.raises(ValueError, match="identity or digest"):
+        construct_initializers(candidate, context, {}, client, tmp_path / "result")
+
+
 def test_canonical_artifact_and_checkpoint_tampering_are_rejected(tmp_path):
     candidate, context, client, _, _ = setup(tmp_path)
     result = construct_initializers(candidate, context, {}, client, tmp_path / "result")
@@ -198,7 +327,7 @@ def test_new_stage_replaces_legacy_initial_call_and_preserves_function_topology(
         payload = json.loads(body["messages"][1]["content"].split("\n", 1)[1])
         requests.append(payload)
         if "selected_state" in payload:
-            assert payload["protocol"] == "causal-initializer-construction-1"
+            assert payload["protocol"] == PROTOCOL
             return response(
                 {
                     "initial": {

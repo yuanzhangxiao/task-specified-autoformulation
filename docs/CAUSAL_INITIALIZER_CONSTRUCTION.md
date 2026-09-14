@@ -69,6 +69,46 @@ source topology's serving identity; this is not permission to override an image
 hash or replace the SIF. The later matched construction campaign will separately
 pin its serving and fitting configuration.
 
+## Bounded assignment normalization
+
+Constructor protocol `causal-initializer-construction-2` accepts a harmless
+assignment wrapper when its meaning is fixed by the selected initialization
+stage. For a selected latent state `I_delay`, these forms have the same meaning:
+
+```text
+I + gain*meal_event_g
+I_delay = I + gain*meal_event_g
+I_delay_0 = I + gain*meal_event_g
+```
+
+The `_0` alias is accepted only when it is not already a state, process,
+parameter, public channel, time symbol or map-local parameter. Runtime parses
+the text without executing it, checks that it contains exactly one simple
+assignment to the selected state or its available alias, and retains the RHS.
+Parentheses and multiline grouping survive extraction. The original cached
+response stays intact. The attempt records the exact supplied expression,
+normalized RHS, target and `initial-assignment-normalization-1` policy, even if
+subsequent RHS validation rejects the proposal. Canonical choices and plans use
+the RHS; acceptance still requires the full restricted grammar, available-symbol,
+parameter and domain checks.
+
+Differential versus algebraic representation is selected earlier by topology.
+This call supplies an initial value for an already selected dynamic state; it
+does not define an algebraic identity for the entire trajectory. Derivative
+assignments, other targets, chained assignments, multiple statements, augmented
+assignments and indexed targets are not silently converted. Their diagnostics
+identify the expected initial-value quantity and ask the proposer to preserve
+the intended formula while correcting notation. There is no instruction to
+simplify a rejected formula into an identity map.
+
+This milestone applies only to the causal initializer constructor. Whole-equation
+and per-interaction function responses have different meanings, including outer
+sign assembly, and retain their existing contracts. The shared expression parser,
+fitter, benchmark prompts and data are unchanged. Changed constructor protocol,
+normalization policy and source hashes prevent resuming an older construction
+checkpoint with these semantics. Previously frozen ACES results remain historical
+results; a new acceptance rule does not retroactively change their success rate.
+
 ## Verification commands
 
 From this commit's clean checkout and configured Python environment:
@@ -79,7 +119,8 @@ PYTHONPATH=src python scripts/smoke_causal_initialization.py
 ruff check .
 ```
 
-The smoke uses a prescribed synthetic scientific map and the real fitter. It
+The smoke supplies `m = a+b*v01`, checks normalization on the first attempt,
+and uses the prescribed synthetic scientific map with the real fitter. It
 checks recovery of `1 + 2*v01(0)`, distinct initial values on unseen validation
 initial observations, and exact experiment-stage resume with no repeated provider
 or fit execution. It does not measure live proposer accuracy or benchmark recovery.
@@ -89,3 +130,11 @@ fitter/resume smoke and Ruff passed. Full pytest reported 1,454 passed, 39 failu
 from missing benchmark fixtures, and three optional skips. The 39 failure
 identities match the pre-existing missing-fixture set; no data was copied or
 modified to conceal them.
+
+Verification for constructor protocol 2: 89 focused tests passed, and the full
+suite passed 1,563 tests with three optional PyTorch skips. Ruff, the causal
+initializer fitting/resume smoke, and the matched-construction smoke passed.
+The tests cover matching assignments, preserved formulas and grouping, immutable
+dynamics, exact cached responses and resumed costs, occupied aliases, derivative
+and ambiguous assignments, and normalized RHS expressions that still fail
+validation. This is an engineering check; no new live ACES experiment was run.

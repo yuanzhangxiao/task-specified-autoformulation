@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from typing import Annotated, Literal
@@ -32,7 +33,8 @@ from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.staged_functions import FunctionParameter
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "causal-initializer-construction-1"
+PROTOCOL = "causal-initializer-construction-2"
+EXPRESSION_NORMALIZATION = "initial-assignment-normalization-1"
 
 
 class SharedBoundary(StrictSchema):
@@ -46,7 +48,13 @@ class MappedBoundary(StrictSchema):
     """One common function, potentially different values on different trajectories."""
 
     mode: Literal["causal_map"] = "causal_map"
-    expression: str = Field(min_length=1, max_length=4096)
+    expression: str = Field(
+        min_length=1,
+        max_length=4096,
+        description=(
+            "Scalar RHS for the selected state's initial value, not its derivative."
+        ),
+    )
     parameters: tuple[FunctionParameter, ...] = Field(default=(), max_length=32)
 
 
@@ -70,6 +78,10 @@ Identical initial information must produce identical deterministic initializatio
 Different unexplained responses need not be resolvable by a causal point initializer.
 Zero input alone does not imply zero latent state. Directly measured state initials
 are runtime-bound to their own first measurements and are not part of this call.
+The requested quantity is the selected state's initial value, not its derivative
+or an algebraic law for every time. Prefer a scalar RHS expression. A single
+assignment to the selected state name (or its unoccupied name_0 alias) is accepted
+as initial-value notation; it cannot change the frozen differential topology.
 Use +, -, *, /, integer-literal ** (absolute exponent at most 16), abs, exp, log,
 sigmoid, softplus, sqrt, tanh, min or max in the restricted scalar grammar. No
 indexing, attributes, arbitrary calls, future values or other generated states.
@@ -77,6 +89,66 @@ Declare every map-local parameter once with its qualitative role, and no unused
 parameters. Equation parameters are not implicitly available to the map.
 Return only the schema. Numerical guesses and parameter fitting belong to runtime.
 """
+
+
+def _normalize_choice(
+    choice: InitializerChoice, state: str, reserved: set[str]
+) -> tuple[InitializerChoice, dict | None]:
+    """Strip only a matching initial-value assignment; never execute supplied text."""
+    if (
+        isinstance(choice.initial, SharedBoundary)
+        or "=" not in choice.initial.expression
+    ):
+        return choice, None
+    original = choice.initial.expression
+    source = original.strip()
+    targets = {state}
+    alias = f"{state}_0"
+    if alias not in reserved | {p.name for p in choice.initial.parameters}:
+        targets.add(alias)
+    guidance = (
+        f"This call sets only the initial value of {state}. Supply its scalar RHS "
+        f"or one assignment to {', '.join(sorted(targets))}. A derivative or "
+        "algebraic topology change requires a different stage. Preserve the intended "
+        "RHS formula when correcting notation."
+    )
+    try:
+        parsed = ast.parse(source, mode="exec")
+    except (SyntaxError, ValueError, MemoryError, RecursionError) as exc:
+        raise ValueError(
+            f"INITIALIZER_ASSIGNMENT_SYNTAX at initial:{state}: {guidance}"
+        ) from exc
+    if len(parsed.body) == 1 and isinstance(parsed.body[0], ast.Expr):
+        # Comparisons and named expressions still face the restricted RHS parser.
+        return choice, None
+    if (
+        len(parsed.body) != 1
+        or not isinstance(parsed.body[0], ast.Assign)
+        or len(parsed.body[0].targets) != 1
+        or not isinstance(parsed.body[0].targets[0], ast.Name)
+    ):
+        raise ValueError(f"INITIALIZER_ASSIGNMENT_FORM at initial:{state}: {guidance}")
+    assignment = parsed.body[0]
+    target = ast.get_source_segment(source, assignment.targets[0])
+    if target not in targets:
+        raise ValueError(
+            f"INITIALIZER_ASSIGNMENT_TARGET at initial:{state}: "
+            f"received {target!r}. {guidance}"
+        )
+    statement = ast.get_source_segment(source, assignment)
+    if statement is None:  # pragma: no cover - parsed nodes have source positions
+        raise ValueError("initializer assignment RHS has no source span")
+    # Keep outer parentheses, including grouping that permits multiline RHS text.
+    expression = statement.split("=", 1)[1].strip()
+    initial = choice.initial.model_copy(update={"expression": expression})
+    return choice.model_copy(update={"initial": initial}), {
+        "policy": EXPRESSION_NORMALIZATION,
+        "kind": "matching_initial_assignment",
+        "target": target,
+        "quantity": "initial_value",
+        "original_expression": original,
+        "normalized_expression": expression,
+    }
 
 
 def _rule(choice: InitializerChoice) -> LatentInitializationReply:
@@ -161,6 +233,7 @@ def construct_initializers(
     identity = content_hash(
         {
             "protocol": PROTOCOL,
+            "expression_normalization": EXPRESSION_NORMALIZATION,
             "candidate": candidate.model_dump(mode="json"),
             "context": context.model_dump(mode="json"),
             "brief": public_brief,
@@ -193,6 +266,13 @@ def construct_initializers(
         return state["result"]
     allowed = sorted(
         set(context.targets) | set(context.forcing_channels) | {context.time_symbol}
+    )
+    reserved = (
+        set(allowed)
+        | set(context.unavailable_observed_channels)
+        | set(model.state_names)
+        | set(model.parameter_names)
+        | {p.name for p in candidate.processes}
     )
     for name in model.state_names:
         if name in model.direct_state_observation_channels or name in state["rules"]:
@@ -229,7 +309,14 @@ def construct_initializers(
                 "accepted": False,
             }
             try:
-                choice = InitializerChoice.model_validate(visible_response(record))
+                reply = visible_response(record)
+                choice = InitializerChoice.model_validate(reply)
+                choice, normalization = _normalize_choice(choice, name, reserved)
+                if normalization is not None:
+                    normalization["original_expression"] = reply["initial"][
+                        "expression"
+                    ]
+                    event["normalization"] = normalization
                 rule = _rule(choice)
                 rules = {**state["rules"], name: rule.model_dump(mode="json")}
                 plan = LatentInitializationPlan.model_validate({"rules": rules})
@@ -251,6 +338,7 @@ def construct_initializers(
     compiled, guesses, audit = apply_initialization_plan(model, plan)
     result = {
         "protocol": PROTOCOL,
+        "expression_normalization": EXPRESSION_NORMALIZATION,
         "identity": identity,
         "base_candidate": candidate.model_dump(mode="json"),
         "base_context": context.model_dump(mode="json"),

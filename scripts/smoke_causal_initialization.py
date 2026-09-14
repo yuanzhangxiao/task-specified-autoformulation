@@ -31,7 +31,7 @@ def main():
         response = {
             "initial": {
                 "mode": "causal_map",
-                "expression": "a+b*v01",
+                "expression": "m = a+b*v01",
                 "parameters": [
                     {"name": "a", "role": "coefficient"},
                     {"name": "b", "role": "coefficient"},
@@ -62,6 +62,9 @@ def main():
         artifact = construct_initializers(
             candidate, context, {}, client, root / "initials"
         )
+        (event,) = artifact["attempts"]
+        assert event["accepted"]
+        assert event["normalization"]["normalized_expression"] == "a+b*v01"
         config = RepairComparisonConfig(
             judge_revision="0" * 40,
             nonlinear_targets=(),
@@ -112,6 +115,7 @@ def main():
             json.dumps(
                 {
                     "status": "pass",
+                    "initializer_normalization": event["normalization"],
                     "training_nmse": fit["training"]["normalized_mse"],
                     "validation_nmse": fit["validation"]["normalized_mse"],
                     "initializer_parameters": {
