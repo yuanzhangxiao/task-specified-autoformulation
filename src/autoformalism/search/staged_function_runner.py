@@ -42,6 +42,7 @@ from autoformalism.search.staged_function_prompts import (
     render_latent_initial_system_prompt,
     render_latent_initial_user_prompt,
 )
+from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_functions import (
     apply_equation_function_reply,
     apply_function_reply,
@@ -74,12 +75,15 @@ def run_staged_functions(
     generation_granularity: FunctionGenerationGranularity = "atomic_interaction",
     function_repair_policy: FunctionRepairPolicy = "legacy",
     initialization_policy: Literal["legacy", "causal_training"] = "legacy",
+    training_evidence: TrainingEvidence | None = None,
 ) -> dict[str, Any]:
     """Assign functions and causal initializers without fitting or topology edits."""
     if initialization_policy not in {"legacy", "causal_training"}:
         raise ValueError("unknown function initialization policy")
+    enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     if (
         initialization_policy == "causal_training"
+        or training_evidence is not None
         or (output / "construction_contract.json").exists()
     ):
         contract = {
@@ -90,6 +94,8 @@ def run_staged_functions(
             "repair": function_repair_policy,
             "initialization": initialization_policy,
         }
+        if training_evidence is not None:
+            contract["training_evidence_sha256"] = training_evidence.packet_sha256
         path = output / "construction_contract.json"
         if path.exists() and json.loads(path.read_text()) != contract:
             raise ValueError("function construction contract differs")
@@ -118,7 +124,9 @@ def run_staged_functions(
     provider_accepted: list[dict[str, Any]] = []
     registry: dict[str, str] = {}
     common = {
-        "public_brief_json": brief.model_dump_json(),
+        "public_brief_json": json.dumps(enriched)
+        if training_evidence is not None
+        else brief.model_dump_json(),
         "inventory_json": json.dumps(source["inventory"]),
         "equation_sketch_json": json.dumps(source["equations"]),
     }
@@ -546,7 +554,7 @@ def run_staged_functions(
             initialization = construct_initializers(
                 expansion.candidate,
                 context,
-                brief.model_dump(mode="json"),
+                enriched,
                 client,
                 output / "initialization",
             )

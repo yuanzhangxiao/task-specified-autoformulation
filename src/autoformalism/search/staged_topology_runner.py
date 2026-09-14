@@ -28,6 +28,7 @@ from autoformalism.search.staged_topology_prompts import (
     render_variable_identification_system_prompt,
     render_variable_identification_user_prompt,
 )
+from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import (
     audit_equation_polarity_policy,
     audit_explicit_equation_polarity,
@@ -265,8 +266,18 @@ def run_staged_topology(
     audit_public_polarity_policy: bool = False,
     hybrid_variable_construction: bool = False,
     proposer_owns_unfixed_signs: bool = False,
+    training_evidence: TrainingEvidence | None = None,
 ) -> dict[str, Any]:
-    """Build one topology without functions, numerical data, or a scientific judge."""
+    """Build one topology with optional descriptive training evidence."""
+    enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
+    contract_path = output / "evidence_contract.json"
+    if training_evidence is not None or contract_path.exists():
+        contract = {"brief": enriched, "context": context.model_dump(mode="json")}
+        if contract_path.exists() and json.loads(contract_path.read_text()) != contract:
+            raise ValueError("topology evidence contract differs")
+        if not contract_path.exists() and (output / "result.json").exists():
+            raise ValueError("training evidence requires a new topology root")
+        atomic_json(contract_path, contract)
     inventory: tuple[ScientificVariable, ...] = initial_inventory or (
         runtime_seeded_inventory(brief) if hybrid_variable_construction else ()
     )
@@ -275,7 +286,9 @@ def run_staged_topology(
     polarity_policies: list[dict[str, Any]] = []
     polarity_audits: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
-    brief_json = brief.model_dump_json()
+    brief_json = (
+        _json(enriched) if training_evidence is not None else brief.model_dump_json()
+    )
     output.mkdir(parents=True, exist_ok=True)
 
     def checkpoint() -> None:

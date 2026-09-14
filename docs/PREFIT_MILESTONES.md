@@ -101,6 +101,9 @@ No arbitrary validation/test initial-state fitting is permitted.
 
 ## 3. Training evidence before construction
 
+Implementation: `TRAINING_EVIDENCE_CONSTRUCTION.md` records the descriptive
+packet, constructor integration, provenance and verification commands.
+
 Build a deterministic training-only packet covering observed initial variability,
 input changes and output trends/turning points, with exact trajectory/window
 provenance and uncertainty. Do not infer hidden labels or make oscillation, lag,
