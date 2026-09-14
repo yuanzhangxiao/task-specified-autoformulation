@@ -59,8 +59,9 @@ class CollocationSensitivityConfig(StrictSchema):
     protocol: Literal["collocation-forward-sensitivity-1"] = (
         "collocation-forward-sensitivity-1"
     )
-    initializer_seconds: float = Field(default=120.0, gt=0.0, le=300.0)
-    refinement_seconds: float = Field(default=360.0, gt=0.0, le=900.0)
+    budget_profile: Literal["standard", "extended_diagnostic"] = "standard"
+    initializer_seconds: float = Field(default=120.0, gt=0.0, le=1800.0)
+    refinement_seconds: float = Field(default=360.0, gt=0.0, le=7200.0)
     maximum_function_evaluations: int = Field(default=80, ge=1, le=3000)
     integration_method: Literal["Radau", "BDF"] = "Radau"
     relative_tolerance: float = Field(default=1e-7, gt=0.0)
@@ -78,6 +79,7 @@ class CollocationSensitivityConfig(StrictSchema):
     recovery_policy: Literal["legacy", "feasible", "branch_aware"] = "legacy"
     collocation_diagnostics: bool = False
     recovery_max_starts: int = Field(default=10, ge=1, le=24)
+    recovery_screen_seconds: float | None = Field(default=None, gt=0.0, le=900.0)
     recovery_probe_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
     recovery_sensitivity_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
     recovery_retry_policy: Literal["repeat_best", "distinct"] = "repeat_best"
@@ -89,9 +91,14 @@ class CollocationSensitivityConfig(StrictSchema):
     collocation_target_variables: int | None = Field(default=None, ge=20, le=1000000)
     collocation_maximum_iterations: int = Field(default=150, ge=1, le=3000)
     collocation_minimum_intervals: int = Field(default=1, ge=1, le=10000)
+    defer_production_replay: bool = False
 
     @model_validator(mode="after")
     def compatible_mesh(self):
+        if self.budget_profile == "standard" and (
+            self.initializer_seconds > 300 or self.refinement_seconds > 900
+        ):
+            raise ValueError("larger budgets require extended_diagnostic profile")
         if (
             self.collocation_minimum_intervals != 1
             and self.collocation_assembly != "mapped"
@@ -405,6 +412,25 @@ def fit_collocation_forward_sensitivity(
             "validation": None,
             "training_only_parameter_estimation": True,
             "validation_used_for_fitting": False,
+            "sensitivity_audit": system.audit,
+        }
+    if config.defer_production_replay:
+        # A supervised campaign checkpoints the parameter search before running
+        # separately bounded, independent production replays. Never claim a fit
+        # is verified merely because this parameter-only checkpoint exists.
+        return {
+            "schema_version": "collocation-forward-sensitivity-fit-1",
+            "status": "verification_pending",
+            "initializer": initializer,
+            "refinement": refinement,
+            "parameters": parameters,
+            "training": None,
+            "validation": None,
+            "initialization_audit": initialization_audit,
+            "training_only_parameter_estimation": True,
+            "validation_used_for_fitting": False,
+            "collocation_states_used_for_final_score": False,
+            "production_replay_deferred": True,
             "sensitivity_audit": system.audit,
         }
     train_initials, train_metrics = evaluate_fitted_candidate(

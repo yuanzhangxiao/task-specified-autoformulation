@@ -263,6 +263,7 @@ def instrumented_fit(
         values = np.asarray(intermediate_result.x)
         entry = {
             "iteration": len(iterations),
+            "seconds": monotonic() - started,
             "parameters": dict(zip(oracle.names, map(float, values), strict=True)),
             "cost": float(intermediate_result.cost),
             "nfev": int(intermediate_result.nfev),

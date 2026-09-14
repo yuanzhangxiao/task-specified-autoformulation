@@ -159,7 +159,11 @@ def recover_refinement(
     budget = EvaluationBudget(
         started + config.refinement_seconds, config.maximum_function_evaluations
     )
-    screen_deadline = started + 0.4 * config.refinement_seconds
+    screen_allowance = min(
+        0.4 * config.refinement_seconds,
+        config.recovery_screen_seconds or float("inf"),
+    )
+    screen_deadline = started + screen_allowance
     points = restart_points(
         initializer,
         start,
@@ -225,6 +229,7 @@ def recover_refinement(
             and "collocation_converged" in point.get("sources", [point["source"]])
         ):
             break
+    screening_seconds = monotonic() - started
     feasible.sort(key=lambda point: point["cost"])
     augmented_failed = False
     attempted = set()
@@ -272,7 +277,14 @@ def recover_refinement(
                     optimizer=optimizer,
                 )
                 stages.append(
-                    {"mode": "sensitivity", "source": point["source"], "result": report}
+                    {
+                        "mode": "sensitivity",
+                        "source": point["source"],
+                        "result": report,
+                        "started_at_refinement_seconds": stage_started - started,
+                        "seconds": monotonic() - stage_started,
+                        "evaluation_limit_seconds": augmented.point_seconds,
+                    }
                 )
                 break
             except SensitivityUnavailable as error:
@@ -287,6 +299,8 @@ def recover_refinement(
                         "failure_evidence": augmented.failure_evidence,
                         "best_evaluated": augmented.best,
                         "actual_residual_calls": augmented.calls,
+                        "started_at_refinement_seconds": stage_started - started,
+                        "seconds": monotonic() - stage_started,
                         "fit_seconds": monotonic() - stage_started,
                         "optimizer_stationarity_claimed": False,
                     }
@@ -304,6 +318,7 @@ def recover_refinement(
         )
         candidates = [point["parameters"] for point in handoff[:2]]
         write_json(directory / "poll_handoff.json", _finite_payload(handoff[:2]))
+        stage_started = monotonic()
         report = poll_fit(
             polling,
             candidates,
@@ -313,7 +328,14 @@ def recover_refinement(
             checkpoint=directory / "recovery_poll.json",
             identity=identity,
         )
-        stages.append({"mode": "directional_poll", "result": report})
+        stages.append(
+            {
+                "mode": "directional_poll",
+                "result": report,
+                "started_at_refinement_seconds": stage_started - started,
+                "seconds": monotonic() - stage_started,
+            }
+        )
     best = min(
         (o.best for o in oracles if o.best is not None),
         key=lambda point: point["cost"],
@@ -337,6 +359,8 @@ def recover_refinement(
         "integration_failures": sum(o.failures.count for o in oracles),
         "rejected_sensitivity_trials": sum(o.rejected_trials for o in oracles),
         "fit_seconds": monotonic() - started,
+        "screening_seconds": screening_seconds,
+        "screening_budget_seconds": screen_allowance,
         "initial_parameters": start,
         "screens": screens,
         "stages": stages,

@@ -141,6 +141,9 @@ def _weak_window(system, forcing, time: np.ndarray, smooth: np.ndarray):
 
 def _latent_worker(candidate, context, result_path, arguments) -> None:
     """Rebuild the symbolic graph in an isolated, killable initializer process."""
+    worker_started = monotonic()
+    timing_path = arguments["directory"] / "worker_timing.json"
+    write_json(timing_path, {"phase": "symbolic_setup", "symbolic_setup_seconds": None})
     try:
         system = SymbolicODE(
             compile_candidate(CandidateModel.model_validate(candidate), context),
@@ -149,6 +152,13 @@ def _latent_worker(candidate, context, result_path, arguments) -> None:
         rows, fingerprint = arguments["training"]
         arguments["training"] = DatasetSplit(
             SplitName.TRAIN, tuple(Trajectory(**row) for row in rows), fingerprint
+        )
+        write_json(
+            timing_path,
+            {
+                "phase": "collocation",
+                "symbolic_setup_seconds": monotonic() - worker_started,
+            },
         )
         result = latent_start(system, **arguments)
     except (RuntimeError, ValueError, ArithmeticError) as error:
@@ -228,6 +238,12 @@ def bounded_latent_start(system: SymbolicODE, **arguments) -> dict:
     progress = read_json(progress_path) if progress_path.exists() else None
     mesh_path = directory / "mesh.json"
     return {
+        "worker_timing": read_json(directory / "worker_timing.json")
+        if (directory / "worker_timing.json").exists()
+        else None,
+        "phase_timing": read_json(directory / "phase_timing.json")
+        if (directory / "phase_timing.json").exists()
+        else None,
         "mesh": read_json(mesh_path) if mesh_path.exists() else None,
         "assembly": arguments.get("assembly", "unrolled"),
         "maximum_iterations": arguments.get("maximum_iterations", 150),
@@ -426,6 +442,9 @@ def latent_start(
         else deadline
     )
     directory.mkdir(parents=True, exist_ok=True)
+    phase_path = directory / "phase_timing.json"
+    phase = {"phase": "assembly", "solver_started_seconds": None}
+    write_json(phase_path, phase)
     opti = ca.Opti()
     theta = opti.variable(len(start))
     opti.set_initial(theta, start)
@@ -626,6 +645,8 @@ def latent_start(
                 "optimizer_started": True,
             },
         )
+        phase.update(phase="solver", solver_started_seconds=monotonic() - started)
+        write_json(phase_path, phase)
         solved = opti.solve()
         if progress is not None:
             progress.save("solver_returned")
@@ -646,6 +667,8 @@ def latent_start(
         }
     except (RuntimeError, ValueError, TimeoutError, ArithmeticError) as error:
         result = {"success": False, "parameters": None, "message": str(error)[-1600:]}
+    phase.update(phase="returned", total_seconds=monotonic() - started)
+    write_json(phase_path, phase)
     return _finite_payload(
         {
             **result,
