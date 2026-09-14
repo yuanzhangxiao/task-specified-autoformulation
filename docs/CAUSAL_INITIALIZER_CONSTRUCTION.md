@@ -83,3 +83,9 @@ The smoke uses a prescribed synthetic scientific map and the real fitter. It
 checks recovery of `1 + 2*v01(0)`, distinct initial values on unseen validation
 initial observations, and exact experiment-stage resume with no repeated provider
 or fit execution. It does not measure live proposer accuracy or benchmark recovery.
+
+Verification at milestone commit `b14be41`: 80 focused tests passed; the real
+fitter/resume smoke and Ruff passed. Full pytest reported 1,454 passed, 39 failures
+from missing benchmark fixtures, and three optional skips. The 39 failure
+identities match the pre-existing missing-fixture set; no data was copied or
+modified to conceal them.

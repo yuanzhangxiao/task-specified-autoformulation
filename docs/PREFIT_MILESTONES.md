@@ -114,13 +114,20 @@ constant/noisy/short trajectories and mixed input schedules.
 
 ## 4. Matched end-to-end experiment
 
+Implementation: `PREFIT_MATCHED_CONSTRUCTION.md` documents the frozen twelve-task
+initial-construction pilot (six matched pairs), separate construction/CPU-fit
+workers, cost and failure accounting, resume, and runnable commands. Its sole
+candidate makes first and best fit identical; post-fit repair remains a separate
+follow-up. The current sensitivity transfer supports only `v01`, so both packet
+arms use the same existing general bounded-rollout fitter for this two-cell pilot.
+
 Compare initial construction with/without the packet, holding initializer policy,
 proposer settings, budgets, scientific judge setting and fitter fixed. Freeze
 source data, code, protocol and seeds before calls. Report completion, first-fit
 and best predictive quality, structural changes, initialization choices, total
 cost and all failures. Preserve checkpoint/resume and task-independent completion.
 Do not combine a fitter change or priority-policy change with the packet ablation.
-The initial six-task public matrix is an engineering pilot, not a general winner.
+The initial six-pair public matrix is an engineering pilot, not a general winner.
 
 Gate: offline mocked orchestration and real numerical smoke, then a user-run
 bounded campaign; interpret its results before choosing subsequent architecture.

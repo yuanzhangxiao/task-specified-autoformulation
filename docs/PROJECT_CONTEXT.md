@@ -4,6 +4,12 @@ The prospective pre-fitting roadmap and current pilot contract are in
 `docs/PREFIT_MILESTONES.md`. Its first opt-in policy compares claim-specific
 evidence strength while preserving deterministic blockers and the legacy control.
 
+The causal initializer constructor and training-only descriptive packet are now
+implemented. `docs/PREFIT_MATCHED_CONSTRUCTION.md` describes their matched
+initial-construction pilot and its limits. It uses the general rollout fitter
+identically in both packet arms, with scientific judging off and no post-fit
+repair, and does not modify the active repair-v3 or Astra fitter experiments.
+
 The opt-in comparison-3 milestone disambiguates train-fitted latent boundaries
 from collocation optimizer initialization, records actual no-op effects, and
 resolves judge occurrence IDs into named terms for proposer feedback only.

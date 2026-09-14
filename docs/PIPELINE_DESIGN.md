@@ -4,6 +4,11 @@ For the current open-loop pre-fitting pilot, initialization boundary and prospec
 milestones, see `PREFIT_MILESTONES.md`. Its opt-in evidence-strength routing keeps
 equal support in joint focus; the historical category priority remains available.
 
+The implemented initial-construction path can attach the same descriptive
+training packet at every scientific stage and then construct causal latent
+boundaries whose coefficients are fitted on training. The paired packet pilot
+and CPU fitting handoff are documented in `PREFIT_MATCHED_CONSTRUCTION.md`.
+
 The opt-in comparison-3 feedback contract is described in
 `REPAIR_FEEDBACK_EVIDENCE_V3.md`. It supplies actual initialization capabilities,
 before/after action effects and named scientific references without changing

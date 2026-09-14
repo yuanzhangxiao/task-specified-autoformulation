@@ -37,3 +37,6 @@ ruff check .
 The focused suite passed 47 tests. The synthetic packet smoke and Ruff passed.
 The next milestone freezes and compares both presentation arms; this milestone
 alone does not establish that the evidence improves live construction or fitting.
+
+Full pytest at milestone commit `f25d647` reported 1,465 passed, the same 39
+missing-benchmark-fixture failures as milestone 2, and three optional skips.
