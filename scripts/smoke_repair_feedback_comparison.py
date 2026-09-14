@@ -11,6 +11,7 @@ from autoformalism.rebuttal.initialization_campaign import synthetic_problem
 from autoformalism.rebuttal.piecewise_campaign import unpack_split
 from autoformalism.rebuttal.repair_comparison import RepairComparisonConfig, _assess
 from autoformalism.rebuttal.repair_drafts import RepairActionV2, advance, empty_draft
+from autoformalism.rebuttal.repair_evidence import decision_report, numerical_findings
 from autoformalism.rebuttal.repair_feedback import initialization_facts
 from autoformalism.rebuttal.repair_fit_reporting import fit_outcomes
 from autoformalism.rebuttal.repair_scientific_judge import review_request
@@ -95,6 +96,18 @@ def main():
     assert audit["status"] == "committed" and fit["status"] == "complete", fit
     assert fit["validation"]["normalized_mse"] < 1e-5, fit
     facts = initialization_facts(revised, initial, context, fit)
+    priority = decision_report(
+        revised,
+        [],
+        [],
+        numerical_findings(revised, fit),
+        [],
+        routing_policy="evidence_strength",
+        fit=fit,
+    )
+    assert priority["objective_category"] == "prediction_refinement"
+    assert priority["numerical_reliability"]["selected_training_replay_verified"]
+    assert not priority["numerical_reliability"]["global_infeasibility_established"]
     assert all(b["selected_values_available"] for b in facts["latent_boundaries"])
     request = review_request(
         candidate, revised, context, "Synthetic public control", 0, "0" * 40
@@ -107,6 +120,8 @@ def main():
             {
                 "schema_version": "repair-comparison-smoke-3",
                 "initialization_facts": facts,
+                "priority_policy": priority["priority_evidence"]["protocol"],
+                "numerical_support": priority["numerical_reliability"]["support"],
                 "status": "pass",
                 "transaction": audit["status"],
                 "fit_status": fit["status"],

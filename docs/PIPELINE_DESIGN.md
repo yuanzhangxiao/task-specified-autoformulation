@@ -1,5 +1,9 @@
 # Phase 1 Pipeline Design
 
+For the current open-loop pre-fitting pilot, initialization boundary and prospective
+milestones, see `PREFIT_MILESTONES.md`. Its opt-in evidence-strength routing keeps
+equal support in joint focus; the historical category priority remains available.
+
 The opt-in comparison-3 feedback contract is described in
 `REPAIR_FEEDBACK_EVIDENCE_V3.md`. It supplies actual initialization capabilities,
 before/after action effects and named scientific references without changing

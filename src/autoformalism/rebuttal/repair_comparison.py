@@ -13,7 +13,7 @@ from pathlib import Path
 from time import monotonic
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from autoformalism.expressions import ModelValidationError, compile_candidate
 from autoformalism.fitting.collocation_sensitivity import (
@@ -45,6 +45,7 @@ from autoformalism.rebuttal.repair_feedback import (
     initialization_facts,
 )
 from autoformalism.rebuttal.repair_fit_reporting import fit_outcomes
+from autoformalism.rebuttal.repair_priority import RoutingPolicy
 from autoformalism.rebuttal.repair_scientific_judge import (
     judge_protocol,
     perform_review,
@@ -84,7 +85,10 @@ def selected_arms(arm: str | None) -> tuple[str, ...]:
 class RepairComparisonConfig(StrictSchema):
     """One frozen fitter and one edit budget shared by the two arms."""
 
-    protocol: Literal["repair-feedback-comparison-3"] = "repair-feedback-comparison-3"
+    protocol: Literal[
+        "repair-feedback-comparison-3", "repair-feedback-comparison-4"
+    ] = "repair-feedback-comparison-3"
+    routing_policy: RoutingPolicy = "legacy_category"
     rounds: int = Field(default=4, ge=1, le=8)
     max_consecutive_no_change: int = Field(default=2, ge=2, le=4)
     fit: CollocationSensitivityConfig = CollocationSensitivityConfig(
@@ -105,6 +109,15 @@ class RepairComparisonConfig(StrictSchema):
     judge_revision: str = Field(pattern=r"^[a-f0-9]{40}$")
     memory_targets: tuple[str, ...] = ("v01",)
     nonlinear_targets: tuple[str, ...] = ("v01",)
+
+    @model_validator(mode="after")
+    def versioned_routing(self):
+        """Never label a changed decision policy as the frozen version-3 control."""
+        if (self.protocol == "repair-feedback-comparison-4") != (
+            self.routing_policy == "evidence_strength"
+        ):
+            raise ValueError("comparison protocol and routing policy disagree")
+        return self
 
 
 def read(path: Path) -> dict:
@@ -154,9 +167,20 @@ class BudgetedRepairClient(StagedTopologyClient):
         return record
 
 
-def freeze(source: Path, output: Path, judge_revision: str) -> dict:
+def freeze(
+    source: Path,
+    output: Path,
+    judge_revision: str,
+    routing_policy: RoutingPolicy = "legacy_category",
+) -> dict:
     """Copy eligible public source once; freeze both arms before any requests."""
-    config = RepairComparisonConfig(judge_revision=judge_revision)
+    config = RepairComparisonConfig(
+        judge_revision=judge_revision,
+        routing_policy=routing_policy,
+        protocol="repair-feedback-comparison-4"
+        if routing_policy == "evidence_strength"
+        else "repair-feedback-comparison-3",
+    )
     repo = Path(__file__).resolve().parents[3]
     inputs = freeze_inputs(
         repo / "configs/staged_multiround_feedback_v6.json", source, output / "inputs"
@@ -444,6 +468,9 @@ def run_task(root: Path, task: dict, client: StagedTopologyClient) -> dict:
             [Finding.model_validate(f) for f in assessment["science"]],
             [Finding.model_validate(f) for f in state["last_numerical"]],
             state["history"],
+            routing_policy=config.routing_policy,
+            fit=assessment.get("fit"),
+            scientific_review=assessment.get("scientific_review"),
         )
         report["public_training_facts"] = _public_fit_context(dataset)
         report["initialization_facts"] = initialization_facts(

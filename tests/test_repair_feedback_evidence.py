@@ -272,8 +272,9 @@ def test_judge_missing_and_duplicate_units_stay_failures_not_approval():
     assert review_status(None)["status"] == "not_requested"
 
 
+@pytest.mark.parametrize("routing_policy", ["legacy_category", "evidence_strength"])
 def test_next_live_request_receives_noop_effect_and_current_initial_values(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, routing_policy
 ):
     from autoformalism.rebuttal import repair_comparison as campaign
 
@@ -286,7 +287,14 @@ def test_next_live_request_receives_noop_effect_and_current_initial_values(
         "seed": 0,
         "arm": campaign.ARMS[0],
     }
-    config = campaign.RepairComparisonConfig(judge_revision="a" * 40, rounds=2)
+    config = campaign.RepairComparisonConfig(
+        judge_revision="a" * 40,
+        rounds=2,
+        routing_policy=routing_policy,
+        protocol="repair-feedback-comparison-4"
+        if routing_policy == "evidence_strength"
+        else "repair-feedback-comparison-3",
+    )
     campaign.atomic_json(tmp_path / "inputs/parent.json", model.model_dump(mode="json"))
     prompt = tmp_path / "inputs/frozen/public/phase_b_v1/control/proposer_prompt.txt"
     prompt.parent.mkdir(parents=True)
@@ -344,6 +352,9 @@ def test_next_live_request_receives_noop_effect_and_current_initial_values(
         "selected_fit_parameter_values"
     ] == {"init_m_value": 2.0}
     assert report["scientific_review_status"]["status"] == "not_requested"
+    assert ("priority_evidence" in report) == (routing_policy == "evidence_strength")
+    if routing_policy == "evidence_strength":
+        assert report["numerical_reliability"]["support"]["strength"] == "unresolved"
     assert result["best"]["round"] == 2
     assert campaign.run_task(tmp_path, task, client) == result
     assert len(fits) == 2 and len(client.requests) == 2

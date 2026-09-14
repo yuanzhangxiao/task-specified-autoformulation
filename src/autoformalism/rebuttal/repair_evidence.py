@@ -331,6 +331,10 @@ def decision_report(
     science: list[Finding],
     last_numerical: list[Finding],
     history: list[dict],
+    *,
+    routing_policy: str = "legacy_category",
+    fit: dict | None = None,
+    scientific_review: dict | None = None,
 ) -> dict:
     """Choose one problem category, not a causal equation or mandatory edit."""
     categories = (
@@ -347,7 +351,7 @@ def decision_report(
         ((c, fs) for c, fs in categories if fs), ("model_review", [])
     )
     unchanged = sum(r.get("outcome") == "no_change" for r in history[-2:])
-    return {
+    report = {
         "schema_version": "repair-decision-report-3",
         "candidate_sha256": model_hash(candidate),
         "objective_category": category,
@@ -362,3 +366,19 @@ def decision_report(
         "cause_is_not_determined_by_runtime": True,
         "hypothesis_and_repair_owned_by_proposer": True,
     }
+    if routing_policy == "evidence_strength":
+        from autoformalism.rebuttal.repair_priority import route_evidence
+
+        report.update(
+            route_evidence(
+                candidate,
+                runtime,
+                science,
+                last_numerical,
+                fit=fit or {},
+                scientific_review=scientific_review,
+            )
+        )
+    elif routing_policy != "legacy_category":
+        raise ValueError(f"unknown routing policy: {routing_policy}")
+    return report

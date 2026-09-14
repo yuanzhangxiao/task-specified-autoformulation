@@ -1,5 +1,9 @@
 # Autoformalism Phase 1 Implementation Context
 
+The prospective pre-fitting roadmap and current pilot contract are in
+`docs/PREFIT_MILESTONES.md`. Its first opt-in policy compares claim-specific
+evidence strength while preserving deterministic blockers and the legacy control.
+
 The opt-in comparison-3 milestone disambiguates train-fitted latent boundaries
 from collocation optimizer initialization, records actual no-op effects, and
 resolves judge occurrence IDs into named terms for proposer feedback only.

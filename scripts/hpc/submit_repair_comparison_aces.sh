@@ -27,7 +27,7 @@ if [[ -f "$root/plan.json" ]]; then revision="$(jq -er '.config.judge_revision' 
 if [[ -z "$revision" && -f "$hf/hub/models--openai--gpt-oss-120b/refs/main" ]]; then revision="$(<"$hf/hub/models--openai--gpt-oss-120b/refs/main")"; fi
 if [[ -z "$revision" ]]; then revision="$(curl --fail --silent --show-error https://huggingface.co/api/models/openai/gpt-oss-120b | jq -er '.sha')"; fi
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || { echo 'Cannot resolve judge revision; set AF_JUDGE_REVISION' >&2; exit 2; }
-"$python" "$repo/scripts/repair_feedback_comparison.py" freeze --source-rescue-root "$source_root" --output "$root" --judge-revision "$revision"
+"$python" "$repo/scripts/repair_feedback_comparison.py" freeze --source-rescue-root "$source_root" --output "$root" --judge-revision "$revision" --routing-policy "${AF_ROUTING_POLICY:-legacy_category}"
 expected="$(jq -er '.serving_image_sha256' "$root/plan.json")"
 actual="$(sha256sum "$image")"
 [[ "${actual%% *}" == "$expected" ]] || { echo 'Image differs from frozen protocol; do not override the hash' >&2; exit 2; }

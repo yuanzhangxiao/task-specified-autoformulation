@@ -31,7 +31,7 @@ if [[ "${1:-}" == prepare ]]; then
   [[ "$container_python" == /* && "$container_python" != *$'\n'* ]] || { echo 'Container Python discovery did not return one absolute path' >&2; exit 2; }
   printf '%s\n' "$container_python" > "$AF_OUTPUT_ROOT/runtime/container-python-${SLURM_JOB_ID}.txt"
   cd "$AF_REPO_ROOT"
-  "$AF_PYTHON" -m pytest -q tests/test_repair_comparison.py tests/test_repair_drafts.py tests/test_repair_action_replay.py tests/test_repair_feedback_evidence.py tests/test_atomic_occurrence_judge.py > "$AF_OUTPUT_ROOT/runtime/preflight-tests-${SLURM_JOB_ID}.log" 2>&1
+  "$AF_PYTHON" -m pytest -q tests/test_repair_priority.py tests/test_repair_comparison.py tests/test_repair_drafts.py tests/test_repair_action_replay.py tests/test_repair_feedback_evidence.py tests/test_atomic_occurrence_judge.py > "$AF_OUTPUT_ROOT/runtime/preflight-tests-${SLURM_JOB_ID}.log" 2>&1
   "$AF_PYTHON" "$AF_REPO_ROOT/scripts/smoke_repair_feedback_comparison.py" > "$AF_OUTPUT_ROOT/runtime/preflight-smoke-${SLURM_JOB_ID}.json"
   judge_revision="$(jq -er '.config.judge_revision' "$plan")"
   proposer_revision="$(jq -er '.proposer_settings.model_revision' "$plan")"

@@ -21,6 +21,11 @@ def main():
     p.add_argument("--source-rescue-root", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--judge-revision", required=True)
+    p.add_argument(
+        "--routing-policy",
+        choices=("legacy_category", "evidence_strength"),
+        default="legacy_category",
+    )
     p = sub.add_parser("run")
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--role", choices=("proposer", "judge"), required=True)
@@ -34,7 +39,12 @@ def main():
             p.add_argument("--arm", choices=ARMS)
     args = parser.parse_args()
     if args.command == "freeze":
-        result = freeze(args.source_rescue_root, args.output, args.judge_revision)
+        result = freeze(
+            args.source_rescue_root,
+            args.output,
+            args.judge_revision,
+            args.routing_policy,
+        )
         result = {"plan_sha256": result["plan_sha256"], "tasks": len(result["tasks"])}
     elif args.command == "run":
         result = run_pass(
