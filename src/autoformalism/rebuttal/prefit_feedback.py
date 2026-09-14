@@ -86,12 +86,12 @@ class FeedbackConfig(StrictSchema):
 
 
 def runtime_identity() -> dict:
-    """Pin compiler/schema dependencies without importing an optimizer."""
+    """Pin used compiler/schema dependencies, excluding optional baseline packages."""
     return {
         "python": sys.version,
         **{
             name: importlib.metadata.version(name)
-            for name in ("pydantic", "numpy", "scipy", "sympy")
+            for name in ("pydantic", "numpy", "scipy")
         },
     }
 

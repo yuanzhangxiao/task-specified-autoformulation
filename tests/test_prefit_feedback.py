@@ -19,6 +19,41 @@ def frozen(tmp_path):
     return tmp_path / "campaign", plan
 
 
+def test_campaign_freezes_runs_and_resumes_without_sympy(tmp_path, monkeypatch):
+    installed_version = feedback.importlib.metadata.version
+
+    def without_sympy(name):
+        if name == "sympy":
+            raise feedback.importlib.metadata.PackageNotFoundError(name)
+        return installed_version(name)
+
+    monkeypatch.setattr(feedback.importlib.metadata, "version", without_sympy)
+    plan = synthetic_plan(tmp_path)
+    root, task, calls = tmp_path / "campaign", plan["tasks"][0], []
+    first = feedback.run_episode(root, plan, task, client_for(root, plan, task, calls))
+    assert first["final"]["valid"]
+    assert feedback.verify(root) == plan
+    assert (
+        feedback.run_episode(root, plan, task, client_for(root, plan, task, calls))
+        == first
+    )
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("required", ["pydantic", "numpy", "scipy"])
+def test_missing_required_dependency_metadata_still_fails(required, monkeypatch):
+    installed_version = feedback.importlib.metadata.version
+
+    def missing_required(name):
+        if name == required:
+            raise feedback.importlib.metadata.PackageNotFoundError(name)
+        return installed_version(name)
+
+    monkeypatch.setattr(feedback.importlib.metadata, "version", missing_required)
+    with pytest.raises(feedback.importlib.metadata.PackageNotFoundError):
+        feedback.runtime_identity()
+
+
 def test_matched_requests_differ_only_in_feedback(frozen):
     root, plan = frozen
     entry = next(e for e in plan["selected"] if e["cohort"] == "repair")

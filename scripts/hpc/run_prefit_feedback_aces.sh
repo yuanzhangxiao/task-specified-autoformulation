@@ -11,7 +11,16 @@ export TMPDIR="$AF_OUTPUT_ROOT/tmp"
 cd "$AF_REPO_ROOT"
 if [[ "$mode" == prepare ]]; then
   : "${AF_SOURCE_ROOT:?required}" "${AF_CONFIG:?required}" "${AF_VLLM_IMAGE:?required}" "${AF_HF_HOME:?required}"
-  "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_prefit_replay.py tests/test_prefit_feedback.py tests/test_prefit_feedback_submission.py > "$AF_OUTPUT_ROOT/runtime/preflight-${SLURM_JOB_ID}.log" 2>&1
+  preflight_log="$AF_OUTPUT_ROOT/runtime/preflight-${SLURM_JOB_ID}.log"
+  printf 'Running preflight tests; full output: %s\n' "$preflight_log"
+  if "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_prefit_replay.py tests/test_prefit_feedback.py tests/test_prefit_feedback_submission.py > "$preflight_log" 2>&1; then
+    tail -n 2 "$preflight_log"
+  else
+    preflight_status=$?
+    printf 'Preflight failed; full output: %s\n' "$preflight_log" >&2
+    tail -n 80 "$preflight_log" >&2
+    exit "$preflight_status"
+  fi
   "$AF_PYTHON" scripts/smoke_prefit_feedback.py > "$AF_OUTPUT_ROOT/runtime/smoke-${SLURM_JOB_ID}.json"
   "$AF_PYTHON" scripts/prefit_response_replay.py --source "$AF_SOURCE_ROOT" --output "$AF_OUTPUT_ROOT/replay.json" > "$AF_OUTPUT_ROOT/runtime/replay-${SLURM_JOB_ID}.json"
   "$AF_PYTHON" scripts/prefit_feedback_campaign.py freeze --corpus "$AF_OUTPUT_ROOT/replay.json" --config "$AF_CONFIG" --output "$AF_OUTPUT_ROOT" > "$AF_OUTPUT_ROOT/runtime/freeze-${SLURM_JOB_ID}.json"

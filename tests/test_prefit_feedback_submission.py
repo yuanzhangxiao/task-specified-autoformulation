@@ -140,3 +140,38 @@ def test_shared_server_selects_fit_free_cli():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "prefit_feedback_campaign.py"
+
+
+def test_worker_surfaces_preflight_failure_in_job_stderr(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    bins = tmp_path / "bin"
+    bins.mkdir()
+    module = bins / "module"
+    module.write_text("#!/bin/sh\nexit 0\n")
+    module.chmod(0o755)
+    python = bins / "failed-preflight"
+    python.write_text("#!/bin/sh\necho 'fixture dependency error'\nexit 2\n")
+    python.chmod(0o755)
+    root = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", str(repo / "scripts/hpc/run_prefit_feedback_aces.sh"), "prepare"],
+        env={
+            **os.environ,
+            "PATH": str(bins) + os.pathsep + os.environ["PATH"],
+            "AF_REPO_ROOT": str(repo),
+            "AF_PYTHON": str(python),
+            "AF_OUTPUT_ROOT": str(root),
+            "AF_SOURCE_ROOT": str(tmp_path / "source"),
+            "AF_CONFIG": str(repo / "configs/prefit_matched_feedback_v1.json"),
+            "AF_VLLM_IMAGE": str(tmp_path / "unused-image"),
+            "AF_HF_HOME": str(tmp_path / "unused-hf"),
+            "SLURM_JOB_ID": "12345",
+        },
+        capture_output=True,
+        text=True,
+    )
+    log = root / "runtime/preflight-12345.log"
+    assert result.returncode == 2
+    assert str(log) in result.stderr and "fixture dependency error" in result.stderr
+    assert log.read_text() == "fixture dependency error\n"
+    assert not (root / "replay.json").exists()

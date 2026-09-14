@@ -101,6 +101,31 @@ causal-initializer numerical smoke also passed as a separate integration regress
 These synthetic outcomes verify experiment mechanics; they are not evidence that
 either feedback arm performs better on the saved ACES responses.
 
+## ACES preparation correction (2026-09-14)
+
+Job 2129189 failed in preflight with 13 tests passed and 14 fixture errors:
+`PackageNotFoundError: No package metadata was found for sympy`.
+The experiment's runtime-version inventory incorrectly required SymPy even though
+none of its validators or runners uses it. ACES then cancelled dependent GPU job
+2129190 without starting it. Replay and live feedback had not begun.
+
+The corrected inventory pins Python, Pydantic, NumPy and SciPy. Missing metadata
+for required packages still fails explicitly. A regression exercises freeze,
+execution and exact resume with SymPy metadata unavailable. The CPU wrapper now
+prints the failing pytest summary into the main job error log while retaining the
+complete preflight log and exit status.
+
+Correction verification: 32 focused tests passed; the full suite passed 1,595
+tests with three optional Torch skips in 524.78 seconds. Ruff, shell checks, and
+both fitting-free smokes passed. The corrected real ACES replay remains to be run.
+
+Use a new detached checkout named `autoformalism-prefit-feedback-v1-fix1` and a new
+output root named `prefit-feedback-v1-fix1` for this correction. Preserve the old
+failure logs. `AF_RESUME=1` does not apply because preparation never completed;
+submit preparation and its dependent feedback job afresh. SymPy installation is
+unnecessary. The feedback arms, inference settings, case-selection rule and
+budgets are unchanged.
+
 ## ACES commands
 
 Run each command as one physical line. The following creates a detached experiment
