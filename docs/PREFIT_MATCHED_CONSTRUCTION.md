@@ -236,3 +236,34 @@ PYTHONPATH=src python -m pytest -q tests/test_prefit_construction_campaign.py te
 PYTHONPATH=src python scripts/smoke_prefit_construction.py
 ruff check .
 ```
+
+The corrected reporter at `7bfb04d` was run in that separate ACES checkout.
+Its output is saved outside the frozen root at
+`/scratch/user/u.yx126462/phase_b/prefit-training-evidence-v1-e7ffd12-report-7bfb04d.json`,
+with SHA-256
+`c0a0ca1938616832aa55cb763f7046fc19cd5db23eb3176f6da0bb6732bfe6e0`.
+The original checkout's `verify` command still passes with plan digest
+`965764d8c2d2607e43b9cd33a277bf7750727b475063757eab838854fb4ebc17`.
+
+| Arm | Constructed / planned | Complete finite validation | Physical requests | Observed tokens |
+| --- | ---: | ---: | ---: | ---: |
+| brief_only | 6 / 6 | 0 / 6 | 87 | 253,330 |
+| training_evidence | 5 / 6 | 1 / 6 | 68 | 606,551 |
+
+The failed construction was named-easy seed 0 in the evidence arm: bounded
+causal-initializer repair exhausted for `I_delay`. The sole complete finite
+validation rollout was named-easy seed 1 in the evidence arm, with training NMSE
+`142681075.50779003` and validation NMSE `136080054.86190537`. Its optimizer
+reported an `ftol` termination; this clearly did not produce an accurate model.
+No matched pair has complete finite validation in both arms. Numeric penalties
+on failed trajectories are excluded from the finite-validation count. These
+results do not establish a useful predictive advantage for either arm or
+structural infeasibility. The next scientific decision should examine numerical
+failures and construction traces before scaling this comparison.
+
+The 30 focused reporting/submission tests, Ruff check and real synthetic smoke
+passed. The full local suite passed **1,536 tests**, with three optional PyTorch
+skips, in 564.76 seconds. The reporting tests also cover changed source, dependency and launcher
+identities; altered plans, public assets and result seals; changed or missing
+provider records; unchanged artifact bytes and modification times; and rejection
+of execution from the different reporting runtime.
