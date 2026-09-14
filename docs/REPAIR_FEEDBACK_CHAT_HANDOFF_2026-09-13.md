@@ -639,3 +639,29 @@ results were supplied in this update. No proposer changes are requested now.
 Keep private reference controls and their artifacts isolated from proposer/judge
 feedback. The active ACES v3 arms remain pinned to 9013e84; this update does not
 authorize merging the new fitter into them or resubmitting them.
+
+## 15. Subsequent discussion: training-only shape evidence (not implemented)
+
+Astra relayed a proposal from its discussion with the user: supply concise shape
+information from permitted training inputs/outputs before topology construction.
+This is a design topic for the next chat, not approval to change the frozen v3
+comparison or a feature already present in it.
+
+Astra reported that v3's _public_fit_context contains observed RMS, zero-baseline
+NMSE and IDs for zero-input/changing-output trajectories, but no oscillation,
+decay or lag summary; initial topology construction has no such evidence packet.
+
+A possible next milestone would produce a cached deterministic training-only
+text/table packet with supporting trajectory IDs and time windows, evidence for
+oscillation, decay, response delay/polarity, and explicit uncertainty. These
+would be observations for the proposer, not inferred hidden-state labels,
+mandatory topology, or proof of a causal mechanism. Do not use validation/test
+outcomes or private-reference information to create this packet.
+
+Also clarify experiment terminology: staged functional proposals permit fitted
+internal scale/shape parameters. That is more general than a strict fixed-basis
+model with only fitted outer linear weights. Do not label the current approach
+as the latter without documenting the distinction.
+
+No implementation, new experiment submission or private-reference evidence was
+supplied with this coordination note.
