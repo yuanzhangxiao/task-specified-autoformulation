@@ -32,7 +32,7 @@ case "${protocol}" in
     worker_script=staged_function_granularity_campaign.py ;;
   scientific-staged-function-hybrid-repair-1|scientific-staged-function-hybrid-repair-2) \
     worker_script=staged_function_hybrid_campaign.py ;;
-  scientific-staged-function-prefit-handoff-1) \
+  scientific-staged-function-prefit-handoff-1|scientific-staged-function-prefit-handoff-2) \
     worker_script=staged_function_prefit_campaign.py ;;
   scientific-staged-multiround-feedback-1|scientific-staged-multiround-feedback-2|scientific-staged-multiround-feedback-3|scientific-staged-multiround-feedback-4|scientific-staged-multiround-feedback-5|scientific-staged-multiround-feedback-6) \
     worker_script=staged_multiround_feedback_campaign.py ;;

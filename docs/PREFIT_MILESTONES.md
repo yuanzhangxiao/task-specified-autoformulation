@@ -89,6 +89,9 @@ This implementation has not submitted a new job or changed the active v3 runs.
 
 ## 2. Trajectory-dependent causal initialization
 
+Implementation: `CAUSAL_INITIALIZER_CONSTRUCTION.md` describes the new opt-in
+constructor, canonical fitting handoff, checkpoints and verification commands.
+
 Make existing causal maps an explicit pre-fitting construction choice, preserving
 the runtime ownership of numeric guesses and parameter fitting. Test distinct
 initials and held-out initial observations, no future-target/ID access, matching

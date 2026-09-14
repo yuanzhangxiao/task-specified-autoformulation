@@ -32,6 +32,7 @@ from autoformalism.schemas.staged_topology import (
     ModelingLimits,
     PublicScientificBrief,
 )
+from autoformalism.search.causal_initialization import compile_initialization_result
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.staged_functions import has_nonlinear_source_dependence
 from autoformalism.staged_topology import content_hash
@@ -49,7 +50,11 @@ class FunctionPrefitGates(StrictSchema):
 class FunctionPrefitConfig(StrictSchema):
     """One function realization for every passed topology in the 2x3 matrix."""
 
-    protocol: Literal["scientific-staged-function-prefit-handoff-1"]
+    protocol: Literal[
+        "scientific-staged-function-prefit-handoff-1",
+        "scientific-staged-function-prefit-handoff-2",
+    ]
+    initialization_policy: Literal["legacy", "causal_training"] = "legacy"
     purpose: str = Field(min_length=1)
     platform: Literal["aces-h100x1"]
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -67,6 +72,12 @@ class FunctionPrefitConfig(StrictSchema):
     @model_validator(mode="after")
     def fixed_public_matrix(self) -> FunctionPrefitConfig:
         """Reject accidental changes to the intended public 2x3 handoff."""
+        if (self.protocol == "scientific-staged-function-prefit-handoff-2") != (
+            self.initialization_policy == "causal_training"
+        ):
+            raise ValueError(
+                "function handoff protocol and initializer policy disagree"
+            )
         if len(set(self.public_cells)) != 2:
             raise ValueError("exactly two distinct public cells are required")
         if len(set(self.seeds)) != 3 or any(seed < 0 for seed in self.seeds):
@@ -160,8 +171,7 @@ def freeze_function_prefit_campaign(
             or source_result.get("parameter_fitting_performed") is not False
         ):
             raise ValueError(
-                "source topology is not a passed public handoff: "
-                f"{source_task_id}"
+                f"source topology is not a passed public handoff: {source_task_id}"
             )
         public = original["source"]
         tasks.append(
@@ -176,6 +186,7 @@ def freeze_function_prefit_campaign(
                 "source_result_sha256": content_hash(source_result),
                 "generation_granularity": config.generation_granularity,
                 "function_repair_policy": config.function_repair_policy,
+                "initialization_policy": config.initialization_policy,
             }
         )
     expected_order = [
@@ -186,7 +197,9 @@ def freeze_function_prefit_campaign(
         raise ValueError("source task matrix or order differs from the frozen config")
 
     plan = {
-        "schema_version": "scientific-staged-function-prefit-handoff-plan-1",
+        "schema_version": "scientific-staged-function-prefit-handoff-plan-2"
+        if config.initialization_policy == "causal_training"
+        else "scientific-staged-function-prefit-handoff-plan-1",
         "config": config.model_dump(mode="json"),
         "source_plan_sha256": source_digest,
         "source_summary_sha256": content_hash(source_summary),
@@ -255,17 +268,28 @@ def deterministic_prefit_audit(
     brief: PublicScientificBrief,
     source: dict[str, Any],
     result: dict[str, Any],
+    *,
+    context: ValidationContext | None = None,
 ) -> dict[str, Any]:
     """Certify only mechanically decidable completeness and syntax facts."""
     candidate = CandidateModel.model_validate(result["candidate"])
+    if result.get("initialization_policy") == "causal_training":
+        if context is None:
+            raise ValueError("causal prefit audit requires the frozen public context")
+        initialization = result["initialization"]
+        compiled = compile_initialization_result(
+            CandidateModel.model_validate(initialization["base_candidate"]),
+            context,
+            initialization,
+        )
+        if compiled.validated.candidate != candidate:
+            raise ValueError("prefit candidate differs from initializer artifact")
     draft = FunctionalDraft.model_validate(result["draft"])
     equations = tuple(
         EquationDefinition.model_validate(item) for item in source["equations"]
     )
     expected_terms = [
-        (equation.name, term)
-        for equation in equations
-        for term in equation.terms
+        (equation.name, term) for equation in equations for term in equation.terms
     ]
     accepted = result["accepted_functions"]
     sign_and_source_match = len(accepted) == len(expected_terms)
@@ -409,6 +433,9 @@ def run_function_prefit_campaign(
                             root,
                             generation_granularity=task["generation_granularity"],
                             function_repair_policy=task["function_repair_policy"],
+                            initialization_policy=task.get(
+                                "initialization_policy", "legacy"
+                            ),
                         )
                     except DeferredCall:
                         break
@@ -418,6 +445,9 @@ def run_function_prefit_campaign(
                                 PublicScientificBrief.model_validate(task["brief"]),
                                 task["source"],
                                 result,
+                                context=ValidationContext.model_validate(
+                                    task["context"]
+                                ),
                             )
                         )
                         atomic_json(root / "result.json", result)
@@ -469,12 +499,12 @@ def summarize_function_prefit(
         "deterministic_prefit_pass_rate": _ratio(
             sum(item["passed"] for item in certificates), len(rows)
         ),
-        "nonlinear_obligation_pass_rate": _ratio(
-            nonlinear_passed, nonlinear_total
-        ) if nonlinear_total else 1.0,
-        "latent_initializer_coverage_rate": _ratio(
-            latent_initialized, latent_total
-        ) if latent_total else 1.0,
+        "nonlinear_obligation_pass_rate": _ratio(nonlinear_passed, nonlinear_total)
+        if nonlinear_total
+        else 1.0,
+        "latent_initializer_coverage_rate": _ratio(latent_initialized, latent_total)
+        if latent_total
+        else 1.0,
     }
     gates = FunctionPrefitGates.model_validate(plan["config"]["gates"])
     checks = {

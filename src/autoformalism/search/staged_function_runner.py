@@ -33,6 +33,7 @@ from autoformalism.schemas.staged_topology import (
     PublicScientificBrief,
     ScientificVariable,
 )
+from autoformalism.search.causal_initialization import construct_initializers
 from autoformalism.search.staged_function_prompts import (
     render_equation_function_batch_system_prompt,
     render_equation_function_batch_user_prompt,
@@ -72,8 +73,29 @@ def run_staged_functions(
     *,
     generation_granularity: FunctionGenerationGranularity = "atomic_interaction",
     function_repair_policy: FunctionRepairPolicy = "legacy",
+    initialization_policy: Literal["legacy", "causal_training"] = "legacy",
 ) -> dict[str, Any]:
     """Assign functions and causal initializers without fitting or topology edits."""
+    if initialization_policy not in {"legacy", "causal_training"}:
+        raise ValueError("unknown function initialization policy")
+    if (
+        initialization_policy == "causal_training"
+        or (output / "construction_contract.json").exists()
+    ):
+        contract = {
+            "source": content_hash(source),
+            "brief": brief.model_dump(mode="json"),
+            "context": context.model_dump(mode="json"),
+            "granularity": generation_granularity,
+            "repair": function_repair_policy,
+            "initialization": initialization_policy,
+        }
+        path = output / "construction_contract.json"
+        if path.exists() and json.loads(path.read_text()) != contract:
+            raise ValueError("function construction contract differs")
+        if not path.exists() and (output / "result.json").exists():
+            raise ValueError("causal initialization requires a new construction root")
+        atomic_json(path, contract)
     inventory = tuple(
         ScientificVariable.model_validate(item) for item in source["inventory"]
     )
@@ -206,6 +228,7 @@ def run_staged_functions(
 
     error = None
     expansion = None
+    initialization = None
     try:
         for equation_index, equation in enumerate(equations):
             parameter_identity_policy = (
@@ -485,6 +508,18 @@ def run_staged_functions(
         for state in topology.states:
             if state.kind is not StateKind.LATENT:
                 continue
+            if initialization_policy == "causal_training":
+                # Temporary completeness scaffold. It is never emitted as the
+                # final physical boundary: every latent state receives a plan.
+                draft = apply_initial_reply(
+                    topology,
+                    draft,
+                    state.name,
+                    LatentInitialReply(initial={"fixed_value": 0.0}),
+                    context,
+                    aliases,
+                )
+                continue
             selected_state = {
                 "name": inverse.get(state.name, state.name),
                 "scientific_role": state.description,
@@ -507,10 +542,21 @@ def run_staged_functions(
             )
             checkpoint()
         expansion = finalize_functional_draft(topology, draft, context)
+        if initialization_policy == "causal_training":
+            initialization = construct_initializers(
+                expansion.candidate,
+                context,
+                brief.model_dump(mode="json"),
+                client,
+                output / "initialization",
+            )
     except (ValueError, ModelValidationError) as exc:
         error = str(exc)[:6000]
+        expansion = None
     result = {
-        "protocol": "scientific-staged-functions-1",
+        "protocol": "scientific-staged-functions-2"
+        if initialization_policy == "causal_training"
+        else "scientific-staged-functions-1",
         "generation_granularity": generation_granularity,
         "function_repair_policy": function_repair_policy,
         "status": "complete" if expansion is not None else "failed",
@@ -522,7 +568,13 @@ def run_staged_functions(
         "accepted_functions": accepted,
         "provider_visible_accepted_functions": provider_accepted,
         "batch_term_audits": batch_term_audits,
-        "candidate": expansion.candidate.model_dump(mode="json") if expansion else None,
+        "candidate": (
+            initialization["candidate"]
+            if initialization
+            else expansion.candidate.model_dump(mode="json")
+        )
+        if expansion
+        else None,
         "scientific_review_facts": (
             _scientific_review_facts(brief, accepted) if expansion else None
         ),
@@ -543,6 +595,9 @@ def run_staged_functions(
         "test_data_opened": False,
         "private_reference_opened": False,
     }
+    if initialization_policy == "causal_training":
+        result["initialization_policy"] = initialization_policy
+        result["initialization"] = initialization
     checkpoint()
     atomic_json(output / "result.json", result)
     return result
@@ -620,8 +675,7 @@ def _accepted_function_record(
         "selected_term": selected,
         "expression": rename_expression(function.expression, inverse),
         "parameters": [
-            {"name": item.name, "role": item.role.value}
-            for item in function.parameters
+            {"name": item.name, "role": item.role.value} for item in function.parameters
         ],
     }
 
