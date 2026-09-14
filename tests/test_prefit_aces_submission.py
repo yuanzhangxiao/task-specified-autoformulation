@@ -31,7 +31,10 @@ def launcher(tmp_path):
 import json, os, pathlib, sys
 root = pathlib.Path({str(root)!r})
 if 'freeze' in sys.argv:
-    (root/'plan.json').write_text(json.dumps({{'artifact_sha256':'frozen'}}))
+    path = pathlib.Path(sys.argv[sys.argv.index('--config')+1])
+    config = json.loads(path.read_text())
+    plan = {{'artifact_sha256':'frozen', 'config': config}}
+    (root/'plan.json').write_text(json.dumps(plan))
 elif 'summary' in sys.argv:
     print(json.dumps({{'status':os.environ.get('SUMMARY_STATUS','partial'),
         'construction_complete':os.environ.get('BUILT','0') == '1'}}))
@@ -131,3 +134,32 @@ def test_complete_campaign_requires_no_new_allocation(launcher):
     assert run().returncode == 0
     assert run(AF_RESUME="1", SUMMARY_STATUS="complete").returncode == 0
     assert len(json.loads(log.read_text())) == 3
+
+
+@pytest.mark.parametrize("built,additional", [("0", 2), ("1", 1)])
+def test_construction_only_schedules_audit_and_never_fitting(
+    launcher, built, additional
+):
+    run, log, root = launcher
+    config = str(
+        Path(__file__).resolve().parents[1]
+        / "configs/prefit_construction_audit_v1.json"
+    )
+    result = run(AF_CONFIG=config)
+    assert result.returncode == 0, result.stderr
+    calls = json.loads(log.read_text())
+    assert [c[-1] for c in calls] == ["prepare", "construct", "audit"]
+    assert "--dependency=afterany:102" in calls[-1]
+    assert "--time=00:30:00" in calls[-1]
+    manifest = json.loads((root / "submission_manifest.json").read_text())
+    assert manifest["audit_job"] == "103" and "fit_job" not in manifest
+    assert run(AF_CONFIG=config).returncode == 0
+    assert json.loads(log.read_text()) == calls
+    result = run(AF_RESUME="1", AF_CONFIG=config, BUILT=built)
+    assert result.returncode == 0, result.stderr
+    calls = json.loads(log.read_text())
+    assert len(calls) == 3 + additional
+    assert calls[-1][-1] == "audit" and all(c[-1] != "fit" for c in calls)
+    result = run(AF_RESUME="1", AF_CONFIG=config, SUMMARY_STATUS="complete")
+    assert result.returncode == 0
+    assert len(json.loads(log.read_text())) == len(calls)

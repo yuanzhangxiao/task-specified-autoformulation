@@ -20,14 +20,21 @@ from autoformalism.search.training_evidence import build_training_evidence
 CELL = "phase_b_anonymous_system_task_canonical_opaque_hard"
 
 
-def synthetic_fixture(root: Path, request_budget: int = 32) -> dict:
+def synthetic_fixture(
+    root: Path, request_budget: int = 32, *, construction_only: bool = False
+) -> dict:
     """Create temporary public-layout observations; do not modify benchmark assets."""
     config = campaign.ConstructionCampaignConfig(
+        protocol=campaign.CONSTRUCTION_ONLY_PROTOCOL
+        if construction_only
+        else "prefit-matched-construction-1",
         serving_image_sha256="0" * 64,
         model_settings=campaign.StagedModelSettings(maximum_requests=request_budget),
         public_cells=(CELL,),
         seeds=(0,),
-        fit=campaign.FitConfig(
+        fit=None
+        if construction_only
+        else campaign.FitConfig(
             allow_derivative_regression=False,
             integration_method="Radau",
             maximum_function_evaluations=100,
@@ -41,6 +48,8 @@ def synthetic_fixture(root: Path, request_budget: int = 32) -> dict:
         ("train", (0.0, 0.6, 1.2), (0.0, 0.5, 1.0)),
         ("validation", (1.5, 1.8), (0.0, 0.8)),
     ):
+        if construction_only and split != "train":
+            continue
         with (directory / f"{split}.csv").open("w", newline="") as stream:
             writer = csv.writer(stream)
             writer.writerow(("trajectory_id", "t", "v01", "u01"))
@@ -71,16 +80,23 @@ def synthetic_fixture(root: Path, request_budget: int = 32) -> dict:
                 {"public_name": "u01", "role": "external_input"},
             ],
             "splits": {
+                "validation": "1" * 64,
                 **{
                     s: hashlib.sha256((directory / f"{s}.csv").read_bytes()).hexdigest()
-                    for s in ("train", "validation")
+                    for s in (
+                        ("train",) if construction_only else ("train", "validation")
+                    )
                 },
                 "test": "0" * 64,
             },
         },
     )
     context = campaign.public_validation_context(CELL)
-    dataset = campaign.load_development(root / "public", CELL)
+    training = (
+        campaign.load_training(root / "public", CELL)
+        if construction_only
+        else campaign.load_development(root / "public", CELL).train
+    )
     brief = PublicScientificBrief(
         scientific_context="Synthetic delayed input response. Generate v01 "
         "from u01 through internal memory.",
@@ -98,11 +114,11 @@ def synthetic_fixture(root: Path, request_budget: int = 32) -> dict:
             ),
         ),
     )
-    packet = build_training_evidence(dataset.train, context)
+    packet = build_training_evidence(training, context)
     cell = {
         "assets": {
             name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
-            for name in campaign.PUBLIC_FILES
+            for name in campaign.public_files(config)
         },
         "brief": brief.model_dump(mode="json"),
         "context": context.model_dump(mode="json"),

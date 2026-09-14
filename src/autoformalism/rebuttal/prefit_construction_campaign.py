@@ -51,12 +51,16 @@ from autoformalism.staged_topology import build_scientific_brief, content_hash
 from autoformalism.targets import PublicTargetContract
 
 ARMS = ("brief_only", "training_evidence")
+CONSTRUCTION_ONLY_PROTOCOL = "prefit-construction-audit-1"
+TRAINING_PUBLIC_FILES = ("manifest.json", "proposer_prompt.txt", "train.csv")
 
 
 class ConstructionCampaignConfig(StrictSchema):
     """Freeze all scientific choices and shared numerical/provider budgets."""
 
-    protocol: Literal["prefit-matched-construction-1"] = "prefit-matched-construction-1"
+    protocol: Literal[
+        "prefit-matched-construction-1", "prefit-construction-audit-1"
+    ] = "prefit-matched-construction-1"
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     model_settings: StagedModelSettings
@@ -71,7 +75,7 @@ class ConstructionCampaignConfig(StrictSchema):
     )
     function_repair_policy: Literal["certified_outer_gain"] = "certified_outer_gain"
     scientific_judge: Literal["off"] = "off"
-    fit: FitConfig = FitConfig(
+    fit: FitConfig | None = FitConfig(
         number_of_starts=1,
         allow_derivative_regression=False,
         maximum_function_evaluations=240,
@@ -97,7 +101,12 @@ class ConstructionCampaignConfig(StrictSchema):
                 raise ValueError(
                     "construction pilot requires public free-rollout cells"
                 )
-        if (
+        if self.protocol == CONSTRUCTION_ONLY_PROTOCOL:
+            if self.fit is not None:
+                raise ValueError("construction-only protocol requires fit=null")
+        elif self.fit is None:
+            raise ValueError("legacy construction protocol requires fit settings")
+        elif (
             self.fit.maximum_wall_time_seconds is None
             or self.fit.allow_derivative_regression
             or self.fit.parameter_fit_strategy != "bounded_nonlinear"
@@ -143,6 +152,22 @@ def load_development(public_root: Path, cell: str):
     )
 
 
+def load_training(public_root: Path, cell: str):
+    """Open only training observations for construction-only evidence."""
+    return BenchmarkLoader().load_training(
+        DataConfig(benchmark_id=cell, tier=cell.rsplit("_", 1)[-1], root=public_root)
+    )
+
+
+def public_files(config: ConstructionCampaignConfig) -> tuple[str, ...]:
+    """Specify the only observation assets allowed into a frozen protocol."""
+    return (
+        TRAINING_PUBLIC_FILES
+        if config.protocol == CONSTRUCTION_ONLY_PROTOCOL
+        else PUBLIC_FILES
+    )
+
+
 def _sealed_write(path: Path, payload: dict) -> None:
     """Bind even terminal failures to exact content and reject accidental rewrites."""
     result = {**payload, "artifact_sha256": content_hash(payload)}
@@ -161,7 +186,7 @@ def _sealed_read(path: Path) -> dict:
 
 
 def freeze(config_path: Path, public_root: Path, output: Path) -> dict:
-    """Copy four public assets per cell and freeze both arms before provider calls."""
+    """Freeze the protocol's allowed public assets and both arms before any calls."""
     config = ConstructionCampaignConfig.model_validate_json(config_path.read_text())
     repo = Path(__file__).resolve().parents[3]
     cells = {}
@@ -169,7 +194,7 @@ def freeze(config_path: Path, public_root: Path, output: Path) -> dict:
     for cell_index, cell in enumerate(config.public_cells):
         source = public_root / "phase_b_v1" / cell
         hashes = {}
-        for name in PUBLIC_FILES:
+        for name in public_files(config):
             payload = (source / name).read_bytes()
             destination = output / "public/phase_b_v1" / cell / name
             if destination.exists() and destination.read_bytes() != payload:
@@ -190,8 +215,12 @@ def freeze(config_path: Path, public_root: Path, output: Path) -> dict:
         brief = build_scientific_brief(
             prompt, context, target, mechanism, limits=config.limits
         )
-        dataset = load_development(output / "public", cell)
-        packet = build_training_evidence(dataset.train, context, config.evidence)
+        training = (
+            load_training(output / "public", cell)
+            if config.protocol == CONSTRUCTION_ONLY_PROTOCOL
+            else load_development(output / "public", cell).train
+        )
+        packet = build_training_evidence(training, context, config.evidence)
         cells[cell] = {
             "assets": hashes,
             "context": context.model_dump(mode="json"),
@@ -248,11 +277,11 @@ def _verify_frozen_inputs(root: Path) -> dict:
     if plan["protocol"] != config.protocol:
         raise ValueError("unsupported frozen construction protocol")
     for cell, payload in plan["cells"].items():
-        if set(payload["assets"]) != set(PUBLIC_FILES):
+        if set(payload["assets"]) != set(public_files(config)):
             raise ValueError("frozen public asset ledger is incomplete")
         for name, digest in payload["assets"].items():
             if (
-                name not in PUBLIC_FILES
+                name not in public_files(config)
                 or hashlib.sha256(
                     (root / "public/phase_b_v1" / cell / name).read_bytes()
                 ).hexdigest()
@@ -361,6 +390,8 @@ def construct_task(
 
 def fit_task(root: Path, plan: dict, task: dict) -> dict | None:
     """Fit the canonical initializer once; interrupted optimizer budgets stay spent."""
+    if plan["protocol"] == CONSTRUCTION_ONLY_PROTOCOL:
+        raise ValueError("fitting is forbidden by the construction-only protocol")
     directory = root / "results" / task["task_id"]
     identity = _identity(plan, task)
     path = directory / "fit.json"
@@ -494,17 +525,21 @@ def _validated_client(config, task, directory, namespace, base_url, can_start):
 
 def run(
     root: Path,
-    stage: Literal["construct", "fit"],
+    stage: Literal["construct", "fit", "audit"],
     base_url: str = "http://unused",
     *,
     arm: str | None = None,
     wall_seconds: float | None = None,
 ) -> dict:
     """Drain independent tasks with per-task locks and allocation-aware deferral."""
-    if stage not in {"construct", "fit"} or arm not in {None, *ARMS}:
+    if stage not in {"construct", "fit", "audit"} or arm not in {None, *ARMS}:
         raise ValueError("unknown stage or arm")
     plan = verify(root)
     config = ConstructionCampaignConfig.model_validate(plan["config"])
+    if stage == "fit" and config.protocol == CONSTRUCTION_ONLY_PROTOCOL:
+        raise ValueError("fitting is forbidden by the construction-only protocol")
+    if stage == "audit" and config.protocol != CONSTRUCTION_ONLY_PROTOCOL:
+        raise ValueError("audit stage requires the construction-only protocol")
     deadline = monotonic() + (
         wall_seconds if wall_seconds is not None else config.wall_seconds
     )
@@ -535,6 +570,12 @@ def run(
                     ):
                         break
                     fit_task(root, plan, task)
+                elif stage == "audit":
+                    from autoformalism.rebuttal.prefit_construction_audit import (
+                        audit_task,
+                    )
+
+                    audit_task(root, plan, task)
                 else:
                     client = _validated_client(
                         config,
@@ -560,6 +601,10 @@ def summarize(root: Path, *, plan: dict | None = None) -> dict:
     plan = plan or verify(root)
     result = _build_summary(root, plan)
     atomic_json(root / "summary.json", result)
+    if plan["protocol"] == CONSTRUCTION_ONLY_PROTOCOL:
+        from autoformalism.rebuttal.prefit_construction_audit import render_index
+
+        (root / "review.md").write_text(render_index(result))
     return result
 
 
@@ -586,6 +631,10 @@ def report(root: Path) -> dict:
 
 def _build_summary(root: Path, plan: dict) -> dict:
     """Collect verified terminal records and cached costs without mutating the run."""
+    if plan["protocol"] == CONSTRUCTION_ONLY_PROTOCOL:
+        from autoformalism.rebuttal.prefit_construction_audit import build_summary
+
+        return build_summary(root, plan)
     rows = []
     for task in plan["tasks"]:
         directory = root / "results" / task["task_id"]

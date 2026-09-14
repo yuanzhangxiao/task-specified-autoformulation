@@ -1,5 +1,5 @@
 #!/bin/bash
-# Freeze twelve tasks, prepare on CPU, construct on one H100, then fit on CPU.
+# Freeze twelve tasks, construct on one H100, then audit or fit on CPU by protocol.
 set -euo pipefail
 repo="${AF_REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 python="${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}"
@@ -23,30 +23,36 @@ else
   [[ "$resume" == 0 ]] || { echo 'Cannot resume without a frozen plan' >&2; exit 2; }
   "$python" "$repo/scripts/prefit_construction_campaign.py" freeze --config "$config" --public-root "$public" --output "$root"
 fi
+protocol="$(jq -er '.config.protocol' "$root/plan.json")"
+case "$protocol" in
+  prefit-matched-construction-1) final_stage=fit; final_time=02:00:00; final_cpus=8; final_mem=32G ;;
+  prefit-construction-audit-1) final_stage=audit; final_time=00:30:00; final_cpus=4; final_mem=16G ;;
+  *) echo 'Unsupported construction protocol' >&2; exit 2 ;;
+esac
 plan_hash="$(jq -er '.artifact_sha256' "$root/plan.json")"
 if [[ -f "$manifest" && "$resume" == 0 ]]; then jq . "$manifest"; exit 0; fi
 mkdir -p "$root/logs" "$root/submissions" "$hf"
 export AF_REPO_ROOT="$repo" AF_PYTHON="$python" AF_OUTPUT_ROOT="$root" AF_VLLM_IMAGE="$image" AF_HF_HOME="$hf"
 export AF_COMPUTE_CACHE_ROOT="${AF_COMPUTE_CACHE_ROOT:-/scratch/user/u.yx126462/autoformalism-runtime-cache/prefit-construction}"
 export AF_IPC_TMP_ROOT="${AF_IPC_TMP_ROOT:-/scratch/user/u.yx126462/af-ipc}"
-prior_construct='' prior_fit='' construct_needed=true
+prior_construct='' prior_final='' construct_needed=true
 if [[ "$resume" == 1 ]]; then
   [[ -f "$manifest" ]] || { echo 'Missing submission manifest; inspect any existing intent before retrying' >&2; exit 2; }
   [[ "$(jq -er '.plan_sha256' "$manifest")" == "$plan_hash" ]] || { echo 'Submission plan differs' >&2; exit 2; }
   prepare="$(jq -er '.prepare_job' "$manifest")"
   prior_construct="$(jq -er '.construct_job' "$manifest")"
-  prior_fit="$(jq -er '.fit_job' "$manifest")"
-  for job in "$prepare" "$prior_construct" "$prior_fit"; do [[ "$job" =~ ^[0-9]+$ ]] || exit 2; done
-  [[ -z "$(squeue -h -j "$prepare,$prior_construct,$prior_fit" -o '%A')" ]] || { echo 'A prior job remains queued/running; no duplicate submission' >&2; exit 2; }
+  prior_final="$(jq -er --arg key "${final_stage}_job" '.[$key]' "$manifest")"
+  for job in "$prepare" "$prior_construct" "$prior_final"; do [[ "$job" =~ ^[0-9]+$ ]] || exit 2; done
+  [[ -z "$(squeue -h -j "$prepare,$prior_construct,$prior_final" -o '%A')" ]] || { echo 'A prior job remains queued/running; no duplicate submission' >&2; exit 2; }
   [[ "$(sacct -n -X -j "$prepare" -o State --parsable2 | head -1 | cut -d'|' -f1)" == COMPLETED ]] || { echo 'Preparation did not complete; inspect its log and dependencies' >&2; exit 2; }
-  for job in "$prior_construct" "$prior_fit"; do
+  for job in "$prior_construct" "$prior_final"; do
     state="$(sacct -n -X -j "$job" -o State --parsable2 | head -1 | cut -d'|' -f1)"
     [[ "$state" =~ ^(COMPLETED|FAILED|CANCELLED|TIMEOUT|PREEMPTED|NODE_FAIL|OUT_OF_MEMORY|BOOT_FAIL) ]] || { echo 'Prior job state is uncertain; inspect accounting' >&2; exit 2; }
   done
   "$python" "$repo/scripts/prefit_construction_campaign.py" summary --root "$root" > "$root/submissions/resume-summary.json"
   [[ "$(jq -r '.status' "$root/submissions/resume-summary.json")" != complete ]] || { echo 'All tasks are terminal; no new jobs needed'; exit 0; }
   [[ "$(jq -r '.construction_complete' "$root/submissions/resume-summary.json")" != true ]] || construct_needed=false
-  intent="$root/submissions/resume-$prior_construct-$prior_fit"
+  intent="$root/submissions/resume-$prior_construct-$prior_final"
 else
   intent="$root/submissions/initial"
 fi
@@ -68,12 +74,12 @@ if [[ "$resume" == 0 ]]; then
 fi
 if [[ "$construct_needed" == true ]]; then
   construct="$(submit_job construct --dependency="afterok:$prepare" --job-name=prefit-construct --partition=gpu --time=04:00:00 --gres=gpu:h100:1 --cpus-per-task=8 --mem=64G --signal=B:TERM@300)"
-  fit="$(submit_job fit --dependency="afterany:$construct" --job-name=prefit-fit --partition=cpu --time=02:00:00 --cpus-per-task=8 --mem=32G --signal=B:TERM@300)"
+  final_job="$(submit_job "$final_stage" --dependency="afterany:$construct" --job-name="prefit-$final_stage" --partition=cpu --time="$final_time" --cpus-per-task="$final_cpus" --mem="$final_mem" --signal=B:TERM@300)"
 else
   construct="$prior_construct"
-  fit="$(submit_job fit --job-name=prefit-fit --partition=cpu --time=02:00:00 --cpus-per-task=8 --mem=32G --signal=B:TERM@300)"
+  final_job="$(submit_job "$final_stage" --job-name="prefit-$final_stage" --partition=cpu --time="$final_time" --cpus-per-task="$final_cpus" --mem="$final_mem" --signal=B:TERM@300)"
 fi
-jq -n --arg prepare_job "$prepare" --arg construct_job "$construct" --arg fit_job "$fit" --arg prior_construct "$prior_construct" --arg prior_fit "$prior_fit" --arg commit "$(git -C "$repo" rev-parse HEAD)" --arg plan_sha256 "$plan_hash" '{prepare_job:$prepare_job,construct_job:$construct_job,fit_job:$fit_job,prior_construct:$prior_construct,prior_fit:$prior_fit,commit:$commit,plan_sha256:$plan_sha256}' > "$intent/manifest.json"
+jq -n --arg prepare_job "$prepare" --arg construct_job "$construct" --arg final_key "${final_stage}_job" --arg final_job "$final_job" --arg prior_construct "$prior_construct" --arg prior_final "$prior_final" --arg commit "$(git -C "$repo" rev-parse HEAD)" --arg plan_sha256 "$plan_hash" '{prepare_job:$prepare_job,construct_job:$construct_job,($final_key):$final_job,prior_construct:$prior_construct,prior_final:$prior_final,commit:$commit,plan_sha256:$plan_sha256}' > "$intent/manifest.json"
 cp "$intent/manifest.json" "$manifest.tmp"
 mv "$manifest.tmp" "$manifest"
-printf 'ACES_PREFIT_PREPARE_JOB=%s\nACES_PREFIT_CONSTRUCTION_JOB=%s\nACES_PREFIT_FIT_JOB=%s\nACES_PREFIT_ROOT=%s\n' "$prepare" "$construct" "$fit" "$root"
+printf 'ACES_PREFIT_PREPARE_JOB=%s\nACES_PREFIT_CONSTRUCTION_JOB=%s\nACES_PREFIT_FINAL_JOB=%s\nACES_PREFIT_ROOT=%s\n' "$prepare" "$construct" "$final_job" "$root"

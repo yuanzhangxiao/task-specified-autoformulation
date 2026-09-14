@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+The fresh construction-only milestone is documented in
+`docs/PREFIT_CONSTRUCTION_AUDIT.md`. Its opt-in protocol builds twelve complete
+models, reconstructs their deterministic contracts and causal initialization,
+and saves canonical handoffs and readable repair audits. It opens only training
+observations and has no fitting or scientific judging stage.
+
 The prospective pre-fitting roadmap and current pilot contract are in
 `docs/PREFIT_MILESTONES.md`. Its first opt-in policy compares claim-specific
 evidence strength while preserving deterministic blockers and the legacy control.

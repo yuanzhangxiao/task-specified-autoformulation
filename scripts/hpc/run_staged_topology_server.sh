@@ -23,7 +23,7 @@ fi
 readonly protocol platform
 case "${protocol}" in
   prefit-matched-feedback-1) worker_script=prefit_feedback_campaign.py ;;
-  prefit-matched-construction-1) worker_script=prefit_construction_campaign.py ;;
+  prefit-matched-construction-1|prefit-construction-audit-1) worker_script=prefit_construction_campaign.py ;;
   scientific-staged-topology-1) worker_script=staged_topology_campaign.py ;;
   scientific-staged-functions-1) worker_script=staged_function_campaign.py ;;
   scientific-staged-sign-contract-1) worker_script=staged_sign_contract_campaign.py ;;

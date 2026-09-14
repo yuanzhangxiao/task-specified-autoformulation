@@ -22,10 +22,10 @@ def main() -> None:
     frozen.add_argument("--config", type=Path, required=True)
     frozen.add_argument("--public-root", type=Path, required=True)
     frozen.add_argument("--output", type=Path, required=True)
-    for name in ("run", "fit", "summary", "report", "verify"):
+    for name in ("run", "fit", "audit", "summary", "report", "verify"):
         command = commands.add_parser(name)
         command.add_argument("--root", type=Path, required=name != "run")
-        if name in {"run", "fit"}:
+        if name in {"run", "fit", "audit"}:
             command.add_argument("--arm", choices=("brief_only", "training_evidence"))
             command.add_argument("--wall-seconds", type=float)
         if name == "run":
@@ -54,8 +54,10 @@ def main() -> None:
             arm=args.arm,
             wall_seconds=args.wall_seconds,
         )
-    elif args.command == "fit":
-        result = run(args.root, "fit", arm=args.arm, wall_seconds=args.wall_seconds)
+    elif args.command in {"fit", "audit"}:
+        result = run(
+            args.root, args.command, arm=args.arm, wall_seconds=args.wall_seconds
+        )
     elif args.command == "summary":
         result = summarize(args.root)
     elif args.command == "report":

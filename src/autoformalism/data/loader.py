@@ -73,6 +73,21 @@ class BenchmarkLoader:
             test=loaded[SplitName.TEST],
         )
 
+    def load_training(self, config: DataConfig) -> DatasetSplit:
+        """Load training observations without opening validation or test files."""
+        spec = self._registry.get(config.benchmark_id)
+        roles = self._roles(spec, config.tier)
+        self._validate_root_paths(config.root, spec)
+        self._validate_manifest(
+            config.root, spec, config.tier, roles,
+            selected_splits=(SplitName.TRAIN,),
+        )
+        paths = self._resolve_split_paths(
+            config.root, spec, config.tier, SplitName.TRAIN,
+            config.use_clean_observations,
+        )
+        return self._load_split(spec, roles, SplitName.TRAIN, paths)
+
     def load_development(self, config: DataConfig) -> DevelopmentDataset:
         """Load only train and validation, leaving test unopened."""
         spec = self._registry.get(config.benchmark_id)
