@@ -184,7 +184,8 @@ starting a new allocation. No live campaign was submitted as part of implementat
 
 ## Remaining limits
 
-The live twelve-task matrix has not been run. These tests do not establish which
+The live twelve-task matrix has now run; the reporting recovery below records
+its execution status. Synthetic tests do not establish which
 presentation is better, calibrate the evidence-priority policy, or establish
 benchmark recovery. The descriptive packet omits some samples/events and has no
 measurement-noise model. Deterministic initial maps cannot recover unobserved
@@ -192,3 +193,46 @@ preparation differences that are absent from all allowed initial features.
 The pinned general fitter may be too weak for difficult candidates. The named
 cell's auxiliary-channel availability remains governed by its public task
 contract; this pilot does not redefine that contract.
+
+## Reporting recovery for the e7ffd12 ACES run
+
+The first live run used commit `e7ffd121ac6f27cd55eb7dc8e65c97bafc8ddcf3`
+and output root
+`/scratch/user/u.yx126462/phase_b/prefit-training-evidence-v1-e7ffd12`.
+Preparation job `2126622` completed. Construction job `2126623` and fit job
+`2126624` both exited with status 1 in the final summary: a failed function
+construction correctly saved `initialization: null`, but the summary attempted
+to read it as a dictionary. Both worker tracebacks identify that same line.
+The saved records account for all twelve tasks: eleven completed constructions,
+one terminal construction failure, eleven evaluated fits and one `not_run`
+because construction failed. Recovering the report needs no new model calls or
+fitting jobs. `evaluated` alone does not imply a successful numerical fit.
+
+The summary now treats absent initialization as an empty mode inventory and
+retains the failure and its costs in the paired denominator. Regression tests
+exercise budget exhaustion during both function and initializer construction.
+
+Use the new `report` command to inspect a previously frozen run with corrected
+reporting code. It verifies the sealed plan and results, task identities, public
+asset hashes, evidence packet and provider-request provenance, including missing
+cached requests. It writes JSON only to stdout and does not alter `summary.json`
+or any experiment artifact. The `reporting` block records both the frozen
+execution identity and current reporting identity. A different reporting runtime
+does not authorize resuming the run: `verify`, `run`, `fit` and `summary` retain
+the exact frozen execution checks.
+
+Create a separate reporting checkout; leave the original experiment checkout and
+plan intact. Each command below is one physical shell line:
+
+```bash
+git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 fetch origin codex/prefit-aces-v1 && git -C /scratch/user/u.yx126462/repos/autoformalism-e432fe3 worktree add --detach /scratch/user/u.yx126462/repos/autoformalism-prefit-report-v1 FETCH_HEAD
+module load GCCcore/13.2.0 Python/3.11.5 && PYTHONPATH=/scratch/user/u.yx126462/repos/autoformalism-prefit-report-v1/src /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python /scratch/user/u.yx126462/repos/autoformalism-prefit-report-v1/scripts/prefit_construction_campaign.py report --root /scratch/user/u.yx126462/phase_b/prefit-training-evidence-v1-e7ffd12
+```
+
+Reporting regression and ACES submission checks can run without a GPU:
+
+```bash
+PYTHONPATH=src python -m pytest -q tests/test_prefit_construction_campaign.py tests/test_prefit_aces_submission.py
+PYTHONPATH=src python scripts/smoke_prefit_construction.py
+ruff check .
+```

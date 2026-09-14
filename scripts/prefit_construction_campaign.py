@@ -7,6 +7,7 @@ from pathlib import Path
 
 from autoformalism.rebuttal.prefit_construction_campaign import (
     freeze,
+    report,
     run,
     summarize,
     verify,
@@ -21,7 +22,7 @@ def main() -> None:
     frozen.add_argument("--config", type=Path, required=True)
     frozen.add_argument("--public-root", type=Path, required=True)
     frozen.add_argument("--output", type=Path, required=True)
-    for name in ("run", "fit", "summary", "verify"):
+    for name in ("run", "fit", "summary", "report", "verify"):
         command = commands.add_parser(name)
         command.add_argument("--root", type=Path, required=name != "run")
         if name in {"run", "fit"}:
@@ -57,6 +58,8 @@ def main() -> None:
         result = run(args.root, "fit", arm=args.arm, wall_seconds=args.wall_seconds)
     elif args.command == "summary":
         result = summarize(args.root)
+    elif args.command == "report":
+        result = report(args.root)
     else:
         plan = verify(args.root)
         result = {"status": "verified", "plan_sha256": plan["artifact_sha256"]}

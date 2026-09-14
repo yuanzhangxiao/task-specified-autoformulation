@@ -230,8 +230,7 @@ def freeze(config_path: Path, public_root: Path, output: Path) -> dict:
 
 def verify(root: Path) -> dict:
     """Reject changed source, dependencies, public assets or evidence on resume."""
-    plan = _sealed_read(root / "plan.json")
-    ConstructionCampaignConfig.model_validate(plan["config"])
+    plan = _verify_frozen_inputs(root)
     if (
         plan["runtime_source_sha256"] != runtime_source_hash()
         or plan["numerical_runtime"] != runtime_identity()
@@ -239,6 +238,15 @@ def verify(root: Path) -> dict:
         raise ValueError("runtime differs from frozen construction campaign")
     if plan["launcher_sha256"] != launcher_hash():
         raise ValueError("launcher differs from frozen construction campaign")
+    return plan
+
+
+def _verify_frozen_inputs(root: Path) -> dict:
+    """Verify sealed inputs without authorizing execution by a different runtime."""
+    plan = _sealed_read(root / "plan.json")
+    config = ConstructionCampaignConfig.model_validate(plan["config"])
+    if plan["protocol"] != config.protocol:
+        raise ValueError("unsupported frozen construction protocol")
     for cell, payload in plan["cells"].items():
         if set(payload["assets"]) != set(PUBLIC_FILES):
             raise ValueError("frozen public asset ledger is incomplete")
@@ -550,6 +558,34 @@ def run(
 def summarize(root: Path, *, plan: dict | None = None) -> dict:
     """Retain failures and paired denominators; never pick a scientific winner."""
     plan = plan or verify(root)
+    result = _build_summary(root, plan)
+    atomic_json(root / "summary.json", result)
+    return result
+
+
+def report(root: Path) -> dict:
+    """Read an older frozen run without writing artifacts or enabling its resume."""
+    plan = _verify_frozen_inputs(root)
+    result = _build_summary(root, plan)
+    keys = ("runtime_source_sha256", "numerical_runtime", "launcher_sha256")
+    frozen = {key: plan[key] for key in keys}
+    reporter = {
+        "runtime_source_sha256": runtime_source_hash(),
+        "numerical_runtime": runtime_identity(),
+        "launcher_sha256": launcher_hash(),
+    }
+    result["reporting"] = {
+        "mode": "read_only",
+        "frozen_execution": frozen,
+        "reporter": reporter,
+        "execution_runtime_matches": frozen == reporter,
+        "execution_authorized": False,
+    }
+    return result
+
+
+def _build_summary(root: Path, plan: dict) -> dict:
+    """Collect verified terminal records and cached costs without mutating the run."""
     rows = []
     for task in plan["tasks"]:
         directory = root / "results" / task["task_id"]
@@ -566,6 +602,7 @@ def summarize(root: Path, *, plan: dict | None = None) -> dict:
             {},
         )
         functions = (construction or {}).get("functions") or {}
+        initialization = functions.get("initialization") or {}
         candidate = functions.get("candidate") or {}
         topology = (construction or {}).get("topology") or {}
         cost = _cost(_cache_records(directory / "calls", identity))
@@ -609,8 +646,7 @@ def summarize(root: Path, *, plan: dict | None = None) -> dict:
                 else None,
                 "initialization_modes": {
                     k: v["initial"]["mode"]
-                    for k, v in functions.get("initialization", {})
-                    .get("plan", {})
+                    for k, v in (initialization.get("plan") or {})
                     .get("rules", {})
                     .items()
                 },
@@ -681,5 +717,4 @@ def summarize(root: Path, *, plan: dict | None = None) -> dict:
         "test_data_opened": False,
         "private_reference_opened": False,
     }
-    atomic_json(root / "summary.json", result)
     return result

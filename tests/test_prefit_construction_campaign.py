@@ -150,7 +150,86 @@ def test_exhausted_budget_is_terminal_without_fitting_or_budget_reset(
     assert campaign.summarize(tmp_path)["arms"]["brief_only"]["expected"] == 1
 
 
-def test_killed_fit_is_terminal_and_altered_checkpoint_rejected(tmp_path, monkeypatch):
+@pytest.mark.parametrize("request_budget", [3, 4, 5])
+def test_failed_functions_with_null_initialization_are_reported(
+    tmp_path, request_budget
+):
+    plan = synthetic_fixture(tmp_path, request_budget=request_budget)
+    task = plan["tasks"][0]
+    calls = []
+    construction = campaign.construct_task(
+        tmp_path, plan, task, client_for(tmp_path, plan, task, calls)
+    )
+    assert construction["status"] == "construction_failed"
+    assert construction["functions"]["initialization"] is None
+    assert campaign.fit_task(tmp_path, plan, task)["status"] == "not_run"
+    for reader in (campaign.summarize, campaign.report):
+        result = reader(tmp_path)
+        row = result["rows"][0]
+        assert row["construction_status"] == "construction_failed"
+        assert row["construction_error"] == construction["functions"]["error"]
+        assert row["initialization_modes"] == {}
+        assert row["fit_status"] == "not_run"
+        assert row["first_validation_nmse"] is None
+        assert row["cost"]["physical_requests"] == request_budget == len(calls)
+        assert result["arms"]["brief_only"]["expected"] == 1
+        assert result["arms"]["brief_only"]["constructed"] == 0
+
+
+@pytest.mark.parametrize(
+    "identity_function", ["runtime_source_hash", "runtime_identity", "launcher_hash"]
+)
+def test_report_reads_old_runtime_without_writes_or_authorizing_execution(
+    tmp_path, monkeypatch, identity_function, capsys
+):
+    from scripts.prefit_construction_campaign import main
+
+    plan = synthetic_fixture(tmp_path)
+    task = plan["tasks"][0]
+    campaign.construct_task(tmp_path, plan, task, client_for(tmp_path, plan, task, []))
+    expected = campaign.summarize(tmp_path)
+    before = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    monkeypatch.setattr(campaign, identity_function, lambda: "different reporter")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("report tried to write, construct, load trajectories or fit")
+
+    for name in (
+        "atomic_json", "_validated_client", "load_development", "fit_candidate"
+    ):
+        monkeypatch.setattr(campaign, name, forbidden)
+    monkeypatch.setattr("sys.argv", ["prefit", "report", "--root", str(tmp_path)])
+    main()
+    result = json.loads(capsys.readouterr().out)
+    provenance = result.pop("reporting")
+    assert result == expected
+    assert provenance["mode"] == "read_only"
+    assert provenance["execution_runtime_matches"] is False
+    assert provenance["execution_authorized"] is False
+    assert provenance["frozen_execution"]["runtime_source_sha256"] == plan[
+        "runtime_source_sha256"
+    ]
+    for action in (campaign.verify, campaign.summarize):
+        with pytest.raises(ValueError, match="differs from frozen"):
+            action(tmp_path)
+    for stage in ("construct", "fit"):
+        with pytest.raises(ValueError, match="differs from frozen"):
+            campaign.run(tmp_path, stage)
+    assert before == {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+
+
+@pytest.mark.parametrize("reader", [campaign.summarize, campaign.report])
+def test_killed_fit_is_terminal_and_altered_checkpoint_rejected(
+    tmp_path, monkeypatch, reader
+):
     plan = synthetic_fixture(tmp_path)
     task = plan["tasks"][0]
     campaign.construct_task(tmp_path, plan, task, client_for(tmp_path, plan, task, []))
@@ -170,7 +249,7 @@ def test_killed_fit_is_terminal_and_altered_checkpoint_rejected(tmp_path, monkey
     result["status"] = "altered"
     (directory / "construction.json").write_text(json.dumps(result))
     with pytest.raises(ValueError, match="artifact digest differs"):
-        campaign.summarize(tmp_path)
+        reader(tmp_path)
 
 
 def test_arm_lock_and_deadline_do_not_block_or_spend_other_task_budget(
@@ -197,7 +276,10 @@ def test_arm_lock_and_deadline_do_not_block_or_spend_other_task_budget(
         campaign.run(tmp_path, "construct", arm="typo")
 
 
-def test_changed_launcher_and_provider_cache_are_rejected(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reader", [campaign.summarize, campaign.report])
+def test_changed_launcher_and_provider_cache_are_rejected(
+    tmp_path, monkeypatch, reader
+):
     plan = synthetic_fixture(tmp_path)
     task = plan["tasks"][0]
     campaign.construct_task(tmp_path, plan, task, client_for(tmp_path, plan, task, []))
@@ -206,20 +288,23 @@ def test_changed_launcher_and_provider_cache_are_rejected(tmp_path, monkeypatch)
     record["request"]["namespace"] = "other"
     cache.write_text(json.dumps(record))
     with pytest.raises(ValueError, match="provider request provenance"):
-        campaign.summarize(tmp_path)
+        reader(tmp_path)
     monkeypatch.setattr(campaign, "launcher_hash", lambda: "changed")
     with pytest.raises(ValueError, match="launcher differs"):
         campaign.verify(tmp_path)
 
 
-def test_missing_cache_cannot_reset_budget_or_silently_reduce_reported_cost(tmp_path):
+@pytest.mark.parametrize("reader", [campaign.summarize, campaign.report])
+def test_missing_cache_cannot_reset_budget_or_silently_reduce_reported_cost(
+    tmp_path, reader
+):
     plan = synthetic_fixture(tmp_path)
     task = plan["tasks"][0]
     campaign.construct_task(tmp_path, plan, task, client_for(tmp_path, plan, task, []))
     cache = next((tmp_path / "results" / task["task_id"] / "calls").glob("*.json"))
     cache.unlink()
     with pytest.raises(ValueError, match="missing a recorded request"):
-        campaign.summarize(tmp_path)
+        reader(tmp_path)
     with pytest.raises(ValueError, match="missing a recorded request"):
         campaign.construct_task(
             tmp_path, plan, task, client_for(tmp_path, plan, task, [])
@@ -256,3 +341,20 @@ def test_finite_fit_is_not_reported_as_optimizer_convergence(tmp_path):
     assert row["optimizer_success"] is False
     assert row["optimizer_status"] == 0
     assert row["first_validation_nmse"] == 0.2
+
+
+@pytest.mark.parametrize("artifact", ["plan", "public_asset"])
+def test_read_only_report_rejects_changed_frozen_inputs(tmp_path, artifact):
+    synthetic_fixture(tmp_path)
+    if artifact == "plan":
+        path = tmp_path / "plan.json"
+        plan = campaign.read(path)
+        plan["tasks"][0]["seed"] = 900
+        path.write_text(json.dumps(plan))
+        error = "artifact digest differs"
+    else:
+        path = tmp_path / "public/phase_b_v1" / CELL / "train.csv"
+        path.write_text(path.read_text() + "\n")
+        error = "frozen public asset differs"
+    with pytest.raises(ValueError, match=error):
+        campaign.report(tmp_path)
