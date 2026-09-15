@@ -42,16 +42,20 @@ class GuardedOracle(SymbolicOracle):
         budget: EvaluationBudget,
         point_seconds: float,
         fail_fast: bool = True,
+        reject_invalid_trials: bool = False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.budget, self.point_seconds = budget, point_seconds
         self.fail_fast = fail_fast
+        self.reject_invalid_trials = reject_invalid_trials
+        self.rejected_trials = 0
 
     def __call__(self, values):
         self.budget.take()
         self.deadline = min(self.budget.deadline, monotonic() + self.point_seconds)
         before = self.failures.count
+        valid_before = self.valid_calls
         try:
             residual = super().__call__(values)
         except TimeoutError as error:
@@ -60,7 +64,8 @@ class GuardedOracle(SymbolicOracle):
             self.failures.record(str(error))
             if self.with_sensitivities:
                 self.last_jac = None
-                raise SensitivityUnavailable(str(error)) from error
+                if not (self.reject_invalid_trials and valid_before):
+                    raise SensitivityUnavailable(str(error)) from error
             residual = np.full(
                 sum(t.number_of_rows for t in self.training.trajectories),
                 self.settings.failure_penalty,
@@ -69,10 +74,22 @@ class GuardedOracle(SymbolicOracle):
             # The legacy oracle records a penalty/zero J internally. Do not let
             # either reach least_squares in this opt-in policy.
             self.last_jac = None
+            if self.reject_invalid_trials and valid_before:
+                self.rejected_trials += 1
+                # TRF rejects nonfinite trial residuals and shrinks its radius.
+                # No Jacobian is supplied for this point; a failed first point
+                # still exits explicitly rather than pretending to converge.
+                return np.full_like(residual, np.inf)
             raise SensitivityUnavailable(
                 "augmented integration unavailable; no derivative supplied"
             )
         return residual
+
+    def jacobian(self, values):
+        matrix = super().jacobian(values)
+        if matrix is None or not np.isfinite(matrix).all():
+            raise SensitivityUnavailable("No finite Jacobian at the requested point")
+        return matrix
 
 
 def restart_points(initializer, start: dict, design: list[dict]) -> list[dict]:

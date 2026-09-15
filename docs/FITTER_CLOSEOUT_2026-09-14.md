@@ -11,6 +11,14 @@ parameter fitting is solved for arbitrary proposed models. Existing experiment
 backends and settings remain unchanged. This document changes no runtime code,
 configuration, benchmark, prompt, or acceptance threshold.
 
+## Explicitly authorized exception
+
+After this closeout, the user authorized one final targeted
+[joint/alternating comparison with a scale audit](FITTER_SCALED_ALTERNATING.md).
+It adds two opt-in diagnostic fits and does not change the production policy,
+previous results, or stopping thresholds. No further expansion follows it
+automatically.
+
 ## Final evidence
 
 The experiment implementation is pinned to commit

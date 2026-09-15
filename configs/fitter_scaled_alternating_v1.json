@@ -1,0 +1,17 @@
+{
+  "protocol": "scaled-alternating-1",
+  "initializer_seconds": 1200.0,
+  "screen_seconds": 240.0,
+  "refinement_seconds": 3360.0,
+  "replay_seconds": 240.0,
+  "screen_point_seconds": 60.0,
+  "sensitivity_point_seconds": 180.0,
+  "refinement_calls": 118,
+  "initializer_iterations": 1000,
+  "alternating_cycles": 40,
+  "block_iterations": 25,
+  "target_variables": 24000,
+  "minimum_intervals": 120,
+  "penalty": 10000.0,
+  "warmup_seconds": 5.0
+}
