@@ -1,0 +1,10 @@
+{
+  "protocol": "public-fit-continuation-pilot-1",
+  "parent_lowered_candidate_sha256": "a31a24bcaff143353934bf21f70cf3562885179130d39509c760c1ad409e7f42",
+  "parent_backend_result_sha256": "e844d8aea69b16ceffd8dce773fcd27b2054bd2d843e143ada992adecf63cd30",
+  "additional_seconds": 180,
+  "additional_residual_calls": 240,
+  "maximum_extensions": 1,
+  "recent_iterations": 4,
+  "minimum_relative_cost_drop": 0.01
+}

@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The bounded public fitting continuation pilot is documented in
+`docs/PUBLIC_FIT_CONTINUATION.md`. It permits one explicitly selected additional
+180-second sensitivity window from the complete retained parameter vector,
+including learned causal initializers. It preserves the parent, selects only
+on training, and reports budget/numerical uncertainty separately from fit
+quality. No automatic continuation or model redesign follows this pilot.
+
 The saved-repair public fitting handoff is documented in
 `docs/PREFIT_PUBLIC_FIT_HANDOFF.md`. It verifies the historical construction and
 repair evidence, transfers one preselected anonymous model to the frozen fitter,

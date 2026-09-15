@@ -5,6 +5,13 @@ comparison. [The closeout](FITTER_CLOSEOUT_2026-09-14.md) records the evidence a
 known limitations. This freeze governs the next full-pipeline work. It is an
 operational decision, not a claim of reliable recovery for arbitrary models.
 
+The subsequent user-authorized [public continuation pilot](PUBLIC_FIT_CONTINUATION.md)
+adds one separately versioned 180-second sensitivity window to the selected
+budget-limited public fit. It preserves the old experiment and full learned
+initializer vector, caps cumulative allocations, and reports unresolved fitting
+uncertainty before scientific redesign. It is not a general automatic extension
+policy or a reopening of fitting-method comparisons.
+
 ## What is frozen
 
 - Keep existing experiment roots pinned to their original code, inputs, starts,
