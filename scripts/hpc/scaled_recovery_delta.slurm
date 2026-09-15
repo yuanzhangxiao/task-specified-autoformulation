@@ -16,7 +16,21 @@ export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
 readonly work="$(mktemp -d "${SLURM_TMPDIR:-/tmp}/scaled-recovery-${SLURM_JOB_ID}.XXXXXX")"
 echo "Node-local work: ${work}"
 date -u '+Bootstrap begins: %Y-%m-%dT%H:%M:%SZ'
-timeout --kill-after=5s 120s cp scripts/stage_scaled_recovery_runtime.py scripts/scaled_recovery_io.py "${work}/"
+finish_preparation() {
+  local result=$?
+  trap - EXIT
+  set +e
+  # Even outer timeout/termination leaves an explicit preparation outcome.
+  # Publication has its own bound; preserve the original failure exit code.
+  timeout --kill-after=5s 120s "${AF_PYTHON}" -S "${work}/stage_scaled_recovery_runtime.py" publish-preparation \
+    --output "${AF_OUTPUT_ROOT}" --work "${work}" --exit-code "${result}"
+  local publication=$?
+  if [[ "${result}" -ne 0 ]]; then exit "${result}"; fi
+  exit "${publication}"
+}
+if [[ "${1:?}" == prepare ]]; then trap finish_preparation EXIT; fi
+timeout --kill-after=5s 120s cp scripts/stage_scaled_recovery_runtime.py scripts/scaled_recovery_io.py \
+  scripts/scaled_runtime_dependencies.py "${work}/"
 case "${1:?}" in
   prepare)
     timeout --kill-after=10s 2400s "${AF_PYTHON}" -S "${work}/stage_scaled_recovery_runtime.py" build \

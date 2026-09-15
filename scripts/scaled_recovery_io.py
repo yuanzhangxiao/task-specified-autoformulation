@@ -94,6 +94,7 @@ def code_files(repo: Path) -> dict[str, str]:
             "run_scaled_recovery.py",
             "scaled_recovery_io.py",
             "stage_scaled_recovery_runtime.py",
+            "scaled_runtime_dependencies.py",
             "smoke_scaled_recovery.py",
             "hpc/scaled_recovery_delta.slurm",
             "hpc/submit_scaled_recovery_delta.sh",
@@ -246,6 +247,41 @@ def publish(source: Path, target: Path) -> None:
 
 def report(output: Path) -> dict:
     """Keep execution completion, physical feasibility and accuracy separate."""
+    if not (output / "freeze.json").exists() or (
+        (output / "submission.json").exists() and not (output / "bundle.json").exists()
+    ):
+        preparation = output / "preparation/result.json"
+        diagnostic = (
+            read(preparation)
+            if preparation.exists()
+            else {
+                "status": "not_ready",
+                "message": "No prepared runtime bundle; inspect preparation job logs.",
+            }
+        )
+        result = {
+            "identity": None,
+            "status": "preparation_" + diagnostic["status"],
+            "preparation": diagnostic,
+            "collocation_reruns": 0,
+            "rows": [
+                {"arm": arm, "status": "blocked_preparation"}
+                for arm in ("joint", "alternating")
+            ],
+        }
+        write(output / "summary.json", result)
+        (output / "SUMMARY.md").write_text(
+            "# Saved-checkpoint execution recovery\n\n"
+            f"Status: {result['status']}. "
+            "Neither fitting arm can start before successful preparation.\n\n"
+            "This is an execution failure or pending preparation, "
+            "not a numerical fitting result. "
+            "No NMSE or recovery conclusion is available.\n\n"
+            "Preparation diagnostic:\n```json\n"
+            + json.dumps(diagnostic, indent=2)
+            + "\n```\n"
+        )
+        return result
     frozen = self_checked(output / "freeze.json")
     rows = []
     for index, task in enumerate(frozen["tasks"]):

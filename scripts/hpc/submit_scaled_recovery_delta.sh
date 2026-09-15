@@ -5,7 +5,7 @@ export AF_REPO_ROOT="${AF_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 export AF_PYTHON="${AF_PYTHON:-/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python}"
 export AF_CASADI_ROOT="${AF_CASADI_ROOT:-/projects/bibo/yxiao2/venvs/fitter-methods-v1-deps}"
 export AF_SOURCE_ROOT="${AF_SOURCE_ROOT:-/work/hdd/bibo/yxiao2/phase_b/fitter-scaled-alternating-v1}"
-export AF_OUTPUT_ROOT="${AF_OUTPUT_ROOT:-/work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v1}"
+export AF_OUTPUT_ROOT="${AF_OUTPUT_ROOT:-/work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v2}"
 cd "${AF_REPO_ROOT}"
 [[ -x "${AF_PYTHON}" && -z "$(git status --porcelain)" ]] || { echo 'Use a clean pinned checkout.' >&2; exit 2; }
 export AF_CODE_COMMIT

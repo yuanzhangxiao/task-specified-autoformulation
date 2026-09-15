@@ -73,30 +73,34 @@ def audit_numerical_sources(repo: Path, source: Path) -> dict:
 
 def command(args: list[str], root: Path, label: str, *, env=None, seconds=600) -> str:
     started = monotonic()
-    print(json.dumps({"event": label + "_begin", "utc_seconds": time()}), flush=True)
-    with (root / (label + ".log")).open("w") as stream:
-        process = subprocess.run(
-            args,
-            env=env,
-            stdout=stream,
-            stderr=subprocess.STDOUT,
-            timeout=seconds,
-            check=False,
-        )
-    elapsed = monotonic() - started
     write(
-        root / (label + ".json"), {"seconds": elapsed, "exit_code": process.returncode}
+        root / "current.json",
+        {"stage": label, "status": "running", "utc_seconds": time()},
     )
-    print(
-        json.dumps(
-            {
-                "event": label + "_end",
-                "seconds": elapsed,
-                "exit_code": process.returncode,
-            }
-        ),
-        flush=True,
-    )
+    print(json.dumps({"event": label + "_begin", "utc_seconds": time()}), flush=True)
+    result = {"stage": label, "status": "failed", "exit_code": None}
+    try:
+        with (root / (label + ".log")).open("w") as stream:
+            process = subprocess.run(
+                args,
+                env=env,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                timeout=seconds,
+                check=False,
+            )
+        result.update(
+            status="complete" if process.returncode == 0 else "failed",
+            exit_code=process.returncode,
+        )
+    except subprocess.TimeoutExpired:
+        result.update(status="timeout", exit_code=124)
+        raise
+    finally:
+        result["seconds"] = monotonic() - started
+        write(root / (label + ".json"), result)
+        write(root / "current.json", result)
+        print(json.dumps({"event": label + "_end", **result}), flush=True)
     if process.returncode:
         raise RuntimeError(
             f"{label} failed: {(root / (label + '.log')).read_text()[-3000:]}"
@@ -109,7 +113,18 @@ def build(
 ):
     payload, logs = work / "payload", work / "preparation"
     logs.mkdir(parents=True, exist_ok=True)
+    write(
+        logs / "current.json", {"stage": "numerical_source_audit", "status": "running"}
+    )
+    print(
+        json.dumps({"event": "numerical_source_audit_begin", "utc_seconds": time()}),
+        flush=True,
+    )
     write(logs / "numerical_source_audit.json", audit_numerical_sources(repo, source))
+    print(
+        json.dumps({"event": "numerical_source_audit_end", "utc_seconds": time()}),
+        flush=True,
+    )
     runtime = payload / "runtime"
     (payload / "repo").mkdir(parents=True, exist_ok=True)
     discovery = command(
@@ -152,12 +167,33 @@ def build(
             shutil.copy2(
                 library, runtime / "python/lib" / library.name, follow_symlinks=True
             )
-    for label, src in (("site", purelib), ("extras", extras)):
+    # Read wheel metadata only: never import the numerical stack over shared
+    # storage, and never traverse/copy unrelated packages in a large environment.
+    command(
+        [
+            str(python),
+            "-S",
+            str(Path(__file__).with_name("scaled_runtime_dependencies.py")),
+            "--root",
+            str(extras),
+            "--root",
+            str(purelib),
+            "--output",
+            str(logs),
+        ],
+        logs,
+        "discover_dependencies",
+        seconds=180,
+    )
+    for index, (label, src) in enumerate((("extras", extras), ("site", purelib))):
+        (runtime / label).mkdir(parents=True, exist_ok=True)
         command(
             [
                 "rsync",
                 "-aL",
-                "--exclude=__pycache__",
+                "--stats",
+                "--out-format=%n",
+                "--files-from=" + str(logs / f"dependency-files-{index}.txt"),
                 str(src) + "/",
                 str(runtime / label) + "/",
             ],
@@ -249,6 +285,29 @@ def build(
         immutable=True,
     )
     print(json.dumps({"prepared": True, "identity": frozen["identity"]}), flush=True)
+    write(logs / "result.json", {"status": "complete", "identity": frozen["identity"]})
+
+
+def publish_preparation(output: Path, work: Path, exit_code: int) -> None:
+    """Preserve bootstrap errors even if no campaign freeze was published."""
+    logs = work / "preparation"
+    logs.mkdir(parents=True, exist_ok=True)
+    result_path = logs / "result.json"
+    if not result_path.exists():
+        write(
+            result_path,
+            {
+                "status": "interrupted" if exit_code else "incomplete",
+                "exit_code": exit_code,
+                "message": "Preparation exited before its completion record; "
+                "inspect bootstrap logs.",
+                "last_stage": read(logs / "current.json")
+                if (logs / "current.json").exists()
+                else None,
+            },
+        )
+    publish(logs, output / "preparation")
+    print(json.dumps({"preparation": read(result_path)}), flush=True)
 
 
 def local_environment(payload: Path) -> dict:
@@ -311,7 +370,7 @@ def restore(output: Path, work: Path, index: int):
 
 def main():
     parser = argparse.ArgumentParser(__doc__)
-    parser.add_argument("action", choices=("build", "restore"))
+    parser.add_argument("action", choices=("build", "restore", "publish-preparation"))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--python", type=Path)
     parser.add_argument("--extras", type=Path)
@@ -319,9 +378,29 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--task-index", type=int, default=0)
+    parser.add_argument("--exit-code", type=int, default=0)
     args = parser.parse_args()
     if args.action == "build":
-        build(args.repo, args.python, args.extras, args.source, args.output, args.work)
+        try:
+            build(
+                args.repo, args.python, args.extras, args.source, args.output, args.work
+            )
+        except Exception as error:
+            logs = args.work / "preparation"
+            write(
+                logs / "result.json",
+                {
+                    "status": "failed",
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                    "last_stage": read(logs / "current.json")
+                    if (logs / "current.json").exists()
+                    else None,
+                },
+            )
+            raise
+    elif args.action == "publish-preparation":
+        publish_preparation(args.output, args.work, args.exit_code)
     else:
         raise SystemExit(restore(args.output, args.work, args.task_index))
 

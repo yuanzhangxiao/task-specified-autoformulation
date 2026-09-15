@@ -18,12 +18,22 @@ the same command cannot silently buy another attempt.
 
 1. A CPU preparation job binds the original commit to its source hash and
    confirms unchanged fitting, expression, data, schema and relevant campaign
-   modules. It copies Python, its standard/shared libraries, venv packages and
-   CasADi packages to local storage. Exact source Python/package versions and
+   modules. It copies Python, its standard/shared libraries, and the required
+   installed packages to local storage. Exact source Python/package versions and
    local numerical import origins must match. `-S` prevents editable `.pth`
    files from redirecting imports to a shared checkout.
    Bootstrap commands use the configured Python with site loading disabled;
    they do not assume a particular `/usr/bin/python3` version.
+   Dependency discovery reads installed metadata without importing the numerical
+   stack. It selects the mandatory dependency closure of the project's runtime
+   imports and CasADi, honoring extras-directory precedence and Python/platform
+   markers. Optional GPU, plotting and development extras are not selected.
+   Only the selected distributions' recorded library/data/metadata files are
+   copied, including native support libraries. Console scripts outside package
+   roots, caches and `.pth` redirects are excluded. Missing inventories or
+   incompatible installed dependencies stop preparation rather than silently
+   falling back to copying the entire environment. Discovery uses installed
+   `packaging`, or pip's bundled parser; it installs nothing.
 2. An independent small synthetic smoke exercises screening, sensitivity,
    replay and deterministic resume. Successful preparation publishes one
    hash-checked runtime/code/input tar bundle. No benchmark point is optimized
@@ -81,7 +91,7 @@ bash scripts/hpc/submit_scaled_recovery_delta.sh
 Defaults:
 
 - Source: `/work/hdd/bibo/yxiao2/phase_b/fitter-scaled-alternating-v1`.
-- New output: `/work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v1`.
+- New output: `/work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v2`.
 - Python: `/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python`.
 - CasADi: `/projects/bibo/yxiao2/venvs/fitter-methods-v1-deps`.
 
@@ -90,15 +100,31 @@ fit tasks (one CPU and 16 GB each, 2.5 hours including staging), and a summary.
 Submission is recorded incrementally and never duplicated automatically.
 Failed preparation blocks both fit workers.
 
+The v1 preparation job `22089715` timed out while copying the entire venv
+`site-packages` directory. It published no freeze and started no fitting. Its
+summary job `22089717` then raised a secondary missing-freeze error. V2 replaces
+that broad copy with the dependency inventory above, retaining numerical code,
+saved checkpoints and budgets. The failed v1 directory remains untouched.
+An EXIT handler now attempts bounded publication of preparation progress and
+errors even after an outer timeout. Summary can report blocked preparation
+without requiring `freeze.json`, and does not label it a numerical fit failure.
+
 After completion:
 
 ```bash
-python3 scripts/run_scaled_recovery.py summarize \
-  --output /work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v1
-cat /work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v1/SUMMARY.md
+/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python -S \
+  scripts/run_scaled_recovery.py summarize \
+  --output /work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v2
+cat /work/hdd/bibo/yxiao2/phase_b/fitter-scaled-recovery-v2/SUMMARY.md
 ```
 
 `preparation/` contains runtime-copy/import/smoke timing and source audits.
+Its `dependencies.json` lists selected installed versions, file counts and
+recorded byte sizes; `copy_extras.log` and `copy_site.log` retain file-copy
+progress. `current.json` identifies the last preparation operation and
+`result.json` records its overall outcome. These diagnostics are also printed
+in the summary when preparation prevents fitting. If the filesystem prevents
+even bounded diagnostic publication, use the Slurm stdout/stderr logs.
 `results/task_000` is joint; `results/task_001` is alternating. Their
 `supervisor-events.jsonl`, stage `events.jsonl`, `ready.json` and `result.json`
 separate execution phases. Screening `calls/` directories contain physical

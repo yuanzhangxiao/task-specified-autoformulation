@@ -309,3 +309,184 @@ def test_local_environment_uses_no_shared_python_paths(tmp_path):
     )
     assert env["PYTHONNOUSERSITE"] == "1"
     assert env["PYTHONPATH"].index("extras") < env["PYTHONPATH"].index("site")
+
+
+def installed_wheel(root, name, version, files, requires=()):
+    """Make a real installed-distribution inventory for packaging tests."""
+    dist = root / f"{name.replace('-', '_')}-{version}.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+        + "".join(f"Requires-Dist: {value}\n" for value in requires)
+    )
+    for file, data in files.items():
+        path = root / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(data)
+    records = [*files, f"{dist.name}/METADATA", f"{dist.name}/RECORD"]
+    (dist / "RECORD").write_text("".join(f"{file},,\n" for file in records))
+    return dist
+
+
+def test_dependency_copy_preserves_precedence_native_files_and_imports(tmp_path):
+    deps, staging = (
+        module("scaled_runtime_dependencies"),
+        module("stage_scaled_recovery_runtime"),
+    )
+    extras, site = tmp_path / "extras", tmp_path / "site"
+    installed_wheel(site, "probe", "1.0", {"probe.py": "VALUE = 1\n"})
+    installed_wheel(
+        extras,
+        "probe",
+        "2.0",
+        {"probe.py": "from child import VALUE\n"},
+        ["child>=1", 'absent; extra == "gpu"', 'absent; python_version < "3"'],
+    )
+    installed_wheel(
+        site,
+        "child",
+        "1.0",
+        {
+            "child.py": "VALUE = 7\n",
+            "child.libs/library.so": "native-support",
+            "child_data/resource.txt": "resource",
+            "redirect.pth": "unwanted side effect",
+            "__pycache__/child.pyc": "unneeded",
+        },
+    )
+    installed_wheel(
+        site, "unrelated-large-package", "1.0", {"huge.bin": "never copied"}
+    )
+    selection = deps.select([extras, site], ("probe",))
+    assert set(selection["packages"]) == {"probe", "child"}
+    assert selection["packages"]["probe"]["version"] == "2.0"
+    targets = []
+    for index, root in enumerate((extras, site)):
+        files = selection["files"][str(root)]
+        inventory = tmp_path / f"files-{index}.txt"
+        inventory.write_text("\n".join(files) + "\n")
+        target = tmp_path / f"relocated-{index}"
+        target.mkdir()
+        staging.command(
+            [
+                "rsync",
+                "-aL",
+                "--files-from=" + str(inventory),
+                str(root) + "/",
+                str(target) + "/",
+            ],
+            tmp_path,
+            f"copy-{index}",
+        )
+        targets.append(target)
+    assert not (targets[1] / "huge.bin").exists()
+    assert not (targets[1] / "redirect.pth").exists()
+    assert (targets[1] / "child.libs/library.so").read_text() == "native-support"
+    result = subprocess.run(
+        [sys.executable, "-S", "-c", "import probe; print(probe.VALUE)"],
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(map(str, targets))},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "7", result.stderr
+
+
+def test_dependency_selection_fails_closed_on_missing_or_conflicting_metadata(tmp_path):
+    deps = module("scaled_runtime_dependencies")
+    dist = installed_wheel(tmp_path, "probe", "1.0", {"probe.py": ""}, ["missing"])
+    with pytest.raises(ValueError, match="missing installed dependency"):
+        deps.select([tmp_path], ("probe",))
+    with pytest.raises(ValueError, match="does not satisfy"):
+        deps.select([tmp_path], ("probe>=2",))
+    (dist / "RECORD").unlink()
+    with pytest.raises(ValueError, match="refusing whole-site copy"):
+        deps.select([tmp_path], ("probe",))
+
+
+def test_preparation_timeout_publishes_stage_and_summary_without_freeze(tmp_path):
+    staging, io = module("stage_scaled_recovery_runtime"), module("scaled_recovery_io")
+    work, output = tmp_path / "work", tmp_path / "output"
+    logs = work / "preparation"
+    logs.mkdir(parents=True)
+    with pytest.raises(subprocess.TimeoutExpired):
+        staging.command(
+            [
+                sys.executable,
+                "-u",
+                "-c",
+                "print('copying child.libs'); import time; time.sleep(10)",
+            ],
+            logs,
+            "copy_site",
+            seconds=0.2,
+        )
+    staging.publish_preparation(output, work, 124)
+    assert io.read(output / "preparation/copy_site.json")["status"] == "timeout"
+    assert "copying child.libs" in (output / "preparation/copy_site.log").read_text()
+    report = io.report(output)
+    assert report["status"] == "preparation_interrupted"
+    assert report["preparation"]["last_stage"]["stage"] == "copy_site"
+    assert all(row["status"] == "blocked_preparation" for row in report["rows"])
+    assert "not a numerical fitting result" in (output / "SUMMARY.md").read_text()
+    assert not (output / "freeze.json").exists()
+
+
+def test_failed_preparation_and_absent_status_are_reportable(tmp_path):
+    io = module("scaled_recovery_io")
+    assert io.report(tmp_path)["status"] == "preparation_not_ready"
+    io.write(
+        tmp_path / "preparation/result.json",
+        {"status": "failed", "message": "dependency missing"},
+    )
+    assert io.report(tmp_path)["preparation"]["message"] == "dependency missing"
+    # A malformed freeze is still an error once preparation is available.
+    io.write(tmp_path / "freeze.json", {"identity": "wrong"})
+    with pytest.raises(ValueError, match="content identity"):
+        io.report(tmp_path)
+
+
+def test_build_cli_preserves_exception_before_exit_publication(tmp_path):
+    io = module("scaled_recovery_io")
+    base = [
+        sys.executable,
+        "-S",
+        str(REPO / "scripts/stage_scaled_recovery_runtime.py"),
+    ]
+    work, output = tmp_path / "work", tmp_path / "output"
+    result = subprocess.run(
+        [
+            *base,
+            "build",
+            "--repo",
+            str(REPO),
+            "--source",
+            str(tmp_path / "absent"),
+            "--output",
+            str(output),
+            "--work",
+            str(work),
+        ],
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode != 0
+    published = subprocess.run(
+        [
+            *base,
+            "publish-preparation",
+            "--output",
+            str(output),
+            "--work",
+            str(work),
+            "--exit-code",
+            str(result.returncode),
+        ],
+        capture_output=True,
+        timeout=10,
+    )
+    assert published.returncode == 0, published.stderr
+    report = io.report(output)
+    assert report["status"] == "preparation_failed"
+    assert report["preparation"]["error_type"] == "FileNotFoundError"
+    assert report["preparation"]["last_stage"]["stage"] == "numerical_source_audit"
