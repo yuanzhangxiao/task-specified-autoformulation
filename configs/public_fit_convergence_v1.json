@@ -1,0 +1,11 @@
+{
+  "protocol": "public-fit-convergence-diagnostic-1",
+  "continuation_identity": "46e9914dd9d2097ba492adcf8edaecb638da6a8bd93404089afa5143d07c91bb",
+  "continuation_backend_sha256": "d92f087138f921ab7f634c9c94d9c87963b9a160b4930fa508e77045d6b9e986",
+  "maximum_windows": 20,
+  "window_seconds": 180,
+  "window_residual_calls": 240,
+  "stationarity_tolerance": 1e-6,
+  "stop_on_slow_progress": false,
+  "final_protocol_limit_decided": false
+}

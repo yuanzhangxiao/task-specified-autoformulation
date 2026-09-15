@@ -12,6 +12,13 @@ initializer vector, caps cumulative allocations, and reports unresolved fitting
 uncertainty before scientific redesign. It is not a general automatic extension
 policy or a reopening of fitting-method comparisons.
 
+The later user-authorized [convergence diagnostic](PUBLIC_FIT_CONVERGENCE.md)
+adds up to twenty further 180-second windows from that pilot's retained point,
+using the same numerical implementation. Its purpose is to measure continued
+improvement and local stopping behavior. This additional diagnostic allowance
+does not determine the final pipeline continuation policy; that limit remains
+undecided. Historical budgets and completed experiments remain immutable.
+
 ## What is frozen
 
 - Keep existing experiment roots pinned to their original code, inputs, starts,

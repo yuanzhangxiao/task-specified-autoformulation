@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The separately authorized convergence diagnostic in
+`docs/PUBLIC_FIT_CONVERGENCE.md` continues the completed public-fit pilot for up
+to twenty further 180-second warm-start windows. It measures training progress
+and qualified native stopping, preserves all learned initializers, and retains
+strict checkpoint/budget provenance. It does not set the final pipeline's
+continuation limit, which remains undecided.
+
 The bounded public fitting continuation pilot is documented in
 `docs/PUBLIC_FIT_CONTINUATION.md`. It permits one explicitly selected additional
 180-second sensitivity window from the complete retained parameter vector,
