@@ -58,17 +58,23 @@ defaults.
 
 ## Completing the pipeline
 
+The first integration milestone is now implemented in
+[Public fitting handoff v1](PUBLIC_FITTING_HANDOFF.md): typed public requests,
+deterministic initializer lowering, sealed data/provenance, explicit existing
+backend profiles, a CPU CLI and separate execution/fit-quality evidence. It
+does not add multi-target C+S support or modify the historical callers below.
+
 Astra owns the fitter interface, numerical result interpretation, and CPU
 handoff. Orion owns scientific construction, requirement repair and coordination
 of the pre-fitting/controller path. They share the project checkout and commit
 only their own files, coordinating source holds for provenance-sensitive tests.
 
-The next integration must expose a complete public model and causal initializer
-as a versioned fit request, identify its numerical backend/settings explicitly,
-and return a comparable result envelope without inventing unavailable metrics.
-Legacy experiment callers remain unchanged. Capability failures must be
-reported before optimization; a poor fit must not become a scientific rejection
-or proof of structural impossibility.
+The controller must export its accepted public model and causal initializer
+through that versioned request, identify the numerical backend/settings explicitly,
+and consume the result envelope without inventing unavailable metrics. Legacy
+experiment callers remain unchanged. Capability failures are reported before
+optimization; a poor fit must not become a scientific rejection or proof of
+structural impossibility.
 
 Multi-target support, if needed for the chosen pipeline pilot, is an adapter
 integration milestone. It must preserve per-channel training scaling, residual

@@ -8,6 +8,12 @@ construction, causal-initialization, fitting and feedback interfaces. The curren
 general rollout and `v01`-only collocation adapters remain distinct execution
 paths; multi-target integration is not yet a deployed capability.
 
+`docs/PUBLIC_FITTING_HANDOFF.md` defines the new `public-fit-1` request/result
+interface and CPU CLI. It seals public train/validation content and deterministic
+initializer lowering, names the existing backend explicitly, and distinguishes
+capability failures, unavailable scores and native convergence. It adds no
+fitting-method comparison or implicit fallback for unsupported multi-target C+S.
+
 The follow-up pre-fitting repair policy in `docs/PREFIT_SIGN_NORMALIZATION.md`
 restores topology-owned outer-sign normalization and makes each interaction's
 source/sign contract explicit. A pinned offline replay precedes fresh repairs;
