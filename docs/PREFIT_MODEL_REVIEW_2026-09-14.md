@@ -3,8 +3,8 @@
 The construction and local-preservation gate passed. The saved equations do not
 justify declaring the scientific pre-fitting work complete. Several problems are
 visible in the assembled models without running a fitter: a growing mode labeled
-as delayed insulin action, repeated disposal contributions, and a mismatch
-between a reported public nonlinearity concern and zero local obligations.
+as delayed insulin action, repeated disposal contributions, and an explicitly
+required nonlinear mechanism missed by zero local nonlinearity obligations.
 
 This is a manual review of candidate structures and their saved audit facts, not
 a scientific-judge experiment, a new production policy, or a fitting result.
@@ -14,6 +14,9 @@ a scientific-judge experiment, a new production policy, or a fitting result.
 - User-provided export: `/Users/yuanzhangxiao/Downloads/model-review.json`.
 - Export SHA-256:
   `84fc26496888fe574760aa56dc88466aaca820f6cf3e587891282386a1f4a443`.
+- Subsequently supplied frozen context:
+  `/Users/yuanzhangxiao/Downloads/review-context.json`, SHA-256
+  `cad00ca42bccd36d222fe1e8f8f92f6eb8f0198c746aa3a35a935541d4b12ca4`.
 - Campaign: `prefit-construction-audit-1`, ACES root
   `/scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1-fix1`.
 - Reported campaign commit: `c7d0b0523b03eb54f688423b288393280399e77f`.
@@ -22,20 +25,64 @@ a scientific-judge experiment, a new production policy, or a fitting result.
 - Twelve models: two public benchmark cells, three seeds, two evidence arms.
 - All twelve canonical candidates were read and schema-validated. Their state
   equations, algebraic processes, initializers and changed slots were inspected.
-- The export excludes the frozen brief, complete original topology, unchanged
-  local replies and provider cache. It cannot independently reproduce the full
-  ACES reconstruction/provenance audit or attribute each defect to its first
-  proposal stage. The saved certificates report that reconstruction passed.
+- The second export supplies both frozen briefs, validation contexts, target
+  contracts, mechanism specifications and public asset digests. Its reported
+  plan hash matches the campaign. Both cells' prompt digests agree across their
+  asset ledger, target contract and mechanism specification. The target contracts
+  equal the registered v2 contracts; the mechanism specifications equal the
+  registered v1 specifications. All four schema types validate for both cells.
+- These projections still exclude the complete original topology, unchanged local
+  replies and provider cache. They cannot independently reproduce the full ACES
+  reconstruction/provenance audit or attribute each defect to its first proposal
+  stage. The complete plan hash cannot be recomputed from a partial projection.
+  The saved certificates report that reconstruction passed.
 - No trajectory data, validation/test values, private reference equations,
   scientific judge or fitted parameter values were used in this review.
 
 The current local proposer prompts are not a substitute for the frozen campaign
-brief. In particular, the local anonymous-system prompt does not explicitly
-require nonlinear feedback, whereas the saved review facts mention it and the
-repository's older public mechanism specification does require it. The local
-prompt hashes differ from those older public contracts. Exact requirement
-adjudication must use the campaign's frozen brief and provenance, not a different
-local prompt or an inferred hidden mechanism.
+brief. Their hashes differ from the frozen public contracts. The anonymous-system
+nonlinearity question is now resolved by the actual frozen text, not by the
+current local prompt, a keyword flag alone or an inferred hidden mechanism.
+
+## Resolution using the frozen requirements
+
+The frozen anonymous-system task explicitly requires a causal internal pathway
+connecting input memory, persistent coupling, nonlinear feedback and output
+generation. Requirement `input_memory_output_pathway` repeats this obligation.
+Evidence seed 1 has only linear ODEs and affine initialization, with no algebraic
+nonlinear process. It therefore lacks a stated required feature. Fitting its
+constant coefficients cannot add nonlinear feedback. This is a high-confidence
+whole-model requirement mismatch, beyond the earlier keyword-based advisory flag.
+It does not establish that the other eleven models pass scientific review.
+
+The Dalla Man context confirms both the delayed insulin-action requirement and
+the meaning of `U` as total disposal including the supplied `Uii` contribution.
+That strengthens the interpretation of the growing delayed-action mode and
+repeated disposal terms as scientific concerns. The exact expression facts are
+separate from deciding how to repair the model; they do not establish global
+numerical infeasibility or automatically change the runtime's rejection policy.
+
+Two qualifications matter:
+
+- The frozen target-contract metadata labels `U` as `instantaneous_process`,
+  while four candidates make it a state. However, the scientific constructor
+  deliberately does not import the older mass/rate representation inference as
+  a mandatory rule. Its brief retains target dependencies, not the expected
+  representation field. The prose identifies a rate but does not explicitly
+  prohibit dynamics for that rate. Report this difference between contract
+  metadata and the construction policy; do not silently turn it into four new
+  deterministic failures. Review the actual disposal equations and their units.
+- The frozen `meal_pathway` has `requires_dynamic_memory=false`; only the
+  insulin-action pathway requires memory. A direct meal contribution is allowed.
+  The absolute-time exponential in brief seed 2 still needs a scientific
+  explanation, but absence of a meal-storage state is not a missing mandatory
+  feature. This narrows the earlier meal-memory concern.
+
+The frozen prose also explicitly calls `Gp` nonnegative. Empty candidate
+constraint lists do not demonstrate that this property is enforced; they also
+do not prove that a particular simulated trajectory becomes negative. Preserve
+this distinction between a required property, a missing guarantee and an
+observed violation.
 
 ## What the aggregate results establish
 
@@ -215,13 +262,16 @@ The code explains this result: local obligations are derived from each selected
 term's scientific-role text, and the certificate checks that all such obligations
 were met. Zero satisfied out of zero required passes. The separate public-text
 flag is a keyword-based review fact, not an adjudicated requirement. It cannot
-by itself authorize a new deterministic rejection.
+by itself authorize a new deterministic rejection. With the second export, the
+explicit frozen nonlinear-feedback requirement supplies the missing evidence:
+this entirely linear candidate does not meet it.
 
 This is a gap between global task/variable claims and local function obligations.
-The frozen public requirement should be attached to the review, followed by a
-targeted decision about whether to change a term, topology or unsupported claim.
-Adding an arbitrary square merely to satisfy a keyword would not establish the
-right feedback mechanism.
+The frozen public requirement is now attached to the review. A targeted repair
+must add an appropriate nonlinear mechanism through a term or topology revision;
+merely deleting a proposer claim cannot waive the public requirement. Adding an
+arbitrary square merely to satisfy a keyword would not establish the right
+feedback mechanism.
 
 The other five anonymous-system models contain powers, a sigmoid or bilinear
 coupling. Their nonlinear syntax does not certify feedback direction, boundedness
@@ -234,8 +284,10 @@ unrestricted outer slot. Effective expressions and parameter domains matter.
 Proceed to a bounded whole-model diagnosis and targeted-repair evaluation using
 these saved candidates, before claiming pre-fitting scientific readiness.
 
-1. Attach the frozen public brief, requirement IDs and original topology/term
-   roles to the model review. Keep typed ODEs and algebraic definitions visible.
+1. Bind the supplied frozen public brief and requirement IDs to each diagnostic;
+   retain original topology/term roles in the repair artifact. Keep typed ODEs
+   and algebraic definitions visible. Public requirements must not disappear
+   when a proposer omits a keyword from a local term's role.
 2. Report exact structural facts separately from interpretations: repeated
    contributions, algebraically expanded balances, effective self-signs when
    provable, initializer/mapping consistency, and global requirement coverage.
@@ -257,7 +309,9 @@ results stand; the review supplies new examples for the next diagnostic layer.
 No fitter default, benchmark prompt, scientific-judge policy or model artifact
 is changed by this document. Astra's optimizer diagnostic remains separate.
 
-To export the missing frozen review context on ACES, this is one physical line:
+The frozen review context has now been supplied; no further context upload is
+needed for these conclusions. For reproducibility, its export command is one
+physical line:
 
 ```bash
 jq '{protocol, artifact_sha256, cells: (.cells | with_entries(.value |= {assets, brief, context, target_contract, mechanism_spec}))}' /scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1-fix1/plan.json > /scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1-fix1/review-context.json
@@ -279,5 +333,14 @@ examples above. Verification on the checkout based on `965d1d2`:
   construction/audit for both synthetic arms, with zero live LLM calls or fitting.
 - Documentation whitespace checks: passed.
 
-Only this review and its link from `PREFIT_CONSTRUCTION_AUDIT.md` are committed.
-Unrelated checkout edits and the supplied experiment artifact remain untouched.
+For the documentation-only frozen-context follow-up, the audit, staged-function
+runner and topology-contract regression groups passed: 69 tests in 8.54 seconds.
+Ruff, documentation whitespace checks and the construction-only resume smoke
+also passed. Read-only schema/digest comparisons checked both exported contexts,
+and expression inspection reconfirmed that anonymous evidence seed 1 has no
+nonlinear state/input dependence or nonlinear initialization. Runtime source is
+unchanged from the preceding full-suite verification.
+
+The first review commit changed this document and its link from
+`PREFIT_CONSTRUCTION_AUDIT.md`. The context follow-up changes only this document;
+unrelated checkout edits and the supplied experiment artifacts remain untouched.
