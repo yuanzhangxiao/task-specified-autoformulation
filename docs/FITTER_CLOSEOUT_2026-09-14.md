@@ -15,9 +15,41 @@ configuration, benchmark, prompt, or acceptance threshold.
 
 After this closeout, the user authorized one final targeted
 [joint/alternating comparison with a scale audit](FITTER_SCALED_ALTERNATING.md).
-It adds two opt-in diagnostic fits and does not change the production policy,
-previous results, or stopping thresholds. No further expansion follows it
-automatically.
+That exception is now completed and closed. Its two interrupted initializer
+checkpoints were evaluated by the
+[saved-checkpoint execution recovery](FITTER_SCALED_RECOVERY.md), pinned to
+`e31f9f67dfdf08dd9e4b5eaf84e3080c4b78b75e`. The user supplied the completed
+`fitter-scaled-recovery-v2` summary and explicitly approved freezing the fitting
+protocol on September 15. No additional difficult-case jobs, collocation reruns,
+budget extensions, or alternating-optimization comparisons are pending.
+
+| Saved initializer | Train v01 NMSE | Validation v01 NMSE | Replay agreement |
+| --- | ---: | ---: | --- |
+| Joint | 0.588559707760291 | 0.6547639704302098 | Passed |
+| Alternating | 0.5719494971518276 | 0.6114701794711856 | Passed |
+
+Both final points came from refinement. Each refinement used the complete
+3,360-second budget, with 74 and 76 calls respectively. The worker's `finished`
+status means that a finite best evaluation was retained; it does not establish
+native optimizer convergence. All reported errors concern the observed `v01`
+trajectory, without latent-state errors. Both arms missed the practical 0.1 band.
+
+The joint checkpoint was identical to the ordinary start. The summary does not
+identify which of the alternating checkpoint and ordinary start won its initial
+training screen. Therefore the modest difference between final scores must not
+be attributed confidently to alternating optimization. This is a budgeted
+recovery of saved interrupted initializers, not evidence that both initializers
+converged. No further diagnostic is needed to make the agreed project decision.
+
+Startup was approximately four seconds and screening completed actual state
+rollouts in 8.7–12.8 seconds. Preparation and numerical execution worked in this
+run. Radau/BDF agreement establishes consistency of the integrations at the
+retained parameters; the poor observed fit remains an optimization limitation.
+The limited result does not prove structural impossibility or universal failure
+of either optimization method.
+
+The explicit implementation boundary and next pipeline work are recorded in
+[FITTER_FREEZE.md](FITTER_FREEZE.md).
 
 ## Final evidence
 

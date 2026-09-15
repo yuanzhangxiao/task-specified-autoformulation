@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The fitting-method investigation is closed under the user-approved September 15
+operational freeze in `docs/FITTER_FREEZE.md`. Its final evidence is recorded in
+`docs/FITTER_CLOSEOUT_2026-09-14.md`. No difficult-case follow-up is pending.
+Existing numerical profiles stay fixed while Astra and Orion connect the public
+construction, causal-initialization, fitting and feedback interfaces. The current
+general rollout and `v01`-only collocation adapters remain distinct execution
+paths; multi-target integration is not yet a deployed capability.
+
 The follow-up pre-fitting repair policy in `docs/PREFIT_SIGN_NORMALIZATION.md`
 restores topology-owned outer-sign normalization and makes each interaction's
 source/sign contract explicit. A pinned offline replay precedes fresh repairs;
