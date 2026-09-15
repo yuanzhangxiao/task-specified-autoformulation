@@ -5,6 +5,10 @@ Its configuration is `configs/prefit_construction_audit_v1.json`. This is the
 first remaining integration milestone after the local repair experiments, rather
 than a renumbering of the original milestones in `PREFIT_MILESTONES.md`.
 
+The completed campaign constructed and audited all twelve models. The
+[saved-model review](PREFIT_MODEL_REVIEW_2026-09-14.md) records what that pass
+establishes, the remaining scientific concerns and the next diagnosis milestone.
+
 ## Question and frozen matrix
 
 Does the current pre-fitting controller construct internally consistent complete
