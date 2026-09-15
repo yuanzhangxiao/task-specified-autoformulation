@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+The optional post-fit sibling pilot in `docs/PREFIT_NUMERICAL_SIBLING.md` exports
+training residual evidence at a completed continuation and its preceding fit.
+It describes mismatches at retained parameters without treating unfinished
+optimization as structural failure. One exploratory proposer episode may retain
+the parent, request a topology change for later review, or revise one interaction
+under the existing scientific contracts. A valid changed child uses the frozen
+fitter and compatible learned parameters, including its causal initial maps.
+The continuing-fit diagnostic remains independent; this pilot sets neither an
+MCTS policy nor the final continuation limit.
+
 The separately authorized convergence diagnostic in
 `docs/PUBLIC_FIT_CONVERGENCE.md` continues the completed public-fit pilot for up
 to twenty further 180-second warm-start windows. It measures training progress

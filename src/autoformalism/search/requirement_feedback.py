@@ -298,6 +298,24 @@ def apply_requirement_repair(
     patch = FunctionRepair.model_validate(raw)
     if patch.interaction_id not in diagnosis["eligible_slots"]:
         raise ValueError("repair targets a protected or unrelated interaction")
+    return rebind_interaction(bundle, bindings, raw, repair_policy=repair_policy)
+
+
+def rebind_interaction(
+    bundle: dict,
+    bindings: list[dict],
+    raw: dict,
+    *,
+    repair_policy: RepairPolicy = TOPOLOGY_SIGN_REPAIR,
+) -> dict:
+    """Change one existing RHS while preserving topology, siblings and boundaries.
+
+    Callers own the reason for revision. All bound public requirements are checked
+    on the result; a numerical hypothesis cannot waive a deterministic obligation.
+    """
+    patch = FunctionRepair.model_validate(raw)
+    if sum(s["interaction_id"] == patch.interaction_id for s in bundle["slots"]) != 1:
+        raise ValueError("revision must select exactly one existing interaction")
     brief = PublicScientificBrief.model_validate(bundle["brief"])
     context = ValidationContext.model_validate(bundle["context"])
     source = bundle["topology"]
