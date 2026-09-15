@@ -8,6 +8,8 @@ than a renumbering of the original milestones in `PREFIT_MILESTONES.md`.
 The completed campaign constructed and audited all twelve models. The
 [saved-model review](PREFIT_MODEL_REVIEW_2026-09-14.md) records what that pass
 establishes, the remaining scientific concerns and the next diagnosis milestone.
+The [requirement-feedback pilot](PREFIT_REQUIREMENT_FEEDBACK.md) now tests that
+next step on these saved models with exact public bindings and one-RHS repair.
 
 ## Question and frozen matrix
 

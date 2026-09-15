@@ -22,6 +22,7 @@ else
 fi
 readonly protocol platform
 case "${protocol}" in
+  prefit-requirement-feedback-1) worker_script=prefit_requirement_campaign.py ;;
   prefit-matched-feedback-1) worker_script=prefit_feedback_campaign.py ;;
   prefit-matched-construction-1|prefit-construction-audit-1) worker_script=prefit_construction_campaign.py ;;
   scientific-staged-topology-1) worker_script=staged_topology_campaign.py ;;
@@ -76,7 +77,7 @@ image_sha="$(sha256sum "${AF_VLLM_IMAGE}")"
 }
 printf '%s\n' "${image_sha}" >"${runtime_root}/image-${SLURM_JOB_ID}.sha256"
 export PYTHONPATH="${AF_REPO_ROOT}/src"
-if [[ "${worker_script}" == prefit_construction_campaign.py || "${worker_script}" == prefit_feedback_campaign.py ]]; then
+if [[ "${worker_script}" == prefit_construction_campaign.py || "${worker_script}" == prefit_feedback_campaign.py || "${worker_script}" == prefit_requirement_campaign.py ]]; then
   "${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/${worker_script}" verify --root "${AF_OUTPUT_ROOT}"
 fi
 if [[ "${worker_script}" == staged_function_campaign.py ]]; then

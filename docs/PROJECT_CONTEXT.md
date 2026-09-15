@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in saved-model requirement feedback milestone is documented in
+`docs/PREFIT_REQUIREMENT_FEEDBACK.md`. It joins an exact public nonlinear-feedback
+requirement to whole-model feedback paths, repairs one eligible RHS, preserves
+other functions and causal initialization, and compares against local-only
+acceptance without fitting, scientific judging or trajectory access.
+
 The fresh construction-only milestone is documented in
 `docs/PREFIT_CONSTRUCTION_AUDIT.md`. Its opt-in protocol builds twelve complete
 models, reconstructs their deterministic contracts and causal initialization,
