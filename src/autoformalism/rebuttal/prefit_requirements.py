@@ -36,6 +36,11 @@ from autoformalism.rebuttal.prefit_feedback import (
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.schemas.base import StrictSchema
+from autoformalism.search.repair_provenance import (
+    STAGE_AWARE,
+    attempt_feedback,
+    with_repair_provenance,
+)
 from autoformalism.search.requirement_feedback import (
     SIGN_SYSTEM_PROMPT,
     STRICT_REPAIR,
@@ -80,6 +85,7 @@ class RequirementConfig(StrictSchema):
     wall_seconds: int = Field(default=3600, ge=600)
     shutdown_margin_seconds: int = Field(default=300, ge=60)
     repair_policy: RepairPolicy = STRICT_REPAIR
+    feedback_policy: Literal["legacy", "stage-aware-1"] = "legacy"
     replay_source_plan_sha256: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
@@ -358,9 +364,13 @@ def run_episode(root: Path, plan: dict, task: dict, client: EpisodeClient) -> di
             result = apply_requirement_repair(
                 bundle, case["bindings"], reply, repair_policy=config.repair_policy
             )
+            if config.feedback_policy == STAGE_AWARE:
+                result = with_repair_provenance(bundle, result)
         except (ValueError, TypeError, KeyError, ModelValidationError) as exc:
             feedback = (
-                repair_failure_feedback(bundle, reply, exc)
+                attempt_feedback(bundle, record, reply, exc)
+                if config.feedback_policy == STAGE_AWARE
+                else repair_failure_feedback(bundle, reply, exc)
                 if (config.repair_policy == TOPOLOGY_SIGN_REPAIR)
                 else {
                     "error": str(exc)[:6000],

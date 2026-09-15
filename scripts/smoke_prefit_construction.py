@@ -21,7 +21,11 @@ CELL = "phase_b_anonymous_system_task_canonical_opaque_hard"
 
 
 def synthetic_fixture(
-    root: Path, request_budget: int = 32, *, construction_only: bool = False
+    root: Path,
+    request_budget: int = 32,
+    *,
+    construction_only: bool = False,
+    with_validation: bool = False,
 ) -> dict:
     """Create temporary public-layout observations; do not modify benchmark assets."""
     config = campaign.ConstructionCampaignConfig(
@@ -48,7 +52,7 @@ def synthetic_fixture(
         ("train", (0.0, 0.6, 1.2), (0.0, 0.5, 1.0)),
         ("validation", (1.5, 1.8), (0.0, 0.8)),
     ):
-        if construction_only and split != "train":
+        if construction_only and not with_validation and split != "train":
             continue
         with (directory / f"{split}.csv").open("w", newline="") as stream:
             writer = csv.writer(stream)
@@ -84,7 +88,9 @@ def synthetic_fixture(
                 **{
                     s: hashlib.sha256((directory / f"{s}.csv").read_bytes()).hexdigest()
                     for s in (
-                        ("train",) if construction_only else ("train", "validation")
+                        ("train",)
+                        if construction_only and not with_validation
+                        else ("train", "validation")
                     )
                 },
                 "test": "0" * 64,

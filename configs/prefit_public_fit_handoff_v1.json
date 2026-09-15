@@ -1,0 +1,9 @@
+{
+  "protocol": "prefit-public-fit-handoff-1",
+  "source_plan_sha256": "6f426e6893035be751a8f00b2f01dd491b7099947c99e506f154737879f5b6cd",
+  "construction_plan_sha256": "c722b0a2de2736150b2f82db93973126a63a480b4c8b82f15dbd76e33b334ab2",
+  "task_id": "203a320c3d072562c008d079d4549b31eaa11703b5991fb7a01a8a7e3604519c_s0_requirement_feedback",
+  "cell": "phase_b_anonymous_system_task_canonical_opaque_hard",
+  "profile": "collocation-feasible-v1",
+  "random_seed": 20260913
+}

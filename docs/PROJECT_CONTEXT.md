@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The saved-repair public fitting handoff is documented in
+`docs/PREFIT_PUBLIC_FIT_HANDOFF.md`. It verifies the historical construction and
+repair evidence, transfers one preselected anonymous model to the frozen fitter,
+and reports stage-specific repair provenance and numerical feedback. The opt-in
+`stage-aware-1` feedback policy separates truncated delivery from mathematical
+rejection. This milestone runs no post-fit proposer revision.
+
 The fitting-method investigation is closed under the user-approved September 15
 operational freeze in `docs/FITTER_FREEZE.md`. Its final evidence is recorded in
 `docs/FITTER_CLOSEOUT_2026-09-14.md`. No difficult-case follow-up is pending.

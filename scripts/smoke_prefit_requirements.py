@@ -34,11 +34,18 @@ REQUIREMENT = "An input-driven causal pathway with nonlinear feedback to v01"
 
 
 def synthetic_plan(
-    temporary: Path, *, fixed_sign: bool = False, repair_policy: str = "strict-1"
+    temporary: Path,
+    *,
+    fixed_sign: bool = False,
+    repair_policy: str = "strict-1",
+    feedback_policy: str = "legacy",
+    with_validation: bool = False,
 ) -> dict:
     """Construct an untagged linear feedback gap and a nonlinear retention control."""
     source, root = temporary / "source", temporary / "campaign"
-    original = synthetic_fixture(source, construction_only=True)
+    original = synthetic_fixture(
+        source, construction_only=True, with_validation=with_validation
+    )
     plan = {k: v for k, v in original.items() if k != "artifact_sha256"}
     brief = plan["cells"][CELL]["brief"]
     brief["requirements"][0]["public_requirement"] = REQUIREMENT
@@ -80,6 +87,7 @@ def synthetic_plan(
     )
     config = campaign.RequirementConfig(
         repair_policy=repair_policy,
+        feedback_policy=feedback_policy,
         serving_image_sha256="0" * 64,
         model_settings=settings,
         seeds=(0,),
