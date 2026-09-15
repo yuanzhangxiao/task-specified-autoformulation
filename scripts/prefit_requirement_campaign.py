@@ -5,7 +5,13 @@ import argparse
 import json
 from pathlib import Path
 
-from autoformalism.rebuttal.prefit_requirements import freeze, run, summarize, verify
+from autoformalism.rebuttal.prefit_requirements import (
+    freeze,
+    replay_saved_repairs,
+    run,
+    summarize,
+    verify,
+)
 
 
 def main() -> None:
@@ -16,9 +22,11 @@ def main() -> None:
     command.add_argument("--source", type=Path, required=True)
     command.add_argument("--config", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
-    for name in ("verify", "diagnostics", "summary", "run"):
+    for name in ("verify", "diagnostics", "summary", "run", "replay"):
         command = commands.add_parser(name)
         command.add_argument("--root", type=Path, required=name != "run")
+        if name == "replay":
+            command.add_argument("--previous-root", type=Path, required=True)
         if name == "run":
             command.add_argument("--plan", type=Path)
             command.add_argument("--output", type=Path)
@@ -33,6 +41,10 @@ def main() -> None:
             "distinct_source_gaps": sum(c["cohort"] == "repair" for c in plan["cases"]),
             "episodes": len(plan["tasks"]),
         }
+    elif args.command == "replay":
+        report = replay_saved_repairs(args.root, args.previous_root)
+        result = {k: v for k, v in report.items() if k != "rows"}
+        result["full_report"] = str(args.root / "replay.json")
     elif args.command == "verify":
         result = {
             "status": "verified",

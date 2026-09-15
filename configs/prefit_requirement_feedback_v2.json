@@ -1,0 +1,36 @@
+{
+  "protocol": "prefit-requirement-feedback-1",
+  "platform": "aces-h100x1",
+  "serving_image_sha256": "9c56389af06cafbf4aa8bd825393f606ac7f2a18e1a700c5999b1ed47f7f9c1e",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 3,
+    "maximum_total_tokens": 262144,
+    "attempts_per_step": 3
+  },
+  "bindings": [
+    {
+      "cell": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "requirement_id": "input_memory_output_pathway",
+      "kind": "nonlinear_feedback",
+      "public_requirement": "a causal internal pathway connecting input memory, persistent coupling, nonlinear feedback, and output generation"
+    }
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "expected_source_models": 12,
+  "expected_source_plan_sha256": "c722b0a2de2736150b2f82db93973126a63a480b4c8b82f15dbd76e33b334ab2",
+  "served_context_tokens": 32768,
+  "wall_seconds": 3600,
+  "shutdown_margin_seconds": 300,
+  "repair_policy": "topology-owned-sign-1",
+  "replay_source_plan_sha256": "d1b3c8c2b6583b0b5ded86a593d21be427baae1ff92aec6baa946fad99057c8c"
+}

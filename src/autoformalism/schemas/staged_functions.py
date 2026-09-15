@@ -57,6 +57,20 @@ class OuterWeightDomainDerivation(StrictSchema):
     outer_weight_sign: OuterWeightSign
 
 
+class OuterSignNormalization(StrictSchema):
+    """Auditable interpretation under the topology-owned outer-sign convention."""
+
+    policy: Literal["topology-owned-sign-1"] = "topology-owned-sign-1"
+    code: Literal["REDUNDANT_OUTER_SIGN_NORMALIZED"] = "REDUNDANT_OUTER_SIGN_NORMALIZED"
+    original_expression: str
+    normalized_expression: str
+    outer_weight_sign: Literal["positive", "negative"]
+    removed_negative_factors: int = Field(ge=1)
+    certificate: Literal["explicit_multiplicative_shell_sign"] = (
+        "explicit_multiplicative_shell_sign"
+    )
+
+
 class EquationFunctionBatchReply(StrictSchema):
     """Ordered scalar functions for every term of one runtime-selected LHS."""
 

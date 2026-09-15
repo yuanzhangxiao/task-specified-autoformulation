@@ -36,9 +36,10 @@ if 'summary' in sys.argv:
     print(json.dumps({{'status': os.environ.get('SUMMARY_STATUS', 'partial')}}))
 elif len(sys.argv) > 1 and sys.argv[1] == '-':
     destination = pathlib.Path(sys.argv[2]).resolve()
-    source = pathlib.Path(sys.argv[3]).resolve()
-    if destination.is_relative_to(source):
-        sys.exit(2)
+    for raw in sys.argv[3:]:
+        source = pathlib.Path(raw).resolve()
+        if destination.is_relative_to(source) or source.is_relative_to(destination):
+            sys.exit(2)
 """,
         "sbatch": f"""#!{sys.executable}
 import json, os, pathlib, sys
@@ -175,3 +176,33 @@ def test_worker_surfaces_preflight_failure_in_job_stderr(tmp_path):
     assert str(log) in result.stderr and "fixture dependency error" in result.stderr
     assert log.read_text() == "fixture dependency error\n"
     assert not (root / "replay.json").exists()
+
+
+def test_sign_policy_submission_requires_prior_campaign_and_pins_its_path(launcher):
+    run, log, root = launcher
+    config = str(
+        Path(__file__).resolve().parents[1]
+        / "configs/prefit_requirement_feedback_v2.json"
+    )
+    prior = root.parent / "prior"
+    overrides = {"AF_CONFIG": config, "AF_PRIOR_ROOT": str(prior)}
+    assert run(**overrides).returncode != 0
+    assert not log.exists()
+    prior.mkdir()
+    (prior / "plan.json").write_text("{}")
+    assert run(**overrides).returncode == 0
+    assert json.loads((root / "submission_manifest.json").read_text())[
+        "prior_root"
+    ] == str(prior)
+    other = root.parent / "other-prior"
+    other.mkdir()
+    (other / "plan.json").write_text("{}")
+    assert run(AF_CONFIG=config, AF_PRIOR_ROOT=str(other)).returncode != 0
+    assert len(json.loads(log.read_text())) == 2
+
+
+def test_new_output_cannot_be_nested_under_prior_campaign(launcher):
+    run, log, root = launcher
+    result = run(AF_PRIOR_ROOT=str(root.parent))
+    assert result.returncode != 0
+    assert not log.exists()

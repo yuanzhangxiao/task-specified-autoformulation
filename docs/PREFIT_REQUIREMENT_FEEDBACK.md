@@ -1,5 +1,9 @@
 # Whole-model requirement feedback: the next pre-fitting milestone
 
+The follow-up [sign-normalization policy](PREFIT_SIGN_NORMALIZATION.md) adds
+topology-owned outer-sign tolerance, explicit source/sign feedback and replay
+of the completed v1 repair responses. It uses a separate configuration and root.
+
 `prefit-requirement-feedback-1` tests whether runtime feedback repairs the missing
 nonlinear feedback identified in the twelve saved constructions. It runs before
 fitting and does not change the defaults of existing construction or fitting

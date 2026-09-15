@@ -1,5 +1,10 @@
 # Staged outer-weight sign contract
 
+The strict historical behavior below is retained for frozen protocols. New
+requirement-repair runs can select the user's restored
+[topology-owned sign normalization](PREFIT_SIGN_NORMALIZATION.md): explicit outer
+minus factors are normalized and logged while internal arithmetic is preserved.
+
 New equation-topology replies must classify each complete contribution as
 `positive`, `negative`, or `unrestricted`. There is no missing-value default.
 The choice describes the sign of an identifiable outer scalar weight, not the

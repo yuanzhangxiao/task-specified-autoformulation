@@ -5,6 +5,7 @@ repo="${AF_REPO_ROOT:?set the pinned checkout path}"
 root="${AF_OUTPUT_ROOT:?set a new output root}"
 python="${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}"
 source_root="${AF_SOURCE_ROOT:-/scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1-fix1}"
+prior_root="${AF_PRIOR_ROOT:-/scratch/user/u.yx126462/phase_b/prefit-requirements-v1}"
 config="${AF_CONFIG:-$repo/configs/prefit_requirement_feedback_v1.json}"
 resume="${AF_RESUME:-0}"
 manifest="$root/submission_manifest.json"
@@ -13,19 +14,27 @@ manifest="$root/submission_manifest.json"
 [[ -z "$(git -C "$repo" status --porcelain)" ]] || { echo 'Use a clean pinned experiment checkout' >&2; exit 2; }
 module load GCCcore/13.2.0 Python/3.11.5
 export AF_REPO_ROOT="$repo" AF_PYTHON="$python" AF_OUTPUT_ROOT="$root" AF_SOURCE_ROOT="$source_root" AF_CONFIG="$config" PYTHONPATH="$repo/src"
+export AF_PRIOR_ROOT="$prior_root"
+if jq -e '.replay_source_plan_sha256 != null' "$config" >/dev/null; then
+  [[ -f "$prior_root/plan.json" ]] || { echo 'Missing pinned prior requirement campaign' >&2; exit 2; }
+fi
 export AF_VLLM_IMAGE="${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}"
 export AF_HF_HOME="${AF_HF_HOME:-/scratch/user/u.yx126462/huggingface-cache}"
 export AF_COMPUTE_CACHE_ROOT="${AF_COMPUTE_CACHE_ROOT:-/scratch/user/u.yx126462/autoformalism-runtime-cache/prefit-requirements}"
 export AF_IPC_TMP_ROOT="${AF_IPC_TMP_ROOT:-/scratch/user/u.yx126462/af-ipc}"
 [[ -f "$AF_VLLM_IMAGE" ]] || { echo 'Missing pinned image' >&2; exit 2; }
-"$python" - "$root" "$source_root" <<'PY'
+"$python" - "$root" "$source_root" "$prior_root" <<'PY'
 import sys
 from pathlib import Path
-if Path(sys.argv[1]).resolve().is_relative_to(Path(sys.argv[2]).resolve()):
-    raise SystemExit('New output root must be outside the historical source')
+destination = Path(sys.argv[1]).resolve()
+for raw in sys.argv[2:]:
+    source = Path(raw).resolve()
+    if destination.is_relative_to(source) or source.is_relative_to(destination):
+        raise SystemExit('New output root must be separate from historical sources')
 PY
 if [[ -f "$manifest" ]]; then
   [[ "$(jq -r '.commit' "$manifest")" == "$(git -C "$repo" rev-parse HEAD)" && "$(jq -r '.source_root' "$manifest")" == "$source_root" && "$(jq -r '.config_sha256' "$manifest")" == "$(sha256sum "$config" | cut -d' ' -f1)" ]] || { echo 'Submission identity differs; use the original pinned checkout and inputs' >&2; exit 2; }
+  [[ "$(jq -r '.prior_root' "$manifest")" == "$prior_root" ]] || { echo 'Prior replay root differs from the submission identity' >&2; exit 2; }
   if [[ "$resume" == 0 ]]; then cat "$manifest"; exit 0; fi
 fi
 mkdir -p "$root/logs" "$root/submissions" "$AF_HF_HOME"
@@ -64,7 +73,7 @@ if [[ "$resume" == 0 ]]; then
   prepare="$(submit prepare --job-name=prefit-req-prepare --partition=cpu --cpus-per-task=4 --mem=16G --time=01:00:00)"
 fi
 repair="$(submit repair --dependency="afterok:$prepare" --job-name=prefit-requirements --partition=gpu --gres=gpu:h100:1 --cpus-per-task=8 --mem=64G --time=02:00:00 --signal=B:TERM@300)"
-jq -n --arg prepare_job "$prepare" --arg repair_job "$repair" --arg commit "$(git -C "$repo" rev-parse HEAD)" --arg source_root "$source_root" --arg config_sha256 "$(sha256sum "$config" | cut -d' ' -f1)" '{prepare_job:$prepare_job,repair_job:$repair_job,commit:$commit,source_root:$source_root,config_sha256:$config_sha256}' > "$intent/manifest.json"
+jq -n --arg prepare_job "$prepare" --arg repair_job "$repair" --arg commit "$(git -C "$repo" rev-parse HEAD)" --arg source_root "$source_root" --arg prior_root "$prior_root" --arg config_sha256 "$(sha256sum "$config" | cut -d' ' -f1)" '{prepare_job:$prepare_job,repair_job:$repair_job,commit:$commit,source_root:$source_root,prior_root:$prior_root,config_sha256:$config_sha256}' > "$intent/manifest.json"
 cp "$intent/manifest.json" "$manifest.tmp"
 mv "$manifest.tmp" "$manifest"
 cat "$manifest"

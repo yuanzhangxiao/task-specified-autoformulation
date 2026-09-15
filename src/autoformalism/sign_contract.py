@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -12,6 +13,33 @@ from autoformalism.schemas.staged import InteractionPolarity
 _SIGNED_ROLES = {ParameterRole.COEFFICIENT, ParameterRole.OFFSET}
 _OUTER_WEIGHT_ROLES = {*_SIGNED_ROLES, ParameterRole.NONNEGATIVE_COEFFICIENT}
 _FIXED_SIGNS = {InteractionPolarity.POSITIVE, InteractionPolarity.NEGATIVE}
+
+
+def strip_outer_negative_factors(tree: ast.Expression) -> tuple[ast.Expression, int]:
+    """Remove explicit signs in the outer product/quotient, not inside a law.
+
+    This implements a topology-owned sign convention, not algebraic equivalence
+    or an absolute-value transform. Calls, powers, sums and differences are
+    opaque; their internal signs and the magnitude of numeric factors survive.
+    The caller must first establish that topology owns a fixed outer sign.
+    """
+    removed = 0
+
+    def shell(node: ast.expr) -> ast.expr:
+        nonlocal removed
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            removed += isinstance(node.op, ast.USub)
+            return shell(node.operand)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mult, ast.Div)):
+            node.left, node.right = shell(node.left), shell(node.right)
+        elif isinstance(node, ast.Constant) and node.value < 0:
+            removed += 1
+            node.value = -node.value
+        return node
+
+    revised = copy.deepcopy(tree)
+    revised.body = shell(revised.body)
+    return ast.fix_missing_locations(revised), removed
 
 
 @dataclass(frozen=True)

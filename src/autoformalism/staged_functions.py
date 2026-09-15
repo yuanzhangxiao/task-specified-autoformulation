@@ -29,10 +29,42 @@ from autoformalism.schemas.staged_functions import (
     InteractionFunctionObligation,
     InteractionFunctionReply,
     LatentInitialReply,
+    OuterSignNormalization,
     OuterWeightDomainDerivation,
 )
 from autoformalism.schemas.staged_topology import OuterWeightSign
-from autoformalism.sign_contract import analyze_outer_weight
+from autoformalism.sign_contract import (
+    analyze_outer_weight,
+    strip_outer_negative_factors,
+)
+
+
+def normalize_topology_owned_sign(
+    reply: InteractionFunctionReply,
+    *,
+    outer_weight_sign: OuterWeightSign | str,
+) -> tuple[InteractionFunctionReply, tuple[OuterSignNormalization, ...]]:
+    """Interpret redundant outer minuses using the selected topology sign.
+
+    This is a logged representation normalization. It makes no assertion about
+    the sign of the function's value and never rewrites unrestricted interactions.
+    Legacy callers keep their strict behavior unless they select this policy.
+    """
+    sign = OuterWeightSign(outer_weight_sign)
+    if sign is OuterWeightSign.UNRESTRICTED:
+        return reply, ()
+    parsed = RestrictedParser().parse(reply.expression, location="function")
+    tree, count = strip_outer_negative_factors(parsed.tree)
+    if not count:
+        return reply, ()
+    expression = ast.unparse(tree)
+    record = OuterSignNormalization(
+        original_expression=reply.expression,
+        normalized_expression=expression,
+        outer_weight_sign=sign.value,
+        removed_negative_factors=count,
+    )
+    return reply.model_copy(update={"expression": expression}), (record,)
 
 
 def rename_expression(expression: str, aliases: Mapping[str, str]) -> str:
@@ -169,15 +201,13 @@ def normalize_outer_weight_reply(
     tree: ast.Expression | None = None,
 ) -> tuple[InteractionFunctionReply, tuple[OuterWeightDomainDerivation, ...]]:
     """Derive a fixed outer gain domain without touching internal signed terms."""
-    parsed_tree = tree or RestrictedParser().parse(
-        reply.expression, location="function"
-    ).tree
+    parsed_tree = (
+        tree or RestrictedParser().parse(reply.expression, location="function").tree
+    )
     roles = {item.name: item.role for item in reply.parameters}
     analysis = analyze_outer_weight(parsed_tree, roles, polarity)
     if analysis.diagnostic_code is not None:
-        raise ValueError(
-            f"{analysis.diagnostic_code}: {analysis.diagnostic_message}"
-        )
+        raise ValueError(f"{analysis.diagnostic_code}: {analysis.diagnostic_message}")
     selected = analysis.identified_parameter
     if selected is None:
         return reply, ()
@@ -351,9 +381,7 @@ def derive_interaction_function_obligation(
     """Derive narrow syntax obligations from the frozen interaction role text."""
     lowered = scientific_role.lower()
     markers = tuple(
-        marker
-        for marker in ("nonlinear", "saturat", "sigmoid")
-        if marker in lowered
+        marker for marker in ("nonlinear", "saturat", "sigmoid") if marker in lowered
     )
     return InteractionFunctionObligation(
         requires_nonlinear_source_dependence=bool(markers),

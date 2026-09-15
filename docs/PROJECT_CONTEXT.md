@@ -1,5 +1,10 @@
 # Autoformalism Phase 1 Implementation Context
 
+The follow-up pre-fitting repair policy in `docs/PREFIT_SIGN_NORMALIZATION.md`
+restores topology-owned outer-sign normalization and makes each interaction's
+source/sign contract explicit. A pinned offline replay precedes fresh repairs;
+historical strict campaigns and fitting behavior remain unchanged.
+
 The opt-in saved-model requirement feedback milestone is documented in
 `docs/PREFIT_REQUIREMENT_FEEDBACK.md`. It joins an exact public nonlinear-feedback
 requirement to whole-model feedback paths, repairs one eligible RHS, preserves

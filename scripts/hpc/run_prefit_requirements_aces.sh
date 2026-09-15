@@ -13,7 +13,7 @@ if [[ "$mode" == prepare ]]; then
   : "${AF_SOURCE_ROOT:?required}" "${AF_CONFIG:?required}" "${AF_VLLM_IMAGE:?required}" "${AF_HF_HOME:?required}"
   preflight_log="$AF_OUTPUT_ROOT/runtime/preflight-${SLURM_JOB_ID}.log"
   printf 'Running preflight tests; full output: %s\n' "$preflight_log"
-  if "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_requirement_feedback.py tests/test_prefit_requirements.py tests/test_prefit_requirements_submission.py > "$preflight_log" 2>&1; then
+  if "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_requirement_feedback.py tests/test_prefit_requirements.py tests/test_prefit_requirements_submission.py tests/test_topology_owned_sign.py tests/test_staged_sign_contract.py tests/test_requirement_sign_policy.py > "$preflight_log" 2>&1; then
     tail -n 2 "$preflight_log"
   else
     preflight_status=$?
@@ -22,8 +22,14 @@ if [[ "$mode" == prepare ]]; then
     exit "$preflight_status"
   fi
   "$AF_PYTHON" scripts/smoke_prefit_requirements.py > "$AF_OUTPUT_ROOT/runtime/smoke-${SLURM_JOB_ID}.json"
+  "$AF_PYTHON" scripts/smoke_prefit_sign_normalization.py > "$AF_OUTPUT_ROOT/runtime/sign-smoke-${SLURM_JOB_ID}.json"
   "$AF_PYTHON" scripts/prefit_requirement_campaign.py freeze --source "$AF_SOURCE_ROOT" --config "$AF_CONFIG" --output "$AF_OUTPUT_ROOT" > "$AF_OUTPUT_ROOT/runtime/freeze-${SLURM_JOB_ID}.json"
   "$AF_PYTHON" scripts/prefit_requirement_campaign.py diagnostics --root "$AF_OUTPUT_ROOT" > "$AF_OUTPUT_ROOT/runtime/selected-cases.json"
+  if jq -e '.config.replay_source_plan_sha256 != null' "$AF_OUTPUT_ROOT/plan.json" >/dev/null; then
+    : "${AF_PRIOR_ROOT:?set the prior requirement campaign root}"
+    "$AF_PYTHON" scripts/prefit_requirement_campaign.py replay --root "$AF_OUTPUT_ROOT" --previous-root "$AF_PRIOR_ROOT" > "$AF_OUTPUT_ROOT/runtime/replay-${SLURM_JOB_ID}.json"
+    cat "$AF_OUTPUT_ROOT/runtime/replay-${SLURM_JOB_ID}.json"
+  fi
   module load WebProxy
   runtime="$(command -v apptainer || command -v singularity)"
   expected="$(jq -er '.config.serving_image_sha256' "$AF_OUTPUT_ROOT/plan.json")"

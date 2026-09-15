@@ -33,7 +33,9 @@ else:
 REQUIREMENT = "An input-driven causal pathway with nonlinear feedback to v01"
 
 
-def synthetic_plan(temporary: Path) -> dict:
+def synthetic_plan(
+    temporary: Path, *, fixed_sign: bool = False, repair_policy: str = "strict-1"
+) -> dict:
     """Construct an untagged linear feedback gap and a nonlinear retention control."""
     source, root = temporary / "source", temporary / "campaign"
     original = synthetic_fixture(source, construction_only=True)
@@ -55,6 +57,8 @@ def synthetic_plan(temporary: Path) -> dict:
             reply = json.loads(record["choices"][0]["message"]["content"])
             if payload.get("selected_lhs", {}).get("name") == "m":
                 reply["terms"][0]["sources"] = ["m", "u01", "v01"]
+                if fixed_sign:
+                    reply["terms"][0]["outer_weight_sign"] = "negative"
             if payload.get("selected_equation", {}).get("lhs") == "m":
                 function = reply["functions"][0]
                 function["expression"] += "+c*v01" + (
@@ -75,6 +79,7 @@ def synthetic_plan(temporary: Path) -> dict:
         **{**plan["config"]["model_settings"], "maximum_requests": 3}
     )
     config = campaign.RequirementConfig(
+        repair_policy=repair_policy,
         serving_image_sha256="0" * 64,
         model_settings=settings,
         seeds=(0,),

@@ -37,12 +37,17 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.search.requirement_feedback import (
+    SIGN_SYSTEM_PROMPT,
+    STRICT_REPAIR,
     SYSTEM_PROMPT,
+    TOPOLOGY_SIGN_REPAIR,
     FunctionRepair,
+    RepairPolicy,
     RequirementBinding,
     apply_requirement_repair,
     diagnose_requirements,
     model_review_facts,
+    repair_failure_feedback,
 )
 from autoformalism.search.requirement_feedback import repair_payload as payload_for
 from autoformalism.staged_topology import content_hash
@@ -74,6 +79,10 @@ class RequirementConfig(StrictSchema):
     served_context_tokens: int = Field(default=32768, ge=8192)
     wall_seconds: int = Field(default=3600, ge=600)
     shutdown_margin_seconds: int = Field(default=300, ge=60)
+    repair_policy: RepairPolicy = STRICT_REPAIR
+    replay_source_plan_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
 
     @model_validator(mode="after")
     def bounded(self):
@@ -322,9 +331,15 @@ def run_episode(root: Path, plan: dict, task: dict, client: EpisodeClient) -> di
         retry = state["attempts"][-1]["feedback"] if state["attempts"] else None
         try:
             record = client.call(
-                system=SYSTEM_PROMPT,
+                system=SIGN_SYSTEM_PROMPT
+                if config.repair_policy == TOPOLOGY_SIGN_REPAIR
+                else SYSTEM_PROMPT,
                 user="Whole-model requirement repair\n"
-                + json.dumps(payload_for(bundle, baseline, retry)),
+                + json.dumps(
+                    payload_for(
+                        bundle, baseline, retry, repair_policy=config.repair_policy
+                    )
+                ),
                 response_model=FunctionRepair,
                 step="requirement_function_repair",
                 attempt=attempt,
@@ -340,13 +355,19 @@ def run_episode(root: Path, plan: dict, task: dict, client: EpisodeClient) -> di
         reply = None
         try:
             reply = visible_response(record)
-            result = apply_requirement_repair(bundle, case["bindings"], reply)
+            result = apply_requirement_repair(
+                bundle, case["bindings"], reply, repair_policy=config.repair_policy
+            )
         except (ValueError, TypeError, KeyError, ModelValidationError) as exc:
-            feedback = {
-                "error": str(exc)[:6000],
-                "rejected_reply": reply,
-                "transaction": "rolled_back",
-            }
+            feedback = (
+                repair_failure_feedback(bundle, reply, exc)
+                if (config.repair_policy == TOPOLOGY_SIGN_REPAIR)
+                else {
+                    "error": str(exc)[:6000],
+                    "rejected_reply": reply,
+                    "transaction": "rolled_back",
+                }
+            )
             result = None
         else:
             feedback = {"error": None, "transaction": "committed"}
@@ -410,6 +431,11 @@ def summarize(root: Path) -> dict:
                 "first_attempt_repaired": bool(
                     state["attempts"] and state["attempts"][0]["accepted"]
                 ),
+                "outer_sign_normalizations": len(
+                    final.get("outer_sign_normalizations", [])
+                )
+                if final
+                else 0,
                 "protected_slots_preserved": final["protected_slots_preserved"]
                 if final
                 else 0,
@@ -449,6 +475,7 @@ def summarize(root: Path) -> dict:
                     k: sum(r[k] for r in selected)
                     for k in (
                         "protected_slots_preserved",
+                        "outer_sign_normalizations",
                         "physical_requests",
                         "observed_tokens",
                         "budget_charge",
@@ -475,6 +502,7 @@ def summarize(root: Path) -> dict:
             ] += 1
     report = {
         "protocol": PROTOCOL,
+        "repair_policy": plan["config"].get("repair_policy", STRICT_REPAIR),
         "plan_sha256": plan["artifact_sha256"],
         "status": "complete"
         if all(r["status"] == "complete" for r in rows)
@@ -499,6 +527,120 @@ def summarize(root: Path) -> dict:
     }
     atomic_json(root / "summary.json", report)
     return report
+
+
+def replay_saved_repairs(root: Path, previous_root: Path) -> dict:
+    """Compare interpretation of exact cached replies, without new provider work.
+
+    This is response admissibility, not a counterfactual fresh-run success rate.
+    The old plan and each request ledger are verified; model cases must agree
+    exactly with the new reconstructed source. Output belongs only to the new run.
+    """
+    plan = verify(root)
+    config = RequirementConfig.model_validate(plan["config"])
+    previous = sealed_read(previous_root / "plan.json")
+    if root.resolve().is_relative_to(
+        previous_root.resolve()
+    ) or previous_root.resolve().is_relative_to(root.resolve()):
+        raise ValueError("replay output must differ from historical campaign")
+    if (
+        not config.replay_source_plan_sha256
+        or previous["artifact_sha256"] != config.replay_source_plan_sha256
+        or previous["protocol"] != PROTOCOL
+    ):
+        raise ValueError("prior requirement campaign differs from pinned replay source")
+    if config.repair_policy != TOPOLOGY_SIGN_REPAIR:
+        raise ValueError("saved-response replay requires topology-owned sign policy")
+    if previous["config"].get("repair_policy", STRICT_REPAIR) != STRICT_REPAIR:
+        raise ValueError("replay baseline must use the strict policy")
+    cases = {c["case_id"]: c for c in plan["cases"]}
+    if (
+        previous["cases"] != plan["cases"]
+        or previous["tasks"] != plan["tasks"]
+        or previous["source_plan_sha256"] != plan["source_plan_sha256"]
+        or previous["config"]["model_settings"] != plan["config"]["model_settings"]
+    ):
+        raise ValueError("replay cases, tasks or proposer settings differ")
+    rows = []
+    for task in previous["tasks"]:
+        state, records = _state(previous_root, previous, task)
+        if state["status"] != "complete":
+            raise ValueError("prior requirement episode is incomplete")
+        if task["arm"] != "requirement_feedback" or task["cohort"] != "repair":
+            if records or state["attempts"]:
+                raise ValueError("prior no-call route contains provider work")
+            continue
+        case = cases[task["case_id"]]
+        for attempt in state["attempts"]:
+            record = next(
+                r for r in records if r["request_hash"] == attempt["request_hash"]
+            )
+            try:
+                raw = visible_response(record)
+            except (ValueError, TypeError, KeyError):
+                raw = None
+            if raw != attempt["response"]:
+                raise ValueError("saved reply differs from cached provider response")
+            outcomes = {}
+            for policy in (STRICT_REPAIR, TOPOLOGY_SIGN_REPAIR):
+                try:
+                    result = apply_requirement_repair(
+                        case["bundle"], case["bindings"], raw, repair_policy=policy
+                    )
+                except (ValueError, TypeError, KeyError, ModelValidationError) as exc:
+                    outcomes[policy] = {"accepted": False, "error": str(exc)[:6000]}
+                else:
+                    outcomes[policy] = {
+                        "accepted": True,
+                        "error": None,
+                        "selected_function": result["selected_function"],
+                        "outer_sign_normalizations": result.get(
+                            "outer_sign_normalizations", []
+                        ),
+                    }
+                    if (
+                        policy == STRICT_REPAIR
+                        and result["candidate"] != state["final"]["candidate"]
+                    ):
+                        raise ValueError(
+                            "strict replay differs from saved accepted candidate"
+                        )
+            if outcomes[STRICT_REPAIR]["accepted"] != attempt["accepted"]:
+                raise ValueError("strict replay differs from saved acceptance")
+            rows.append(
+                {
+                    "task": task,
+                    "attempt": attempt["attempt"],
+                    "request_hash": attempt["request_hash"],
+                    "response": raw,
+                    "outcomes": outcomes,
+                }
+            )
+    old = sum(r["outcomes"][STRICT_REPAIR]["accepted"] for r in rows)
+    new = sum(r["outcomes"][TOPOLOGY_SIGN_REPAIR]["accepted"] for r in rows)
+    regressions = sum(
+        r["outcomes"][STRICT_REPAIR]["accepted"]
+        and not r["outcomes"][TOPOLOGY_SIGN_REPAIR]["accepted"]
+        for r in rows
+    )
+    return sealed_write(
+        root / "replay.json",
+        {
+            "protocol": "prefit-sign-response-replay-1",
+            "new_plan_sha256": plan["artifact_sha256"],
+            "source_plan_sha256": previous["artifact_sha256"],
+            "saved_responses": len(rows),
+            "strict_accepted": old,
+            "normalized_accepted": new,
+            "newly_admissible": new - old + regressions,
+            "acceptance_regressions": regressions,
+            "live_llm_calls": 0,
+            "parameter_fitting_performed": False,
+            "rows": rows,
+            "limitation": "Exact saved-response admissibility only; no counterfactual "
+            "fresh-run success rate, scientific certification or fitting result.",
+        },
+    )
 
 
 def run(root: Path, base_url: str, *, wall_seconds: float | None = None) -> dict:
