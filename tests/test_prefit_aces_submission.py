@@ -10,11 +10,19 @@ from pathlib import Path
 import pytest
 
 
-@pytest.fixture
-def launcher(tmp_path):
+@pytest.fixture(params=("no_job_config", "construction_job_config"))
+def launcher(tmp_path, monkeypatch, request):
     if not all(shutil.which(c) for c in ("bash", "jq")):
         pytest.skip("shell tools unavailable")
     repo = Path(__file__).resolve().parents[1]
+    # ACES preflight inherits this selector through sbatch --export=ALL.
+    # Exercise that environment even when pytest runs on a clean workstation.
+    if request.param == "construction_job_config":
+        monkeypatch.setenv(
+            "AF_CONFIG", str(repo / "configs/prefit_construction_audit_v1.json")
+        )
+    else:
+        monkeypatch.delenv("AF_CONFIG", raising=False)
     bins = tmp_path / "bin"
     bins.mkdir()
     root = tmp_path / "output"
@@ -53,8 +61,9 @@ if os.environ.get('FAIL_STAGE') == sys.argv[-1]: sys.exit(1)
         path = bins / name
         path.write_text(script)
         path.chmod(0o755)
+    # Only fixture settings and explicit run() overrides may select a workflow.
     env = dict(
-        os.environ,
+        {key: value for key, value in os.environ.items() if not key.startswith("AF_")},
         PATH=str(bins) + os.pathsep + os.environ["PATH"],
         AF_REPO_ROOT=str(repo),
         AF_PYTHON=str(bins / "fakepython"),

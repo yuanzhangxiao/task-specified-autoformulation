@@ -178,8 +178,50 @@ tests passed, as did Ruff and the repeated construction-only smoke. The legacy
 fit smoke, shell syntax checks and new server-protocol dispatch check also passed.
 These local runs use synthetic provider responses, not live proposer results.
 
-After the ACES results, inspect the complete models and failure traces. Then pin
-Astra's selected fitter, validate its interface against these sealed canonical
-artifacts, and run a small full fit–diagnose–repair pilot before expanding the
-full pipeline. Fitter selection, scientific adequacy and empirical improvement
-remain unestablished by this construction-only milestone.
+After the ACES results, inspect the complete models and failure traces. Retain
+the existing fitting settings under the agreed fitter freeze, validate the
+interface against these sealed canonical artifacts, and run a small full
+fit–diagnose–repair pilot before expanding the full pipeline. Scientific adequacy
+and empirical improvement remain unestablished by this construction-only milestone.
+
+## Recovery from the first ACES preflight failure
+
+Preparation job 2131028 failed with four scheduler-test assertions; construction
+job 2131029 was cancelled without running. Audit job 2131030 completed its report
+step, which does not establish that any construction took place.
+
+The cause was inherited test configuration. The live job exports `AF_CONFIG`
+pointing to the construction-only audit configuration. The offline scheduler
+fixture copied that environment into its subprocess, so tests of the legacy
+default workflow selected `audit` while correctly asserting the expected legacy
+`fit` stage. These are mocked scheduler calls; the failure did not involve fitting
+or a live proposer.
+
+Setting the same `AF_CONFIG` locally reproduced all four failures. The fixture
+now removes inherited `AF_*` variables before applying its own settings and the
+test's explicit overrides. Every scheduler case runs with both an absent config
+selector and an exported audit selector. Assertions for both the legacy fit chain
+and the construction-only audit chain remain intact. The exact ACES preflight
+group passed all 82 cases under the exported audit configuration after this fix.
+Only tests and documentation change; runtime code, launchers, scientific settings,
+fitting settings, prompts and data stay fixed.
+
+The full repository suite after the fix passed 1,638 tests with three optional
+Torch skips in 443.36 seconds. Ruff and the construction-only smoke also passed;
+the smoke was run with the audit configuration exported, as in ACES preparation.
+
+Update the existing experiment checkout to the fix commit supplied in the
+completion message. Then submit a fresh output root, retaining the failed run's
+logs and reusing its frozen public inputs. This is a fresh submission because the regular `AF_RESUME=1` path requires
+successful preparation and will correctly refuse job 2131028.
+
+```bash
+AF_RESUME=0 AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-prefit-construction-audit-v1 AF_PYTHON=/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python AF_CONFIG=/scratch/user/u.yx126462/repos/autoformalism-prefit-construction-audit-v1/configs/prefit_construction_audit_v1.json AF_PUBLIC_ROOT=/scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1/public AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1-fix1 bash /scratch/user/u.yx126462/repos/autoformalism-prefit-construction-audit-v1/scripts/hpc/submit_prefit_construction_aces.sh
+cat /scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1-fix1/submission_manifest.json
+```
+
+After the new audit job completes with exit code `0:0`:
+
+```bash
+jq '{protocol,status,construction_complete,arms,limitation}' /scratch/user/u.yx126462/phase_b/prefit-construction-audit-v1-fix1/summary.json
+```
