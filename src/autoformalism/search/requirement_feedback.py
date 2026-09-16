@@ -307,6 +307,7 @@ def rebind_interaction(
     raw: dict,
     *,
     repair_policy: RepairPolicy = TOPOLOGY_SIGN_REPAIR,
+    inherit_existing_parameters: bool = False,
 ) -> dict:
     """Change one existing RHS while preserving topology, siblings and boundaries.
 
@@ -333,6 +334,7 @@ def rebind_interaction(
     if repair_policy not in (STRICT_REPAIR, TOPOLOGY_SIGN_REPAIR):
         raise ValueError("unknown requirement repair policy")
     new_slots, repairs, sign_normalizations = [], [], []
+    parameter_inheritance = []
     for original in bundle["slots"]:
         slot = copy.deepcopy(original)
         selected, identifier = slot["selected_term"], slot["interaction_id"]
@@ -343,6 +345,10 @@ def rebind_interaction(
             else slot["accepted_reply"]
         )
         if changed:
+            if inherit_existing_parameters:
+                from autoformalism.search.parameter_reuse import inherit_parameters
+
+                reply, parameter_inheritance = inherit_parameters(slot, reply)
             if repair_policy == TOPOLOGY_SIGN_REPAIR:
                 reply, sign_records = normalize_topology_owned_sign(
                     reply, outer_weight_sign=selected["outer_weight_sign"]
@@ -402,6 +408,13 @@ def rebind_interaction(
     }
     compile_initialization_result(base, context, initialization)
     candidate = compiled.validated.candidate.model_dump(mode="json")
+    if inherit_existing_parameters:
+        before_parameters = {p["name"]: p for p in bundle["candidate"]["parameters"]}
+        after_parameters = {p["name"]: p for p in candidate["parameters"]}
+        for record in parameter_inheritance:
+            name = record["canonical_name"]
+            if before_parameters[name] != after_parameters.get(name):
+                raise ValueError(f"inherited parameter declaration changed: {name}")
     for field in ("states", "observation_mappings", "initial_conditions"):
         if candidate[field] != bundle["candidate"][field]:
             raise ValueError(f"protected {field} changed")
@@ -433,6 +446,11 @@ def rebind_interaction(
             bundle["initialization"]["plan"]
         ),
         "deterministic_role_normalizations": repairs,
+        **(
+            {"parameter_inheritance": parameter_inheritance}
+            if inherit_existing_parameters
+            else {}
+        ),
         **(
             {"outer_sign_normalizations": sign_normalizations}
             if repair_policy == TOPOLOGY_SIGN_REPAIR

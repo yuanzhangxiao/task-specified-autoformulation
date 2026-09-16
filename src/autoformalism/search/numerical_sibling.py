@@ -257,6 +257,7 @@ def apply_revision(
     raw: dict,
     *,
     policy: FeedbackPolicy = LEGACY_POLICY,
+    inherit_existing_parameters: bool = False,
 ) -> dict:
     """Validate the hypothesis contract and atomically preserve every other slot."""
     reply, normalizations = checked_reply(raw, packet, policy)
@@ -271,7 +272,10 @@ def apply_revision(
     if reply.action != "revise_function":
         return {**base, "outcome": reply.action, "final": None, "provenance": None}
     result = rebind_interaction(
-        bundle, bindings, reply.revision.model_dump(mode="json")
+        bundle,
+        bindings,
+        reply.revision.model_dump(mode="json"),
+        inherit_existing_parameters=inherit_existing_parameters,
     )
     selected = result["selected_function"]
     original = next(
@@ -294,6 +298,11 @@ def apply_revision(
         "hypothesis": reply.hypothesis,
         "packet_sha256": packet["packet_sha256"],
         "hypothesis_confirmed": False,
+        **(
+            {"parameter_inheritance": result["parameter_inheritance"]}
+            if inherit_existing_parameters
+            else {}
+        ),
     }
     result["selected_function"] = {
         k: selected[k]
