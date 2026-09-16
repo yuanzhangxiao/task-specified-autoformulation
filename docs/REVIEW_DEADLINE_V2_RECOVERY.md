@@ -66,6 +66,55 @@ The normal v2 launcher is also corrected for **future fresh campaigns**. The
 existing campaign uses the separate recovery driver to preserve its original
 scientific identity.
 
+## Dispatcher-only repair after the ACES wrapper rejection
+
+The first recovery driver used `sbatch --wrap` for its final dispatcher.
+ACES's `/sw/local/bin/sbatch` forwards its arguments without preserving quoting,
+so it splits the command string. In the observed attempt, proposal `2135300`,
+fitting array `2135301`, and reporting `2135302` were accepted; only submission
+of the visit-two dispatcher failed. Do not repeat those three jobs or remove
+their intent directory.
+
+The corrected driver submits a real shell-script file through the same site
+wrapper. Its explicit `--complete-dispatcher-only` mode verifies and adopts the
+three recorded job IDs, checks that no dispatcher was already accepted, and
+submits only the missing dispatcher. If the report already completed, it uses
+that verified completion instead of another dependency on an expired ID.
+It requires expanded accounting records for every array task; a successful
+parent record cannot hide a failed or missing child. If accounting is still
+catching up, it stops before creating repair intent and may be retried later.
+An unexpected or failed accounting record requires inspection rather than
+resubmission. A saved reply indicating acceptance or an uncertain outcome also
+blocks retry even if queue/accounting snapshots are temporarily empty.
+
+On ACES, use the new repair commit supplied in the implementation message:
+
+```bash
+(
+  set -euo pipefail
+  module load GCCcore/13.2.0 Python/3.11.5
+  REV=REPLACE_WITH_DISPATCHER_REPAIR_COMMIT
+  BASE=/scratch/user/u.yx126462/repos/autoformalism-e432fe3
+  git -C "$BASE" fetch origin codex/prefit-aces-v1
+  REPAIR_REPO="/scratch/user/u.yx126462/repos/autoformalism-review-dispatch-${REV:0:7}"
+  if [ ! -e "$REPAIR_REPO/.git" ]; then
+    git -C "$BASE" worktree add --detach "$REPAIR_REPO" "$REV"
+  fi
+  [ "$(git -C "$REPAIR_REPO" rev-parse HEAD)" = "$REV" ]
+  export AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-review-v2-7eff174
+  export AF_PYTHON="$BASE/.venv/bin/python"
+  export AF_OUTPUT_ROOT=/scratch/user/u.yx126462/phase_b/review-deadline-v2
+  "$AF_PYTHON" "$REPAIR_REPO/scripts/recover_review_deadline_v2.py" \
+    --round 1 --complete-dispatcher-only
+)
+```
+
+The original evidence and accepted job IDs remain untouched. New evidence,
+the dispatcher script, and raw scheduler stdout/stderr/exit-code receipts are
+saved under `scheduler-recovery/attempt-1/dispatcher-repair`. A repeated uncertain
+repair remains blocked for inspection; a completed submission returns its saved
+manifest. The newly queued dispatcher uses this corrected driver for visit two.
+
 ## Inspect the resumed results
 
 ```bash

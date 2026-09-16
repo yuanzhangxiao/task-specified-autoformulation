@@ -38,11 +38,30 @@ print(json.dumps(artifacts))
 """
 
 
-def run(argv: list[str], *, env: dict | None = None) -> str:
+def run(
+    argv: list[str], *, env: dict | None = None, receipt: Path | None = None
+) -> str:
     """Require a successful, bounded scheduler or verification command."""
-    return subprocess.run(
-        argv, env=env, check=True, text=True, capture_output=True, timeout=180
-    ).stdout.strip()
+    try:
+        result = subprocess.run(
+            argv, env=env, check=False, text=True, capture_output=True, timeout=180
+        )
+    except subprocess.TimeoutExpired as error:
+        if receipt is not None:
+            write(receipt, {"argv": argv, "status": "timeout_reply_uncertain"})
+        raise error
+    if receipt is not None:
+        write(
+            receipt,
+            {
+                "argv": argv,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode,
+            },
+        )
+    result.check_returncode()
+    return result.stdout.strip()
 
 
 def read(path: Path) -> dict:
@@ -97,6 +116,11 @@ def check_unsubmitted(root: Path, index: int, start: str) -> None:
             raise ValueError(
                 "visit already has scientific work; inspect before recovery"
             )
+    check_absent(names, start)
+
+
+def check_absent(names: list[str], start: str) -> None:
+    """Check accounting and the live queue before a possibly duplicate submission."""
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", start):
         raise ValueError("missing preparation start time for duplicate-job audit")
     history = run(
@@ -120,7 +144,72 @@ def check_unsubmitted(root: Path, index: int, start: str) -> None:
         raise ValueError("scheduler has visit jobs; inspect before recovery")
 
 
-def recover(index: int) -> dict:
+def recorded_job(job: str, key: str, *, indices: set[int] | None = None) -> dict:
+    """Confirm the identity of an already accepted job without resubmitting it."""
+    if not re.fullmatch(r"[0-9]+", job):
+        raise ValueError("invalid saved recovery job ID")
+    rows = run(
+        [
+            "sacct",
+            "--array",
+            "-n",
+            "-P",
+            "-j",
+            job,
+            "--format=JobID%40,JobName%80,State%40,ExitCode",
+        ]
+    ).splitlines()
+    allocations = [[f.strip() for f in r.split("|")] for r in rows]
+    if indices is not None:
+        matches = [
+            r for r in allocations if re.fullmatch(re.escape(job) + r"_\d+", r[0])
+        ]
+        actual = [int(r[0].rsplit("_", 1)[1]) for r in matches]
+        if len(actual) != len(indices) or set(actual) != indices:
+            raise ValueError(
+                f"cannot confirm complete saved array {job}; accounting may be "
+                "catching up. No repair was submitted; wait and retry."
+            )
+    else:
+        matches = [r for r in allocations if r[0] == job]
+        if len(matches) != 1:
+            raise ValueError(f"cannot confirm existing job {job}")
+    for fields in matches:
+        if (
+            len(fields) != 4
+            or fields[1] != f"review-v2-{key}"
+            or fields[2] not in {"PENDING", "RUNNING", "COMPLETING", "COMPLETED"}
+            or fields[3] != "0:0"
+        ):
+            raise ValueError(f"existing job needs inspection: {fields}")
+    return {
+        "job": job,
+        "name": f"review-v2-{key}",
+        "state": matches[0][2] if len(matches) == 1 else "ARRAY_CONFIRMED",
+        "allocations": matches,
+    }
+
+
+def check_prior_reply(attempt: Path, key: str) -> None:
+    """Positive or uncertain local submission evidence outweighs empty snapshots."""
+    path = attempt / f"{key}.reply.json"
+    if not path.exists():
+        return  # The legacy driver did not save replies; inspect queue/accounting.
+    value = read(path)
+    if (
+        value.get("status") is not None
+        or not isinstance(value.get("returncode"), int)
+        or value["returncode"] <= 0
+        or value["returncode"] >= 128
+        or str(value.get("stdout", "")).strip()
+    ):
+        raise ValueError(
+            f"prior dispatcher reply records acceptance or uncertainty: {path}; "
+            "inspect it before any new submission"
+        )
+
+
+def recover(index: int, *, complete_dispatcher_only: bool = False) -> dict:
     """Queue one untouched visit and, if needed, this same bounded dispatcher."""
     root = Path(os.environ["AF_OUTPUT_ROOT"]).resolve()
     repo = Path(os.environ["AF_REPO_ROOT"]).resolve()
@@ -140,8 +229,11 @@ def recover(index: int) -> dict:
         existing = root / f"submission-round-{index}.json"
         if existing.exists():
             return read(existing)
-        if (ledger / f"attempt-{index}").exists():
+        attempt = ledger / f"attempt-{index}"
+        if attempt.exists() and not complete_dispatcher_only:
             raise ValueError("recovery intent exists; inspect jobs before retrying")
+        if complete_dispatcher_only and not attempt.exists():
+            raise ValueError("dispatcher-only repair requires an existing attempt")
         parent = read(root / f"submission-round-{index - 1}.json")
         plan = read(root / "plan.json")
         if (
@@ -197,10 +289,41 @@ def recover(index: int) -> dict:
                 raise ValueError(
                     "original dispatcher is not a confirmed terminal failure"
                 )
-        check_unsubmitted(root, index, prepare["start"])
-        attempt = ledger / f"attempt-{index}"
-        # Permanent intent precedes the first possible sbatch side effect.
-        attempt.mkdir()
+        adopted = {}
+        if complete_dispatcher_only:
+            if index + 1 >= plan["config"]["rounds"]:
+                raise ValueError("last visit does not need a dispatcher")
+            old = read(attempt / "evidence.json")
+            for key, value in {
+                "scientific_commit": commit,
+                "plan_sha256": plan["artifact_sha256"],
+                "round": index,
+                "prior_results": prior_results,
+            }.items():
+                if old.get(key) != value:
+                    raise ValueError(f"partial recovery identity differs: {key}")
+            required = [f"{s}-{index}" for s in ("propose", "fit", "finish")]
+            if {p.stem for p in attempt.glob("*.id")} != set(required):
+                raise ValueError("repair requires exactly the three original job IDs")
+            check_prior_reply(attempt, f"submit-next-{index + 1}")
+            for key in required:
+                job = (attempt / f"{key}.id").read_text().strip()
+                adopted[key] = recorded_job(
+                    job,
+                    key,
+                    indices={t["index"] for t in plan["tasks"]}
+                    if key.startswith("fit-")
+                    else None,
+                )
+            check_absent([f"review-v2-submit-next-{index + 1}"], prepare["start"])
+            submission_directory = attempt / "dispatcher-repair"
+            # A repeated uncertain dispatcher repair also requires inspection.
+            submission_directory.mkdir()
+        else:
+            check_unsubmitted(root, index, prepare["start"])
+            # Permanent intent precedes the first possible sbatch side effect.
+            attempt.mkdir()
+            submission_directory = attempt
         evidence = {
             "scientific_commit": commit,
             "plan_sha256": plan["artifact_sha256"],
@@ -212,9 +335,11 @@ def recover(index: int) -> dict:
             "failed_original_dispatcher": failed_dispatch,
             "scheduler_only": True,
             "new_scientific_budget": False,
+            "adopted_jobs": adopted,
         }
-        write(attempt / "evidence.json", evidence)
+        write(submission_directory / "evidence.json", evidence)
         jobs = dict(parent["jobs"])
+        jobs.update({key: value["job"] for key, value in adopted.items()})
         account = env.get("AF_ACCOUNT", "156264627414")
         worker = str(repo / "scripts/hpc/run_review_deadline_aces.sh")
 
@@ -222,6 +347,7 @@ def recover(index: int) -> dict:
             stage: str, visit: int, options: list[str], command: list[str]
         ) -> str:
             key = f"{stage}-{visit}"
+            reply_path = submission_directory / f"{key}.reply.json"
             reply = run(
                 [
                     "sbatch",
@@ -238,77 +364,107 @@ def recover(index: int) -> dict:
                     *command,
                 ],
                 env=env,
+                receipt=reply_path,
             )
             job = reply.split(";")[0]
             if not re.fullmatch(r"[0-9]+", job):
                 raise ValueError(
-                    "uncertain scheduler reply; intent retained, inspect jobs"
+                    "uncertain scheduler reply; intent retained. "
+                    f"Inspect jobs and {reply_path} before retrying"
                 )
-            (attempt / f"{key}.id").write_text(job + "\n")
+            (submission_directory / f"{key}.id").write_text(job + "\n")
             jobs[key] = job
             return job
 
-        gpu = submit(
-            "propose",
-            index,
-            [
-                "--partition=gpu",
-                "--gres=gpu:h100:1",
-                "--cpus-per-task=8",
-                "--mem=64G",
-                "--time=06:30:00",
-                "--signal=B:TERM@300",
-            ],
-            [worker, "propose", str(index)],
+        gpu = (
+            jobs[f"propose-{index}"]
+            if complete_dispatcher_only
+            else submit(
+                "propose",
+                index,
+                [
+                    "--partition=gpu",
+                    "--gres=gpu:h100:1",
+                    "--cpus-per-task=8",
+                    "--mem=64G",
+                    "--time=06:30:00",
+                    "--signal=B:TERM@300",
+                ],
+                [worker, "propose", str(index)],
+            )
         )
         indices = ",".join(str(t["index"]) for t in plan["tasks"])
-        cpu = submit(
-            "fit",
-            index,
-            [
-                f"--dependency=afterany:{gpu}",
-                "--partition=cpu",
-                f"--array={indices}%16",
-                "--cpus-per-task=1",
-                "--mem=16G",
-                "--time=00:40:00",
-                "--signal=B:TERM@120",
-            ],
-            [worker, "fit", str(index)],
-        )
-        finish_id = submit(
-            "finish",
-            index,
-            [
-                f"--dependency=afterany:{cpu}",
-                "--partition=cpu",
-                "--cpus-per-task=1",
-                "--mem=4G",
-                "--time=00:15:00",
-            ],
-            [worker, "finish", str(index)],
-        )
-        last = index + 1 == plan["config"]["rounds"]
-        if not last:
-            shell = "module load GCCcore/13.2.0 Python/3.11.5 && exec " + shlex.join(
+        cpu = (
+            jobs[f"fit-{index}"]
+            if complete_dispatcher_only
+            else submit(
+                "fit",
+                index,
                 [
-                    python,
-                    str(script),
-                    "--round",
-                    str(index + 1),
-                ]
+                    f"--dependency=afterany:{gpu}",
+                    "--partition=cpu",
+                    f"--array={indices}%16",
+                    "--cpus-per-task=1",
+                    "--mem=16G",
+                    "--time=00:40:00",
+                    "--signal=B:TERM@120",
+                ],
+                [worker, "fit", str(index)],
             )
-            submit(
-                "submit-next",
-                index + 1,
+        )
+        finish_id = (
+            jobs[f"finish-{index}"]
+            if complete_dispatcher_only
+            else submit(
+                "finish",
+                index,
                 [
-                    f"--dependency=afterany:{finish_id}",
+                    f"--dependency=afterany:{cpu}",
                     "--partition=cpu",
                     "--cpus-per-task=1",
                     "--mem=4G",
                     "--time=00:15:00",
                 ],
-                ["--wrap", shlex.join(["bash", "-lc", shell])],
+                [worker, "finish", str(index)],
+            )
+        )
+        last = index + 1 == plan["config"]["rounds"]
+        if not last:
+            shell = (
+                "#!/bin/bash\nset -euo pipefail\n"
+                "module load GCCcore/13.2.0 Python/3.11.5\nexec "
+                + shlex.join(
+                    [
+                        python,
+                        str(script),
+                        "--round",
+                        str(index + 1),
+                    ]
+                )
+            )
+            dispatch_script = submission_directory / f"dispatch-{index + 1}.sh"
+            dispatch_script.write_text(shell + "\n")
+            # ACES's wrapper expands its argument string without preserving
+            # quoting. Pass a script file; --wrap with spaces is split by it.
+            dependency = (
+                []
+                if (
+                    complete_dispatcher_only
+                    and adopted[f"finish-{index}"]["state"] == "COMPLETED"
+                )
+                else [f"--dependency=afterany:{finish_id}"]
+            )
+            submit(
+                "submit-next",
+                index + 1,
+                [
+                    *dependency,
+                    "--partition=cpu",
+                    "--cpus-per-task=1",
+                    "--mem=4G",
+                    "--time=00:15:00",
+                ],
+                [str(dispatch_script)],
             )
         manifest = {
             **parent,
@@ -327,9 +483,17 @@ def recover(index: int) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--round", type=int, required=True)
+    parser.add_argument("--complete-dispatcher-only", action="store_true")
     args = parser.parse_args()
     try:
-        print(json.dumps(recover(args.round), indent=2))
+        print(
+            json.dumps(
+                recover(
+                    args.round, complete_dispatcher_only=args.complete_dispatcher_only
+                ),
+                indent=2,
+            )
+        )
     except subprocess.CalledProcessError as error:
         print(error.stderr or str(error), file=sys.stderr)
         raise SystemExit(2) from error
