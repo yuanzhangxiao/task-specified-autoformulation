@@ -222,3 +222,133 @@ def test_uncertain_delivery_consumes_request_and_next_attempt_only(context, tmp_
     report = campaign._report(tmp_path, plan, residual)
     assert report["physical_requests"] == 2
     assert report["unknown_latency_requests"] == 1
+
+
+@pytest.fixture(scope="module")
+def routed_context(context):
+    plan, residual = copy.deepcopy(context)
+    plan["config"]["feedback_policy"] = review.ROUTED_POLICY
+    return plan, residual
+
+
+def test_routed_duplicate_references_normalize_without_mutating_reply(context):
+    plan, residual = context
+    raw = reply_for(plan, residual)
+    raw["evidence_ids"] *= 2
+    original = copy.deepcopy(raw)
+    with pytest.raises(ValueError, match="unique"):
+        review.apply_revision(plan["bundle"], plan["bindings"], residual["packet"], raw)
+    decision = review.apply_revision(
+        plan["bundle"],
+        plan["bindings"],
+        residual["packet"],
+        raw,
+        policy=review.ROUTED_POLICY,
+    )
+    assert decision["outcome"] == "committed"
+    assert len(decision["reply"]["evidence_ids"]) == 1
+    assert decision["citation_normalizations"][0]["before"] == raw["evidence_ids"]
+    assert raw == original
+
+
+def test_routed_absent_citations_get_specific_retry_then_resume(
+    routed_context, tmp_path
+):
+    plan, residual = routed_context
+    raw = reply_for(plan, residual)
+    raw["evidence_ids"] *= 2
+    corrected = copy.deepcopy(raw)
+    raw["evidence_ids"] += ["unavailable_samples"]
+    calls = []
+    proposer = client(tmp_path, plan, [(raw, "stop"), (corrected, "stop")], calls)
+    state = campaign.run_episode(tmp_path, plan, residual, proposer)
+    assert state["stop_reason"] == "committed" and len(calls) == 2
+    feedback = state["attempts"][0]["feedback"]
+    assert feedback["code"] == "EVIDENCE_IDS_NOT_AVAILABLE"
+    assert feedback["absent_evidence_ids"] == ["unavailable_samples"]
+    assert not feedback["mathematical_reply_evaluated"]
+    assert feedback["available_evidence_ids"] == sorted(
+        review.evidence_ids(residual["packet"])
+    )
+    assert feedback["citation_normalizations"]
+    retry = json.loads(calls[1]["messages"][1]["content"].split("\n", 1)[1])
+    assert retry["retry_feedback"] == feedback
+    assert campaign.run_episode(tmp_path, plan, residual, proposer) == state
+    assert len(calls) == 2
+
+
+def test_routed_catalog_lists_only_available_samples_and_measurements(routed_context):
+    plan, residual = routed_context
+    value = review.payload(
+        plan["bundle"],
+        plan["bindings"],
+        residual["packet"],
+        residual["seed"]["state"]["parameters"],
+        policy=review.ROUTED_POLICY,
+    )
+    ids = {
+        i
+        for row in value["evidence_catalog"]
+        for i in [row["row"], *row["windows"], *row["details"]]
+    }
+    assert ids == review.evidence_ids(residual["packet"])
+    assert value["training_evidence"] == residual["packet"]
+    assert value["routing_decision"]["parent_fitting_allocation_this_visit"] == "closed"
+    assert (
+        "budget limit explains why optimization stopped, not why residual error"
+        in review.system_prompt(review.ROUTED_POLICY)
+    )
+    assert "validation" not in value and "private_reference" not in value
+
+
+@pytest.mark.parametrize("action", ["no_change", "topology_revision_needed"])
+def test_routed_can_report_missing_evidence_or_scope_without_child(
+    routed_context, tmp_path, action
+):
+    plan, residual = routed_context
+    raw = reply_for(plan, residual, action=action)
+    raw["evidence_ids"] *= 2
+    calls = []
+    proposer = client(tmp_path, plan, [(raw, "stop")], calls)
+    state = campaign.run_episode(tmp_path, plan, residual, proposer)
+    assert state["stop_reason"] == action and len(calls) == 1
+    assert state["decision"]["final"] is None
+    assert state["decision"]["citation_normalizations"]
+    assert campaign.run_episode(tmp_path, plan, residual, proposer) == state
+
+
+@pytest.mark.parametrize(
+    "mutation", ["wrong_action", "source", "absent_only", "empty", "excess"]
+)
+def test_routed_normalization_does_not_weaken_other_contracts(routed_context, mutation):
+    plan, residual = routed_context
+    raw = reply_for(plan, residual)
+    raw["evidence_ids"] *= 2
+    if mutation == "wrong_action":
+        raw["action"] = "no_change"
+    elif mutation == "source":
+        raw["revision"]["expression"] += "+unlisted_state"
+    elif mutation == "absent_only":
+        raw["evidence_ids"] = ["absent"] * 2
+    elif mutation == "empty":
+        raw["evidence_ids"] = []
+    else:
+        raw["evidence_ids"] *= 9
+    with pytest.raises((ValueError, ModelValidationError)):
+        review.apply_revision(
+            plan["bundle"],
+            plan["bindings"],
+            residual["packet"],
+            raw,
+            policy=review.ROUTED_POLICY,
+        )
+
+
+def test_routed_truncation_stays_provider_failure(routed_context, tmp_path):
+    plan, residual = routed_context
+    raw = reply_for(plan, residual)
+    calls = []
+    proposer = client(tmp_path, plan, [(raw, "length"), (raw, "stop")], calls)
+    state = campaign.run_episode(tmp_path, plan, residual, proposer)
+    assert state["attempts"][0]["feedback"]["stage"] == "provider_response"
+    assert state["stop_reason"] == "committed"

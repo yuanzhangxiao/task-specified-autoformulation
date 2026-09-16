@@ -21,7 +21,7 @@ def main():
         "root",
     ):
         command.add_argument("--" + name, type=Path, required=True)
-    for name in ("replay", "verify", "run", "fit", "report"):
+    for name in ("replay", "verify", "run", "fit", "report", "audit-citations"):
         command = commands.add_parser(name)
         command.add_argument("--root", type=Path, required=name != "run")
         if name == "run":
@@ -40,6 +40,8 @@ def main():
             args.root,
         )
         result = {"status": "prepared", "plan_sha256": plan["artifact_sha256"]}
+    elif args.command == "audit-citations":
+        result = campaign.audit_saved_citations(args.root)
     elif args.command == "replay":
         replay = campaign.replay(args.root)
         result = {k: replay[k] for k in ("identity", "status")}

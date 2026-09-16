@@ -37,7 +37,7 @@ if [[ "$mode" == prepare ]]; then
     tail -n 100 "$log" >&2
     exit 1
   fi
-  "$AF_PYTHON" scripts/smoke_prefit_numerical_sibling.py > "$AF_OUTPUT_ROOT/runtime/smoke-${SLURM_JOB_ID}.json"
+  "$AF_PYTHON" scripts/smoke_prefit_numerical_sibling.py --feedback-policy "$(jq -r '.feedback_policy // "optional-review-1"' "$AF_CONFIG")" > "$AF_OUTPUT_ROOT/runtime/smoke-${SLURM_JOB_ID}.json"
   verify_submission
   "$AF_PYTHON" "$cli" prepare --parent-fit "$AF_PARENT_FIT" --continuation-fit "$AF_CONTINUATION_FIT" --source "$AF_SOURCE_ROOT" --construction-root "$AF_CONSTRUCTION_ROOT" --config "$AF_CONFIG" --root "$AF_OUTPUT_ROOT"
   "$AF_PYTHON" "$cli" replay --root "$AF_OUTPUT_ROOT" > "$AF_OUTPUT_ROOT/runtime/replay.json"

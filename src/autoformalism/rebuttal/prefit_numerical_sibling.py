@@ -59,6 +59,7 @@ class SiblingConfig(StrictSchema):
     """Pin one completed parent and one bounded optional proposer episode."""
 
     protocol: Literal["prefit-numerical-sibling-1"] = PROTOCOL
+    feedback_policy: review.FeedbackPolicy = review.LEGACY_POLICY
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     selection: FeedbackSelection = Field(default_factory=FeedbackSelection)
     serving_image_sha256: Sha256
@@ -97,11 +98,21 @@ def launcher_hash() -> str:
     )
 
 
-def _reserve(root: Path, parent_path: Path, selection: FeedbackSelection) -> None:
+def _reservation_directory(
+    parent_path: Path, selection: FeedbackSelection, policy: str
+) -> Path:
+    """One allocation per explicitly versioned experiment, never per output path."""
     ledger = (
         parent_path.parent.parent
         / ".numerical-siblings"
         / selection.continuation_identity
+    )
+    return ledger if policy == review.LEGACY_POLICY else ledger / policy
+
+
+def _reserve(root: Path, parent_path: Path, config: SiblingConfig) -> None:
+    ledger = _reservation_directory(
+        parent_path, config.selection, config.feedback_policy
     )
     with public._lock(ledger):
         sealed_write(
@@ -109,22 +120,31 @@ def _reserve(root: Path, parent_path: Path, selection: FeedbackSelection) -> Non
             {
                 "protocol": PROTOCOL,
                 "output": str(root.resolve()),
-                "selection": selection.model_dump(mode="json"),
+                "selection": config.selection.model_dump(mode="json"),
+                **(
+                    {"feedback_policy": config.feedback_policy}
+                    if config.feedback_policy != review.LEGACY_POLICY
+                    else {}
+                ),
             },
         )
 
 
 def _check_reservation(root: Path, plan: dict) -> None:
-    ledger = (
-        Path(plan["paths"]["parent"]).parent.parent
-        / ".numerical-siblings"
-        / plan["config"]["selection"]["continuation_identity"]
+    config = SiblingConfig.model_validate(plan["config"])
+    ledger = _reservation_directory(
+        Path(plan["paths"]["parent"]), config.selection, config.feedback_policy
     )
     reservation = sealed_read(ledger / "reservation.json")
     expected = {
         "protocol": PROTOCOL,
         "output": str(root.resolve()),
         "selection": plan["config"]["selection"],
+        **(
+            {"feedback_policy": config.feedback_policy}
+            if config.feedback_policy != review.LEGACY_POLICY
+            else {}
+        ),
     }
     if {k: v for k, v in reservation.items() if k != "artifact_sha256"} != expected:
         raise ValueError("sibling reservation differs; no new allocation")
@@ -213,7 +233,7 @@ def prepare(
             "runtime": public._runtime(),
             "launcher_sha256": launcher_hash(),
         }
-        _reserve(root, parent_path, config.selection)
+        _reserve(root, parent_path, config)
         return sealed_write(root / "plan.json", plan)
 
 
@@ -258,16 +278,27 @@ def _namespace(plan: dict) -> str:
 
 
 def _user(plan, residual, retry):
-    return "Optional numerical sibling review\n" + json.dumps(
-        review.payload(
-            plan["bundle"],
-            plan["bindings"],
-            residual["packet"],
-            residual["seed"]["state"]["parameters"],
-            retry,
-        ),
-        sort_keys=True,
-        separators=(",", ":"),
+    policy = SiblingConfig.model_validate(plan["config"]).feedback_policy
+    title = (
+        "Optional numerical sibling review"
+        if policy == review.LEGACY_POLICY
+        else "Routed structural hypothesis"
+    )
+    return (
+        title
+        + "\n"
+        + json.dumps(
+            review.payload(
+                plan["bundle"],
+                plan["bindings"],
+                residual["packet"],
+                residual["seed"]["state"]["parameters"],
+                retry,
+                policy=policy,
+            ),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     )
 
 
@@ -275,7 +306,13 @@ def _evaluate(plan, packet, record):
     raw, result = None, None
     try:
         raw = visible_response(record)
-        result = review.apply_revision(plan["bundle"], plan["bindings"], packet, raw)
+        result = review.apply_revision(
+            plan["bundle"],
+            plan["bindings"],
+            packet,
+            raw,
+            policy=SiblingConfig.model_validate(plan["config"]).feedback_policy,
+        )
         feedback = {
             "stage": "revision_contract",
             "error": None,
@@ -307,7 +344,8 @@ def _state(root, plan, residual):
         raise ValueError("sibling episode identity differs")
     records = _records(root / "results/calls", _namespace(plan))
     _check_events(state, records)
-    settings = SiblingConfig.model_validate(plan["config"]).model_settings
+    config = SiblingConfig.model_validate(plan["config"])
+    settings = config.model_settings
     if (
         len(records) > settings.maximum_requests
         or len(state["attempts"]) > settings.attempts_per_step
@@ -348,7 +386,10 @@ def _state(root, plan, residual):
         body = {
             "model": settings.model,
             "messages": [
-                {"role": "system", "content": review.SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": review.system_prompt(config.feedback_policy),
+                },
                 {"role": "user", "content": _user(plan, residual, retry)},
             ],
             "stream": False,
@@ -359,10 +400,12 @@ def _state(root, plan, residual):
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "NumericalRevision",
+                    "name": review.response_model(config.feedback_policy).__name__,
                     "strict": True,
                     "schema": strict_provider_schema(
-                        review.NumericalRevision.model_json_schema()
+                        review.response_model(
+                            config.feedback_policy
+                        ).model_json_schema()
                     ),
                 },
             },
@@ -413,9 +456,9 @@ def run_episode(root: Path, plan: dict, residual: dict, client: EpisodeClient) -
         retry = state["attempts"][-1]["feedback"] if state["attempts"] else None
         try:
             record = client.call(
-                system=review.SYSTEM_PROMPT,
+                system=review.system_prompt(config.feedback_policy),
                 user=_user(plan, residual, retry),
-                response_model=review.NumericalRevision,
+                response_model=review.response_model(config.feedback_policy),
                 step=STEP,
                 attempt=attempt,
             )
@@ -559,6 +602,7 @@ def _report(root, plan, residual):
     )
     report = {
         "protocol": PROTOCOL,
+        "feedback_policy": SiblingConfig.model_validate(plan["config"]).feedback_policy,
         "plan_sha256": plan["artifact_sha256"],
         "status": "complete" if complete else "partial",
         "replay_status": residual["status"],
@@ -596,3 +640,55 @@ def report(root: Path) -> dict:
     """Publish a consistent read-only numerical report under the campaign lock."""
     with public._lock(root):
         return _report(root, *verify(root))
+
+
+def audit_saved_citations(root: Path) -> dict:
+    """Read historical replies under both citation policies; never resume a run."""
+    state = sealed_read(root / "results/state.json")
+    envelope = public._read(root / "evidence/result.json")
+    result = envelope["result"]
+    if public.content_sha256(result) != envelope["sha256"]:
+        raise ValueError("saved evidence result digest differs")
+    packet = result["packet"]
+    if (
+        public.content_sha256({k: v for k, v in packet.items() if k != "packet_sha256"})
+        != packet["packet_sha256"]
+        or state["packet_sha256"] != packet["packet_sha256"]
+    ):
+        raise ValueError("saved packet digest differs")
+    rows = []
+    for event in state["attempts"]:
+        entry = {"attempt": event["attempt"], "historical_accepted": event["accepted"]}
+        for policy in (review.LEGACY_POLICY, review.ROUTED_POLICY):
+            try:
+                reply, normalizations = review.checked_reply(
+                    event["response"], packet, policy
+                )
+                outcome = {
+                    "citation_contract_valid": True,
+                    "evidence_ids": list(reply.evidence_ids),
+                    "normalizations": normalizations,
+                }
+            except (ValueError, TypeError) as error:
+                outcome = {"citation_contract_valid": False, "error": str(error)}
+                if isinstance(error, review.EvidenceReferenceError):
+                    outcome.update(
+                        absent_evidence_ids=error.absent,
+                        normalizations=error.normalizations,
+                    )
+            entry[policy] = outcome
+        rows.append(entry)
+    return {
+        "protocol": "sibling-citation-replay-1",
+        "source_state_sha256": state["artifact_sha256"],
+        "packet_sha256": packet["packet_sha256"],
+        "available_evidence_ids": sorted(review.evidence_ids(packet)),
+        "attempts": rows,
+        "live_llm_calls": 0,
+        "parameter_fitting_performed": False,
+        "historical_state_modified": False,
+        "limitation": (
+            "Saved reply/citation contracts only; no mathematical or scientific "
+            "acceptance and no counterfactual fresh-run outcome."
+        ),
+    }

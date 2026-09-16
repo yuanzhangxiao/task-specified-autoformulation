@@ -1,0 +1,27 @@
+{
+  "protocol": "prefit-numerical-sibling-1",
+  "platform": "aces-h100x1",
+  "selection": {
+    "protocol": "public-fit-residual-feedback-1",
+    "continuation_identity": "46e9914dd9d2097ba492adcf8edaecb638da6a8bd93404089afa5143d07c91bb",
+    "continuation_backend_sha256": "d92f087138f921ab7f634c9c94d9c87963b9a160b4930fa508e77045d6b9e986",
+    "replay_seconds_per_point": 300
+  },
+  "serving_image_sha256": "9c56389af06cafbf4aa8bd825393f606ac7f2a18e1a700c5999b1ed47f7f9c1e",
+  "model_settings": {
+    "model": "openai/gpt-oss-20b",
+    "model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 180,
+    "maximum_requests": 3,
+    "maximum_total_tokens": 262144,
+    "attempts_per_step": 3
+  },
+  "seed": 0,
+  "served_context_tokens": 32768,
+  "wall_seconds": 3600,
+  "shutdown_margin_seconds": 300,
+  "feedback_policy": "routed-hypothesis-2"
+}

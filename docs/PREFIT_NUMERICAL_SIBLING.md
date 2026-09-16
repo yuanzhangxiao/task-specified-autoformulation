@@ -1,5 +1,9 @@
 # One numerical-feedback sibling
 
+The opt-in successor is documented in `PREFIT_NUMERICAL_FEEDBACK_V2.md`. It adds
+logged citation normalization, precise missing-reference feedback and an explicit
+structural-hypothesis task. This document retains the original pilot contract.
+
 The primary response to an improving fit stopped by its budget is further bounded
 fitting. Its present error does not establish a bad equation. This separately
 authorized pilot explores one alternative while the original model continues

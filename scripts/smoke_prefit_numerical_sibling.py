@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -55,7 +56,7 @@ def _scores(frozen, parameters):
     )
 
 
-def fixture(base: Path) -> Path:
+def fixture(base: Path, *, feedback_policy="optional-review-1") -> Path:
     """Seal test-only timeout histories with real production scores at both points."""
     plan = synthetic_plan(
         base, with_validation=True, repair_policy="topology-owned-sign-1"
@@ -182,6 +183,7 @@ def fixture(base: Path) -> Path:
         completed = continuation.execute_continuation(pilot)
     assert completed.status == "complete", completed
     config = sibling.SiblingConfig(
+        feedback_policy=feedback_policy,
         serving_image_sha256="0" * 64,
         selection=FeedbackSelection(
             continuation_identity=completed.identity,
@@ -236,9 +238,9 @@ def client_for(root, plan, calls, *, action="revise_function"):
     )
 
 
-def smoke(base: Path) -> dict:
+def smoke(base: Path, *, feedback_policy="optional-review-1") -> dict:
     """Check the new pipeline edge with real export and frozen child optimizer."""
-    root = fixture(base)
+    root = fixture(base, feedback_policy=feedback_policy)
     original = {
         str(p): p.read_bytes()
         for name in ("source", "campaign", "parent", "pilot")
@@ -274,6 +276,7 @@ def smoke(base: Path) -> dict:
     }
     return {
         "status": "passed",
+        "feedback_policy": feedback_policy,
         "synthetic_histories": True,
         "live_llm_calls": 0,
         "mock_provider_requests": len(calls),
@@ -287,8 +290,19 @@ def smoke(base: Path) -> dict:
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--feedback-policy",
+        choices=("optional-review-1", "routed-hypothesis-2"),
+        default="optional-review-1",
+    )
+    args = parser.parse_args()
     with TemporaryDirectory(prefix="prefit-sibling-") as temporary:
-        print(json.dumps(smoke(Path(temporary)), indent=2))
+        print(
+            json.dumps(
+                smoke(Path(temporary), feedback_policy=args.feedback_policy), indent=2
+            )
+        )
 
 
 if __name__ == "__main__":

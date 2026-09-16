@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -12,8 +13,9 @@ from autoformalism.rebuttal import prefit_numerical_sibling as sibling
 from scripts.smoke_prefit_numerical_sibling import client_for, fixture, smoke
 
 
-def test_real_feedback_to_child_fit_and_deterministic_resume(tmp_path):
-    result = smoke(tmp_path)
+@pytest.mark.parametrize("policy", ["optional-review-1", "routed-hypothesis-2"])
+def test_real_feedback_to_child_fit_and_deterministic_resume(tmp_path, policy):
+    result = smoke(tmp_path, feedback_policy=policy)
     assert result["status"] == "passed"
     assert result["real_frozen_child_fitting"] and result["resume_unchanged"]
 
@@ -87,3 +89,47 @@ def test_report_rejects_valid_child_from_different_episode(tmp_path, monkeypatch
     assert sibling_fit.inspect_child_fit(root / "child_fit")["result"] is None
     with pytest.raises(ValueError, match=r"child|decision|lineage"):
         sibling.report(root)
+
+
+def test_citation_audit_is_read_only_and_does_not_resume_old_campaign(tmp_path):
+    root = fixture(tmp_path)
+    sibling.replay(root)
+    plan, residual = sibling.verify(root)
+    calls = []
+    sibling.run_episode(
+        root, plan, residual, client_for(root, plan, calls, action="no_change")
+    )
+    original = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    audit = sibling.audit_saved_citations(root)
+    assert audit["attempts"][0]["routed-hypothesis-2"]["citation_contract_valid"]
+    assert audit["live_llm_calls"] == 0
+    assert {p: p.read_bytes() for p in original} == original
+    assert sibling.audit_saved_citations(root) == audit
+    path = root / "evidence/result.json"
+    envelope = json.loads(path.read_text())
+    envelope["result"]["packet"]["normalized_mse"] += 1
+    path.write_text(json.dumps(envelope))
+    with pytest.raises(ValueError, match="digest"):
+        sibling.audit_saved_citations(root)
+
+
+def test_policy_allocations_are_separate_and_cannot_be_renewed_by_path(tmp_path):
+    from autoformalism.schemas.residual_feedback import FeedbackSelection
+
+    selection = FeedbackSelection()
+    source = tmp_path / "parent/fit"
+    config = sibling.SiblingConfig.model_validate_json(
+        (
+            Path(__file__).resolve().parents[1]
+            / "configs/prefit_numerical_sibling_v2.json"
+        ).read_text()
+    )
+    old = config.model_copy(update={"feedback_policy": "optional-review-1"})
+    sibling._reserve(tmp_path / "v1", source, old)
+    sibling._reserve(tmp_path / "v2", source, config)
+    sibling._reserve(tmp_path / "v2", source, config)
+    assert sibling._reservation_directory(
+        source, selection, old.feedback_policy
+    ) != sibling._reservation_directory(source, selection, config.feedback_policy)
+    with pytest.raises(ValueError, match="frozen artifact differs"):
+        sibling._reserve(tmp_path / "v2-extra", source, config)
