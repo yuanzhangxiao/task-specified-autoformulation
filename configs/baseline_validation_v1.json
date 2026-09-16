@@ -1,0 +1,91 @@
+{
+  "protocol": "saved-baseline-validation-1",
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_canonical_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_perturbed_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_perturbed_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_cstr_controlled_reactor_mechanism_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy",
+      "tier": "easy"
+    }
+  ],
+  "repetitions": [
+    0,
+    1,
+    2
+  ],
+  "historical_d3_cells": [
+    {
+      "benchmark_id": "original_b1",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "perturbed_b1",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "obfuscated_original_case01",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "obfuscated_perturbed_case01",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "benchmark5",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "benchmark6",
+      "tier": "hard"
+    }
+  ],
+  "historical_d3_repetitions": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "historical_d3_source_precedence": {
+    "original_b1": [
+      "d3-native-retries-v18",
+      "d3-native-production-v1"
+    ],
+    "perturbed_b1": [
+      "d3-native-retries-v18",
+      "d3-native-production-v1"
+    ],
+    "obfuscated_original_case01": [
+      "d3-native-retries-v18"
+    ],
+    "obfuscated_perturbed_case01": [
+      "d3-native-retries-v18",
+      "d3-native-production-v1"
+    ],
+    "benchmark5": [
+      "d3-native-production-v1"
+    ],
+    "benchmark6": [
+      "d3-native-retries-v18",
+      "d3-native-production-v1"
+    ]
+  }
+}

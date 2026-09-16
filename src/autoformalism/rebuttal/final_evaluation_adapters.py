@@ -268,22 +268,25 @@ def _adapt_d3(
     context: ValidationContext,
 ) -> FrozenEvaluationSubject:
     path = _required_file(request.source_path)
-    result = BaselineResult.model_validate_json(path.read_text(encoding="utf-8"))
+    payload = _read_object(path)
+    result = (
+        BaselineDevelopmentResult.model_validate(payload)
+        if payload.get("schema_version") == "phase-b-baseline-development-result-1"
+        else BaselineResult.model_validate(payload)
+    )
     if not result.method.startswith("d3_"):
         raise ValueError(f"baseline method {result.method!r} is not D3")
     checkpoint_path = path.with_name("d3_checkpoint.json")
     checkpoint = _read_object(checkpoint_path)
     generation = int(result.selected_hyperparameters["selected_generation"])
-    record = next(
-        (
-            item
-            for item in checkpoint.get("records", [])
-            if isinstance(item, dict) and int(item.get("generation", -1)) == generation
-        ),
-        None,
-    )
-    if record is None or not isinstance(record.get("candidate"), dict):
+    records = [
+        item
+        for item in checkpoint.get("records", [])
+        if isinstance(item, dict) and int(item.get("generation", -1)) == generation
+    ]
+    if len(records) != 1 or not isinstance(records[0].get("candidate"), dict):
         raise ValueError(f"D3 checkpoint has no selected generation {generation}")
+    record = records[0]
     candidate = CandidateModel.model_validate(record["candidate"])
     parameters = _numeric_mapping(record.get("parameters", {}))
     parameterization = _parameterization(candidate, parameters, {})

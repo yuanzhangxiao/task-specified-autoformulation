@@ -5,6 +5,11 @@ scores. Remote completion counts still require inspection of the corresponding
 development artifacts. No test data or private reference was opened for this
 audit. Use this document alongside `REVIEW_DEADLINE_ANALYSIS_HANDOFF.md`.
 
+The validation-only inventory, frozen replay and CPU submission workflow is now
+implemented in `BASELINE_VALIDATION_REPLAY.md`. It also reuses historical D3 on
+its original cells, with an explicit separate cohort and original training
+checkpoint parameters. This does not establish remote artifact availability.
+
 ## Findings
 
 1. All six review cells appear in the full classical Phase-B configuration.
