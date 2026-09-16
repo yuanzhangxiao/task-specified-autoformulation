@@ -42,6 +42,7 @@ from autoformalism.schemas.public_fitting import (
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import numerical_sibling as revision
 from autoformalism.search import review_model_edits as content_edits
+from autoformalism.search import review_revision_v3
 from autoformalism.search.residual_evidence import build_residual_evidence
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.search.staged_topology_runner import run_staged_topology
@@ -190,7 +191,10 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     namespace = content_hash([plan["artifact_sha256"], task, index])
     _cache_records(directory, namespace)
     settings = io.DeadlineConfig.model_validate(plan["config"]).model_settings
-    if index and plan["protocol"] != io.CONTENT_PROTOCOL:
+    if index and plan["protocol"] not in {
+        io.CONTENT_PROTOCOL,
+        io.CONTINUATION_PROTOCOL,
+    }:
         settings = settings.model_copy(
             update={
                 "maximum_requests": 3,
@@ -201,7 +205,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     kwargs = {} if transport is None else {"transport": transport}
     client_type = (
         RevisionClient
-        if index and plan["protocol"] == io.CONTENT_PROTOCOL
+        if index and plan["protocol"] in {io.CONTENT_PROTOCOL, io.CONTINUATION_PROTOCOL}
         else BudgetedRepairClient
     )
     return client_type(
@@ -248,22 +252,24 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     if packet is None:
         return {"status": "residual_evidence_unavailable"}
     bundle = selected["bundle"]
+    improved = plan["protocol"] == io.CONTINUATION_PROTOCOL
+    edits = review_revision_v3 if improved else content_edits
     attempts, feedback = [], None
     for attempt in range(3):
         raw, record = None, None
-        user = content_edits.payload(
-            bundle, packet, selected["fit"]["parameters"], feedback
-        )
+        user = edits.payload(bundle, packet, selected["fit"]["parameters"], feedback)
         try:
             record = client.call(
-                system=content_edits.SYSTEM_PROMPT,
+                system=edits.SYSTEM_PROMPT,
                 user=json.dumps(user, sort_keys=True, separators=(",", ":")),
-                response_model=content_edits.ModelEdits,
+                response_model=review_revision_v3.ScientificRevision
+                if improved
+                else content_edits.ModelEdits,
                 step="review_model_content",
                 attempt=attempt,
             )
             raw = visible_response(record)
-            decision = content_edits.apply_edits(bundle, packet, raw)
+            decision = edits.apply_edits(bundle, packet, raw)
             certificate = None
             if decision["bundle"] is not None:
                 certificate = certificates(
@@ -291,7 +297,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                 "certificate": certificate,
                 "decision": decision,
                 "attempts": attempts,
-                "revision_policy": content_edits.POLICY,
+                "revision_policy": "scientific-content-revision-3"
+                if improved
+                else content_edits.POLICY,
             }
         except RepairBudgetExceeded as error:
             return {
@@ -319,6 +327,17 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                     {"code": d.code, "location": d.location, "message": d.message}
                     for d in error.diagnostics
                 ]
+            if improved:
+                feedback.update(
+                    review_revision_v3.feedback(
+                        bundle, packet, selected["fit"]["parameters"], raw, error
+                    )
+                )
+                if isinstance(error, ModelValidationError):
+                    feedback["details"] = [
+                        {"code": d.code, "location": d.location, "message": d.message}
+                        for d in error.diagnostics
+                    ]
             attempts.append(
                 {
                     "request_hash": record["request_hash"],
@@ -331,7 +350,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     return {
         "status": "revision_failed",
         "attempts": attempts,
-        "revision_policy": content_edits.POLICY,
+        "revision_policy": "scientific-content-revision-3"
+        if improved
+        else content_edits.POLICY,
     }
 
 
@@ -407,7 +428,7 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
                 )
             except (ValueError, KeyError, ModelValidationError) as error:
                 payload.update(status="contract_failed", error=str(error))
-    elif plan["protocol"] == io.CONTENT_PROTOCOL:
+    elif plan["protocol"] in {io.CONTENT_PROTOCOL, io.CONTINUATION_PROTOCOL}:
         payload.update(_content_revision(plan, task, parent, client))
     else:
         selected = parent["selected"]
@@ -618,8 +639,22 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
         incumbent = parent["selected"] if parent else None
         trial = None
         status = proposal["status"]
+        continuation = plan["protocol"] == io.CONTINUATION_PROTOCOL
+        fallback = (
+            continuation
+            and incumbent is not None
+            and status
+            in {
+                "revision_failed",
+                "no_change",
+                "residual_evidence_unavailable",
+            }
+        )
+        if fallback:
+            # Spend at most this visit's existing fit allocation, never an extra one.
+            status = "unchanged_refit"
         if status in {"constructed", "committed", "unchanged_refit"}:
-            bundle = proposal["bundle"]
+            bundle = incumbent["bundle"] if fallback else proposal["bundle"]
             certificate = certificates(bundle, plan["cells"][task["cell"]], task)
             request = request_for(bundle, plan, task, index)
             cell = plan["cells"][task["cell"]]
@@ -643,7 +678,8 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                     },
                     **(
                         {"allow_initialization_changes": True}
-                        if plan["protocol"] == io.CONTENT_PROTOCOL
+                        if plan["protocol"]
+                        in {io.CONTENT_PROTOCOL, io.CONTINUATION_PROTOCOL}
                         else {}
                     ),
                 )
@@ -658,7 +694,8 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                 "fit": result.model_dump(mode="json"),
                 "packet": packet,
                 "origin_task": task["task_id"],
-                "origin_round": index,
+                "origin_round": index
+                + plan.get("continuation", {}).get("source_round", 0),
                 "fit_result_sha256": public.content_sha256(
                     public._read(fit_directory / "result.json")
                 ),
@@ -677,6 +714,8 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
             "provider_budget_exhausted",
             "requirement_failed",
         }
+        if continuation:
+            closed = selected is None
         return sealed_write(
             directory / "result.json",
             {
@@ -692,6 +731,19 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                 "cost": proposal["cost"],
                 "test_data_opened": False,
                 "selected_new_trial": selected is not None and selected is trial,
+                **(
+                    {
+                        "proposal_status": proposal["status"],
+                        "fit_trigger": "incumbent_fallback"
+                        if fallback
+                        else "proposed_or_control",
+                        "citation_audit": (proposal.get("decision") or {})
+                        .get("provenance", {})
+                        .get("citation_audit"),
+                    }
+                    if continuation
+                    else {}
+                ),
             },
         )
 

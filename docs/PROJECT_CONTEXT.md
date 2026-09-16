@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/REVIEW_CONTINUATION_V3.md` describes the opt-in continuation from each
+review-v2 lineage's retained round-two model. It simplifies scientific revisions,
+audits citation warnings separately, and preserves viable incumbents after
+rejected proposals. Five additional visits use the frozen fitter and inherited
+ablations in a separate campaign; historical results remain unchanged.
+
 The bounded internal-review campaign in `docs/REVIEW_DEADLINE.md` now connects
 staged construction, the frozen C+S fitter, training-residual function feedback,
 immutable round selection, and post-freeze rollout/intervention evaluation.

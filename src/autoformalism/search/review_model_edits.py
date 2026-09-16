@@ -138,7 +138,6 @@ def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
     parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
     if content_hash(bundle["candidate"]) != packet["candidate_sha256"]:
         raise ValueError("model differs from training packet")
-    context = ValidationContext.model_validate(bundle["context"])
     aliases = parameter_aliases(parent)
     reply = ModelEdits.model_validate(
         translate_names(raw, {v: k for k, v in aliases.items()})
@@ -146,6 +145,15 @@ def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
     absent = sorted(set(reply.evidence_ids) - evidence.evidence_ids(packet))
     if absent:
         raise ValueError(f"absent training evidence IDs: {absent}")
+    return apply_checked_content(bundle, packet, reply)
+
+
+def apply_checked_content(bundle: dict, packet: dict, reply: ModelEdits) -> dict:
+    """Compile schema-validated content separately from the citation policy."""
+    parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
+    if content_hash(bundle["candidate"]) != packet["candidate_sha256"]:
+        raise ValueError("model differs from training packet")
+    context = ValidationContext.model_validate(bundle["context"])
     initial = LatentInitializationPlan.model_validate(bundle["initialization"]["plan"])
     action = RepairAction.model_validate(
         {

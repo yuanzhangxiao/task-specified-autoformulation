@@ -118,6 +118,7 @@ def main():
         "command",
         choices=(
             "prepare",
+            "prepare-continuation",
             "verify",
             "run",
             "fit-inner",
@@ -135,6 +136,9 @@ def main():
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--public-root", type=Path)
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--source-round", type=int, default=2)
+    parser.add_argument("--visits", type=int, default=5)
     parser.add_argument("--base-url")
     parser.add_argument("--wall-seconds", type=int)
     parser.add_argument(
@@ -154,7 +158,19 @@ def main():
         parser.error("--root required")
     root = root.resolve()
     command = args.command
-    if command == "prepare":
+    if command == "prepare-continuation":
+        from autoformalism.rebuttal.review_continuation import prepare
+
+        if args.source is None:
+            parser.error("prepare-continuation requires --source")
+        plan = prepare(args.source, root, args.source_round, args.visits)
+        value = {
+            "identity": plan["artifact_sha256"],
+            "tasks": len(plan["tasks"]),
+            "source_round": args.source_round,
+            "additional_visits": args.visits,
+        }
+    elif command == "prepare":
         if args.config is None or args.public_root is None:
             parser.error("prepare requires --config and --public-root")
         plan = io.freeze(args.config, args.public_root.resolve(), root)

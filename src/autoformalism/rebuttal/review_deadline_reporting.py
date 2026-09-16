@@ -59,7 +59,9 @@ def report(root: Path) -> dict:
                     "cell": task["cell"],
                     "seed": task["seed"],
                     "arm": task["arm"],
-                    "round": index,
+                    "round": index
+                    + plan.get("continuation", {}).get("source_round", 0),
+                    "phase_round": index,
                     "status": result["status"] if result else "missing",
                     "trial_train_nmse": (trial or {})
                     .get("fit", {})
@@ -98,6 +100,15 @@ def report(root: Path) -> dict:
                     ],
                     "shared_round_zero_cost": task["arm"] == "refit_only",
                     "result_sha256": result["artifact_sha256"] if result else None,
+                    "proposal_status": result.get("proposal_status")
+                    if result
+                    else None,
+                    "fit_trigger": result.get("fit_trigger") if result else None,
+                    "citation_status": (result.get("citation_audit") or {}).get(
+                        "status"
+                    )
+                    if result
+                    else None,
                 }
             )
     value = {
@@ -107,6 +118,13 @@ def report(root: Path) -> dict:
         "rows": rows,
         "test_metrics_used": False,
         "fitter_research_reopened": False,
+        "continuation": plan.get("continuation"),
+        "proposal_status_counts": dict(
+            Counter(
+                r["proposal_status"] for r in rows if r["proposal_status"] is not None
+            )
+        ),
+        "fallback_fits": sum(r["fit_trigger"] == "incumbent_fallback" for r in rows),
     }
     public._write(root / "summary.json", value)
     with (root / "rounds.csv").open("w", newline="") as stream:
@@ -141,6 +159,18 @@ def report(root: Path) -> dict:
         ),
         "| --- | ---: | --- | ---: | --- | ---: | ---: | --- |",
     ]
+    if plan.get("continuation"):
+        lines[4:4] = [
+            f"Imported round {plan['continuation']['source_round']} is an anchor, "
+            "not a new construction or fit. Costs below count this phase only.",
+            f"Proposal outcomes: {value['proposal_status_counts']}; "
+            f"incumbent fallback fits: {value['fallback_fits']}.",
+            "Citation warnings remain visible in rounds.csv; they do not certify "
+            "scientific claims or bypass equation/public-requirement checks.",
+            "Protocol changed after the anchor; this is continued development, "
+            "not one unchanged-protocol convergence experiment.",
+            "",
+        ]
     for r in rows:
         lines.append(
             "| "

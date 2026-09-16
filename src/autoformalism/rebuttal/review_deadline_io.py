@@ -28,6 +28,7 @@ from autoformalism.targets import PublicTargetContract
 
 PROTOCOL = "review-deadline-1"
 CONTENT_PROTOCOL = "review-deadline-2"
+CONTINUATION_PROTOCOL = "review-deadline-3"
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
 FILES = ("manifest.json", "proposer_prompt.txt", "train.csv", "validation.csv")
 REPO = Path(__file__).resolve().parents[3]
@@ -36,14 +37,16 @@ REPO = Path(__file__).resolve().parents[3]
 class DeadlineConfig(StrictSchema):
     """Bounded matrix; ablations change one declared component each."""
 
-    protocol: Literal["review-deadline-1", "review-deadline-2"] = PROTOCOL
+    protocol: Literal["review-deadline-1", "review-deadline-2", "review-deadline-3"] = (
+        PROTOCOL
+    )
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     model_settings: StagedModelSettings
     served_context_tokens: Literal[32768] = 32768
     public_cells: tuple[str, ...] = Field(min_length=1, max_length=8)
     seeds: tuple[int, ...] = (0, 1)
-    rounds: int = Field(default=3, ge=1, le=5)
+    rounds: int = Field(default=3, ge=1, le=6)
     no_latent_cells: tuple[str, ...] = ()
     no_spec_cells: tuple[str, ...] = ()
     limits: ModelingLimits = ModelingLimits()
@@ -120,6 +123,14 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
     )
     if protocol == CONTENT_PROTOCOL:
         paths += ("scripts/hpc/submit_review_deadline_v2_aces.sh",)
+    if protocol == CONTINUATION_PROTOCOL:
+        paths += (
+            "scripts/submit_review_continuation.py",
+            "scripts/hpc/run_review_continuation_aces.sh",
+            "scripts/hpc/submit_review_continuation_aces.sh",
+            "scripts/audit_review_continuation.py",
+            "scripts/smoke_review_continuation.py",
+        )
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
     )
@@ -128,6 +139,8 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
 def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
     """Copy only development assets; every task exists before provider work."""
     config = DeadlineConfig.model_validate_json(config_path.read_text())
+    if config.protocol == CONTINUATION_PROTOCOL:
+        raise ValueError("continuations require an explicit source checkpoint import")
     if root.resolve().is_relative_to(
         public_root.resolve()
     ) or public_root.resolve().is_relative_to(root.resolve()):
@@ -225,7 +238,7 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
 def verify(root: Path, *, execution: bool = True) -> dict:
     """Check immutable inputs, including code for executing rather than reporting."""
     plan = sealed_read(root / "plan.json")
-    if plan["protocol"] not in {PROTOCOL, CONTENT_PROTOCOL}:
+    if plan["protocol"] not in {PROTOCOL, CONTENT_PROTOCOL, CONTINUATION_PROTOCOL}:
         raise ValueError("unsupported deadline protocol")
     config = DeadlineConfig.model_validate(plan["config"])
     if config.protocol != plan["protocol"]:
@@ -248,6 +261,10 @@ def verify(root: Path, *, execution: bool = True) -> dict:
                 != digest
             ):
                 raise ValueError("frozen public content differs")
+    if plan["protocol"] == CONTINUATION_PROTOCOL:
+        from autoformalism.rebuttal.review_continuation import verify_imports
+
+        verify_imports(root, plan)
     return plan
 
 
