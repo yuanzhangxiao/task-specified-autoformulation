@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from autoformalism.baselines.models import BaselineResult
+from autoformalism.baselines.models import BaselineDevelopmentResult, BaselineResult
 from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal.baseline_postfreeze import FrozenBaselineModel
 from autoformalism.rebuttal.final_evaluation import (
@@ -233,11 +233,15 @@ def _adapt_symbolic_baseline(
     raw = path.read_text(encoding="utf-8")
     payload = _read_object(path)
     if payload.get("schema_version") == "phase-b-frozen-baseline-model-1":
-        result: BaselineResult | FrozenBaselineModel = (
+        result: BaselineDevelopmentResult | BaselineResult | FrozenBaselineModel = (
             FrozenBaselineModel.model_validate_json(raw)
         )
         if result.test_data_opened is not False:
             raise ValueError("frozen symbolic source has opened test data")
+    elif payload.get("schema_version") == "phase-b-baseline-development-result-1":
+        # Preserve the selected training equations. The historical finalization
+        # path refits SINDy on train + validation, which is a separate comparison.
+        result = BaselineDevelopmentResult.model_validate_json(raw)
     else:
         result = BaselineResult.model_validate_json(raw)
     if result.method != request.source_kind:

@@ -6,8 +6,9 @@ campaign evidence from historical experiments and records decisions that should
 guide the next pipeline revision.
 
 The campaign implementation is pinned at commit
-`a590b7a27edf145b23de6f7cbdfb4438fcaa8600`. The matched refit control was added
-at `cf6d32a`. The frozen plan hash is
+`a590b7a27edf145b23de6f7cbdfb4438fcaa8600`. Its `refit_only` arm is distinct
+from Orion's separately submitted single-parent control at `cf6d32a`; do not
+assume that control's outcome from these campaign results. The frozen plan hash is
 `995f6304bb0b0fe6e9ce03d185100b2493c7f1476a095e64a05bd0595ac27535`.
 The ACES output root is:
 
@@ -22,13 +23,16 @@ failure or a numerical value.
 
 ## Decisions supported by the campaign
 
-### Do not make repeated refitting a routine search branch
+### Use a bounded fitting budget; qualify the evidence for more fitting
 
 The `refit_only` arm shares the full arm's visit-zero model, then applies the
 same frozen fitting protocol again without changing structure. Eleven finite
 paired lineages showed negligible changes in validation NMSE. This is evidence
-that another identical fit call is not a useful default branch under the tested
-budgets and implementation.
+that another identical fit call may not be a useful default branch under the
+tested budgets and implementation. Inspect attempted-fit metrics as well as
+retained metrics: retaining the parent can conceal a worsened trial. The new
+single-parent matched control is a separate experiment whose result remains to
+be inspected.
 
 The operational policy should therefore be simple:
 
@@ -51,27 +55,35 @@ that allowed only a new function over an existing interaction's exact source
 set. The runtime consequently classified the replies as invalid rather than
 routing them to source or topology revision.
 
-The next proposer contract should permit exactly one typed scientific action:
+The proposer should describe a coherent scientific revision using model content
+and a rationale. It should not be required to classify that revision with an
+action enum. The runtime derives the actual changes from identifiers, equations,
+referenced symbols, and declared state/initialization content. Internal routing
+categories are implementation details, not another proposer-facing correctness
+test:
 
-| Action | Meaning | Runtime response |
+| Runtime-inferred change | Meaning | Runtime response |
 | --- | --- | --- |
-| `keep` | Retain the fitted model | Close the revision visit |
-| `revise_function` | Change one interaction while retaining its sources | Validate with the restricted expression grammar and refit |
-| `revise_sources` | Add, remove, or replace a source for one interaction | Return to interaction construction, regenerate its function, validate, and refit |
-| `add_pathway` | Add one scientifically justified interaction or process | Return to the bounded topology stage, complete affected functions, validate, and refit |
-| `add_state` | Add one scientifically justified persistent state and its required paths | Return to bounded topology construction and complete all affected contracts before refitting |
+| No model change | Retain the fitted model | Record a no-change visit |
+| Function change | Change an interaction while retaining its sources | Validate with the restricted expression grammar and refit |
+| Source change | Add, remove, or replace a source for an interaction | Rebuild its source contract and validate the proposed function |
+| New pathway | Add a scientifically justified interaction or process | Complete affected topology/function contracts, validate, and refit |
+| New state | Add a scientifically justified persistent state and its paths | Complete affected topology, functions, and causal initial conditions before refitting |
 
-The action schema should require a scientific rationale tied to the supplied
+The revision schema should require a scientific rationale tied to the supplied
 brief and residual evidence. Deterministic checks must still block unsafe
 expressions, undefined symbols, unavailable channels, target leakage, and
 incomplete equations. A well-formed request for a new source or pathway should
 be routed to the appropriate earlier stage rather than forced into a
 function-only reply and rejected. This retains proposer flexibility while
-keeping each visit bounded and auditable.
+keeping each visit bounded and auditable. One coherent scientific revision can
+require several coordinated equation edits. Do not equate one revision with
+one changed equation. The runtime may infer symbol dependencies, but must not
+invent scientific dynamics or silently change the proposed signs.
 
 ### The 98,304 limit is an experiment limit, not a GPT-OSS limit
 
-The served model has a 32,768-token context and the campaign requests at most
+This campaign configures a 32,768-token serving context and requests at most
 8,192 output tokens. Later visits override the cumulative client budget to
 98,304, which was chosen as three times 32,768 for three allowed attempts. It is
 imposed in `review_deadline_pipeline.py`; it is not a hard GPT-OSS output limit.
@@ -91,10 +103,35 @@ attempts. The observed `provider_budget_exhausted` rows must be described as a
 campaign budget/accounting limitation, not evidence that GPT-OSS exhausted its
 context or could not repair the model.
 
-For future runs, use one unit throughout. Prefer provider/tokenizer prompt-token
-counts plus the output allowance. Preflight the largest request and reject a
-configuration whose cumulative budget cannot fund the declared attempts. Do not
-retroactively change the pinned campaign.
+For the corrected revision visits, remove the additional cumulative 98,304 gate.
+Retain at most three provider requests, the per-request context and output
+limits, timeouts, the visit wall budget, and actual usage accounting. A request
+must fit its serving context; removing the cumulative gate does not expand
+that context. Resume must count already consumed requests. If a cumulative
+token cap is later needed, use token units consistently. Do not retroactively
+change the pinned campaign or silently remove construction-stage budgets.
+
+## Corrected rerun policy
+
+Keep v1 as a protocol diagnostic and run v2 in a new frozen directory. Its
+later-visit rejection rates and learning curves are not the primary evidence
+for the corrected system. Earlier construction, finite fitting, and controlled
+demonstration results remain useful with their original protocol labels.
+
+Prefer replaying all unchanged round-zero artifacts into v2 only after exact
+input, prompt, model, fitter, parameter, and source provenance checks. Include
+failed constructions as well as successful ones; never select only promising
+parents. If construction or its budget changes, use a fresh full matrix.
+
+Start with a small contract smoke that exercises new sources, coupled edits,
+new states and causal initials, and all three repair attempts. Then run the same
+six cells and ablations with two revision visits. Use one corrected protocol
+across cells rather than multiple adaptive protocol changes before the deadline.
+Freeze any incomplete planned rows explicitly at the cutoff.
+
+The old job elapsed times underestimate a successful rerun: closed lineages and
+rejected proposals often do not call the fitter. Account for new accepted
+models consuming their full fit allowance and for GPU queue/startup time.
 
 ## Current campaign snapshot
 
@@ -181,6 +218,12 @@ The common final-evaluation adapter is documented in
 `docs/PHASE_B_FINAL_EVALUATION.md`. Use it when a matched comparison is needed;
 do not copy values from experiments with different prediction semantics into a
 single unqualified table.
+
+See `docs/REVIEW_BASELINE_COMPATIBILITY.md` for the code-level audit. In
+particular, the old classical predictive reports use observed-state resets,
+and the historical SINDy finalizer additionally refits on train plus validation.
+The common adapter now accepts original train-only development selections,
+preserving their exact equations without applying that extra refit.
 
 ## Files for table and figure generation
 
@@ -273,8 +316,8 @@ artifacts/rebuttal/interventions/phase_a3_synthesis_v1/paired_comparisons.csv
 - Another identical refit did not materially improve the finite paired models
   in this campaign.
 - Function-only repair is too narrow for residual evidence that points to a
-  missing source, pathway, or state; typed routing should preserve those
-  scientific proposals.
+  missing source, pathway, or state; runtime-inferred routing should preserve
+  those scientific proposals without proposer action labels.
 - The current revision-attempt failure rate is confounded by an imposed and
   inconsistently accounted cumulative budget.
 - The controlled example demonstrates why public scientific requirements can
