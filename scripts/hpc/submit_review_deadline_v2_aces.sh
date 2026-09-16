@@ -60,12 +60,73 @@ if [[ "$round" != 0 && ! -f "$root/submission-round-$((round-1)).json" ]]; then
   echo 'Previous round submission is incomplete; inspect its recorded job IDs.' >&2
   exit 2
 fi
+export AF_COMMIT="$(git -C "$repo" rev-parse HEAD)"
+prerequisites='null'
+if [[ "$round" != 0 ]]; then
+  # Completed jobs can disappear from slurmctld while remaining in accounting.
+  # Check durable artifacts and accounting BEFORE recording submission intent.
+  prerequisites="$("$python" - "$root" "$round" "$AF_COMMIT" <<'PY'
+import json, subprocess, sys
+from pathlib import Path
+from autoformalism.rebuttal.prefit_replay import sealed_read
+
+root, index, commit = Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+try:
+    plan = json.loads((root / 'plan.json').read_text())
+    manifests = {
+        r: json.loads((root / f'submission-round-{r}.json').read_text())
+        for r in {0, index - 1}
+    }
+    for r, manifest in manifests.items():
+        if (manifest.get('commit') != commit
+            or manifest.get('protocol') != 'review-deadline-2'
+            or manifest.get('submitted_through_round') != r
+            or manifest.get('round_submission_complete') is not True):
+            raise ValueError('prior submission manifest identity differs')
+    expected = {}
+    for key, source_round in [('prepare-0', 0), (f'finish-{index-1}', index-1)]:
+        job_id = (root / 'submission-intent' / f'{key}.id').read_text().strip()
+        if not job_id.isdecimal() or manifests[source_round]['jobs'].get(key) != job_id:
+            raise ValueError(f'prior scheduler ID differs: {key}')
+        if job_id in expected:
+            raise ValueError('prerequisite job IDs must be distinct')
+        expected[job_id] = f'review-v2-{key}'
+    response = subprocess.run(
+        ['sacct', '--noheader', '--allocations', '--parsable2',
+         '--starttime=1970-01-01', '--jobs=' + ','.join(expected),
+         '--format=JobIDRaw,JobName%80,State%32,ExitCode'],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    records = []
+    for job_id, name in expected.items():
+        matches = [line.split('|') for line in response.stdout.splitlines()
+                   if line.split('|')[0].strip() == job_id]
+        if len(matches) != 1 or [f.strip() for f in matches[0]] != [
+            job_id, name, 'COMPLETED', '0:0'
+        ]:
+            raise ValueError(f'{name} ({job_id}) lacks confirmed COMPLETED/0:0 accounting')
+        records.append({'job_id': job_id, 'name': name, 'state': 'COMPLETED', 'exit_code': '0:0'})
+    artifacts = {}
+    for task in plan['tasks']:
+        path = root / 'results' / task['task_id'] / f'round_{index-1:02d}' / 'result.json'
+        result = sealed_read(path)
+        if result.get('round') != index-1 or result.get('task') != task or not result.get('status'):
+            raise ValueError(f'previous round result identity differs: {path}')
+        artifacts[task['task_id']] = result['artifact_sha256']
+    print(json.dumps({'previous_round': index-1, 'accounting': records, 'results': artifacts}))
+except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+    print(f'Round prerequisites not confirmed: {error}. No jobs submitted; '
+          'inspect prerequisites/accounting before retrying.', file=sys.stderr)
+    sys.exit(2)
+PY
+)" || exit 2
+fi
 mkdir "$root/submission-intent/round-$round" || {
   echo "Round $round submission intent exists. Inspect recorded IDs and squeue; do not duplicate uncertain jobs." >&2
   exit 2
 }
+printf '%s\n' "$prerequisites" > "$root/submission-intent/round-$round/prerequisites.json"
 export AF_PYTHON="$python" AF_VLLM_IMAGE="$image" AF_HF_HOME="$hf"
-export AF_COMMIT="$(git -C "$repo" rev-parse HEAD)"
 export AF_COMPUTE_CACHE_ROOT="${AF_COMPUTE_CACHE_ROOT:-/scratch/user/u.yx126462/autoformalism-runtime-cache/review}"
 export AF_IPC_TMP_ROOT="${AF_IPC_TMP_ROOT:-/scratch/user/u.yx126462/af-ipc}"
 worker="$repo/scripts/hpc/run_review_deadline_aces.sh"
@@ -79,17 +140,14 @@ submit() {
   printf '%s\n' "$id" > "$root/submission-intent/$key.id"
   printf '%s\n' "$id"
 }
+gpu_options=(--partition=gpu --gres=gpu:h100:1 --cpus-per-task=8 --mem=64G --time=06:30:00 --signal=B:TERM@300)
 if [[ "$round" == 0 ]]; then
   prepare="$(submit prepare 0 --partition=cpu --cpus-per-task=1 --mem=16G --time=01:00:00)"
   submit demo 0 --dependency="afterok:$prepare" --partition=cpu --cpus-per-task=1 --mem=16G --time=00:45:00 > /dev/null
-  dependency="afterok:$prepare"
-else
-  prepare="$(cat "$root/submission-intent/prepare-0.id")"
-  prior="$(cat "$root/submission-intent/finish-$((round-1)).id")"
-  dependency="afterok:$prepare,afterany:$prior"
+  gpu_options+=(--dependency="afterok:$prepare")
 fi
 indices="$(jq -r --argjson r "$round" '[.tasks[] | select($r > 0 or .arm != "refit_only") | .index] | join(",")' "$root/plan.json")"
-gpu="$(submit propose "$round" --dependency="$dependency" --partition=gpu --gres=gpu:h100:1 --cpus-per-task=8 --mem=64G --time=06:30:00 --signal=B:TERM@300)"
+gpu="$(submit propose "$round" "${gpu_options[@]}")"
 cpu="$(submit fit "$round" --dependency="afterany:$gpu" --partition=cpu --array="${indices}%16" --cpus-per-task=1 --mem=16G --time=00:40:00 --signal=B:TERM@120)"
 finish="$(submit finish "$round" --dependency="afterany:$cpu" --partition=cpu --cpus-per-task=1 --mem=4G --time=00:15:00)"
 if (( round + 1 < rounds )); then

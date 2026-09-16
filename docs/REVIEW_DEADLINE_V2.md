@@ -54,6 +54,11 @@ data equally well. It is separate from the six-cell search results.
 
 ## Fresh run and provenance
 
+For the interrupted September 16 campaign at `7eff174`, use
+[`REVIEW_DEADLINE_V2_RECOVERY.md`](REVIEW_DEADLINE_V2_RECOVERY.md). That procedure
+preserves visit zero and the original scientific checkout while repairing only
+the scheduler handoff.
+
 Use a fresh complete matrix in `review-deadline-v2`, including fresh visit-zero
 construction. Imported v1 checkpoints would require a separate cross-version
 provenance migration because the execution identity binds source and runtime.
