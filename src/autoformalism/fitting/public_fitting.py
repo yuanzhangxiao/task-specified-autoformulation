@@ -308,8 +308,12 @@ def _load(directory):
 def _capability(request, model) -> str | None:
     if request.profile == "general-rollout-v1":
         return None
-    if tuple(request.context.targets) != ("v01",):
+    if request.profile == "collocation-feasible-v1" and tuple(
+        request.context.targets
+    ) != ("v01",):
         return "collocation-feasible-v1 currently requires the single target v01"
+    if len(request.context.targets) != 1:
+        return "collocation-single-target-v2 requires exactly one public target"
     try:
         from autoformalism.fitting.sensitivity_probe import (
             SensitivityContractError,

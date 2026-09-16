@@ -13,7 +13,9 @@ from autoformalism.schemas.base import FiniteFloat, Identifier, StrictSchema
 from autoformalism.schemas.candidate import CandidateModel
 
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-FitProfile = Literal["general-rollout-v1", "collocation-feasible-v1"]
+FitProfile = Literal[
+    "general-rollout-v1", "collocation-feasible-v1", "collocation-single-target-v2"
+]
 
 
 class PublicFitSource(StrictSchema):

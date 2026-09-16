@@ -476,7 +476,8 @@ def latent_start(
             if node_start == "rollout_or_observed":
                 check_node_guess(system, data.time[0], guess[0], start, inputs[0])
             predicted = system.observe(data.time[0], current, theta, inputs[0])[0]
-            objective += ((predicted - data.targets["v01"][0]) / scale) ** 2
+            residual = (predicted - data.targets[system.channels[0]][0]) / scale
+            objective += residual**2
             for i in range(len(data.time) - 1):
                 if monotonic() >= deadline:
                     raise TimeoutError("initializer construction deadline reached")
@@ -529,7 +530,9 @@ def latent_start(
                         opti.subject_to(end == current + dt * (3 * first + last) / 4)
                     current = end
                 predicted = system.observe(t1, current, theta, u1)[0]
-                objective += ((predicted - data.targets["v01"][i + 1]) / scale) ** 2
+                objective += (
+                    (predicted - data.targets[system.channels[0]][i + 1]) / scale
+                ) ** 2
         opti.minimize(objective)
         events = []
         progress = (

@@ -425,10 +425,13 @@ class SymbolicOracle(RolloutOracle):
         *,
         sensitivities: bool,
     ):
+        if len(system.channels) != 1:
+            raise ValueError("probe requires exactly one target")
+        self.target = system.channels[0]
         super().__init__(
-            system.model, training, {"v01": scale}, settings, directory, deadline
+            system.model, training, {self.target: scale}, settings, directory, deadline
         )
-        if self.names != system.names or system.channels != ("v01",):
+        if self.names != system.names:
             raise ValueError(
                 "probe requires the production parameter order and one target"
             )
@@ -461,7 +464,7 @@ class SymbolicOracle(RolloutOracle):
                     sensitivities=self.with_sensitivities,
                 )
                 residuals.append(
-                    (predictions[:, 0] - trajectory.targets["v01"]) / self.scale
+                    (predictions[:, 0] - trajectory.targets[self.target]) / self.scale
                 )
                 if jac is not None:
                     matrices.append(jac[:, 0, :] / self.scale)

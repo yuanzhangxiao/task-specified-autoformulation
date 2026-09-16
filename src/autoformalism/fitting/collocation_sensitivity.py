@@ -120,10 +120,11 @@ def fit_collocation_forward_sensitivity(
         raise SensitivityContractError(
             "collocation-sensitivity scoring requires validation data"
         )
-    if tuple(model.validated.context.targets) != ("v01",):
+    if len(model.validated.context.targets) != 1:
         raise SensitivityContractError(
-            "current transfer adapter requires the single target v01"
+            "current transfer adapter requires exactly one target"
         )
+    target = model.validated.context.targets[0]
     initialization_audit = None
     if initialization_plan is not None:
         model, guesses, initialization_audit = apply_initialization_plan(
@@ -136,7 +137,7 @@ def fit_collocation_forward_sensitivity(
         }
     system = SymbolicODE(model, allow_piecewise=config.piecewise_policy == "allow")
     settings = config.fit_config()
-    scale = TrainingScaler().fit(training).scales["target:v01"].standard_deviation
+    scale = TrainingScaler().fit(training).scales[f"target:{target}"].standard_deviation
     if not np.isfinite(scale) or scale <= 0.0:
         raise SensitivityContractError(
             "training target scale must be positive and finite"
@@ -145,7 +146,7 @@ def fit_collocation_forward_sensitivity(
     layout = RolloutOracle(
         model,
         training,
-        {"v01": scale},
+        {target: scale},
         settings,
         directory / "layout",
         None,
@@ -375,7 +376,7 @@ def fit_collocation_forward_sensitivity(
         training,
         global_parameters=parameters,
         global_initial_conditions={},
-        target_scales={"v01": scale},
+        target_scales={target: scale},
         config=settings,
         fit_trajectory_initial_conditions=False,
     )
@@ -400,7 +401,7 @@ def fit_collocation_forward_sensitivity(
         validation,
         global_parameters=parameters,
         global_initial_conditions={},
-        target_scales={"v01": scale},
+        target_scales={target: scale},
         config=settings,
         fit_trajectory_initial_conditions=False,
     )

@@ -19,6 +19,14 @@ improvement and local stopping behavior. This additional diagnostic allowance
 does not determine the final pipeline continuation policy; that limit remains
 undecided. Historical budgets and completed experiments remain immutable.
 
+The subsequent [internal-review integration](REVIEW_DEADLINE.md) adds the explicit
+`collocation-single-target-v2` adapter profile. It removes the spelling-only v01
+restriction for single-output public cells while preserving their actual channel
+names, numerical settings, physical initial conditions and budgets. The historical
+`collocation-feasible-v1` profile still requires v01. This is not multi-output
+support or a new optimizer comparison; channel-renaming invariance and real named
+output recovery are verified locally.
+
 ## What is frozen
 
 - Keep existing experiment roots pinned to their original code, inputs, starts,

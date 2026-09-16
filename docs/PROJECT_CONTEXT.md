@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+The bounded internal-review campaign in `docs/REVIEW_DEADLINE.md` now connects
+staged construction, the frozen C+S fitter, training-residual function feedback,
+immutable round selection, and post-freeze rollout/intervention evaluation.
+Its six cells cover three families, including the complete Dalla Man description
+by dynamics contrast, with explicit information, latent-state and iteration
+controls. `collocation-single-target-v2` supports any single public target name
+with unchanged numerical settings; the historical profile keeps its v01 guard.
+No multi-output capability or new fitting-method research is implied.
+
+
 The optional post-fit sibling pilot in `docs/PREFIT_NUMERICAL_SIBLING.md` exports
 training residual evidence at a completed continuation and its preceding fit.
 It describes mismatches at retained parameters without treating unfinished
