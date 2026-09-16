@@ -118,10 +118,12 @@ later-visit rejection rates and learning curves are not the primary evidence
 for the corrected system. Earlier construction, finite fitting, and controlled
 demonstration results remain useful with their original protocol labels.
 
-Prefer replaying all unchanged round-zero artifacts into v2 only after exact
-input, prompt, model, fitter, parameter, and source provenance checks. Include
-failed constructions as well as successful ones; never select only promising
-parents. If construction or its budget changes, use a fresh full matrix.
+The implemented v2 campaign uses a fresh complete matrix. Execution identities
+bind the source and runtime, so importing v1 checkpoints would require a
+separate provenance migration. Initial construction and its budgets remain
+unchanged; its samples are regenerated. This is a separate campaign, not an
+exactly paired later-visit comparison. See `docs/REVIEW_DEADLINE_V2.md` for the
+run procedure and corrected output root.
 
 Start with a small contract smoke that exercises new sources, coupled edits,
 new states and causal initials, and all three repair attempts. Then run the same

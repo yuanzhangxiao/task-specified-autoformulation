@@ -17,6 +17,7 @@ from autoformalism.fitting import public_fitting as public
 from autoformalism.fitting import sibling_fit
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.simulation import simulate_trajectory
+from autoformalism.llm.review_revision import RevisionClient
 from autoformalism.llm.staged_topology import DeferredCall, visible_response
 from autoformalism.rebuttal import review_deadline_io as io
 from autoformalism.rebuttal.mechanisms import (
@@ -30,6 +31,9 @@ from autoformalism.rebuttal.repair_comparison import (
     BudgetedRepairClient,
     RepairBudgetExceeded,
 )
+from autoformalism.rebuttal.staged_multiround_feedback_campaign import (
+    RevisionContractError,
+)
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.public_fitting import (
     PublicFitRequest,
@@ -37,6 +41,7 @@ from autoformalism.schemas.public_fitting import (
 )
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import numerical_sibling as revision
+from autoformalism.search import review_model_edits as content_edits
 from autoformalism.search.residual_evidence import build_residual_evidence
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.search.staged_topology_runner import run_staged_topology
@@ -185,7 +190,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     namespace = content_hash([plan["artifact_sha256"], task, index])
     _cache_records(directory, namespace)
     settings = io.DeadlineConfig.model_validate(plan["config"]).model_settings
-    if index:
+    if index and plan["protocol"] != io.CONTENT_PROTOCOL:
         settings = settings.model_copy(
             update={
                 "maximum_requests": 3,
@@ -194,7 +199,12 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
             }
         )
     kwargs = {} if transport is None else {"transport": transport}
-    return BudgetedRepairClient(
+    client_type = (
+        RevisionClient
+        if index and plan["protocol"] == io.CONTENT_PROTOCOL
+        else BudgetedRepairClient
+    )
+    return client_type(
         settings=settings,
         seed=task["seed"],
         namespace=namespace,
@@ -203,6 +213,126 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
         can_start=can_start,
         **kwargs,
     )
+
+
+def _certificate_feedback(certificate: dict, task: dict) -> dict:
+    """Expose failed public predicates without leaking withheld ablation criteria."""
+    targets = [
+        p
+        for p in certificate["targets"]["predicates"]
+        if p["status"] == "failed"
+        and (
+            task["arm"] != "no_spec"
+            or p["predicate"]
+            in {"explicit_observation_mapping", "generated_model_path"}
+        )
+    ]
+    result = {"failed_target_predicates": targets}
+    if task["arm"] != "no_spec":
+        result["failed_mechanisms"] = [
+            p
+            for p in certificate["mechanisms"]["mechanism_results"]
+            if p["status"] == "failed"
+        ]
+    if not certificate["ablation_constraint_pass"]:
+        result["no_latent_forbidden_states"] = certificate[
+            "differential_states_outside_targets"
+        ]
+    return result
+
+
+def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
+    """Three complete content patches; infer routes and recheck each closure."""
+    selected = parent["selected"]
+    packet = selected.get("packet")
+    if packet is None:
+        return {"status": "residual_evidence_unavailable"}
+    bundle = selected["bundle"]
+    attempts, feedback = [], None
+    for attempt in range(3):
+        raw, record = None, None
+        user = content_edits.payload(
+            bundle, packet, selected["fit"]["parameters"], feedback
+        )
+        try:
+            record = client.call(
+                system=content_edits.SYSTEM_PROMPT,
+                user=json.dumps(user, sort_keys=True, separators=(",", ":")),
+                response_model=content_edits.ModelEdits,
+                step="review_model_content",
+                attempt=attempt,
+            )
+            raw = visible_response(record)
+            decision = content_edits.apply_edits(bundle, packet, raw)
+            certificate = None
+            if decision["bundle"] is not None:
+                certificate = certificates(
+                    decision["bundle"], plan["cells"][task["cell"]], task
+                )
+                if not certificate["eligible_for_development_selection"]:
+                    raise RevisionContractError(
+                        "PUBLIC_MODEL_REQUIREMENTS",
+                        "Reconstructed model fails public target/graph or ablation "
+                        "requirements. Preserve the active brief's requirements and "
+                        "supply complete target-generating definitions.",
+                        **_certificate_feedback(certificate, task),
+                    )
+            attempts.append(
+                {
+                    "request_hash": record["request_hash"],
+                    "record_sha256": content_hash(record),
+                    "accepted": True,
+                    "raw": raw,
+                }
+            )
+            return {
+                "status": decision["outcome"],
+                "bundle": decision["bundle"],
+                "certificate": certificate,
+                "decision": decision,
+                "attempts": attempts,
+                "revision_policy": content_edits.POLICY,
+            }
+        except RepairBudgetExceeded as error:
+            return {
+                "status": "revision_failed",
+                "error": str(error),
+                "attempts": attempts,
+            }
+        except (ValueError, KeyError, TypeError, ModelValidationError) as error:
+            if record is None:
+                raise
+            feedback = {
+                "code": getattr(error, "code", "MODEL_CONTENT_CONTRACT"),
+                "stage": "model_construction"
+                if raw is not None
+                else "provider_delivery",
+                "message": str(error)[:6000],
+                "rejected_patch": raw,
+                "incumbent_unchanged": True,
+                "attempts_remaining": 2 - attempt,
+            }
+            if isinstance(error, RevisionContractError):
+                feedback["details"] = error.details
+            elif isinstance(error, ModelValidationError):
+                feedback["details"] = [
+                    {"code": d.code, "location": d.location, "message": d.message}
+                    for d in error.diagnostics
+                ]
+            attempts.append(
+                {
+                    "request_hash": record["request_hash"],
+                    "record_sha256": content_hash(record),
+                    "accepted": False,
+                    "feedback": feedback,
+                    "raw": raw,
+                }
+            )
+    return {
+        "status": "revision_failed",
+        "attempts": attempts,
+        "revision_policy": content_edits.POLICY,
+    }
 
 
 def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict | None:
@@ -277,6 +407,8 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
                 )
             except (ValueError, KeyError, ModelValidationError) as error:
                 payload.update(status="contract_failed", error=str(error))
+    elif plan["protocol"] == io.CONTENT_PROTOCOL:
+        payload.update(_content_revision(plan, task, parent, client))
     else:
         selected = parent["selected"]
         packet = selected.get("packet")
@@ -509,6 +641,11 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                         "campaign": plan["artifact_sha256"],
                         "proposal": proposal["artifact_sha256"],
                     },
+                    **(
+                        {"allow_initialization_changes": True}
+                        if plan["protocol"] == io.CONTENT_PROTOCOL
+                        else {}
+                    ),
                 )
                 result = sibling_fit.execute_child_fit(fit_directory)
             packet = None

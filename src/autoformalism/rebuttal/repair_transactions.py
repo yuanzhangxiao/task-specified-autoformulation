@@ -298,6 +298,8 @@ def commit_action(
     context: ValidationContext,
     nonlinear_targets: tuple[str, ...] = (),
     memory_targets: tuple[str, ...] = (),
+    *,
+    require_input_path: bool = True,
 ) -> tuple[CandidateModel, LatentInitializationPlan, dict]:
     """Validate the whole dependency closure before any canonical mutation."""
     existing = expressions(parent)
@@ -459,7 +461,7 @@ def commit_action(
     )
 
     reach = _target_reachability(revised, context)
-    if any(
+    if require_input_path and any(
         not set(context.external_inputs).intersection(sources)
         for sources in reach.values()
     ):

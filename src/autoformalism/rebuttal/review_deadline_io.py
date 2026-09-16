@@ -27,6 +27,7 @@ from autoformalism.staged_topology import build_scientific_brief, content_hash
 from autoformalism.targets import PublicTargetContract
 
 PROTOCOL = "review-deadline-1"
+CONTENT_PROTOCOL = "review-deadline-2"
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
 FILES = ("manifest.json", "proposer_prompt.txt", "train.csv", "validation.csv")
 REPO = Path(__file__).resolve().parents[3]
@@ -35,7 +36,7 @@ REPO = Path(__file__).resolve().parents[3]
 class DeadlineConfig(StrictSchema):
     """Bounded matrix; ablations change one declared component each."""
 
-    protocol: Literal["review-deadline-1"] = PROTOCOL
+    protocol: Literal["review-deadline-1", "review-deadline-2"] = PROTOCOL
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     model_settings: StagedModelSettings
@@ -110,13 +111,15 @@ def tasks(config: DeadlineConfig) -> list[dict]:
     return result
 
 
-def launcher_hash() -> str:
+def launcher_hash(protocol: str = PROTOCOL) -> str:
     paths = (
         "scripts/review_deadline.py",
         "scripts/hpc/run_review_deadline_aces.sh",
         "scripts/hpc/submit_review_deadline_aces.sh",
         "scripts/hpc/run_staged_topology_server.sh",
     )
+    if protocol == CONTENT_PROTOCOL:
+        paths += ("scripts/hpc/submit_review_deadline_v2_aces.sh",)
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
     )
@@ -183,13 +186,25 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
         return sealed_write(
             root / "plan.json",
             {
-                "protocol": PROTOCOL,
+                "protocol": config.protocol,
                 "config": config.model_dump(mode="json"),
                 "cells": cells,
                 "tasks": tasks(config),
                 "source_sha256": public._source_identity(),
                 "runtime": public._runtime(),
-                "launcher_sha256": launcher_hash(),
+                "launcher_sha256": launcher_hash(config.protocol),
+                **(
+                    {
+                        "revision_call_policy": {
+                            "physical_attempts": 3,
+                            "cumulative_token_limit": None,
+                            "schema": "model-content-inferred-routing-1",
+                            "round_zero_reused": False,
+                        }
+                    }
+                    if config.protocol == CONTENT_PROTOCOL
+                    else {}
+                ),
                 "test_data_opened": False,
                 "private_reference_opened": False,
                 "selection": (
@@ -210,15 +225,17 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
 def verify(root: Path, *, execution: bool = True) -> dict:
     """Check immutable inputs, including code for executing rather than reporting."""
     plan = sealed_read(root / "plan.json")
-    if plan["protocol"] != PROTOCOL:
+    if plan["protocol"] not in {PROTOCOL, CONTENT_PROTOCOL}:
         raise ValueError("unsupported deadline protocol")
     config = DeadlineConfig.model_validate(plan["config"])
+    if config.protocol != plan["protocol"]:
+        raise ValueError("plan and config protocol differ")
     if plan["tasks"] != tasks(config):
         raise ValueError("task matrix differs")
     if execution and (
         plan["source_sha256"] != public._source_identity()
         or plan["runtime"] != public._runtime()
-        or plan["launcher_sha256"] != launcher_hash()
+        or plan["launcher_sha256"] != launcher_hash(plan["protocol"])
     ):
         raise ValueError("frozen execution runtime differs")
     for cell, value in plan["cells"].items():

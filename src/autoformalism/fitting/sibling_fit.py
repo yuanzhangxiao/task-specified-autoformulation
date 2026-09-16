@@ -17,6 +17,7 @@ from autoformalism.schemas.public_fitting import (
 )
 
 POLICY = "identical-parameter-declaration-warm-start-1"
+EDIT_POLICY = "model-content-boundary-warm-start-1"
 
 
 def compatible_seed(
@@ -24,14 +25,19 @@ def compatible_seed(
     child: PublicFitRequest,
     parameters: dict[str, float],
     training: PublicSplit,
+    *,
+    allow_initialization_changes: bool = False,
 ) -> dict:
     """Retain values only for identical declarations, including latent boundaries."""
-    if parent.initialization_plan != child.initialization_plan:
+    if (
+        parent.initialization_plan != child.initialization_plan
+        and not allow_initialization_changes
+    ):
         raise ValueError("child must preserve the scientific initialization plan")
     if parent.context != child.context or parent.profile != child.profile:
         raise ValueError("child must preserve public context and numerical profile")
     old, _, _ = public._lower(parent)
-    new, guesses, _ = public._lower(child)
+    new, guesses, new_initials = public._lower(child)
     old_specs = {p.name: p for p in old.validated.candidate.parameters}
     new_specs = {p.name: p for p in new.validated.candidate.parameters}
     if set(parameters) != set(old_specs) or any(
@@ -47,13 +53,27 @@ def compatible_seed(
             <= variable.upper
         ):
             raise ValueError("parent parameter outside its declared domain")
-    retained = sorted(n for n, p in new_specs.items() if old_specs.get(n) == p)
+    changed_boundaries = {
+        state
+        for state, rule in child.initialization_plan.rules.items()
+        if parent.initialization_plan.rules.get(state) != rule
+    }
+    reset_initials = {
+        name
+        for state in changed_boundaries
+        for name in new_initials["bindings"][state]["parameters"]
+    }
+    retained = sorted(
+        n
+        for n, p in new_specs.items()
+        if old_specs.get(n) == p and n not in reset_initials
+    )
     full = {**_role_start(new.validated.candidate, train), **guesses}
     full.update({name: parameters[name] for name in retained})
     init_names = set(new.parameter_names) - {
         p.name for p in child.base_candidate.parameters
     }
-    if not init_names <= set(retained):
+    if not init_names <= set(retained) and not allow_initialization_changes:
         raise ValueError(
             "all initializer parameter declarations must survive unchanged"
         )
@@ -67,11 +87,11 @@ def compatible_seed(
         ):
             raise ValueError("child warm start outside its declared domain")
     return {
-        "policy": POLICY,
+        "policy": EDIT_POLICY if allow_initialization_changes else POLICY,
         "parameters": full,
         "parameter_sha256": public.content_sha256(full),
         "retained_parameters": retained,
-        "retained_initializer_parameters": sorted(init_names),
+        "retained_initializer_parameters": sorted(init_names & set(retained)),
         "fresh_parameters": sorted(set(new_specs) - set(retained)),
         "removed_parameters": sorted(set(old_specs) - set(new_specs)),
         "changed_declarations": sorted(
@@ -79,19 +99,44 @@ def compatible_seed(
             for n in old_specs.keys() & new_specs.keys()
             if old_specs[n] != new_specs[n]
         ),
-        "initialization_plan_unchanged": True,
+        "initialization_plan_unchanged": (
+            parent.initialization_plan == child.initialization_plan
+        ),
+        **(
+            {
+                "changed_boundaries": sorted(changed_boundaries),
+                "reset_initializer_parameters": sorted(reset_initials & set(old_specs)),
+            }
+            if allow_initialization_changes
+            else {}
+        ),
     }
 
 
-def _freeze(parent, child, parameters, training, validation, lineage):
+def _freeze(
+    parent,
+    child,
+    parameters,
+    training,
+    validation,
+    lineage,
+    allow_initialization_changes=False,
+):
     body = {
         "protocol": "numerical-sibling-fit-1",
         "public_fit": public._bundle(child, training, validation),
         "parent_request": public._jsonable(parent),
         "parent_parameters": parameters,
-        "seed": compatible_seed(parent, child, parameters, training),
+        "seed": compatible_seed(
+            parent,
+            child,
+            parameters,
+            training,
+            allow_initialization_changes=allow_initialization_changes,
+        ),
         "lineage": lineage,
         "runtime": public._runtime(),
+        **({"warm_start_policy": EDIT_POLICY} if allow_initialization_changes else {}),
     }
     return {**body, "identity": public.content_sha256(body)}
 
@@ -105,9 +150,18 @@ def prepare_child_fit(
     directory: Path,
     *,
     lineage: dict,
+    allow_initialization_changes: bool = False,
 ) -> dict:
     """Bind the full vector separately from the unchanged scientific request schema."""
-    frozen = _freeze(parent, child, parameters, training, validation, lineage)
+    frozen = _freeze(
+        parent,
+        child,
+        parameters,
+        training,
+        validation,
+        lineage,
+        allow_initialization_changes=allow_initialization_changes,
+    )
     with public._lock(directory):
         path = directory / "freeze.json"
         if path.exists():
@@ -128,7 +182,13 @@ def _load(directory):
     train = PublicSplit.model_validate(bundle["training"])
     val = PublicSplit.model_validate(bundle["validation"])
     expected = _freeze(
-        parent, child, frozen["parent_parameters"], train, val, frozen["lineage"]
+        parent,
+        child,
+        frozen["parent_parameters"],
+        train,
+        val,
+        frozen["lineage"],
+        allow_initialization_changes=frozen.get("warm_start_policy") == EDIT_POLICY,
     )
     if expected != frozen:
         raise ValueError("child fit source, seed, data or profile differs")

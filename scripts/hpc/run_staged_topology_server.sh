@@ -22,7 +22,7 @@ else
 fi
 readonly protocol platform
 case "${protocol}" in
-  review-deadline-1) worker_script=review_deadline.py ;;
+  review-deadline-1|review-deadline-2) worker_script=review_deadline.py ;;
   prefit-numerical-sibling-1) worker_script=prefit_numerical_sibling.py ;;
   prefit-requirement-feedback-1) worker_script=prefit_requirement_campaign.py ;;
   prefit-matched-feedback-1) worker_script=prefit_feedback_campaign.py ;;
