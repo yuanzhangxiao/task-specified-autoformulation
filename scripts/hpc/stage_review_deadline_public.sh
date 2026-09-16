@@ -17,14 +17,30 @@ for cell in config['public_cells']:
         print('phase_b_v1/'+cell+'/'+name)
 PY
 mkdir "$local_stage/public"
+# Check ACES credentials before downloading the release from Delta.
+ssh aces true
 rsync -a --files-from="$local_stage/files.txt" "delta:$source_root/" "$local_stage/public/"
+"$python" - "$local_stage" > "$local_stage/sha256.txt" <<'PY'
+import hashlib, sys
+from pathlib import Path
+stage = Path(sys.argv[1])
+for name in (stage / 'files.txt').read_text().splitlines():
+    path = stage / 'public' / name
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit('Missing or linked development file: ' + name)
+    print(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + name)
+PY
 ssh aces "mkdir -p '$destination'"
 # Existing differing files are not silently replaced. A new release directory is required.
 rsync -ain --checksum "$local_stage/public/" "aces:$destination/" > "$local_stage/diff.txt"
-if awk 'substr($0,1,1)=="<" && substr($0,3,9)!="+++++++++" {bad=1} END {exit !bad}' "$local_stage/diff.txt"; then
+# openrsync on macOS prints seven pluses; GNU rsync prints nine.
+if awk 'substr($1,1,1)=="<" && $1 !~ /^<f[+]+$/ {bad=1} END {exit !bad}' "$local_stage/diff.txt"; then
   echo 'Existing ACES development files differ; choose a new AF_PUBLIC_ROOT.' >&2
   cat "$local_stage/diff.txt" >&2
   exit 2
 fi
 rsync -a --ignore-existing "$local_stage/public/" "aces:$destination/"
+# Verify every required file remotely, including files retained on a resumed copy.
+ssh aces "cd '$destination' && sha256sum -c - > /dev/null" < "$local_stage/sha256.txt"
+printf 'Verified %s development files on ACES.\n' "$(wc -l < "$local_stage/files.txt" | tr -d ' ')"
 printf 'ACES public development root: %s\n' "$destination"

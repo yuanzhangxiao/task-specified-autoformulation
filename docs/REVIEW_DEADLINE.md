@@ -149,6 +149,11 @@ No test or private-reference files are transferred by that helper. It uses
 `/work/hdd/bibo/yxiao2/phase_b/inputs/public-prompt-v3` as source and
 `/scratch/user/u.yx126462/phase_b/review-deadline-inputs-v1` as destination.
 Override `AF_DELTA_PUBLIC_ROOT` or `AF_PUBLIC_ROOT` if those releases moved.
+The helper checks ACES authentication first and verifies all 24 remote file
+checksums before reporting success. It accepts both macOS openrsync and GNU
+rsync new-file markers, retains identical files on resume, and refuses to
+overwrite differing content. A failed or interrupted transfer can be rerun.
+Do not submit until the helper prints `Verified 24 development files on ACES.`
 Prompt hashes, manifest identities and loaded channel roles are checked before
 submission; a missing/mismatched release stops before GPU use.
 
