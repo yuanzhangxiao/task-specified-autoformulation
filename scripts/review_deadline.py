@@ -139,6 +139,11 @@ def main():
     parser.add_argument("--source", type=Path)
     parser.add_argument("--source-round", type=int, default=2)
     parser.add_argument("--visits", type=int, default=5)
+    parser.add_argument(
+        "--continuation-protocol",
+        choices=sorted(io.CONTINUATION_PROTOCOLS),
+        default=io.CONTINUATION_PROTOCOL,
+    )
     parser.add_argument("--base-url")
     parser.add_argument("--wall-seconds", type=int)
     parser.add_argument(
@@ -163,7 +168,13 @@ def main():
 
         if args.source is None:
             parser.error("prepare-continuation requires --source")
-        plan = prepare(args.source, root, args.source_round, args.visits)
+        plan = prepare(
+            args.source,
+            root,
+            args.source_round,
+            args.visits,
+            protocol=args.continuation_protocol,
+        )
         value = {
             "identity": plan["artifact_sha256"],
             "tasks": len(plan["tasks"]),

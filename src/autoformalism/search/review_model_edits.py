@@ -148,11 +148,23 @@ def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
     return apply_checked_content(bundle, packet, reply)
 
 
-def apply_checked_content(bundle: dict, packet: dict, reply: ModelEdits) -> dict:
+def apply_checked_content(
+    bundle: dict, packet: dict, reply: ModelEdits, *, parameter_specs: tuple = ()
+) -> dict:
     """Compile schema-validated content separately from the citation policy."""
     parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
     if content_hash(bundle["candidate"]) != packet["candidate_sha256"]:
         raise ValueError("model differs from training packet")
+    if parameter_specs:
+        occupied = {p.name for p in parent.parameters}
+        names = [p.name for p in parameter_specs]
+        if len(set(names)) != len(names) or occupied.intersection(names):
+            raise ValueError("resolved new parameters must have distinct new names")
+        # The v4 adapter resolves roles across the whole patch before compilation.
+        # Only the temporary compiler parent is extended; source identity is intact.
+        parent = parent.model_copy(
+            update={"parameters": (*parent.parameters, *parameter_specs)}
+        )
     context = ValidationContext.model_validate(bundle["context"])
     initial = LatentInitializationPlan.model_validate(bundle["initialization"]["plan"])
     action = RepairAction.model_validate(

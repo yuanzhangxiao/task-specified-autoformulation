@@ -44,8 +44,8 @@ def submit(root: Path, index: int) -> dict:
     root = root.resolve()
     io.require_open(root)
     plan = io.verify(root)
-    if plan["protocol"] != io.CONTINUATION_PROTOCOL:
-        raise ValueError("requires an imported review-deadline-3 campaign")
+    if plan["protocol"] not in io.CONTINUATION_PROTOCOLS:
+        raise ValueError("requires an imported continuation campaign")
     if not 1 <= index < plan["config"]["rounds"]:
         raise ValueError("visit outside frozen continuation budget")
     repo = io.REPO
@@ -126,7 +126,7 @@ def submit(root: Path, index: int) -> dict:
                 key,
                 [
                     *base,
-                    f"--job-name=review-v3-{key}",
+                    f"--job-name=review-v{plan['protocol'].rsplit('-', 1)[-1]}-{key}",
                     f"--output={root}/logs/{key}-%A_%a.out",
                     f"--error={root}/logs/{key}-%A_%a.err",
                     *options,

@@ -136,7 +136,9 @@ def _unique(items, key):
     return list(result.values()), redundant
 
 
-def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
+def apply_edits(
+    bundle: dict, packet: dict, raw: dict, *, parameter_specs: tuple = ()
+) -> dict:
     """Citation quality is advisory; every equation still passes the full compiler."""
     reply = ScientificRevision.model_validate(raw)
     equations, duplicates = _unique(reply.equations, "component")
@@ -185,7 +187,9 @@ def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
         "initializers": [i.model_dump(mode="json") for i in initializers],
     }
     content = CheckedContent.model_validate(translate_names(patch, inverse))
-    result = legacy.apply_checked_content(bundle, packet, content)
+    result = legacy.apply_checked_content(
+        bundle, packet, content, parameter_specs=parameter_specs
+    )
     revised = result["bundle"] or bundle
     still_used = {p["name"] for p in revised["candidate"]["parameters"]} & set(cleanup)
     if still_used:

@@ -111,6 +111,28 @@ def report(root: Path) -> dict:
                     else None,
                 }
             )
+            if plan["protocol"] == io.PARAMETER_PROTOCOL:
+                certificate = (selected or {}).get("certificate", {})
+                states = {
+                    p["status"]
+                    for p in certificate.get("mechanisms", {}).get("predicates", [])
+                }
+                rows[-1].update(
+                    arm_label="prediction_only"
+                    if task["arm"] == "no_spec"
+                    else task["arm"],
+                    graph_check_status=(
+                        "failed"
+                        if "failed" in states
+                        else "unresolved"
+                        if "ambiguous" in states
+                        else "certified"
+                        if certificate.get("all_public_graph_requirements_certified")
+                        else "unavailable"
+                        if selected is None
+                        else "uncertified"
+                    ),
+                )
     value = {
         "plan_sha256": plan["artifact_sha256"],
         "planned_rounds": len(rows),
@@ -171,6 +193,15 @@ def report(root: Path) -> dict:
             "not one unchanged-protocol convergence experiment.",
             "",
         ]
+    if plan["protocol"] == io.PARAMETER_PROTOCOL:
+        lines = [line.replace("Graph certified |", "Graph check |") for line in lines]
+        lines[4:4] = [
+            "Prediction-only (internal ID no_spec) omits scientific requirements "
+            "and their enforcement; evaluate task satisfaction alongside NMSE.",
+            "Unresolved graph checks are distinct from failed predicates. "
+            "Certificates are unchanged.",
+            "",
+        ]
     for r in rows:
         lines.append(
             "| "
@@ -179,12 +210,14 @@ def report(root: Path) -> dict:
                 for k in (
                     "cell",
                     "seed",
-                    "arm",
+                    "arm_label" if plan["protocol"] == io.PARAMETER_PROTOCOL else "arm",
                     "round",
                     "status",
                     "retained_train_nmse",
                     "retained_validation_nmse",
-                    "all_graph_requirements_certified",
+                    "graph_check_status"
+                    if plan["protocol"] == io.PARAMETER_PROTOCOL
+                    else "all_graph_requirements_certified",
                 )
             )
             + " |"

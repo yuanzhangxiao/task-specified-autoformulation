@@ -42,7 +42,7 @@ from autoformalism.schemas.public_fitting import (
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import numerical_sibling as revision
 from autoformalism.search import review_model_edits as content_edits
-from autoformalism.search import review_revision_v3
+from autoformalism.search import review_revision_v3, review_revision_v4
 from autoformalism.search.residual_evidence import build_residual_evidence
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.search.staged_topology_runner import run_staged_topology
@@ -193,7 +193,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     settings = io.DeadlineConfig.model_validate(plan["config"]).model_settings
     if index and plan["protocol"] not in {
         io.CONTENT_PROTOCOL,
-        io.CONTINUATION_PROTOCOL,
+        *io.CONTINUATION_PROTOCOLS,
     }:
         settings = settings.model_copy(
             update={
@@ -205,7 +205,8 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     kwargs = {} if transport is None else {"transport": transport}
     client_type = (
         RevisionClient
-        if index and plan["protocol"] in {io.CONTENT_PROTOCOL, io.CONTINUATION_PROTOCOL}
+        if index
+        and plan["protocol"] in {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}
         else BudgetedRepairClient
     )
     return client_type(
@@ -252,8 +253,14 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     if packet is None:
         return {"status": "residual_evidence_unavailable"}
     bundle = selected["bundle"]
-    improved = plan["protocol"] == io.CONTINUATION_PROTOCOL
-    edits = review_revision_v3 if improved else content_edits
+    improved = plan["protocol"] in io.CONTINUATION_PROTOCOLS
+    edits = (
+        review_revision_v4
+        if plan["protocol"] == io.PARAMETER_PROTOCOL
+        else review_revision_v3
+        if improved
+        else content_edits
+    )
     attempts, feedback = [], None
     for attempt in range(3):
         raw, record = None, None
@@ -262,7 +269,7 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
             record = client.call(
                 system=edits.SYSTEM_PROMPT,
                 user=json.dumps(user, sort_keys=True, separators=(",", ":")),
-                response_model=review_revision_v3.ScientificRevision
+                response_model=edits.ScientificRevision
                 if improved
                 else content_edits.ModelEdits,
                 step="review_model_content",
@@ -297,7 +304,8 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                 "certificate": certificate,
                 "decision": decision,
                 "attempts": attempts,
-                "revision_policy": "scientific-content-revision-3"
+                "revision_policy": "scientific-content-revision-"
+                + plan["protocol"].rsplit("-", 1)[-1]
                 if improved
                 else content_edits.POLICY,
             }
@@ -329,7 +337,7 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                 ]
             if improved:
                 feedback.update(
-                    review_revision_v3.feedback(
+                    edits.feedback(
                         bundle, packet, selected["fit"]["parameters"], raw, error
                     )
                 )
@@ -350,7 +358,8 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     return {
         "status": "revision_failed",
         "attempts": attempts,
-        "revision_policy": "scientific-content-revision-3"
+        "revision_policy": "scientific-content-revision-"
+        + plan["protocol"].rsplit("-", 1)[-1]
         if improved
         else content_edits.POLICY,
     }
@@ -428,7 +437,7 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
                 )
             except (ValueError, KeyError, ModelValidationError) as error:
                 payload.update(status="contract_failed", error=str(error))
-    elif plan["protocol"] in {io.CONTENT_PROTOCOL, io.CONTINUATION_PROTOCOL}:
+    elif plan["protocol"] in {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}:
         payload.update(_content_revision(plan, task, parent, client))
     else:
         selected = parent["selected"]
@@ -639,7 +648,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
         incumbent = parent["selected"] if parent else None
         trial = None
         status = proposal["status"]
-        continuation = plan["protocol"] == io.CONTINUATION_PROTOCOL
+        continuation = plan["protocol"] in io.CONTINUATION_PROTOCOLS
         fallback = (
             continuation
             and incumbent is not None
@@ -679,7 +688,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                     **(
                         {"allow_initialization_changes": True}
                         if plan["protocol"]
-                        in {io.CONTENT_PROTOCOL, io.CONTINUATION_PROTOCOL}
+                        in {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}
                         else {}
                     ),
                 )

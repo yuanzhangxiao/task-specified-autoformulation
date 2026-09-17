@@ -46,7 +46,9 @@ def verify_imports(root: Path, plan: dict) -> None:
         source = sealed_read(root / "imports" / task["task_id"] / "result.json")
         if source["artifact_sha256"] != ledger["results"][task["task_id"]]:
             raise ValueError("source checkpoint hash differs")
-        _check_result(source, task, ledger["source_round"])
+        _check_result(
+            source, task, ledger.get("source_phase_round", ledger["source_round"])
+        )
         anchor = io.read_round(root, task, 0)
         if (
             anchor is None
@@ -61,26 +63,43 @@ def verify_imports(root: Path, plan: dict) -> None:
             raise ValueError("imported anchor differs from its source")
 
 
-def prepare(source: Path, root: Path, source_round: int = 2, visits: int = 5) -> dict:
+def prepare(
+    source: Path,
+    root: Path,
+    source_round: int = 2,
+    visits: int = 5,
+    *,
+    protocol: str = io.CONTINUATION_PROTOCOL,
+) -> dict:
     """Copy development assets and retained models; source results are never edited."""
     source, root = source.resolve(), root.resolve()
     if source.is_relative_to(root) or root.is_relative_to(source):
         raise ValueError("source and continuation must be disjoint directories")
+    if protocol not in io.CONTINUATION_PROTOCOLS:
+        raise ValueError("unsupported continuation protocol")
     if source_round < 0 or not 1 <= visits <= 5:
         raise ValueError("choose a source round and between one and five new visits")
     with io.execution_lease(source, exclusive=True), public._lock(root):
         io.require_open(source)
         original = io.verify(source, execution=False)
-        if original["protocol"] != io.CONTENT_PROTOCOL:
-            raise ValueError("this milestone imports a review-deadline-2 campaign")
-        if source_round >= original["config"]["rounds"]:
+        allowed = (
+            {io.CONTENT_PROTOCOL}
+            if protocol == io.CONTINUATION_PROTOCOL
+            else {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}
+        )
+        if original["protocol"] not in allowed:
+            raise ValueError(f"source protocol must be one of {sorted(allowed)}")
+        phase_round = source_round - original.get("continuation", {}).get(
+            "source_round", 0
+        )
+        if not 0 <= phase_round < original["config"]["rounds"]:
             raise ValueError("source round is outside the original campaign")
         results = {}
         for task in original["tasks"]:
-            result = io.read_round(source, task, source_round)
+            result = io.read_round(source, task, phase_round)
             if result is None:
                 raise ValueError(f"source round incomplete: {task['task_id']}")
-            _check_result(result, task, source_round)
+            _check_result(result, task, phase_round)
             results[task["task_id"]] = result
         ledger = {
             "source_root": str(source),
@@ -95,15 +114,19 @@ def prepare(source: Path, root: Path, source_round: int = 2, visits: int = 5) ->
             "on_revision_failure": "same_visit_incumbent_refit_then_next_visit",
             "automatic_expansion": False,
         }
+        if protocol == io.PARAMETER_PROTOCOL:
+            ledger.update(
+                source_phase_round=phase_round, source_protocol=original["protocol"]
+            )
         if (root / "plan.json").exists():
             plan = io.verify(root)
-            if plan.get("continuation") != ledger:
+            if plan.get("continuation") != ledger or plan["protocol"] != protocol:
                 raise ValueError("continuation source or additional budget differs")
             return plan
         config = io.DeadlineConfig.model_validate(
             {
                 **original["config"],
-                "protocol": io.CONTINUATION_PROTOCOL,
+                "protocol": protocol,
                 "rounds": visits + 1,
             }
         )
@@ -140,13 +163,13 @@ def prepare(source: Path, root: Path, source_round: int = 2, visits: int = 5) ->
         plan = sealed_write(
             root / "plan.json",
             {
-                "protocol": io.CONTINUATION_PROTOCOL,
+                "protocol": protocol,
                 "config": config.model_dump(mode="json"),
                 "cells": original["cells"],
                 "tasks": original["tasks"],
                 "source_sha256": public._source_identity(),
                 "runtime": public._runtime(),
-                "launcher_sha256": io.launcher_hash(io.CONTINUATION_PROTOCOL),
+                "launcher_sha256": io.launcher_hash(protocol),
                 "continuation": ledger,
                 "test_data_opened": False,
                 "private_reference_opened": False,

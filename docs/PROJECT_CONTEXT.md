@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/REVIEW_CONTINUATION_V4.md` describes the next opt-in phase, importing each
+retained round-seven model for five visits numbered 8–12. New parameters are
+declared once per revision; inherited roles remain immutable. Saved-response
+replay and an equation export distinguish interface errors from unresolved
+scientific requirements. Reports label `no_spec` as a prediction-only control
+and separate ambiguous graph checks from failed predicates. The fitter,
+selection rules, benchmark assets, and historical results remain unchanged.
+
 `docs/REVIEW_CONTINUATION_V3.md` describes the opt-in continuation from each
 review-v2 lineage's retained round-two model. It simplifies scientific revisions,
 audits citation warnings separately, and preserves viable incumbents after
