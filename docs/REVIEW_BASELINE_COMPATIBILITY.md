@@ -1,5 +1,13 @@
 # Baseline compatibility for the corrected review campaign
 
+**2026-09-16 D3 correction:** the earlier common ODE replay reinterprets native
+D3 increments as rates. It must not be reported as native D3 validation.
+[The new Phase-B D3 campaign](PHASE_B_D3_NATIVE_VALIDATION.md) discovers models
+on the actual Phase-B cells and preserves `x_next = x + f`, with no dt multiplier,
+for native one-step checks and recursive target rollouts. Historical D3 models
+remain a separate cohort. Continuous-time and scientific compliance are not
+certified by the native discrete baseline.
+
 This is a public-code and configuration audit, not a report of new baseline
 scores. Remote completion counts still require inspection of the corresponding
 development artifacts. No test data or private reference was opened for this

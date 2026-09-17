@@ -1,5 +1,13 @@
 # Saved baseline validation replay
 
+**D3 semantics correction (2026-09-16):** the native D3 implementation fits
+sample increments, `x_next = x + f`, without a dt multiplier. Its historical
+common ODE replay is an ODE reinterpretation diagnostic, not native D3
+performance. Historical candidates also cannot populate different Phase-B
+cells. Use [fresh Phase-B native validation](PHASE_B_D3_NATIVE_VALIDATION.md)
+for new discovery and correctly labeled one-step/recursive scores. Preserve
+older results under their original protocol rather than relabeling them.
+
 This milestone reuses existing SINDy/PySR, GPT-5.6 Sol and D3 candidates and
 fitted parameters. It performs no fitting, parameter/initial-state optimization,
 LLM generation, test-data loading, or private-reference evaluation. It requires
