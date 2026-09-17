@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field
 
 from autoformalism.expressions import RestrictedParser, ValidationContext
+from autoformalism.rebuttal.repair_transactions import signed_tree
 from autoformalism.rebuttal.revision_decision import parameter_aliases, translate_names
 from autoformalism.rebuttal.staged_multiround_feedback_campaign import (
     ComponentRevision,
@@ -118,11 +119,14 @@ def _resolve(
         expression = translate_names(expression, inverse)
         parsed = RestrictedParser().parse(expression, location=component)
         local = tuple(p for name, p in declarations.items() if name in parsed.symbols)
+        # Match the transaction compiler: -a*m is a signed outer gain, not an
+        # ambiguous internal parameter. Normalize only the analysis tree.
+        role_tree = signed_tree(parsed.tree)
         roles, audit = _effective_revision_parameter_roles(
             ComponentRevision(
                 component=component, expression=expression, parameters=local
             ),
-            parsed.tree,
+            role_tree,
             scientific_symbols=symbols,
             parent_parameters=existing,
         )

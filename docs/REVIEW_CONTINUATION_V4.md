@@ -63,6 +63,32 @@ that the name was inherited. The new interface removes this source of failure.
 It does not promise to resolve every historical shared-declaration error: some
 may concern genuinely new incompatible definitions.
 
+### Signed-gain compatibility correction
+
+The first v4 adapter omitted the transaction compiler's sign normalization in
+its new parameter-analysis pass. As a result, it could reject `-a*m` or
+`(-a)*m` as an ambiguous internal parameter, although v3 accepted them as signed
+outer gains. The correction applies the same normalization to the analysis tree.
+It preserves the supplied equation, its negative contribution, internal
+differences such as `m-gain`, and the nonnegative domain of the outer weight.
+It does not relax checks on genuinely ambiguous internal shape parameters.
+
+Campaigns pinned to the initial v4 commit retain their original code and results.
+Do not update a running pinned checkout or resume its frozen directory with the
+corrected source. Use a new phase/checkpoint import if a corrected run is needed.
+The historical response audit must be rerun under the corrected code in a new
+audit directory before reporting its revised acceptance counts.
+
+If the initial v4 campaign has only submitted round 8, hold its round-9 dispatcher,
+let the round-8 fitting and finish jobs complete, then use the corrected checkout
+with `AF_SOURCE_ROOT` pointing to that v4 campaign, `AF_SOURCE_ROUND=8`,
+`AF_ADDITIONAL_VISITS=4`, and a fresh output directory such as
+`review-continuation-v4-signfix`. This retains completed work and runs rounds
+9–12 within the already planned round budget. Verify that no round-2 submission
+intent exists in the old campaign before proceeding; its presence means the old
+dispatcher has already begun submitting global round 9 and needs inspection.
+Mark this additional code transition in progress plots.
+
 Each visit still allows at most three physical proposer requests and one fitting
 allocation. If revision fails or returns no change, that allocation refits the
 retained model from its complete fitted parameter vector. A failed challenger

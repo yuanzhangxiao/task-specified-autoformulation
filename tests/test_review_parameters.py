@@ -14,7 +14,7 @@ from autoformalism.rebuttal import review_deadline_io as io
 from autoformalism.rebuttal import review_deadline_pipeline as pipeline
 from autoformalism.rebuttal import review_deadline_reporting as reporting
 from autoformalism.rebuttal.prefit_replay import sealed_write
-from autoformalism.rebuttal.revision_decision import parameter_aliases
+from autoformalism.rebuttal.revision_decision import expressions, parameter_aliases
 from autoformalism.schemas import CandidateModel
 from autoformalism.search import review_revision_v3 as old
 from autoformalism.search import review_revision_v4 as edits
@@ -86,6 +86,23 @@ def test_one_shared_new_parameter_compiles_across_equations_and_mapping():
         result["bundle"]["revision_provenance"]["protocol"]
         == "scientific-content-revision-4"
     )
+
+
+@pytest.mark.parametrize("expression", ["-a*m", "(-a)*m", "a*(-m)", "-a*(m-gain)"])
+def test_new_signed_gains_match_legacy_without_changing_the_equation(expression):
+    bundle, packet, *_ = example()
+    raw = reply(expression)
+    raw["equations"][0]["parameters"] = [{"name": "a", "role": "coefficient"}]
+    legacy = old.apply_edits(bundle, packet, raw)
+    current = edits.apply_edits(bundle, packet, edits.migrate_saved(raw))
+    for result in (legacy, current):
+        model = CandidateModel.model_validate(
+            result["bundle"]["initialization"]["base_candidate"]
+        )
+        assert expressions(model)["f"] == expression
+        assert next(p for p in model.parameters if p.name == "a").role.value == (
+            "nonnegative_coefficient"
+        )
 
 
 @pytest.mark.parametrize(
