@@ -446,3 +446,16 @@ def test_interrupted_review_retains_accounting_and_does_not_resend(tmp_path):
         "unknown_usage_requests": 1,
         "observed_tokens": 200,
     }
+
+
+def test_unsupported_saved_expression_retains_row_and_never_calls_provider(tmp_path):
+    bundle, public, root = fixture(tmp_path)
+    original = json.loads(bundle.read_text())
+    row = original["rows"][0]
+    row["candidate"]["state_equations"][0]["rhs"] = "__import__('os').getcwd()"
+    changed = tmp_path / "unsupported.json"
+    sealed_write(changed, {"protocol": BUNDLE_PROTOCOL, "rows": [row]})
+    plan = campaign.prepare([changed], public, root, model_revision="a" * 40)
+    assert plan["rows"][0]["status"] == "audit_input_failed"
+    assert "UNSUPPORTED" in plan["rows"][0]["error"]
+    assert plan["maximum_provider_calls"] == 0

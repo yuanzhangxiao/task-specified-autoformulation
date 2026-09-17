@@ -11,7 +11,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from autoformalism.expressions import ValidationContext
+from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.llm.review_revision import RevisionClient
 from autoformalism.llm.staged_topology import (
     DeferredCall,
@@ -133,7 +133,13 @@ def prepare(
                     )
                     row.update(packet=packet, graph=graph)
                     row["packet_sha256"] = content_hash(packet)
-                except (ValueError, OSError, KeyError, TypeError) as exc:
+                except (
+                    ValueError,
+                    OSError,
+                    KeyError,
+                    TypeError,
+                    ModelValidationError,
+                ) as exc:
                     row.update(status="audit_input_failed", error=str(exc))
             selected.append(row)
     if not selected:
