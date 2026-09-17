@@ -15,6 +15,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.revision_decision import parameter_aliases
 from autoformalism.schemas import CandidateModel
 from autoformalism.search import review_revision_v4 as edits
+from autoformalism.search import review_revision_v5
 
 
 def declarations(bundle: dict, raw: dict) -> list[dict]:
@@ -41,14 +42,16 @@ def declarations(bundle: dict, raw: dict) -> list[dict]:
 
 def audit(root: Path) -> dict:
     plan = io.verify(root)
-    if plan["protocol"] != io.PARAMETER_PROTOCOL:
+    if plan["protocol"] not in io.PARAMETER_PROTOCOLS:
         raise ValueError("requires parameter-declaration continuation")
+    adapter = review_revision_v5 if plan["protocol"] == io.REVISION_PROTOCOL else edits
     ledger = plan["continuation"]
     source = Path(ledger["source_root"])
     original = io.verify(source, execution=False)
     if original["artifact_sha256"] != ledger["source_plan_sha256"]:
         raise ValueError("source plan changed")
     records, requirements, terminal = [], [], Counter()
+    failed_visits, terminal_messages = set(), Counter()
     for task in plan["tasks"]:
         for index in range(1, ledger["source_phase_round"] + 1):
             path = io.round_path(source, task, index) / "proposal.json"
@@ -60,6 +63,14 @@ def audit(root: Path) -> dict:
                 raise ValueError("saved proposal parent differs")
             attempts = proposal.get("attempts", [])
             if proposal["status"] == "revision_failed":
+                failed_visits.add((task["task_id"], index))
+                last = (attempts[-1].get("feedback") or {}) if attempts else {}
+                terminal_messages[
+                    (
+                        last.get("code", "delivery_or_budget"),
+                        proposal.get("error") or last.get("message", ""),
+                    )
+                ] += 1
                 terminal[
                     (attempts[-1].get("feedback") or {}).get(
                         "code", "delivery_or_budget"
@@ -91,9 +102,9 @@ def audit(root: Path) -> dict:
                         from audit_review_continuation import convert
 
                         raw = convert(raw, bundle["context"]["targets"][0])
-                    if original["protocol"] != io.PARAMETER_PROTOCOL:
+                    if original["protocol"] not in io.PARAMETER_PROTOCOLS:
                         raw = edits.migrate_saved(raw)
-                    result = edits.apply_edits(bundle, packet, raw)
+                    result = adapter.apply_edits(bundle, packet, raw)
                     if result["bundle"] is not None:
                         certificate = pipeline.certificates(
                             result["bundle"], original["cells"][task["cell"]], task
@@ -112,11 +123,19 @@ def audit(root: Path) -> dict:
                             "parameter_declaration_audit"
                         ],
                     )
+                    if plan["protocol"] == io.REVISION_PROTOCOL:
+                        record.update(
+                            size_audit=result["provenance"]["size_audit"],
+                            unused_new_declarations_removed=result["provenance"][
+                                "unused_new_declarations_removed"
+                            ],
+                        )
                 except (ValueError, KeyError, TypeError, ModelValidationError) as error:
                     record.update(
                         status="still_blocked",
                         error=str(error)[:2000],
                         details=getattr(error, "details", {}),
+                        error_code=getattr(error, "code", type(error).__name__),
                     )
                 records.append(record)
         selected = io.read_round(root, task, 0)["selected"]
@@ -156,6 +175,27 @@ def audit(root: Path) -> dict:
             "records": records,
             "status_counts": dict(Counter(r["status"] for r in records)),
             "source_terminal_errors": dict(terminal),
+            "source_terminal_messages": [
+                {"code": code, "message": message, "visits": count}
+                for (code, message), count in sorted(terminal_messages.items())
+            ],
+            "failed_visits_with_saved_attempts": len(failed_visits),
+            "failed_visits_with_newly_valid_reply": len(
+                {
+                    (r["task"], r["source_phase_round"])
+                    for r in records
+                    if r["status"] == "content_valid"
+                    and (r["task"], r["source_phase_round"]) in failed_visits
+                }
+            ),
+            "previously_accepted_now_blocked": [
+                {
+                    k: r.get(k)
+                    for k in ("task", "round", "error", "error_code", "details")
+                }
+                for r in records
+                if r["source_accepted"] and r["status"] != "content_valid"
+            ],
             "rejected_then_valid": sum(
                 not r["source_accepted"] and r["status"] == "content_valid"
                 for r in records

@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/REVIEW_CONTINUATION_V5.md` describes an opt-in continuation from round 12
+through round 15. Initial-construction size limits become advisory during model
+revision, with measured before/after counts. No-latent capabilities are explicit;
+genuinely unused new parameter metadata is discarded with an audit. Scientific
+requirements, explicit initialization, frozen fitting, and execution budgets
+remain enforced. Saved-response replay diagnoses the interface without promoting
+historical proposals. Original campaigns retain their own protocols and results.
+
 `docs/REVIEW_CONTINUATION_V4.md` describes the next opt-in phase, importing each
 retained round-seven model for five visits numbered 8–12. New parameters are
 declared once per revision; inherited roles remain immutable. Saved-response

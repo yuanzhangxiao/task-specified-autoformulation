@@ -30,7 +30,9 @@ PROTOCOL = "review-deadline-1"
 CONTENT_PROTOCOL = "review-deadline-2"
 CONTINUATION_PROTOCOL = "review-deadline-3"
 PARAMETER_PROTOCOL = "review-deadline-4"
-CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, PARAMETER_PROTOCOL}
+REVISION_PROTOCOL = "review-deadline-5"
+PARAMETER_PROTOCOLS = {PARAMETER_PROTOCOL, REVISION_PROTOCOL}
+CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, *PARAMETER_PROTOCOLS}
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
 FILES = ("manifest.json", "proposer_prompt.txt", "train.csv", "validation.csv")
 REPO = Path(__file__).resolve().parents[3]
@@ -44,6 +46,7 @@ class DeadlineConfig(StrictSchema):
         "review-deadline-2",
         "review-deadline-3",
         "review-deadline-4",
+        "review-deadline-5",
     ] = PROTOCOL
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -136,11 +139,13 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
             "scripts/audit_review_continuation.py",
             "scripts/smoke_review_continuation.py",
         )
-    if protocol == PARAMETER_PROTOCOL:
+    if protocol in PARAMETER_PROTOCOLS:
         paths += (
             "scripts/audit_review_parameters.py",
             "scripts/smoke_review_parameters.py",
         )
+    if protocol == REVISION_PROTOCOL:
+        paths += ("scripts/smoke_review_revision.py",)
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
     )

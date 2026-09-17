@@ -13,7 +13,12 @@ if [[ "$mode" == dispatch ]]; then
 fi
 if [[ "$mode" == prepare ]]; then
   "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_review_continuation.py
-  if [[ "$(jq -r '.protocol' "$AF_OUTPUT_ROOT/plan.json")" == review-deadline-4 ]]; then
+  protocol="$(jq -r '.protocol' "$AF_OUTPUT_ROOT/plan.json")"
+  if [[ "$protocol" == review-deadline-5 ]]; then
+    "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_review_revision_v5.py
+    "$AF_PYTHON" scripts/smoke_review_revision.py
+    "$AF_PYTHON" scripts/audit_review_parameters.py --root "$AF_OUTPUT_ROOT"
+  elif [[ "$protocol" == review-deadline-4 ]]; then
     "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_review_parameters.py
     "$AF_PYTHON" scripts/smoke_review_parameters.py
     "$AF_PYTHON" scripts/audit_review_parameters.py --root "$AF_OUTPUT_ROOT"

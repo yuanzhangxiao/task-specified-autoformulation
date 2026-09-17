@@ -42,7 +42,11 @@ from autoformalism.schemas.public_fitting import (
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import numerical_sibling as revision
 from autoformalism.search import review_model_edits as content_edits
-from autoformalism.search import review_revision_v3, review_revision_v4
+from autoformalism.search import (
+    review_revision_v3,
+    review_revision_v4,
+    review_revision_v5,
+)
 from autoformalism.search.residual_evidence import build_residual_evidence
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.search.staged_topology_runner import run_staged_topology
@@ -255,7 +259,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     bundle = selected["bundle"]
     improved = plan["protocol"] in io.CONTINUATION_PROTOCOLS
     edits = (
-        review_revision_v4
+        review_revision_v5
+        if plan["protocol"] == io.REVISION_PROTOCOL
+        else review_revision_v4
         if plan["protocol"] == io.PARAMETER_PROTOCOL
         else review_revision_v3
         if improved

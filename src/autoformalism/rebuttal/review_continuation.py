@@ -85,6 +85,8 @@ def prepare(
         allowed = (
             {io.CONTENT_PROTOCOL}
             if protocol == io.CONTINUATION_PROTOCOL
+            else {io.CONTENT_PROTOCOL, io.CONTINUATION_PROTOCOL, io.PARAMETER_PROTOCOL}
+            if protocol == io.PARAMETER_PROTOCOL
             else {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}
         )
         if original["protocol"] not in allowed:
@@ -114,10 +116,13 @@ def prepare(
             "on_revision_failure": "same_visit_incumbent_refit_then_next_visit",
             "automatic_expansion": False,
         }
-        if protocol == io.PARAMETER_PROTOCOL:
+        if protocol in io.PARAMETER_PROTOCOLS:
             ledger.update(
                 source_phase_round=phase_round, source_protocol=original["protocol"]
             )
+        if protocol == io.REVISION_PROTOCOL:
+            ledger["revision_size_policy"] = "advisory_initial_construction_references"
+            ledger["unused_new_parameter_policy"] = "discard_with_audit"
         if (root / "plan.json").exists():
             plan = io.verify(root)
             if plan.get("continuation") != ledger or plan["protocol"] != protocol:

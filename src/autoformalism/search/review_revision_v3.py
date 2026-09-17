@@ -137,7 +137,12 @@ def _unique(items, key):
 
 
 def apply_edits(
-    bundle: dict, packet: dict, raw: dict, *, parameter_specs: tuple = ()
+    bundle: dict,
+    packet: dict,
+    raw: dict,
+    *,
+    parameter_specs: tuple = (),
+    enforce_size_limits: bool = True,
 ) -> dict:
     """Citation quality is advisory; every equation still passes the full compiler."""
     reply = ScientificRevision.model_validate(raw)
@@ -188,7 +193,11 @@ def apply_edits(
     }
     content = CheckedContent.model_validate(translate_names(patch, inverse))
     result = legacy.apply_checked_content(
-        bundle, packet, content, parameter_specs=parameter_specs
+        bundle,
+        packet,
+        content,
+        parameter_specs=parameter_specs,
+        enforce_size_limits=enforce_size_limits,
     )
     revised = result["bundle"] or bundle
     still_used = {p["name"] for p in revised["candidate"]["parameters"]} & set(cleanup)

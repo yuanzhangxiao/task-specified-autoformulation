@@ -169,7 +169,9 @@ def _resolve(
     }
 
 
-def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
+def apply_edits(
+    bundle: dict, packet: dict, raw: dict, *, enforce_size_limits: bool = True
+) -> dict:
     reply = ScientificRevision.model_validate(raw)
     specs, audit = _resolve(bundle, reply)
     result = previous.apply_edits(
@@ -177,6 +179,7 @@ def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
         packet,
         reply.model_dump(mode="json", exclude={"new_parameters"}),
         parameter_specs=specs,
+        enforce_size_limits=enforce_size_limits,
     )
     result["provenance"].update(
         protocol="scientific-content-revision-4",

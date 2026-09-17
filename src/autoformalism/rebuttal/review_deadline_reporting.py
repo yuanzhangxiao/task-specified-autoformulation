@@ -17,6 +17,7 @@ from autoformalism.rebuttal.postfreeze_evaluation import evaluate_subject_on_tes
 from autoformalism.rebuttal.prefit_construction_campaign import _cache_records, _cost
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.schemas.public_fitting import PublicFitRequest
+from autoformalism.search import review_revision_v5
 from autoformalism.staged_topology import content_hash
 
 
@@ -111,7 +112,7 @@ def report(root: Path) -> dict:
                     else None,
                 }
             )
-            if plan["protocol"] == io.PARAMETER_PROTOCOL:
+            if plan["protocol"] in io.PARAMETER_PROTOCOLS:
                 certificate = (selected or {}).get("certificate", {})
                 states = {
                     p["status"]
@@ -133,6 +134,35 @@ def report(root: Path) -> dict:
                         else "uncertified"
                     ),
                 )
+            if plan["protocol"] == io.REVISION_PROTOCOL:
+                proposal_path = directory / "proposal.json"
+                proposal = sealed_read(proposal_path) if proposal_path.exists() else {}
+                attempts = proposal.get("attempts", [])
+                feedback = (attempts[-1].get("feedback") or {}) if attempts else {}
+                failed = proposal.get("status") == "revision_failed"
+                provenance = (proposal.get("decision") or {}).get("provenance", {})
+                rows[-1].update(
+                    terminal_revision_code=(
+                        feedback.get("code", "delivery_or_budget") if failed else None
+                    ),
+                    terminal_revision_message=(
+                        proposal.get("error") or feedback.get("message")
+                    )
+                    if failed
+                    else None,
+                    selected_new_trial=result.get("selected_new_trial", False)
+                    if result
+                    else False,
+                    trial_size=review_revision_v5.model_size(trial["bundle"])
+                    if trial
+                    else None,
+                    retained_size=review_revision_v5.model_size(selected["bundle"])
+                    if selected
+                    else None,
+                    unused_new_declarations_removed=provenance.get(
+                        "unused_new_declarations_removed", []
+                    ),
+                )
     value = {
         "plan_sha256": plan["artifact_sha256"],
         "planned_rounds": len(rows),
@@ -149,6 +179,38 @@ def report(root: Path) -> dict:
         "fallback_fits": sum(r["fit_trigger"] == "incumbent_fallback" for r in rows),
     }
     public._write(root / "summary.json", value)
+    if plan["protocol"] == io.REVISION_PROTOCOL:
+        public._write(
+            root / "revision_diagnostics.json",
+            {
+                "plan_sha256": plan["artifact_sha256"],
+                "terminal_errors": [
+                    {"code": code, "message": message, "visits": count}
+                    for (code, message), count in sorted(
+                        Counter(
+                            (
+                                r["terminal_revision_code"],
+                                r["terminal_revision_message"] or "",
+                            )
+                            for r in rows
+                            if r["proposal_status"] == "revision_failed"
+                        ).items()
+                    )
+                ],
+                "accepted_revision_visits": sum(
+                    r["proposal_status"] == "committed" for r in rows
+                ),
+                "accepted_revision_trials_retained": sum(
+                    r["proposal_status"] == "committed" and r["selected_new_trial"]
+                    for r in rows
+                ),
+                "trial_visits_above_original_size_references": sum(
+                    bool((r["trial_size"] or {}).get("exceeded_references"))
+                    for r in rows
+                ),
+                "test_data_opened": False,
+            },
+        )
     with (root / "rounds.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
@@ -193,13 +255,23 @@ def report(root: Path) -> dict:
             "not one unchanged-protocol convergence experiment.",
             "",
         ]
-    if plan["protocol"] == io.PARAMETER_PROTOCOL:
+    if plan["protocol"] in io.PARAMETER_PROTOCOLS:
         lines = [line.replace("Graph certified |", "Graph check |") for line in lines]
         lines[4:4] = [
             "Prediction-only (internal ID no_spec) omits scientific requirements "
             "and their enforcement; evaluate task satisfaction alongside NMSE.",
             "Unresolved graph checks are distinct from failed predicates. "
             "Certificates are unchanged.",
+            "",
+        ]
+    if plan["protocol"] == io.REVISION_PROTOCOL:
+        lines[4:4] = [
+            "Revision size is advisory; original construction references "
+            "are not acceptance gates. "
+            "Actual counts are in summary.json/rounds.csv; rejection details "
+            "are in revision_diagnostics.json.",
+            "Per-reply limits, call/fit budgets and scientific/ablation checks "
+            "remain enforced.",
             "",
         ]
     for r in rows:
@@ -210,13 +282,15 @@ def report(root: Path) -> dict:
                 for k in (
                     "cell",
                     "seed",
-                    "arm_label" if plan["protocol"] == io.PARAMETER_PROTOCOL else "arm",
+                    "arm_label"
+                    if plan["protocol"] in io.PARAMETER_PROTOCOLS
+                    else "arm",
                     "round",
                     "status",
                     "retained_train_nmse",
                     "retained_validation_nmse",
                     "graph_check_status"
-                    if plan["protocol"] == io.PARAMETER_PROTOCOL
+                    if plan["protocol"] in io.PARAMETER_PROTOCOLS
                     else "all_graph_requirements_certified",
                 )
             )

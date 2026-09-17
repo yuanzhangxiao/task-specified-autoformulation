@@ -149,7 +149,12 @@ def apply_edits(bundle: dict, packet: dict, raw: dict) -> dict:
 
 
 def apply_checked_content(
-    bundle: dict, packet: dict, reply: ModelEdits, *, parameter_specs: tuple = ()
+    bundle: dict,
+    packet: dict,
+    reply: ModelEdits,
+    *,
+    parameter_specs: tuple = (),
+    enforce_size_limits: bool = True,
 ) -> dict:
     """Compile schema-validated content separately from the citation policy."""
     parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
@@ -230,7 +235,7 @@ def apply_checked_content(
         name: interaction_contract(normalized_signs(revised), name)
         for name in new_definitions
     }
-    if (
+    if enforce_size_limits and (
         len(new_definitions) > limits["generated_variables"]
         or any(len(v) > limits["terms_per_equation"] for v in interactions.values())
         or sum(map(len, interactions.values())) > limits["total_terms"]
