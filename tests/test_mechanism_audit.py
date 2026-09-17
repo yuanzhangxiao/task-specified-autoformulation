@@ -181,6 +181,12 @@ def test_native_semantics_do_not_manufacture_continuous_time_claim():
         data["deterministic_modeling_evidence"]["continuous_time_representation"]
         == "fail"
     )
+    result = consensus(data, [review(data), review(data)])
+    assert result["counts"]["modeling"]["fail"] == 1
+    assert result["counts"]["task_mechanism"]["pass"] == 1
+    assert result["requirements"][1]["deterministic_override"]["scope"] == (
+        "continuous_time_representation_only"
+    )
 
 
 def fixture(tmp_path):

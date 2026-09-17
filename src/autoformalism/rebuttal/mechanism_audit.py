@@ -242,6 +242,21 @@ def consensus(packet: dict, reviews: list[Review | None]) -> dict:
                 "review_disagreement": verdicts[0] != verdicts[1],
             }
         )
+        # A known representation mismatch is not made uncertain by an LLM's
+        # omission or contradictory answer. This affects only that public
+        # modeling obligation, not the separate scientific mechanism verdicts.
+        if (
+            packet["equation_semantics"] == "native_increment"
+            and requirement["category"] == "modeling"
+            and "explicit continuous-time model" in requirement["text"].lower()
+        ):
+            rows[-1].update(
+                verdict="fail",
+                deterministic_override={
+                    "reason": "native sample increments are not an explicit ODE",
+                    "scope": "continuous_time_representation_only",
+                },
+            )
     counts = {}
     for category in ("task_mechanism", "modeling"):
         group = [r for r in rows if r["category"] == category]

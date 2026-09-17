@@ -35,6 +35,9 @@ verdict; missing reviews and disagreements yield unresolved. Unresolved units
 remain in the denominator. Missing model counts are always shown separately;
 the available-model supported fraction must not be represented as an all-run
 success rate. Modeling compliance is reported separately from mechanisms.
+One known representation fact is enforced independently: native D3 increments
+fail an explicitly requested continuous-time representation, even if the LLM
+contradicts that fact. This override does not fail unrelated mechanism units.
 
 This is a **new, uncalibrated equation-review rubric**, not a reuse claim for the
 earlier paired judge's calibration. Repeated seeds of one model are not independent
