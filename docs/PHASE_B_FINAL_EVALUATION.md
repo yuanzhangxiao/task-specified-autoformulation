@@ -2,6 +2,14 @@
 
 ## Purpose
 
+**Reporting clarification (2026-09-17):** the historical field
+`mechanism_compliance` below is a graph-score compatibility alias, not full
+scientific compliance. Interpret endpoint 2 as **public graph compliance**.
+The opt-in [public mechanism audit](PUBLIC_MECHANISM_AUDIT.md) keeps graph
+results, advisory equation reviews, and behavioral evidence separate, without
+changing historical selection or scoring. The new review rubric is not yet
+calibrated; agreement of two seeds is not an expert ground-truth certificate.
+
 The LLM judge is part of Autoformalism: it supplies public-information
 scientific feedback and participates in the frozen search/selection protocol.
 It is not, however, the source of hidden benchmark truth. Final evaluation

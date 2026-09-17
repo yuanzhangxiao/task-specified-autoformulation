@@ -1,11 +1,15 @@
 # Public mechanism-compliance signals
 
-Mechanism evaluation exposes two separate deterministic endpoints. They are not
-combined into a weighted score.
+The legacy evaluator exposes deterministic **structural** endpoints. They are not
+full scientific mechanism compliance and are not combined into a weighted score.
+The saved-model audit in [PUBLIC_MECHANISM_AUDIT.md](PUBLIC_MECHANISM_AUDIT.md)
+reports these separately from evidence-bearing public equation reviews and
+behavioral evidence availability. Its new reports omit the misleading alias
+`mechanism_compliance`; historical artifacts and runtime gates remain unchanged.
 
 ## Graph mechanism compliance
 
-`graph_mechanism_compliance` is the primary scientific signal. For each
+`graph_mechanism_compliance` is a structural requirement signal. For each
 publicly required mechanism, the evaluator searches the candidate's directed
 dependency graph for candidate-owned state or process components that:
 
@@ -17,6 +21,13 @@ The check does not depend on proposer-supplied mechanism names or tags. It
 allows alternative latent-state names and alternative restricted expressions.
 Sign requirements that cannot yet be certified from graph structure remain
 ambiguous and make the separate completeness flag false.
+
+The graph evaluator does not receive fitted values or trajectories. It cannot
+establish nonzero pathway activity, correct timescales, physically appropriate
+nonlinear functions, or scientific correctness. A 100% graph score means only
+that all predicates actually encoded in the specification passed. Annotation
+aliases such as `nonlinear_feedback` do not create additional predicates. High
+scores in graph-filtered model populations are also a consequence of selection.
 
 ## Mechanism annotation compliance
 
