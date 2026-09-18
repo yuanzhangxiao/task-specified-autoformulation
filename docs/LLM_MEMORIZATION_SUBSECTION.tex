@@ -1,0 +1,41 @@
+% Round-12 Autoformalism full-arm endpoints and saved baseline validation replay.
+% Provenance and every underlying run are in docs/LLM_MEMORIZATION_EVIDENCE.md.
+\subsection{Did the LLM Proposer Memorize the Model?}
+\label{sec:experiment_memorization}
+
+We examine dependence on familiar scientific names using the Dalla Man
+$2\times2$ contrast: canonical versus perturbed dynamics, each presented with
+named or obfuscated variables and descriptions. Within each semantic pair,
+numerical trajectories, channel availability, and task burden are preserved.
+Median validation free-rollout NMSE across two Autoformalism runs and three
+GPT-5.6 Sol runs per cell is:
+
+\begin{center}
+\begin{tabular}{llrr}
+\hline
+Dynamics & Presentation & Autoformalism & GPT-5.6 Sol \\
+\hline
+Canonical & Named      & $0.354$ & $0.526$ \\
+Canonical & Obfuscated & $0.257$ & $0.0310$ \\
+Perturbed & Named      & $0.462$ & $0.0743$ \\
+Perturbed & Obfuscated & $0.244$ & $4.74\times10^4$ \\
+\hline
+\end{tabular}
+\end{center}
+
+Autoformalism's median error does not increase under obfuscation for either
+dynamics variant. GPT-5.6 Sol also improves under obfuscation on canonical
+dynamics, so these results do not support a general failure when familiar names
+are removed. Its large errors occur in the perturbed, obfuscated cell: two runs
+reach NMSE $4.74\times10^4$ and $7.81\times10^4$, while the third reaches $0.100$.
+Autoformalism's two errors in that cell are $0.245$ and $0.244$. Thus the observed
+contrast concerns reliability under combined dynamics and presentation changes,
+with substantial variation across GPT-5.6 Sol runs.
+
+These results support Autoformalism's robustness to the tested changes without
+relying on explicit physiological naming cues. They neither prove that its
+proposer avoids memorization nor establish that GPT-5.6 Sol retrieved a known
+model. Obfuscation does not remove every recognizable pattern, and differences
+in search, numerical fitting, and model selection can also affect robustness.
+The small, unequal run counts and reuse of validation for model selection make
+this a descriptive development comparison.
