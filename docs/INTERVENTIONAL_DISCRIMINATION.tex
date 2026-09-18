@@ -1,0 +1,37 @@
+% Paper-ready replacement subsection. Round-12 development endpoints only.
+% Sources, all matched comparisons, and scope are documented in
+% docs/INTERVENTIONAL_DISCRIMINATION_EVIDENCE.md.
+\subsection{Interventional discrimination}
+\label{sec:experiment_identifiability}
+
+Task specifications identify the inputs that may be manipulated and the
+mechanisms a model must represent. The resulting dynamical model supports an
+input intervention by replacing the supplied input schedule while holding its
+equations and fitted parameters fixed, then simulating the response from the
+available initial observations. Future target measurements are never supplied
+during this rollout; predictions remain conditional on any auxiliaries permitted
+by the task. We therefore evaluate free-rollout NMSE on validation conditions
+absent from training, including new input amplitudes, timings, and frequencies.
+This tests response prediction under changed excitation, beyond fitting the
+recorded training trajectories.
+
+The existing benchmark evidence illustrates why training error alone is
+insufficient, although it does not establish a uniform benefit from task
+specification. Across six cells from three system families, the prediction-only
+ablation currently covers two cells and two seeds each. On the alien-device
+cell at seed~1, prediction-only achieves lower training NMSE than the full method
+($0.472$ versus $0.773$), but higher validation NMSE ($0.655$ versus $0.627$).
+Thus a $39\%$ training-error reduction does not translate into a better response
+under the held-out validation schedules. The reversal is modest: the full method
+has lower validation error in only two of the four matched runs. This ablation
+removes scientific requirements from both proposal generation and eligibility
+checks, measuring their joint contribution.
+
+A complementary example concerns model memory. On CSTR at seed~0, removing
+persistent latent states improves training NMSE from $0.132$ to $0.123$, but
+increases validation NMSE from $0.0140$ to $0.0320$ ($2.28\times$). This comparison
+changes the model class rather than the specification, and the other CSTR seed
+does not show the reversal. These examples motivate assessing response behavior
+separately from training fit; they do not demonstrate unique causal recovery or
+a large, systematic specification advantage. Since validation also selects
+models, these are development comparisons, not independent test estimates.
