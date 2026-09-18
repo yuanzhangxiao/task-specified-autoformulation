@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/DETERMINISTIC_MECHANISM_ASSESSMENT.md` defines three separate CPU-only
+saved-model assessments: public equation predicates, fitted public-channel
+activity probes, and observed validation response agreement. All methods use
+their saved parameters and actual continuous/discrete semantics. Scientific
+interpretation is optional, no overall correctness score is inferred, and the
+fitter and benchmark assets remain unchanged.
+
 `docs/REVIEW_CONTINUATION_V5.md` describes an opt-in continuation from round 12
 through round 15. Initial-construction size limits become advisory during model
 revision, with measured before/after counts. No-latent capabilities are explicit;

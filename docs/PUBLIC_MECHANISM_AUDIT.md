@@ -1,5 +1,9 @@
 # Saved-model public mechanism audit
 
+Use [`DETERMINISTIC_MECHANISM_ASSESSMENT.md`](DETERMINISTIC_MECHANISM_ASSESSMENT.md)
+for the primary CPU-only equation, fitted-activity and observed-response metrics.
+The two-call scientific interpretation below is optional.
+
 This milestone computes structural graph scores for saved SINDy, PySR,
 GPT-5.6 Sol, native Phase-B D3, and an explicitly chosen Autoformalism round.
 It separately runs a common public equation rubric. It performs **no discovery,

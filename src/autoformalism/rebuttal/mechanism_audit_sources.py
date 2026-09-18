@@ -41,6 +41,7 @@ def baseline_rows(root: Path) -> list[dict]:
             "error": source.get("error"),
             "provenance": source.get("audit"),
             "validation_nmse": None,
+            "data_identity": source.get("data_identity"),
         }
         if source["status"] == "ready":
             subject = FrozenEvaluationSubject.model_validate(source["subject"])
@@ -93,6 +94,7 @@ def d3_rows(root: Path) -> list[dict]:
             "status": "unavailable",
             "validation_nmse": None,
             "error": "native selection unavailable",
+            "data_identity": source.get("public_identity"),
         }
         path = root / "results" / str(source["index"]) / "native-selection.json"
         if path.exists():
