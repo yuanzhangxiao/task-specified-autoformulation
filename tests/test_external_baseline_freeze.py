@@ -992,3 +992,22 @@ def test_resume_proceeds_when_code_identity_matches_the_sealed_record(
     assert "postfreeze_JOB=12345" in result.stdout
     # resuming skips the already-completed preparation stage
     assert "prepare_JOB=" not in result.stdout
+
+
+def test_offline_checks_never_submit_the_sealed_chain() -> None:
+    """The copy-paste pre-check must stop before test data can be opened."""
+    path = HPC / "external_baseline_offline_checks.sh"
+    subprocess.run(["bash", "-n", str(path)], check=True)
+    text = path.read_text(encoding="utf-8")
+    executable, _, note = text.partition("cat <<'NOTE'")
+    # The submit command may appear in the closing note, never as executed code.
+    assert "submit_external_baseline_evaluation_delta.sh" in note
+    assert "submit_external_baseline_evaluation_delta.sh" not in executable
+    assert "sbatch" not in executable
+    for forbidden in (
+        "evaluate_phase_b_postfreeze",
+        "--authorize-execution",
+        "--verify-execution-record",
+        "--seal-execution-record",
+    ):
+        assert forbidden not in executable
