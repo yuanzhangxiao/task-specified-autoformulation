@@ -112,6 +112,16 @@ class RepairAction(StrictSchema):
         return self
 
 
+class WholeModelRepairAction(RepairAction):
+    """Whole-model edits without historical patch-count limits; same validators."""
+
+    equations: tuple[EquationEdit, ...] = ()
+    remove: tuple[Identifier, ...] = ()
+    mappings: tuple[MappingEdit, ...] = ()
+    initializers: tuple[InitializerEdit, ...] = ()
+    keep: tuple[Identifier, ...] = ()
+
+
 SYSTEM_PROMPT = """You revise a continuous-time scientific model. Runtime observations
 are not causal explanations. Choose the scientific hypothesis and the smallest
 coherent repair; the objective category is a priority, not a mandated component.
@@ -300,6 +310,7 @@ def commit_action(
     memory_targets: tuple[str, ...] = (),
     *,
     require_input_path: bool = True,
+    enforce_inventory_limits: bool = True,
 ) -> tuple[CandidateModel, LatentInitializationPlan, dict]:
     """Validate the whole dependency closure before any canonical mutation."""
     existing = expressions(parent)
@@ -326,7 +337,9 @@ def commit_action(
             target=name,
         )
     new_names = {e.component for e in action.equations} - set(existing)
-    if len(new_names) > 2 or len(set(existing) | new_names) - len(action.remove) > 12:
+    if enforce_inventory_limits and (
+        len(new_names) > 2 or len(set(existing) | new_names) - len(action.remove) > 12
+    ):
         raise ValueError("bounded variable budget exceeded")
     inventory = (set(existing) | new_names) - set(action.remove)
     local, role_audit = {}, []

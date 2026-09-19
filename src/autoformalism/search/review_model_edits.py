@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import Field, model_validator
 
 from autoformalism.expressions import ValidationContext, compile_candidate
@@ -14,6 +16,7 @@ from autoformalism.rebuttal.repair_transactions import (
     EquationEdit,
     MappingEdit,
     RepairAction,
+    WholeModelRepairAction,
     commit_action,
     normalized_signs,
 )
@@ -49,6 +52,8 @@ class InitializerContent(StrictSchema):
 class ModelEdits(StrictSchema):
     """The proposer supplies scientific definitions, never a controller action enum."""
 
+    action_model: ClassVar[type[RepairAction]] = RepairAction
+
     hypothesis: str = Field(min_length=1, max_length=3000)
     evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=16)
     equations: tuple[EquationEdit, ...] = Field(default=(), max_length=6)
@@ -58,7 +63,7 @@ class ModelEdits(StrictSchema):
 
     @model_validator(mode="after")
     def coherent_content(self):
-        RepairAction.model_validate(
+        self.action_model.model_validate(
             {
                 **self.model_dump(exclude={"evidence_ids"}),
                 "hypothesis": self.hypothesis[:800],
@@ -66,6 +71,16 @@ class ModelEdits(StrictSchema):
             }
         )
         return self
+
+
+class WholeModelEdits(ModelEdits):
+    """Compiler input for the explicit whole-model revision policy only."""
+
+    action_model: ClassVar[type[RepairAction]] = WholeModelRepairAction
+    equations: tuple[EquationEdit, ...] = ()
+    remove: tuple[Identifier, ...] = ()
+    mappings: tuple[MappingEdit, ...] = ()
+    initializers: tuple[InitializerContent, ...] = ()
 
 
 SYSTEM_PROMPT = """Propose one coherent scientific revision from measured TRAINING
@@ -155,6 +170,7 @@ def apply_checked_content(
     *,
     parameter_specs: tuple = (),
     enforce_size_limits: bool = True,
+    enforce_patch_limits: bool = True,
 ) -> dict:
     """Compile schema-validated content separately from the citation policy."""
     parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
@@ -172,7 +188,7 @@ def apply_checked_content(
         )
     context = ValidationContext.model_validate(bundle["context"])
     initial = LatentInitializationPlan.model_validate(bundle["initialization"]["plan"])
-    action = RepairAction.model_validate(
+    action = reply.action_model.model_validate(
         {
             **reply.model_dump(exclude={"evidence_ids"}),
             "hypothesis": reply.hypothesis[:800],
@@ -185,6 +201,7 @@ def apply_checked_content(
         action,
         context,
         require_input_path=bundle["source_task"].get("arm") != "no_spec",
+        enforce_inventory_limits=enforce_patch_limits,
     )
     model = compile_candidate(revised, context)
     new_latent = set(plan.rules) - set(initial.rules)

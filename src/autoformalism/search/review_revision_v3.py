@@ -146,6 +146,26 @@ def apply_edits(
 ) -> dict:
     """Citation quality is advisory; every equation still passes the full compiler."""
     reply = ScientificRevision.model_validate(raw)
+    return apply_content(
+        bundle,
+        packet,
+        reply,
+        parameter_specs=parameter_specs,
+        enforce_size_limits=enforce_size_limits,
+    )
+
+
+def apply_content(
+    bundle: dict,
+    packet: dict,
+    reply: ScientificRevision,
+    *,
+    parameter_specs: tuple = (),
+    enforce_size_limits: bool = True,
+    content_model: type[legacy.ModelEdits] = CheckedContent,
+    enforce_patch_limits: bool = True,
+) -> dict:
+    """Compile already schema-validated content using an explicit runtime policy."""
     equations, duplicates = _unique(reply.equations, "component")
     initializers, initial_duplicates = _unique(reply.initializers, "state")
     available = references(packet)
@@ -191,13 +211,14 @@ def apply_edits(
         else [{"channel": targets[0], "expression": reply.output_expression}],
         "initializers": [i.model_dump(mode="json") for i in initializers],
     }
-    content = CheckedContent.model_validate(translate_names(patch, inverse))
+    content = content_model.model_validate(translate_names(patch, inverse))
     result = legacy.apply_checked_content(
         bundle,
         packet,
         content,
         parameter_specs=parameter_specs,
         enforce_size_limits=enforce_size_limits,
+        enforce_patch_limits=enforce_patch_limits,
     )
     revised = result["bundle"] or bundle
     still_used = {p["name"] for p in revised["candidate"]["parameters"]} & set(cleanup)
