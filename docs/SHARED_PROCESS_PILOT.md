@@ -108,6 +108,11 @@ function obligations, inventory-revision routing limitations, nonlinear grammar
 and causal-initialization rules remain; this milestone does not add a general
 symbolic unit/conservation verifier or change the calibrated judge.
 
+For the two round-0 empty-parameter-vector execution failures, use the separate
+[parameter-free recovery runbook](SHARED_PROCESS_FIXED_MODEL_RECOVERY.md). It
+preserves this campaign and imports its results into a corrected execution root
+before any revision round is submitted.
+
 ## ACES commands
 
 Use group scratch for source, outputs and new runtime caches. This avoids the

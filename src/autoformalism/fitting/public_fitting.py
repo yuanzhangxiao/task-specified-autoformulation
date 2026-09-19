@@ -369,6 +369,27 @@ def _metrics(raw, targets) -> PublicFitMetrics:
 
 
 def _run_backend(request, model, training, validation, guesses, settings, directory):
+    # Lowering may introduce learnable initial-condition parameters even when
+    # the base equations contain none. Only the completely fixed model bypasses
+    # numerical optimization; historical nonempty-parameter routes are unchanged.
+    if not model.parameter_names:
+        from autoformalism.fitting.fixed_model import evaluate
+
+        config = (
+            FitConfig.model_validate(settings)
+            if request.profile == "general-rollout-v1"
+            else FitConfig(
+                integration_backend="solve_ivp",
+                integration_method=settings["integration_method"],
+                relative_tolerance=settings["relative_tolerance"],
+                absolute_tolerance=settings["absolute_tolerance"],
+                allow_derivative_regression=False,
+                maximum_wall_time_seconds=(
+                    settings["initializer_seconds"] + settings["refinement_seconds"]
+                ),
+            )
+        )
+        return evaluate(model, training, validation, config)
     if request.profile == "general-rollout-v1":
         return _jsonable(
             fit_candidate(
@@ -401,6 +422,15 @@ def _run_backend(request, model, training, validation, guesses, settings, direct
 
 
 def _evidence(request, raw):
+    if raw.get("execution_mode") == "parameter-free-rollout-1":
+        return {
+            "parameters": {},
+            "training": _metrics(raw["training"], request.context.targets),
+            "validation": _metrics(raw["validation"], request.context.targets),
+            "native_optimizer_converged": None,
+            "budget_exhausted": raw["budget_exhausted"],
+            "actual_residual_calls": 0,
+        }
     if request.profile == "general-rollout-v1":
         diagnostics = raw.get("diagnostics", [])
         selected = next(
@@ -523,7 +553,12 @@ def execute_fit(directory: Path) -> PublicFitResult:
                         status="complete" if complete else "fit_failed",
                         backend_result_sha256=content_sha256(raw),
                         message=(
-                            "Finite complete train/validation rollouts; accuracy is "
+                            "Parameter-free model evaluated by causal rollouts; "
+                            "no optimization was required. Accuracy is separate."
+                            if complete
+                            and raw.get("execution_mode") == "parameter-free-rollout-1"
+                            else "Finite complete train/validation rollouts; "
+                            "accuracy is "
                             "reported separately."
                             if complete
                             else "No complete finite train/validation fit; "

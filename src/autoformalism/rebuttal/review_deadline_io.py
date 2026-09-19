@@ -167,6 +167,8 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
             "scripts/hpc/run_shared_process_pilot_aces.sh",
             "scripts/hpc/submit_shared_process_pilot_aces.sh",
             "scripts/smoke_shared_process_pilot.py",
+            "scripts/recover_shared_process_fixed_models.py",
+            "scripts/hpc/run_shared_process_fixed_recovery_aces.sh",
         )
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
@@ -318,6 +320,10 @@ def verify(root: Path, *, execution: bool = True) -> dict:
                 raise ValueError("frozen public content differs")
     if plan["protocol"] in CONTINUATION_PROTOCOLS:
         from autoformalism.rebuttal.review_continuation import verify_imports
+
+        verify_imports(root, plan)
+    if "parameter_free_recovery" in plan:
+        from autoformalism.rebuttal.shared_process_recovery import verify_imports
 
         verify_imports(root, plan)
     return plan

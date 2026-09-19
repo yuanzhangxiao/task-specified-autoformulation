@@ -599,7 +599,9 @@ def replay_packet(root, directory, request, result, training):
         ),
         parameters=result.parameters,
         numerical_status={
-            "feedback_status": "budget_limited_unresolved"
+            "feedback_status": "fixed_model_evaluated"
+            if not model.parameter_names and not result.budget_exhausted
+            else "budget_limited_unresolved"
             if result.budget_exhausted
             else "local_optimizer_stopped",
             "native_optimizer_converged": result.native_optimizer_converged,

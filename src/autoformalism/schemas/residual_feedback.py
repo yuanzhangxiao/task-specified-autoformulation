@@ -111,6 +111,7 @@ class NumericalQualification(StrictSchema):
         "budget_limited_unresolved",
         "numerical_failure_unresolved",
         "local_optimizer_stopped",
+        "fixed_model_evaluated",
         "continuation_not_run",
     ] = "budget_limited_unresolved"
     native_optimizer_converged: bool | None = None

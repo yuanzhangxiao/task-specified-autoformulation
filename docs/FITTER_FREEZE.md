@@ -27,6 +27,14 @@ names, numerical settings, physical initial conditions and budgets. The historic
 support or a new optimizer comparison; channel-renaming invariance and real named
 output recovery are verified locally.
 
+The [parameter-free execution correction](SHARED_PROCESS_FIXED_MODEL_RECOVERY.md)
+evaluates a public model directly when no learnable parameters remain after
+initialization lowering. It avoids passing an empty vector to optimization;
+learned latent boundaries still use the existing fitter. Existing integration
+settings, training normalization and time allowances are preserved. Historical
+pilot results remain intact, with the two eligible failures evaluated in a
+separate recovery root. This is an execution fix, not an algorithm comparison.
+
 ## What is frozen
 
 - Keep existing experiment roots pinned to their original code, inputs, starts,

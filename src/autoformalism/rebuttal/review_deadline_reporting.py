@@ -37,6 +37,17 @@ def report(root: Path) -> dict:
                 content_hash([plan["artifact_sha256"], task, index]),
             )
             cost = _cost(records)
+            imported = (
+                plan.get("parameter_free_recovery", {})
+                .get("entries", {})
+                .get(task["task_id"])
+                if index == 0
+                else None
+            )
+            if imported is not None:
+                if records:
+                    raise ValueError("imported construction cannot issue fresh calls")
+                cost = imported["cost"]
             if (
                 result
                 and result.get("cost", {}).get("physical_requests", 0)
@@ -52,7 +63,9 @@ def report(root: Path) -> dict:
                     raise ValueError("fit accounting marker differs from frozen fit")
             calls += cost.get("physical_requests", 0)
             tokens += cost.get("observed_tokens", 0)
-            fits += int(fit_started)
+            fits += (
+                imported["historical_fit_attempts"] if imported else int(fit_started)
+            )
             metric = selected["fit"] if selected else {}
             rows.append(
                 {
@@ -95,6 +108,20 @@ def report(root: Path) -> dict:
                     "cumulative_tokens": tokens,
                     "cumulative_fit_attempts": fits,
                     "worker_started": (directory / "worker_started.json").exists(),
+                    **(
+                        {
+                            "source_result_sha256": imported["result_sha256"],
+                            "execution_recovery": (result or {}).get(
+                                "execution_recovery"
+                            ),
+                            "fixed_model_evaluations": int(
+                                fit_started and imported["eligible"]
+                            ),
+                            "construction_usage_imported": True,
+                        }
+                        if imported
+                        else {}
+                    ),
                     "provider_reserved_tokens": cost["budget_charge"],
                     "provider_calls_with_unknown_usage": cost[
                         "requests_with_unknown_usage"
