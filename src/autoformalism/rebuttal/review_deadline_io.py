@@ -31,8 +31,11 @@ CONTENT_PROTOCOL = "review-deadline-2"
 CONTINUATION_PROTOCOL = "review-deadline-3"
 PARAMETER_PROTOCOL = "review-deadline-4"
 REVISION_PROTOCOL = "review-deadline-5"
+SHARED_PROTOCOL = "shared-process-pilot-1"
 PARAMETER_PROTOCOLS = {PARAMETER_PROTOCOL, REVISION_PROTOCOL}
 CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, *PARAMETER_PROTOCOLS}
+SCIENTIFIC_PROTOCOLS = {*CONTINUATION_PROTOCOLS, SHARED_PROTOCOL}
+CONTENT_PROTOCOLS = {CONTENT_PROTOCOL, *SCIENTIFIC_PROTOCOLS}
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
 FILES = ("manifest.json", "proposer_prompt.txt", "train.csv", "validation.csv")
 REPO = Path(__file__).resolve().parents[3]
@@ -47,6 +50,7 @@ class DeadlineConfig(StrictSchema):
         "review-deadline-3",
         "review-deadline-4",
         "review-deadline-5",
+        "shared-process-pilot-1",
     ] = PROTOCOL
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -71,6 +75,12 @@ class DeadlineConfig(StrictSchema):
 
     @model_validator(mode="after")
     def bounded_matrix(self):
+        if self.protocol == SHARED_PROTOCOL and (
+            self.no_latent_cells or self.no_spec_cells or self.rounds != 2
+        ):
+            raise ValueError(
+                "shared-process pilot requires two rounds and only paired prompt arms"
+            )
         if len(set(self.public_cells)) != len(self.public_cells):
             raise ValueError("duplicate public cells")
         if (
@@ -95,6 +105,10 @@ class DeadlineConfig(StrictSchema):
 
 def tasks(config: DeadlineConfig) -> list[dict]:
     """Counterbalance fresh-construction arm order; refit shares full round zero."""
+    if config.protocol == SHARED_PROTOCOL:
+        from autoformalism.rebuttal.shared_process_pilot import tasks as paired_tasks
+
+        return paired_tasks(config)
     result = []
     for ci, cell in enumerate(config.public_cells):
         for seed in config.seeds:
@@ -146,6 +160,14 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
         )
     if protocol == REVISION_PROTOCOL:
         paths += ("scripts/smoke_review_revision.py",)
+    if protocol == SHARED_PROTOCOL:
+        paths += (
+            "scripts/submit_shared_process_pilot.py",
+            "scripts/submit_review_continuation.py",
+            "scripts/hpc/run_shared_process_pilot_aces.sh",
+            "scripts/hpc/submit_shared_process_pilot_aces.sh",
+            "scripts/smoke_shared_process_pilot.py",
+        )
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
     )
@@ -226,11 +248,15 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                         "revision_call_policy": {
                             "physical_attempts": 3,
                             "cumulative_token_limit": None,
-                            "schema": "model-content-inferred-routing-1",
+                            "schema": (
+                                "scientific-content-revision-6"
+                                if config.protocol == SHARED_PROTOCOL
+                                else "model-content-inferred-routing-1"
+                            ),
                             "round_zero_reused": False,
                         }
                     }
-                    if config.protocol == CONTENT_PROTOCOL
+                    if config.protocol in {CONTENT_PROTOCOL, SHARED_PROTOCOL}
                     else {}
                 ),
                 "test_data_opened": False,
@@ -241,6 +267,20 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                 ),
                 "uncertified_semantics": (
                     "reported separately; never counted as a certified pass"
+                ),
+                **(
+                    {
+                        "shared_process_experiment": {
+                            "guidance_policy": "shared-process-guidance-1",
+                            "revision_policy": "scientific-content-revision-6",
+                            "matched_fitter": True,
+                            "automatic_test_access": False,
+                            "automatic_parameter_tying": False,
+                            "controls_also_use_whole_model_revision": True,
+                        }
+                    }
+                    if config.protocol == SHARED_PROTOCOL
+                    else {}
                 ),
                 "round_zero_control": "no-iteration endpoint; not equal total compute",
                 "refit_control": (
@@ -253,7 +293,7 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
 def verify(root: Path, *, execution: bool = True) -> dict:
     """Check immutable inputs, including code for executing rather than reporting."""
     plan = sealed_read(root / "plan.json")
-    if plan["protocol"] not in {PROTOCOL, CONTENT_PROTOCOL, *CONTINUATION_PROTOCOLS}:
+    if plan["protocol"] not in {PROTOCOL, *CONTENT_PROTOCOLS}:
         raise ValueError("unsupported deadline protocol")
     config = DeadlineConfig.model_validate(plan["config"])
     if config.protocol != plan["protocol"]:

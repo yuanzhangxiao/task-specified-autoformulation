@@ -46,8 +46,10 @@ from autoformalism.search import (
     review_revision_v3,
     review_revision_v4,
     review_revision_v5,
+    review_revision_v6,
 )
 from autoformalism.search.residual_evidence import build_residual_evidence
+from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.search.staged_topology_runner import run_staged_topology
 from autoformalism.search.training_evidence import TrainingEvidence
@@ -195,10 +197,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     namespace = content_hash([plan["artifact_sha256"], task, index])
     _cache_records(directory, namespace)
     settings = io.DeadlineConfig.model_validate(plan["config"]).model_settings
-    if index and plan["protocol"] not in {
-        io.CONTENT_PROTOCOL,
-        *io.CONTINUATION_PROTOCOLS,
-    }:
+    if index and plan["protocol"] not in io.CONTENT_PROTOCOLS:
         settings = settings.model_copy(
             update={
                 "maximum_requests": 3,
@@ -209,8 +208,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     kwargs = {} if transport is None else {"transport": transport}
     client_type = (
         RevisionClient
-        if index
-        and plan["protocol"] in {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}
+        if index and plan["protocol"] in io.CONTENT_PROTOCOLS
         else BudgetedRepairClient
     )
     return client_type(
@@ -257,9 +255,11 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     if packet is None:
         return {"status": "residual_evidence_unavailable"}
     bundle = selected["bundle"]
-    improved = plan["protocol"] in io.CONTINUATION_PROTOCOLS
+    improved = plan["protocol"] in io.SCIENTIFIC_PROTOCOLS
     edits = (
-        review_revision_v5
+        review_revision_v6
+        if plan["protocol"] == io.SHARED_PROTOCOL
+        else review_revision_v5
         if plan["protocol"] == io.REVISION_PROTOCOL
         else review_revision_v4
         if plan["protocol"] == io.PARAMETER_PROTOCOL
@@ -273,7 +273,11 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
         user = edits.payload(bundle, packet, selected["fit"]["parameters"], feedback)
         try:
             record = client.call(
-                system=edits.SYSTEM_PROMPT,
+                system=system_prompt(
+                    edits.SYSTEM_PROMPT,
+                    "revision",
+                    task.get("process_guidance") == "on",
+                ),
                 user=json.dumps(user, sort_keys=True, separators=(",", ":")),
                 response_model=edits.ScientificRevision
                 if improved
@@ -311,7 +315,11 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                 "decision": decision,
                 "attempts": attempts,
                 "revision_policy": "scientific-content-revision-"
-                + plan["protocol"].rsplit("-", 1)[-1]
+                + (
+                    "6"
+                    if plan["protocol"] == io.SHARED_PROTOCOL
+                    else plan["protocol"].rsplit("-", 1)[-1]
+                )
                 if improved
                 else content_edits.POLICY,
             }
@@ -365,7 +373,11 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
         "status": "revision_failed",
         "attempts": attempts,
         "revision_policy": "scientific-content-revision-"
-        + plan["protocol"].rsplit("-", 1)[-1]
+        + (
+            "6"
+            if plan["protocol"] == io.SHARED_PROTOCOL
+            else plan["protocol"].rsplit("-", 1)[-1]
+        )
         if improved
         else content_edits.POLICY,
     }
@@ -415,6 +427,11 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
             audit_public_polarity_policy=True,
             proposer_owns_unfixed_signs=True,
             training_evidence=evidence,
+            **(
+                {"shared_process_guidance": task["process_guidance"] == "on"}
+                if plan["protocol"] == io.SHARED_PROTOCOL
+                else {}
+            ),
         )
         functions = None
         if topology["complete_topology"] and topology["public_structure_checks_passed"]:
@@ -428,6 +445,11 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
                 function_repair_policy="certified_outer_gain",
                 initialization_policy="causal_training",
                 training_evidence=evidence,
+                **(
+                    {"shared_process_guidance": task["process_guidance"] == "on"}
+                    if plan["protocol"] == io.SHARED_PROTOCOL
+                    else {}
+                ),
             )
         payload.update(topology=topology, functions=functions)
         if functions and functions["complete_model"]:
@@ -443,7 +465,7 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
                 )
             except (ValueError, KeyError, ModelValidationError) as error:
                 payload.update(status="contract_failed", error=str(error))
-    elif plan["protocol"] in {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}:
+    elif plan["protocol"] in io.CONTENT_PROTOCOLS:
         payload.update(_content_revision(plan, task, parent, client))
     else:
         selected = parent["selected"]
@@ -654,7 +676,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
         incumbent = parent["selected"] if parent else None
         trial = None
         status = proposal["status"]
-        continuation = plan["protocol"] in io.CONTINUATION_PROTOCOLS
+        continuation = plan["protocol"] in io.SCIENTIFIC_PROTOCOLS
         fallback = (
             continuation
             and incumbent is not None
@@ -693,8 +715,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                     },
                     **(
                         {"allow_initialization_changes": True}
-                        if plan["protocol"]
-                        in {io.CONTENT_PROTOCOL, *io.CONTINUATION_PROTOCOLS}
+                        if plan["protocol"] in io.CONTENT_PROTOCOLS
                         else {}
                     ),
                 )

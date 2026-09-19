@@ -134,7 +134,7 @@ def report(root: Path) -> dict:
                         else "uncertified"
                     ),
                 )
-            if plan["protocol"] == io.REVISION_PROTOCOL:
+            if plan["protocol"] in {io.REVISION_PROTOCOL, io.SHARED_PROTOCOL}:
                 proposal_path = directory / "proposal.json"
                 proposal = sealed_read(proposal_path) if proposal_path.exists() else {}
                 attempts = proposal.get("attempts", [])
@@ -163,6 +163,15 @@ def report(root: Path) -> dict:
                         "unused_new_declarations_removed", []
                     ),
                 )
+            if plan["protocol"] == io.SHARED_PROTOCOL:
+                from autoformalism.rebuttal.shared_process_pilot import model_evidence
+
+                rows[-1].update(
+                    process_guidance=task["process_guidance"],
+                    arm_label=task["arm"] + "/shared_" + task["process_guidance"],
+                    shared_process_evidence=model_evidence(selected),
+                    trial_shared_process_evidence=model_evidence(trial),
+                )
     value = {
         "plan_sha256": plan["artifact_sha256"],
         "planned_rounds": len(rows),
@@ -179,7 +188,7 @@ def report(root: Path) -> dict:
         "fallback_fits": sum(r["fit_trigger"] == "incumbent_fallback" for r in rows),
     }
     public._write(root / "summary.json", value)
-    if plan["protocol"] == io.REVISION_PROTOCOL:
+    if plan["protocol"] in {io.REVISION_PROTOCOL, io.SHARED_PROTOCOL}:
         public._write(
             root / "revision_diagnostics.json",
             {
@@ -297,6 +306,10 @@ def report(root: Path) -> dict:
             + " |"
         )
     (root / "SUMMARY.md").write_text("\n".join(lines) + "\n")
+    if plan["protocol"] == io.SHARED_PROTOCOL:
+        from autoformalism.rebuttal.shared_process_pilot import write_report
+
+        write_report(root, value)
     return value
 
 

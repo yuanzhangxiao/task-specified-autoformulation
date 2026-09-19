@@ -34,6 +34,7 @@ from autoformalism.schemas.staged_topology import (
     ScientificVariable,
 )
 from autoformalism.search.causal_initialization import construct_initializers
+from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_function_prompts import (
     render_equation_function_batch_system_prompt,
     render_equation_function_batch_user_prompt,
@@ -76,13 +77,15 @@ def run_staged_functions(
     function_repair_policy: FunctionRepairPolicy = "legacy",
     initialization_policy: Literal["legacy", "causal_training"] = "legacy",
     training_evidence: TrainingEvidence | None = None,
+    shared_process_guidance: bool = False,
 ) -> dict[str, Any]:
     """Assign functions and causal initializers without fitting or topology edits."""
     if initialization_policy not in {"legacy", "causal_training"}:
         raise ValueError("unknown function initialization policy")
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     if (
-        initialization_policy == "causal_training"
+        shared_process_guidance
+        or initialization_policy == "causal_training"
         or training_evidence is not None
         or (output / "construction_contract.json").exists()
     ):
@@ -94,6 +97,8 @@ def run_staged_functions(
             "repair": function_repair_policy,
             "initialization": initialization_policy,
         }
+        if shared_process_guidance:
+            contract["shared_process_guidance"] = True
         if training_evidence is not None:
             contract["training_evidence_sha256"] = training_evidence.packet_sha256
         path = output / "construction_contract.json"
@@ -269,7 +274,11 @@ def run_staged_functions(
                 ):
                     reply, draft = request(
                         f"function_{identifier}",
-                        render_interaction_function_system_prompt(),
+                        system_prompt(
+                            render_interaction_function_system_prompt(),
+                            "functions",
+                            shared_process_guidance,
+                        ),
                         lambda diagnostic,
                         selected=selected: render_interaction_function_user_prompt(
                             **common,
@@ -318,7 +327,11 @@ def run_staged_functions(
                 }
                 reply, draft = request(
                     f"equation_functions_{equation_index}",
-                    render_equation_function_batch_system_prompt(),
+                    system_prompt(
+                        render_equation_function_batch_system_prompt(),
+                        "functions",
+                        shared_process_guidance,
+                    ),
                     lambda diagnostic, selected_equation=selected_equation: (
                         render_equation_function_batch_user_prompt(
                             **common,
@@ -381,7 +394,11 @@ def run_staged_functions(
 
                 reply, _ = request(
                     f"equation_functions_{equation_index}",
-                    render_equation_function_batch_system_prompt(),
+                    system_prompt(
+                        render_equation_function_batch_system_prompt(),
+                        "functions",
+                        shared_process_guidance,
+                    ),
                     lambda diagnostic, selected_equation=selected_equation: (
                         render_equation_function_batch_user_prompt(
                             **common,
@@ -453,7 +470,11 @@ def run_staged_functions(
                         )
                         atomic_reply, draft = request(
                             f"atomic_repair_{identifier}",
-                            render_interaction_function_system_prompt(),
+                            system_prompt(
+                                render_interaction_function_system_prompt(),
+                                "functions",
+                                shared_process_guidance,
+                            ),
                             lambda runtime_diagnostic,
                             selected=selected: render_interaction_function_user_prompt(
                                 **common,

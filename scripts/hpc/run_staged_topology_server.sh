@@ -22,7 +22,7 @@ else
 fi
 readonly protocol platform
 case "${protocol}" in
-  review-deadline-1|review-deadline-2|review-deadline-3|review-deadline-4|review-deadline-5) worker_script=review_deadline.py ;;
+  review-deadline-1|review-deadline-2|review-deadline-3|review-deadline-4|review-deadline-5|shared-process-pilot-1) worker_script=review_deadline.py ;;
   prefit-numerical-sibling-1) worker_script=prefit_numerical_sibling.py ;;
   prefit-requirement-feedback-1) worker_script=prefit_requirement_campaign.py ;;
   prefit-matched-feedback-1) worker_script=prefit_feedback_campaign.py ;;
@@ -204,7 +204,12 @@ trap cleanup EXIT
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader \
   >"${runtime_root}/gpu-${SLURM_JOB_ID}.txt"
 date -u +%Y-%m-%dT%H:%M:%SZ >"${runtime_root}/started-${SLURM_JOB_ID}.txt"
-git -C "${AF_REPO_ROOT}" rev-parse HEAD >"${runtime_root}/commit-${SLURM_JOB_ID}.txt"
+if [[ "$protocol" == shared-process-pilot-1 && -f "$AF_REPO_ROOT/SOURCE_COMMIT" ]]; then
+  [[ "$(cat "$AF_REPO_ROOT/SOURCE_COMMIT")" == "${AF_COMMIT:?}" ]] || exit 2
+  printf '%s\n' "$AF_COMMIT" >"${runtime_root}/commit-${SLURM_JOB_ID}.txt"
+else
+  git -C "${AF_REPO_ROOT}" rev-parse HEAD >"${runtime_root}/commit-${SLURM_JOB_ID}.txt"
+fi
 sha256sum "${AF_REPO_ROOT}/scripts/hpc/run_staged_topology_server.sh" \
   >"${runtime_root}/launcher-${SLURM_JOB_ID}.sha256"
 "${runtime}" exec --nv \

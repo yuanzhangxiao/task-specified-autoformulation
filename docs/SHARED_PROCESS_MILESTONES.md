@@ -44,11 +44,11 @@ preserve them. A process can be signed; positivity is not inferred merely becaus
 it is called a process. Internal differences and nonlinear sign changes remain
 part of its law. Opposite equation signs alone do not establish conservation.
 
-The future construction schema should therefore distinguish a declared transfer
-from a generic shared response. It should record the interpretation and any
-explicit conversion relationship, using the existing restricted expression and
-parameter-role contracts. The actual response schema and lowering are Milestone 2;
-this document does not claim they are already deployed.
+The first construction pilot distinguishes transfer, conversion and response
+through existing scientific-role fields and guidance. It introduces no redundant
+process type or machine-certified balance declaration. The detailed saved-model
+audit did not justify imposing a new transfer schema; richer checked relationships
+remain a possible later extension, guided by evidence.
 
 ## Milestone 1 — inventory and removal of revision quotas
 
@@ -130,23 +130,27 @@ small fitting/fallback checks. Changed-file lint passed. Repository-wide
 
 ## Milestone 2 — shared-process construction and coherent revision
 
-Add process-aware obligations to the existing variable/topology/interaction flow,
-not a second independent model generator. A consumer should reuse the chosen law,
-and a shared-transfer conversion should not acquire an arbitrary independent gain.
-Integrate the tested whole-model revision adapter into a new campaign version.
-Expose resource usage rather than silently truncating coherent patches.
+Implemented as the opt-in `shared-process-pilot-1` comparison; see
+[SHARED_PROCESS_PILOT.md](SHARED_PROCESS_PILOT.md) for the frozen matrix, commands,
+reporting and limitations. The existing variable/topology/interaction prompts
+receive optional stage-specific guidance. Whole-model v6 revision is wired into
+both arms. Both also use explicit broader construction capacities, with unchanged
+LLM and fitting budgets. Historical campaigns retain their own policy.
 
-First check deterministic equivalence of inline versus named-process equations,
-including parameter identities and derivatives, using illustrative transfer and
-response models. Then run a small matched ACES construction pilot on development
-cells, retaining the full/brief contrast. Freeze seeds, LLM budgets and fitter
-settings before submission. Compare valid construction, actual process reuse,
-deterministic mechanism evidence, output NMSE, parameter count and token usage.
-Use the existing CPU fitting path; no new numerical-method comparison.
+The detailed round-15 audit found 23 available models, 16 exact groups in eight
+models and 67 similar groups in eighteen. Exact groups already share parameter
+names; factoring them is not a parameter reduction. The sole directly reused named
+process was an output expression consumed by its mapping and one state equation.
+The pilot therefore reports governing-equation reuse separately and does not turn
+syntax witnesses into transfer certification.
 
-Advance only when valid construction and lowering work. A richer representation
-need not improve every benchmark, particularly where auxiliary trajectories make
-the public target task conditional on already observed internal quantities.
+The matched pilot covers three families, two seeds, both initial-information
+variants and guidance on/off: 24 fresh lineages and one revision round, at most
+48 fits. Review round 0 before explicitly submitting round 1. Tests compare inline
+and named law values and parameter derivatives; an offline prescribed-provider
+smoke exercises the real frozen fitter and atomic revision. Scientific benefit
+requires the live development results. No pruning, new judge or test access follows
+automatically.
 
 ## Milestone 3 — process-aware pruning
 

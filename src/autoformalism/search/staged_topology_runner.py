@@ -22,6 +22,7 @@ from autoformalism.schemas.staged_topology import (
     VariableReply,
     equation_reply_model,
 )
+from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_topology_prompts import (
     render_equation_topology_system_prompt,
     render_equation_topology_user_prompt,
@@ -267,12 +268,19 @@ def run_staged_topology(
     hybrid_variable_construction: bool = False,
     proposer_owns_unfixed_signs: bool = False,
     training_evidence: TrainingEvidence | None = None,
+    shared_process_guidance: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     contract_path = output / "evidence_contract.json"
-    if training_evidence is not None or contract_path.exists():
+    if (
+        shared_process_guidance
+        or training_evidence is not None
+        or contract_path.exists()
+    ):
         contract = {"brief": enriched, "context": context.model_dump(mode="json")}
+        if shared_process_guidance:
+            contract["shared_process_guidance"] = True
         if contract_path.exists() and json.loads(contract_path.read_text()) != contract:
             raise ValueError("topology evidence contract differs")
         if not contract_path.exists() and (output / "result.json").exists():
@@ -381,7 +389,11 @@ def run_staged_topology(
                 for attempt in range(client.settings.attempts_per_step):
                     rejected: object = None
                     record = client.call(
-                        system=render_variable_identification_system_prompt(),
+                        system=system_prompt(
+                            render_variable_identification_system_prompt(),
+                            "variables",
+                            shared_process_guidance,
+                        ),
                         user=render_variable_identification_user_prompt(
                             public_brief_json=brief_json,
                             agenda_json=item.model_dump_json(),
@@ -486,7 +498,11 @@ def run_staged_topology(
 
                 inventory = request(
                     f"variables_{index}",
-                    render_variable_identification_system_prompt(),
+                    system_prompt(
+                        render_variable_identification_system_prompt(),
+                        "variables",
+                        shared_process_guidance,
+                    ),
                     lambda diagnostic,
                     item=item,
                     inventory=inventory: render_variable_identification_user_prompt(
@@ -554,7 +570,11 @@ def run_staged_topology(
 
             accepted = request(
                 f"equation_{selected.name}",
-                render_equation_topology_system_prompt(),
+                system_prompt(
+                    render_equation_topology_system_prompt(),
+                    "topology",
+                    shared_process_guidance,
+                ),
                 lambda diagnostic,
                 selected=selected,
                 equations=equations,
