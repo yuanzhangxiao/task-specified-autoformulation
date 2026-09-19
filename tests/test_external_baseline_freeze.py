@@ -19,6 +19,7 @@ from autoformalism.rebuttal.external_baseline_freeze import (
     reject_refit_derived_source,
     require_executable_freeze,
     resolve_external_baseline_sources,
+    symbolic_layout,
     unavailable_reused_rows,
     verify_recorded_hashes,
     verify_request_roster_association,
@@ -1011,3 +1012,73 @@ def test_offline_checks_never_submit_the_sealed_chain() -> None:
         "--seal-execution-record",
     ):
         assert forbidden not in executable
+
+
+# --- unsealed development-run layout --------------------------------------
+
+
+def _development_runs(
+    tmp_path: Path, *, complete: bool = True, status: str = "complete"
+) -> Path:
+    """Mirror the producer's unsealed layout: runs/<method>/<id>_<tier>_seed<r>."""
+    root = tmp_path / "public-baselines-full-v1"
+    run = root / "runs" / "sindy" / "phase_b_cell_easy_seed0"
+    run.mkdir(parents=True)
+    if complete:
+        (run / "result.json").write_text(
+            json.dumps(_development_result("sindy", "phase_b_cell", "easy", 0)),
+            encoding="utf-8",
+        )
+        (run / "run_status.json").write_text(
+            json.dumps(
+                {
+                    "status": status,
+                    "elapsed_wall_seconds": 1.0,
+                    "wall_timeout_seconds": 10.0,
+                }
+            ),
+            encoding="utf-8",
+        )
+    return root
+
+
+def test_layout_detection_prefers_a_readiness_freeze(tmp_path: Path) -> None:
+    assert symbolic_layout(tmp_path / "absent") == "absent"
+    assert symbolic_layout(_development_runs(tmp_path)) == "development_runs"
+    freeze = _symbolic_freeze(
+        tmp_path / "sealed",
+        tasks=[{"task_index": 0, "method": "sindy", **CELL, "repetition": 0}],
+        write={0: _development_result("sindy", "phase_b_cell", "easy", 0)},
+    )
+    assert symbolic_layout(freeze) == "readiness_freeze"
+
+
+def test_unsealed_development_runs_are_resolved(tmp_path: Path) -> None:
+    """The readiness freeze cannot exist while any cell is unfinished."""
+    root = _development_runs(tmp_path)
+    plan = _plan([_method("sindy")])
+    requests, sources = resolve_external_baseline_sources(plan, roots={"sindy": root})
+
+    assert len(requests) == 1
+    assert sources[0].artifact_status == "available"
+    assert sources[0].adapter_requested is True
+    assert sources[0].source_path.endswith(
+        "runs/sindy/phase_b_cell_easy_seed0/result.json"
+    )
+    assert set(sources[0].artifact_sha256) == {"result.json", "run_status.json"}
+
+
+def test_unfinished_development_run_fails_closed(tmp_path: Path) -> None:
+    root = _development_runs(tmp_path, status="timed_out")
+    plan = _plan([_method("sindy")])
+    with pytest.raises(ValueError, match="did not terminate complete"):
+        resolve_external_baseline_sources(plan, roots={"sindy": root})
+
+
+def test_absent_development_run_is_a_missing_row(tmp_path: Path) -> None:
+    root = _development_runs(tmp_path, complete=False)
+    plan = _plan([_method("sindy")])
+    requests, sources = resolve_external_baseline_sources(plan, roots={"sindy": root})
+    assert requests == ()
+    assert sources[0].artifact_status == "missing"
+    assert sources[0].missing_artifacts[0].endswith("result.json")

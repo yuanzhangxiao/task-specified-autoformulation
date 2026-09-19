@@ -17,6 +17,7 @@ from autoformalism.rebuttal.external_baseline_freeze import (
     reconcile,
     require_executable_freeze,
     resolve_external_baseline_sources,
+    symbolic_layout,
     unavailable_reused_rows,
     verify_recorded_hashes,
     verify_request_roster_association,
@@ -143,6 +144,9 @@ def _prepare(parser, args, output_root: Path) -> None:
         "repetition_count": len(plan.repetitions),
         "reporting_roster": plan.reporting_roster,
         "method_ids": [item.method_id for item in plan.methods],
+        "symbolic_source_layout": symbolic_layout(
+            args.symbolic_development_freeze
+        ),
         "reused_freeze": reused_manifest,
         "withheld_outcome_count": len(withheld),
         "source_adapter_requests_sha256": _sha256(requests_path),

@@ -53,13 +53,35 @@ to the planned total.
 
 ### SINDy and PySR
 
-Source: the **development readiness freeze**, one selected
-`BaselineDevelopmentResult` per task at
-`<development-root>/common-readiness-freeze/tasks/task_NNN.json`
-(schema `phase-b-baseline-development-result-1`), with identity resolved
-through `<...>/inputs/task_plan.jsonl`. Coefficients are fitted on training
-data only; validation selects the SINDy threshold and the PySR expression.
-Coefficients are embedded in the equation strings, so the adapter reports
+Two source layouts are accepted, detected automatically and recorded in the
+manifest as `symbolic_source_layout`:
+
+1. **`readiness_freeze`** — the sealed development readiness freeze, one
+   selected `BaselineDevelopmentResult` per task at
+   `<root>/tasks/task_NNN.json` with identity from
+   `<root>/inputs/task_plan.jsonl`.
+2. **`development_runs`** — the unsealed development experiment root, at
+   `<root>/runs/<method>/<benchmark_id>_<tier>_seed<repetition>/result.json`.
+
+The second exists because the readiness freeze requires **all 360** development
+tasks to have completed (`freeze_phase_b_public_baseline_development_results.py:204`
+raises `baseline task is not complete` otherwise). While any cell is
+unfinished, that freeze cannot be built, and as of 2026-09-19 SINDy and PySR
+stand at 102 of 120 each, so it does not exist. The raw runs hold the same
+`phase-b-baseline-development-result-1` artifacts, so the train-only contract
+and the refit bypass are unaffected.
+
+Unsealed runs carry **weaker provenance**: they are not sealed behind a single
+content hash, and a later development run could add or change cells. Each run
+is therefore checked individually — its `run_status.json` must report
+`complete`, and its result must be `development_complete` with test data
+unopened — and every accepted artifact is hashed into the roster, which
+`--verify` re-checks before adaptation. Report the recorded
+`symbolic_source_layout` alongside any result taken from this source.
+
+In both layouts, coefficients are fitted on training data only; validation
+selects the SINDy threshold and the PySR expression. Coefficients are embedded
+in the equation strings, so the adapter reports
 `parameterization: not_required`. Neither method reads the proposer prompt.
 
 ### GPT-5.6 Sol
@@ -153,8 +175,9 @@ Development-stage counts from the 2026-09-16 saved-baseline validation replay
 come from a validation replay, not an inventory of the frozen development
 results:
 
-- SINDy 102 / 120 complete, 18 unavailable;
-- PySR 102 / 120 complete, 18 unavailable;
+- SINDy 102 / 120 complete, 18 unavailable (confirmed on the cluster
+  2026-09-19: 102 `result.json` under `runs/sindy/`);
+- PySR 102 / 120 complete, 18 unavailable (likewise under `runs/pysr/`);
 - Sol 119 / 120, with one rollout failure on
   `phase_b_anonymous_system_task_canonical_opaque_easy` repetition 0;
 - native D3: no Phase-B matrix completion is **recorded locally**. Whether the

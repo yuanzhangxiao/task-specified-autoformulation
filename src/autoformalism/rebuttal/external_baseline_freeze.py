@@ -41,6 +41,9 @@ D3_REQUIRED_ARTIFACTS = ("result.json", "native-selection.json")
 #: Written only when the generational checkpoint survived; never assumed.
 D3_OPTIONAL_ARTIFACTS = ("d3_checkpoint.json",)
 
+#: How a symbolic source root stores its selected development results.
+SymbolicLayout = Literal["readiness_freeze", "development_runs", "absent"]
+
 
 class ExternalBaselineMethodPlan(BaseModel):
     """One external baseline and the execution semantics its models require."""
@@ -234,6 +237,33 @@ def reject_refit_derived_source(path: Path) -> None:
         raise ValueError(f"source already opened test data: {path}")
 
 
+def require_complete_run_status(path: Path) -> None:
+    """Apply the readiness freeze's terminal-status rule to one unsealed run."""
+    payload = _read_object(path)
+    if payload.get("status") != "complete":
+        raise ValueError(
+            f"development run did not terminate complete: {path} "
+            f"(status={payload.get('status')!r})"
+        )
+
+
+def symbolic_layout(root: Path) -> SymbolicLayout:
+    """Classify a symbolic source root.
+
+    The readiness freeze requires all 360 development tasks to have completed,
+    so it does not exist while any cell is unfinished. The raw development
+    experiment root holds the same `BaselineDevelopmentResult` artifacts and is
+    accepted instead, with each run's terminal status checked individually. Its
+    provenance is weaker: the runs are not sealed behind one content hash.
+    """
+    resolved = root.expanduser().resolve()
+    if (resolved / "inputs" / "task_plan.jsonl").is_file():
+        return "readiness_freeze"
+    if (resolved / "runs").is_dir():
+        return "development_runs"
+    return "absent"
+
+
 def symbolic_source_index(
     development_freeze_root: Path,
 ) -> dict[tuple[str, str, str, int], int] | None:
@@ -292,9 +322,14 @@ def resolve_external_baseline_sources(
         if root is None:
             raise ValueError(f"no source root supplied for {method.method_id!r}")
         resolved = root.expanduser().resolve()
+        layout: SymbolicLayout = (
+            symbolic_layout(resolved)
+            if method.source_layout == "symbolic_development_freeze"
+            else "absent"
+        )
         symbolic = (
             symbolic_source_index(resolved)
-            if method.source_layout == "symbolic_development_freeze"
+            if layout == "readiness_freeze"
             else None
         )
         native = (
@@ -308,6 +343,7 @@ def resolve_external_baseline_sources(
                     plan_method=method,
                     root=resolved,
                     symbolic=symbolic,
+                    symbolic_layout=layout,
                     native=native,
                     cell=cell,
                     repetition=repetition,
@@ -553,6 +589,7 @@ def _resolve_one(
     plan_method: ExternalBaselineMethodPlan,
     root: Path,
     symbolic: dict[tuple[str, str, str, int], int] | None,
+    symbolic_layout: SymbolicLayout,
     native: dict[tuple[str, str, int], int] | None,
     cell: FinalEvaluationPilotCell,
     repetition: int,
@@ -571,7 +608,9 @@ def _resolve_one(
         "source_kind": plan_method.source_kind,
         "evaluator_status": evaluator_status,
     }
-    location = _locate(plan_method, root, symbolic, native, cell, repetition)
+    location = _locate(
+        plan_method, root, symbolic, symbolic_layout, native, cell, repetition
+    )
     if location is None:
         return ExternalBaselineSource(
             **common,
@@ -599,6 +638,9 @@ def _resolve_one(
     if evaluator_status == "ready":
         reject_refit_derived_source(source_path)
         _validate_identity(source_path, cell, repetition)
+        status_path = source_path.with_name("run_status.json")
+        if status_path.is_file():
+            require_complete_run_status(status_path)
     return ExternalBaselineSource(
         **common,
         source_path=str(source_path),
@@ -613,20 +655,33 @@ def _locate(
     method: ExternalBaselineMethodPlan,
     root: Path,
     symbolic: dict[tuple[str, str, str, int], int] | None,
+    symbolic_layout: SymbolicLayout,
     native: dict[tuple[str, str, int], int] | None,
     cell: FinalEvaluationPilotCell,
     repetition: int,
 ) -> tuple[Path, tuple[Path, ...], tuple[Path, ...]] | None:
     """Return the source path plus required and optional companions."""
     if method.source_layout == "symbolic_development_freeze":
-        if symbolic is None:
+        if symbolic_layout == "readiness_freeze":
+            if symbolic is None:
+                return None
+            identity = (method.source_kind, cell.benchmark_id, cell.tier, repetition)
+            task_index = symbolic.get(identity)
+            if task_index is None:
+                return None
+            path = root / "tasks" / f"task_{task_index:03d}.json"
+            return path, (path,), ()
+        if symbolic_layout == "absent":
             return None
-        identity = (method.source_kind, cell.benchmark_id, cell.tier, repetition)
-        task_index = symbolic.get(identity)
-        if task_index is None:
-            return None
-        path = root / "tasks" / f"task_{task_index:03d}.json"
-        return path, (path,), ()
+        # The producer names runs "<benchmark_id>_<tier>_seed<repetition>".
+        directory = (
+            root
+            / "runs"
+            / method.source_kind
+            / f"{cell.benchmark_id}_{cell.tier}_seed{repetition}"
+        )
+        path = directory / "result.json"
+        return path, (path, directory / "run_status.json"), ()
     if native is None:
         return None
     position = native.get((cell.benchmark_id, cell.tier, repetition))
