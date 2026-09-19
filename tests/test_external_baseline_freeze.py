@@ -1082,3 +1082,36 @@ def test_absent_development_run_is_a_missing_row(tmp_path: Path) -> None:
     assert requests == ()
     assert sources[0].artifact_status == "missing"
     assert sources[0].missing_artifacts[0].endswith("result.json")
+
+
+def test_timeout_and_failure_are_recorded_distinctly(tmp_path: Path) -> None:
+    """A wall-clock limit is a budget artifact, not a method failure."""
+    plan = _plan([_method("sindy")])
+    for status, message, expected in (
+        ("timed_out", "baseline wall-clock limit reached", "of a 1800.0s budget"),
+        (
+            "failed",
+            "ValueError: no SINDy support passed safe validation rollout",
+            "no SINDy support",
+        ),
+    ):
+        root = tmp_path / status
+        run = root / "runs" / "sindy" / "phase_b_cell_easy_seed0"
+        run.mkdir(parents=True)
+        (run / "run_status.json").write_text(
+            json.dumps(
+                {
+                    "status": status,
+                    "elapsed_wall_seconds": 1800.0,
+                    "wall_timeout_seconds": 1800.0,
+                    "message": message,
+                }
+            ),
+            encoding="utf-8",
+        )
+        _, sources = resolve_external_baseline_sources(plan, roots={"sindy": root})
+        row = sources[0]
+        assert row.artifact_status == "missing"
+        assert row.terminal_status == status
+        assert expected in row.reason
+        assert row.outcome().error == row.reason

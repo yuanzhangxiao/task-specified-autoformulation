@@ -94,6 +94,7 @@ def join(
                 "tier": source.tier,
                 "repetition": source.repetition,
                 "state": state,
+                "terminal_status": source.terminal_status or "",
                 "reason": source.reason or outcome.error or "",
                 "runtime_valid": (
                     record.runtime.valid if record is not None else None
@@ -129,6 +130,13 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
                 state: sum(row["state"] == state for row in subset)
                 for state in STATES
             },
+            # A wall-clock timeout is a budget limit, not a method failure.
+            "missing_timed_out": sum(
+                row["terminal_status"] == "timed_out" for row in subset
+            ),
+            "missing_failed": sum(
+                row["terminal_status"] == "failed" for row in subset
+            ),
             "scored_count": len(scored),
             "target_nmse_median_conditional_on_success": (
                 median(scored) if scored else None

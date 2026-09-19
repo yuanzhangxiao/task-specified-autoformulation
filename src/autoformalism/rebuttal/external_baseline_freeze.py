@@ -151,6 +151,9 @@ class ExternalBaselineSource(BaseModel):
     reason: str | None = None
     missing_artifacts: tuple[str, ...] = ()
     artifact_sha256: dict[str, str] = Field(default_factory=dict)
+    #: Terminal status of an absent run, when the producer recorded one.
+    #: A wall-clock timeout is a budget limit, not a method failure.
+    terminal_status: Literal['failed', 'timed_out'] | None = None
 
     @model_validator(mode="after")
     def requested_only_when_available_and_ready(self) -> ExternalBaselineSource:
@@ -626,13 +629,15 @@ def _resolve_one(
     source_path, required, optional = location
     absent = tuple(sorted(str(item) for item in required if not item.is_file()))
     if absent:
+        terminal, detail = _terminal_outcome(source_path)
         return ExternalBaselineSource(
             **common,
             source_path=str(source_path),
             artifact_status="missing",
             adapter_requested=False,
-            reason=f"{len(absent)} required artifact(s) absent",
+            reason=detail or f"{len(absent)} required artifact(s) absent",
             missing_artifacts=absent,
+            terminal_status=terminal,
         )
     present = tuple(item for item in (*required, *optional) if item.is_file())
     if evaluator_status == "ready":
@@ -649,6 +654,33 @@ def _resolve_one(
         reason=(None if evaluator_status == "ready" else plan_method.blocking_gap),
         artifact_sha256={item.name: _sha256(item) for item in present},
     )
+
+
+def _terminal_outcome(
+    source_path: Path,
+) -> tuple[Literal["failed", "timed_out"] | None, str | None]:
+    """Recover why a run produced no result, when the producer recorded it.
+
+    A run that hit its wall clock is budget-limited; one that raised is a
+    terminal outcome for the method on that data. Collapsing both into "absent"
+    would license reading a compute limit as a method failure.
+    """
+    status_path = source_path.with_name("run_status.json")
+    if not status_path.is_file():
+        return None, None
+    payload = _read_object(status_path)
+    status = payload.get("status")
+    if status not in {"failed", "timed_out"}:
+        return None, None
+    message = str(payload.get("message") or "").strip()
+    elapsed = payload.get("elapsed_wall_seconds")
+    limit = payload.get("wall_timeout_seconds")
+    detail = f"development run terminated {status}"
+    if status == "timed_out" and isinstance(elapsed, int | float):
+        detail += f" after {float(elapsed):.0f}s of a {limit}s budget"
+    if message:
+        detail += f": {message[:400]}"
+    return status, detail
 
 
 def _locate(

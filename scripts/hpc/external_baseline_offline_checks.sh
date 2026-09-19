@@ -17,7 +17,9 @@ readonly af_user="${USER:?}"
 : "${AF_D3_CAMPAIGN_ROOT:=${AF_WORK}/phase_b/d3-native-full-v1}"
 : "${AF_HIDDEN_AUDIT:=${AF_WORK}/phase_b/hidden-contract-audit-v2/hidden_contract_audit.json}"
 : "${AF_SOL_FREEZE_MANIFEST:=${AF_WORK}/phase_b/raw-agent-deterministic-evaluation-v1/frozen/raw_agent_freeze_manifest.json}"
-: "${AF_INVENTORY_ROOT:=${AF_WORK}/phase_b/external-baseline-inventory-v1/frozen}"
+# Frozen artifacts are write-once, so each survey lands in its own directory
+# and re-running never collides with an earlier inventory.
+: "${AF_INVENTORY_ROOT:=${AF_WORK}/phase_b/external-baseline-inventory/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 : "${AF_BUDGET24_ROOT:=${AF_WORK}/phase_b/raw-data-agent-budget24-v1}"
 
 [[ -x "${AF_PYTHON}" ]] || { echo "missing Python: ${AF_PYTHON}" >&2; exit 2; }
@@ -74,6 +76,7 @@ print('public identity:', public_development_identity(root, plan))
 "
 
 banner "4. source inventory (opens nothing)"
+echo "inventory root: ${AF_INVENTORY_ROOT}"
 "${AF_PYTHON}" scripts/prepare_external_baseline_frozen_test_evaluation.py \
   --config "${plan}" \
   --symbolic-development-freeze "${AF_SYMBOLIC_FREEZE}" \
