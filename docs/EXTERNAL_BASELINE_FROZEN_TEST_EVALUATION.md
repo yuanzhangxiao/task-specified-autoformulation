@@ -185,6 +185,39 @@ results:
 
 The preparation command produces the authoritative inventory.
 
+### Resolved 2026-09-19: absent symbolic runs are retained, not re-run
+
+Cluster inventory confirmed 324 of 480 sources available: SINDy 102, PySR 102,
+Sol 120, native D3 0. Every absent symbolic run recorded a terminal status:
+
+| | `timed_out` | `failed` |
+|---|---:|---:|
+| SINDy | 12 | 6 |
+| PySR | 18 | 0 |
+
+The 6 SINDy failures are one semantic-variant pair (CSTR named / anonymous-task
+obfuscated, easy tier, all three repetitions). Each rejected all twelve
+thresholds from `1e-4` to `1e4`, every one failing the rollout on the same
+seven trajectories, in about 43 s. That is the method's behaviour on that data.
+
+The 30 timeouts hit a wall clock — 1800 s for SINDy, 3600 s for PySR.
+
+**Decision: these runs are retained as recorded and not re-run.** Extending a
+budget or adjusting a search for one method is tuning a baseline, and the
+comparison holds every method to its own declared budget: Sol to 12 tool calls,
+the symbolic methods to their wall clocks. Re-running only the baselines would
+introduce the differential tuning this contract exists to avoid.
+
+Reporting follows from that, and the two states must not be merged:
+
+- a `failed` row is a **method** result on that data;
+- a `timed_out` row is **not evaluated under the declared budget**, a compute
+  limit rather than a method limitation, and must never be described as the
+  method failing.
+
+`missing_timed_out` and `missing_failed` in the roster report keep them apart,
+and each row carries the producer's own status message as its reason.
+
 ## 6. Metric definitions
 
 Endpoints are reported separately. **No weighted overall score is defined.**
