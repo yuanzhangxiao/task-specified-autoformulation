@@ -1,0 +1,230 @@
+{
+  "schema_version": "phase-b-external-baseline-frozen-test-evaluation-plan-1",
+  "status": "frozen_before_test_or_private_evaluation",
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_canonical_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_canonical_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_canonical_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_perturbed_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_perturbed_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_perturbed_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t1_perturbed_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_canonical_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_canonical_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_perturbed_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_perturbed_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_perturbed_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t2_perturbed_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_canonical_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_canonical_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_canonical_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_perturbed_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_perturbed_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t3_perturbed_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t3_perturbed_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_canonical_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_canonical_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_canonical_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_perturbed_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_perturbed_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_dalla_man_t4_perturbed_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_t4_perturbed_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_cstr_controlled_reactor_mechanism_canonical_named_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_obfuscated_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_cstr_controlled_reactor_mechanism_canonical_named_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_obfuscated_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_easy",
+      "tier": "easy"
+    },
+    {
+      "benchmark_id": "phase_b_alien_device_unknown_device_mechanism_canonical_functional_hard",
+      "tier": "hard"
+    },
+    {
+      "benchmark_id": "phase_b_anonymous_system_task_canonical_opaque_hard",
+      "tier": "hard"
+    }
+  ],
+  "repetitions": [
+    0,
+    1,
+    2
+  ],
+  "methods": [
+    {
+      "method_id": "sindy",
+      "source_kind": "sindy",
+      "source_layout": "symbolic_development_freeze",
+      "execution_semantics": "continuous_ode_free_rollout",
+      "parameter_provenance": "equation_embedded_train_only",
+      "fitting_data_access": "train_only",
+      "prompt_sensitive": false,
+      "implementation_status": "ready",
+      "blocking_gap": null
+    },
+    {
+      "method_id": "pysr",
+      "source_kind": "pysr",
+      "source_layout": "symbolic_development_freeze",
+      "execution_semantics": "continuous_ode_free_rollout",
+      "parameter_provenance": "equation_embedded_train_only",
+      "fitting_data_access": "train_only",
+      "prompt_sensitive": false,
+      "implementation_status": "ready",
+      "blocking_gap": null
+    },
+    {
+      "method_id": "raw_data_agent:gpt-5.6-sol",
+      "source_kind": "raw_data_agent",
+      "source_layout": "reused_external_freeze",
+      "execution_semantics": "continuous_ode_free_rollout",
+      "parameter_provenance": "provider_returned_no_refit",
+      "fitting_data_access": "train_only",
+      "prompt_sensitive": true,
+      "implementation_status": "ready",
+      "blocking_gap": null
+    },
+    {
+      "method_id": "d3_native_no_tools",
+      "source_kind": "d3",
+      "source_layout": "d3_native_campaign",
+      "execution_semantics": "discrete_increment_recursive_rollout",
+      "parameter_provenance": "checkpoint_fitted_train_only",
+      "fitting_data_access": "train_only",
+      "prompt_sensitive": true,
+      "implementation_status": "blocked",
+      "blocking_gap": "Two gaps. (1) The campaign writes its selected development result into the sealed native-selection.json; result.json is an evaluation wrapper, and the shared _adapt_d3 reader expects the historical layout instead. (2) The common post-freeze evaluator performs solve_ivp free rollout only, while native D3 learns x_next = x + f without a dt multiplier, so an ODE replay would be an unlabelled reinterpretation. A campaign reader, a discrete recursive test protocol, and a matching evaluation_protocol literal are required."
+    }
+  ],
+  "hidden_contract_audit": {
+    "schema_version": "phase-b-hidden-subspace-contract-audit-2",
+    "sha256": "5a57615899fab71fcc5991752267f6569a1ed358b04cc17923f97ae1fe60fddc",
+    "required_status": "pass"
+  },
+  "paired_numeric_data_across_semantic_variants": true,
+  "train_plus_validation_refit_permitted": false,
+  "parameter_refit_applied": false,
+  "model_selection_uses_test_results": false,
+  "weighted_overall_score_defined": false,
+  "test_data_opened": false,
+  "private_reference_opened": false,
+  "reporting_roster": "all_40_conditions"
+}

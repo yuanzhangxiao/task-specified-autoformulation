@@ -66,21 +66,28 @@ class SourceAdapterRequest(BaseModel):
 
 
 class SourceAdapterOutcome(BaseModel):
-    """Explicit success or failure for one requested source artifact."""
+    """Explicit adaptation result for one requested source artifact.
+
+    `failed` means adaptation raised on a present artifact. `missing` means the
+    artifact was never produced. `evaluator_unsupported` means the artifact
+    exists but no frozen evaluator can score it under its declared execution
+    semantics. The three are distinct because they license different reporting:
+    none of them is a zero score, and none is evidence of compliance.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str
     source_kind: SourceKind
     source_path: str
-    status: Literal["adapted", "failed"]
+    status: Literal["adapted", "failed", "missing", "evaluator_unsupported"]
     subject_id: str | None = None
     error_type: str | None = None
     error: str | None = None
 
     @model_validator(mode="after")
     def fields_match_status(self) -> SourceAdapterOutcome:
-        """Keep adapted identifiers and failure diagnostics mutually exclusive."""
+        """Keep adapted identifiers and non-adapted diagnostics exclusive."""
         if self.status == "adapted":
             if (
                 self.subject_id is None
@@ -89,7 +96,9 @@ class SourceAdapterOutcome(BaseModel):
             ):
                 raise ValueError("adapted source requires only a subject identifier")
         elif self.subject_id is not None or not self.error_type or not self.error:
-            raise ValueError("failed source requires error diagnostics only")
+            raise ValueError(
+                f"{self.status} source requires diagnostics and no subject identifier"
+            )
         return self
 
 
