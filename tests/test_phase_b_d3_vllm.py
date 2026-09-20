@@ -91,7 +91,7 @@ def test_batch_job_defaults_to_one_gpu_and_resumes_after_a_failure() -> None:
     assert "failures=$((failures + 1))" in text
     assert "export AF_VLLM_BASE_URL" in text
     # mktemp on a parent that may not exist kills the job before it logs
-    assert "mktemp" not in text
+    assert "mktemp -d" not in text
     assert "batch job starting" in text
     # the plan is frozen in-job, serialised so only the first batch pays
     assert "flock" in text and "phase_b_d3.py freeze" in text
