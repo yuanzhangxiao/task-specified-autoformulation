@@ -30,6 +30,8 @@ readonly af_user="${SLURM_JOB_USER:-${USER:?}}"
 # Each generation is one short call plus a long CPU Adam fit, so the GPU
 # idles unless several tasks run at once against the one served model.
 : "${AF_TASK_CONCURRENCY:=8}"
+: "${AF_D3_CONFIG:=${AF_REPO_ROOT}/configs/phase_b_d3_full_v1.json}"
+: "${AF_PUBLIC_ROOT:=${AF_WORK}/phase_b/inputs/public-prompt-v3}"
 : "${AF_HF_HOME:=${AF_WORK}/hf}"
 : "${AF_VLLM_IMAGE:=${AF_WORK}/containers/vllm-openai-v0.27.1.sif}"
 : "${AF_VLLM_IMAGE_URI:=docker://vllm/vllm-openai:v0.27.1}"
@@ -76,6 +78,21 @@ if [[ ! -f "${runtime_image}" ]]; then
   echo "Building job-local Apptainer sandbox from ${AF_VLLM_IMAGE_URI}"
   apptainer build --sandbox "${runtime_image}" "${AF_VLLM_IMAGE_URI}"
 fi
+
+# Freeze the plan here rather than in a separate CPU job: ACES rejects CPU
+# jobs submitted under a GPU account, and prepare is idempotent. flock
+# serialises concurrent batches so only the first pays for it.
+flock "${AF_OUTPUT_ROOT}/prepare.shlock" bash -c '
+  set -euo pipefail
+  if [[ ! -f "${AF_OUTPUT_ROOT}/plan.json" ]]; then
+    echo "freezing the campaign plan"
+    "${AF_PYTHON}" scripts/phase_b_d3.py freeze \
+      --config "${AF_D3_CONFIG}" --public-root "${AF_PUBLIC_ROOT}" \
+      --root "${AF_OUTPUT_ROOT}" --model "${AF_LOCAL_MODEL}" --provider vllm
+  else
+    echo "reusing the sealed plan"
+  fi
+'
 
 readonly port=$((20000 + RANDOM % 20000))
 readonly endpoint="http://127.0.0.1:${port}"

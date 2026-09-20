@@ -90,6 +90,9 @@ def test_batch_job_defaults_to_one_gpu_and_resumes_after_a_failure() -> None:
     # a failed task must not abandon the rest of the batch
     assert "failures=$((failures + 1))" in text
     assert "export AF_VLLM_BASE_URL" in text
+    # the plan is frozen in-job, serialised so only the first batch pays
+    assert "flock" in text and "phase_b_d3.py freeze" in text
+    assert "--provider vllm" in text
 
 
 def test_submission_batches_by_tier_and_records_a_ledger() -> None:
@@ -97,10 +100,10 @@ def test_submission_batches_by_tier_and_records_a_ledger() -> None:
     subprocess.run(["bash", "-n", str(path)], check=True)
     text = path.read_text(encoding="utf-8")
     assert "AF_TIER:=easy" in text
-    assert "--provider vllm" in text
     assert "list_phase_b_d3_task_indices.py" in text
     assert "submission_ledger.jsonl" in text
     assert 'AF_GPU_REQUEST:=--gres=gpu:h100:1' in text
     assert "${AF_GPU_REQUEST}" in text
-    # preparation is skipped when a sealed plan already exists
-    assert 'if [[ ! -f "${AF_OUTPUT_ROOT}/plan.json" ]]' in text
+    # no CPU job: ACES rejects CPU work submitted under a GPU account
+    assert "AF_CPU_PARTITION" not in text
+    assert "partition=cpu" not in text
