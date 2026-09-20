@@ -4,6 +4,13 @@ This is a development protocol. Keep both `full` and `brief_only`; the final
 method choice remains open. The numerical fitter remains frozen. Incorrect or
 contradictory specification experiments and alternating optimization are deferred.
 
+The optional explicit process-review follow-up is preceded by the new
+[detention-basin qualification](DETENTION_BENCHMARK.md). This adds a realistic
+positive control and an independent-basins negative control outside the existing
+domains, with isolated development data and a frozen-fitter attainability audit.
+It does not yet change the construction flow below, enable the review phase,
+or select a new model/reasoning setting. Review these CPU results first.
+
 ## Where shared processes enter
 
 A shared process is **introduced during variable construction**, using the existing

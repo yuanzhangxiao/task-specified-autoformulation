@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/DETENTION_BENCHMARK.md` defines a separate stormwater-basin development
+qualification: physical water balance, an independent-basins negative control,
+public train/validation exports and an eight-arm known-skeleton audit using the
+frozen single-target fitter. Its rating-table generator and private reference
+labels never enter proposer feedback. It creates no test data and does not yet
+register a seventh benchmark or alter existing shared-process campaigns.
+
 `docs/DETERMINISTIC_MECHANISM_ASSESSMENT.md` defines three separate CPU-only
 saved-model assessments: public equation predicates, fitted public-channel
 activity probes, and observed validation response agreement. All methods use

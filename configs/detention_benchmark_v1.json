@@ -1,0 +1,14 @@
+{
+  "protocol": "detention-development-1",
+  "seed": 20260919,
+  "duration_minutes": 240,
+  "sample_minutes": 4,
+  "training_trajectories": 6,
+  "validation_trajectories": 3,
+  "noise_fractions": [0.0, 0.01],
+  "starts": [
+    {"k_transfer": 30.0, "k_outlet": 30.0},
+    {"k_transfer": 120.0, "k_outlet": 100.0}
+  ],
+  "fit_profile": "collocation-single-target-v2"
+}
