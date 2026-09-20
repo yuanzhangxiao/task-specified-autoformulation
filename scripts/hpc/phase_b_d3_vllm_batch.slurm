@@ -19,7 +19,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:?}}"
 : "${AF_WORK:=/work/hdd/bibo/${af_user}}"
 : "${AF_REPO_ROOT:?AF_REPO_ROOT is required}"
 : "${AF_PYTHON:=${AF_PROJECT}/venvs/autoformalism-v21/bin/python}"
-: "${AF_OUTPUT_ROOT:?AF_OUTPUT_ROOT is required}"
+: "${AF_D3_OUTPUT_ROOT:?AF_D3_OUTPUT_ROOT is required}"
 : "${AF_TASK_INDICES:?AF_TASK_INDICES is required}"
 : "${AF_BATCH_SIZE:?AF_BATCH_SIZE is required}"
 : "${AF_LOCAL_MODEL:=openai/gpt-oss-120b}"
@@ -51,7 +51,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "batch job starting: host=$(hostname) job=${SLURM_JOB_ID:-none}"
-echo "output_root=${AF_OUTPUT_ROOT} repo=${AF_REPO_ROOT}"
+echo "output_root=${AF_D3_OUTPUT_ROOT} repo=${AF_REPO_ROOT}"
 export APPTAINER_CACHEDIR="${apptainer_cache}" APPTAINER_TMPDIR="${apptainer_tmp}"
 fit_threads=$(( ${SLURM_CPUS_PER_TASK:-8} / AF_TASK_CONCURRENCY ))
 ((fit_threads > 0)) || fit_threads=1
@@ -60,7 +60,7 @@ export MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONHASHSEED=0
 export PYTHONPATH="${AF_REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${AF_HF_HOME}" "${apptainer_cache}" "${apptainer_tmp}" \
   "$(dirname "${AF_VLLM_IMAGE}")" "${AF_REPO_ROOT}/logs" \
-  "${AF_OUTPUT_ROOT}/logs"
+  "${AF_D3_OUTPUT_ROOT}/logs"
 cd "${AF_REPO_ROOT}"
 
 # This batch's slice of the task list.
@@ -88,13 +88,13 @@ fi
 # Freeze the plan here rather than in a separate CPU job: ACES rejects CPU
 # jobs submitted under a GPU account, and prepare is idempotent. flock
 # serialises concurrent batches so only the first pays for it.
-flock "${AF_OUTPUT_ROOT}/prepare.shlock" bash -c '
+flock "${AF_D3_OUTPUT_ROOT}/prepare.shlock" bash -c '
   set -euo pipefail
-  if [[ ! -f "${AF_OUTPUT_ROOT}/plan.json" ]]; then
+  if [[ ! -f "${AF_D3_OUTPUT_ROOT}/plan.json" ]]; then
     echo "freezing the campaign plan"
-    "${AF_PYTHON}" scripts/phase_b_d3.py freeze \
+    "${AF_PYTHON}" scripts/phase_b_d3.py prepare \
       --config "${AF_D3_CONFIG}" --public-root "${AF_PUBLIC_ROOT}" \
-      --root "${AF_OUTPUT_ROOT}" --model "${AF_LOCAL_MODEL}" --provider vllm
+      --root "${AF_D3_OUTPUT_ROOT}" --model "${AF_LOCAL_MODEL}" --provider vllm
   else
     echo "reusing the sealed plan"
   fi
@@ -102,7 +102,7 @@ flock "${AF_OUTPUT_ROOT}/prepare.shlock" bash -c '
 
 readonly port=$((20000 + RANDOM % 20000))
 readonly endpoint="http://127.0.0.1:${port}"
-readonly server_log="${AF_OUTPUT_ROOT}/logs/vllm-batch-${batch}.log"
+readonly server_log="${AF_D3_OUTPUT_ROOT}/logs/vllm-batch-${batch}.log"
 
 vllm_parallel_args=()
 if ((AF_TENSOR_PARALLEL_SIZE > 1)); then
@@ -149,8 +149,8 @@ while ((position < ${#batch_indices[@]})); do
   for index in "${group[@]}"; do
     echo "== starting task ${index}"
     "${AF_PYTHON}" scripts/phase_b_d3.py run \
-      --root "${AF_OUTPUT_ROOT}" --index "${index}" \
-      >"${AF_OUTPUT_ROOT}/logs/task-${index}.out" 2>&1 &
+      --root "${AF_D3_OUTPUT_ROOT}" --index "${index}" \
+      >"${AF_D3_OUTPUT_ROOT}/logs/task-${index}.out" 2>&1 &
     pids+=("$!")
   done
   for offset in "${!pids[@]}"; do

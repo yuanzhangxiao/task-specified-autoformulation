@@ -94,7 +94,9 @@ def test_batch_job_defaults_to_one_gpu_and_resumes_after_a_failure() -> None:
     assert "mktemp -d" not in text
     assert "batch job starting" in text
     # the plan is frozen in-job, serialised so only the first batch pays
-    assert "flock" in text and "phase_b_d3.py freeze" in text
+    # the subcommand itself is checked against the CLI below, not asserted
+    # as a literal here, which would only restate whatever was written
+    assert "flock" in text
     assert "--provider vllm" in text
 
 
@@ -114,3 +116,27 @@ def test_submission_batches_by_tier_and_records_a_ledger() -> None:
     # no CPU job: ACES rejects CPU work submitted under a GPU account
     assert "AF_CPU_PARTITION" not in text
     assert "partition=cpu" not in text
+
+
+def test_launchers_call_subcommands_the_cli_actually_accepts() -> None:
+    """`freeze` is the local variable name; the subcommand is `prepare`."""
+    import re
+
+    cli = Path("scripts/phase_b_d3.py").read_text(encoding="utf-8")
+    accepted = set(re.findall(r'add_parser\("([a-z_]+)"\)', cli))
+    assert accepted == {"prepare", "run", "report"}
+    for name in ("phase_b_d3_vllm_batch.slurm", "submit_phase_b_d3_vllm.sh"):
+        text = (HPC / name).read_text(encoding="utf-8")
+        used = set(re.findall(r"phase_b_d3\.py\s+([a-z_]+)", text))
+        assert used <= accepted, f"{name} invokes {sorted(used - accepted)}"
+
+
+def test_the_d3_output_root_cannot_be_hijacked_by_another_campaign() -> None:
+    """A stale AF_OUTPUT_ROOT export once redirected D3 into a sealed root."""
+    for name in ("phase_b_d3_vllm_batch.slurm", "submit_phase_b_d3_vllm.sh"):
+        text = (HPC / name).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            assert "AF_OUTPUT_ROOT" not in line, f"{name}: {line}"
+        assert "AF_D3_OUTPUT_ROOT" in text
