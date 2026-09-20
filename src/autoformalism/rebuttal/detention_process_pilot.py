@@ -102,9 +102,10 @@ def launcher_hash():
 
 
 def _public_asset(path):
+    """Verify the release exporter's compact-JSON seal, not staged-call hashes."""
     value = public._read(path)
-    if content_hash(value["value"]) != value["sha256"]:
-        raise ValueError("source public asset seal differs")
+    if public.content_sha256(value["value"]) != value["sha256"]:
+        raise ValueError(f"source public asset seal differs: {path}")
     return value["value"]
 
 

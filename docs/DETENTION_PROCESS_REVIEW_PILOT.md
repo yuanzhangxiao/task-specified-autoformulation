@@ -131,3 +131,19 @@ The smoke uses a small temporary fixture and prescribed provider replies, then
 runs the real frozen fitter and independent solvers and verifies unchanged
 resume. It tests plumbing, not GPT-OSS scientific discovery. Existing benchmark
 assets are never modified.
+
+## Export seal compatibility correction
+
+The first discovery submission at `445f848` failed before writing its plan or
+submitting jobs. The qualification exporter uses
+`public_fitting.content_sha256` (sorted compact JSON), but the pilot checked those
+seals using the staged-call hash (sorted JSON with spaces). Identical data therefore
+failed verification. The importer now uses the exporter's exact codec; tampering
+checks remain active. The fixture uses the actual exporter, and an integration
+test imports a complete qualification release, checks deterministic resume and
+unchanged source files, and forbids reads outside its public files and manifest.
+
+Use the corrected source archive and repeat the same submission command with
+`detention-development-v1` as input and `detention-process-pilot-v1` as output.
+The saved qualification data, prompts, budgets and experiment matrix are unchanged.
+No regeneration, file deletion, re-sealing or bypassing verification is needed.

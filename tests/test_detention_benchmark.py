@@ -89,6 +89,40 @@ def test_public_boundary_no_fitted_or_hidden_validation_initials():
     assert public._capability(request, model) is None
 
 
+def test_process_pilot_imports_actual_release_without_private_reads(
+    release, tmp_path, monkeypatch
+):
+    from autoformalism.rebuttal import detention_process_pilot as pilot
+
+    allowed = {"plan.json"} | {
+        f"public/{case}/noise1/{name}.json"
+        for case in ("coupled", "independent")
+        for name in ("specification", "train", "val")
+    }
+    before = {name: (release / name).read_bytes() for name in allowed}
+    reads = []
+    original = public._read
+
+    def read_public_only(path):
+        if path.is_relative_to(release):
+            relative = str(path.relative_to(release))
+            assert relative in allowed, f"private release read: {relative}"
+            reads.append(relative)
+        return original(path)
+
+    monkeypatch.setattr(public, "_read", read_public_only)
+    config = pilot.REPO / "configs/detention_process_pilot_v1.json"
+    imported = pilot.freeze(release, tmp_path / "pilot", config)
+    assert set(reads) == allowed
+    assert len(imported["tasks"]) == 16
+    assert not imported["private_reference_opened"]
+    assert not imported["test_data_opened"]
+    assert len(imported["cells"]["coupled"]["training"]["rows"]) == 6
+    assert "audits" not in imported and "diagnostic" not in imported
+    assert pilot.freeze(release, tmp_path / "pilot", config) == imported
+    assert before == {name: (release / name).read_bytes() for name in allowed}
+
+
 def test_deterministic_resume_and_no_fitting_in_report(release, monkeypatch):
     before = (release / "plan.json").read_bytes()
     monkeypatch.setattr(

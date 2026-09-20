@@ -13,8 +13,8 @@ from pathlib import Path
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal import detention_process_pilot as pilot
+from autoformalism.rebuttal.detention_benchmark import _seal
 from autoformalism.search.process_review import POLICY
 from autoformalism.staged_topology import content_hash
 
@@ -63,9 +63,7 @@ def fixture(source: Path, root: Path):
                 )
             value = {"name": split, "fingerprint": content_hash(rows), "rows": rows}
             relative = f"public/{case}/noise1/{split}.json"
-            public._write(
-                source / relative, {"value": value, "sha256": content_hash(value)}
-            )
+            _seal(source / relative, value)
             files[relative] = hashlib.sha256(
                 (source / relative).read_bytes()
             ).hexdigest()
@@ -79,7 +77,7 @@ def fixture(source: Path, root: Path):
             "fixed_covariates": list(rows[0]["fixed_covariates"]),
         }
         relative = f"public/{case}/noise1/specification.json"
-        public._write(source / relative, {"value": spec, "sha256": content_hash(spec)})
+        _seal(source / relative, spec)
         files[relative] = hashlib.sha256((source / relative).read_bytes()).hexdigest()
     plan = {
         "protocol": "detention-development-1",
@@ -87,7 +85,7 @@ def fixture(source: Path, root: Path):
         "files": files,
         "diagnostic": "PRIVATE_ORACLE_POISON",
     }
-    public._write(source / "plan.json", {"value": plan, "sha256": content_hash(plan)})
+    _seal(source / "plan.json", plan)
     (source / "diagnostic").mkdir(exist_ok=True)
     (source / "diagnostic" / "do-not-read.txt").write_text("PRIVATE_ORACLE_POISON")
     return pilot.freeze(

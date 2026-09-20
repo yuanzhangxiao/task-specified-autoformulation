@@ -5,9 +5,23 @@ import json
 import pytest
 
 from autoformalism.rebuttal import detention_process_pilot as pilot
+from autoformalism.rebuttal.detention_benchmark import _seal
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.search.process_review import POLICY
 from scripts import smoke_detention_process_pilot as smoke
+
+
+def test_source_seal_uses_exporter_codec_and_still_rejects_tampering(tmp_path):
+    path = tmp_path / "export.json"
+    value = {"public_prompt": "Depth in metres", "rows": [{"depth": 0.2}]}
+    _seal(path, value)
+    assert pilot.content_hash(value) != pilot.public.content_sha256(value)
+    assert pilot._public_asset(path) == value
+    changed = json.loads(path.read_text())
+    changed["value"]["rows"][0]["depth"] = 0.8
+    path.write_text(json.dumps(changed))
+    with pytest.raises(ValueError, match="source public asset seal differs"):
+        pilot._public_asset(path)
 
 
 @pytest.fixture
