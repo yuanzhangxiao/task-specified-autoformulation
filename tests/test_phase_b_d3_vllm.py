@@ -75,12 +75,18 @@ def test_batch_job_defaults_to_one_gpu_and_resumes_after_a_failure() -> None:
     path = HPC / "phase_b_d3_vllm_batch.slurm"
     subprocess.run(["bash", "-n", str(path)], check=True)
     text = path.read_text(encoding="utf-8")
-    assert "#SBATCH --gpus-per-node=1" in text
+    # the GPU request is supplied by the submitter: ACES and Delta differ
+    assert "#SBATCH --gpus-per-node" not in text
+    assert "#SBATCH --gres" not in text
     assert "AF_TENSOR_PARALLEL_SIZE:=1" in text
     # a single 80 GB card holds MXFP4 weights plus a 32k KV cache
     assert "AF_VLLM_MAX_MODEL_LEN:=32768" in text
     # one model load per batch, not per task
-    assert "for index in" in text and "vllm serve" in text
+    assert "vllm serve" in text
+    # CPU fitting dominates, so tasks overlap against the served model
+    assert "AF_TASK_CONCURRENCY:=8" in text
+    assert '--max-num-seqs "${AF_TASK_CONCURRENCY}"' in text
+    assert "fit_threads=$(( ${SLURM_CPUS_PER_TASK:-8} / AF_TASK_CONCURRENCY ))" in text
     # a failed task must not abandon the rest of the batch
     assert "failures=$((failures + 1))" in text
     assert "export AF_VLLM_BASE_URL" in text
@@ -94,5 +100,7 @@ def test_submission_batches_by_tier_and_records_a_ledger() -> None:
     assert "--provider vllm" in text
     assert "list_phase_b_d3_task_indices.py" in text
     assert "submission_ledger.jsonl" in text
+    assert 'AF_GPU_REQUEST:=--gres=gpu:h100:1' in text
+    assert "${AF_GPU_REQUEST}" in text
     # preparation is skipped when a sealed plan already exists
     assert 'if [[ ! -f "${AF_OUTPUT_ROOT}/plan.json" ]]' in text

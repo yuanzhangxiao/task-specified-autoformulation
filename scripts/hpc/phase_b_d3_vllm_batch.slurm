@@ -2,9 +2,11 @@
 #SBATCH --job-name=d3-phaseb-vllm
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=64G
-#SBATCH --gpus-per-node=1
+# No GPU directive here: ACES wants --gres=gpu:h100:N and Delta wants
+# --gpus-per-node=N, so the submitter passes AF_GPU_REQUEST on the
+# command line, where it overrides any directive.
 
 # One GPU job per batch: load gpt-oss-120b once, then run this batch's D3 tasks
 # against the local endpoint. Server and clients share the job, so no
@@ -25,6 +27,9 @@ readonly af_user="${SLURM_JOB_USER:-${USER:?}}"
 # D3 prompts are far shorter than the judge's; 32k keeps KV cache small enough
 # for a single 80 GB card to hold the MXFP4 weights comfortably.
 : "${AF_VLLM_MAX_MODEL_LEN:=32768}"
+# Each generation is one short call plus a long CPU Adam fit, so the GPU
+# idles unless several tasks run at once against the one served model.
+: "${AF_TASK_CONCURRENCY:=8}"
 : "${AF_HF_HOME:=${AF_WORK}/hf}"
 : "${AF_VLLM_IMAGE:=${AF_WORK}/containers/vllm-openai-v0.27.1.sif}"
 : "${AF_VLLM_IMAGE_URI:=docker://vllm/vllm-openai:v0.27.1}"
@@ -41,7 +46,9 @@ cleanup() {
 trap cleanup EXIT
 
 export APPTAINER_CACHEDIR="${apptainer_cache}" APPTAINER_TMPDIR="${apptainer_tmp}"
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}" OPENBLAS_NUM_THREADS=1
+fit_threads=$(( ${SLURM_CPUS_PER_TASK:-8} / AF_TASK_CONCURRENCY ))
+((fit_threads > 0)) || fit_threads=1
+export OMP_NUM_THREADS="${fit_threads}" OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONHASHSEED=0
 export PYTHONPATH="${AF_REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${AF_HF_HOME}" "${apptainer_cache}" "${apptainer_tmp}" \
@@ -87,7 +94,7 @@ apptainer exec --nv \
     --host 127.0.0.1 \
     --port "${port}" \
     --max-model-len "${AF_VLLM_MAX_MODEL_LEN}" \
-    --max-num-seqs 1 \
+    --max-num-seqs "${AF_TASK_CONCURRENCY}" \
     --gpu-memory-utilization 0.90 \
     "${vllm_parallel_args[@]}" \
     >"${server_log}" 2>&1 &
@@ -111,14 +118,28 @@ done
 export AF_VLLM_BASE_URL="${endpoint}"
 
 # Completed tasks resume without a call; a failed task must not abandon the batch.
+echo "task_concurrency=${AF_TASK_CONCURRENCY} fit_threads=${fit_threads}"
 failures=0
-for index in "${batch_indices[@]}"; do
-  echo "== task ${index}"
-  if ! "${AF_PYTHON}" scripts/phase_b_d3.py run \
-      --root "${AF_OUTPUT_ROOT}" --index "${index}"; then
-    echo "task ${index} failed" >&2
-    failures=$((failures + 1))
-  fi
+position=0
+while ((position < ${#batch_indices[@]})); do
+  group=("${batch_indices[@]:position:AF_TASK_CONCURRENCY}")
+  pids=()
+  for index in "${group[@]}"; do
+    echo "== starting task ${index}"
+    "${AF_PYTHON}" scripts/phase_b_d3.py run \
+      --root "${AF_OUTPUT_ROOT}" --index "${index}" \
+      >"${AF_OUTPUT_ROOT}/logs/task-${index}.out" 2>&1 &
+    pids+=("$!")
+  done
+  for offset in "${!pids[@]}"; do
+    if wait "${pids[offset]}"; then
+      echo "task ${group[offset]} complete"
+    else
+      echo "task ${group[offset]} failed; see logs/task-${group[offset]}.out" >&2
+      failures=$((failures + 1))
+    fi
+  done
+  position=$((position + AF_TASK_CONCURRENCY))
 done
 echo "batch=${batch} completed with ${failures} failed task(s)"
 exit 0

@@ -23,9 +23,12 @@ readonly af_user="${USER:?}"
 : "${AF_TIER:=easy}"
 : "${AF_BATCH_SIZE:=10}"
 : "${AF_BATCH_HOURS:=08:00:00}"
-: "${AF_ACCOUNT:?set AF_ACCOUNT for the GPU allocation}"
-: "${AF_GPU_PARTITION:?set AF_GPU_PARTITION, e.g. gpu or gpuA100}"
+# ACES defaults; `accounts` on the login node prints the project names.
+: "${AF_ACCOUNT:=156264627414}"
+: "${AF_GPU_PARTITION:=gpu}"
 : "${AF_CPU_PARTITION:=cpu}"
+# ACES: --gres=gpu:h100:N. Delta: --gpus-per-node=N on a gpuA40x4 partition.
+: "${AF_GPU_REQUEST:=--gres=gpu:h100:1}"
 cd "${AF_REPO_ROOT}"
 export PYTHONPATH="${AF_REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p logs "${AF_OUTPUT_ROOT}/logs"
@@ -36,6 +39,7 @@ indices="${AF_TASK_INDICES:-$("${AF_PYTHON}" scripts/list_phase_b_d3_task_indice
 readonly task_count="$(tr ',' '\n' <<< "${indices}" | wc -l | tr -d ' ')"
 readonly batches=$(( (task_count + AF_BATCH_SIZE - 1) / AF_BATCH_SIZE ))
 echo "tier=${AF_TIER} tasks=${task_count} batch_size=${AF_BATCH_SIZE} batches=${batches}"
+echo "account=${AF_ACCOUNT} partition=${AF_GPU_PARTITION} gpu=${AF_GPU_REQUEST}"
 
 readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_LOCAL_MODEL=${AF_D3_MODEL},AF_TASK_INDICES=${indices},AF_BATCH_SIZE=${AF_BATCH_SIZE}"
 
@@ -56,6 +60,7 @@ depend=()
 [[ -n "${prepare_job}" ]] && depend=(--dependency="afterok:${prepare_job}" --kill-on-invalid-dep=yes)
 batch_job="$(sbatch --parsable --account="${AF_ACCOUNT}" \
   --partition="${AF_GPU_PARTITION}" --time="${AF_BATCH_HOURS}" \
+  ${AF_GPU_REQUEST} \
   --array="0-$((batches - 1))%${AF_MAX_CONCURRENT_BATCHES:-2}" \
   --output="${AF_OUTPUT_ROOT}/logs/batch-%A_%a.out" \
   --export="${common}" "${depend[@]}" \
