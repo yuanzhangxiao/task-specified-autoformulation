@@ -254,10 +254,23 @@ unsupported rows as source failures.
 
 1. Freeze the method/cell/repetition roster before test access. Missing,
    invalid, unsupported, and failing rows stay in the denominator.
-2. Report per-cell **median over successful repetitions**, labeled as
-   conditional on success, with completed/expected alongside. Full-roster
-   availability and failure rates are reported separately. No zero-imputation,
-   no silent omission of identities.
+2. The headline statistic is `target_nmse_median_full_roster`: a median over
+   **every planned identity**, with unscored rows ranked beyond every observed
+   value. A median needs only an ordering, so a failure can be placed last
+   without inventing a magnitude for it — unlike a mean, which would require
+   one. It is reported as the lower median, so the value is always something
+   the method actually produced, and is undefined when at least half the
+   roster is unscored, because the middle of the ranking then falls among the
+   failures.
+
+   `target_nmse_median_conditional_on_success` remains available but is
+   **diagnostic only**: discarding failures reports the middle of whatever
+   happened to work, which flatters whichever method failed most.
+
+   Report alongside it the counts that explain the gap, which are not
+   interchangeable: `missing_failed` and `missing_timed_out` for development,
+   and `unscored_diverged` and `unscored_timeout` for the sealed replay. A
+   timeout is a budget we chose; a divergence is the model.
 3. **Retain all 40 conditions as the primary reporting roster for every
    method.** Named/obfuscated and functional/opaque cells share numeric data
    (`paired_numeric_data_across_semantic_variants: true`), so paired cells are

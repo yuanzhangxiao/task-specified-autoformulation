@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from statistics import median
 
 import pytest
 
@@ -35,7 +36,11 @@ from autoformalism.rebuttal.final_evaluation import (
 )
 from autoformalism.rebuttal.final_evaluation_adapters import SourceAdapterOutcome
 from scripts.assemble_phase_b_final_evaluation import _validate_outcomes
-from scripts.summarize_external_baseline_evaluation import join, summarize
+from scripts.summarize_external_baseline_evaluation import (
+    full_roster_median,
+    join,
+    summarize,
+)
 
 CONFIG = Path("configs/external_baseline_frozen_test_evaluation_v1.json")
 CELL = {"benchmark_id": "phase_b_cell", "tier": "easy"}
@@ -668,7 +673,9 @@ def _outcome(status: str, request_id: str) -> SourceAdapterOutcome:
     )
 
 
-def _record(request_id: str, *, nmse: float = 0.5) -> FinalEvaluationRecord:
+def _record(
+    request_id: str, *, nmse: float = 0.5, failed: str | None = None
+) -> FinalEvaluationRecord:
     """Minimal evaluated record; the report reads only these fields."""
     return FinalEvaluationRecord(
         subject_id=f"subject-{request_id}",
@@ -686,14 +693,25 @@ def _record(request_id: str, *, nmse: float = 0.5) -> FinalEvaluationRecord:
         parameterization=FrozenParameterization(status="not_required"),
         runtime=RuntimeValidityEndpoint(valid=True),
         public_mechanism=PublicMechanismEndpoint(status="missing"),
-        target_prediction=TargetPredictionEndpoint(
-            status="available",
-            evaluation_protocol="unseen_condition_free_rollout",
-            normalized_mse=nmse,
-            per_target_normalized_mse={"y": nmse},
-            normalization_scales={"y": 1.0},
-            trajectory_count=1,
-            successful_trajectory_count=1,
+        target_prediction=(
+            TargetPredictionEndpoint(
+                status="failed",
+                evaluation_protocol="unseen_condition_free_rollout",
+                trajectory_count=1,
+                successful_trajectory_count=0,
+                failed_trajectories=("t0",),
+                message=failed,
+            )
+            if failed is not None
+            else TargetPredictionEndpoint(
+                status="available",
+                evaluation_protocol="unseen_condition_free_rollout",
+                normalized_mse=nmse,
+                per_target_normalized_mse={"y": nmse},
+                normalization_scales={"y": 1.0},
+                trajectory_count=1,
+                successful_trajectory_count=1,
+            )
         ),
         hidden_mechanisms=(),
         interventions=(),
@@ -733,7 +751,8 @@ def test_report_keeps_missing_and_unsupported_out_of_failures() -> None:
     assert counts["evaluator_unsupported"] == 1
     assert counts["adaptation_failed"] == 0
     assert report["pooled_cross_method_mean_reported"] is False
-    assert report["median_is_conditional_on_success"] is True
+    assert report["headline_median"] == "target_nmse_median_full_roster"
+    assert report["conditional_median_is_diagnostic_only"] is True
 
 
 def test_report_rejects_same_count_wrong_identifiers() -> None:
@@ -1115,3 +1134,53 @@ def test_timeout_and_failure_are_recorded_distinctly(tmp_path: Path) -> None:
         assert row.terminal_status == status
         assert expected in row.reason
         assert row.outcome().error == row.reason
+
+
+# --- full-roster median ---------------------------------------------------
+
+
+def test_unscored_rows_rank_worst_rather_than_being_dropped() -> None:
+    """Conditioning on success flatters whichever method fails most."""
+    scored = [1.0, 2.0, 3.0]
+    # Three of five scored. The two failures rank beyond every observed value,
+    # so the middle of the ranking sits at the worst thing the method managed.
+    assert full_roster_median(scored, 5) == 3.0
+    # Conditioning on success discards them and reports the middle of what
+    # happened to work, which is better than the method actually did.
+    assert median(scored) == 2.0
+    # With nothing unscored the two agree.
+    assert full_roster_median([*scored, 4.0, 5.0], 5) == 3.0
+    assert median([*scored, 4.0, 5.0]) == 3.0
+
+
+def test_the_median_is_undefined_when_most_of_the_roster_is_unscored() -> None:
+    """The middle of the ranking then falls among the failures."""
+    # half scored: the lower median is still an observed value
+    assert full_roster_median([1.0, 2.0], 4) == 2.0
+    # fewer than half: the middle of the ranking is itself a failure
+    assert full_roster_median([1.0], 4) is None
+    assert full_roster_median([], 3) is None
+    assert full_roster_median([1.0], 0) is None
+
+
+def test_report_separates_a_compute_limit_from_a_diverged_model() -> None:
+    roster = (_row("evaluated", "a"), _row("evaluated", "b"), _row("evaluated", "c"))
+    outcomes = tuple(_outcome("adapted", item) for item in ("a", "b", "c"))
+    records = (
+        _record("a", nmse=0.5),
+        _record("b", failed="one or more held-out free rollouts failed"),
+        _record("c", failed="TimeoutError: fitting wall-clock limit reached"),
+    )
+    report = summarize(join(roster, outcomes, records))
+    counts = report["by_method"]["sindy"]
+    assert counts["scored_count"] == 1
+    assert counts["evaluated_but_unscored"] == 2
+    assert counts["unscored_diverged"] == 1
+    assert counts["unscored_timeout"] == 1
+    # one of three scored, so the middle of the ranking is a failure
+    assert counts["target_nmse_median_full_roster"] is None
+    assert counts["full_roster_median_defined"] is False
+    # the conditional statistic still reports a number, which is why it is
+    # labelled diagnostic rather than headline
+    assert counts["target_nmse_median_conditional_on_success"] == 0.5
+    assert report["headline_median"] == "target_nmse_median_full_roster"

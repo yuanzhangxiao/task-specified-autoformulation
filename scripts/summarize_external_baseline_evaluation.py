@@ -23,6 +23,32 @@ from autoformalism.rebuttal.final_evaluation_adapters import SourceAdapterOutcom
 STATES = ("evaluated", "adaptation_failed", "missing", "evaluator_unsupported")
 
 
+def full_roster_median(scored: list[float], planned: int) -> float | None:
+    """Median over every planned identity, ranking unscored rows worst.
+
+    A median needs only an ordering, so an unscored row can be placed beyond
+    every observed value without inventing a magnitude for it. Conditioning on
+    success instead flatters whichever method fails most often.
+
+    Returned as the lower median, so the statistic is always a value the method
+    actually produced. Undefined when at least half the roster is unscored,
+    because the middle of the ranking then falls among the failures.
+    """
+    if planned <= 0:
+        return None
+    ranked = sorted(scored)
+    index = (planned - 1) // 2
+    return ranked[index] if index < len(ranked) else None
+
+
+def _unscored_reason(row: dict[str, object]) -> str | None:
+    """Separate a compute limit from a model that could not be integrated."""
+    if row["state"] != "evaluated" or row["target_nmse"] is not None:
+        return None
+    message = str(row.get("target_message") or "")
+    return "timeout" if "Timeout" in message else "diverged"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roster", type=Path, required=True)
@@ -105,6 +131,9 @@ def join(
                     else None
                 ),
                 "target_status": target.status if target is not None else None,
+                "target_message": (
+                    (target.message or "") if target is not None else ""
+                ),
                 "evaluation_protocol": (
                     target.evaluation_protocol if target is not None else None
                 ),
@@ -124,6 +153,7 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
             for row in subset
             if row["target_nmse"] is not None
         ]
+        unscored = [_unscored_reason(row) for row in subset]
         by_method[method] = {
             "planned": len(subset),
             **{
@@ -138,9 +168,20 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
                 row["terminal_status"] == "failed" for row in subset
             ),
             "scored_count": len(scored),
+            # Headline: every planned identity counted, failures ranked worst.
+            "target_nmse_median_full_roster": full_roster_median(
+                scored, len(subset)
+            ),
+            "full_roster_median_defined": (
+                full_roster_median(scored, len(subset)) is not None
+            ),
+            # Diagnostic only: reads better the more a method fails.
             "target_nmse_median_conditional_on_success": (
                 median(scored) if scored else None
             ),
+            "evaluated_but_unscored": sum(item is not None for item in unscored),
+            "unscored_timeout": sum(item == "timeout" for item in unscored),
+            "unscored_diverged": sum(item == "diverged" for item in unscored),
         }
     by_cell = {}
     for method in methods:
@@ -165,6 +206,9 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
             by_cell[f"{method}|{cell[0]}|{cell[1]}"] = {
                 "planned": len(subset),
                 "scored_count": len(scored),
+                "target_nmse_median_full_roster": full_roster_median(
+                    scored, len(subset)
+                ),
                 "target_nmse_median_conditional_on_success": (
                     median(scored) if scored else None
                 ),
@@ -176,7 +220,10 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
     return {
         "schema_version": "phase-b-external-baseline-report-1",
         "planned_identity_count": len(rows),
-        "median_is_conditional_on_success": True,
+        "headline_median": "target_nmse_median_full_roster",
+        "full_roster_median_ranks_unscored_worst": True,
+        "full_roster_median_is_the_lower_median": True,
+        "conditional_median_is_diagnostic_only": True,
         "pooled_cross_method_mean_reported": False,
         "weighted_overall_score_defined": False,
         "by_method": by_method,
