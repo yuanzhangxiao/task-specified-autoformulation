@@ -38,15 +38,20 @@ readonly af_user="${SLURM_JOB_USER:-${USER:?}}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
 
 readonly batch="${SLURM_ARRAY_TASK_ID:?submit as an array over batches}"
-readonly apptainer_cache="${AF_WORK}/apptainer/cache"
-apptainer_tmp="$(mktemp -d "${AF_WORK}/apptainer/tmp.XXXXXX")"
-readonly apptainer_tmp
+# Assign these paths, never mktemp: the parent may not exist yet, and under
+# set -e that kills the job before it can log why. Build on node-local storage,
+# because Apptainer sandbox creation has failed on the shared filesystem.
+readonly apptainer_cache="${AF_PROJECT}/apptainer-cache"
+readonly node_local_tmp_root="${SLURM_TMPDIR:-/tmp/${af_user}}"
+readonly apptainer_tmp="${node_local_tmp_root}/apptainer-${SLURM_JOB_ID}"
 cleanup() {
   [[ -n "${server_pid:-}" ]] && kill "${server_pid}" 2>/dev/null || true
   rm -rf -- "${apptainer_tmp}"
 }
 trap cleanup EXIT
 
+echo "batch job starting: host=$(hostname) job=${SLURM_JOB_ID:-none}"
+echo "output_root=${AF_OUTPUT_ROOT} repo=${AF_REPO_ROOT}"
 export APPTAINER_CACHEDIR="${apptainer_cache}" APPTAINER_TMPDIR="${apptainer_tmp}"
 fit_threads=$(( ${SLURM_CPUS_PER_TASK:-8} / AF_TASK_CONCURRENCY ))
 ((fit_threads > 0)) || fit_threads=1
@@ -54,7 +59,8 @@ export OMP_NUM_THREADS="${fit_threads}" OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONHASHSEED=0
 export PYTHONPATH="${AF_REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${AF_HF_HOME}" "${apptainer_cache}" "${apptainer_tmp}" \
-  "$(dirname "${AF_VLLM_IMAGE}")" "${AF_REPO_ROOT}/logs"
+  "$(dirname "${AF_VLLM_IMAGE}")" "${AF_REPO_ROOT}/logs" \
+  "${AF_OUTPUT_ROOT}/logs"
 cd "${AF_REPO_ROOT}"
 
 # This batch's slice of the task list.
@@ -97,7 +103,6 @@ flock "${AF_OUTPUT_ROOT}/prepare.shlock" bash -c '
 readonly port=$((20000 + RANDOM % 20000))
 readonly endpoint="http://127.0.0.1:${port}"
 readonly server_log="${AF_OUTPUT_ROOT}/logs/vllm-batch-${batch}.log"
-mkdir -p "${AF_OUTPUT_ROOT}/logs"
 
 vllm_parallel_args=()
 if ((AF_TENSOR_PARALLEL_SIZE > 1)); then
