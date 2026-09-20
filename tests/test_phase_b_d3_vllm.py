@@ -102,6 +102,10 @@ def test_submission_batches_by_tier_and_records_a_ledger() -> None:
     assert "AF_TIER:=easy" in text
     assert "list_phase_b_d3_task_indices.py" in text
     assert "submission_ledger.jsonl" in text
+    # the account must match the job type and the GPU flag differs per site
+    assert 'AF_CLUSTER:=delta' in text
+    assert 'AF_ACCOUNT:=bibo-delta-gpu' in text
+    assert 'AF_GPU_REQUEST:=--gpus-per-node=4' in text
     assert 'AF_GPU_REQUEST:=--gres=gpu:h100:1' in text
     assert "${AF_GPU_REQUEST}" in text
     # no CPU job: ACES rejects CPU work submitted under a GPU account

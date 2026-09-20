@@ -23,11 +23,27 @@ readonly af_user="${USER:?}"
 : "${AF_TIER:=easy}"
 : "${AF_BATCH_SIZE:=10}"
 : "${AF_BATCH_HOURS:=08:00:00}"
-# ACES defaults; `accounts` on the login node prints the project names.
-: "${AF_ACCOUNT:=156264627414}"
-: "${AF_GPU_PARTITION:=gpu}"
-# ACES: --gres=gpu:h100:N. Delta: --gpus-per-node=N on a gpuA40x4 partition.
-: "${AF_GPU_REQUEST:=--gres=gpu:h100:1}"
+# Cluster presets. `accounts` on the login node prints the project names,
+# and the account must match the job type: Delta separates cpu from gpu.
+: "${AF_CLUSTER:=delta}"
+case "${AF_CLUSTER}" in
+  delta)
+    # No H100 on Delta; A40 is Ampere, so the MXFP4 weights are
+    # dequantized and need four cards. Four GPU-hours per wall-hour.
+    : "${AF_ACCOUNT:=bibo-delta-gpu}"
+    : "${AF_GPU_PARTITION:=gpuA40x4}"
+    : "${AF_GPU_REQUEST:=--gpus-per-node=4}"
+    : "${AF_TENSOR_PARALLEL_SIZE:=4}"
+    ;;
+  aces)
+    # H100 is Hopper: native MXFP4, one card, one GPU-hour per wall-hour.
+    : "${AF_ACCOUNT:?set AF_ACCOUNT to the ACES GPU account from `accounts`}"
+    : "${AF_GPU_PARTITION:=gpu}"
+    : "${AF_GPU_REQUEST:=--gres=gpu:h100:1}"
+    : "${AF_TENSOR_PARALLEL_SIZE:=1}"
+    ;;
+  *) echo "unknown AF_CLUSTER: ${AF_CLUSTER}" >&2; exit 2 ;;
+esac
 cd "${AF_REPO_ROOT}"
 export PYTHONPATH="${AF_REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p logs "${AF_OUTPUT_ROOT}/logs"
@@ -38,9 +54,10 @@ indices="${AF_TASK_INDICES:-$("${AF_PYTHON}" scripts/list_phase_b_d3_task_indice
 readonly task_count="$(tr ',' '\n' <<< "${indices}" | wc -l | tr -d ' ')"
 readonly batches=$(( (task_count + AF_BATCH_SIZE - 1) / AF_BATCH_SIZE ))
 echo "tier=${AF_TIER} tasks=${task_count} batch_size=${AF_BATCH_SIZE} batches=${batches}"
-echo "account=${AF_ACCOUNT} partition=${AF_GPU_PARTITION} gpu=${AF_GPU_REQUEST}"
+echo "cluster=${AF_CLUSTER} account=${AF_ACCOUNT} partition=${AF_GPU_PARTITION}"
+echo "gpu=${AF_GPU_REQUEST} tensor_parallel=${AF_TENSOR_PARALLEL_SIZE}"
 
-readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_LOCAL_MODEL=${AF_D3_MODEL},AF_TASK_INDICES=${indices},AF_BATCH_SIZE=${AF_BATCH_SIZE},AF_D3_CONFIG=${AF_D3_CONFIG},AF_PUBLIC_ROOT=${AF_PUBLIC_ROOT}"
+readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_LOCAL_MODEL=${AF_D3_MODEL},AF_TASK_INDICES=${indices},AF_BATCH_SIZE=${AF_BATCH_SIZE},AF_D3_CONFIG=${AF_D3_CONFIG},AF_PUBLIC_ROOT=${AF_PUBLIC_ROOT},AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}"
 
 batch_job="$(sbatch --parsable --account="${AF_ACCOUNT}" \
   --partition="${AF_GPU_PARTITION}" --time="${AF_BATCH_HOURS}" \
