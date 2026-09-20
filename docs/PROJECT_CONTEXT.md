@@ -760,3 +760,10 @@ final-evaluation judge defaults are unchanged. Runtime findings, scientific
 concerns, and numerical outcomes are separate evidence streams. This pilot measures
 the incremental judge contribution conditional on the redesigned interface; it
 does not claim an isolated old-vs-new routing comparison from historical results.
+
+The opt-in `detention-process-pilot-1` compares an optional scientific process
+review after variable selection with the same guidance-only construction. The
+qualified basin release supplies public inputs only; the fitter is unchanged.
+See `docs/DETENTION_PROCESS_REVIEW_PILOT.md`. Empty/invalid suggestions preserve
+the original inventory, and failure of added processes can trigger a cached
+fallback under the same total budget. Named reuse does not certify conservation.

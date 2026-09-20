@@ -215,3 +215,13 @@ do not combine their token costs with fresh-run efficiency estimates. Report
 round curves, input/output tokens, model complexity, mechanism evidence and output
 NMSE with failure denominators. Freeze the final method, controls and selection
 policy before opening held-out test data.
+
+### Follow-up to Milestone 2: optional inventory review
+
+Detention-basin qualification passed all eight reference-skeleton fitting arms.
+The next gated experiment is `detention-process-pilot-1`: one optional process
+review between variable selection and topology, paired against guidance alone,
+on coupled/disconnected public tasks. Empty/invalid reviews preserve construction;
+failed additions allow fallback within the same total budgets. See
+`docs/DETENTION_PROCESS_REVIEW_PILOT.md` for scope, metrics and ACES commands.
+Hold further milestones until the discovery results have been reviewed.

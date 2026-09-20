@@ -269,18 +269,22 @@ def run_staged_topology(
     proposer_owns_unfixed_signs: bool = False,
     training_evidence: TrainingEvidence | None = None,
     shared_process_guidance: bool = False,
+    optional_process_review: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     contract_path = output / "evidence_contract.json"
     if (
         shared_process_guidance
+        or optional_process_review
         or training_evidence is not None
         or contract_path.exists()
     ):
         contract = {"brief": enriched, "context": context.model_dump(mode="json")}
         if shared_process_guidance:
             contract["shared_process_guidance"] = True
+        if optional_process_review:
+            contract["optional_process_review"] = "optional-process-review-1"
         if contract_path.exists() and json.loads(contract_path.read_text()) != contract:
             raise ValueError("topology evidence contract differs")
         if not contract_path.exists() and (output / "result.json").exists():
@@ -370,6 +374,7 @@ def run_staged_topology(
     topology = None
     aliases: dict[str, str] = {}
     agenda = scientific_agenda(brief) if initial_inventory is None else ()
+    process_review = None
     try:
         for index, item in enumerate(agenda):
             if hybrid_variable_construction:
@@ -516,6 +521,13 @@ def run_staged_topology(
                 )
             checkpoint()
         inventory = freeze_inventory(brief, inventory)
+        if optional_process_review:
+            from autoformalism.search.process_review import review
+
+            inventory, process_review = review(
+                brief, enriched, inventory, client, output
+            )
+            checkpoint()
         allowed = tuple(item.name for item in inventory if item.definition != "unused")
         model = equation_reply_model(
             allowed, maximum_terms=brief.limits.terms_per_equation
@@ -686,6 +698,8 @@ def run_staged_topology(
         "proposer_owns_unfixed_signs": proposer_owns_unfixed_signs,
         "parameter_fitting_performed": False,
     }
+    if optional_process_review:
+        result["process_review"] = process_review
     checkpoint()
     atomic_json(output / "result.json", result)
     return result
