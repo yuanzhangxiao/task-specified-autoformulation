@@ -44,7 +44,10 @@ def submit(root: Path, index: int = 0) -> dict:
     """Preserve intent, uncertain scheduler replies, and consumed fit attempts."""
     root = root.resolve()
     plan = io.verify(root)
-    if plan["protocol"] not in {io.PROTOCOL, io.BOUND_PROTOCOL} or index != 0:
+    if (
+        plan["protocol"] not in {io.PROTOCOL, io.BOUND_PROTOCOL, io.GAIN_PROTOCOL}
+        or index != 0
+    ):
         raise ValueError("requires optional basin review pilot")
     repo = io.REPO
     commit = source_commit(repo)

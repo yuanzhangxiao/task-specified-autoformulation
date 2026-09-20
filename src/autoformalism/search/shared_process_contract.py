@@ -268,6 +268,7 @@ def requirements(bindings: list[dict], target: str) -> list[dict]:
             "sources": [b["proposal"]["name"], *u["conversion_sources"]],
             "outer_weight_sign": u["outer_weight_sign"],
             "scientific_role": u["scientific_role"],
+            **({"automatic_identity": True} if "signed_declaration" in b else {}),
         }
         for b in bindings
         for u in b["uses"]
@@ -308,11 +309,46 @@ def decorate_function_term(selected: dict, bindings: list[dict]) -> dict:
     """Use the same contract in provider context, saved slots and reconstruction."""
     if not bindings:
         return selected
+
+    def prose_as_context(slot):
+        # The v2 signed declaration contains no typed nonlinear-function claim.
+        # In particular a nonlinear P still enters its consumers linearly.
+        obligation = slot.get("functional_obligation")
+        return {
+            **slot,
+            **(
+                {
+                    "functional_obligation": {
+                        **obligation,
+                        "requires_nonlinear_source_dependence": False,
+                        "provenance": [],
+                    },
+                    "scientific_role_is_context_only": True,
+                }
+                if obligation
+                else {}
+            ),
+        }
+
+    if any(
+        b["proposal"]["name"] == selected["lhs"] and "signed_declaration" in b
+        for b in bindings
+    ):
+        return {
+            **prose_as_context(selected),
+            "shared_process_law": selected["lhs"],
+            "process_instruction": (
+                "Define this one shared shape law. Its signed values are allowed. "
+                "The runtime supplies fitted consumer magnitudes; avoid an extra "
+                "overall amplitude. Any certified direct coefficient magnitude "
+                "is nonnegative, without removing signs from the law itself."
+            ),
+        }
     use = function_use(bindings, selected["lhs"], selected["sources"])
     if use is None:
         return selected
     return {
-        **selected,
+        **(prose_as_context(selected) if use.get("automatic_identity") else selected),
         "shared_process_use": use,
         "process_instruction": (
             "Use the shared process once, multiplied or divided by necessary "
@@ -326,9 +362,22 @@ def validate_contract(contract: dict | None, equations, inventory) -> list[dict]
     """Reconstruct the shared-law certificate from immutable scientific declarations."""
     if contract is None:
         return []
-    if contract["protocol"] != POLICY:
+    from autoformalism.search import signed_processes as signed
+
+    if contract["protocol"] not in {POLICY, signed.POLICY}:
         raise ValueError("unknown shared-process function contract")
     bindings = contract["bindings"]
+    if contract["protocol"] == signed.POLICY:
+        for binding in bindings:
+            declaration = signed.SignedProcess.model_validate(
+                binding["signed_declaration"]
+            )
+            if binding != signed.binding_for(declaration):
+                raise ValueError("signed declaration differs from compiled uses")
+        if signed._has_algebraic_cycle(bindings, inventory):
+            raise ValueError("signed process algebraic cycle")
+    elif any("signed_declaration" in b for b in bindings):
+        raise ValueError("signed process requires version 2 contract")
     definitions = {}
     for binding in bindings:
         validate_uses(binding["proposal"], UsesReply(uses=binding["uses"]), inventory)
@@ -349,6 +398,8 @@ def validate_function(expression: str, use: dict | None) -> None:
     """Certify one linear multiplicative use of P, without evaluating provider text."""
     if use is None:
         return
+    if use.get("automatic_identity") and expression != use["process"]:
+        raise ValueError("automatic process slot must remain the shared identity")
     RestrictedParser().parse(expression, location="shared_process_use")
     node = ast.parse(expression, mode="eval").body
     name = use["process"]

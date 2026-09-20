@@ -34,6 +34,7 @@ from autoformalism.schemas.staged_topology import (
     ScientificVariable,
 )
 from autoformalism.search import shared_process_contract as shared
+from autoformalism.search import signed_processes as signed
 from autoformalism.search.causal_initialization import construct_initializers
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_function_prompts import (
@@ -116,6 +117,12 @@ def run_staged_functions(
         EquationDefinition.model_validate(item) for item in source["equations"]
     )
     process_contract = source.get("shared_process_contract")
+    if (process_contract or {}).get(
+        "protocol"
+    ) == signed.POLICY and generation_granularity != "equation_batch_atomic_repair":
+        raise ValueError(
+            "signed process compilation requires hybrid function construction"
+        )
     process_bindings = shared.validate_contract(process_contract, equations, inventory)
     topology, aliases = lower_topology(brief, inventory, equations, context)
     if (
@@ -392,16 +399,22 @@ def run_staged_functions(
                     )
                 checkpoint()
             else:
+                automatic = [signed.automatic_function(s) for s in selected_terms]
+                requested_terms = [
+                    s
+                    for s, a in zip(selected_terms, automatic, strict=True)
+                    if a is None
+                ]
                 selected_equation = {
                     "lhs": equation.name,
                     "definition": equation.definition,
-                    "terms": list(selected_terms),
+                    "terms": requested_terms,
                 }
 
                 def validate_batch_shape(
                     reply: EquationFunctionBatchReply,
                     *,
-                    expected_count: int = len(identifiers),
+                    expected_count: int = len(requested_terms),
                     unchanged: FunctionalDraft = draft,
                 ) -> FunctionalDraft:
                     if len(reply.functions) != expected_count:
@@ -411,29 +424,37 @@ def run_staged_functions(
                         )
                     return unchanged
 
-                reply, _ = request(
-                    f"equation_functions_{equation_index}",
-                    system_prompt(
-                        render_equation_function_batch_system_prompt(),
-                        "functions",
-                        shared_process_guidance,
-                    ),
-                    lambda diagnostic, selected_equation=selected_equation: (
-                        render_equation_function_batch_user_prompt(
-                            **common,
-                            selected_equation_json=json.dumps(selected_equation),
-                            accepted_functions_json=json.dumps(accepted_context()),
-                            parameter_registry_json=json.dumps(registry_context()),
-                            diagnostics_json=diagnostic,
-                        )
-                    ),
-                    EquationFunctionBatchReply,
-                    validate_batch_shape,
+                reply, _ = (
+                    request(
+                        f"equation_functions_{equation_index}",
+                        system_prompt(
+                            render_equation_function_batch_system_prompt(),
+                            "functions",
+                            shared_process_guidance,
+                        ),
+                        lambda diagnostic, selected_equation=selected_equation: (
+                            render_equation_function_batch_user_prompt(
+                                **common,
+                                selected_equation_json=json.dumps(selected_equation),
+                                accepted_functions_json=json.dumps(accepted_context()),
+                                parameter_registry_json=json.dumps(registry_context()),
+                                diagnostics_json=diagnostic,
+                            )
+                        ),
+                        EquationFunctionBatchReply,
+                        validate_batch_shape,
+                    )
+                    if requested_terms
+                    else (None, draft)
+                )
+                responses = iter(reply.functions if reply else ())
+                all_functions = tuple(
+                    a if a is not None else next(responses) for a in automatic
                 )
                 for identifier, selected, function in zip(
                     identifiers,
                     selected_terms,
-                    reply.functions,
+                    all_functions,
                     strict=True,
                 ):
                     audit = {
@@ -448,6 +469,11 @@ def run_staged_functions(
                         "atomic_repair_attempted": False,
                         "atomic_repair_succeeded": False,
                         "final_source": None,
+                        **(
+                            {"runtime_generated": "signed_process_identity"}
+                            if signed.automatic_function(selected) is not None
+                            else {}
+                        ),
                     }
                     batch_term_audits.append(audit)
                     local_function = function

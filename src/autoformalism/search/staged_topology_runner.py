@@ -271,10 +271,14 @@ def run_staged_topology(
     shared_process_guidance: bool = False,
     optional_process_review: bool = False,
     bind_shared_processes: bool = False,
+    signed_shared_processes: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     from autoformalism.search import shared_process_contract as shared
+    from autoformalism.search import signed_processes as signed
 
+    if signed_shared_processes and not bind_shared_processes:
+        raise ValueError("signed processes require binding")
     if bind_shared_processes and not optional_process_review:
         raise ValueError("shared process binding requires the process proposal stage")
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
@@ -290,7 +294,11 @@ def run_staged_topology(
             contract["shared_process_guidance"] = True
         if optional_process_review:
             contract["optional_process_review"] = (
-                shared.POLICY if bind_shared_processes else "optional-process-review-1"
+                signed.POLICY
+                if signed_shared_processes
+                else shared.POLICY
+                if bind_shared_processes
+                else "optional-process-review-1"
             )
         if contract_path.exists() and json.loads(contract_path.read_text()) != contract:
             raise ValueError("topology evidence contract differs")
@@ -532,13 +540,23 @@ def run_staged_topology(
         if optional_process_review:
             from autoformalism.search.process_review import review
 
-            process_proposer = shared.propose if bind_shared_processes else review
+            process_proposer = (
+                signed.propose
+                if signed_shared_processes
+                else shared.propose
+                if bind_shared_processes
+                else review
+            )
             inventory, process_review = process_proposer(
                 brief, enriched, inventory, client, output
             )
             checkpoint()
         if bind_shared_processes:
-            for suggestion in process_review["suggestions"]:
+            if signed_shared_processes:
+                process_bindings.extend(process_review["bindings"])
+            for suggestion in (
+                [] if signed_shared_processes else process_review["suggestions"]
+            ):
                 binding = request(
                     f"process_uses_{suggestion['name']}",
                     shared.TOPOLOGY_SYSTEM,
@@ -607,7 +625,11 @@ def run_staged_topology(
                 definition = EquationDefinition(
                     name=selected.name,
                     definition=selected.definition,
-                    terms=reply.terms,
+                    terms=(
+                        signed.assemble(process_bindings, selected.name, reply.terms)
+                        if signed_shared_processes
+                        else reply.terms
+                    ),
                 )
                 if process_bindings:
                     shared.validate_equation_uses(process_bindings, definition)
@@ -656,6 +678,7 @@ def run_staged_topology(
                         if process_bindings
                         else None
                     ),
+                    automatic_process_terms=signed_shared_processes,
                 ),
                 model,
                 accept_equation,
@@ -749,7 +772,7 @@ def run_staged_topology(
         result["process_review"] = process_review
     if bind_shared_processes:
         result["shared_process_contract"] = {
-            "protocol": shared.POLICY,
+            "protocol": signed.POLICY if signed_shared_processes else shared.POLICY,
             "bindings": process_bindings,
         }
     checkpoint()

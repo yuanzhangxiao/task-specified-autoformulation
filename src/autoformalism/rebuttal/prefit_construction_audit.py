@@ -25,6 +25,7 @@ from autoformalism.schemas.staged_topology import (
     ScientificVariable,
 )
 from autoformalism.search import shared_process_contract as shared
+from autoformalism.search import signed_processes as signed
 from autoformalism.search.causal_initialization import compile_initialization_result
 from autoformalism.search.staged_function_runner import (
     _accepted_function_record,
@@ -105,6 +106,16 @@ def reconstruct(cell: dict, construction: dict) -> dict:
             selected["functional_obligation"]
         )
         original = _reply(batch["batch_function"])
+        automatic = signed.automatic_function(selected)
+        if automatic is not None and (
+            original != automatic
+            or _reply(final) != automatic
+            or batch.get("runtime_generated") != "signed_process_identity"
+            or batch["atomic_repair_attempted"]
+        ):
+            raise ValueError(
+                "automatic process function differs from signed declaration"
+            )
         original_valid = False
         prepared = None
         try:

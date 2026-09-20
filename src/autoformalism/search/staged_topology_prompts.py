@@ -148,6 +148,7 @@ def render_equation_topology_user_prompt(
     polarity_policy_json: str | None = None,
     diagnostics_json: str | None = None,
     shared_process_terms: list[dict] | None = None,
+    automatic_process_terms: bool = False,
 ) -> str:
     """Render one Level-2 request for an immutable selected left-hand side."""
     payload: dict[str, object] = {
@@ -187,6 +188,12 @@ def render_equation_topology_user_prompt(
             "Include each required process contribution exactly once with its agreed "
             "sources and outer sign. Complete the remaining terms scientifically. "
             "Do not replace the process with a separate law of its upstream variables."
+        )
+    if automatic_process_terms:
+        payload["process_assembly_instruction"] = (
+            "The runtime inserts the displayed signed process contributions. "
+            "Return ONLY other terms, or an empty terms list if none remain. "
+            "Do not redefine or repeat a process, its consumers, or its signs."
         )
     return _request_text(stage="equation topology", payload=payload)
 

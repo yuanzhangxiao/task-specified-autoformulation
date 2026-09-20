@@ -45,14 +45,17 @@ from autoformalism.targets import _dependency_graph, _reaches
 REPO = Path(__file__).resolve().parents[3]
 PROTOCOL = "detention-process-pilot-1"
 BOUND_PROTOCOL = "detention-process-pilot-2"
+GAIN_PROTOCOL = "detention-process-pilot-3"
 
 
 class PilotConfig(StrictSchema):
     """Sixteen fresh models, one construction/fit each; no revision or test access."""
 
-    protocol: Literal["detention-process-pilot-1", "detention-process-pilot-2"] = (
-        PROTOCOL
-    )
+    protocol: Literal[
+        "detention-process-pilot-1",
+        "detention-process-pilot-2",
+        "detention-process-pilot-3",
+    ] = PROTOCOL
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     model_settings: StagedModelSettings
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -71,6 +74,24 @@ class PilotConfig(StrictSchema):
 
 def tasks(config):
     """Counterbalance arm order while matching cases, seeds and initial information."""
+    if config.protocol == GAIN_PROTOCOL:
+        from autoformalism.rebuttal.process_gain_comparison import POLICIES
+
+        result = []
+        for task in tasks(config.model_copy(update={"protocol": BOUND_PROTOCOL})):
+            if not task["review"]:
+                continue
+            for policy in POLICIES if task["seed"] == 0 else reversed(POLICIES):
+                result.append(
+                    {
+                        **task,
+                        "index": len(result),
+                        "gain_policy": policy,
+                        "construction_task": task,
+                        "task_id": task["task_id"] + "_" + policy,
+                    }
+                )
+        return result
     result = []
     for case_index, case in enumerate(("coupled", "independent")):
         for seed in config.seeds:
@@ -135,7 +156,7 @@ def paired_inputs(parent: Path, config: PilotConfig, source_binding: str) -> dic
     ):
         raise ValueError("paired source data, model or construction limits differ")
     imported = {}
-    for task in tasks(config):
+    for task in tasks(config.model_copy(update={"protocol": BOUND_PROTOCOL})):
         if not task["review"]:
             continue
         folder = parent / "results" / task["task_id"]
@@ -211,11 +232,11 @@ def freeze(source: Path, root: Path, config_path: Path, parent: Path | None = No
     ):
         raise ValueError("requires qualified detention development release")
     binding = content_hash(qualification)
-    if config.protocol == BOUND_PROTOCOL and parent is None:
+    if config.protocol in {BOUND_PROTOCOL, GAIN_PROTOCOL} and parent is None:
         raise ValueError("bound-process pilot requires the previous pilot --parent")
     imported = (
         paired_inputs(parent, config, binding)
-        if config.protocol == BOUND_PROTOCOL
+        if config.protocol in {BOUND_PROTOCOL, GAIN_PROTOCOL}
         else None
     )
     with public._lock(root):
@@ -404,7 +425,7 @@ def construct(root, plan, task, client):
         if task["arm"] == "full"
         else None
     )
-    bound = plan["protocol"] == BOUND_PROTOCOL
+    bound = plan["protocol"] in {BOUND_PROTOCOL, GAIN_PROTOCOL}
     initial_inventory = None
     if bound:
         pair = (
@@ -438,6 +459,11 @@ def construct(root, plan, task, client):
                         {
                             "initial_inventory": initial_inventory,
                             "bind_shared_processes": route == "review",
+                            **(
+                                {"signed_shared_processes": route == "review"}
+                                if plan["protocol"] == GAIN_PROTOCOL
+                                else {}
+                            ),
                         }
                         if bound
                         else {}
@@ -578,23 +604,94 @@ def run_proposals(root, base_url, wall_seconds):
     for task in plan["tasks"]:
         if draining or monotonic() >= deadline:
             return {"status": "deferred"}
-        with public._lock(root / "results" / task["task_id"]):
+        common_root = (
+            root / "construction" if plan["protocol"] == GAIN_PROTOCOL else root
+        )
+        common_task = task.get("construction_task", task)
+        with public._lock(common_root / "results" / common_task["task_id"]):
             try:
                 construct(
-                    root,
+                    common_root,
                     plan,
-                    task,
+                    common_task,
                     make_client(
-                        root,
+                        common_root,
                         plan,
-                        task,
+                        common_task,
                         base_url,
                         lambda: not draining and monotonic() < deadline,
                     ),
                 )
             except DeferredCall:
                 return {"status": "deferred"}
+        if plan["protocol"] == GAIN_PROTOCOL:
+            gain_proposal(root, plan, task)
     return {"status": "complete"}
+
+
+def gain_proposal(root, plan, task):
+    """Publish a derived arm with provenance, without a second LLM call."""
+    from autoformalism.rebuttal.process_gain_comparison import compile_bundle
+
+    directory = root / "results" / task["task_id"]
+    source = sealed_read(
+        root
+        / "construction"
+        / "results"
+        / task["construction_task"]["task_id"]
+        / "proposal.json"
+    )
+    with public._lock(directory):
+        if (directory / "proposal.json").exists():
+            saved = sealed_read(directory / "proposal.json")
+            if saved["common_proposal_sha256"] != source["artifact_sha256"]:
+                raise ValueError("common process construction differs")
+            return saved
+        result = {k: v for k, v in source.items() if k != "artifact_sha256"}
+        result.update(
+            task=task,
+            common_proposal_sha256=source["artifact_sha256"],
+            usage_shared_between_gain_arms=True,
+        )
+        if source["bundle"]:
+            try:
+                bundle = compile_bundle(
+                    source["bundle"],
+                    source.get("shared_process_contract"),
+                    task["gain_policy"],
+                    plan["cells"][task["case"]]["training"],
+                )
+                result.update(
+                    bundle=bundle,
+                    gain_compilation=bundle["gain_compilation"],
+                    equation_inventory=model_inventory(
+                        CandidateModel.model_validate(bundle["candidate"]),
+                        ValidationContext.model_validate(
+                            bundle["initialization"]["context"]
+                        ),
+                    ),
+                )
+                structural = structure(
+                    CandidateModel.model_validate(bundle["candidate"]), task["case"]
+                )
+                result["structural"] = structural
+                if not structural["eligible"]:
+                    result.update(
+                        status="requirement_failed",
+                        bundle=None,
+                        equation_inventory=None,
+                        gain_compilation_error=(
+                            "gain assembly adds a forbidden upstream dependency"
+                        ),
+                    )
+            except (ValueError, ArithmeticError) as exc:
+                result.update(
+                    status="gain_assembly_unavailable",
+                    bundle=None,
+                    equation_inventory=None,
+                    gain_compilation_error=str(exc),
+                )
+        return sealed_write(directory / "proposal.json", result)
 
 
 def replay(request, parameters, cell):
@@ -658,6 +755,27 @@ def fit_task(root, index):
         if not (directory / "proposal.json").exists():
             return {"status": "proposal_missing"}
         proposal = sealed_read(directory / "proposal.json")
+        if plan["protocol"] == GAIN_PROTOCOL and proposal["bundle"]:
+            from autoformalism.rebuttal.process_gain_comparison import compile_bundle
+
+            common = sealed_read(
+                root
+                / "construction"
+                / "results"
+                / task["construction_task"]["task_id"]
+                / "proposal.json"
+            )
+            rebuilt = compile_bundle(
+                common["bundle"],
+                common.get("shared_process_contract"),
+                task["gain_policy"],
+                plan["cells"][task["case"]]["training"],
+            )
+            if (
+                rebuilt != proposal["bundle"]
+                or common["artifact_sha256"] != proposal["common_proposal_sha256"]
+            ):
+                raise ValueError("gain compilation differs from shared construction")
         result = {
             "task": task,
             "proposal_sha256": proposal["artifact_sha256"],
@@ -727,6 +845,23 @@ def report(root):
         fit = result.get("fit") or {}
         inv = proposal.get("equation_inventory") or {}
         bundle = proposal.get("bundle")
+        gain_fields = {}
+        if plan["protocol"] == GAIN_PROTOCOL:
+            from autoformalism.rebuttal.process_gain_comparison import (
+                conservation_diagnostic,
+            )
+
+            gain_fields = {
+                "gain_compilation": proposal.get("gain_compilation"),
+                "gain_compilation_error": proposal.get("gain_compilation_error"),
+                "common_proposal_sha256": proposal.get("common_proposal_sha256"),
+                "usage_shared_between_gain_arms": True,
+                "transfer_cancellation": conservation_diagnostic(
+                    bundle or {},
+                    fit.get("parameters"),
+                    plan["cells"][task["case"]]["training"],
+                ),
+            }
         equations.extend(["", "## " + task["task_id"], ""])
         if bundle:
             candidate = bundle["candidate"]
@@ -766,9 +901,10 @@ def report(root):
                 "training": fit.get("training"),
                 "validation": fit.get("validation"),
                 "replay": result.get("replay"),
+                **gain_fields,
                 **(
                     {"shared_process_contract": proposal.get("shared_process_contract")}
-                    if plan["protocol"] == BOUND_PROTOCOL
+                    if plan["protocol"] in {BOUND_PROTOCOL, GAIN_PROTOCOL}
                     else {}
                 ),
             }
@@ -782,13 +918,40 @@ def report(root):
         "test_data_opened": False,
         "automatic_followup": False,
     }
+    if plan["protocol"] == GAIN_PROTOCOL:
+        unique = {
+            r["common_proposal_sha256"]: r
+            for r in rows
+            if r.get("common_proposal_sha256")
+        }
+        summary["shared_construction_accounting"] = {
+            "planned_constructions": len(plan["tasks"]) // 2,
+            "recorded_constructions": len(unique),
+            "observed_total_tokens": sum(
+                (r["usage"] or {}).get("observed_total_tokens", 0)
+                for r in unique.values()
+            ),
+            "physical_calls": sum(
+                (r["usage"] or {}).get("physical_calls", 0) for r in unique.values()
+            ),
+            "unmeasured_calls": sum(
+                (r["usage"] or {}).get("unmeasured_calls", 0) for r in unique.values()
+            ),
+            "historical_variable_selection_cost_included": False,
+        }
     public._write(root / "summary.json", summary)
-    if plan["protocol"] == BOUND_PROTOCOL:
+    if plan["protocol"] in {BOUND_PROTOCOL, GAIN_PROTOCOL}:
         public._write(root / "SAVED_REPLY_AUDIT.json", plan["paired_inputs"])
     lines = [
         "# Optional process review — basin pilot",
         "",
-        "Same guidance, model, seeds, data and total budgets; optional review on/off.",
+        (
+            "One signed construction per pair; explicit conversions/tied transfer gain "
+            "vs independent effective gains. "
+            "Tokens are shared by the two arms; do not sum them twice. No test data."
+            if plan["protocol"] == GAIN_PROTOCOL
+            else "Same model, seeds, data and budgets; optional review on/off."
+        ),
         *(
             [
                 "Both arms use the same saved variable inventory. "
@@ -824,6 +987,33 @@ def report(root):
             (r["usage"] or {}).get("observed_total_tokens"),
         ]
         lines.append("| " + " | ".join(str(v) for v in fields) + " |")
+    if plan["protocol"] == GAIN_PROTOCOL:
+        lines.extend(
+            [
+                "",
+                "Gain policies change the model family and starting predictions. "
+                "Shapes, boundaries and other terms are shared; fit budgets are equal.",
+                "Transfer checks cover declared terms in named depth coordinates. "
+                "They do not certify total balance. Zero transfer is uninformative.",
+                "",
+                "| Task | Train NMSE | Transfer cancellation | Assembly diagnostic |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for r in rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    str(v)
+                    for v in [
+                        r["task"]["task_id"],
+                        (r["training"] or {}).get("normalized_mse"),
+                        r["transfer_cancellation"],
+                        r["gain_compilation_error"],
+                    ]
+                )
+                + " |"
+            )
     temporary = root / "SUMMARY.md.tmp"
     temporary.write_text("\n".join(lines) + "\n")
     temporary.replace(root / "SUMMARY.md")

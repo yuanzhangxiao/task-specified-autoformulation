@@ -165,7 +165,8 @@ def request_for(
             "context": bundle["context"],
             "initialization_plan": initial["plan"],
             "parameter_guesses": {
-                k: v for k, v in initial["guesses"].items() if k in base_names
+                **{k: v for k, v in initial["guesses"].items() if k in base_names},
+                **bundle.get("fit_parameter_guesses", {}),
             },
             "profile": plan["config"]["fit_profile"],
             "random_seed": 20260916 + task["seed"],
