@@ -86,9 +86,16 @@ DEFAULT_VLLM_BASE_URL = "http://127.0.0.1:8000"
 
 
 def _endpoint(provider: str) -> str:
-    """Return the base URL this provider will actually call."""
+    """Return a stable endpoint identity for the plan.
+
+    A served vLLM listens on a port chosen per job, and preparation runs before
+    that server exists, so the literal URL differs between freezing a plan and
+    resuming it. Identify the local case by its kind instead; switching between
+    a hosted API and a local server still changes the identity, which is what
+    the resume guard is for.
+    """
     if provider == "vllm":
-        return os.environ.get("AF_VLLM_BASE_URL", DEFAULT_VLLM_BASE_URL)
+        return "job-local vllm endpoint"
     return os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
 

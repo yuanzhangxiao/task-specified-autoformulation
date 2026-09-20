@@ -172,3 +172,18 @@ def test_a_wholly_failed_batch_does_not_report_success() -> None:
     text = (HPC / "phase_b_d3_vllm_batch.slurm").read_text(encoding="utf-8")
     assert "if ((failures == ${#batch_indices[@]})); then" in text
     assert "every task in batch" in text
+
+
+def test_a_served_port_does_not_change_the_plan_identity(monkeypatch) -> None:
+    """Preparation runs before the server exists; resume must still match."""
+    pytest.importorskip("torch")
+    from autoformalism.rebuttal.phase_b_d3 import environment_identity
+
+    monkeypatch.delenv("AF_VLLM_BASE_URL", raising=False)
+    frozen = environment_identity("vllm")
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:29184")
+    assert environment_identity("vllm") == frozen
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:31337")
+    assert environment_identity("vllm") == frozen
+    # switching provider still changes it, which is what the guard is for
+    assert environment_identity("openai") != frozen
