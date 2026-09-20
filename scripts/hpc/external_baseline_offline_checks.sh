@@ -27,7 +27,7 @@ readonly af_user="${USER:?}"
 [[ -x "${AF_PYTHON}" ]] || { echo "missing Python: ${AF_PYTHON}" >&2; exit 2; }
 cd "${AF_REPO_ROOT}"
 export PYTHONPATH="${AF_REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
-readonly plan="${AF_REPO_ROOT}/configs/external_baseline_frozen_test_evaluation_v2.json"
+readonly plan="${AF_EVAL_PLAN:-${AF_REPO_ROOT}/configs/external_baseline_frozen_test_evaluation_v2.json}"
 
 banner() { printf '\n========== %s ==========\n' "$1"; }
 

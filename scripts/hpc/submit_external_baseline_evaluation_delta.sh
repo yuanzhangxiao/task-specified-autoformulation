@@ -15,6 +15,9 @@ readonly af_user="${USER:?}"
 : "${AF_REPO_ROOT:=${AF_PROJECT}/repos/autoformalism-v21}"
 : "${AF_OUTPUT_ROOT:=${AF_WORK}/phase_b/external-baseline-evaluation-v1}"
 : "${AF_ACCOUNT:=bibo-delta-cpu}"
+# Which plan this evaluation runs. D3 is scored under its own receipt, so
+# it uses the single-method plan and its own output root.
+: "${AF_EVAL_PLAN:=${AF_REPO_ROOT}/configs/external_baseline_frozen_test_evaluation_v2.json}"
 : "${AF_RESUME_FROM:=prepare}"
 : "${AF_POSTFREEZE_ARRAY:=0-23%12}"
 : "${AF_HIDDEN_ARRAY:=0-23%12}"
@@ -22,7 +25,10 @@ export AF_REPO_ROOT
 cd "${AF_REPO_ROOT}"
 
 readonly commit="$(git rev-parse HEAD)"
+export AF_EVAL_PLAN
 readonly digest="$(bash scripts/hpc/external_baseline_inputs_digest.sh)"
+echo "plan=${AF_EVAL_PLAN}"
+echo "output_root=${AF_OUTPUT_ROOT}"
 readonly ledger="${AF_OUTPUT_ROOT}/submission_ledger.jsonl"
 readonly receipt="${AF_OUTPUT_ROOT}/submission_manifest.json"
 
@@ -51,7 +57,7 @@ if [[ "${AF_RESUME_FROM}" != "prepare" && -f "${sealed_record}" ]]; then
 fi
 mkdir -p logs "${AF_OUTPUT_ROOT}"
 
-readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_EVALUATOR_CODE_COMMIT=${commit},AF_CHAIN_INPUTS_DIGEST=${digest}"
+readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_EVALUATOR_CODE_COMMIT=${commit},AF_CHAIN_INPUTS_DIGEST=${digest},AF_EVAL_PLAN=${AF_EVAL_PLAN}"
 # Plain variables rather than an associative array: bash 3.2 lacks -A.
 job_prepare=""
 job_postfreeze=""

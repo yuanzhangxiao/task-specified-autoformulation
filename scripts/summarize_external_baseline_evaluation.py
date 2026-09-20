@@ -51,16 +51,29 @@ def _unscored_reason(row: dict[str, object]) -> str | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--roster", type=Path, required=True)
-    parser.add_argument("--outcomes", type=Path, required=True)
-    parser.add_argument("--records", type=Path, required=True)
+    parser.add_argument("--roster", type=Path)
+    parser.add_argument("--outcomes", type=Path)
+    parser.add_argument("--records", type=Path)
+    parser.add_argument(
+        "--evaluations",
+        type=Path,
+        help="JSON list of {label, roster, outcomes, records} to combine",
+    )
     parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
 
-    roster = _read(args.roster, ExternalBaselineSource)
-    outcomes = _read(args.outcomes, SourceAdapterOutcome)
-    records = _read(args.records, FinalEvaluationRecord)
-    rows = join(roster, outcomes, records)
+    if args.evaluations is not None:
+        rows, sources = load_evaluations(args.evaluations)
+    else:
+        for name in ("roster", "outcomes", "records"):
+            if getattr(args, name) is None:
+                parser.error(f"--{name} is required without --evaluations")
+        rows = join(
+            _read(args.roster, ExternalBaselineSource),
+            _read(args.outcomes, SourceAdapterOutcome),
+            _read(args.records, FinalEvaluationRecord),
+        )
+        sources = [{"label": "single", "roster": str(args.roster)}]
 
     output_root = args.output_root.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -72,16 +85,62 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
     report = summarize(rows)
+    report["evaluations"] = sources
     (output_root / "external_baseline_report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(json.dumps(report["by_method"], indent=2, sort_keys=True))
 
 
+def load_evaluations(manifest: Path) -> tuple[list[dict[str, object]], list[dict]]:
+    """Combine separately executed evaluations without merging their identity.
+
+    Methods are evaluated under their own receipts and on different dates. The
+    rows are joined for one comparison table, but each keeps the evaluation it
+    came from, and a method may not appear in two: that would mean the same
+    model was scored twice under different conditions.
+    """
+    entries = json.loads(manifest.read_text(encoding="utf-8"))
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"expected a nonempty JSON list: {manifest}")
+    rows: list[dict[str, object]] = []
+    sources: list[dict] = []
+    seen: dict[str, str] = {}
+    for entry in entries:
+        label = str(entry["label"])
+        joined = join(
+            _read(Path(entry["roster"]), ExternalBaselineSource),
+            _read(Path(entry["outcomes"]), SourceAdapterOutcome),
+            _read(Path(entry["records"]), FinalEvaluationRecord),
+            label=label,
+        )
+        for row in joined:
+            method = str(row["method_id"])
+            if seen.setdefault(method, label) != label:
+                raise ValueError(
+                    f"method {method!r} appears in both {seen[method]!r} "
+                    f"and {label!r}; each method is evaluated once"
+                )
+        rows.extend(joined)
+        sources.append(
+            {
+                "label": label,
+                "roster": str(entry["roster"]),
+                "records": str(entry["records"]),
+                "receipt": entry.get("receipt"),
+                "evaluated_on": entry.get("evaluated_on"),
+                "row_count": len(joined),
+            }
+        )
+    return rows, sources
+
+
 def join(
     roster: tuple[ExternalBaselineSource, ...],
     outcomes: tuple[SourceAdapterOutcome, ...],
     records: tuple[FinalEvaluationRecord, ...],
+    *,
+    label: str = "single",
 ) -> list[dict[str, object]]:
     """Attach each planned identity to its outcome and evaluated endpoints."""
     by_outcome = {item.request_id: item for item in outcomes}
@@ -114,6 +173,7 @@ def join(
         target = record.target_prediction if record is not None else None
         rows.append(
             {
+                "evaluation": label,
                 "request_id": source.request_id,
                 "method_id": source.method_id,
                 "benchmark_id": source.benchmark_id,
@@ -155,6 +215,8 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
         ]
         unscored = [_unscored_reason(row) for row in subset]
         by_method[method] = {
+            # which separately executed evaluation produced these rows
+            "evaluation": sorted({str(row["evaluation"]) for row in subset}),
             "planned": len(subset),
             **{
                 state: sum(row["state"] == state for row in subset)

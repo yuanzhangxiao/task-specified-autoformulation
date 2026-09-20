@@ -21,7 +21,7 @@ readonly files=(
   "scripts/evaluate_phase_b_hidden_subspace.py"
   "scripts/merge_phase_b_hidden_subspace.py"
   "scripts/assemble_phase_b_final_evaluation.py"
-  "configs/external_baseline_frozen_test_evaluation_v2.json"
+  "${AF_EVAL_PLAN:-configs/external_baseline_frozen_test_evaluation_v2.json}"
   "scripts/hpc/external_baseline_eval_prepare.slurm"
   "scripts/hpc/external_baseline_eval_postfreeze.slurm"
   "scripts/hpc/external_baseline_eval_merge.slurm"
@@ -32,4 +32,7 @@ readonly files=(
 for file in "${files[@]}"; do
   [[ -f "${file}" ]] || { echo "chain input missing: ${file}" >&2; exit 2; }
 done
-sha256sum "${files[@]}" | sha256sum | awk '{print $1}'
+# Hash contents only. sha256sum prints the path it was given, so an
+# absolute plan path would otherwise produce a different identity from the
+# same file named relatively.
+sha256sum "${files[@]}" | awk '{print $1}' | sha256sum | awk '{print $1}'

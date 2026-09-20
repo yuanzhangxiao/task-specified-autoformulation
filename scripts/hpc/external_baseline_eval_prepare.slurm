@@ -25,7 +25,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:?}}"
 : "${AF_EVALUATOR_CODE_COMMIT:?AF_EVALUATOR_CODE_COMMIT is required}"
 : "${AF_CHAIN_INPUTS_DIGEST:?AF_CHAIN_INPUTS_DIGEST is required}"
 
-readonly plan="${AF_REPO_ROOT}/configs/external_baseline_frozen_test_evaluation_v2.json"
+readonly plan="${AF_EVAL_PLAN:-${AF_REPO_ROOT}/configs/external_baseline_frozen_test_evaluation_v2.json}"
 cd "${AF_REPO_ROOT}"
 [[ "$(git rev-parse HEAD)" == "${AF_EVALUATOR_CODE_COMMIT}" ]] || {
   echo "evaluator checkout changed after submission" >&2

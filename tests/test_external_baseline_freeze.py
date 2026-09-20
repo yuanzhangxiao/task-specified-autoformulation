@@ -1248,3 +1248,124 @@ def test_the_chain_uses_the_plan_that_can_score_d3() -> None:
     ):
         text = (Path("scripts/hpc") / name).read_text(encoding="utf-8")
         assert "d3-native-pilot-v1" in text
+
+
+# --- combining separately executed evaluations ----------------------------
+
+
+def _evaluation_files(tmp_path: Path, label: str, method: str) -> dict:
+    roster = tmp_path / f"{label}-roster.jsonl"
+    outcomes = tmp_path / f"{label}-outcomes.jsonl"
+    records = tmp_path / f"{label}-records.jsonl"
+    row = _row("evaluated", f"{label}-a", method=method)
+    roster.write_text(row.model_dump_json() + "\n", encoding="utf-8")
+    outcomes.write_text(
+        _outcome("adapted", f"{label}-a").model_dump_json() + "\n", encoding="utf-8"
+    )
+    records.write_text(
+        _record(f"{label}-a").model_dump_json() + "\n", encoding="utf-8"
+    )
+    return {
+        "label": label,
+        "roster": str(roster),
+        "outcomes": str(outcomes),
+        "records": str(records),
+        "receipt": f"{label}-commit",
+    }
+
+
+def test_separate_receipts_combine_while_keeping_their_identity(
+    tmp_path: Path,
+) -> None:
+    """D3 is evaluated under its own receipt, then joined for reporting."""
+    from scripts.summarize_external_baseline_evaluation import load_evaluations
+
+    manifest = tmp_path / "evaluations.json"
+    manifest.write_text(
+        json.dumps(
+            [
+                _evaluation_files(tmp_path, "baselines", "sindy"),
+                _evaluation_files(tmp_path, "d3", "d3_native_no_tools"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    rows, sources = load_evaluations(manifest)
+    assert len(rows) == 2
+    assert {row["evaluation"] for row in rows} == {"baselines", "d3"}
+    assert [item["receipt"] for item in sources] == ["baselines-commit", "d3-commit"]
+
+    report = summarize(rows)
+    assert report["by_method"]["sindy"]["evaluation"] == ["baselines"]
+    assert report["by_method"]["d3_native_no_tools"]["evaluation"] == ["d3"]
+
+
+def test_one_method_cannot_be_scored_under_two_receipts(tmp_path: Path) -> None:
+    """Two receipts for one method would mean it was evaluated twice."""
+    from scripts.summarize_external_baseline_evaluation import load_evaluations
+
+    manifest = tmp_path / "evaluations.json"
+    manifest.write_text(
+        json.dumps(
+            [
+                _evaluation_files(tmp_path, "first", "sindy"),
+                _evaluation_files(tmp_path, "second", "sindy"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="each method is evaluated once"):
+        load_evaluations(manifest)
+
+
+def test_the_chain_can_run_a_single_method_plan() -> None:
+    """D3 runs under its own plan and receipt, not by re-running everything."""
+    plan = json.loads(
+        Path("configs/external_baseline_d3_evaluation_v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [item["method_id"] for item in plan["methods"]] == ["d3_native_no_tools"]
+    assert len(plan["cells"]) * len(plan["repetitions"]) == 120
+    for name in (
+        "external_baseline_inputs_digest.sh",
+        "external_baseline_eval_prepare.slurm",
+        "external_baseline_eval_postfreeze.slurm",
+        "external_baseline_offline_checks.sh",
+        "submit_external_baseline_evaluation_delta.sh",
+    ):
+        text = (Path("scripts/hpc") / name).read_text(encoding="utf-8")
+        assert "AF_EVAL_PLAN" in text, name
+
+
+def test_the_chain_digest_ignores_how_a_path_is_spelled() -> None:
+    """sha256sum prints its argument, so absolute and relative would differ."""
+    import os
+
+    base = dict(os.environ, AF_REPO_ROOT=str(Path.cwd()))
+    relative = subprocess.run(
+        ["bash", "scripts/hpc/external_baseline_inputs_digest.sh"],
+        capture_output=True, text=True, env=base, check=True,
+    ).stdout.strip()
+    absolute = subprocess.run(
+        ["bash", "scripts/hpc/external_baseline_inputs_digest.sh"],
+        capture_output=True, text=True, check=True,
+        env={
+            **base,
+            "AF_EVAL_PLAN": str(
+                Path.cwd()
+                / "configs/external_baseline_frozen_test_evaluation_v2.json"
+            ),
+        },
+    ).stdout.strip()
+    assert relative == absolute
+    # a different plan is still a different identity
+    other = subprocess.run(
+        ["bash", "scripts/hpc/external_baseline_inputs_digest.sh"],
+        capture_output=True, text=True, check=True,
+        env={
+            **base,
+            "AF_EVAL_PLAN": "configs/external_baseline_d3_evaluation_v1.json",
+        },
+    ).stdout.strip()
+    assert other != relative

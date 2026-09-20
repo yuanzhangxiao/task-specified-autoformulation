@@ -40,7 +40,7 @@ jq -e '.execution_authorized == true' \
 # Verify every sealed setting in Python against resolved paths. `sha256sum -c`
 # would resolve the recorded basename against this working directory instead.
 "${AF_PYTHON}" scripts/prepare_external_baseline_frozen_test_evaluation.py \
-  --config "${AF_REPO_ROOT}/configs/external_baseline_frozen_test_evaluation_v2.json" \
+  --config "${AF_EVAL_PLAN:-${AF_REPO_ROOT}/configs/external_baseline_frozen_test_evaluation_v2.json}" \
   --output-root "${AF_OUTPUT_ROOT}/frozen" \
   --verify-execution-record \
   --adapted-root "${AF_OUTPUT_ROOT}/adapted" \
