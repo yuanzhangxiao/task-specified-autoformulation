@@ -1184,3 +1184,67 @@ def test_report_separates_a_compute_limit_from_a_diverged_model() -> None:
     # labelled diagnostic rather than headline
     assert counts["target_nmse_median_conditional_on_success"] == 0.5
     assert report["headline_median"] == "target_nmse_median_full_roster"
+
+
+# --- plan versions --------------------------------------------------------
+
+CONFIG_V2 = Path("configs/external_baseline_frozen_test_evaluation_v2.json")
+
+
+def test_v1_records_what_was_actually_evaluated() -> None:
+    """The completed receipt cites v1's hash, so v1 must not be edited."""
+    plan = load_external_baseline_plan(CONFIG)
+    blocked = [
+        item.method_id
+        for item in plan.methods
+        if item.implementation_status == "blocked"
+    ]
+    assert blocked == ["d3_native_no_tools"]
+
+
+def test_v2_scores_d3_now_that_its_evaluator_exists() -> None:
+    plan = load_external_baseline_plan(CONFIG_V2)
+    assert plan.status == "frozen_before_test_or_private_evaluation"
+    assert plan.expected_source_count == 480
+    assert not [
+        item.method_id
+        for item in plan.methods
+        if item.implementation_status == "blocked"
+    ]
+    d3 = next(item for item in plan.methods if item.method_id == "d3_native_no_tools")
+    assert d3.execution_semantics == "discrete_increment_recursive_rollout"
+    assert d3.blocking_gap is None
+
+
+def test_v2_differs_from_v1_only_in_d3_readiness() -> None:
+    """Everything the completed run depended on must be identical."""
+    first = json.loads(CONFIG.read_text(encoding="utf-8"))
+    second = json.loads(CONFIG_V2.read_text(encoding="utf-8"))
+    for key in set(first) | set(second):
+        if key == "methods":
+            continue
+        assert first[key] == second[key], key
+    changed = [
+        one["method_id"]
+        for one, two in zip(first["methods"], second["methods"], strict=True)
+        if one != two
+    ]
+    assert changed == ["d3_native_no_tools"]
+
+
+def test_the_chain_uses_the_plan_that_can_score_d3() -> None:
+    for name in (
+        "external_baseline_offline_checks.sh",
+        "external_baseline_eval_prepare.slurm",
+        "external_baseline_inputs_digest.sh",
+    ):
+        text = (Path("scripts/hpc") / name).read_text(encoding="utf-8")
+        assert "external_baseline_frozen_test_evaluation_v2.json" in text
+        assert "external_baseline_frozen_test_evaluation_v1.json" not in text
+    # and at the root where completed D3 models actually are
+    for name in (
+        "external_baseline_offline_checks.sh",
+        "external_baseline_eval_prepare.slurm",
+    ):
+        text = (Path("scripts/hpc") / name).read_text(encoding="utf-8")
+        assert "d3-native-pilot-v1" in text

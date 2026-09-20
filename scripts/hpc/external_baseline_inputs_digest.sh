@@ -21,7 +21,7 @@ readonly files=(
   "scripts/evaluate_phase_b_hidden_subspace.py"
   "scripts/merge_phase_b_hidden_subspace.py"
   "scripts/assemble_phase_b_final_evaluation.py"
-  "configs/external_baseline_frozen_test_evaluation_v1.json"
+  "configs/external_baseline_frozen_test_evaluation_v2.json"
   "scripts/hpc/external_baseline_eval_prepare.slurm"
   "scripts/hpc/external_baseline_eval_postfreeze.slurm"
   "scripts/hpc/external_baseline_eval_merge.slurm"

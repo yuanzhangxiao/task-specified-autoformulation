@@ -3,6 +3,18 @@
 Contract for opening sealed Phase-B test data on the four existing external
 baselines: SINDy, PySR, GPT-5.6 Sol, and native Phase-B D3.
 
+**Plan versions.** `..._v1.json` is the plan the completed 2026-09-19
+evaluation ran under, and its hash is cited by that receipt, so it is not
+edited. `..._v2.json` is identical except that native D3 is `ready`, now that
+its campaign reader and discrete test protocol exist. The chain points at v2.
+
+**Known inaccuracy in the v1 receipt.** That run recorded all 120 D3 rows as
+`missing` because `AF_D3_CAMPAIGN_ROOT` defaulted to an unrun full-campaign
+root while six completed Phase-B models sat at the pilot root. No score is
+affected: D3 had no evaluator then and was not scored either way. The receipt
+overstates D3's unavailability and should be read with this note; v2 points at
+the pilot root so a later evaluation records it correctly.
+
 **Status: `frozen_before_test_or_private_evaluation`** (finalized 2026-09-19
 after advisor review). Steps 1-3 still open nothing. Step 4 opens sealed test
 trajectories and the private reference, and now runs, because the plan is
