@@ -174,6 +174,34 @@ def test_a_wholly_failed_batch_does_not_report_success() -> None:
     assert "every task in batch" in text
 
 
+def test_the_client_dials_a_url_not_the_plan_identity(monkeypatch) -> None:
+    """One function served both needs, so the client was handed a label.
+
+    The plan must identify the endpoint without pinning a per-job port, and the
+    client must receive a real address. Conflating them produced
+    "vLLM base_url must use http or https" on every task.
+    """
+    from autoformalism.llm.config import LLMConfig, LLMProvider
+    from autoformalism.rebuttal.phase_b_d3 import (
+        _endpoint_identity,
+        _vllm_base_url,
+    )
+
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:29184")
+    assert _vllm_base_url() == "http://127.0.0.1:29184"
+    identity = _endpoint_identity("vllm")
+    assert not identity.startswith(("http://", "https://"))
+    # the dialled URL must satisfy the client's own validation
+    config = LLMConfig(
+        provider=LLMProvider.VLLM,
+        model="gpt-oss-120b",
+        cache_directory=Path("/tmp/d3-cache"),
+        log_path=Path("/tmp/d3-calls.jsonl"),
+        vllm_base_url=_vllm_base_url(),
+    )
+    assert config.vllm_base_url.startswith("http")
+
+
 def test_a_served_port_does_not_change_the_plan_identity(monkeypatch) -> None:
     """Preparation runs before the server exists; resume must still match."""
     pytest.importorskip("torch")

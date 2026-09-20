@@ -85,14 +85,19 @@ class Campaign(BaseModel):
 DEFAULT_VLLM_BASE_URL = "http://127.0.0.1:8000"
 
 
-def _endpoint(provider: str) -> str:
-    """Return a stable endpoint identity for the plan.
+def _vllm_base_url() -> str:
+    """The URL the client actually dials, which must be a real endpoint."""
+    return os.environ.get("AF_VLLM_BASE_URL", DEFAULT_VLLM_BASE_URL)
 
-    A served vLLM listens on a port chosen per job, and preparation runs before
-    that server exists, so the literal URL differs between freezing a plan and
-    resuming it. Identify the local case by its kind instead; switching between
-    a hosted API and a local server still changes the identity, which is what
-    the resume guard is for.
+
+def _endpoint_identity(provider: str) -> str:
+    """Describe the endpoint for the sealed plan, without pinning its address.
+
+    Separate from the URL the client dials. A served vLLM listens on a port
+    chosen per job, and preparation runs before that server exists, so the
+    literal URL differs between freezing a plan and resuming it. Identify the
+    local case by kind; moving between a hosted API and a local server still
+    changes the identity, which is what the resume guard is for.
     """
     if provider == "vllm":
         return "job-local vllm endpoint"
@@ -105,7 +110,9 @@ def environment_identity(provider: str = "openai") -> dict:
     return {
         "runtime_source_sha256": runtime_source_hash(),
         "provider": provider,
-        "provider_endpoint_sha256": content_hash({"base_url": _endpoint(provider)}),
+        "provider_endpoint_sha256": content_hash(
+            {"base_url": _endpoint_identity(provider)}
+        ),
         "libraries": {
             name: importlib.metadata.version(name)
             for name in ("torch", "numpy", "pydantic", "openai")
@@ -276,7 +283,7 @@ def run(root: Path, index: int, *, client=None) -> dict:
                             # The served port is job-local, so the client must
                             # use the same endpoint the plan identity records.
                             **(
-                                {"vllm_base_url": _endpoint("vllm")}
+                                {"vllm_base_url": _vllm_base_url()}
                                 if provider == "vllm"
                                 else {}
                             ),
