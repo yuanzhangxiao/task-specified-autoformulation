@@ -66,6 +66,14 @@ def evaluate_subject_on_test(
     if subject.target_prediction.status == "available":
         raise ValueError("subject already carries available target test metrics")
     trajectory_ids = tuple(item.trajectory_id for item in test_split.trajectories)
+    if subject.execution_semantics == "discrete_increment_recursive_rollout":
+        return _evaluate_discrete_subject(
+            subject,
+            training_split=training_split,
+            test_split=test_split,
+            trajectory_ids=trajectory_ids,
+            seconds=(fit_config.maximum_wall_time_seconds if fit_config else 300.0),
+        )
     if subject.parameterization.status not in {"available", "not_required"}:
         return _failed_subject(
             subject,
@@ -230,12 +238,17 @@ def _failed_subject(
     subject: FrozenEvaluationSubject,
     trajectory_ids: tuple[str, ...],
     message: str,
+    *,
+    protocol: str = "unseen_condition_free_rollout",
+    successful: int = 0,
 ) -> FrozenEvaluationSubject:
+    # A failure must still be labelled with the protocol that was attempted,
+    # so a discrete method is never recorded as having been free-rolled.
     target = TargetPredictionEndpoint(
         status="failed",
-        evaluation_protocol="unseen_condition_free_rollout",
+        evaluation_protocol=protocol,
         trajectory_count=len(trajectory_ids),
-        successful_trajectory_count=0,
+        successful_trajectory_count=max(successful, 0),
         failed_trajectories=trajectory_ids,
         message=message,
     )
@@ -271,3 +284,70 @@ def _updated_subject(
         }
     )
     return FrozenEvaluationSubject.model_validate(payload)
+
+
+def _evaluate_discrete_subject(
+    subject: FrozenEvaluationSubject,
+    *,
+    training_split: DatasetSplit,
+    test_split: DatasetSplit,
+    trajectory_ids: tuple[str, ...],
+    seconds: float | None,
+) -> FrozenEvaluationSubject:
+    """Score a discrete increment map with its own update, never as an ODE.
+
+    Routed by declared execution semantics. torch is imported here so the
+    continuous path keeps working without the optional D3 dependency.
+    """
+    try:
+        from autoformalism.baselines.d3_rollout import evaluate_sealed_test
+    except ImportError as exc:  # pragma: no cover - optional runtime
+        return _failed_subject(
+            subject, trajectory_ids, f"native D3 runtime unavailable: {exc}"
+        )
+    try:
+        outcome = evaluate_sealed_test(
+            subject.candidate,
+            dict(subject.parameterization.global_parameters),
+            training_split,
+            test_split,
+            seconds=seconds or 300.0,
+        )
+    except Exception as exc:  # sealed sources are untrusted inputs
+        return _failed_subject(
+            subject,
+            trajectory_ids,
+            f"native discrete replay failed: {type(exc).__name__}: {exc}",
+        )
+    rollout = outcome["sealed_test_rollout"]
+    failed = tuple(
+        str(item["trajectory_id"])
+        for item in rollout["trajectories"]
+        if not item["success"]
+    )
+    successful = len(trajectory_ids) - len(failed)
+    if rollout["status"] != "complete" or failed:
+        return _failed_subject(
+            subject,
+            trajectory_ids,
+            "one or more sealed discrete rollouts failed",
+            protocol="unseen_condition_recursive_discrete_rollout",
+            successful=successful,
+        )
+    return _updated_subject(
+        subject,
+        TargetPredictionEndpoint(
+            status="available",
+            evaluation_protocol="unseen_condition_recursive_discrete_rollout",
+            normalized_mse=float(rollout["normalized_mse"]),
+            per_target_normalized_mse={
+                name: float(value)
+                for name, value in rollout["per_target_normalized_mse"].items()
+            },
+            normalization_scales=dict(outcome["normalization_scales"]),
+            trajectory_count=len(trajectory_ids),
+            successful_trajectory_count=len(trajectory_ids),
+            message=outcome["state_update"],
+        ),
+        (),
+    )

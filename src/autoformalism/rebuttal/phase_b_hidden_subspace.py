@@ -219,6 +219,30 @@ def evaluate_phase_b_hidden_subspace(
 ) -> tuple[FrozenEvaluationSubject, PhaseBHiddenSubspaceOutcome]:
     """Evaluate a frozen candidate against private mechanism response directions."""
     _validate_inputs(subject, training_split, test_split, contract)
+    # The response-subspace contract perturbs a continuous right-hand side and
+    # integrates it. A discrete increment map has no such derivative, so this
+    # endpoint is unsupported for it rather than failed or recovered: the model
+    # was scored, just not by an evaluator that can address this question.
+    if (
+        subject.target_prediction.evaluation_protocol
+        != "unseen_condition_free_rollout"
+    ):
+        protocol = subject.target_prediction.evaluation_protocol
+        reason = (
+            "hidden response subspace requires the common free-rollout "
+            f"protocol; this subject was scored by {protocol}"
+        )
+        endpoint = HiddenMechanismEndpoint(
+            mechanism_id="claimed_mechanism_response_subspace",
+            status="not_applicable",
+            recovered=False,
+            message=reason,
+        )
+        return _append_endpoint(subject, endpoint), _outcome(
+            subject,
+            contract,
+            status="not_applicable",
+        )
     if contract.mode == "not_applicable":
         endpoint = HiddenMechanismEndpoint(
             mechanism_id="claimed_mechanism_response_subspace",
@@ -632,8 +656,6 @@ def _validate_inputs(
         raise ValueError("target post-freeze evaluation must precede hidden evaluation")
     if subject.target_prediction.status != "available":
         raise ValueError("hidden evaluation requires successful target replay")
-    if subject.target_prediction.evaluation_protocol != "unseen_condition_free_rollout":
-        raise ValueError("hidden evaluation requires the common free-rollout protocol")
     if set(subject.target_prediction.normalization_scales) != set(
         subject.validation_context.targets
     ):

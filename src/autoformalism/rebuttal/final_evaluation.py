@@ -69,7 +69,10 @@ class TargetPredictionEndpoint(BaseModel):
 
     status: EndpointStatus
     evaluation_protocol: Literal[
-        "legacy_unspecified", "unseen_condition_free_rollout"
+        "legacy_unspecified",
+        "unseen_condition_free_rollout",
+        # A discrete method's own update, never an ODE reinterpretation of it.
+        "unseen_condition_recursive_discrete_rollout",
     ] = "legacy_unspecified"
     normalized_mse: float | None = Field(default=None, ge=0.0)
     per_target_normalized_mse: dict[str, float] = Field(default_factory=dict)
@@ -94,7 +97,10 @@ class TargetPredictionEndpoint(BaseModel):
             raise ValueError("normalization scales must be positive")
         if self.successful_trajectory_count > self.trajectory_count:
             raise ValueError("successful trajectories cannot exceed requested count")
-        if self.evaluation_protocol == "unseen_condition_free_rollout":
+        if self.evaluation_protocol in {
+            "unseen_condition_free_rollout",
+            "unseen_condition_recursive_discrete_rollout",
+        }:
             if not self.trajectory_count:
                 raise ValueError("free-rollout evaluation requires trajectories")
             if self.status == "available" and (
@@ -255,6 +261,13 @@ class FrozenEvaluationSubject(BaseModel):
     source_provenance: SourceArtifactProvenance
     candidate: CandidateModel
     parameterization: FrozenParameterization
+    #: How this model advances state. The evaluator routes on the declared
+    #: semantics, never on a method name: replaying a discrete increment map
+    #: through the ODE solver silently reinterprets what the model learned.
+    execution_semantics: Literal[
+        "continuous_ode_free_rollout",
+        "discrete_increment_recursive_rollout",
+    ] = "continuous_ode_free_rollout"
     validation_context: ValidationContext
     target_prediction: TargetPredictionEndpoint
     hidden_mechanisms: tuple[HiddenMechanismEndpoint, ...] = ()
@@ -279,13 +292,26 @@ class FrozenEvaluationSubject(BaseModel):
                     f"missing={sorted(expected_targets - actual_targets)}, "
                     f"extra={sorted(actual_targets - expected_targets)}"
                 )
-            if (
-                self.target_prediction.evaluation_protocol
-                == "unseen_condition_free_rollout"
-                and set(self.target_prediction.normalization_scales) != expected_targets
+            if self.target_prediction.evaluation_protocol in {
+                "unseen_condition_free_rollout",
+                "unseen_condition_recursive_discrete_rollout",
+            } and (
+                set(self.target_prediction.normalization_scales) != expected_targets
             ):
                 raise ValueError(
-                    "free-rollout normalization scales differ from public targets"
+                    "rollout normalization scales differ from public targets"
+                )
+            expected_protocol = {
+                "continuous_ode_free_rollout": "unseen_condition_free_rollout",
+                "discrete_increment_recursive_rollout": (
+                    "unseen_condition_recursive_discrete_rollout"
+                ),
+            }[self.execution_semantics]
+            actual_protocol = self.target_prediction.evaluation_protocol
+            if actual_protocol not in {"legacy_unspecified", expected_protocol}:
+                raise ValueError(
+                    f"{self.execution_semantics} must be scored by "
+                    f"{expected_protocol}, not {actual_protocol}"
                 )
         mechanism_ids = [item.mechanism_id for item in self.hidden_mechanisms]
         if len(mechanism_ids) != len(set(mechanism_ids)):

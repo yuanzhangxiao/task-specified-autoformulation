@@ -276,7 +276,63 @@ def _adapt_d3(
     request: SourceAdapterRequest,
     context: ValidationContext,
 ) -> FrozenEvaluationSubject:
+    """Adapt a native D3 selection from either recorded campaign layout."""
     path = _required_file(request.source_path)
+    sealed = path.with_name("native-selection.json")
+    if sealed.is_file():
+        return _adapt_d3_campaign(request, context, path, sealed)
+    return _adapt_d3_historical(request, context, path)
+
+
+def _adapt_d3_campaign(
+    request: SourceAdapterRequest,
+    context: ValidationContext,
+    path: Path,
+    sealed: Path,
+) -> FrozenEvaluationSubject:
+    """Read the Phase-B campaign layout: the selection lives in its own seal.
+
+    `result.json` is an evaluation and accounting wrapper, so the selected
+    model is taken from `native-selection.json`, and both files must name the
+    same plan before the selection is trusted.
+    """
+    wrapper = _read_object(path)
+    selection = _read_object(sealed)
+    plan = selection.get("plan_sha256")
+    if not plan or plan != wrapper.get("plan_sha256"):
+        raise ValueError(f"D3 selection and result name different plans: {sealed}")
+    result = BaselineDevelopmentResult.model_validate(selection["selection"])
+    if not result.method.startswith("d3_"):
+        raise ValueError(f"baseline method {result.method!r} is not D3")
+    payload = result.selection_payload
+    candidate = CandidateModel.model_validate(payload["candidate"])
+    parameters = _numeric_mapping(payload.get("parameters", {}))
+    auxiliary = {sealed.name: _sha256(sealed)}
+    checkpoint = path.with_name("d3_checkpoint.json")
+    if checkpoint.is_file():
+        auxiliary[checkpoint.name] = _sha256(checkpoint)
+    return _subject(
+        request=request,
+        method=result.method,
+        benchmark_id=result.benchmark_id,
+        tier=result.tier,
+        repetition=result.seed,
+        candidate=candidate,
+        parameterization=_parameterization(candidate, parameters, {}),
+        context=context,
+        source_path=path,
+        source_hash=_sha256(path),
+        auxiliary_hashes=auxiliary,
+        execution_semantics="discrete_increment_recursive_rollout",
+    )
+
+
+def _adapt_d3_historical(
+    request: SourceAdapterRequest,
+    context: ValidationContext,
+    path: Path,
+) -> FrozenEvaluationSubject:
+    """Read the original layout, where result.json is the development result."""
     payload = _read_object(path)
     result = (
         BaselineDevelopmentResult.model_validate(payload)
@@ -298,7 +354,6 @@ def _adapt_d3(
     record = records[0]
     candidate = CandidateModel.model_validate(record["candidate"])
     parameters = _numeric_mapping(record.get("parameters", {}))
-    parameterization = _parameterization(candidate, parameters, {})
     return _subject(
         request=request,
         method=result.method,
@@ -306,11 +361,12 @@ def _adapt_d3(
         tier=result.tier,
         repetition=result.seed,
         candidate=candidate,
-        parameterization=parameterization,
+        parameterization=_parameterization(candidate, parameters, {}),
         context=context,
         source_path=path,
         source_hash=_sha256(path),
         auxiliary_hashes={checkpoint_path.name: _sha256(checkpoint_path)},
+        execution_semantics="discrete_increment_recursive_rollout",
     )
 
 
@@ -366,6 +422,7 @@ def _subject(
     source_path: Path,
     source_hash: str,
     auxiliary_hashes: dict[str, str] | None = None,
+    execution_semantics: str = "continuous_ode_free_rollout",
 ) -> FrozenEvaluationSubject:
     identity = {
         "request_id": request.request_id,
@@ -380,6 +437,7 @@ def _subject(
     ).hexdigest()
     return FrozenEvaluationSubject(
         subject_id=subject_id,
+        execution_semantics=execution_semantics,
         method=method,
         benchmark_id=benchmark_id,
         tier=tier,

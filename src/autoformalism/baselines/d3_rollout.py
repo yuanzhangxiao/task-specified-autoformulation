@@ -292,3 +292,57 @@ def evaluate_validation(
         "test_data_opened": False,
         "parameter_refit_applied": False,
     }
+
+
+def evaluate_sealed_test(
+    candidate: CandidateModel,
+    parameters: dict[str, float],
+    train: DatasetSplit,
+    test: DatasetSplit,
+    *,
+    seconds: float = 300.0,
+) -> dict:
+    """Replay the native increment map on sealed test trajectories.
+
+    The development entry point deliberately refuses a test split; this is its
+    post-freeze sibling. It keeps the native `x + f` update rather than handing
+    the learned expression to an ODE solver, fits nothing, and resets no
+    measured target after the initial sample. Only the recursive endpoint is
+    computed: the one-step diagnostic reads later target states, which the
+    sealed protocol does not permit.
+    """
+    if not np.isfinite(seconds) or seconds <= 0:
+        raise ValueError("require a positive finite trajectory time limit")
+    if train.name is not SplitName.TRAIN:
+        raise ValueError("normalization must be fitted on the training split")
+    if test.name is not SplitName.TEST:
+        raise ValueError("sealed replay requires the test split")
+    if not train.trajectories or not test.trajectories:
+        raise ValueError("require nonempty training and test trajectories")
+    first = train.trajectories[0]
+    targets = tuple(first.targets)
+    observed = (*targets, *first.auxiliaries)
+    inputs = (*first.external_inputs, *first.fixed_covariates)
+    for trajectory in test.trajectories:
+        if len(trajectory.time) < 2:
+            raise ValueError("require at least two samples per trajectory")
+        if set(trajectory.targets) != set(targets):
+            raise ValueError("sealed test target identities differ from training")
+    model = NativeMap.build(candidate, parameters, observed, inputs)
+    fitted = TrainingScaler().fit(train).scales
+    scales = {
+        name: float(fitted[f"target:{name}"].standard_deviation) for name in targets
+    }
+    recursive = _metrics(
+        model, test, scales, teacher_forced=False, seconds=seconds
+    )
+    return {
+        "protocol": PROTOCOL,
+        "state_update": "x_next = x + f(x, supplied_inputs); no dt multiplier",
+        "sealed_test_rollout": recursive,
+        "normalization_scales": scales,
+        "bounds_violations": list(model.bounds_violations),
+        "saved_parameter_values_preserved": True,
+        "target_states_reset_after_initial": False,
+        "parameter_refit_applied": False,
+    }
