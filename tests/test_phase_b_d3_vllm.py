@@ -165,3 +165,10 @@ def test_no_readonly_name_is_reused_as_a_loop_variable() -> None:
         ) - frozen
         assert not frozen & loops, f"{name}: {sorted(frozen & loops)}"
         assert not frozen & assigned, f"{name}: reassigns {sorted(frozen & assigned)}"
+
+
+def test_a_wholly_failed_batch_does_not_report_success() -> None:
+    """Exiting 0 regardless once hid a failed task behind COMPLETED."""
+    text = (HPC / "phase_b_d3_vllm_batch.slurm").read_text(encoding="utf-8")
+    assert "if ((failures == ${#batch_indices[@]})); then" in text
+    assert "every task in batch" in text

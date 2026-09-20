@@ -163,5 +163,12 @@ while ((position < ${#batch_indices[@]})); do
   done
   position=$((position + AF_TASK_CONCURRENCY))
 done
-echo "batch=${batch} completed with ${failures} failed task(s)"
+echo "batch=${batch} completed with ${failures} failed task(s) of ${#batch_indices[@]}"
+# Tolerate a partial failure so one bad task cannot abandon its batch, but a
+# batch where nothing succeeded must not report success: sacct would show
+# COMPLETED while the campaign produced no model at all.
+if ((failures == ${#batch_indices[@]})); then
+  echo "every task in batch ${batch} failed" >&2
+  exit 1
+fi
 exit 0
