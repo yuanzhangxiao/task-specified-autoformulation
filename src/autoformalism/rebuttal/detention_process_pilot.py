@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import signal
 from collections import Counter
 from pathlib import Path
@@ -25,7 +26,12 @@ from autoformalism.rebuttal.shared_process_audit import inventory as model_inven
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicSplit
-from autoformalism.schemas.staged_topology import ModelingLimits, PublicScientificBrief
+from autoformalism.schemas.staged_topology import (
+    ModelingLimits,
+    PublicScientificBrief,
+    ScientificVariable,
+)
+from autoformalism.search import shared_process_contract as shared
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.search.staged_topology_runner import run_staged_topology
 from autoformalism.search.training_evidence import (
@@ -33,17 +39,20 @@ from autoformalism.search.training_evidence import (
     TrainingEvidence,
     build_training_evidence,
 )
-from autoformalism.staged_topology import content_hash
+from autoformalism.staged_topology import content_hash, freeze_inventory
 from autoformalism.targets import _dependency_graph, _reaches
 
 REPO = Path(__file__).resolve().parents[3]
 PROTOCOL = "detention-process-pilot-1"
+BOUND_PROTOCOL = "detention-process-pilot-2"
 
 
 class PilotConfig(StrictSchema):
     """Sixteen fresh models, one construction/fit each; no revision or test access."""
 
-    protocol: Literal["detention-process-pilot-1"] = PROTOCOL
+    protocol: Literal["detention-process-pilot-1", "detention-process-pilot-2"] = (
+        PROTOCOL
+    )
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     model_settings: StagedModelSettings
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -109,7 +118,90 @@ def _public_asset(path):
     return value["value"]
 
 
-def freeze(source: Path, root: Path, config_path: Path):
+def paired_inputs(parent: Path, config: PilotConfig, source_binding: str) -> dict:
+    """Import sealed public variable inventories, not fitted models or hidden labels.
+
+    Both arms branch from the old review-on request's exact pre-process inventory.
+    Old replies are revalidated for an offline admission audit only, not used as
+    the new live proposal. The parent code identity is historical, not current.
+    """
+    plan = sealed_read(parent / "plan.json")
+    if (
+        plan["protocol"] != PROTOCOL
+        or plan["source_plan_sha256"] != source_binding
+        or plan["config"]["model_settings"]
+        != config.model_settings.model_dump(mode="json")
+        or plan["config"]["limits"] != config.limits.model_dump(mode="json")
+    ):
+        raise ValueError("paired source data, model or construction limits differ")
+    imported = {}
+    for task in tasks(config):
+        if not task["review"]:
+            continue
+        folder = parent / "results" / task["task_id"]
+        proposal = sealed_read(folder / "proposal.json")
+        if proposal["task"] != task:
+            raise ValueError("paired parent task differs")
+        review = proposal["attempts"][0]["process_review"]
+        key = review["request_hash"]
+        if (
+            not isinstance(key, str)
+            or len(key) != 64
+            or any(c not in "0123456789abcdef" for c in key)
+        ):
+            raise ValueError("invalid parent process request identity")
+        call = public._read(folder / "calls" / f"{key}.json")
+        if (
+            content_hash(call["request"]) != key
+            or call["step"] != "optional_process_review"
+        ):
+            raise ValueError("parent process request differs")
+        payload = json.loads(
+            next(
+                m["content"]
+                for m in call["request"]["body"]["messages"]
+                if m["role"] == "user"
+            )
+        )
+        brief = PublicScientificBrief.model_validate(
+            plan["cells"][task["case"]]["brief"]
+        )
+        inventory = freeze_inventory(
+            brief,
+            tuple(ScientificVariable.model_validate(v) for v in payload["inventory"]),
+        )
+        try:
+            from autoformalism.llm.staged_topology import visible_response
+
+            raw = visible_response(call)
+            translated = {
+                "processes": [
+                    {
+                        "name": p["name"],
+                        "depends_on": p["drivers"],
+                        "used_in_equations_for": p["consumers"],
+                        "scientific_meaning": p["scientific_role"],
+                    }
+                    for p in raw["processes"]
+                ]
+            }
+            _, admission = shared.admit(brief, inventory, translated)
+        except (ValueError, TypeError, KeyError) as exc:
+            admission = {"status": "unavailable", "error": str(exc)[:6000]}
+        imported[task["task_id"]] = {
+            "inventory": [v.model_dump(mode="json") for v in inventory],
+            "parent_proposal_sha256": proposal["artifact_sha256"],
+            "parent_request_hash": key,
+            "parent_call_sha256": hashlib.sha256(
+                (folder / "calls" / f"{key}.json").read_bytes()
+            ).hexdigest(),
+            "historical_status": review["status"],
+            "saved_reply_admission": admission,
+        }
+    return {"parent_plan_sha256": plan["artifact_sha256"], "pairs": imported}
+
+
+def freeze(source: Path, root: Path, config_path: Path, parent: Path | None = None):
     """Read only six public assets and the qualification manifest, never diagnostic/."""
     config = PilotConfig.model_validate_json(config_path.read_text())
     qualification = _public_asset(source / "plan.json")
@@ -119,6 +211,13 @@ def freeze(source: Path, root: Path, config_path: Path):
     ):
         raise ValueError("requires qualified detention development release")
     binding = content_hash(qualification)
+    if config.protocol == BOUND_PROTOCOL and parent is None:
+        raise ValueError("bound-process pilot requires the previous pilot --parent")
+    imported = (
+        paired_inputs(parent, config, binding)
+        if config.protocol == BOUND_PROTOCOL
+        else None
+    )
     with public._lock(root):
         if (root / "plan.json").exists():
             plan = verify(root)
@@ -126,6 +225,8 @@ def freeze(source: Path, root: Path, config_path: Path):
                 "config"
             ] != config.model_dump(mode="json"):
                 raise ValueError("source or configuration differs")
+            if plan.get("paired_inputs") != imported:
+                raise ValueError("paired inventory source differs")
             for relative, digest in plan["source_public_files"].items():
                 if (
                     hashlib.sha256((source / relative).read_bytes()).hexdigest()
@@ -207,7 +308,7 @@ def freeze(source: Path, root: Path, config_path: Path):
         return sealed_write(
             root / "plan.json",
             {
-                "protocol": PROTOCOL,
+                "protocol": config.protocol,
                 "config": config.model_dump(mode="json"),
                 "source_plan_sha256": binding,
                 "source_public_files": files,
@@ -218,6 +319,7 @@ def freeze(source: Path, root: Path, config_path: Path):
                 "runtime": public._runtime(),
                 "test_data_opened": False,
                 "private_reference_opened": False,
+                **({"paired_inputs": imported} if imported is not None else {}),
             },
         )
 
@@ -226,7 +328,7 @@ def verify(root):
     """Reject source, launch or matrix drift without reading the old release."""
     plan = sealed_read(root / "plan.json")
     config = PilotConfig.model_validate(plan["config"])
-    if plan["protocol"] != PROTOCOL or plan["tasks"] != tasks(config):
+    if plan["protocol"] != config.protocol or plan["tasks"] != tasks(config):
         raise ValueError("pilot contract differs")
     if (
         plan["source_sha256"] != public._source_identity()
@@ -302,6 +404,18 @@ def construct(root, plan, task, client):
         if task["arm"] == "full"
         else None
     )
+    bound = plan["protocol"] == BOUND_PROTOCOL
+    initial_inventory = None
+    if bound:
+        pair = (
+            task["task_id"].removesuffix("off") + "on"
+            if not task["review"]
+            else task["task_id"]
+        )
+        initial_inventory = tuple(
+            ScientificVariable.model_validate(v)
+            for v in plan["paired_inputs"]["pairs"][pair]["inventory"]
+        )
     attempts, bundle = [], None
     for route in ("review", "fallback") if task["review"] else ("control",):
         output = directory / route
@@ -320,6 +434,14 @@ def construct(root, plan, task, client):
                     training_evidence=evidence,
                     shared_process_guidance=True,
                     optional_process_review=(route == "review"),
+                    **(
+                        {
+                            "initial_inventory": initial_inventory,
+                            "bind_shared_processes": route == "review",
+                        }
+                        if bound
+                        else {}
+                    ),
                 ),
             )
             if (
@@ -364,6 +486,15 @@ def construct(root, plan, task, client):
                 "topology_status": (topology or {}).get("status"),
                 "function_status": (functions or {}).get("status"),
                 "process_review": (topology or {}).get("process_review"),
+                **(
+                    {
+                        "shared_process_contract": (topology or {}).get(
+                            "shared_process_contract"
+                        )
+                    }
+                    if bound
+                    else {}
+                ),
                 "structural": structural,
             }
         )
@@ -371,7 +502,7 @@ def construct(root, plan, task, client):
             break
         # No alteration means no new failure attributable to optional additions.
         if route != "review" or not ((topology or {}).get("process_review") or {}).get(
-            "added_names"
+            "suggestions" if bound else "added_names"
         ):
             break
     records = client.records
@@ -417,6 +548,17 @@ def construct(root, plan, task, client):
             else None,
             "test_data_opened": False,
             "private_reference_opened": False,
+            **(
+                {
+                    "shared_process_contract": (functions or {}).get(
+                        "shared_process_contract"
+                    )
+                    if bundle
+                    else None
+                }
+                if bound
+                else {}
+            ),
         },
     )
 
@@ -624,10 +766,15 @@ def report(root):
                 "training": fit.get("training"),
                 "validation": fit.get("validation"),
                 "replay": result.get("replay"),
+                **(
+                    {"shared_process_contract": proposal.get("shared_process_contract")}
+                    if plan["protocol"] == BOUND_PROTOCOL
+                    else {}
+                ),
             }
         )
     summary = {
-        "protocol": PROTOCOL,
+        "protocol": plan["protocol"],
         "plan_sha256": plan["artifact_sha256"],
         "status_counts": dict(Counter(r["status"] for r in rows)),
         "rows": rows,
@@ -636,10 +783,20 @@ def report(root):
         "automatic_followup": False,
     }
     public._write(root / "summary.json", summary)
+    if plan["protocol"] == BOUND_PROTOCOL:
+        public._write(root / "SAVED_REPLY_AUDIT.json", plan["paired_inputs"])
     lines = [
         "# Optional process review — basin pilot",
         "",
         "Same guidance, model, seeds, data and total budgets; optional review on/off.",
+        *(
+            [
+                "Both arms use the same saved variable inventory. "
+                "Process definitions and uses are bound."
+            ]
+            if plan["protocol"] == BOUND_PROTOCOL
+            else []
+        ),
         (
             "No private equations, hidden trajectories or test data. "
             "Named reuse is not conservation certification."

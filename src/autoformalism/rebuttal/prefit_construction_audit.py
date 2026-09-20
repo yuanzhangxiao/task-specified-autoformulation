@@ -24,6 +24,7 @@ from autoformalism.schemas.staged_topology import (
     PublicScientificBrief,
     ScientificVariable,
 )
+from autoformalism.search import shared_process_contract as shared
 from autoformalism.search.causal_initialization import compile_initialization_result
 from autoformalism.search.staged_function_runner import (
     _accepted_function_record,
@@ -59,6 +60,11 @@ def reconstruct(cell: dict, construction: dict) -> dict:
     source, result = construction["topology"], construction["functions"]
     inventory = tuple(ScientificVariable.model_validate(x) for x in source["inventory"])
     equations = tuple(EquationDefinition.model_validate(x) for x in source["equations"])
+    bindings = shared.validate_contract(
+        source.get("shared_process_contract"), equations, inventory
+    )
+    if source.get("shared_process_contract") != result.get("shared_process_contract"):
+        raise ValueError("saved shared-process contract differs")
     topology, aliases = lower_topology(brief, inventory, equations, context)
     if topology.model_dump(mode="json") != source["topology"]:
         raise ValueError("saved topology differs from its scientific declarations")
@@ -69,12 +75,15 @@ def reconstruct(cell: dict, construction: dict) -> dict:
     slots = [
         (
             f"term_{i}_{j}",
-            {
-                **_selected_term(
-                    equation, term, parameter_identity_policy="interaction_local"
-                ),
-                "deterministic_role_repair_policy": "certified_outer_gain",
-            },
+            shared.decorate_function_term(
+                {
+                    **_selected_term(
+                        equation, term, parameter_identity_policy="interaction_local"
+                    ),
+                    "deterministic_role_repair_policy": "certified_outer_gain",
+                },
+                bindings,
+            ),
         )
         for i, equation in enumerate(equations)
         for j, term in enumerate(equation.terms)
@@ -99,6 +108,9 @@ def reconstruct(cell: dict, construction: dict) -> dict:
         original_valid = False
         prepared = None
         try:
+            shared.validate_function(
+                original.expression, selected.get("shared_process_use")
+            )
             prepared, _ = repair_certified_outer_gain_role(
                 original,
                 set(selected["sources"]),
@@ -111,6 +123,9 @@ def reconstruct(cell: dict, construction: dict) -> dict:
         except (ValueError, ModelValidationError):
             pass
         final_reply = _reply(final)
+        shared.validate_function(
+            final_reply.expression, selected.get("shared_process_use")
+        )
         if original_valid != batch["batch_accepted"]:
             raise ValueError("recorded batch validity differs from revalidation")
         if original_valid and (

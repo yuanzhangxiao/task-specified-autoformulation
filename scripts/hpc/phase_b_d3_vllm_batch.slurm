@@ -65,8 +65,8 @@ cd "${AF_REPO_ROOT}"
 
 # This batch's slice of the task list.
 IFS=',' read -r -a all_indices <<< "${AF_TASK_INDICES}"
-readonly offset=$((batch * AF_BATCH_SIZE))
-batch_indices=("${all_indices[@]:${offset}:${AF_BATCH_SIZE}}")
+readonly slice_start=$((batch * AF_BATCH_SIZE))
+batch_indices=("${all_indices[@]:${slice_start}:${AF_BATCH_SIZE}}")
 ((${#batch_indices[@]})) || { echo "batch ${batch} is empty"; exit 0; }
 echo "batch=${batch} tasks=${batch_indices[*]}"
 echo "model=${AF_LOCAL_MODEL} tp=${AF_TENSOR_PARALLEL_SIZE} max_model_len=${AF_VLLM_MAX_MODEL_LEN}"
@@ -153,11 +153,11 @@ while ((position < ${#batch_indices[@]})); do
       >"${AF_D3_OUTPUT_ROOT}/logs/task-${index}.out" 2>&1 &
     pids+=("$!")
   done
-  for offset in "${!pids[@]}"; do
-    if wait "${pids[offset]}"; then
-      echo "task ${group[offset]} complete"
+  for slot in "${!pids[@]}"; do
+    if wait "${pids[slot]}"; then
+      echo "task ${group[slot]} complete"
     else
-      echo "task ${group[offset]} failed; see logs/task-${group[offset]}.out" >&2
+      echo "task ${group[slot]} failed; see logs/task-${group[slot]}.out" >&2
       failures=$((failures + 1))
     fi
   done

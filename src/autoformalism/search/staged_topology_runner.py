@@ -270,8 +270,13 @@ def run_staged_topology(
     training_evidence: TrainingEvidence | None = None,
     shared_process_guidance: bool = False,
     optional_process_review: bool = False,
+    bind_shared_processes: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
+    from autoformalism.search import shared_process_contract as shared
+
+    if bind_shared_processes and not optional_process_review:
+        raise ValueError("shared process binding requires the process proposal stage")
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     contract_path = output / "evidence_contract.json"
     if (
@@ -284,7 +289,9 @@ def run_staged_topology(
         if shared_process_guidance:
             contract["shared_process_guidance"] = True
         if optional_process_review:
-            contract["optional_process_review"] = "optional-process-review-1"
+            contract["optional_process_review"] = (
+                shared.POLICY if bind_shared_processes else "optional-process-review-1"
+            )
         if contract_path.exists() and json.loads(contract_path.read_text()) != contract:
             raise ValueError("topology evidence contract differs")
         if not contract_path.exists() and (output / "result.json").exists():
@@ -375,6 +382,7 @@ def run_staged_topology(
     aliases: dict[str, str] = {}
     agenda = scientific_agenda(brief) if initial_inventory is None else ()
     process_review = None
+    process_bindings: list[dict] = []
     try:
         for index, item in enumerate(agenda):
             if hybrid_variable_construction:
@@ -524,9 +532,39 @@ def run_staged_topology(
         if optional_process_review:
             from autoformalism.search.process_review import review
 
-            inventory, process_review = review(
+            process_proposer = shared.propose if bind_shared_processes else review
+            inventory, process_review = process_proposer(
                 brief, enriched, inventory, client, output
             )
+            checkpoint()
+        if bind_shared_processes:
+            for suggestion in process_review["suggestions"]:
+                binding = request(
+                    f"process_uses_{suggestion['name']}",
+                    shared.TOPOLOGY_SYSTEM,
+                    lambda diagnostic, suggestion=suggestion: _json(
+                        {
+                            "protocol": shared.POLICY,
+                            "stage": "process_uses",
+                            "public_brief": enriched,
+                            "process": suggestion,
+                            "inventory": [v.model_dump(mode="json") for v in inventory],
+                            "runtime_diagnostics": json.loads(diagnostic)
+                            if diagnostic
+                            else None,
+                        }
+                    ),
+                    shared.UsesReply,
+                    lambda reply, suggestion=suggestion: shared.validate_uses(
+                        suggestion, reply, inventory
+                    ),
+                )
+                process_bindings.append(binding)
+            # Each process has one defining interaction. Its function remains signed;
+            # the proposer decides consumer assembly signs together above.
+            equations = tuple(shared.definition(b) for b in process_bindings)
+            for definition in equations:
+                validate_equation(inventory, (), definition, brief.limits)
             checkpoint()
         allowed = tuple(item.name for item in inventory if item.definition != "unused")
         model = equation_reply_model(
@@ -550,6 +588,8 @@ def run_staged_topology(
         for selected in equation_order:
             if selected.definition not in {"differential", "algebraic"}:
                 continue
+            if selected.name in {b["proposal"]["name"] for b in process_bindings}:
+                continue
             polarity_policy = compile_equation_polarity_policy(
                 brief,
                 selected.name,
@@ -569,6 +609,8 @@ def run_staged_topology(
                     definition=selected.definition,
                     terms=reply.terms,
                 )
+                if process_bindings:
+                    shared.validate_equation_uses(process_bindings, definition)
                 validate_equation(inventory, equations, definition, brief.limits)
                 if hybrid_variable_construction:
                     _validate_memory_equation_obligations(
@@ -609,6 +651,11 @@ def run_staged_topology(
                         else None
                     ),
                     diagnostics_json=diagnostic,
+                    shared_process_terms=(
+                        shared.requirements(process_bindings, selected.name)
+                        if process_bindings
+                        else None
+                    ),
                 ),
                 model,
                 accept_equation,
@@ -700,6 +747,11 @@ def run_staged_topology(
     }
     if optional_process_review:
         result["process_review"] = process_review
+    if bind_shared_processes:
+        result["shared_process_contract"] = {
+            "protocol": shared.POLICY,
+            "bindings": process_bindings,
+        }
     checkpoint()
     atomic_json(output / "result.json", result)
     return result

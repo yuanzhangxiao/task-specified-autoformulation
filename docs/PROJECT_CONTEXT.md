@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/SHARED_PROCESS_CONTRACT.md` describes the opt-in shared-law construction
+milestone: independently admitted process suggestions, jointly chosen topology
+uses, one defining function/parameter set, and checked linear conversions at each
+consumer. The matched basin v2 pilot branches both arms from the same saved
+variable inventory. Public data, fitter and historical protocols stay fixed;
+the representation certificate does not establish physical conservation.
+
 `docs/DETENTION_BENCHMARK.md` defines a separate stormwater-basin development
 qualification: physical water balance, an independent-basins negative control,
 public train/validation exports and an eight-arm known-skeleton audit using the

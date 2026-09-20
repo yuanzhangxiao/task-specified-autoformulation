@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source", type=Path)
+    parser.add_argument("--parent", type=Path)
     parser.add_argument(
         "--config",
         type=Path,
@@ -35,7 +36,7 @@ def main():
     if args.command == "prepare":
         if args.source is None:
             parser.error("--source required")
-        plan = pilot.freeze(args.source, root, args.config)
+        plan = pilot.freeze(args.source, root, args.config, args.parent)
         result = {"identity": plan["artifact_sha256"], "tasks": len(plan["tasks"])}
     elif args.command == "verify":
         result = {"identity": pilot.verify(root)["artifact_sha256"]}

@@ -140,3 +140,28 @@ def test_the_d3_output_root_cannot_be_hijacked_by_another_campaign() -> None:
                 continue
             assert "AF_OUTPUT_ROOT" not in line, f"{name}: {line}"
         assert "AF_D3_OUTPUT_ROOT" in text
+
+
+def test_no_readonly_name_is_reused_as_a_loop_variable() -> None:
+    """`for offset in ...` against `readonly offset=` aborts only at runtime.
+
+    bash -n parses it happily; the job dies mid-batch with
+    "offset: readonly variable" after the model has already been loaded.
+    """
+    import re
+
+    for name in (
+        "phase_b_d3_vllm_batch.slurm",
+        "submit_phase_b_d3_vllm.sh",
+        "external_baseline_offline_checks.sh",
+    ):
+        text = (HPC / name).read_text(encoding="utf-8")
+        frozen = set(re.findall(r"^readonly\s+([A-Za-z_][A-Za-z0-9_]*)=", text, re.M))
+        loops = set(
+            re.findall(r"^\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", text, re.M)
+        )
+        assigned = set(
+            re.findall(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=", text, re.M)
+        ) - frozen
+        assert not frozen & loops, f"{name}: {sorted(frozen & loops)}"
+        assert not frozen & assigned, f"{name}: reassigns {sorted(frozen & assigned)}"

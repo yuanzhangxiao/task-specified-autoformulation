@@ -14,7 +14,7 @@ fi
 "$AF_PYTHON" scripts/detention_process_pilot.py verify --root "$AF_OUTPUT_ROOT"
 case "${1:?stage}" in
  prepare)
-    "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_process_review.py tests/test_detention_process_pilot.py tests/test_detention_process_submission.py
+    "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_process_review.py tests/test_shared_process_contract.py tests/test_detention_process_pilot.py tests/test_detention_process_submission.py tests/test_detention_bound_pilot.py
     actual="$(sha256sum "$AF_VLLM_IMAGE")"
     [[ "${actual%% *}" == "$(jq -r '.config.serving_image_sha256' "$AF_OUTPUT_ROOT/plan.json")" ]] || exit 2
     ;;

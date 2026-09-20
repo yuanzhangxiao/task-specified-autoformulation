@@ -15,6 +15,9 @@ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_TH
 module load GCCcore/13.2.0 Python/3.11.5
 cd "$AF_REPO_ROOT"
 [[ -x "$AF_PYTHON" && -f "$AF_VLLM_IMAGE" ]] || { echo 'Missing Python or serving image' >&2; exit 2; }
-bash scripts/hpc/run_staged_topology_server.sh --check-config configs/detention_process_pilot_v1.json
-"$AF_PYTHON" scripts/detention_process_pilot.py prepare --source "$AF_PUBLIC_ROOT" --root "$AF_OUTPUT_ROOT"
+config="${AF_CONFIG:-$AF_REPO_ROOT/configs/detention_process_pilot_v1.json}"
+bash scripts/hpc/run_staged_topology_server.sh --check-config "$config"
+extra=()
+if [[ -n "${AF_PARENT_ROOT:-}" ]]; then extra=(--parent "$AF_PARENT_ROOT"); fi
+"$AF_PYTHON" scripts/detention_process_pilot.py prepare --source "$AF_PUBLIC_ROOT" --root "$AF_OUTPUT_ROOT" --config "$config" "${extra[@]}"
 exec "$AF_PYTHON" scripts/submit_detention_process_pilot.py --root "$AF_OUTPUT_ROOT"

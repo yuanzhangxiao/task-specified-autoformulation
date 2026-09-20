@@ -33,6 +33,7 @@ from autoformalism.schemas.staged_topology import (
     PublicScientificBrief,
     ScientificVariable,
 )
+from autoformalism.search import shared_process_contract as shared
 from autoformalism.search.causal_initialization import construct_initializers
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_function_prompts import (
@@ -85,6 +86,7 @@ def run_staged_functions(
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     if (
         shared_process_guidance
+        or source.get("shared_process_contract")
         or initialization_policy == "causal_training"
         or training_evidence is not None
         or (output / "construction_contract.json").exists()
@@ -113,6 +115,8 @@ def run_staged_functions(
     equations = tuple(
         EquationDefinition.model_validate(item) for item in source["equations"]
     )
+    process_contract = source.get("shared_process_contract")
+    process_bindings = shared.validate_contract(process_contract, equations, inventory)
     topology, aliases = lower_topology(brief, inventory, equations, context)
     if (
         not source.get("complete_topology")
@@ -231,6 +235,7 @@ def run_staged_functions(
         selected: dict[str, Any],
     ) -> tuple[InteractionFunctionReply, tuple[DeterministicFunctionRepair, ...]]:
         """Apply only the versioned, AST-certified provider-side repair."""
+        shared.validate_function(reply.expression, selected.get("shared_process_use"))
         if function_repair_policy == "legacy":
             return reply, ()
         return repair_certified_outer_gain_role(
@@ -263,6 +268,10 @@ def run_staged_functions(
                     ),
                 }
                 for term in equation.terms
+            )
+            selected_terms = tuple(
+                shared.decorate_function_term(selected, process_bindings)
+                for selected in selected_terms
             )
             identifiers = tuple(
                 f"term_{equation_index}_{term_index}"
@@ -320,6 +329,25 @@ def run_staged_functions(
                     )
                     checkpoint()
             elif generation_granularity == "equation_batch":
+
+                def validate_shared_batch(
+                    reply,
+                    selected_terms=selected_terms,
+                    draft=draft,
+                    identifiers=identifiers,
+                ):
+                    if len(reply.functions) != len(selected_terms):
+                        raise ValueError("equation function count mismatch")
+                    for function, selected in zip(
+                        reply.functions, selected_terms, strict=True
+                    ):
+                        shared.validate_function(
+                            function.expression, selected.get("shared_process_use")
+                        )
+                    return apply_equation_function_reply(
+                        topology, draft, identifiers, reply, context, aliases
+                    )
+
                 selected_equation = {
                     "lhs": equation.name,
                     "definition": equation.definition,
@@ -342,16 +370,7 @@ def run_staged_functions(
                         )
                     ),
                     EquationFunctionBatchReply,
-                    lambda reply,
-                    identifiers=identifiers,
-                    draft=draft: apply_equation_function_reply(
-                        topology,
-                        draft,
-                        identifiers,
-                        reply,
-                        context,
-                        aliases,
-                    ),
+                    validate_shared_batch,
                 )
                 for selected, function in zip(
                     selected_terms, reply.functions, strict=True
@@ -627,6 +646,8 @@ def run_staged_functions(
     if initialization_policy == "causal_training":
         result["initialization_policy"] = initialization_policy
         result["initialization"] = initialization
+    if process_contract:
+        result["shared_process_contract"] = process_contract
     checkpoint()
     atomic_json(output / "result.json", result)
     return result
