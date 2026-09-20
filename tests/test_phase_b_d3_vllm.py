@@ -187,3 +187,11 @@ def test_a_served_port_does_not_change_the_plan_identity(monkeypatch) -> None:
     assert environment_identity("vllm") == frozen
     # switching provider still changes it, which is what the guard is for
     assert environment_identity("openai") != frozen
+
+
+def test_a_recorded_discovery_failure_counts_as_a_failed_task() -> None:
+    """run() records terminal failures rather than raising, so exit 0 is not proof."""
+    text = (HPC / "phase_b_d3_vllm_batch.slurm").read_text(encoding="utf-8")
+    assert "does not mean the task discovered anything" in text
+    assert '.status // "missing"' in text
+    assert 'if [[ "${status}" == complete ]]; then' in text

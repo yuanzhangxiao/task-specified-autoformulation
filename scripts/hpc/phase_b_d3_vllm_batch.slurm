@@ -154,8 +154,18 @@ while ((position < ${#batch_indices[@]})); do
     pids+=("$!")
   done
   for slot in "${!pids[@]}"; do
+    # run() records a terminal failure as a result rather than raising, so a
+    # zero exit status does not mean the task discovered anything.
     if wait "${pids[slot]}"; then
-      echo "task ${group[slot]} complete"
+      status="$(jq -r '.status // "missing"' \
+        "${AF_D3_OUTPUT_ROOT}/results/${group[slot]}/result.json" 2>/dev/null \
+        || echo missing)"
+      if [[ "${status}" == complete ]]; then
+        echo "task ${group[slot]} complete"
+      else
+        echo "task ${group[slot]} recorded ${status}" >&2
+        failures=$((failures + 1))
+      fi
     else
       echo "task ${group[slot]} failed; see logs/task-${group[slot]}.out" >&2
       failures=$((failures + 1))
