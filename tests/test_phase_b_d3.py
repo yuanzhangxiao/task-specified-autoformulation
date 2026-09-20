@@ -31,7 +31,7 @@ def fixture(tmp_path, monkeypatch, generations=1):
     }
     monkeypatch.setattr(campaign, "load_public", lambda *a: (data, context, identity))
     monkeypatch.setattr(campaign, "_prompt_path", lambda *a: prompt)
-    monkeypatch.setattr(campaign, "environment_identity", lambda: {"code": "fixed"})
+    monkeypatch.setattr(campaign, "environment_identity", lambda *_: {"code": "fixed"})
     monkeypatch.setattr(
         d3,
         "fit_native_d3",
@@ -110,7 +110,9 @@ def test_code_drift_and_model_change_refused(tmp_path, monkeypatch):
     root, _, _, config = fixture(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="frozen artifact differs"):
         campaign.prepare(config, tmp_path, root, "different-model")
-    monkeypatch.setattr(campaign, "environment_identity", lambda: {"code": "different"})
+    monkeypatch.setattr(
+        campaign, "environment_identity", lambda *_: {"code": "different"}
+    )
     with pytest.raises(ValueError, match="code or dependencies"):
         campaign.run(root, 0, client=MockLLMClient())
 

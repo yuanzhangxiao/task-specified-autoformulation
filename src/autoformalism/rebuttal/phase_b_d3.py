@@ -81,18 +81,24 @@ class Campaign(BaseModel):
         return self
 
 
-def environment_identity() -> dict:
+#: Mirrors LLMConfig.vllm_base_url; LLMConfig cannot be built without a model.
+DEFAULT_VLLM_BASE_URL = "http://127.0.0.1:8000"
+
+
+def _endpoint(provider: str) -> str:
+    """Return the base URL this provider will actually call."""
+    if provider == "vllm":
+        return os.environ.get("AF_VLLM_BASE_URL", DEFAULT_VLLM_BASE_URL)
+    return os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+
+def environment_identity(provider: str = "openai") -> dict:
     """Require fitting dependencies before spending tokens; bind resume to code."""
     importlib.import_module("torch")
     return {
         "runtime_source_sha256": runtime_source_hash(),
-        "provider_endpoint_sha256": content_hash(
-            {
-                "base_url": os.environ.get(
-                    "OPENAI_BASE_URL", "https://api.openai.com/v1"
-                ),
-            }
-        ),
+        "provider": provider,
+        "provider_endpoint_sha256": content_hash({"base_url": _endpoint(provider)}),
         "libraries": {
             name: importlib.metadata.version(name)
             for name in ("torch", "numpy", "pydantic", "openai")
@@ -108,13 +114,19 @@ def _prompt_path(public_root: Path, benchmark: str, tier: str) -> Path:
     return path / "proposer_prompt.txt"
 
 
-def prepare(config_path: Path, public_root: Path, root: Path, model: str) -> dict:
+def prepare(
+    config_path: Path,
+    public_root: Path,
+    root: Path,
+    model: str,
+    provider: str = "openai",
+) -> dict:
     """Freeze exact public development inputs; never access historical/test data."""
     config = Campaign.model_validate(read_json(config_path))
+    if provider not in {"openai", "vllm"}:
+        raise ValueError(f"unsupported D3 provider: {provider!r}")
     if not model.strip() or ":" in model or model != model.strip():
-        raise ValueError(
-            "supply an explicit OpenAI API model ID without provider prefix"
-        )
+        raise ValueError("supply an explicit model ID without a provider prefix")
     public_root = public_root.resolve()
     rows = []
     for cell in config.cells:
@@ -140,11 +152,11 @@ def prepare(config_path: Path, public_root: Path, root: Path, model: str) -> dic
             {
                 "protocol": PROTOCOL,
                 "config": config.model_dump(mode="json"),
-                "provider": "openai",
+                "provider": provider,
                 "model": model,
                 "max_attempts": 1,
                 "public_root": str(public_root),
-                "environment": environment_identity(),
+                "environment": environment_identity(provider),
                 "upstream_revision": D3_UPSTREAM_REVISION,
                 "adaptation": ADAPTATION,
                 "maximum_logical_calls": len(rows) * config.generations,
@@ -203,7 +215,10 @@ def accounting(path: Path) -> dict:
 def run(root: Path, index: int, *, client=None) -> dict:
     """Resume one exact task; completed results cause no calls or refitting."""
     plan = sealed_read(root / "plan.json")
-    if plan["protocol"] != PROTOCOL or plan["environment"] != environment_identity():
+    provider = str(plan.get("provider", "openai"))
+    if plan["protocol"] != PROTOCOL or plan["environment"] != environment_identity(
+        provider
+    ):
         raise ValueError(
             "protocol, code or dependencies changed; use the pinned checkout"
         )
@@ -244,13 +259,20 @@ def run(root: Path, index: int, *, client=None) -> dict:
                     if client is not None
                     else create_llm_client(
                         LLMConfig(
-                            provider=LLMProvider.OPENAI,
+                            provider=LLMProvider(provider),
                             model=plan["model"],
                             max_attempts=1,
                             max_output_tokens=config.max_output_tokens,
                             cache_directory=directory / "llm_cache",
                             log_path=directory / "llm_calls.jsonl",
                             proposal_target_channels=context.targets,
+                            # The served port is job-local, so the client must
+                            # use the same endpoint the plan identity records.
+                            **(
+                                {"vllm_base_url": _endpoint("vllm")}
+                                if provider == "vllm"
+                                else {}
+                            ),
                         )
                     )
                 )
@@ -258,7 +280,7 @@ def run(root: Path, index: int, *, client=None) -> dict:
                     BaselineConfig(
                         method="d3_native_no_tools",
                         seed=row["repetition"],
-                        llm_model=f"openai:{plan['model']}",
+                        llm_model=f"{provider}:{plan['model']}",
                         d3_generations=config.generations,
                         d3_patience=config.patience,
                     ),

@@ -17,7 +17,13 @@ def main() -> None:
     freeze = sub.add_parser("prepare")
     freeze.add_argument("--config", type=Path, required=True)
     freeze.add_argument("--public-root", type=Path, required=True)
-    freeze.add_argument("--model", required=True, help="Explicit OpenAI API model ID")
+    freeze.add_argument("--model", required=True, help="Explicit model ID, no prefix")
+    freeze.add_argument(
+        "--provider",
+        choices=("openai", "vllm"),
+        default="openai",
+        help="Hosted OpenAI, or a local vLLM endpoint (AF_VLLM_BASE_URL)",
+    )
     freeze.add_argument("--root", type=Path, required=True)
     worker = sub.add_parser("run")
     worker.add_argument("--root", type=Path, required=True)
@@ -26,7 +32,9 @@ def main() -> None:
     summary.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "prepare":
-        result = prepare(args.config, args.public_root, args.root, args.model)
+        result = prepare(
+            args.config, args.public_root, args.root, args.model, args.provider
+        )
         value = {
             "plan_sha256": result["artifact_sha256"],
             "expected": len(result["rows"]),
