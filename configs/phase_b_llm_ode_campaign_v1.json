@@ -184,12 +184,12 @@
     "unit": "iterations",
     "published_default": 200,
     "declared": 200,
-    "rationale": "Published default, unreduced. One prompt per island per iteration, so 200 iterations x 4 islands is 800 calls per run and 96000 across 40 cells and 3 repetitions. That is affordable on a served local model, so the search runs at full length and no budget qualification applies."
+    "rationale": "Published default, unreduced. The driver builds one searcher per state variable, so calls are iterations x islands x variables: 200 x 4 x 3 is about 2400 per run for a three-state cell, and roughly 288000 across 40 cells and 3 repetitions. Affordable on a served local model, so the search runs at full length and no budget qualification applies."
   },
   "prompt_policy": {
     "supplies_public_task_specification": true,
     "upstream_withholds_specification": true,
     "description": "Declared adaptation. The upstream protocol withholds variable meanings and system descriptions to mitigate memorisation; this benchmark controls for that with its named/obfuscated pairing, so the specification is supplied to equalise information with the other LLM baselines. Search instructions, operators, fitting and selection are unchanged."
   },
-  "derivative_provenance": "not_applicable"
+  "derivative_provenance": "upstream_findiff_fourth_order"
 }

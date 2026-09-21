@@ -111,7 +111,14 @@ class VendoredCampaignPlan(BaseModel):
     cells: tuple[FinalEvaluationPilotCell, ...] = Field(min_length=1)
     repetitions: tuple[int, ...] = Field(min_length=1)
     execution_semantics: Literal["continuous_ode_free_rollout"]
-    derivative_provenance: Literal["estimated_numpy_gradient", "not_applicable"]
+    #: How the method obtains derivatives. Upstream choices are kept, so a
+    #: method is not credited or penalised for our estimator; the
+    #: difference from the other symbolic baselines is reported instead.
+    derivative_provenance: Literal[
+        "estimated_numpy_gradient",
+        "upstream_findiff_fourth_order",
+        "not_applicable",
+    ]
     test_data_opened: Literal[False]
     private_reference_opened: Literal[False]
 
