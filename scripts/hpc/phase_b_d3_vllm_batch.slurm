@@ -85,6 +85,11 @@ if [[ ! -f "${runtime_image}" ]]; then
   apptainer build --sandbox "${runtime_image}" "${AF_VLLM_IMAGE_URI}"
 fi
 
+# The lock runs a new shell, and ":=" defaults are not exported, so the
+# inner shell would see them unset under set -u. Export what it reads
+# rather than relying on the submitter having passed every one.
+export AF_D3_OUTPUT_ROOT AF_PYTHON AF_D3_CONFIG AF_PUBLIC_ROOT AF_LOCAL_MODEL
+
 # Freeze the plan here rather than in a separate CPU job: ACES rejects CPU
 # jobs submitted under a GPU account, and prepare is idempotent. flock
 # serialises concurrent batches so only the first pays for it.
