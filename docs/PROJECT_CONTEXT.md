@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/PROCESS_ASSEMBLY_CONTRACT.md` describes opt-in assembly ownership: ordinary
+and shared outer signs are normalized consistently, local dependency edits preserve
+process-to-target paths, and duplicated outer conversion factors receive focused
+proposer feedback. A saved-v5 CPU audit precedes another live experiment. Historical
+results, benchmark assets, numerical budgets and the fitter remain unchanged.
+
 `docs/FUNCTION_DEPENDENCY_CONFIRMATION.md` describes the fresh basin v5 run:
 eight constructions and sixteen paired gain fits using the audited local dependency
 policy. Exact v4 public inputs, inventories, proposer settings and fitter budgets

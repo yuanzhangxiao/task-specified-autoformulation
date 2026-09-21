@@ -34,6 +34,7 @@ from autoformalism.schemas.staged_topology import (
     ScientificVariable,
 )
 from autoformalism.search import function_dependencies as dependencies
+from autoformalism.search import process_assembly_contract as assembly
 from autoformalism.search import shared_process_contract as shared
 from autoformalism.search import signed_processes as signed
 from autoformalism.search.causal_initialization import construct_initializers
@@ -82,11 +83,20 @@ def run_staged_functions(
     training_evidence: TrainingEvidence | None = None,
     shared_process_guidance: bool = False,
     dependency_policy: str = "strict",
+    assembly_policy: str = "legacy",
 ) -> dict[str, Any]:
     """Assign functions; optional local source edits are checked transactions."""
     if dependency_policy not in {"strict", dependencies.POLICY}:
         raise ValueError("unknown function dependency policy")
     flexible = dependency_policy == dependencies.POLICY
+    assembly.validate_policy(assembly_policy)
+    owned_assembly = assembly_policy == assembly.POLICY
+    if owned_assembly and (
+        not flexible or function_repair_policy != "certified_outer_gain"
+    ):
+        raise ValueError(
+            "assembly ownership requires local dependencies and certified role repair"
+        )
     if flexible and generation_granularity != "equation_batch_atomic_repair":
         raise ValueError("local dependency repair requires hybrid construction")
     if initialization_policy not in {"legacy", "causal_training"}:
@@ -112,6 +122,8 @@ def run_staged_functions(
             contract["shared_process_guidance"] = True
         if flexible:
             contract["dependency_policy"] = dependency_policy
+        if owned_assembly:
+            contract["assembly_policy"] = assembly_policy
         if training_evidence is not None:
             contract["training_evidence_sha256"] = training_evidence.packet_sha256
         path = output / "construction_contract.json"
@@ -151,6 +163,7 @@ def run_staged_functions(
     registry: dict[str, str] = {}
     effective_source = source
     dependency_revisions: list[dict] = []
+    assembly_decisions: list[dict] = []
     common = {
         "public_brief_json": json.dumps(enriched)
         if training_evidence is not None
@@ -169,6 +182,14 @@ def run_staged_functions(
                 "provider_visible_accepted_functions": provider_accepted,
                 "batch_term_audits": batch_term_audits,
                 "events": events,
+                **(
+                    {
+                        "assembly_policy": assembly_policy,
+                        "assembly_decisions": assembly_decisions,
+                    }
+                    if owned_assembly
+                    else {}
+                ),
                 **(
                     {
                         "dependency_revisions": dependency_revisions,
@@ -196,6 +217,8 @@ def run_staged_functions(
             system = dependencies.prompt(
                 system, atomic=step.startswith("atomic_repair_")
             )
+            if owned_assembly:
+                system = assembly.prompt(system)
         for attempt in range(client.settings.attempts_per_step):
             rejected: object = None
             record = client.call(
@@ -285,8 +308,22 @@ def run_staged_functions(
     def bind_hybrid(reply, identifier, selected):
         """Validate all changes before mutating topology, selected slot or ledger."""
         nonlocal topology, aliases, commitment, effective_source, process_contract
+        decision = None
+        if owned_assembly:
+            normalized, decision = assembly.prepare(reply, selected)
+            reply = dependencies.DependencyFunctionReply(
+                **normalized.model_dump(mode="json"),
+                revise_dependencies=bool(getattr(reply, "revise_dependencies", False)),
+            )
         updated, event = (
-            dependencies.prepare(brief, context, effective_source, identifier, reply)
+            dependencies.prepare(
+                brief,
+                context,
+                effective_source,
+                identifier,
+                reply,
+                preserve_process_paths=owned_assembly,
+            )
             if flexible
             else (effective_source, None)
         )
@@ -321,6 +358,8 @@ def run_staged_functions(
             process_contract = updated.get("shared_process_contract")
             selected["sources"] = event["after_sources"]
             dependency_revisions.append(event)
+        if decision is not None:
+            assembly_decisions.append({"interaction_id": identifier, **decision})
         return next_draft, local, repairs
 
     error = None
@@ -359,6 +398,10 @@ def run_staged_functions(
                 )
                 for selected in selected_terms
             )
+            if owned_assembly:
+                selected_terms = tuple(
+                    assembly.decorate(s, process_bindings) for s in selected_terms
+                )
             identifiers = tuple(
                 f"term_{equation_index}_{term_index}"
                 for term_index in range(len(equation.terms))
@@ -598,7 +641,9 @@ def run_staged_functions(
                                 parameter_registry_json=json.dumps(registry_context()),
                                 diagnostics_json=runtime_diagnostic,
                             ),
-                            dependencies.DependencyFunctionReply
+                            assembly.AssemblyFunctionReply
+                            if owned_assembly
+                            else dependencies.DependencyFunctionReply
                             if flexible
                             else InteractionFunctionReply,
                             lambda repaired,
@@ -608,10 +653,13 @@ def run_staged_functions(
                             )[0],
                             initial_diagnostic=diagnostic,
                         )
+                        normalized_atomic = (
+                            assembly.prepare(atomic_reply, selected)[0]
+                            if owned_assembly
+                            else dependencies.plain(atomic_reply)
+                        )
                         repaired_reply, atomic_deterministic_repairs = (
-                            prepare_provider_reply(
-                                dependencies.plain(atomic_reply), selected
-                            )
+                            prepare_provider_reply(normalized_atomic, selected)
                         )
                         audit["atomic_deterministic_role_repairs"] = [
                             item.model_dump(mode="json")
@@ -755,6 +803,10 @@ def run_staged_functions(
         result["initialization"] = initialization
     if process_contract:
         result["shared_process_contract"] = process_contract
+    if owned_assembly:
+        result.update(
+            assembly_policy=assembly_policy, assembly_decisions=assembly_decisions
+        )
     if flexible:
         result.update(
             dependency_policy=dependency_policy,

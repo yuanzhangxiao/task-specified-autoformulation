@@ -87,7 +87,15 @@ def fixed_sources(brief, context, source: dict) -> set[str]:
     )
 
 
-def prepare(brief, context, source: dict, identifier: str, reply):
+def prepare(
+    brief,
+    context,
+    source: dict,
+    identifier: str,
+    reply,
+    *,
+    preserve_process_paths=False,
+):
     """Return a proposed source transaction; caller commits only after binding.
 
     Exact shared consumers remain immutable. A law dependency edit updates both the
@@ -137,6 +145,10 @@ def prepare(brief, context, source: dict, identifier: str, reply):
         EquationDefinition.model_validate(e) for e in updated["equations"]
     )
     shared.validate_contract(contract, equations, inventory)
+    if preserve_process_paths:
+        from autoformalism.search.process_assembly_contract import preserve_paths
+
+        preserve_paths(brief, source, updated)
     topology, _ = lower_topology(brief, inventory, equations, context)
     checks = required_checks(brief, equations)
     failed = [c for c in checks if not c["passed"]]
@@ -162,6 +174,10 @@ def prepare(brief, context, source: dict, identifier: str, reply):
 
 def replay(brief, context, original: dict, result: dict) -> tuple[dict, dict]:
     """Independently reproduce committed edits and reject ledger tampering."""
+    from autoformalism.search import process_assembly_contract as assembly
+
+    assembly_policy = result.get("assembly_policy", "legacy")
+    assembly.validate_policy(assembly_policy)
     if result.get("dependency_policy", "strict") == "strict":
         if result.get("dependency_revisions") or result.get("effective_source"):
             raise ValueError("dependency edits require an explicit policy")
@@ -181,7 +197,14 @@ def replay(brief, context, original: dict, result: dict) -> tuple[dict, dict]:
         reply = DependencyFunctionReply(
             **event["reply"], revise_dependencies=event["revise_dependencies"]
         )
-        updated, expected = prepare(brief, context, current, identifier, reply)
+        updated, expected = prepare(
+            brief,
+            context,
+            current,
+            identifier,
+            reply,
+            preserve_process_paths=assembly_policy == assembly.POLICY,
+        )
         if expected != event:
             raise ValueError("dependency revision ledger differs")
         current = updated

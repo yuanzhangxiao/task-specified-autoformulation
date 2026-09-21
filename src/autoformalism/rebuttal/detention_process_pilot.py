@@ -504,6 +504,7 @@ def construct(root, plan, task, client):
                         dependency_policy=plan.get(
                             "function_dependency_policy", "strict"
                         ),
+                        assembly_policy=plan.get("process_assembly_policy", "legacy"),
                     ),
                 )
             if functions and functions["complete_model"]:

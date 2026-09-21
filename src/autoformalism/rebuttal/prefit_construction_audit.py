@@ -25,6 +25,7 @@ from autoformalism.schemas.staged_topology import (
     ScientificVariable,
 )
 from autoformalism.search import function_dependencies as dependencies
+from autoformalism.search import process_assembly_contract as assembly
 from autoformalism.search import shared_process_contract as shared
 from autoformalism.search import signed_processes as signed
 from autoformalism.search.causal_initialization import compile_initialization_result
@@ -62,6 +63,9 @@ def reconstruct(cell: dict, construction: dict) -> dict:
     source, result = construction["topology"], construction["functions"]
     original_source = source
     source, before_changes = dependencies.replay(brief, context, source, result)
+    owned_assembly = result.get("assembly_policy") == assembly.POLICY
+    if not owned_assembly and result.get("assembly_decisions"):
+        raise ValueError("assembly decisions require the versioned policy")
     inventory = tuple(ScientificVariable.model_validate(x) for x in source["inventory"])
     equations = tuple(EquationDefinition.model_validate(x) for x in source["equations"])
     bindings = shared.validate_contract(
@@ -95,11 +99,23 @@ def reconstruct(cell: dict, construction: dict) -> dict:
         for i, equation in enumerate(equations)
         for j, term in enumerate(equation.terms)
     ]
+    if owned_assembly:
+        slots = [
+            (identifier, assembly.decorate(selected, bindings))
+            for identifier, selected in slots
+        ]
     local = result["provider_visible_accepted_functions"]
     accepted = result["accepted_functions"]
     batches = result["batch_term_audits"]
     if not len(slots) == len(local) == len(accepted) == len(batches):
         raise ValueError("saved slot coverage differs from the complete topology")
+    decisions = result.get("assembly_decisions", [])
+    if owned_assembly and [d["interaction_id"] for d in decisions] != [
+        s[0] for s in slots
+    ]:
+        raise ValueError("assembly decision coverage differs")
+    decision_by_id = {d["interaction_id"]: d for d in decisions}
+    assembly_source = original_source
     repairs = []
     for (identifier, selected), final, stored, batch in zip(
         slots, local, accepted, batches, strict=True
@@ -125,11 +141,14 @@ def reconstruct(cell: dict, construction: dict) -> dict:
         original_valid = False
         prepared = None
         try:
+            original_normalized = (
+                assembly.prepare(original, selected)[0] if owned_assembly else original
+            )
             shared.validate_function(
-                original.expression, selected.get("shared_process_use")
+                original_normalized.expression, selected.get("shared_process_use")
             )
             prepared, _ = repair_certified_outer_gain_role(
-                original,
+                original_normalized,
                 set(selected["sources"]),
                 outer_weight_sign=selected["outer_weight_sign"],
             )
@@ -138,9 +157,12 @@ def reconstruct(cell: dict, construction: dict) -> dict:
                 batch_source, _ = dependencies.prepare(
                     brief,
                     context,
-                    before_changes.get(identifier, source),
+                    assembly_source
+                    if owned_assembly
+                    else before_changes.get(identifier, source),
                     identifier,
-                    original,
+                    original_normalized,
+                    preserve_process_paths=owned_assembly,
                 )
                 batch_topology, batch_aliases = lower_topology(
                     brief,
@@ -170,6 +192,37 @@ def reconstruct(cell: dict, construction: dict) -> dict:
         except (ValueError, ModelValidationError):
             pass
         final_reply = _reply(final)
+        if owned_assembly:
+            decision = decision_by_id[identifier]
+            raw = assembly.AssemblyFunctionReply.model_validate(decision["raw_reply"])
+            normalized, expected = assembly.prepare(raw, selected)
+            # Batch replies have no repair-only fields; preserve the exact raw schema.
+            expected["raw_reply"] = decision["raw_reply"]
+            if {"interaction_id": identifier, **expected} != decision:
+                raise ValueError("assembly normalization ledger differs")
+            interpreted, _ = repair_certified_outer_gain_role(
+                normalized,
+                set(selected["sources"]),
+                outer_weight_sign=selected["outer_weight_sign"],
+            )
+            if interpreted != final_reply:
+                raise ValueError("assembly interpretation differs from final function")
+            if (
+                batch["batch_accepted"]
+                and decision["raw_reply"] != batch["batch_function"]
+            ):
+                raise ValueError("accepted batch assembly reply differs")
+            assembly_source, _ = dependencies.prepare(
+                brief,
+                context,
+                assembly_source,
+                identifier,
+                dependencies.DependencyFunctionReply(
+                    **normalized.model_dump(mode="json"),
+                    revise_dependencies=raw.revise_dependencies,
+                ),
+                preserve_process_paths=True,
+            )
         if identifier in before_changes:
             change = next(
                 e
