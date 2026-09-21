@@ -25,12 +25,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import product
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
 from autoformalism.data import DatasetSplit
+from autoformalism.rebuttal.baseline_validation import load_public
+from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
+from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
+from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
 
 #: Upstream differentiates with findiff at fourth order; keep that choice.
 DERIVATIVE_ACCURACY = 4
@@ -187,3 +192,165 @@ def select_system(
         if value < best_score:
             best_score, best = float(value), combination
     return best
+
+
+PROTOCOL = "phase-b-llm-ode-campaign-1"
+
+
+def environment_identity() -> dict:
+    """Bind resume to the code and endpoint kind, never to a per-job port."""
+    return {
+        "runtime_source_sha256": runtime_source_hash(),
+        "provider": "vllm",
+        "endpoint_kind": "job-local vllm endpoint",
+    }
+
+
+def target_indices(
+    channels: tuple[str, ...], targets: tuple[str, ...]
+) -> tuple[int, ...]:
+    """Search only the predicted channels.
+
+    Upstream runs one searcher per state because its systems are autonomous.
+    Here the auxiliaries are supplied over the horizon, so only the targets are
+    predicted; searching the rest would spend calls on equations the evaluation
+    never uses. A declared accommodation, and it reduces the call count from
+    iterations x islands x states to iterations x islands x targets.
+    """
+    missing = [name for name in targets if name not in channels]
+    if missing:
+        raise ValueError(f"targets absent from the observed channels: {missing}")
+    return tuple(channels.index(name) for name in targets)
+
+
+def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
+    """Freeze the campaign before any provider call."""
+    plan = VendoredCampaignPlan.model_validate_json(
+        config_path.read_text(encoding="utf-8")
+    )
+    if plan.method != "llm_ode":
+        raise ValueError(f"expected an llm_ode plan, not {plan.method!r}")
+    public = public_root.expanduser().resolve()
+    rows = []
+    for cell in plan.cells:
+        development, context, identity = load_public(
+            public, cell.benchmark_id, cell.tier
+        )
+        channels = observed_channels(development.train)
+        for repetition in plan.repetitions:
+            rows.append(
+                {
+                    "index": len(rows),
+                    "benchmark_id": cell.benchmark_id,
+                    "tier": cell.tier,
+                    "repetition": repetition,
+                    "public_identity": identity,
+                    "channels": list(channels),
+                    "searched_targets": list(context.targets),
+                }
+            )
+    root.mkdir(parents=True, exist_ok=True)
+    return sealed_write(
+        root / "plan.json",
+        {
+            "protocol": PROTOCOL,
+            "plan": plan.model_dump(mode="json"),
+            "public_root": str(public),
+            "environment": environment_identity(),
+            "reporting_qualifications": list(plan.reporting_qualifications()),
+            "maximum_logical_calls": (
+                len(rows) * plan.budget.declared * 4 * max(
+                    len(row["searched_targets"]) for row in rows
+                )
+            ),
+            "rows": rows,
+            "test_data_opened": False,
+            "private_reference_opened": False,
+        },
+    )
+
+
+def run(
+    root: Path,
+    index: int,
+    *,
+    search: SearcherFactory | None = None,
+) -> dict:
+    """Resume one task; a completed result causes no call and no refitting."""
+    sealed = sealed_read(root / "plan.json")
+    if (
+        sealed["protocol"] != PROTOCOL
+        or sealed["environment"] != environment_identity()
+    ):
+        raise ValueError(
+            "protocol or code changed since this plan was frozen. Run from the "
+            f"checkout that froze it, or delete {root / 'plan.json'} and its "
+            "results to re-freeze at the current code."
+        )
+    if not 0 <= index < len(sealed["rows"]):
+        raise ValueError("task index out of range")
+    row = sealed["rows"][index]
+    directory = root / "results" / str(index)
+    directory.mkdir(parents=True, exist_ok=True)
+    result_path = directory / "result.json"
+    if result_path.exists():
+        return sealed_read(result_path)
+
+    development, context, identity = load_public(
+        Path(sealed["public_root"]), row["benchmark_id"], row["tier"]
+    )
+    if identity != row["public_identity"]:
+        raise ValueError("public development input drift")
+    if search is None:  # pragma: no cover - requires the vendored checkout
+        raise ValueError(
+            "supply a searcher factory bound to the pinned LLM-ODE checkout"
+        )
+    train = cell_arrays(development.train)
+    validation = cell_arrays(development.validation)
+    outcome = search(
+        train=train,
+        validation=validation,
+        targets=tuple(context.targets),
+        prompt=row.get("prompt", ""),
+        directory=directory,
+    )
+    return sealed_write(
+        result_path,
+        {
+            **{
+                key: row[key]
+                for key in ("index", "benchmark_id", "tier", "repetition")
+            },
+            "protocol": PROTOCOL,
+            "plan_sha256": sealed["artifact_sha256"],
+            "status": outcome["status"],
+            "error": outcome.get("error"),
+            "accounting": outcome.get("accounting", {}),
+            "test_data_opened": False,
+            "private_reference_opened": False,
+            "selection_metric": "development_rollout_error",
+        },
+    )
+
+
+def report(root: Path) -> dict:
+    """Keep missing and failed cells visible rather than averaging over them."""
+    sealed = sealed_read(root / "plan.json")
+    rows = []
+    for task in sealed["rows"]:
+        path = root / "results" / str(task["index"]) / "result.json"
+        rows.append(
+            sealed_read(path)
+            if path.exists()
+            else {**task, "status": "pending"}
+        )
+    counts: dict[str, int] = {}
+    for item in rows:
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+    return {
+        "protocol": PROTOCOL,
+        "expected": len(sealed["rows"]),
+        "counts": counts,
+        "reporting_qualifications": sealed["reporting_qualifications"],
+        "rows": rows,
+    }

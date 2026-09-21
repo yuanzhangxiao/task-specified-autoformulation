@@ -8,6 +8,8 @@ leaving the search, the derivative order and the selection rule alone.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -119,3 +121,69 @@ def test_an_exploding_product_is_refused_rather_than_truncated() -> None:
     frontiers = tuple(tuple(f"v{index}_{n}" for n in range(30)) for index in range(4))
     with pytest.raises(ValueError, match="exceed the"):
         select_system(frontiers, lambda item: 1.0, maximum_combinations=1000)
+
+
+# --- plan freeze, resume and reporting ------------------------------------
+
+
+def test_only_the_predicted_channels_are_searched() -> None:
+    """Auxiliaries are supplied over the horizon, so searching them is waste."""
+    from autoformalism.rebuttal.llm_ode_campaign import target_indices
+
+    assert target_indices(("y", "u", "w"), ("y", "w")) == (0, 2)
+    with pytest.raises(ValueError, match="absent from the observed channels"):
+        target_indices(("y", "u"), ("y", "missing"))
+
+
+def test_the_plan_identity_excludes_the_served_port() -> None:
+    """Preparation runs before the server exists, as it does for D3."""
+    from autoformalism.rebuttal.llm_ode_campaign import environment_identity
+
+    first = environment_identity()
+    assert first["provider"] == "vllm"
+    assert not first["endpoint_kind"].startswith("http")
+    assert environment_identity() == first
+
+
+def test_a_task_without_a_searcher_refuses_rather_than_inventing_one(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The search must come from the pinned checkout, never from here."""
+    from autoformalism.rebuttal import llm_ode_campaign as campaign
+
+    sealed = {
+        "protocol": campaign.PROTOCOL,
+        "environment": campaign.environment_identity(),
+        "public_root": str(tmp_path),
+        "artifact_sha256": "a" * 64,
+        "rows": [
+            {
+                "index": 0,
+                "benchmark_id": "phase_b_cell",
+                "tier": "easy",
+                "repetition": 0,
+                "public_identity": {"train": "t", "validation": "v", "prompt": "p"},
+            }
+        ],
+    }
+    monkeypatch.setattr(campaign, "sealed_read", lambda path: sealed)
+    monkeypatch.setattr(
+        campaign,
+        "load_public",
+        lambda *args: (None, None, sealed["rows"][0]["public_identity"]),
+    )
+    monkeypatch.setattr(campaign, "cell_arrays", lambda split: None)
+    with pytest.raises(ValueError, match="searcher factory"):
+        campaign.run(tmp_path, 0)
+
+
+def test_a_changed_checkout_names_its_remedy(tmp_path: Path, monkeypatch) -> None:
+    from autoformalism.rebuttal import llm_ode_campaign as campaign
+
+    monkeypatch.setattr(
+        campaign,
+        "sealed_read",
+        lambda path: {"protocol": campaign.PROTOCOL, "environment": {"stale": True}},
+    )
+    with pytest.raises(ValueError, match="delete"):
+        campaign.run(tmp_path, 0)

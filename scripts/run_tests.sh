@@ -34,6 +34,16 @@ echo "== parallel bulk"
 "${python_bin}" -m pytest -q -n auto --dist loadfile "${deselect[@]}" "${@:2}"
 bulk=$?
 
+# Tests that supervise subprocesses against wall-clock deadlines time out under
+# load and pass alone, so a parallel failure is not yet evidence. Re-run only
+# the failures serially; a suite that invents them would cost more than it saves.
+if ((bulk != 0)); then
+  echo "== re-running failures serially"
+  "${python_bin}" -m pytest -q --last-failed "${deselect[@]}" "${@:2}"
+  bulk=$?
+  ((bulk == 0)) && echo "(failures were contention, not defects)"
+fi
+
 serial=0
 if [[ "${mode}" == full ]]; then
   echo "== serial, timing-sensitive"

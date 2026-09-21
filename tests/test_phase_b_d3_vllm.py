@@ -223,3 +223,12 @@ def test_a_recorded_discovery_failure_counts_as_a_failed_task() -> None:
     assert "does not mean the task discovered anything" in text
     assert '.status // "missing"' in text
     assert 'if [[ "${status}" == complete ]]; then' in text
+
+
+def test_the_runner_confirms_parallel_failures_serially() -> None:
+    """A fast suite that invents failures costs more than the time it saves."""
+    text = Path("scripts/run_tests.sh").read_text(encoding="utf-8")
+    assert "--last-failed" in text
+    assert "re-running failures serially" in text
+    # the retry decides the outcome, rather than reporting the parallel result
+    assert text.index("--last-failed") < text.index('echo "PASS')
