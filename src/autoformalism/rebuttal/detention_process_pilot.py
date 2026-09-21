@@ -493,6 +493,9 @@ def construct(root, plan, task, client):
                         initialization_policy="causal_training",
                         training_evidence=evidence,
                         shared_process_guidance=True,
+                        dependency_policy=plan.get(
+                            "function_dependency_policy", "strict"
+                        ),
                     ),
                 )
             if functions and functions["complete_model"]:

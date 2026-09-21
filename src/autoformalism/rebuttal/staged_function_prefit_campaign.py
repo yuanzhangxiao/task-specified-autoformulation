@@ -272,6 +272,13 @@ def deterministic_prefit_audit(
     context: ValidationContext | None = None,
 ) -> dict[str, Any]:
     """Certify only mechanically decidable completeness and syntax facts."""
+    original_source = source
+    if result.get("dependency_policy"):
+        from autoformalism.search.function_dependencies import replay
+
+        if context is None:
+            raise ValueError("dependency audit requires the public context")
+        source, _ = replay(brief, context, source, result)
     candidate = CandidateModel.model_validate(result["candidate"])
     if result.get("initialization_policy") == "causal_training":
         if context is None:
@@ -329,7 +336,7 @@ def deterministic_prefit_audit(
             and source.get("public_structure_checks_passed")
         ),
         "source_topology_digest_preserved": (
-            result.get("source_topology_result_sha256") == content_hash(source)
+            result.get("source_topology_result_sha256") == content_hash(original_source)
         ),
         "complete_compiled_model": bool(result.get("complete_model")),
         "exact_target_mapping_coverage": (

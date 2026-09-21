@@ -93,6 +93,7 @@ def _bundle(cell, task, brief, topology, functions):
     audit = reconstruct({**cell, "brief": brief.model_dump(mode="json")}, saved)
     if not audit["certificate"]["passed"]:
         raise ValueError("construction reconstruction did not pass")
+    topology = functions.get("effective_source", topology)
     return {
         "source_task": task,
         "brief": brief.model_dump(mode="json"),

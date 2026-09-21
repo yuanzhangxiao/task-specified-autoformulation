@@ -33,6 +33,7 @@ from autoformalism.schemas.staged_topology import (
     PublicScientificBrief,
     ScientificVariable,
 )
+from autoformalism.search import function_dependencies as dependencies
 from autoformalism.search import shared_process_contract as shared
 from autoformalism.search import signed_processes as signed
 from autoformalism.search.causal_initialization import construct_initializers
@@ -80,13 +81,20 @@ def run_staged_functions(
     initialization_policy: Literal["legacy", "causal_training"] = "legacy",
     training_evidence: TrainingEvidence | None = None,
     shared_process_guidance: bool = False,
+    dependency_policy: str = "strict",
 ) -> dict[str, Any]:
-    """Assign functions and causal initializers without fitting or topology edits."""
+    """Assign functions; optional local source edits are checked transactions."""
+    if dependency_policy not in {"strict", dependencies.POLICY}:
+        raise ValueError("unknown function dependency policy")
+    flexible = dependency_policy == dependencies.POLICY
+    if flexible and generation_granularity != "equation_batch_atomic_repair":
+        raise ValueError("local dependency repair requires hybrid construction")
     if initialization_policy not in {"legacy", "causal_training"}:
         raise ValueError("unknown function initialization policy")
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     if (
         shared_process_guidance
+        or flexible
         or source.get("shared_process_contract")
         or initialization_policy == "causal_training"
         or training_evidence is not None
@@ -102,6 +110,8 @@ def run_staged_functions(
         }
         if shared_process_guidance:
             contract["shared_process_guidance"] = True
+        if flexible:
+            contract["dependency_policy"] = dependency_policy
         if training_evidence is not None:
             contract["training_evidence_sha256"] = training_evidence.packet_sha256
         path = output / "construction_contract.json"
@@ -139,6 +149,8 @@ def run_staged_functions(
     accepted: list[dict[str, Any]] = []
     provider_accepted: list[dict[str, Any]] = []
     registry: dict[str, str] = {}
+    effective_source = source
+    dependency_revisions: list[dict] = []
     common = {
         "public_brief_json": json.dumps(enriched)
         if training_evidence is not None
@@ -157,6 +169,14 @@ def run_staged_functions(
                 "provider_visible_accepted_functions": provider_accepted,
                 "batch_term_audits": batch_term_audits,
                 "events": events,
+                **(
+                    {
+                        "dependency_revisions": dependency_revisions,
+                        "effective_source": effective_source,
+                    }
+                    if flexible
+                    else {}
+                ),
             },
         )
 
@@ -169,11 +189,22 @@ def run_staged_functions(
         initial_diagnostic: str | None = None,
     ) -> tuple[Any, FunctionalDraft]:
         diagnostic = initial_diagnostic
+        function_request = flexible and step.startswith(
+            ("equation_functions_", "atomic_repair_")
+        )
+        if function_request:
+            system = dependencies.prompt(
+                system, atomic=step.startswith("atomic_repair_")
+            )
         for attempt in range(client.settings.attempts_per_step):
             rejected: object = None
             record = client.call(
                 system=system,
-                user=render(diagnostic),
+                user=dependencies.request_context(
+                    render(diagnostic), brief, context, effective_source
+                )
+                if function_request
+                else render(diagnostic),
                 response_model=model,
                 step=step,
                 attempt=attempt,
@@ -250,6 +281,47 @@ def run_staged_functions(
             set(selected["sources"]),
             outer_weight_sign=selected["outer_weight_sign"],
         )
+
+    def bind_hybrid(reply, identifier, selected):
+        """Validate all changes before mutating topology, selected slot or ledger."""
+        nonlocal topology, aliases, commitment, effective_source, process_contract
+        updated, event = (
+            dependencies.prepare(brief, context, effective_source, identifier, reply)
+            if flexible
+            else (effective_source, None)
+        )
+        next_topology, next_aliases = (topology, aliases)
+        next_selected = dict(selected)
+        if event:
+            next_topology, next_aliases = lower_topology(
+                brief,
+                inventory,
+                tuple(
+                    EquationDefinition.model_validate(e) for e in updated["equations"]
+                ),
+                context,
+            )
+            next_selected["sources"] = event["after_sources"]
+        local, repairs = prepare_provider_reply(
+            dependencies.plain(reply), next_selected
+        )
+        next_commitment = topology_commitment_sha256(next_topology)
+        next_draft, _ = bind_function_reply(
+            next_topology,
+            draft.model_copy(update={"topology_commitment_sha256": next_commitment}),
+            identifier,
+            local,
+            context,
+            next_aliases,
+            _obligation(next_selected),
+        )
+        if event:
+            effective_source = updated
+            topology, aliases, commitment = next_topology, next_aliases, next_commitment
+            process_contract = updated.get("shared_process_contract")
+            selected["sources"] = event["after_sources"]
+            dependency_revisions.append(event)
+        return next_draft, local, repairs
 
     error = None
     expansion = None
@@ -486,22 +558,13 @@ def run_staged_functions(
                     local_function = function
                     deterministic_repairs: tuple[DeterministicFunctionRepair, ...] = ()
                     try:
-                        local_function, deterministic_repairs = prepare_provider_reply(
-                            function, selected
+                        draft, local_function, deterministic_repairs = bind_hybrid(
+                            function, identifier, selected
                         )
                         audit["deterministic_role_repairs"] = [
                             item.model_dump(mode="json")
                             for item in deterministic_repairs
                         ]
-                        draft, _ = bind_function_reply(
-                            topology,
-                            draft,
-                            identifier,
-                            local_function,
-                            context,
-                            aliases,
-                            _obligation(selected),
-                        )
                     except (
                         ValueError,
                         TypeError,
@@ -535,23 +598,20 @@ def run_staged_functions(
                                 parameter_registry_json=json.dumps(registry_context()),
                                 diagnostics_json=runtime_diagnostic,
                             ),
-                            InteractionFunctionReply,
+                            dependencies.DependencyFunctionReply
+                            if flexible
+                            else InteractionFunctionReply,
                             lambda repaired,
                             identifier=identifier,
-                            selected=selected,
-                            draft=draft: bind_function_reply(
-                                topology,
-                                draft,
-                                identifier,
-                                prepare_provider_reply(repaired, selected)[0],
-                                context,
-                                aliases,
-                                _obligation(selected),
+                            selected=selected: bind_hybrid(
+                                repaired, identifier, selected
                             )[0],
                             initial_diagnostic=diagnostic,
                         )
                         repaired_reply, atomic_deterministic_repairs = (
-                            prepare_provider_reply(atomic_reply, selected)
+                            prepare_provider_reply(
+                                dependencies.plain(atomic_reply), selected
+                            )
                         )
                         audit["atomic_deterministic_role_repairs"] = [
                             item.model_dump(mode="json")
@@ -622,6 +682,20 @@ def run_staged_functions(
                 ),
             )
             checkpoint()
+        if flexible:
+            failed_paths = [
+                c
+                for c in dependencies.required_checks(
+                    brief,
+                    tuple(
+                        EquationDefinition.model_validate(e)
+                        for e in effective_source["equations"]
+                    ),
+                )
+                if not c["passed"]
+            ]
+            if failed_paths:
+                raise ValueError("public pathways failed: " + json.dumps(failed_paths))
         expansion = finalize_functional_draft(topology, draft, context)
         if initialization_policy == "causal_training":
             initialization = construct_initializers(
@@ -681,6 +755,13 @@ def run_staged_functions(
         result["initialization"] = initialization
     if process_contract:
         result["shared_process_contract"] = process_contract
+    if flexible:
+        result.update(
+            dependency_policy=dependency_policy,
+            dependency_revisions=dependency_revisions,
+            effective_source=effective_source,
+            equation_connectivity=dependencies.connectivity(result["candidate"]),
+        )
     checkpoint()
     atomic_json(output / "result.json", result)
     return result

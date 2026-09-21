@@ -24,6 +24,7 @@ from autoformalism.schemas.staged_topology import (
     PublicScientificBrief,
     ScientificVariable,
 )
+from autoformalism.search import function_dependencies as dependencies
 from autoformalism.search import shared_process_contract as shared
 from autoformalism.search import signed_processes as signed
 from autoformalism.search.causal_initialization import compile_initialization_result
@@ -59,6 +60,8 @@ def reconstruct(cell: dict, construction: dict) -> dict:
     brief = PublicScientificBrief.model_validate(cell["brief"])
     context = ValidationContext.model_validate(cell["context"])
     source, result = construction["topology"], construction["functions"]
+    original_source = source
+    source, before_changes = dependencies.replay(brief, context, source, result)
     inventory = tuple(ScientificVariable.model_validate(x) for x in source["inventory"])
     equations = tuple(EquationDefinition.model_validate(x) for x in source["equations"])
     bindings = shared.validate_contract(
@@ -130,13 +133,58 @@ def reconstruct(cell: dict, construction: dict) -> dict:
                 set(selected["sources"]),
                 outer_weight_sign=selected["outer_weight_sign"],
             )
+            batch_topology, batch_aliases = topology, aliases
+            if result.get("dependency_policy") == dependencies.POLICY:
+                batch_source, _ = dependencies.prepare(
+                    brief,
+                    context,
+                    before_changes.get(identifier, source),
+                    identifier,
+                    original,
+                )
+                batch_topology, batch_aliases = lower_topology(
+                    brief,
+                    inventory,
+                    tuple(
+                        EquationDefinition.model_validate(e)
+                        for e in batch_source["equations"]
+                    ),
+                    context,
+                )
             bind_function_reply(
-                topology, draft, identifier, prepared, context, aliases, obligation
+                batch_topology,
+                draft.model_copy(
+                    update={
+                        "topology_commitment_sha256": topology_commitment_sha256(
+                            batch_topology
+                        )
+                    }
+                ),
+                identifier,
+                prepared,
+                context,
+                batch_aliases,
+                obligation,
             )
             original_valid = True
         except (ValueError, ModelValidationError):
             pass
         final_reply = _reply(final)
+        if identifier in before_changes:
+            change = next(
+                e
+                for e in result["dependency_revisions"]
+                if e["interaction_id"] == identifier
+            )
+            changed_reply, _ = repair_certified_outer_gain_role(
+                _reply(change["reply"]),
+                set(selected["sources"]),
+                outer_weight_sign=selected["outer_weight_sign"],
+            )
+            if changed_reply != final_reply:
+                raise ValueError(
+                    "committed dependency reply differs from final function"
+                )
         shared.validate_function(
             final_reply.expression, selected.get("shared_process_use")
         )
@@ -196,7 +244,9 @@ def reconstruct(cell: dict, construction: dict) -> dict:
     )
     if compiled.validated.candidate.model_dump(mode="json") != result["candidate"]:
         raise ValueError("saved complete model differs from reconstructed initializer")
-    certificate = deterministic_prefit_audit(brief, source, result, context=context)
+    certificate = deterministic_prefit_audit(
+        brief, original_source, result, context=context
+    )
     certificate["checks"].update(
         topology_reconstructed=True,
         functions_rebound_from_local_replies=True,

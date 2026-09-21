@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/FUNCTION_DEPENDENCY_REPAIR.md` describes an opt-in construction correction:
+permitted public fixed covariates can enter functions, and a proposer can explicitly
+revise one term's dependencies under unchanged signs and shared consumers. Atomic
+validation and independent ledger reconstruction preserve hard public paths and
+causal boundaries. A saved-response CPU audit separates mechanically valid replies
+from counterfactual scientific revisions before any fresh pilot; fitting stays frozen.
+
 `docs/SHARED_PROCESS_CONTRACT.md` describes the opt-in shared-law construction
 milestone: independently admitted process suggestions, jointly chosen topology
 uses, one defining function/parameter set, and checked linear conversions at each
