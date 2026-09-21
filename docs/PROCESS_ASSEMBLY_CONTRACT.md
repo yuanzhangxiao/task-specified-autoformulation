@@ -86,6 +86,30 @@ reported separately from unexpected acceptance regressions. Sign normalization i
 counterfactual under the new convention, not an improvement to historical NMSE.
 Replies are not independent models; whole-model recovery remains zero.
 
+### Recovery of historical review aliases
+
+The first ACES audit stopped with `dependency revision ledger differs` at
+`coupled_seed0_full_review_on/review`, `term_3_0`; only `after_sha256` differed.
+A local reproduction identified a cold-construction alias bug: topology assembly
+shared Python binding/proposal objects between `process_review` and
+`shared_process_contract`. A dependency edit copied the source with `deepcopy`,
+which preserved these links and unintentionally updated review metadata too.
+JSON saving discarded the object links, so independent replay computed a different
+post-edit hash. This was an audit/history mismatch, not evidence of a fitting error.
+
+New edits isolate the active contract before mutation and preserve review metadata.
+The compatibility reader recognizes only the exact historical signed-process
+layout and recreates its documented object links on a private copy. It retries only
+an `after_sha256` mismatch and still checks every full ledger entry and the final
+saved state. It never ignores hashes, changes source files or promotes a model.
+The audit reports verified compatibility uses in `historical_alias_replays`; a
+different inconsistency still stops with the construction, interaction and field
+differences. This makes the hypothesized cause verifiable on the actual ACES files.
+
+Use `process-assembly-audit-v2` for this corrected audit. Keep the failed v1 directory
+for provenance: its freeze pins the previous runtime, so it must not be overwritten
+or resumed under changed code. No fitting or model construction is repeated.
+
 On ACES, use the full pushed commit supplied with this milestone:
 
 ```bash
@@ -96,7 +120,7 @@ On ACES, use the full pushed commit supplied with this milestone:
   AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
   export AF_REPO_ROOT="$AF_GROUP/repos/process-assembly-${AF_COMMIT:0:7}"
   export AF_SOURCE_ROOT="$AF_GROUP/detention-process-pilot-v5"
-  export AF_OUTPUT_ROOT="$AF_GROUP/process-assembly-audit-v1"
+  export AF_OUTPUT_ROOT="$AF_GROUP/process-assembly-audit-v2"
   export AF_PYTHON="$AF_BASE/.venv/bin/python"
   git -C "$AF_BASE" fetch origin codex/prefit-aces-v1
   git -C "$AF_BASE" cat-file -e "$AF_COMMIT^{commit}"
@@ -117,9 +141,9 @@ On ACES, use the full pushed commit supplied with this milestone:
 After the CPU audit finishes:
 
 ```bash
-ROOT=/scratch/group/p.nairr260351.000/u.yx126462/process-assembly-audit-v1
+ROOT=/scratch/group/p.nairr260351.000/u.yx126462/process-assembly-audit-v2
 cat "$ROOT/SUMMARY.md"
-jq '{classification_counts,
+jq '{classification_counts, historical_alias_replays,
      accepted_requiring_repair: (.historically_accepted_requiring_repair | length),
      unexpected_acceptance_regressions, unavailable_saved_attempts,
      missing_constructions, llm_calls, optimizer_calls}' "$ROOT/summary.json"

@@ -11,11 +11,29 @@ from autoformalism.search import function_dependencies as dep
 from scripts import smoke_function_dependencies as old
 
 
-@pytest.fixture
-def saved(tmp_path):
+@pytest.fixture(params=[False, True], ids=["isolated_review", "legacy_cold_review"])
+def saved(tmp_path, request, monkeypatch):
     root = tmp_path / "v5"
     base = root / "construction/results/toy"
-    brief, context, source, functions = old.construct(base / "review", [])
+    with monkeypatch.context() as patch:
+        if request.param:
+            fixture, prepare = old.fixture, dep.prepare
+
+            def linked_fixture():
+                brief, context, source = fixture()
+                bindings = source["shared_process_contract"]["bindings"]
+                source["process_review"] = {
+                    "bindings": list(bindings),
+                    "suggestions": [b["proposal"] for b in bindings],
+                }
+                return brief, context, source
+
+            def legacy_prepare(*args, **kwargs):
+                return prepare(*args, **kwargs, _legacy_review_aliases=True)
+
+            patch.setattr(old, "fixture", linked_fixture)
+            patch.setattr(dep, "prepare", legacy_prepare)
+        brief, context, source, functions = old.construct(base / "review", [])
     assert functions["complete_model"]
     sealed_write(base / "review/topology_stage.json", {"result": source})
     sealed_write(base / "review/function_stage.json", {"result": functions})
@@ -43,6 +61,7 @@ def test_audit_records_historical_context_and_resumes_without_mutation(saved, tm
     output = tmp_path / "audit"
     result = audit.audit(root, output)
     assert not result["unexpected_acceptance_regressions"]
+    assert bool(result["historical_alias_replays"]) == ("process_review" in saved[3])
     assert result["unavailable_saved_attempts"] == 0
     assert (
         result["llm_calls"]
@@ -102,5 +121,12 @@ def test_dependency_tampering_not_misreported_as_model_failure(saved, tmp_path):
     path = root / "construction/results/toy/review/function_stage.json"
     path.unlink()
     sealed_write(path, {"result": value})
-    with pytest.raises(ValueError, match="ledger differs"):
+    with pytest.raises(ValueError, match="ledger differs") as failure:
         audit.audit(root, tmp_path / "audit")
+    message = str(failure.value)
+    assert "toy/review" in message
+    assert '"interaction_id": "term_0_0"' in message
+    assert (
+        '"before_sources": {"replayed": ["x", "u", "crest"], "saved": ["wrong"]}'
+        in message
+    )

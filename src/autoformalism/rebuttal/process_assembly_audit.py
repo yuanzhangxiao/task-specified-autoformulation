@@ -123,30 +123,26 @@ def assess(brief, context, source, identifier, raw, accepted):
     return row
 
 
-def _contexts(brief, context, source, functions):
+def _contexts(brief, context, source, functions, *, diagnostics=None):
     """Recover the exact source state preceding each saved batch/atomic attempt."""
-    dep.replay(brief, context, source, functions)
-    changes = {
-        e["interaction_id"]: e for e in functions.get("dependency_revisions", [])
+    effective, before = dep.replay(
+        brief, context, source, functions, diagnostics=diagnostics
+    )
+    changes = list(before)
+    after = {
+        identifier: before[changes[i + 1]] if i + 1 < len(changes) else effective
+        for i, identifier in enumerate(changes)
     }
     current, contexts = source, {}
     for batch in functions["batch_term_audits"]:
         identifier = batch["interaction_id"]
+        if identifier in contexts:
+            raise ValueError("historical attempt coverage repeats an interaction")
+        if identifier in before and current != before[identifier]:
+            raise ValueError("historical attempt context differs")
         contexts[identifier] = current
-        if identifier in changes:
-            e = changes[identifier]
-            current, actual = dep.prepare(
-                brief,
-                context,
-                current,
-                identifier,
-                dep.DependencyFunctionReply(
-                    **e["reply"], revise_dependencies=e["revise_dependencies"]
-                ),
-            )
-            if e != actual:
-                raise ValueError("historical dependency event differs")
-    if current != functions.get("effective_source", source):
+        current = after.get(identifier, current)
+    if current != effective or set(before) - set(contexts):
         raise ValueError("historical attempt coverage differs")
     return contexts
 
@@ -206,7 +202,19 @@ def audit(source: Path, output: Path) -> dict:
                 if not source_path.exists():
                     raise ValueError("function stage has no saved topology")
                 original = sealed_read(source_path)["result"]
-                contexts = _contexts(brief, context, original, functions)
+                replay_diagnostics = {}
+                try:
+                    contexts = _contexts(
+                        brief,
+                        context,
+                        original,
+                        functions,
+                        diagnostics=replay_diagnostics,
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"saved construction replay failed for {name}/{route}: {exc}"
+                    ) from exc
                 attempts = []
                 for b in functions["batch_term_audits"]:
                     identifier = b["interaction_id"]
@@ -273,6 +281,7 @@ def audit(source: Path, output: Path) -> dict:
                     {
                         "route": route,
                         "historical_status": functions["status"],
+                        "dependency_replay": replay_diagnostics,
                         "attempts": attempts,
                         "historical_connectivity": dep.connectivity(
                             functions.get("candidate")
@@ -298,6 +307,12 @@ def audit(source: Path, output: Path) -> dict:
             "identity": content_hash(identity),
             "constructions": rows,
             "classification_counts": counts,
+            "historical_alias_replays": [
+                {"task": r["task"], "route": rt["route"]}
+                for r in rows
+                for rt in r["routes"]
+                if rt["dependency_replay"]["mode"] == "historical_shared_review_aliases"
+            ],
             "historically_accepted_requiring_repair": [
                 a
                 for a in attempts
@@ -329,6 +344,8 @@ def audit(source: Path, output: Path) -> dict:
             "require fresh proposer decisions. No intrinsic confirmation is invented.",
             "",
             f"Classification counts: {counts}",
+            "Hash-verified historical alias replays: "
+            f"{len(summary['historical_alias_replays'])}",
             "Accepted replies requiring repair: "
             f"{len(summary['historically_accepted_requiring_repair'])}",
             "Unexpected acceptance regressions: "

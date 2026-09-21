@@ -95,6 +95,7 @@ def prepare(
     reply,
     *,
     preserve_process_paths=False,
+    _legacy_review_aliases=False,
 ):
     """Return a proposed source transaction; caller commits only after binding.
 
@@ -122,6 +123,13 @@ def prepare(
             "Required public paths and shared consumer identities still apply."
         )
     updated = deepcopy(source)
+    # The topology producer reused binding objects in its review metadata.
+    # deepcopy preserves those aliases, whereas JSON persistence removes them.
+    # An active edit must never mutate the historical review as a side effect.
+    if not _legacy_review_aliases and "shared_process_contract" in updated:
+        updated["shared_process_contract"] = deepcopy(
+            updated["shared_process_contract"]
+        )
     # Preserve order of retained declarations; new names have deterministic order.
     names = [n for n in previous if n in actual] + sorted(actual - expected)
     updated["equations"][i]["terms"][j]["sources"] = names
@@ -172,8 +180,75 @@ def prepare(
     return updated, event
 
 
-def replay(brief, context, original: dict, result: dict) -> tuple[dict, dict]:
-    """Independently reproduce committed edits and reject ledger tampering."""
+class _ReplayMismatch(ValueError):
+    """Keep exact differing fields available to the narrow compatibility reader."""
+
+    def __init__(self, identifier, event, expected):
+        self.differences = {
+            key: {"saved": event.get(key), "replayed": (expected or {}).get(key)}
+            for key in sorted(set(event) | set(expected or {}))
+            if event.get(key) != (expected or {}).get(key)
+        }
+        super().__init__(
+            "dependency revision ledger differs: "
+            + json.dumps(
+                {"interaction_id": identifier, "differences": self.differences},
+                sort_keys=True,
+            )
+        )
+
+
+def _legacy_review_source(original: dict) -> dict:
+    """Recreate only the known cold-producer aliases, never infer edited values."""
+    source = deepcopy(original)
+    contract = source.get("shared_process_contract") or {}
+    review = source.get("process_review") or {}
+    bindings = review.get("bindings")
+    if (
+        contract.get("protocol") != signed.POLICY
+        or not bindings
+        or contract.get("bindings") != bindings
+        or review.get("suggestions") != [b["proposal"] for b in bindings]
+    ):
+        raise ValueError("source does not match the historical shared-review layout")
+    # signed.admit created suggestions from these proposal objects, and the
+    # topology runner extended a separate list with the same binding objects.
+    contract["bindings"] = list(bindings)
+    review["suggestions"] = [b["proposal"] for b in bindings]
+    return source
+
+
+def replay(
+    brief, context, original: dict, result: dict, *, diagnostics: dict | None = None
+) -> tuple[dict, dict]:
+    """Verify every hash; support the historical cold-run object aliasing bug."""
+    mode = "isolated_review"
+    try:
+        verified = _replay(brief, context, original, result)
+    except _ReplayMismatch as primary:
+        if set(primary.differences) != {"after_sha256"}:
+            raise
+        try:
+            verified = _replay(
+                brief, context, original, result, legacy_review_aliases=True
+            )
+        except ValueError as compatibility_error:
+            # Never suppress integrity checks or accept a merely similar state.
+            raise primary from compatibility_error
+        mode = "historical_shared_review_aliases"
+    if diagnostics is not None:
+        diagnostics.update(
+            mode=mode,
+            exact_ledger_and_final_state_verified=True,
+            dependency_edits=len(result.get("dependency_revisions", [])),
+        )
+    return verified
+
+
+def _replay(
+    brief, context, original: dict, result: dict, *, legacy_review_aliases=False
+) -> tuple[dict, dict]:
+    """Independently reproduce one exact history interpretation."""
     from autoformalism.search import process_assembly_contract as assembly
 
     assembly_policy = result.get("assembly_policy", "legacy")
@@ -186,7 +261,8 @@ def replay(brief, context, original: dict, result: dict) -> tuple[dict, dict]:
         raise ValueError("unknown dependency policy")
     if result["source_topology_result_sha256"] != content_hash(original):
         raise ValueError("dependency source identity differs")
-    current, before = original, {}
+    current = _legacy_review_source(original) if legacy_review_aliases else original
+    before = {}
     indices = []
     for event in result["dependency_revisions"]:
         identifier = event["interaction_id"]
@@ -204,9 +280,10 @@ def replay(brief, context, original: dict, result: dict) -> tuple[dict, dict]:
             identifier,
             reply,
             preserve_process_paths=assembly_policy == assembly.POLICY,
+            _legacy_review_aliases=legacy_review_aliases,
         )
         if expected != event:
-            raise ValueError("dependency revision ledger differs")
+            raise _ReplayMismatch(identifier, event, expected)
         current = updated
     if current != result["effective_source"]:
         raise ValueError("effective dependency source differs from replay")
