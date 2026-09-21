@@ -107,7 +107,9 @@ flock "${AF_D3_OUTPUT_ROOT}/prepare.shlock" bash -c '
 
 readonly port=$((20000 + RANDOM % 20000))
 readonly endpoint="http://127.0.0.1:${port}"
-readonly server_log="${AF_D3_OUTPUT_ROOT}/logs/vllm-batch-${batch}.log"
+# Include the job id: two tiers submitted against one output root both
+# number their batches from zero and would otherwise share this file.
+readonly server_log="${AF_D3_OUTPUT_ROOT}/logs/vllm-${SLURM_JOB_ID}-batch-${batch}.log"
 
 vllm_parallel_args=()
 if ((AF_TENSOR_PARALLEL_SIZE > 1)); then
