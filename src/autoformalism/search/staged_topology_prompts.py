@@ -132,9 +132,21 @@ def render_variable_identification_user_prompt(
     return _request_text(stage="variable identification", payload=payload)
 
 
-def render_equation_topology_system_prompt() -> str:
+def render_equation_topology_system_prompt(
+    *, automatic_process_terms: bool = False
+) -> str:
     """Return the immutable Level-2 provider instruction."""
-    return EQUATION_TOPOLOGY_SYSTEM_PROMPT
+    if not automatic_process_terms:
+        return EQUATION_TOPOLOGY_SYSTEM_PROMPT
+    return EQUATION_TOPOLOGY_SYSTEM_PROMPT.replace(
+        "For a normal equation-topology response, "
+        "return one or more interaction terms\n"
+        "and set inventory_revision to null.",
+        "The runtime supplies the displayed signed process terms. "
+        "Return only ADDITIONAL\n"
+        "interaction terms and set inventory_revision to null. Return an empty terms\n"
+        "list with inventory_revision=null when no additional terms are needed.",
+    )
 
 
 def render_equation_topology_user_prompt(

@@ -305,7 +305,9 @@ def function_use(bindings: list[dict], lhs: str, sources: list[str]) -> dict | N
     return rows[0] if rows else None
 
 
-def decorate_function_term(selected: dict, bindings: list[dict]) -> dict:
+def decorate_function_term(
+    selected: dict, bindings: list[dict], *, process_review: dict | None = None
+) -> dict:
     """Use the same contract in provider context, saved slots and reconstruction."""
     if not bindings:
         return selected
@@ -334,9 +336,20 @@ def decorate_function_term(selected: dict, bindings: list[dict]) -> dict:
         b["proposal"]["name"] == selected["lhs"] and "signed_declaration" in b
         for b in bindings
     ):
+        from autoformalism.search.signed_processes import proposal_context
+
         return {
             **prose_as_context(selected),
             "shared_process_law": selected["lhs"],
+            **(
+                {
+                    "process_proposal_context": proposal_context(
+                        process_review, selected["lhs"]
+                    )
+                }
+                if process_review is not None
+                else {}
+            ),
             "process_instruction": (
                 "Define this one shared shape law. Its signed values are allowed. "
                 "The runtime supplies fitted consumer magnitudes; avoid an extra "

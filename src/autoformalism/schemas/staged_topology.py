@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import Field, create_model, model_validator
 
@@ -167,15 +167,24 @@ class EquationReply(StrictSchema):
 
     terms: tuple[EquationTerm, ...] = Field(max_length=32)
     inventory_revision: InventoryRevision | None
+    _runtime_supplies_terms: ClassVar[bool] = False
 
     @model_validator(mode="after")
     def exactly_one_outcome(self) -> EquationReply:
         """Keep revision requests distinct from an accepted equation."""
+        if self._runtime_supplies_terms and not self.terms:
+            return self
         if bool(self.terms) == (self.inventory_revision is not None):
             raise ValueError(
                 "return nonempty terms OR an inventory_revision, never both"
             )
         return self
+
+
+class EquationAdditionsReply(EquationReply):
+    """An empty addition is valid only when the runtime supplies signed terms."""
+
+    _runtime_supplies_terms: ClassVar[bool] = True
 
 
 class EquationDefinition(StrictSchema):
@@ -226,7 +235,10 @@ class EquationPolarityPolicy(StrictSchema):
 
 
 def equation_reply_model(
-    allowed_sources: tuple[str, ...], *, maximum_terms: int
+    allowed_sources: tuple[str, ...],
+    *,
+    maximum_terms: int,
+    runtime_supplies_terms: bool = False,
 ) -> type[EquationReply]:
     """Derive the actual provider schema and validator from one active inventory."""
     if not allowed_sources or len(set(allowed_sources)) != len(allowed_sources):
@@ -239,6 +251,6 @@ def equation_reply_model(
     )
     return create_model(
         "SelectedEquationReply",
-        __base__=EquationReply,
+        __base__=EquationAdditionsReply if runtime_supplies_terms else EquationReply,
         terms=(tuple[term_model, ...], Field(max_length=maximum_terms)),
     )

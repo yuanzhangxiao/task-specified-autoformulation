@@ -38,6 +38,11 @@ constants and displayed covariates with multiplication/division are supported.
 Do NOT put the process, its sign, a fitted gain, or a scientific law in conversion.
 This optional conversion declares units; null does NOT invalidate the process.
 Declare the process's inputs here; its single shared function is generated later.
+Choose all required dependencies, including public geometric thresholds when the
+scientific law needs them. These are ongoing RHS contributions, not initial-state
+assignments. Boundary values belong to the existing initialization phase. A fixed
+covariate can parameterize an ongoing law when scientifically justified; explain
+that use. Do not replace a boundary assignment by continuous forcing.
 The runtime fits nonnegative magnitudes; internal nonlinear shapes may be signed.
 Do not force shared processes in disconnected systems or invent a second use for
 a local outlet. Scientific meaning is explanatory context, not a machine proof.
@@ -308,3 +313,25 @@ def automatic_function(selected):
     if use.get("automatic_identity"):
         return InteractionFunctionReply(expression=use["process"], parameters=())
     return None
+
+
+def proposal_context(review: dict, name: str) -> dict:
+    """Keep original scientific content as advice, never as executable conversion."""
+    return {
+        "original_suggestions": [
+            p
+            for p in review.get("original_suggestions", [])
+            if isinstance(p, dict) and p.get("name") == name
+        ],
+        "unresolved_conversions": [
+            d for d in review.get("conversion_diagnostics", []) if d["process"] == name
+        ],
+        "interpretation": (
+            "These are untrusted scientific suggestions from the earlier proposal. "
+            "An unresolved conversion was NOT inserted into the equations. Consider "
+            "its scientific content when choosing this single shared law, using only "
+            "the declared dependencies. Do not duplicate a conversion already applied "
+            "at its consumers. The public requirements remain authoritative; names "
+            "and explanations are not a certificate that the function satisfies them."
+        ),
+    }

@@ -292,6 +292,8 @@ def run_staged_topology(
         contract = {"brief": enriched, "context": context.model_dump(mode="json")}
         if shared_process_guidance:
             contract["shared_process_guidance"] = True
+        if signed_shared_processes:
+            contract["signed_process_handoff"] = "signed-process-handoff-2"
         if optional_process_review:
             contract["optional_process_review"] = (
                 signed.POLICY
@@ -585,9 +587,6 @@ def run_staged_topology(
                 validate_equation(inventory, (), definition, brief.limits)
             checkpoint()
         allowed = tuple(item.name for item in inventory if item.definition != "unused")
-        model = equation_reply_model(
-            allowed, maximum_terms=brief.limits.terms_per_equation
-        )
         memory_names = {name for names in memory_candidates.values() for name in names}
         public_targets = {
             item.name for item in brief.public_variables if item.data_role == "target"
@@ -608,6 +607,15 @@ def run_staged_topology(
                 continue
             if selected.name in {b["proposal"]["name"] for b in process_bindings}:
                 continue
+            automatic_terms = bool(
+                signed_shared_processes
+                and shared.requirements(process_bindings, selected.name)
+            )
+            model = equation_reply_model(
+                allowed,
+                maximum_terms=brief.limits.terms_per_equation,
+                runtime_supplies_terms=automatic_terms,
+            )
             polarity_policy = compile_equation_polarity_policy(
                 brief,
                 selected.name,
@@ -647,13 +655,16 @@ def run_staged_topology(
             accepted = request(
                 f"equation_{selected.name}",
                 system_prompt(
-                    render_equation_topology_system_prompt(),
+                    render_equation_topology_system_prompt(
+                        automatic_process_terms=automatic_terms
+                    ),
                     "topology",
                     shared_process_guidance,
                 ),
                 lambda diagnostic,
                 selected=selected,
                 equations=equations,
+                automatic_terms=automatic_terms,
                 polarity_policy=polarity_policy: render_equation_topology_user_prompt(
                     public_brief_json=brief_json,
                     agenda_json=_json(
@@ -678,7 +689,7 @@ def run_staged_topology(
                         if process_bindings
                         else None
                     ),
-                    automatic_process_terms=signed_shared_processes,
+                    automatic_process_terms=automatic_terms,
                 ),
                 model,
                 accept_equation,
@@ -775,6 +786,8 @@ def run_staged_topology(
             "protocol": signed.POLICY if signed_shared_processes else shared.POLICY,
             "bindings": process_bindings,
         }
+    if signed_shared_processes:
+        result["signed_process_handoff"] = "signed-process-handoff-2"
     checkpoint()
     atomic_json(output / "result.json", result)
     return result

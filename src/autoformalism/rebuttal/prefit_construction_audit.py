@@ -84,6 +84,9 @@ def reconstruct(cell: dict, construction: dict) -> dict:
                     "deterministic_role_repair_policy": "certified_outer_gain",
                 },
                 bindings,
+                process_review=source.get("process_review")
+                if source.get("signed_process_handoff") == "signed-process-handoff-2"
+                else None,
             ),
         )
         for i, equation in enumerate(equations)

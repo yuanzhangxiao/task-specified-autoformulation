@@ -277,7 +277,14 @@ def run_staged_functions(
                 for term in equation.terms
             )
             selected_terms = tuple(
-                shared.decorate_function_term(selected, process_bindings)
+                shared.decorate_function_term(
+                    selected,
+                    process_bindings,
+                    process_review=source.get("process_review")
+                    if source.get("signed_process_handoff")
+                    == "signed-process-handoff-2"
+                    else None,
+                )
                 for selected in selected_terms
             )
             identifiers = tuple(
