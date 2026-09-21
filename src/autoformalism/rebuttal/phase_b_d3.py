@@ -234,7 +234,11 @@ def run(root: Path, index: int, *, client=None) -> dict:
         provider
     ):
         raise ValueError(
-            "protocol, code or dependencies changed; use the pinned checkout"
+            "protocol, code or dependencies changed since this plan was frozen. "
+            "The identity covers every module in the package, so any commit "
+            "invalidates it. Either run from the checkout that froze the plan, "
+            f"or delete {root / 'plan.json'} and its results to re-freeze at "
+            "the current code. Do not update a checkout mid-campaign."
         )
     if not 0 <= index < len(plan["rows"]):
         raise ValueError("task index out of range")
