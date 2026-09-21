@@ -220,3 +220,75 @@ def test_sealed_test_evaluator_refuses_development_splits() -> None:
     assert "sealed replay requires the test split" in source
     # the development entry point keeps refusing test data
     assert "require TRAIN and VALIDATION splits, never TEST" in source
+
+
+# --- vendored external campaigns -----------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["llm_sr", "llm_ode"])
+def test_a_vendored_campaign_selection_is_adapted_without_reading_upstream(
+    tmp_path: Path, kind: str
+) -> None:
+    """Only the sealed selection is read, so upstream internals never matter."""
+    run = tmp_path / kind
+    run.mkdir()
+    (run / "result.json").write_text(
+        json.dumps(
+            {
+                "benchmark_id": "phase_b_cell",
+                "tier": "easy",
+                "repetition": 0,
+                "status": "complete",
+                "plan_sha256": "c" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    selection = _development_result(
+        {
+            "candidate": _candidate(),
+            "parameters": {"a": -0.5},
+            "selected_generation": 3,
+        }
+    )
+    selection["method"] = f"{kind}_vendored"
+    (run / "native-selection.json").write_text(
+        json.dumps({"plan_sha256": "c" * 64, "selection": selection}),
+        encoding="utf-8",
+    )
+    subject = adapt_source(
+        SourceAdapterRequest(
+            request_id=f"{kind}-0",
+            source_kind=kind,
+            source_path=run / "result.json",
+        ),
+        _context(),
+    )
+    assert subject.method == f"{kind}_vendored"
+    # both discover a continuous right-hand side, so the ODE replay applies
+    assert subject.execution_semantics == "continuous_ode_free_rollout"
+    assert subject.parameterization.global_parameters == {"a": -0.5}
+    assert "native-selection.json" in subject.source_provenance.auxiliary_sha256
+
+
+def test_a_vendored_selection_from_another_plan_is_refused(tmp_path: Path) -> None:
+    run = tmp_path / "llm_sr"
+    run.mkdir()
+    (run / "result.json").write_text(
+        json.dumps({"plan_sha256": "d" * 64}), encoding="utf-8"
+    )
+    selection = _development_result({"candidate": _candidate(), "parameters": {}})
+    selection["method"] = "llm_sr_vendored"
+    (run / "native-selection.json").write_text(
+        json.dumps({"plan_sha256": "e" * 64, "selection": selection}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="different plans"):
+        adapt_source(
+            SourceAdapterRequest(
+                request_id="llm_sr-0",
+                source_kind="llm_sr",
+                source_path=run / "result.json",
+            ),
+            _context(),
+        )

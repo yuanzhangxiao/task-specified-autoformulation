@@ -26,6 +26,10 @@ SourceKind = Literal[
     "sindy",
     "pysr",
     "d3",
+    # Vendored external campaigns: discovery runs upstream at a pinned
+    # revision, and only the sealed selection is adapted here.
+    "llm_sr",
+    "llm_ode",
 ]
 
 
@@ -113,6 +117,8 @@ def adapt_source(
         return _adapt_raw_agent(request, context)
     if request.source_kind in {"sindy", "pysr"}:
         return _adapt_symbolic_baseline(request, context)
+    if request.source_kind in VENDORED_CAMPAIGNS:
+        return _adapt_vendored_campaign(request, context)
     return _adapt_d3(request, context)
 
 
@@ -269,6 +275,56 @@ def _adapt_symbolic_baseline(
         context=context,
         source_path=path,
         source_hash=_sha256(path),
+    )
+
+
+#: Campaigns whose driver seals the selected model beside its result wrapper.
+#: Both discover continuous right-hand sides, so the common ODE replay applies.
+VENDORED_CAMPAIGNS: dict[str, tuple[str, str]] = {
+    "llm_sr": ("llm_sr", "continuous_ode_free_rollout"),
+    "llm_ode": ("llm_ode", "continuous_ode_free_rollout"),
+}
+
+
+def _adapt_vendored_campaign(
+    request: SourceAdapterRequest,
+    context: ValidationContext,
+) -> FrozenEvaluationSubject:
+    """Adapt an external campaign's sealed selection without reading upstream.
+
+    The driver writes the selected model as a development result beside its
+    evaluation wrapper, so nothing here depends on how the upstream method
+    searched. Both files must name the same plan before the selection counts.
+    """
+    prefix, semantics = VENDORED_CAMPAIGNS[request.source_kind]
+    path = _required_file(request.source_path)
+    sealed = path.with_name("native-selection.json")
+    if not sealed.is_file():
+        raise ValueError(f"campaign selection is missing: {sealed}")
+    wrapper = _read_object(path)
+    selection = _read_object(sealed)
+    plan = selection.get("plan_sha256")
+    if not plan or plan != wrapper.get("plan_sha256"):
+        raise ValueError(f"selection and result name different plans: {sealed}")
+    result = BaselineDevelopmentResult.model_validate(selection["selection"])
+    if not result.method.startswith(prefix):
+        raise ValueError(f"baseline method {result.method!r} is not {prefix}")
+    payload = result.selection_payload
+    candidate = CandidateModel.model_validate(payload["candidate"])
+    parameters = _numeric_mapping(payload.get("parameters", {}))
+    return _subject(
+        request=request,
+        method=result.method,
+        benchmark_id=result.benchmark_id,
+        tier=result.tier,
+        repetition=result.seed,
+        candidate=candidate,
+        parameterization=_parameterization(candidate, parameters, {}),
+        context=context,
+        source_path=path,
+        source_hash=_sha256(path),
+        auxiliary_hashes={sealed.name: _sha256(sealed)},
+        execution_semantics=semantics,
     )
 
 
@@ -450,6 +506,8 @@ def _subject(
                 "sindy": "sindy_result",
                 "pysr": "pysr_result",
                 "d3": "d3_result",
+                "llm_sr": "llm_sr_result",
+                "llm_ode": "llm_ode_result",
             }[request.source_kind],
             request_id=request.request_id,
             source_path=str(source_path),

@@ -198,6 +198,8 @@ class SourceArtifactProvenance(BaseModel):
         "sindy_result",
         "pysr_result",
         "d3_result",
+        "llm_sr_result",
+        "llm_ode_result",
         "direct_candidate",
     ]
     request_id: str = Field(min_length=1)
