@@ -125,6 +125,8 @@ def launcher_hash():
         "scripts/hpc/run_detention_process_pilot_aces.sh",
         "scripts/hpc/submit_detention_process_pilot_aces.sh",
         "scripts/hpc/run_staged_topology_server.sh",
+        "scripts/process_handoff_confirmation.py",
+        "scripts/hpc/submit_process_handoff_confirmation_aces.sh",
     ]
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
@@ -356,6 +358,10 @@ def verify(root):
         or plan["launcher_sha256"] != launcher_hash()
     ):
         raise ValueError("source or launcher differs")
+    if "handoff_confirmation" in plan:
+        from autoformalism.rebuttal.process_handoff_confirmation import verify_manifest
+
+        verify_manifest(root, plan)
     return plan
 
 
