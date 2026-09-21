@@ -18,12 +18,18 @@ case "${1:?stage}" in
     if jq -e '.handoff_confirmation' "$AF_OUTPUT_ROOT/plan.json" >/dev/null; then
       "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_process_handoff.py tests/test_process_handoff_confirmation.py
     fi
+    if jq -e '.dependency_confirmation' "$AF_OUTPUT_ROOT/plan.json" >/dev/null; then
+      "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_function_dependencies.py tests/test_function_dependency_confirmation.py
+    fi
     actual="$(sha256sum "$AF_VLLM_IMAGE")"
     [[ "${actual%% *}" == "$(jq -r '.config.serving_image_sha256' "$AF_OUTPUT_ROOT/plan.json")" ]] || exit 2
     ;;
  propose) module load WebProxy; exec bash scripts/hpc/run_staged_topology_server.sh ;;
  fit) exec "$AF_PYTHON" scripts/detention_process_pilot.py fit --root "$AF_OUTPUT_ROOT" ;;
  report)
+    if jq -e '.dependency_confirmation' "$AF_OUTPUT_ROOT/plan.json" >/dev/null; then
+      exec "$AF_PYTHON" scripts/function_dependency_confirmation.py report --root "$AF_OUTPUT_ROOT"
+    fi
     if jq -e '.handoff_confirmation' "$AF_OUTPUT_ROOT/plan.json" >/dev/null; then
       exec "$AF_PYTHON" scripts/process_handoff_confirmation.py report --root "$AF_OUTPUT_ROOT"
     fi

@@ -6,6 +6,10 @@ gain policies and LLM settings are unchanged. First run the CPU-only saved-reply
 audit below. Review that audit before scheduling a fresh construction confirmation;
 this milestone submits no live LLM or fitting campaign automatically.
 
+The completed audit and separately authorized fresh confirmation are documented in
+`FUNCTION_DEPENDENCY_CONFIRMATION.md`. Use its v5 commands for the new experiment;
+do not modify the historical v4 plan or repeat the audit in its frozen directory.
+
 ## Why the previous replies failed
 
 The original batch and atomic prompts **did** show each grouped source set and

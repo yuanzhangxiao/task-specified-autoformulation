@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/FUNCTION_DEPENDENCY_CONFIRMATION.md` describes the fresh basin v5 run:
+eight constructions and sixteen paired gain fits using the audited local dependency
+policy. Exact v4 public inputs, inventories, proposer settings and fitter budgets
+are retained; historical outcomes are reporting-only. The report separates
+dependency repairs, fallback and token costs from numerical and scientific outcomes.
+
 `docs/FUNCTION_DEPENDENCY_REPAIR.md` describes an opt-in construction correction:
 permitted public fixed covariates can enter functions, and a proposer can explicitly
 revise one term's dependencies under unchanged signs and shared consumers. Atomic
