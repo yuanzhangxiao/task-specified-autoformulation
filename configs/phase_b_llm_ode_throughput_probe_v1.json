@@ -1,0 +1,37 @@
+{
+  "schema_version": "phase-b-vendored-campaign-plan-1",
+  "status": "proposed_pending_review",
+  "provider": "vllm",
+  "model": "openai/gpt-oss-120b",
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t1_canonical_named_easy",
+      "tier": "easy"
+    }
+  ],
+  "repetitions": [
+    0
+  ],
+  "execution_semantics": "continuous_ode_free_rollout",
+  "test_data_opened": false,
+  "private_reference_opened": false,
+  "method": "llm_ode",
+  "upstream": {
+    "repository": "https://github.com/gryaklab/llm-ode",
+    "commit": "31667d9ac948e8f411cd2f07726d7744784b5d5a",
+    "license": "MIT",
+    "search_modified": false
+  },
+  "budget": {
+    "unit": "iterations",
+    "published_default": 200,
+    "declared": 10,
+    "rationale": "Throughput probe, not a results campaign. Ten iterations on one cell measure the requests-per-hour and wall-clock cost of a full-length task before the allocation is committed to one. No model from this root may be evaluated or reported; it exists to size the budget."
+  },
+  "prompt_policy": {
+    "supplies_public_task_specification": true,
+    "upstream_withholds_specification": true,
+    "description": "Declared adaptation. The upstream protocol withholds variable meanings and system descriptions to mitigate memorisation; this benchmark controls for that with its named/obfuscated pairing, so the specification is supplied to equalise information with the other LLM baselines. Search instructions, operators, fitting and selection are unchanged."
+  },
+  "derivative_provenance": "upstream_findiff_fourth_order"
+}
