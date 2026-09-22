@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/BASIN_EQUATION_AUDIT.md` defines the saved-v7 public physics audit. It
+reconstructs final gain assemblies, checks inflow conversions, outlet presence
+and finite threshold probes, and examines area-weighted transfer cancellation.
+Unknown latent meanings and unproved identities remain unverified. Public-only
+feedback packets are produced without LLM calls, fitting, model edits or promotion;
+critic/repair integration waits for this milestone's results.
+
 `docs/IDENTIFIED_FUNCTION_CONFIRMATION.md` describes the opt-in basin v7 pilot:
 slot-addressed function batches preserve unambiguous replies, shared consumers stay
 runtime supplied, and the audited atomic process repair API uses existing budgets.
