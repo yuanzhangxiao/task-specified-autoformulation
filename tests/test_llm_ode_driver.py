@@ -11,8 +11,8 @@ from __future__ import annotations
 import inspect
 import sys
 import types
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 import pytest
@@ -259,9 +259,11 @@ def test_an_interpreter_older_than_upstream_requires_is_refused() -> None:
     """
     from autoformalism.rebuttal import llm_ode_upstream
 
-    with mock.patch.object(llm_ode_upstream.sys, "version_info", (3, 12, 10)):
-        with pytest.raises(RuntimeError, match="requires Python"):
-            llm_ode_upstream.load_upstream(Path("/nonexistent"))
+    with (
+        mock.patch.object(llm_ode_upstream.sys, "version_info", (3, 12, 10)),
+        pytest.raises(RuntimeError, match="requires Python"),
+    ):
+        llm_ode_upstream.load_upstream(Path("/nonexistent"))
 
 
 def test_a_search_that_never_produces_a_candidate_stops_early(monkeypatch) -> None:
