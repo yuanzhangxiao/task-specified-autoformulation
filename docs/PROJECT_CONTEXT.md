@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/PROCESS_ASSEMBLY_REVISIONS.md` defines the saved-v6 interface milestone:
+conversion-only covariates need not occur in intrinsic laws; law/conversion edits
+commit atomically; public-pathway failures can spend remaining repair attempts on
+companion ordinary terms. Actual retained overlaps stay scientifically unverified.
+The opt-in transaction runner and CPU saved-response audit precede a fresh pilot
+adapter; historical launchers, fitter, benchmark data and prompts are unchanged.
+
 `docs/PROCESS_ASSEMBLY_CONFIRMATION.md` describes the audit-gated basin v6
 comparison: eight fresh constructions and sixteen paired gain fits with the same
 v5 public inputs, inventories, seeds and budgets. It enables assembly-owned signs,
