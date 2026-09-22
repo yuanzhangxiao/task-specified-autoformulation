@@ -152,3 +152,12 @@ The smoke uses prescribed replies and a synthetic fixture, then performs an
 actual frozen child fit and independent numerical replay. It checks cache
 resume and byte-for-byte preservation of historical fixture files. It does not
 call a live LLM or assert that the repair improves prediction accuracy.
+
+Verified locally on 2026-09-22: the full test runner passed 2,757 parallel tests
+and 66 timing-sensitive tests, with eight optional PyTorch tests skipped because
+PyTorch is unavailable locally. The eleven shared-process tests excluded by that
+runner passed separately. All 28 new focused tests are included in the parallel
+count. The real child-fit/replay smoke passed, including deterministic resume and
+historical-file preservation. Changed Python files and shell syntax checks pass;
+repository-wide Ruff still reports 37 existing findings in `analysis/claude/`.
+The live proposer repair outcomes remain to be measured on ACES.
