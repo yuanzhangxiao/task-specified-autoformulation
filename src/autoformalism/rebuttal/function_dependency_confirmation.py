@@ -265,18 +265,37 @@ def report(root: Path) -> dict:
     plan = pilot.verify(root)
     if "dependency_confirmation" not in plan:
         raise ValueError("requires a frozen dependency confirmation")
+    return comparison_report(root, plan)
+
+
+def comparison_report(
+    root: Path,
+    plan: dict,
+    *,
+    protocol: str = PROTOCOL,
+    construction_reader=construction_rows,
+    accounting_reader=accounting,
+    title: str = "Fresh function dependency confirmation",
+    scope: str = (
+        "Historical strict v4 versus fresh dependency-policy construction. "
+        "Matched inventories, data, seeds, model settings and budgets. "
+        "Changed prompts can change sampled models. No new-variable stage, "
+        "optimizer change, model promotion or automatic follow-up."
+    ),
+) -> dict:
+    """Render matched outcomes after the caller verifies its versioned plan."""
     pilot.report(root)
     baseline = sealed_read(root / "baseline.json")
     current = [model_row(root, plan, t) for t in plan["tasks"]]
-    constructions = construction_rows(root, plan)
+    constructions = construction_reader(root, plan)
     old = {r["task"]: r for r in baseline["rows"]}
     summary = {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
         "plan_sha256": plan["artifact_sha256"],
         "historical_status_counts": dict(Counter(r["status"] for r in old.values())),
         "current_status_counts": dict(Counter(r["status"] for r in current)),
-        "historical_accounting": accounting(baseline["constructions"]),
-        "current_accounting": accounting(constructions),
+        "historical_accounting": accounting_reader(baseline["constructions"]),
+        "current_accounting": accounting_reader(constructions),
         "construction_pairs": [
             {"task": a["task"], "historical": a, "current": b}
             for a, b in zip(baseline["constructions"], constructions, strict=True)
@@ -288,16 +307,11 @@ def report(root: Path) -> dict:
         "scientific_compliance_certified": False,
         "test_data_opened": False,
         "automatic_followup": False,
-        "comparison_scope": (
-            "Historical strict v4 versus fresh dependency-policy construction. "
-            "Matched inventories, data, seeds, model settings and budgets. "
-            "Changed prompts can change sampled models. No new-variable stage, "
-            "optimizer change, model promotion or automatic follow-up."
-        ),
+        "comparison_scope": scope,
     }
     public._write(root / "comparison.json", summary)
     lines = [
-        "# Fresh function dependency confirmation",
+        "# " + title,
         "",
         "Eight fresh constructions, sixteen fits. " + summary["comparison_scope"],
         "",

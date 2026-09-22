@@ -129,6 +129,8 @@ def launcher_hash():
         "scripts/hpc/submit_process_handoff_confirmation_aces.sh",
         "scripts/function_dependency_confirmation.py",
         "scripts/hpc/submit_function_dependency_confirmation_aces.sh",
+        "scripts/process_assembly_confirmation.py",
+        "scripts/hpc/submit_process_assembly_confirmation_aces.sh",
     ]
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
@@ -368,6 +370,10 @@ def verify(root):
         from autoformalism.rebuttal.function_dependency_confirmation import (
             verify_manifest,
         )
+
+        verify_manifest(root, plan)
+    if "assembly_confirmation" in plan:
+        from autoformalism.rebuttal.process_assembly_confirmation import verify_manifest
 
         verify_manifest(root, plan)
     return plan

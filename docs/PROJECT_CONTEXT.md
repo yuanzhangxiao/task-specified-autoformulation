@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/PROCESS_ASSEMBLY_CONFIRMATION.md` describes the audit-gated basin v6
+comparison: eight fresh constructions and sixteen paired gain fits with the same
+v5 public inputs, inventories, seeds and budgets. It enables assembly-owned signs,
+conversion feedback and process-path preservation, and reports construction costs
+and equation decisions separately from frozen-fitter outcomes. Historical results
+remain report-only; no test access or automatic follow-up is introduced.
+
 `docs/PROCESS_ASSEMBLY_CONTRACT.md` describes opt-in assembly ownership: ordinary
 and shared outer signs are normalized consistently, local dependency edits preserve
 process-to-target paths, and duplicated outer conversion factors receive focused
