@@ -25,8 +25,8 @@
   "budget": {
     "unit": "iterations",
     "published_default": 200,
-    "declared": 10,
-    "rationale": "Throughput probe, not a results campaign. Ten iterations on one cell measure the requests-per-hour and wall-clock cost of a full-length task before the allocation is committed to one. No model from this root may be evaluated or reported; it exists to size the budget."
+    "declared": 25,
+    "rationale": "Throughput probe, not a results campaign. Twenty-five iterations on one cell give timing at five points, so per-iteration cost and any growth across the run can be read off rather than extrapolated from a single number. The barren-search guard aborts a non-functioning environment after five iterations, so a broken run costs a minute rather than a wall-clock. No model from this root may be evaluated or reported."
   },
   "prompt_policy": {
     "supplies_public_task_specification": true,
