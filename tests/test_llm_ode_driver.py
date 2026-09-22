@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import sys
 import types
+from unittest import mock
 from pathlib import Path
 
 import pandas as pd
@@ -245,3 +246,44 @@ def test_selection_refuses_a_held_out_split() -> None:
             _Split(SplitName.TRAIN),
             _Split(SplitName.TEST),
         )
+
+
+def test_an_interpreter_older_than_upstream_requires_is_refused() -> None:
+    """A two-hour job that discovers nothing must not be possible silently.
+
+    Upstream pins Python 3.13.5 and builds programs with
+    str.replace(count=1). On 3.12 every construction raises TypeError, which
+    upstream logs as a warning and continues past, so the islands stay empty
+    for the whole run and the job dies at its walltime having produced
+    nothing.
+    """
+    from autoformalism.rebuttal import llm_ode_upstream
+
+    with mock.patch.object(llm_ode_upstream.sys, "version_info", (3, 12, 10)):
+        with pytest.raises(RuntimeError, match="requires Python"):
+            llm_ode_upstream.load_upstream(Path("/nonexistent"))
+
+
+def test_a_search_that_never_produces_a_candidate_stops_early(monkeypatch) -> None:
+    """Whatever the cause, an empty search must not spend the allocation."""
+    _install_fake_upstream(monkeypatch, {"y": []})
+    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 1.0)
+    search = driver.build_searcher(
+        upstream_root=Path("/nonexistent"),
+        base_url="http://127.0.0.1:1/v1",
+        iterations=200,
+        islands=4,
+    )
+    outcome = search(
+        train=_arrays(("y",)),
+        validation=_arrays(("y",)),
+        targets=("y",),
+        prompt="",
+        directory=Path("/tmp"),
+        development=(object(), object()),
+        context=object(),
+    )
+    assert outcome["status"] == "no_candidates"
+    assert "not running" in outcome["error"]
+    # stopped at the barren threshold rather than running all 200
+    assert outcome["accounting"]["llm_queries"] == 7

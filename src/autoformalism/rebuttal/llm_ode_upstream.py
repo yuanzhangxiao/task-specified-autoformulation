@@ -55,8 +55,26 @@ class UpstreamModules:
     generate_prompt: object
 
 
+#: Upstream pins ``requires-python = "==3.13.5"`` and calls
+#: ``str.replace(..., count=1)``, which only accepts that keyword from 3.13.
+#: On an older interpreter every program construction raises TypeError,
+#: upstream logs it as a warning and continues, and the islands stay empty for
+#: the whole run: a silent two-hour job that discovers nothing.
+MINIMUM_UPSTREAM_PYTHON = (3, 13)
+
+
 def load_upstream(root: Path) -> UpstreamModules:
     """Import the vendored checkout without installing it."""
+    if sys.version_info[:2] < MINIMUM_UPSTREAM_PYTHON:
+        running = ".".join(str(part) for part in sys.version_info[:3])
+        wanted = ".".join(str(part) for part in MINIMUM_UPSTREAM_PYTHON)
+        raise RuntimeError(
+            f"LLM-ODE requires Python >= {wanted} and this is {running}. "
+            "Its programs are built with str.replace(count=1), which older "
+            "interpreters reject; the search would run to completion having "
+            "created no candidates. Use an interpreter matching the pinned "
+            "checkout rather than editing its source."
+        )
     resolved = root.expanduser().resolve()
     if not (resolved / "llmode" / "llmode.py").is_file():
         raise ValueError(f"not an LLM-ODE checkout: {resolved}")

@@ -56,6 +56,16 @@ from autoformalism.rebuttal.llm_ode_upstream import (
 
 LOGGER = logging.getLogger(__name__)
 
+#: Iterations after which a total absence of candidates is pathological
+#: rather than unlucky. Upstream logs a construction failure and continues,
+#: so an environment fault otherwise costs an entire wall-clock allocation.
+BARREN_ITERATIONS = 5
+
+
+class BarrenSearch(RuntimeError):
+    """The search produced no candidate at all, well past the point it should."""
+
+
 #: Upstream assembles systems from the full Cartesian product of the
 #: per-variable Pareto frontiers, so the frontiers are used whole. When the
 #: product exceeds the campaign's cap the task records that refusal rather
@@ -211,6 +221,19 @@ def build_searcher(
                         searcher.step()
                 # About ten progress lines whatever the budget, so a short
                 # probe reports timing instead of finishing silently.
+                # Upstream swallows a failed program construction as a
+                # warning, so a systematically broken environment produces a
+                # full-length run with permanently empty islands. Stop once
+                # that is unambiguous instead of spending the whole wall.
+                if iteration == BARREN_ITERATIONS and not any(
+                    _frontier_equations(item) for item in searchers
+                ):
+                    raise BarrenSearch(
+                        f"no target produced a single candidate in "
+                        f"{BARREN_ITERATIONS} iterations; the search is "
+                        "not running, check the task log for repeated "
+                        "upstream warnings"
+                    )
                 if iteration % max(1, iterations // 10) == 0:
                     LOGGER.info(
                         "iteration %d of %d after %.1fs",
