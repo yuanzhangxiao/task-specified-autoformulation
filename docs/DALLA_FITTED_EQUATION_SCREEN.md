@@ -179,6 +179,88 @@ is `work/agent-comms/2026-09-22-codex-expanded-dalla-equation-search.md`.
 Production code, fitting settings, benchmark data and official selection are
 unchanged.
 
+## Mechanism-first follow-up: no NMSE eligibility filter
+
+The earlier pass screened equations for **all 217 exported fitted records**;
+only a shortlist received full trajectory replay. It was not a complete manual
+mechanism certification of every model. Its conclusion concerned the combination
+of good physiological equations and good fit, not the absence of any structurally
+reasonable reduced model. Those are different claims.
+
+The frozen public T1-easy prompt explicitly permits omission of auxiliaries.
+Its machine-readable requirement is a causal meal-to-glucose pathway, with
+`requires_dynamic_memory=false` and `required_sign=unspecified`. The prose also
+asks for coherent source/sink interpretations. Therefore a missing EGP, Uii, E
+or Gt term is not automatically a public-requirement failure. Conversely, a graph
+certificate for the meal path is not a certificate of fitted physiological signs.
+Recovered full physiological balance is a stronger post-selection criterion.
+
+A second pass used no NMSE cutoff and included all state equations, removing
+only states with no nonzero fitted dependency path to the target. For affine
+models it checked nonnegative cross-state couplings, nonnegative meal forcing,
+an active meal-to-latent-to-target path, negative real parts of computed poles,
+and correctly directed effects of whichever physiological auxiliaries were used.
+This is a sufficient response-sign screen, not a necessary or complete
+mechanism-compliance test: signed latent-coordinate changes can preserve a
+correct input-output mechanism while failing this particular screen.
+
+Of 217 records, 199 are affine and 18 require nonlinear review. Forty-five pass
+the narrow affine screen (30 Full, 15 Brief-only); removing three with explicit
+time drift and two with numerically near-zero poles leaves 40. These are repeated
+saved records, not 40 independent discoveries. Initial-state plausibility,
+physiological interpretation, coefficient accuracy and full intervention behavior
+are not certified. All affine expansions were checked against the production
+interpreter: 1,274 state-equation evaluations agree. Detailed facts are in
+`artifacts/dalla-equation-search-2026-09-22/mechanism-first-audit.json`.
+
+Two concrete leads from this structural screen are:
+
+| Candidate | Status | Train / validation NMSE | Interpretation |
+| --- | --- | --- | --- |
+| Full, canonical obfuscated T1, seed 1, round 10; `291778966c99` | Unretained fitted trial; same fitted dynamics recur in a round-12 trial | 0.150775 / 0.246069 | Positive active meal filters, damping, positive fitted initial values. Main meal-filter and glucose decay times are about 48 and 49 minutes; additional modes are about 901 and 2,298 minutes. A coherent reduced meal-response lead, with slow baseline-compensation modes and no explicit auxiliary balance. |
+| Full, perturbed obfuscated T1, seed 0, round 14; `e113a8ec1bdd` | Unretained fitted trial | 0.150487 / 0.265179 | Positive meal-response paths and stable linear dynamics; some negative latent initial values and an extremely slow mode require interpretation. Not a recovered nonlinear perturbed physiological balance. |
+
+Raw latent coefficients cannot be compared directly with reference coefficients
+without fixing latent scaling. For these reduced models, compare meal-response
+gain, timing and relaxation, then the existing frozen trajectories. Do not
+hand-adjust parameters using the reference or select a new benchmark endpoint
+from this diagnostic screen.
+
+Only two records have all five explicitly represented direct balance signs
+`+EGP, -Uii, -E, +Gt, -Gp` correct. Full perturbed named seed 1 round 5 has those
+signs, but its meal-driven Y term enters glucose negatively; its small positive
+A pathway does not justify calling the full absorption mechanism correct.
+Full perturbed named seed 0 round 3 has coefficients +1, -1, -1, +0.1, -0.1,
+but its fitted meal-memory-to-target coefficient is exactly zero. It remains
+a direct meal-driven model. Neither establishes the desired combination of
+active absorption memory, a good physiological balance and accurate fitting.
+The remaining nonlinear models are not declared invalid merely because the
+affine screen does not apply.
+
+### Proposed next pilot
+
+Keep the structurally plausible reduced-model leads and retrieve the missing
+round-15 records before closing the existing search. A small canonical named
+T1-hard pilot is also reasonable: two Full seeds, three bounded rounds, the
+same frozen fit budget, and all candidate equations/parameters retained.
+Inspect mechanisms and fitted signs before ranking by training/validation fit;
+keep this diagnostic ranking separate from official benchmark selection.
+
+T2-easy is the next useful mechanism-focused task, followed by T2-hard; T3/T4
+can follow once this path is working. However, the current review campaign
+explicitly rejects multiple targets and fixes `collocation-single-target-v2`.
+T2-easy requires Gp/I/U, T2-hard Gp/I, T3-easy Gp/I/EGP/U and T4 Gp/I. Simply
+changing the cell list will not run them. The general rollout backend does
+accept broader contexts, but silently substituting it would change the fitting
+protocol. A coding-agent milestone must connect and validate an explicitly
+versioned multi-target configuration before submitting those jobs. Do not drop
+targets to make them fit the current runner.
+
+For T2/T3, verify the actual released input schedules and permitted initial
+conditions excite insulin independently before planning an intervention figure;
+meal-only validation cannot by itself establish this discrimination. Existing
+registered test results must not guide fitting or candidate selection.
+
 ## Actual current-method coverage
 
 The known review campaign has four Dalla Man cells: T1 canonical and perturbed,
