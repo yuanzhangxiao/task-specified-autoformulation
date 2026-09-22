@@ -101,3 +101,57 @@ that the current T1 requirement checker would reject a model omitting tissue
 glucose. A task specification must state which intervention family the model is
 intended to support. Report the meal-spacing outcome as well as the tissue-glucose
 outcomes, and distinguish response error from aggregate trajectory NMSE.
+
+## Full-model extension and interpretation of controls
+
+`scripts/probe_t1_full_interventions.py` adds every available Full endpoint
+(both seeds, named and obfuscated) to the exact same seven cases. This extension
+has no training-error eligibility filter: the Full endpoints have worse original
+training fits than the previously screened Sol pair. It copies authenticated
+reference arrays and comparator rollouts into a separate output directory. For
+named candidates, only public channel names are translated; times, numerical
+values, fitted parameters and initialization rules remain unchanged. Every
+imported digest is bound in the new plan and checked on resume. It does not
+regenerate references or rerun completed comparator simulations.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m scripts.probe_t1_full_interventions freeze \
+  --source artifacts/t1-curves-round12-2026-09-22 \
+  --probe artifacts/t1-intervention-probe-2026-09-22 \
+  --output artifacts/t1-intervention-full
+
+PYTHONPATH=src .venv/bin/python -m scripts.probe_t1_full_interventions run \
+  --output artifacts/t1-intervention-full
+
+MPLCONFIGDIR=/tmp/t1-matplotlib PYTHONPATH=src \
+  .venv/bin/python -m scripts.plot_t1_full_interventions \
+  --root artifacts/t1-intervention-full
+
+PYTHONPATH=src .venv/bin/pytest -q tests/test_t1_full_interventions.py \
+  tests/test_t1_intervention_probe.py tests/test_t1_curve_replay.py \
+  tests/test_baseline_validation.py
+```
+
+A matched control is a second simulation of the same model, with the same fitted
+parameters and initial plasma glucose. For the tissue-glucose preparation, it
+retains the unperturbed tissue initial value and the same meal schedule. For meal
+spacing, it uses one 60 g meal at minute 60, compared with two 30 g meals at
+minutes 60 and 90. All other physical initial conditions are identical. The
+reference receives its own corresponding pair of simulations. Physiological
+auxiliaries are regenerated coherently for each case, rather than held fixed.
+
+Subtracting each model's own control isolates its predicted intervention effect,
+but can cancel baseline errors. Absolute predictions and paired differences must
+therefore both be inspected. In particular, an unforced rise in both the control
+and intervention is not evidence that a model responds to the intervention.
+The extension renderer includes absolute control/intervention comparisons, all
+seven Full cases, and absolute/paired plots for the two Sol meal-spacing models.
+
+"No extra latent states" is the accurate description of the first Sol model.
+It still integrates the observed glucose state, and its supplied auxiliary
+trajectories reflect the physiological past. A model can therefore predict a
+meal-delay effect without explicitly reconstructing the hidden meal compartments.
+The second Sol model has three extra meal-delay states, but its coefficients
+and glucose relaxation rate also differ. A comparison of these two endpoints
+does not isolate the effect of adding memory. Better tissue-initialization
+performance does not imply better meal-spacing performance, or vice versa.
