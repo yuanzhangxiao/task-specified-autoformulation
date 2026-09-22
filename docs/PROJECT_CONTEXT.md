@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/BASIN_SAVED_REPAIR_FIT.md` defines the opt-in saved-reply fitting handoff.
+Repair-v3 normalizes compatible equality cycles and empty binding entries, while
+v1/v2 remain reproducible. Cached replies retain their actual historical context;
+one latest eligible child per arm is frozen without score-based selection.
+Historical confirmed fits are retained separately. New children use the existing
+sibling warm-start fitter, fitted public checks and independent solver replay.
+No new LLM calls, test access, automatic promotion or fitter changes are introduced.
+
 `docs/BASIN_REPAIR_HANDOFF_AUDIT.md` defines the saved-reply repair-v2 milestone:
 explicit patches need no separate acceptance call; new declarations and bindings
 resolve atomically; aliases and existing component kinds are runtime-owned.

@@ -64,7 +64,7 @@ def _outcome(bundle, parent, case, surveys):
     }
 
 
-def _row(source, plan, baseline, task):
+def _row(source, plan, baseline, task, *, policy=repair, include_context=False):
     """Evaluate replies independently; never splice in counterfactual predecessors."""
     name = task["task_id"]
     if not (source / "results" / name / "proposal.json").exists():
@@ -90,6 +90,8 @@ def _row(source, plan, baseline, task):
             "context_sha256": content_hash(current),
             "counterfactual_only": True,
         }
+        if include_context:
+            row.update(raw_reply=event["raw"], historical_context=current)
         if event["raw"] is None:
             row.update(
                 classification="delivery_unavailable",
@@ -97,7 +99,7 @@ def _row(source, plan, baseline, task):
             )
         else:
             try:
-                outcome = repair.transition(
+                outcome = policy.transition(
                     current,
                     parent,
                     event["raw"],
