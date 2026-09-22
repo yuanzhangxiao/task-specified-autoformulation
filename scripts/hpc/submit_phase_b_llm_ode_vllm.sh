@@ -13,6 +13,16 @@
 # so batches are small and walltime long, unlike D3's single-shot tasks.
 
 set -euo pipefail
+# These are produced by this script and handed to the job. Slurm's
+# --export=ALL also forwards the submitting shell, so a stale value left over
+# from an earlier run could reach the job instead of the one resolved here.
+# Refuse rather than rely on the caller remembering `env -u`.
+for internal in AF_SUBMISSION_DIR AF_TASK_INDEX_FILE; do
+  if [[ -n "${!internal:-}" ]]; then
+    echo "${internal} is set in the environment; unset it and resubmit" >&2
+    exit 2
+  fi
+done
 readonly af_user="${USER:?}"
 : "${AF_PROJECT:=/projects/bibo/${af_user}}"
 : "${AF_WORK:=/work/hdd/bibo/${af_user}}"
@@ -82,11 +92,65 @@ echo "gpu=${AF_GPU_REQUEST} tensor_parallel=${AF_TENSOR_PARALLEL_SIZE}"
 
 # Slurm splits --export on commas, so a comma-separated value arrives
 # truncated at its first element. Hand over a path instead.
-readonly index_file="${AF_LLM_ODE_OUTPUT_ROOT}/task_indices_${AF_TIER}.txt"
+#
+# One directory per submission, never reused: a retry or smoke run for the
+# same tier must not rewrite the list an already-queued array will read when
+# it finally starts. That would reproduce wrong-task execution with no comma
+# involved at all.
+readonly submission_id="${AF_TIER}-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
+readonly submission_dir="${AF_LLM_ODE_OUTPUT_ROOT}/submissions/${submission_id}"
+[[ -e "${submission_dir}" ]] && {
+  echo "submission directory already exists: ${submission_dir}" >&2
+  exit 2
+}
+mkdir -p "${submission_dir}"
+readonly index_file="${submission_dir}/tasks.txt"
 tr ',' '\n' <<< "${indices}" | grep -v '^$' > "${index_file}"
+readonly tasks_sha256="$("${AF_PYTHON}" -c "
+import hashlib, sys
+sys.stdout.write(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())
+" "${index_file}")"
+echo "submission=${submission_id}"
 echo "index_file=${index_file} ($(wc -l < "${index_file}" | tr -d ' ') entries)"
 
-readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_LLM_ODE_OUTPUT_ROOT=${AF_LLM_ODE_OUTPUT_ROOT},AF_LLM_ODE_ROOT=${AF_LLM_ODE_ROOT},AF_LOCAL_MODEL=${AF_LOCAL_MODEL},AF_TASK_INDEX_FILE=${index_file},AF_BATCH_SIZE=${AF_BATCH_SIZE},AF_LLM_ODE_CONFIG=${AF_LLM_ODE_CONFIG},AF_PUBLIC_ROOT=${AF_PUBLIC_ROOT},AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}"
+readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_LLM_ODE_OUTPUT_ROOT=${AF_LLM_ODE_OUTPUT_ROOT},AF_LLM_ODE_ROOT=${AF_LLM_ODE_ROOT},AF_LOCAL_MODEL=${AF_LOCAL_MODEL},AF_SUBMISSION_DIR=${submission_dir},AF_BATCH_SIZE=${AF_BATCH_SIZE},AF_LLM_ODE_CONFIG=${AF_LLM_ODE_CONFIG},AF_PUBLIC_ROOT=${AF_PUBLIC_ROOT},AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}"
+
+export AF_SUBMISSION_ID="${submission_id}"
+export AF_SUBMISSION_BATCHES="${batches}"
+export AF_SUBMISSION_MODEL="${AF_LOCAL_MODEL}"
+export AF_SUBMISSION_CONFIG="${AF_LLM_ODE_CONFIG}"
+export AF_SUBMISSION_OUTPUT_ROOT="${AF_LLM_ODE_OUTPUT_ROOT}"
+export AF_TIER AF_BATCH_SIZE AF_REPO_ROOT AF_ACCOUNT AF_GPU_PARTITION AF_GPU_REQUEST
+# The manifest is what the job validates against before it loads a model.
+"${AF_PYTHON}" - "${submission_dir}" <<'PYEOF'
+import hashlib, json, os, sys
+from pathlib import Path
+
+directory = Path(sys.argv[1])
+tasks = [line for line in (directory / "tasks.txt").read_text().split() if line]
+manifest = {
+    "schema_version": "phase-b-submission-manifest-1",
+    "submission_id": os.environ["AF_SUBMISSION_ID"],
+    "tier": os.environ["AF_TIER"],
+    "task_count": len(tasks),
+    "tasks_sha256": hashlib.sha256(
+        (directory / "tasks.txt").read_bytes()
+    ).hexdigest(),
+    "batch_size": int(os.environ["AF_BATCH_SIZE"]),
+    "batches": int(os.environ["AF_SUBMISSION_BATCHES"]),
+    "model": os.environ["AF_SUBMISSION_MODEL"],
+    "config": os.environ["AF_SUBMISSION_CONFIG"],
+    "config_sha256": hashlib.sha256(
+        Path(os.environ["AF_SUBMISSION_CONFIG"]).read_bytes()
+    ).hexdigest(),
+    "repo_root": os.environ["AF_REPO_ROOT"],
+    "output_root": os.environ["AF_SUBMISSION_OUTPUT_ROOT"],
+    "account": os.environ["AF_ACCOUNT"],
+    "partition": os.environ["AF_GPU_PARTITION"],
+    "gpu_request": os.environ["AF_GPU_REQUEST"],
+}
+(directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+PYEOF
 
 batch_job="$(sbatch --parsable --account="${AF_ACCOUNT}" \
   --partition="${AF_GPU_PARTITION}" --time="${AF_BATCH_HOURS}" \

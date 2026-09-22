@@ -8,7 +8,9 @@ leaving the search, the derivative order and the selection rule alone.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -21,6 +23,7 @@ from autoformalism.rebuttal.llm_ode_campaign import (
     select_system,
     specification_block,
 )
+from autoformalism.schemas.candidate import CandidateModel
 
 
 def _trajectory(identifier: str, count: int = 12, *, step: float = 0.1) -> Trajectory:
@@ -225,3 +228,109 @@ def test_a_reordered_public_prompt_is_refused_rather_than_passed_whole() -> None
 
     with pytest.raises(ValueError, match="boundary must be re-established"):
         public_task_specification("A. Task specification\nB. Available data\nno C")
+
+
+def test_a_completed_search_persists_a_model_the_evaluator_can_adapt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Accounting without the model would make the whole campaign unusable.
+
+    The frozen evaluator adapts a vendored campaign through
+    native-selection.json beside the result. A run that recorded only its
+    status and token counts would look successful and carry nothing to score.
+    """
+    from autoformalism.baselines.models import BaselineDevelopmentResult
+    from autoformalism.expressions import ValidationContext
+    from autoformalism.rebuttal import llm_ode_campaign as campaign
+
+    context = ValidationContext(targets=("G",), auxiliaries=("I",))
+    sealed = {
+        "protocol": campaign.PROTOCOL,
+        "environment": campaign.environment_identity(),
+        "public_root": str(tmp_path),
+        "artifact_sha256": "b" * 64,
+        "search_config": {"n_islands": 4},
+        "plan": {"budget": {"declared": 200}},
+        "rows": [
+            {
+                "index": 0,
+                "benchmark_id": "phase_b_cell",
+                "tier": "easy",
+                "repetition": 0,
+                "public_identity": {"train": "t", "validation": "v", "prompt": "p"},
+                "prompt": "",
+            }
+        ],
+    }
+    monkeypatch.setattr(campaign, "sealed_read", lambda path: sealed)
+    monkeypatch.setattr(
+        campaign,
+        "load_public",
+        lambda *args: (
+            SimpleNamespace(train=object(), validation=object()),
+            context,
+            sealed["rows"][0]["public_identity"],
+        ),
+    )
+    monkeypatch.setattr(campaign, "cell_arrays", lambda split: None)
+
+    def searcher(**kwargs) -> dict:
+        return {
+            "status": "complete",
+            "equations": {"G": "-0.5 * G + I"},
+            "development_rollout_error": 0.25,
+            "training_rollout_error": 0.125,
+            "accounting": {"llm_queries": 2400, "search_seconds": 42.0},
+        }
+
+    result = campaign.run(tmp_path, 0, search=searcher)
+    assert result["status"] == "complete"
+    assert result["equations"] == {"G": "-0.5 * G + I"}
+
+    saved = json.loads(
+        (tmp_path / "results" / "0" / "native-selection.json").read_text()
+    )
+    assert saved["plan_sha256"] == sealed["artifact_sha256"]
+    selection = BaselineDevelopmentResult.model_validate(saved["selection"])
+    assert selection.method == "llm_ode"
+    assert selection.validation_normalized_mse == 0.25
+    assert selection.training_normalized_mse == 0.125
+    # the payload the adapter reads must carry a usable candidate
+    candidate = CandidateModel.model_validate(selection.selection_payload["candidate"])
+    assert [item.state for item in candidate.state_equations] == ["G"]
+    # the island count is the sealed one, not an environment override
+    assert selection.selected_hyperparameters["n_islands"] == 4
+
+
+def test_the_report_persists_a_summary_with_coverage_before_scores(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Both campaigns must write summary.json, or a reader infers a difference.
+
+    D3 persisted one and LLM-ODE did not, so an identical-looking directory
+    meant different things depending on which method produced it.
+    """
+    from autoformalism.rebuttal import llm_ode_campaign as campaign
+
+    sealed = {
+        "protocol": campaign.PROTOCOL,
+        "artifact_sha256": "c" * 64,
+        "reporting_qualifications": ["declared prompt adaptation"],
+        "rows": [
+            {"index": index, "benchmark_id": f"cell{index}", "tier": "easy",
+             "repetition": 0}
+            for index in range(3)
+        ],
+    }
+    monkeypatch.setattr(campaign, "sealed_read", lambda path: sealed)
+    (tmp_path / "results").mkdir()
+
+    value = campaign.report(tmp_path)
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary == value
+    # nothing has run, so the campaign is pending and claims no successes
+    assert value["status"] == "pending"
+    assert value["expected"] == 3
+    assert value["not_started"] == 3
+    assert value["terminal_success"] == 0
+    assert value["frozen_models"] == 0

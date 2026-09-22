@@ -106,6 +106,10 @@ class VendoredCampaignPlan(BaseModel):
     upstream: UpstreamRevision
     budget: DeclaredBudget
     prompt_policy: PromptPolicy
+    #: Upstream's island count. It changes the search and the call volume, so
+    #: it belongs to the sealed identity: read from the environment at run time
+    #: it would silently alter what a frozen plan means.
+    islands: int = Field(default=4, ge=1, le=64)
     provider: Literal["openai", "vllm"]
     model: str = Field(min_length=1)
     cells: tuple[FinalEvaluationPilotCell, ...] = Field(min_length=1)

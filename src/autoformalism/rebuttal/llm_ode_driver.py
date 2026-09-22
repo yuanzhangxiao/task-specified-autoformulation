@@ -41,7 +41,7 @@ import numpy as np
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.fitting import FitConfig, simulate_trajectory
-from autoformalism.rebuttal.final_evaluation_adapters import _equation_candidate
+from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
 from autoformalism.rebuttal.llm_ode_campaign import (
     CellArrays,
     select_system,
@@ -66,20 +66,25 @@ def development_rollout_error(
     equations: dict[str, str],
     context: ValidationContext,
     train: DatasetSplit,
-    validation: DatasetSplit,
+    evaluate: DatasetSplit,
     *,
     seconds: float = 60.0,
 ) -> float | None:
-    """Normalized rollout error on VALIDATION; ``None`` if any rollout fails.
+    """Normalized rollout error on ``evaluate``; ``None`` if any rollout fails.
 
     The same quantity the frozen evaluator reports, computed here for model
-    selection. It refuses anything but TRAIN and VALIDATION so a selection
-    metric can never be computed against held-out data.
+    selection and for the development scores the sealed selection records.
+    ``train`` always supplies the normalizing scales. Only TRAIN and VALIDATION
+    are accepted, so a selection metric can never be computed against held-out
+    data.
     """
-    if train.name is not SplitName.TRAIN or validation.name is not SplitName.VALIDATION:
+    if train.name is not SplitName.TRAIN or evaluate.name not in {
+        SplitName.TRAIN,
+        SplitName.VALIDATION,
+    }:
         raise ValueError("selection requires TRAIN and VALIDATION, never TEST")
     compiled = compile_candidate(
-        _equation_candidate("llm_ode", equations, context), context
+        equation_candidate("llm_ode", equations, context), context
     )
     scaling = TrainingScaler().fit(train).scales
     scales = {
@@ -87,7 +92,7 @@ def development_rollout_error(
         for target in context.targets
     }
     squared: list[float] = []
-    for trajectory in validation.trajectories:
+    for trajectory in evaluate.trajectories:
         simulation = simulate_trajectory(
             compiled,
             trajectory,
@@ -278,13 +283,18 @@ def build_searcher(
                 ),
                 "accounting": accounting,
             }
+        equations, validation_error = expressible[best]
         return {
             "status": "complete",
             "error": error,
-            "equations": expressible[best][0],
+            "equations": equations,
+            "training_rollout_error": development_rollout_error(
+                equations, context, development[0], development[0],
+                seconds=seconds_per_rollout,
+            ),
             # Reuse the recorded score; re-scoring would repeat the rollout
             # and count the same system twice in the accounting.
-            "development_rollout_error": expressible[best][1],
+            "development_rollout_error": validation_error,
             "accounting": accounting,
         }
 

@@ -16,9 +16,6 @@ from autoformalism.rebuttal.llm_ode_campaign import prepare, report, run
 from autoformalism.rebuttal.llm_ode_driver import build_searcher
 from autoformalism.rebuttal.prefit_replay import sealed_read
 
-#: Upstream's own default, and what maximum_logical_calls is computed against.
-DEFAULT_ISLANDS = 4
-
 
 def _searcher(root: Path):
     """Bind the pinned checkout and the job-local endpoint for one task."""
@@ -36,7 +33,10 @@ def _searcher(root: Path):
         upstream_root=Path(checkout),
         base_url=base_url.rstrip("/") + "/v1",
         iterations=int(budget["declared"]),
-        islands=int(os.environ.get("AF_LLM_ODE_ISLANDS", DEFAULT_ISLANDS)),
+        # From the sealed plan, never the environment: the island count
+        # changes the search and the call volume, so it is part of what the
+        # frozen plan means.
+        islands=int(sealed["search_config"]["n_islands"]),
     )
 
 

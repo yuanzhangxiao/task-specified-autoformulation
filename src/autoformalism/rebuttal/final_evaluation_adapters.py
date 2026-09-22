@@ -263,7 +263,7 @@ def _adapt_symbolic_baseline(
         raise ValueError(
             f"baseline method {result.method!r} does not match {request.source_kind!r}"
         )
-    candidate = _equation_candidate(result.method, result.equations, context)
+    candidate = equation_candidate(result.method, result.equations, context)
     return _subject(
         request=request,
         method=result.method,
@@ -426,7 +426,7 @@ def _adapt_d3_historical(
     )
 
 
-def _equation_candidate(
+def equation_candidate(
     method: str,
     equations: dict[str, str],
     context: ValidationContext,

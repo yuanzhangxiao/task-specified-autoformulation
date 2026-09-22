@@ -116,7 +116,7 @@ def submitted(tmp_path: Path, request) -> dict:
 def test_the_whole_task_list_survives_slurms_export_parsing(submitted: dict) -> None:
     """The easy tier is 60 tasks; the job must receive all 60."""
     passed = slurm_export_environment(submitted["export"])
-    index_file = Path(passed["AF_TASK_INDEX_FILE"])
+    index_file = Path(passed["AF_SUBMISSION_DIR"]) / "tasks.txt"
     assert index_file.is_file()
     indices = [line for line in index_file.read_text().splitlines() if line]
     assert len(indices) == 60, f"job would see {len(indices)} of 60 tasks"
@@ -158,7 +158,110 @@ def test_the_batch_job_reads_every_index_it_was_given(submitted: dict) -> None:
     # easy tier interleaves with hard, so the indices are not contiguous.
     passed = slurm_export_environment(submitted["export"])
     indices = [
-        line for line in Path(passed["AF_TASK_INDEX_FILE"]).read_text().splitlines()
+        line
+        for line in (
+            Path(passed["AF_SUBMISSION_DIR"]) / "tasks.txt"
+        ).read_text().splitlines()
         if line
     ]
     assert f"tasks={' '.join(indices[:10])}" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize("submitted", ["d3", "llm_ode"], indirect=True)
+def test_every_array_element_covers_its_slice_including_the_short_last_one(
+    submitted: dict,
+) -> None:
+    """Element zero passing says nothing about the final, partial batch.
+
+    60 tasks at 10 per batch is six elements; the bug that lost the campaign
+    showed up as a later element resolving to nothing at all.
+    """
+    stubs = Path(submitted["env"]["PATH"].split(":")[0])
+    _fake(stubs, "nvidia-smi", 'echo "FAKE GPU, 46068 MiB"\n')
+    _fake(stubs, "df", 'echo "h"\necho "fake 100 1 999999999 1%"\n')
+    _fake(stubs, "apptainer", 'echo "apptainer $*"\nexit 9\n')
+    passed = slurm_export_environment(submitted["export"])
+    indices = [
+        line
+        for line in (Path(passed["AF_SUBMISSION_DIR"]) / "tasks.txt")
+        .read_text().splitlines()
+        if line
+    ]
+    assert len(indices) == 60
+
+    seen: list[str] = []
+    for element in range(6):
+        result = subprocess.run(
+            ["bash", str(submitted["repo"] / "scripts" / "hpc" / submitted["batch"])],
+            cwd=submitted["repo"],
+            env={
+                **submitted["env"], **passed,
+                "SLURM_ARRAY_TASK_ID": str(element),
+                "SLURM_JOB_ID": "1", "SLURM_CPUS_PER_TASK": "8",
+                "AF_VLLM_IMAGE": str(submitted["repo"] / "missing.sif"),
+            },
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+        line = next(
+            item for item in result.stdout.splitlines()
+            if item.startswith(f"batch={element} tasks=")
+        )
+        assert "is empty" not in result.stdout, f"element {element}: {result.stdout}"
+        seen.extend(line.split("tasks=", 1)[1].split())
+    # every submitted task is covered exactly once across the array
+    assert seen == indices
+
+
+@pytest.mark.parametrize("submitted", ["d3"], indirect=True)
+def test_a_second_submission_cannot_rewrite_a_queued_ones_task_list(
+    submitted: dict,
+) -> None:
+    """A retry for the same tier must not change what a queued array will read.
+
+    The first fix wrote one file per tier in the campaign root, so a smoke run
+    submitted afterwards would silently redefine the membership of an array
+    still sitting in the queue.
+    """
+    first = Path(slurm_export_environment(submitted["export"])["AF_SUBMISSION_DIR"])
+    before = (first / "tasks.txt").read_text()
+
+    second = subprocess.run(
+        ["bash", str(submitted["repo"] / "scripts" / "hpc"
+                     / SUBMITTERS["d3"][0])],
+        cwd=submitted["repo"],
+        env={**submitted["env"], "AF_TASK_INDICES": "7"},
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert (first / "tasks.txt").read_text() == before
+    # and the two submissions are separately recorded
+    roots = sorted((first.parent).iterdir())
+    assert len(roots) == 2, [item.name for item in roots]
+
+
+@pytest.mark.parametrize("submitted", ["d3"], indirect=True)
+def test_a_tampered_task_list_is_refused_before_the_model_loads(
+    submitted: dict,
+) -> None:
+    """The membership acted on must be the membership submitted."""
+    stubs = Path(submitted["env"]["PATH"].split(":")[0])
+    _fake(stubs, "nvidia-smi", 'echo "FAKE GPU"\n')
+    _fake(stubs, "apptainer", 'echo "apptainer $*"\nexit 9\n')
+    passed = slurm_export_environment(submitted["export"])
+    tasks = Path(passed["AF_SUBMISSION_DIR"]) / "tasks.txt"
+    tasks.write_text(tasks.read_text().replace("0\n", "99\n", 1))
+
+    result = subprocess.run(
+        ["bash", str(submitted["repo"] / "scripts" / "hpc" / submitted["batch"])],
+        cwd=submitted["repo"],
+        env={
+            **submitted["env"], **passed,
+            "SLURM_ARRAY_TASK_ID": "0", "SLURM_JOB_ID": "1",
+            "SLURM_CPUS_PER_TASK": "8",
+            "AF_VLLM_IMAGE": str(submitted["repo"] / "missing.sif"),
+        },
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert result.returncode != 0
+    assert "does not match the manifest" in result.stderr
+    assert "apptainer" not in result.stdout

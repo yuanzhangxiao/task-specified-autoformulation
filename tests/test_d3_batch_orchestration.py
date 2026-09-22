@@ -39,7 +39,13 @@ elif command == "run":
     index = sys.argv[sys.argv.index("--index") + 1]
     assert os.environ.get("AF_VLLM_BASE_URL", "").startswith("http"), \\
         "the worker needs a dialable endpoint"
-    outcome = os.environ.get("AF_STUB_OUTCOME", "complete")
+    # Per-index outcomes, so a "partial failure" test can actually mix them.
+    failing = set(filter(None, os.environ.get("AF_STUB_FAIL_INDICES", "").split(",")))
+    outcome = (
+        os.environ.get("AF_STUB_FAIL_OUTCOME", "discovery_failed")
+        if index in failing
+        else os.environ.get("AF_STUB_OUTCOME", "complete")
+    )
     if outcome == "crash":
         sys.exit(3)
     directory = root / "results" / index
@@ -146,10 +152,18 @@ def test_an_existing_plan_is_reused_rather_than_refrozen(cluster: dict) -> None:
 
 
 def test_a_partially_failing_batch_still_succeeds(cluster: dict) -> None:
-    """One bad task must not abandon the rest of its batch."""
-    result = _run(cluster, AF_TASK_INDICES="0,1", AF_BATCH_SIZE="2")
-    assert result.returncode == 0
-    assert result.stdout.count("complete") >= 2
+    """One bad task must not abandon the rest of its batch.
+
+    This previously gave both tasks the same successful outcome, so it proved
+    only that two successes succeed. Index 1 now genuinely fails.
+    """
+    result = _run(
+        cluster, AF_TASK_INDICES="0,1", AF_BATCH_SIZE="2", AF_STUB_FAIL_INDICES="1"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "task 0 complete" in result.stdout
+    assert "task 1 recorded discovery_failed" in result.stderr
+    assert "completed with 1 failed task(s) of 2" in result.stdout
 
 
 def test_a_missing_required_variable_fails_before_any_gpu_work(

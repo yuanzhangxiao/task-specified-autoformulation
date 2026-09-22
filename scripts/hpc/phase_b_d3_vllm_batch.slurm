@@ -24,6 +24,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:?}}"
 # is silently truncated at its first element: a 60-task list arrived as one
 # task and the array reported success having run almost nothing. The list
 # travels as a file, whose path holds no commas.
+: "${AF_SUBMISSION_DIR:=}"
 : "${AF_TASK_INDEX_FILE:=}"
 : "${AF_BATCH_SIZE:?AF_BATCH_SIZE is required}"
 : "${AF_LOCAL_MODEL:=openai/gpt-oss-120b}"
@@ -68,6 +69,37 @@ mkdir -p "${AF_HF_HOME}" "${apptainer_cache}" "${apptainer_tmp}" \
 cd "${AF_REPO_ROOT}"
 
 # This batch's slice of the task list.
+if [[ -n "${AF_SUBMISSION_DIR}" ]]; then
+  # Validate the submission before any GPU work: the membership a job acts on
+  # must be the membership that was submitted, and a mismatch is far cheaper
+  # to find here than after a model load.
+  "${AF_PYTHON}" - "${AF_SUBMISSION_DIR}" "${AF_BATCH_SIZE}" <<'PYEOF'
+import hashlib, json, sys
+from pathlib import Path
+
+directory = Path(sys.argv[1])
+manifest = json.loads((directory / "manifest.json").read_text())
+raw = (directory / "tasks.txt").read_bytes()
+if hashlib.sha256(raw).hexdigest() != manifest["tasks_sha256"]:
+    sys.exit("task list does not match the manifest it was submitted with")
+tasks = [item for item in raw.decode().split() if item]
+if len(tasks) != manifest["task_count"]:
+    sys.exit(f"expected {manifest['task_count']} tasks, found {len(tasks)}")
+if not tasks:
+    sys.exit("submission carries no tasks")
+if len(set(tasks)) != len(tasks):
+    sys.exit("submission assigns the same task twice")
+if not all(item.isdigit() for item in tasks):
+    sys.exit(f"malformed task ids: {[i for i in tasks if not i.isdigit()][:5]}")
+if int(sys.argv[2]) != manifest["batch_size"]:
+    sys.exit(
+        f"batch size {sys.argv[2]} differs from the submitted "
+        f"{manifest['batch_size']}"
+    )
+PYEOF
+  echo "submission=$(basename "${AF_SUBMISSION_DIR}") verified"
+  AF_TASK_INDEX_FILE="${AF_SUBMISSION_DIR}/tasks.txt"
+fi
 if [[ -n "${AF_TASK_INDEX_FILE}" ]]; then
   [[ -f "${AF_TASK_INDEX_FILE}" ]] || {
     echo "AF_TASK_INDEX_FILE does not exist: ${AF_TASK_INDEX_FILE}" >&2
@@ -149,8 +181,8 @@ apptainer exec --nv \
 server_pid=$!
 
 ready=false
-for _ in $(seq 1 1200); do
-  if curl --silent --fail "${endpoint}/v1/models" >/dev/null; then ready=true; break; fi
+for _ in $(seq 1 450); do
+  if curl --silent --fail --max-time 5 "${endpoint}/v1/models" >/dev/null; then ready=true; break; fi
   if ! kill -0 "${server_pid}" 2>/dev/null; then
     echo "vLLM exited before becoming ready; see ${server_log}" >&2
     tail -n 100 "${server_log}" >&2

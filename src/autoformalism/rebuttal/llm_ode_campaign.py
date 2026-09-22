@@ -31,9 +31,16 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 
+from autoformalism.baselines.models import BaselineDevelopmentResult
 from autoformalism.data import BenchmarkRegistry, DatasetSplit
+from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.baseline_validation import load_public
-from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
+from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
+from autoformalism.rebuttal.prefit_replay import (
+    content_hash,
+    sealed_read,
+    sealed_write,
+)
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
 
@@ -311,8 +318,9 @@ def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
             "public_root": str(public),
             "environment": environment_identity(),
             "reporting_qualifications": list(plan.reporting_qualifications()),
+            "search_config": {"n_islands": plan.islands},
             "maximum_logical_calls": (
-                len(rows) * plan.budget.declared * 4 * max(
+                len(rows) * plan.budget.declared * plan.islands * max(
                     len(row["searched_targets"]) for row in rows
                 )
             ),
@@ -371,6 +379,42 @@ def run(
         development=(development.train, development.validation),
         context=context,
     )
+    # The frozen evaluator adapts a campaign through native-selection.json
+    # beside the result. Without it a completed search leaves its accounting
+    # behind and loses the model it found, which is the only thing the
+    # evaluation reads.
+    if outcome["status"] == "complete":
+        equations = outcome["equations"]
+        selection = BaselineDevelopmentResult(
+            method="llm_ode",
+            benchmark_id=row["benchmark_id"],
+            tier=row["tier"],
+            seed=row["repetition"],
+            equations=equations,
+            selected_hyperparameters={
+                "iterations": int(sealed["plan"]["budget"]["declared"]),
+                "n_islands": int(sealed["search_config"]["n_islands"]),
+                "selection": "development_rollout_error",
+            },
+            selection_payload={
+                "candidate": equation_candidate(
+                    "llm_ode", equations, context
+                ).model_dump(mode="json"),
+                # Upstream substitutes its fitted coefficients into the
+                # expressions, so no free parameters remain to carry.
+                "parameters": {},
+            },
+            training_normalized_mse=float(outcome["training_rollout_error"]),
+            validation_normalized_mse=float(outcome["development_rollout_error"]),
+            elapsed_wall_seconds=outcome.get("accounting", {}).get("search_seconds"),
+        )
+        sealed_write(
+            directory / "native-selection.json",
+            {
+                "plan_sha256": sealed["artifact_sha256"],
+                "selection": selection.model_dump(mode="json"),
+            },
+        )
     return sealed_write(
         result_path,
         {
@@ -382,6 +426,8 @@ def run(
             "plan_sha256": sealed["artifact_sha256"],
             "status": outcome["status"],
             "error": outcome.get("error"),
+            "equations": outcome.get("equations"),
+            "development_rollout_error": outcome.get("development_rollout_error"),
             "accounting": outcome.get("accounting", {}),
             "test_data_opened": False,
             "private_reference_opened": False,
@@ -404,10 +450,35 @@ def report(root: Path) -> dict:
     counts: dict[str, int] = {}
     for item in rows:
         counts[item["status"]] = counts.get(item["status"], 0) + 1
-    return {
+    # Coverage before scores: a campaign with pending or failed cells is not a
+    # result, whatever the finished rows happen to say.
+    expected = len(sealed["rows"])
+    complete = counts.get("complete", 0)
+    value = {
         "protocol": PROTOCOL,
-        "expected": len(sealed["rows"]),
+        "status": "complete" if complete == expected else "pending",
+        "expected": expected,
+        "terminal_success": complete,
+        "not_started": counts.get("pending", 0),
+        "terminal_scientific_failure": sum(
+            count
+            for status, count in counts.items()
+            if status in {"inexpressible", "rollout_failed", "no_candidates"}
+        ),
+        "infrastructure_failure": counts.get("product_too_large", 0),
+        "frozen_models": sum(
+            1
+            for task in sealed["rows"]
+            if (
+                root / "results" / str(task["index"]) / "native-selection.json"
+            ).is_file()
+        ),
         "counts": counts,
         "reporting_qualifications": sealed["reporting_qualifications"],
         "rows": rows,
     }
+    value["artifact_sha256"] = content_hash(value)
+    # Same persisted-summary contract as the D3 campaign, so a reader does not
+    # have to know which method wrote the directory.
+    atomic_json(root / "summary.json", value)
+    return value
