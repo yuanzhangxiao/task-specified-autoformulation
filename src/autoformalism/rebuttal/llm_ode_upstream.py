@@ -21,8 +21,16 @@ from pathlib import Path
 
 from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
 
-#: Offered to upstream's proposer but absent from our approved functions.
-UNAPPROVED_UPSTREAM_FUNCTIONS = ("sin", "cos", "tan")
+#: Upstream's SYSTEM_TEMPLATE offers +, -, *, **, /, sin, log, exp and abs.
+#: Every one but ``sin`` is in our approved set, so ``sin`` is the whole of the
+#: expressible gap. Detection is still computed from the parsed equation rather
+#: than from this tuple, which only records what upstream advertises.
+UNAPPROVED_UPSTREAM_FUNCTIONS = ("sin",)
+
+#: SymPy prints some approved operators with its own spelling: an equation
+#: containing ``abs`` comes back as ``Abs``. Renaming these before the grammar
+#: check keeps an approved operator from being reported as inexpressible.
+SYMPY_PRINTED_ALIASES = {"Abs": "abs", "Max": "max", "Min": "min"}
 
 
 class InexpressibleEquation(ValueError):
@@ -85,10 +93,17 @@ def substitute_channels(equation: str, channels: tuple[str, ...]) -> str:
     def replace(match: re.Match[str]) -> str:
         index = int(match.group(1))
         if index >= len(channels):
-            raise ValueError(f"equation references x{index} beyond the channels")
+            raise ValueError(f"equation references x_{index} beyond the channels")
         return channels[index]
 
-    return re.sub(r"\bx(\d+)\b", replace, equation)
+    return re.sub(r"\bx_(\d+)\b", replace, equation)
+
+
+def normalize_printed_functions(equation: str) -> str:
+    """Rewrite SymPy's printed spelling of operators our grammar approves."""
+    for printed, approved in SYMPY_PRINTED_ALIASES.items():
+        equation = re.sub(rf"\b{printed}\(", f"{approved}(", equation)
+    return equation
 
 
 def to_state_equations(
@@ -101,7 +116,9 @@ def to_state_equations(
         raise ValueError("expected one selected equation per searched target")
     equations: dict[str, str] = {}
     for target, equation in zip(targets, selected, strict=True):
-        renamed = substitute_channels(str(equation), channels)
+        renamed = normalize_printed_functions(
+            substitute_channels(str(equation), channels)
+        )
         unapproved = unapproved_functions(renamed)
         if unapproved:
             raise InexpressibleEquation(renamed, unapproved)

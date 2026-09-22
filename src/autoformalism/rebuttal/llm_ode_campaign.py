@@ -42,16 +42,25 @@ DERIVATIVE_ACCURACY = 4
 
 
 class SearcherFactory(Protocol):
-    """Constructs one upstream per-variable searcher, injected for testing."""
+    """Runs upstream's search for one cell, injected so tests need no provider.
+
+    Upstream's own ``LlmOde`` wrapper builds its data by integrating the true
+    system, so it cannot be handed observed trajectories. The driver therefore
+    drives ``LlmOdeEquation`` -- the per-variable searcher ``LlmOde`` itself
+    composes -- once per target, which is why the cell is the unit here.
+    """
 
     def __call__(
         self,
         *,
-        time: NDArray[np.float64],
-        states: NDArray[np.float64],
-        derivative: NDArray[np.float64],
-        variable_index: int,
-    ) -> object: ...
+        train: CellArrays,
+        validation: CellArrays,
+        targets: tuple[str, ...],
+        prompt: str,
+        directory: Path,
+        development: tuple[DatasetSplit, DatasetSplit],
+        context: object,
+    ) -> dict: ...
 
 
 @dataclass(frozen=True)
@@ -313,6 +322,10 @@ def run(
         targets=tuple(context.targets),
         prompt=row.get("prompt", ""),
         directory=directory,
+        # Selection rolls out on development data; the searcher never receives
+        # a split it could confuse with the held-out one.
+        development=(development.train, development.validation),
+        context=context,
     )
     return sealed_write(
         result_path,
