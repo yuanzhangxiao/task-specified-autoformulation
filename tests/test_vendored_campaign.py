@@ -106,3 +106,30 @@ def test_the_search_itself_is_not_adjustable_through_the_plan() -> None:
 def test_llm_sr_uses_the_same_derivatives_as_the_other_symbolic_baselines() -> None:
     """It regresses a derivative from features, as SINDy and PySR do here."""
     assert _plan("llm_sr").derivative_provenance == "estimated_numpy_gradient"
+
+
+def test_partial_coverage_is_a_qualification_even_at_full_budget() -> None:
+    """Six cells of forty is a limit, whatever the budget says.
+
+    A campaign can run a method's published budget unreduced and still cover
+    fewer conditions than the methods it sits beside in a table. That has to
+    be stated, or a reader compares a six-cell median with a forty-cell one.
+    """
+    from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
+
+    plan = VendoredCampaignPlan.model_validate_json(
+        Path("configs/phase_b_llm_sr_six_cell_v1.json").read_text()
+    )
+    assert plan.budget.is_reduced is False
+    notes = plan.reporting_qualifications()
+    assert any("6 of 40 conditions" in note for note in notes), notes
+
+
+def test_a_full_coverage_campaign_carries_no_scope_qualification() -> None:
+    from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
+
+    plan = VendoredCampaignPlan.model_validate_json(
+        Path("configs/phase_b_llm_ode_campaign_v1.json").read_text()
+    )
+    assert len(plan.cells) == plan.full_design_conditions
+    assert not any("scope-limited" in note for note in plan.reporting_qualifications())

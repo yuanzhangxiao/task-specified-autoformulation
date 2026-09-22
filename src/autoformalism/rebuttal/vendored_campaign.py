@@ -110,6 +110,13 @@ class VendoredCampaignPlan(BaseModel):
     #: it belongs to the sealed identity: read from the environment at run time
     #: it would silently alter what a frozen plan means.
     islands: int = Field(default=4, ge=1, le=64)
+    #: Why this cell set, when it is not the whole 40-condition design. A
+    #: campaign covering fewer conditions than the methods it is compared
+    #: against is qualified on that basis, separately from its budget.
+    scope_note: str = ""
+    #: Conditions in the full design, so partial coverage can be stated as a
+    #: fraction rather than left for a reader to notice.
+    full_design_conditions: int = Field(default=40, gt=0)
     provider: Literal["openai", "vllm"]
     model: str = Field(min_length=1)
     cells: tuple[FinalEvaluationPilotCell, ...] = Field(min_length=1)
@@ -153,6 +160,12 @@ class VendoredCampaignPlan(BaseModel):
                 f"budget-conditioned at {self.budget.declared} "
                 f"{self.budget.unit} against a published default of "
                 f"{self.budget.published_default}"
+            )
+        if len(self.cells) < self.full_design_conditions:
+            notes.append(
+                f"scope-limited: {len(self.cells)} of "
+                f"{self.full_design_conditions} conditions"
+                + (f" ({self.scope_note})" if self.scope_note else "")
             )
         if (
             self.prompt_policy.supplies_public_task_specification
