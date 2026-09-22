@@ -186,3 +186,30 @@ def test_a_missing_checkout_fails_before_any_gpu_work(cluster: dict) -> None:
     assert result.returncode != 0
     assert "AF_LLM_ODE_ROOT" in result.stderr
     assert "apptainer" not in result.stdout
+
+
+def test_requested_modules_are_loaded_before_the_work(cluster: dict) -> None:
+    """A venv from a module-provided Python needs that module in the job."""
+    stubs = Path(cluster["env"]["PATH"].split(":")[0])
+    loaded = stubs.parent / "module.log"
+    _fake(stubs, "module", f'echo "$@" >> {loaded}\n')
+    result = _run(cluster, AF_MODULES="python/3.13.5-gcc13.3.1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "modules=python/3.13.5-gcc13.3.1" in result.stdout
+    assert "load python/3.13.5-gcc13.3.1" in loaded.read_text()
+
+
+def test_an_unavailable_module_command_fails_before_the_model_loads(
+    cluster: dict,
+) -> None:
+    """Silently skipping the load would fail later and far less clearly."""
+    # a real PATH, but without the stub and with no lmod init present
+    result = _run(cluster, AF_MODULES="python/3.13.5-gcc13.3.1", PATH="/usr/bin:/bin")
+    assert result.returncode != 0
+    assert "'module' is unavailable" in result.stderr
+
+
+def test_no_modules_requested_changes_nothing(cluster: dict) -> None:
+    result = _run(cluster)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "modules=" not in result.stdout

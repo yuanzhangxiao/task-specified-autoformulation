@@ -819,3 +819,10 @@ qualified basin release supplies public inputs only; the fitter is unchanged.
 See `docs/DETENTION_PROCESS_REVIEW_PILOT.md`. Empty/invalid suggestions preserve
 the original inventory, and failure of added processes can trigger a cached
 fallback under the same total budget. Named reuse does not certify conservation.
+
+The opt-in `basin-equation-repair-1` milestone reuses the whole-model revision
+compiler to repair saved v7 basin models against public equation witnesses.
+Explicit fixed/shared parameter declarations propagate across all uses. Each
+transaction presents the entire rebuilt model and affected consumers for proposer
+review before one frozen-profile child fit. Historical parents remain unchanged;
+there is no automatic promotion or follow-up. See `docs/BASIN_EQUATION_REPAIR.md`.

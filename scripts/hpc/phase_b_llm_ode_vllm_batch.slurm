@@ -54,6 +54,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Site initialization, opt-in. A venv built from a module-provided Python
+# generally needs that module loaded to find its runtime, and a batch script
+# does not inherit the submitting shell's module environment. `module` is a
+# shell function from the site profile, which a non-login shell may not have.
+if [[ -n "${AF_MODULES:-}" ]]; then
+  if ! command -v module >/dev/null 2>&1; then
+    for init in /etc/profile.d/modules.sh /etc/profile.d/lmod.sh \
+                /usr/share/lmod/lmod/init/bash; do
+      [[ -r "${init}" ]] && source "${init}" && break
+    done
+  fi
+  command -v module >/dev/null 2>&1 || {
+    echo "AF_MODULES is set but 'module' is unavailable in this shell" >&2
+    exit 1
+  }
+  # shellcheck disable=SC2086
+  module load ${AF_MODULES}
+  echo "modules=${AF_MODULES}"
+fi
+
 echo "batch job starting: host=$(hostname) job=${SLURM_JOB_ID:-none}"
 echo "output_root=${AF_LLM_ODE_OUTPUT_ROOT} repo=${AF_REPO_ROOT}"
 export APPTAINER_CACHEDIR="${apptainer_cache}" APPTAINER_TMPDIR="${apptainer_tmp}"

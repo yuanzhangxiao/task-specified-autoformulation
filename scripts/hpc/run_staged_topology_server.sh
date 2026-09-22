@@ -22,6 +22,7 @@ else
 fi
 readonly protocol platform
 case "${protocol}" in
+  basin-equation-repair-1) worker_script=basin_repair_pilot.py ;;
   detention-process-pilot-1|detention-process-pilot-2|detention-process-pilot-3) worker_script=detention_process_pilot.py ;;
   review-deadline-1|review-deadline-2|review-deadline-3|review-deadline-4|review-deadline-5|shared-process-pilot-1) worker_script=review_deadline.py ;;
   prefit-numerical-sibling-1) worker_script=prefit_numerical_sibling.py ;;
@@ -80,7 +81,7 @@ image_sha="$(sha256sum "${AF_VLLM_IMAGE}")"
 }
 printf '%s\n' "${image_sha}" >"${runtime_root}/image-${SLURM_JOB_ID}.sha256"
 export PYTHONPATH="${AF_REPO_ROOT}/src"
-if [[ "${worker_script}" == detention_process_pilot.py || "${worker_script}" == review_deadline.py || "${worker_script}" == prefit_construction_campaign.py || "${worker_script}" == prefit_feedback_campaign.py || "${worker_script}" == prefit_requirement_campaign.py || "${worker_script}" == prefit_numerical_sibling.py ]]; then
+if [[ "${worker_script}" == basin_repair_pilot.py || "${worker_script}" == detention_process_pilot.py || "${worker_script}" == review_deadline.py || "${worker_script}" == prefit_construction_campaign.py || "${worker_script}" == prefit_feedback_campaign.py || "${worker_script}" == prefit_requirement_campaign.py || "${worker_script}" == prefit_numerical_sibling.py ]]; then
   "${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/${worker_script}" verify --root "${AF_OUTPUT_ROOT}"
 fi
 if [[ "${worker_script}" == staged_function_campaign.py ]]; then
@@ -205,7 +206,7 @@ trap cleanup EXIT
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader \
   >"${runtime_root}/gpu-${SLURM_JOB_ID}.txt"
 date -u +%Y-%m-%dT%H:%M:%SZ >"${runtime_root}/started-${SLURM_JOB_ID}.txt"
-if [[ ( "$protocol" == shared-process-pilot-1 || "$protocol" == detention-process-pilot-1 || "$protocol" == detention-process-pilot-2 || "$protocol" == detention-process-pilot-3 ) && -f "$AF_REPO_ROOT/SOURCE_COMMIT" ]]; then
+if [[ ( "$protocol" == basin-equation-repair-1 || "$protocol" == shared-process-pilot-1 || "$protocol" == detention-process-pilot-1 || "$protocol" == detention-process-pilot-2 || "$protocol" == detention-process-pilot-3 ) && -f "$AF_REPO_ROOT/SOURCE_COMMIT" ]]; then
   [[ "$(cat "$AF_REPO_ROOT/SOURCE_COMMIT")" == "${AF_COMMIT:?}" ]] || exit 2
   printf '%s\n' "$AF_COMMIT" >"${runtime_root}/commit-${SLURM_JOB_ID}.txt"
 else
