@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/BASIN_REPAIR_HANDOFF_AUDIT.md` defines the saved-reply repair-v2 milestone:
+explicit patches need no separate acceptance call; new declarations and bindings
+resolve atomically; aliases and existing component kinds are runtime-owned.
+Conservative partial probes detect parameter-independent public counterexamples.
+A CPU-only audit evaluates each reply in its actual historical context, separating
+mechanical acceptance, static eligibility and newly eligible saved final drafts.
+Historical campaigns, the fitter and production defaults remain unchanged; no
+new LLM calls, numerical fits or automatic promotion occur in this milestone.
+
 `docs/BASIN_EQUATION_AUDIT.md` defines the saved-v7 public physics audit. It
 reconstructs final gain assemblies, checks inflow conversions, outlet presence
 and finite threshold probes, and examines area-weighted transfer cancellation.
