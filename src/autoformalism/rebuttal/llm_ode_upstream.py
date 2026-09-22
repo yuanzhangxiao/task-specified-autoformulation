@@ -1,0 +1,124 @@
+"""Bind the pinned LLM-ODE checkout to Phase-B data.
+
+Everything the method does -- the island search, its prompt instructions, its
+BFGS coefficient fitting, its Pareto selection -- comes from upstream. This
+module supplies data, appends the declared task specification, and converts the
+selected system into the restricted grammar the frozen evaluator parses.
+
+Upstream offers `sin` to its proposer and our grammar does not approve it, so a
+selected equation may be inexpressible here. That is a limit of our evaluator,
+not a failure of the method, and it is recorded with the offending operator
+named so the cost can be reported rather than estimated.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
+
+#: Offered to upstream's proposer but absent from our approved functions.
+UNAPPROVED_UPSTREAM_FUNCTIONS = ("sin", "cos", "tan")
+
+
+class InexpressibleEquation(ValueError):
+    """A selected equation lies outside the grammar the evaluator parses."""
+
+    def __init__(self, equation: str, functions: tuple[str, ...]) -> None:
+        super().__init__(
+            f"equation uses {', '.join(functions)}, which the restricted "
+            f"grammar does not approve: {equation}"
+        )
+        self.equation = equation
+        self.functions = functions
+
+
+@dataclass(frozen=True)
+class UpstreamModules:
+    """The pinned checkout's entry points, imported once."""
+
+    equation_searcher: type
+    system: type
+    llm: type
+    generate_prompt: object
+
+
+def load_upstream(root: Path) -> UpstreamModules:
+    """Import the vendored checkout without installing it."""
+    resolved = root.expanduser().resolve()
+    if not (resolved / "llmode" / "llmode.py").is_file():
+        raise ValueError(f"not an LLM-ODE checkout: {resolved}")
+    if str(resolved) not in sys.path:
+        sys.path.insert(0, str(resolved))
+    from llmode.llm import Llm, generate_prompt
+    from llmode.llmode import LlmOdeEquation
+    from llmode.system import System
+
+    return UpstreamModules(
+        equation_searcher=LlmOdeEquation,
+        system=System,
+        llm=Llm,
+        generate_prompt=generate_prompt,
+    )
+
+
+def unapproved_functions(equation: str) -> tuple[str, ...]:
+    """Name every called function the restricted grammar does not approve."""
+    try:
+        tree = ast.parse(equation, mode="eval")
+    except SyntaxError as exc:
+        raise InexpressibleEquation(equation, ("unparsable",)) from exc
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    return tuple(sorted(called - set(APPROVED_FUNCTION_ARITY)))
+
+
+def substitute_channels(equation: str, channels: tuple[str, ...]) -> str:
+    """Rename upstream's positional variables to our public channel names."""
+    def replace(match: re.Match[str]) -> str:
+        index = int(match.group(1))
+        if index >= len(channels):
+            raise ValueError(f"equation references x{index} beyond the channels")
+        return channels[index]
+
+    return re.sub(r"\bx(\d+)\b", replace, equation)
+
+
+def to_state_equations(
+    selected: tuple[str, ...],
+    channels: tuple[str, ...],
+    targets: tuple[str, ...],
+) -> dict[str, str]:
+    """Express the selected system in our grammar, or say why it cannot be."""
+    if len(selected) != len(targets):
+        raise ValueError("expected one selected equation per searched target")
+    equations: dict[str, str] = {}
+    for target, equation in zip(targets, selected, strict=True):
+        renamed = substitute_channels(str(equation), channels)
+        unapproved = unapproved_functions(renamed)
+        if unapproved:
+            raise InexpressibleEquation(renamed, unapproved)
+        equations[target] = renamed
+    return equations
+
+
+def specification_prompt(
+    base_prompt: object, specification: str
+) -> list[dict[str, str]]:
+    """Append the declared specification to upstream's own prompt.
+
+    Upstream's instructions, in-context examples and output format are left
+    exactly as they are; the specification is added as trailing content.
+    """
+    messages = [dict(item) for item in base_prompt]  # type: ignore[arg-type]
+    if not messages:
+        raise ValueError("upstream produced no prompt to extend")
+    messages[-1]["content"] = messages[-1]["content"] + specification
+    return messages
