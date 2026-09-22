@@ -179,6 +179,8 @@ def test_frozen_confirmation_config_and_slurm_preserve_selected_protocol() -> No
     wrapper = SLURM.read_text(encoding="utf-8")
     assert ': "${AF_PAIR_IDS=heldout_' in common
     assert ': "${AF_PAIR_IDS:=heldout_' not in common
+    assert ': "${AF_VLLM_MAX_MODEL_LEN:=32768}"' in common
+    assert '--max-model-len "${AF_VLLM_MAX_MODEL_LEN}"' in common
     assert '"${pair_id_args[@]}"' in common
     assert ": \"${AF_PAIR_IDS:=}\"" in wrapper
     assert "#SBATCH --gpus-per-node=4" in wrapper

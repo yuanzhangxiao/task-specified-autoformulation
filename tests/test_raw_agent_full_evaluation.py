@@ -6,8 +6,11 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from autoformalism.data import BenchmarkRegistry
 from scripts.list_raw_data_agent_retry_task_ids import retry_task_ids
+from scripts.prepare_hybrid_judge_failure_retry import rotate_failure_ledger
 from scripts.resolve_raw_data_agent_matrix_task import resolve_task
 from scripts.summarize_raw_data_agent_full_evaluation import aggregate, build_rows
 
@@ -62,6 +65,7 @@ def test_full_matrix_launchers_are_syntactically_valid_and_frozen() -> None:
     assert "#SBATCH --array=0-3" in audit
     assert "AF_SHARD_COUNT:=4" in audit
     assert "AF_REPAIR_MISSING_ATOMIC_UNITS:=true" in audit
+    assert "AF_VLLM_MAX_MODEL_LEN:=65536" in audit
     subprocess.run(["bash", "-n", str(AGENT_SLURM)], check=True)
     subprocess.run(["bash", "-n", str(AUDIT_SLURM)], check=True)
 
@@ -162,3 +166,58 @@ def test_retry_task_ids_exclude_complete_and_rollout_failed_models(
         )
 
     assert retry_task_ids(config, tmp_path) == (2,)
+
+
+def test_failure_retry_preserves_ledger_and_opens_only_failed_keys(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "hybrid_judge_failures.jsonl"
+    rows = [
+        {
+            "pair_id": f"pair_{index}",
+            "judge_model": "vllm:test",
+            "repetition": 0,
+            "order": "baseline_a",
+            "error_type": "LLMResponseError",
+            "error": "invalid JSON",
+            "failure_stage": "hybrid_comparison",
+        }
+        for index in range(2)
+    ]
+    ledger.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+
+    record = rotate_failure_ledger(tmp_path)
+
+    assert record is not None
+    assert record["failure_count"] == 2
+    assert record["failures_by_stage"] == {"hybrid_comparison": 2}
+    assert ledger.read_text(encoding="utf-8") == ""
+    archive = tmp_path / "hybrid_judge_failures.attempt_001.jsonl"
+    assert archive.is_file()
+    assert len(archive.read_text(encoding="utf-8").splitlines()) == 2
+    manifest = tmp_path / "hybrid_judge_failure_retries.jsonl"
+    assert len(manifest.read_text(encoding="utf-8").splitlines()) == 1
+    assert rotate_failure_ledger(tmp_path) is None
+
+
+def test_failure_retry_rejects_duplicate_keys_before_mutation(tmp_path: Path) -> None:
+    ledger = tmp_path / "hybrid_judge_failures.jsonl"
+    row = {
+        "pair_id": "pair_0",
+        "judge_model": "vllm:test",
+        "repetition": 0,
+        "order": "baseline_a",
+        "error_type": "LLMResponseError",
+        "error": "invalid JSON",
+    }
+    ledger.write_text(
+        json.dumps(row) + "\n" + json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="duplicate failure key"):
+        rotate_failure_ledger(tmp_path)
+
+    assert ledger.is_file()
+    assert not (tmp_path / "hybrid_judge_failures.attempt_001.jsonl").exists()

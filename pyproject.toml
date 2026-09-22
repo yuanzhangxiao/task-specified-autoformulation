@@ -37,6 +37,11 @@ d3 = [
 gemini = [
   "google-genai>=2.0.0,<3.0.0",
 ]
+paper = [
+  "matplotlib==3.10.8",
+  "scienceplots==2.1.1",
+  "seaborn==0.13.2",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/autoformalism"]

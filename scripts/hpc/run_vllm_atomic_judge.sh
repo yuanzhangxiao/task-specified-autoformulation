@@ -34,6 +34,7 @@ readonly af_user="${SLURM_JOB_USER:-${USER:-}}"
 : "${AF_REPAIR_MISSING_ATOMIC_UNITS:=false}"
 : "${AF_JUDGE_ENTRYPOINT:=hybrid}"
 : "${AF_APPTAINER_TMP_MIN_GIB:=40}"
+: "${AF_VLLM_MAX_MODEL_LEN:=32768}"
 : "${AF_PAIR_IDS=heldout_55d8026028a90be5 heldout_ee453d8cc6fcb7a2 heldout_70b3222d4736ea1d heldout_cca8883e6ae1b33f}"
 
 [[ "${AF_REPETITIONS}" == "${AF_REQUIRED_REPETITIONS}" && \
@@ -59,6 +60,14 @@ case "${AF_COMPARATIVE_INDETERMINATE_POLICY}" in
     exit 2
     ;;
 esac
+[[ "${AF_VLLM_MAX_MODEL_LEN}" =~ ^[0-9]+$ ]] || {
+  echo "AF_VLLM_MAX_MODEL_LEN must be a positive integer" >&2
+  exit 2
+}
+((AF_VLLM_MAX_MODEL_LEN > 0)) || {
+  echo "AF_VLLM_MAX_MODEL_LEN must be a positive integer" >&2
+  exit 2
+}
 
 readonly shard_index="${SLURM_ARRAY_TASK_ID:-0}"
 readonly shard_root="${AF_CALIBRATION_ROOT}/shards/shard_${shard_index}"
@@ -167,7 +176,7 @@ readonly available_tmp_kib="$(
   df -Pk "${apptainer_tmp}" | awk 'NR == 2 {print $4}'
 )"
 readonly required_tmp_kib=$((AF_APPTAINER_TMP_MIN_GIB * 1024 * 1024))
-echo "model=${AF_LOCAL_MODEL} reasoning=low atomic=true shard=${shard_index}/${AF_SHARD_COUNT}"
+echo "model=${AF_LOCAL_MODEL} reasoning=low judge_entrypoint=${AF_JUDGE_ENTRYPOINT} shard=${shard_index}/${AF_SHARD_COUNT} max_model_len=${AF_VLLM_MAX_MODEL_LEN}"
 echo "Apptainer build temp: ${apptainer_tmp}"
 df -hP "${apptainer_tmp}"
 if ((available_tmp_kib < required_tmp_kib)); then
@@ -200,7 +209,7 @@ apptainer exec --nv \
   vllm serve "${AF_LOCAL_MODEL}" \
     --host 127.0.0.1 \
     --port "${port}" \
-    --max-model-len 32768 \
+    --max-model-len "${AF_VLLM_MAX_MODEL_LEN}" \
     --max-num-seqs 1 \
     --gpu-memory-utilization 0.90 \
     "${vllm_parallel_args[@]}" \

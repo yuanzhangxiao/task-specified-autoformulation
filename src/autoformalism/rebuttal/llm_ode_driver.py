@@ -196,6 +196,7 @@ def build_searcher(
             for index in indices
         ]
         error: str | None = None
+        started = monotonic()
         try:
             for iteration in range(1, iterations + 1):
                 for searcher, specification in zip(
@@ -203,8 +204,15 @@ def build_searcher(
                 ):
                     with _specification_appended(upstream_module, specification):
                         searcher.step()
-                if iteration % 25 == 0:
-                    LOGGER.info("iteration %d of %d", iteration, iterations)
+                # About ten progress lines whatever the budget, so a short
+                # probe reports timing instead of finishing silently.
+                if iteration % max(1, iterations // 10) == 0:
+                    LOGGER.info(
+                        "iteration %d of %d after %.1fs",
+                        iteration,
+                        iterations,
+                        monotonic() - started,
+                    )
         except Exception as exc:  # upstream raised; keep whatever it found
             error = f"{type(exc).__name__}: {exc}"
             LOGGER.warning("search stopped early: %s", error)
@@ -242,6 +250,7 @@ def build_searcher(
 
         accounting = {
             "llm_queries": calls,
+            "search_seconds": round(monotonic() - started, 1),
             "frontier_sizes": [len(frontier) for frontier in frontiers],
             "search_error": error,
         }

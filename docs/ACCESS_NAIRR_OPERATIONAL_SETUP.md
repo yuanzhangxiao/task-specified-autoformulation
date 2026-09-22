@@ -1622,6 +1622,43 @@ FULL_AUDIT_JOB="$(
 echo "FULL_AUDIT_JOB=$FULL_AUDIT_JOB"
 ```
 
+The full raw-agent audit permits a 65,536-token vLLM context because its largest
+general, model-derived prompt can exceed the 32,768-token calibration default.
+This changes only the serving capacity; prompts, schemas, reasoning, seeds, and
+scores remain frozen. If bounded provider or contract failures remain after all
+shards finish, archive the active failure ledgers before retrying. Successful
+keys and valid stage caches remain in place, while failed responses are never
+cached:
+
+```bash
+repo=/projects/bibo/$USER/repos/autoformalism-v21
+python_bin=/projects/bibo/$USER/venvs/autoformalism-v21/bin/python
+evaluation=/work/hdd/bibo/$USER/phase_b/raw-data-agent-fitted-full-evaluation-v1
+judge="$evaluation/gpt-oss-120b"
+
+"$python_bin" "$repo/scripts/prepare_hybrid_judge_failure_retry.py" \
+  --root "$judge" \
+  --shard-ids 0 1 2 3
+
+cd "$repo"
+gpu_account="$(accounts | awk '/gpu/ {print $1; exit}')"
+FULL_AUDIT_RETRY_JOB="$(
+  sbatch --parsable \
+    --account="$gpu_account" \
+    --partition=gpuA40x4 \
+    --array=0-3 \
+    --time=03:00:00 \
+    scripts/hpc/phase_b_raw_agent_scientific_audit_full_120b.slurm
+)"
+echo "FULL_AUDIT_RETRY_JOB=$FULL_AUDIT_RETRY_JOB"
+```
+
+Each shard stores the prior ledger as
+`hybrid_judge_failures.attempt_NNN.jsonl`, records its digest and counts in
+`hybrid_judge_failure_retries.jsonl`, and creates a new empty active ledger.
+Never delete the archived attempts. Re-running the preparation command is a
+no-op for shards without active failures.
+
 Merge all successful and failed judge calls, summarize paired scientific
 coverage, and create the complete development report:
 

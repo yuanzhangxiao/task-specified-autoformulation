@@ -14,6 +14,17 @@ Python 3.11 or newer is required.
 python -m pip install -e ".[dev]"
 ```
 
+To reproduce the paper's figures and generated LaTeX tables, install the
+separately pinned plotting dependencies and run the asset generator:
+
+```bash
+python -m pip install -e '.[paper]'
+python paper_to_revise/scripts/generate_experiment_assets.py
+```
+
+See [`paper_to_revise/README.md`](paper_to_revise/README.md) for the complete
+input-artifact manifest and output locations.
+
 Set the public benchmark root either in the environment or on each command:
 
 ```bash

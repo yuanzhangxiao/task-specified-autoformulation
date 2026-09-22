@@ -402,6 +402,14 @@ failures; no hidden reasoning is parsed and no missing score is imputed.
 Hybrid calibration resume is additionally guarded by an immutable per-shard run
 manifest and exact planned-key validation, including the pair-file digest and
 selected pair IDs.
+Serving context capacity is an operational limit rather than a scientific
+protocol parameter. The shared vLLM launcher defaults to the frozen 32,768-token
+calibration capacity, while a wrapper may explicitly request a larger supported
+capacity for general candidate inventories. A context-length rejection remains a
+provider failure. Retrying terminal failures requires first archiving the active
+ledger under a monotonically numbered, hash-recorded attempt; successful keys and
+validated caches are retained, and only the archived failure keys become eligible
+for fresh calls.
 For Ollama calibration, schema-constrained final content is the primary response
 transport. Always-on schema-validated tool calls and JSON-primary/tool-fallback
 are manifest-pinned experimental ablations. Although all paths ignore hidden
