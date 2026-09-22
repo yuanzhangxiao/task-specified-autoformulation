@@ -180,6 +180,11 @@ def submit(root: Path, index: int = 0) -> dict:
             value["fresh_constructions"] = plan["assembly_confirmation"][
                 "fresh_constructions"
             ]
+        if "revision_confirmation" in plan:
+            value["experiment"] = plan["revision_confirmation"]["protocol"]
+            value["fresh_constructions"] = plan["revision_confirmation"][
+                "fresh_constructions"
+            ]
         public._write(manifest, value)
         public._write(root / "submission_manifest.json", value)
         return value

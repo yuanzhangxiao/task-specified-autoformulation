@@ -50,7 +50,11 @@ def _repairs(root: Path, task: str) -> dict:
         if not path.exists():
             continue
         f = sealed_read(path)["result"]
-        events = [e for e in f["events"] if e["step"].startswith("atomic_repair_")]
+        events = [
+            e
+            for e in f["events"]
+            if e["step"].startswith(("atomic_repair_", "assembly_revision_"))
+        ]
         for event in events:
             key = event["request_hash"]
             if not re.fullmatch(r"[0-9a-f]{64}", key):

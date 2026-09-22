@@ -131,6 +131,8 @@ def launcher_hash():
         "scripts/hpc/submit_function_dependency_confirmation_aces.sh",
         "scripts/process_assembly_confirmation.py",
         "scripts/hpc/submit_process_assembly_confirmation_aces.sh",
+        "scripts/process_revision_confirmation.py",
+        "scripts/hpc/submit_process_revision_confirmation_aces.sh",
     ]
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
@@ -376,6 +378,10 @@ def verify(root):
         from autoformalism.rebuttal.process_assembly_confirmation import verify_manifest
 
         verify_manifest(root, plan)
+    if "revision_confirmation" in plan:
+        from autoformalism.rebuttal.process_revision_confirmation import verify_manifest
+
+        verify_manifest(root, plan)
     return plan
 
 
@@ -511,6 +517,9 @@ def construct(root, plan, task, client):
                             "function_dependency_policy", "strict"
                         ),
                         assembly_policy=plan.get("process_assembly_policy", "legacy"),
+                        function_delivery_policy=plan.get(
+                            "function_delivery_policy", "legacy"
+                        ),
                     ),
                 )
             if functions and functions["complete_model"]:

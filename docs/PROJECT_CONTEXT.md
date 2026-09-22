@@ -1,5 +1,10 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/IDENTIFIED_FUNCTION_CONFIRMATION.md` describes the opt-in basin v7 pilot:
+slot-addressed function batches preserve unambiguous replies, shared consumers stay
+runtime supplied, and the audited atomic process repair API uses existing budgets.
+Independent reconstruction precedes the same sixteen frozen-fitter arms.
+
 `docs/PROCESS_ASSEMBLY_REVISIONS.md` defines the saved-v6 interface milestone:
 conversion-only covariates need not occur in intrinsic laws; law/conversion edits
 commit atomically; public-pathway failures can spend remaining repair attempts on

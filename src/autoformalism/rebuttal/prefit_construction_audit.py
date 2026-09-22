@@ -61,6 +61,8 @@ def reconstruct(cell: dict, construction: dict) -> dict:
     brief = PublicScientificBrief.model_validate(cell["brief"])
     context = ValidationContext.model_validate(cell["context"])
     source, result = construction["topology"], construction["functions"]
+    if result.get("function_delivery_policy") == "identified-function-delivery-1":
+        return _reconstruct_identified(brief, context, source, result)
     original_source = source
     source, before_changes = dependencies.replay(brief, context, source, result)
     owned_assembly = result.get("assembly_policy") == assembly.POLICY
@@ -278,6 +280,23 @@ def reconstruct(cell: dict, construction: dict) -> dict:
                 ],
             }
         )
+    return _finish_reconstruction(
+        brief,
+        context,
+        original_source,
+        result,
+        topology,
+        aliases,
+        draft,
+        accepted,
+        repairs,
+    )
+
+
+def _finish_reconstruction(
+    brief, context, original_source, result, topology, aliases, draft, accepted, repairs
+):
+    """Reuse canonical expansion, causal boundaries, and public completeness checks."""
     for state in topology.states:
         if state.kind is StateKind.LATENT:
             draft = apply_initial_reply(
@@ -320,6 +339,53 @@ def reconstruct(cell: dict, construction: dict) -> dict:
             "candidate_sha256": content_hash(result["candidate"]),
         },
     }
+
+
+def _reconstruct_identified(brief, context, original_source, result):
+    """Reproduce delivered functions and explicit multi-slot repairs before scoring."""
+    from autoformalism.search import identified_function_stage as delivery
+
+    source, _ = dependencies.replay(brief, context, original_source, result)
+    stage = result["function_delivery"]
+    if not stage["complete"] or set(stage["functions"]) != set(delivery.slots(source)):
+        raise ValueError("identified function coverage is incomplete")
+    topology, aliases, draft, accepted, local = delivery.records(
+        brief, context, source, stage["functions"]
+    )
+    if (
+        accepted != result["accepted_functions"]
+        or local != result["provider_visible_accepted_functions"]
+        or source.get("shared_process_contract")
+        != result.get("shared_process_contract")
+        or topology_commitment_sha256(topology) != result["topology_commitment_sha256"]
+        or result.get("assembly_decisions")
+        or result.get("batch_term_audits")
+    ):
+        raise ValueError("identified function records differ from replay")
+    repairs = [
+        {
+            "interaction_id": n,
+            "accepted_reply": stage["functions"][n],
+            "canonical_function": a,
+            "explicit_transaction_replay": True,
+        }
+        for n, a in zip(delivery.slots(source), accepted, strict=True)
+    ]
+    verified = _finish_reconstruction(
+        brief,
+        context,
+        original_source,
+        result,
+        topology,
+        aliases,
+        draft,
+        accepted,
+        repairs,
+    )
+    checks = verified["certificate"]["checks"]
+    checks.pop("valid_batch_slots_preserved")
+    checks["valid_slots_preserved_or_explicitly_revised"] = True
+    return verified
 
 
 def _inputs(root: Path, plan: dict, task: dict) -> tuple[dict | None, dict, list[dict]]:

@@ -222,6 +222,24 @@ def replay(
     brief, context, original: dict, result: dict, *, diagnostics: dict | None = None
 ) -> tuple[dict, dict]:
     """Verify every hash; support the historical cold-run object aliasing bug."""
+    if result.get("function_delivery_policy") == "identified-function-delivery-1":
+        from autoformalism.search.identified_function_stage import (
+            replay as replay_delivery,
+        )
+
+        if (
+            result.get("dependency_policy") != POLICY
+            or result.get("assembly_policy") != "process-assembly-contract-1"
+            or result.get("assembly_decisions")
+            or result["source_topology_result_sha256"] != content_hash(original)
+        ):
+            raise ValueError("delivery source identity differs")
+        current, _ = replay_delivery(
+            brief, context, original, result["function_delivery"]
+        )
+        if current != result["effective_source"] or result.get("dependency_revisions"):
+            raise ValueError("delivery source or legacy ledger differs")
+        return current, {}
     mode = "isolated_review"
     try:
         verified = _replay(brief, context, original, result)

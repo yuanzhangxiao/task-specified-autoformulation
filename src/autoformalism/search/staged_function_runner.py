@@ -84,8 +84,18 @@ def run_staged_functions(
     shared_process_guidance: bool = False,
     dependency_policy: str = "strict",
     assembly_policy: str = "legacy",
+    function_delivery_policy: str = "legacy",
 ) -> dict[str, Any]:
     """Assign functions; optional local source edits are checked transactions."""
+    identified = function_delivery_policy == "identified-function-delivery-1"
+    if function_delivery_policy not in {"legacy", "identified-function-delivery-1"}:
+        raise ValueError("unknown function delivery policy")
+    if identified and (
+        dependency_policy != dependencies.POLICY or assembly_policy != assembly.POLICY
+    ):
+        raise ValueError(
+            "identified delivery requires dependency and assembly contracts"
+        )
     if dependency_policy not in {"strict", dependencies.POLICY}:
         raise ValueError("unknown function dependency policy")
     flexible = dependency_policy == dependencies.POLICY
@@ -124,6 +134,8 @@ def run_staged_functions(
             contract["dependency_policy"] = dependency_policy
         if owned_assembly:
             contract["assembly_policy"] = assembly_policy
+        if identified:
+            contract["function_delivery_policy"] = function_delivery_policy
         if training_evidence is not None:
             contract["training_evidence_sha256"] = training_evidence.packet_sha256
         path = output / "construction_contract.json"
@@ -164,6 +176,7 @@ def run_staged_functions(
     effective_source = source
     dependency_revisions: list[dict] = []
     assembly_decisions: list[dict] = []
+    delivery_result = None
     common = {
         "public_brief_json": json.dumps(enriched)
         if training_evidence is not None
@@ -366,7 +379,29 @@ def run_staged_functions(
     expansion = None
     initialization = None
     try:
-        for equation_index, equation in enumerate(equations):
+        if identified:
+            from autoformalism.search import identified_function_stage as delivery
+
+            delivery_result = delivery.run(
+                brief,
+                context,
+                source,
+                client,
+                output / "identified",
+                public_brief=enriched,
+            )
+            effective_source = delivery_result["effective_source"]
+            topology, aliases, draft, accepted, provider_accepted = delivery.records(
+                brief, context, effective_source, delivery_result["functions"]
+            )
+            commitment = topology_commitment_sha256(topology)
+            process_contract = effective_source.get("shared_process_contract")
+            events.extend(delivery_result["events"])
+            if not delivery_result["complete"]:
+                raise ValueError(
+                    delivery_result["error"] or "incomplete identified functions"
+                )
+        for equation_index, equation in enumerate(() if identified else equations):
             parameter_identity_policy = (
                 "interaction_local"
                 if generation_granularity == "equation_batch_atomic_repair"
@@ -803,6 +838,11 @@ def run_staged_functions(
         result["initialization"] = initialization
     if process_contract:
         result["shared_process_contract"] = process_contract
+    if identified:
+        result.update(
+            function_delivery_policy=function_delivery_policy,
+            function_delivery=delivery_result,
+        )
     if owned_assembly:
         result.update(
             assembly_policy=assembly_policy, assembly_decisions=assembly_decisions

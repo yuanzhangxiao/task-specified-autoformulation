@@ -99,6 +99,8 @@ def run(
     *,
     initial_error: str,
     attempt_offset: int = 0,
+    normalize_delivery: bool = False,
+    public_brief: dict | None = None,
 ) -> dict:
     """Use only remaining attempts; cached/uncertain outcomes still consume a slot.
 
@@ -122,25 +124,39 @@ def run(
         "initial_error": initial_error,
         "attempt_offset": attempt_offset,
     }
+    if normalize_delivery:
+        freeze["normalize_delivery"] = True
+    if public_brief is not None:
+        freeze["public_brief"] = public_brief
     with _lock(output):
         sealed_write(output / "freeze.json", freeze)
         if (output / "result.json").exists():
             result = sealed_read(output / "result.json")
             if result["transaction"] is not None:
                 revision.replay(brief, context, source, known, result["transaction"])
+                if normalize_delivery:
+                    _interpret_delivery(
+                        brief, context, source, identifier, known, result
+                    )
             return result
         diagnostic, scope, events, transaction = initial_error, "local", [], None
+        delivered_reply, delivery_normalizations = None, []
         for attempt in range(attempt_offset, maximum):
             if error_category(diagnostic) in {"public_pathway", "process_target_path"}:
                 scope = "topology"
+            payload = request_context(
+                brief, context, source, identifier, known, diagnostic, scope
+            )
+            if public_brief is not None:
+                payload["public_brief"] = public_brief
+            system = SYSTEM
+            if normalize_delivery:
+                from autoformalism.search.function_delivery import repair_grammar
+
+                system += "\n" + repair_grammar()
             record = client.call(
-                system=SYSTEM,
-                user=json.dumps(
-                    request_context(
-                        brief, context, source, identifier, known, diagnostic, scope
-                    ),
-                    sort_keys=True,
-                ),
+                system=system,
+                user=json.dumps(payload, sort_keys=True),
                 response_model=revision.RevisionReply,
                 step=f"assembly_revision_{identifier}_{scope}",
                 attempt=attempt,
@@ -148,15 +164,29 @@ def run(
             error = None
             try:
                 reply = revision.RevisionReply.model_validate(visible_response(record))
-                transaction = revision.prepare(
-                    brief,
-                    context,
-                    source,
-                    identifier,
-                    reply,
-                    known_functions=known,
-                    allow_topology_repair=scope == "topology",
-                )
+                if normalize_delivery:
+                    from autoformalism.search.function_delivery import interpret
+
+                    delivered_reply = reply.model_dump(mode="json")
+                    transaction, delivery_normalizations = interpret(
+                        brief,
+                        context,
+                        source,
+                        known,
+                        identifier,
+                        delivered_reply,
+                        topology=scope == "topology",
+                    )
+                else:
+                    transaction = revision.prepare(
+                        brief,
+                        context,
+                        source,
+                        identifier,
+                        reply,
+                        known_functions=known,
+                        allow_topology_repair=scope == "topology",
+                    )
             except (ValueError, TypeError, KeyError, ModelValidationError) as exc:
                 error = str(exc)[:6000]
                 diagnostic = error
@@ -186,5 +216,30 @@ def run(
                 "optimizer_calls": 0,
                 "automatic_followup": False,
                 "scientific_validity_certified": False,
+                **(
+                    {
+                        "delivered_reply": delivered_reply,
+                        "delivery_normalizations": delivery_normalizations,
+                    }
+                    if normalize_delivery
+                    else {}
+                ),
             },
         )
+
+
+def _interpret_delivery(brief, context, source, identifier, known, result):
+    """Recheck label normalization as well as the mathematical transaction."""
+    from autoformalism.search.function_delivery import interpret
+
+    expected, labels = interpret(
+        brief,
+        context,
+        source,
+        known,
+        identifier,
+        result["delivered_reply"],
+        topology=result["transaction"]["scope"] == "topology",
+    )
+    if expected != result["transaction"] or labels != result["delivery_normalizations"]:
+        raise ValueError("repair delivery differs from independent replay")
