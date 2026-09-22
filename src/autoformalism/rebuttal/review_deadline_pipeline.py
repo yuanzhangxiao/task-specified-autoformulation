@@ -258,8 +258,12 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
         return {"status": "residual_evidence_unavailable"}
     bundle = selected["bundle"]
     improved = plan["protocol"] in io.SCIENTIFIC_PROTOCOLS
+    from autoformalism.search import shared_model_revision
+
     edits = (
-        review_revision_v6
+        shared_model_revision
+        if plan["protocol"] == io.INTEGRATION_PROTOCOL
+        else review_revision_v6
         if plan["protocol"] == io.SHARED_PROTOCOL
         else review_revision_v5
         if plan["protocol"] == io.REVISION_PROTOCOL
@@ -273,6 +277,21 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     for attempt in range(3):
         raw, record = None, None
         user = edits.payload(bundle, packet, selected["fit"]["parameters"], feedback)
+        if plan["protocol"] == io.INTEGRATION_PROTOCOL:
+            user["public_requirement_findings"] = selected["certificate"]
+            user["fitting_status"] = {
+                k: selected["fit"].get(k)
+                for k in (
+                    "status",
+                    "budget_exhausted",
+                    "native_optimizer_converged",
+                    "message",
+                )
+            }
+            user["feedback_scope"] = (
+                "Training mismatch at retained parameters; not structural "
+                "impossibility."
+            )
         try:
             record = client.call(
                 system=system_prompt(
@@ -316,7 +335,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                 "certificate": certificate,
                 "decision": decision,
                 "attempts": attempts,
-                "revision_policy": "scientific-content-revision-"
+                "revision_policy": "general-shared-revision-1"
+                if plan["protocol"] == io.INTEGRATION_PROTOCOL
+                else "scientific-content-revision-"
                 + (
                     "6"
                     if plan["protocol"] == io.SHARED_PROTOCOL
@@ -374,7 +395,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     return {
         "status": "revision_failed",
         "attempts": attempts,
-        "revision_policy": "scientific-content-revision-"
+        "revision_policy": "general-shared-revision-1"
+        if plan["protocol"] == io.INTEGRATION_PROTOCOL
+        else "scientific-content-revision-"
         + (
             "6"
             if plan["protocol"] == io.SHARED_PROTOCOL
@@ -413,6 +436,19 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
             )
         else:
             payload["status"] = "shared_full_round_zero"
+    elif index == 0 and plan["protocol"] == io.INTEGRATION_PROTOCOL:
+        from autoformalism.search.shared_construction import construct
+
+        payload.update(
+            construct(
+                cell,
+                task,
+                client,
+                directory,
+                build_bundle=_bundle,
+                certificate_for=certificates,
+            )
+        )
     elif index == 0:
         brief = _brief(cell, task)
         evidence = (

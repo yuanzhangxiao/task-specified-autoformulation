@@ -45,7 +45,7 @@ def submit(root: Path, index: int) -> dict:
     root = root.resolve()
     io.require_open(root)
     plan = io.verify(root)
-    if plan["protocol"] != io.SHARED_PROTOCOL or index not in range(2):
+    if plan["protocol"] not in io.SHARED_PROTOCOLS or index not in range(2):
         raise ValueError("requires a shared-process pilot round 0 or 1")
     repo = io.REPO
     commit = source_commit(repo)

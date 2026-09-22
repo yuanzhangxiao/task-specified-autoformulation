@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/SHARED_PROCESS_INTEGRATION.md` defines the opt-in general Milestone 2 pilot:
+fresh variables, optional signed shared processes with same-inventory fallback,
+existing identified function delivery, and whole-model revision with explicit
+consumer propagation records. It reuses the ordinary public predicate checks,
+training residual evidence, validation selection and frozen fitter. Six lineages
+span obfuscated Dalla Man, CSTR and the alien device for construction plus one
+revision. Basin-specific probes/repair actions are not part of this path. Live
+integration evidence is pending; no new critic, pruning or test access is enabled.
+
 `docs/BASIN_SAVED_REPAIR_FIT.md` defines the opt-in saved-reply fitting handoff.
 Repair-v3 normalizes compatible equality cycles and empty binding entries, while
 v1/v2 remain reproducible. Cached replies retain their actual historical context;

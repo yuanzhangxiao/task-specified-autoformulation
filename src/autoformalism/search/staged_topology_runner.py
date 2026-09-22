@@ -272,6 +272,8 @@ def run_staged_topology(
     optional_process_review: bool = False,
     bind_shared_processes: bool = False,
     signed_shared_processes: bool = False,
+    stop_after_inventory: bool = False,
+    initial_memory_candidates: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     from autoformalism.search import shared_process_contract as shared
@@ -285,11 +287,17 @@ def run_staged_topology(
     contract_path = output / "evidence_contract.json"
     if (
         shared_process_guidance
+        or stop_after_inventory
+        or initial_memory_candidates is not None
         or optional_process_review
         or training_evidence is not None
         or contract_path.exists()
     ):
         contract = {"brief": enriched, "context": context.model_dump(mode="json")}
+        if initial_memory_candidates is not None:
+            contract["initial_memory_candidates"] = initial_memory_candidates
+        if stop_after_inventory:
+            contract["stop_after_inventory"] = True
         if shared_process_guidance:
             contract["shared_process_guidance"] = True
         if signed_shared_processes:
@@ -311,7 +319,16 @@ def run_staged_topology(
         runtime_seeded_inventory(brief) if hybrid_variable_construction else ()
     )
     equations: tuple[EquationDefinition, ...] = ()
-    memory_candidates: dict[str, set[str]] = {}
+    memory_candidates: dict[str, set[str]] = {
+        key: set(value) for key, value in (initial_memory_candidates or {}).items()
+    }
+    if initial_memory_candidates is not None:
+        dynamic = {v.name for v in inventory if v.definition == "differential"}
+        required = {r.id for r in brief.requirements}
+        if set(memory_candidates) - required or any(
+            not names <= dynamic for names in memory_candidates.values()
+        ):
+            raise ValueError("initial memory candidates differ from public inventory")
     polarity_policies: list[dict[str, Any]] = []
     polarity_audits: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
@@ -539,6 +556,16 @@ def run_staged_topology(
                 )
             checkpoint()
         inventory = freeze_inventory(brief, inventory)
+        if stop_after_inventory:
+            result = {
+                "status": "variables_complete",
+                "inventory": [v.model_dump(mode="json") for v in inventory],
+                "memory_candidates": {
+                    k: sorted(v) for k, v in memory_candidates.items()
+                },
+            }
+            atomic_json(output / "result.json", result)
+            return result
         if optional_process_review:
             from autoformalism.search.process_review import review
 

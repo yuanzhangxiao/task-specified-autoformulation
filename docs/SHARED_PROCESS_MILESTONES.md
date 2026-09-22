@@ -159,6 +159,15 @@ smoke exercises the real frozen fitter and atomic revision. Scientific benefit
 requires the live development results. No pruning, new judge or test access follows
 automatically.
 
+Milestone 2 integration follow-up (2026-09-22): the general constructor now has an
+opt-in route for optional signed processes with same-inventory fallback, declared
+gain assembly, and ordinary whole-model revision. See
+[SHARED_PROCESS_INTEGRATION.md](SHARED_PROCESS_INTEGRATION.md). A six-lineage,
+three-family pilot checks construction and one revision using the frozen fitter.
+It excludes the basin-specific scientific repair controller and probes. Milestone
+2 remains pending this cross-benchmark evidence; pruning and the calibrated critic
+remain subsequent work.
+
 ## Milestone 3 — process-aware pruning
 
 Start from the retained fitted model. Propose removal of redundant terms or whole

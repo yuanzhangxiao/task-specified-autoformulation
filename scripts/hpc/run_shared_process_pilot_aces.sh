@@ -18,7 +18,12 @@ case "${1:?stage}" in
  prepare)
     "$AF_PYTHON" -c 'import casadi, scipy; print(casadi.__version__, scipy.__version__)'
     "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_shared_process_pilot.py tests/test_review_revision_v6.py tests/test_shared_process_pilot_submission.py
-    "$AF_PYTHON" scripts/smoke_shared_process_pilot.py
+    if [[ "$(jq -r '.protocol' "$AF_OUTPUT_ROOT/plan.json")" == shared-process-integration-1 ]]; then
+      "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_shared_process_integration.py
+      "$AF_PYTHON" scripts/smoke_shared_process_integration.py
+    else
+      "$AF_PYTHON" scripts/smoke_shared_process_pilot.py
+    fi
     actual="$(sha256sum "$AF_VLLM_IMAGE")"
     [[ "${actual%% *}" == "$(jq -r '.config.serving_image_sha256' "$AF_OUTPUT_ROOT/plan.json")" ]] || exit 2
     ;;

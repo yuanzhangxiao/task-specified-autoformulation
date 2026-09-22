@@ -32,9 +32,11 @@ CONTINUATION_PROTOCOL = "review-deadline-3"
 PARAMETER_PROTOCOL = "review-deadline-4"
 REVISION_PROTOCOL = "review-deadline-5"
 SHARED_PROTOCOL = "shared-process-pilot-1"
+INTEGRATION_PROTOCOL = "shared-process-integration-1"
+SHARED_PROTOCOLS = {SHARED_PROTOCOL, INTEGRATION_PROTOCOL}
 PARAMETER_PROTOCOLS = {PARAMETER_PROTOCOL, REVISION_PROTOCOL}
 CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, *PARAMETER_PROTOCOLS}
-SCIENTIFIC_PROTOCOLS = {*CONTINUATION_PROTOCOLS, SHARED_PROTOCOL}
+SCIENTIFIC_PROTOCOLS = {*CONTINUATION_PROTOCOLS, *SHARED_PROTOCOLS}
 CONTENT_PROTOCOLS = {CONTENT_PROTOCOL, *SCIENTIFIC_PROTOCOLS}
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
 FILES = ("manifest.json", "proposer_prompt.txt", "train.csv", "validation.csv")
@@ -51,6 +53,7 @@ class DeadlineConfig(StrictSchema):
         "review-deadline-4",
         "review-deadline-5",
         "shared-process-pilot-1",
+        "shared-process-integration-1",
     ] = PROTOCOL
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -75,7 +78,7 @@ class DeadlineConfig(StrictSchema):
 
     @model_validator(mode="after")
     def bounded_matrix(self):
-        if self.protocol == SHARED_PROTOCOL and (
+        if self.protocol in SHARED_PROTOCOLS and (
             self.no_latent_cells or self.no_spec_cells or self.rounds != 2
         ):
             raise ValueError(
@@ -105,6 +108,12 @@ class DeadlineConfig(StrictSchema):
 
 def tasks(config: DeadlineConfig) -> list[dict]:
     """Counterbalance fresh-construction arm order; refit shares full round zero."""
+    if config.protocol == INTEGRATION_PROTOCOL:
+        from autoformalism.rebuttal.shared_process_integration import (
+            tasks as integration_tasks,
+        )
+
+        return integration_tasks(config)
     if config.protocol == SHARED_PROTOCOL:
         from autoformalism.rebuttal.shared_process_pilot import tasks as paired_tasks
 
@@ -160,7 +169,7 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
         )
     if protocol == REVISION_PROTOCOL:
         paths += ("scripts/smoke_review_revision.py",)
-    if protocol == SHARED_PROTOCOL:
+    if protocol in SHARED_PROTOCOLS:
         paths += (
             "scripts/submit_shared_process_pilot.py",
             "scripts/submit_review_continuation.py",
@@ -169,6 +178,11 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
             "scripts/smoke_shared_process_pilot.py",
             "scripts/recover_shared_process_fixed_models.py",
             "scripts/hpc/run_shared_process_fixed_recovery_aces.sh",
+        )
+    if protocol == INTEGRATION_PROTOCOL:
+        paths += (
+            "scripts/hpc/submit_shared_process_integration_aces.sh",
+            "scripts/smoke_shared_process_integration.py",
         )
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
@@ -251,14 +265,16 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                             "physical_attempts": 3,
                             "cumulative_token_limit": None,
                             "schema": (
-                                "scientific-content-revision-6"
+                                "general-shared-revision-1"
+                                if config.protocol == INTEGRATION_PROTOCOL
+                                else "scientific-content-revision-6"
                                 if config.protocol == SHARED_PROTOCOL
                                 else "model-content-inferred-routing-1"
                             ),
                             "round_zero_reused": False,
                         }
                     }
-                    if config.protocol in {CONTENT_PROTOCOL, SHARED_PROTOCOL}
+                    if config.protocol in {CONTENT_PROTOCOL, *SHARED_PROTOCOLS}
                     else {}
                 ),
                 "test_data_opened": False,
@@ -284,8 +300,25 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                     if config.protocol == SHARED_PROTOCOL
                     else {}
                 ),
+                **(
+                    {
+                        "integration_contract": {
+                            "construction": "general-shared-construction-1",
+                            "gain_assembly": "declared_or_independent",
+                            "revision": "general-shared-revision-1",
+                            "benchmark_specific_checks": False,
+                            "comparison_claim": "integration_only",
+                        }
+                    }
+                    if config.protocol == INTEGRATION_PROTOCOL
+                    else {}
+                ),
                 "round_zero_control": "no-iteration endpoint; not equal total compute",
                 "refit_control": (
+                    "no separate refit arm; no-change/failed revision reuses the "
+                    "same visit fit allowance"
+                    if config.protocol == INTEGRATION_PROTOCOL
+                    else
                     "same C+S budget and retained parameter seed; no revision calls"
                 ),
             },

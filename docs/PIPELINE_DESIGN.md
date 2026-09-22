@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+The opt-in `shared-process-integration-1` path extends general staged construction
+with optional signed shared laws and reuses whole-model revision, public checks,
+training residual feedback and the frozen open-loop fitter. A named law is compiled
+once for all consumers; a revision updates its references without a separate
+confirmation call. Missing conversion declarations permit effective independent
+consumer gains without a conservation claim. See `SHARED_PROCESS_INTEGRATION.md`
+for the small three-family integration gate. Basin-specific diagnostics remain
+outside this general runtime, and historical protocol dispatch stays unchanged.
+
 For the current open-loop pre-fitting pilot, initialization boundary and prospective
 milestones, see `PREFIT_MILESTONES.md`. Its opt-in evidence-strength routing keeps
 equal support in joint focus; the historical category priority remains available.
