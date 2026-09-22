@@ -31,7 +31,7 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 
-from autoformalism.data import DatasetSplit
+from autoformalism.data import BenchmarkRegistry, DatasetSplit
 from autoformalism.rebuttal.baseline_validation import load_public
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
@@ -160,14 +160,48 @@ def specification_block(
     obfuscated pairing. The wording is fixed and adds no private information,
     no reference knowledge and nothing about our own pipeline.
     """
-    named = ", ".join(f"x{index} = {name}" for index, name in enumerate(channels))
+    named = ", ".join(f"x_{index} = {name}" for index, name in enumerate(channels))
     return (
         "\n\nTask specification (public):\n"
         f"{prompt.strip()}\n\n"
         f"Variables: {named}.\n"
-        f"You are proposing the time derivative of x{variable_index} "
+        f"You are proposing the time derivative of x_{variable_index} "
         f"({channels[variable_index]})."
     )
+
+
+#: The public prompt is rendered in lettered sections. A and B are the public
+#: scientific content -- the task and the channels -- and are what the other
+#: LLM baselines receive. C onward is this pipeline's modelling requirements
+#: and response format, which must not enter a vendored method's prompt.
+SPECIFICATION_SECTIONS = ("A. Task specification", "B. Available data")
+SPECIFICATION_END = "C. Modeling requirements"
+
+
+def public_prompt_text(root: Path, benchmark: str, tier: str) -> str:
+    """Read the rendered public proposer prompt for one cell."""
+    spec = BenchmarkRegistry().get(benchmark)
+    prompt_root = root / spec.relative_root
+    if spec.data_layout != "tidy_split_file":
+        prompt_root /= spec.tier_directory_template.format(tier=tier)
+    return (prompt_root / "proposer_prompt.txt").read_text(encoding="utf-8")
+
+
+def public_task_specification(prompt: str) -> str:
+    """Take the public scientific sections of the proposer prompt, and no more.
+
+    Pasting the whole prompt would hand a vendored baseline our modelling
+    requirements, our response format and our restrictions. Taking a prefix by
+    position would silently pass everything if the prompt were ever reordered,
+    so each boundary is required to be present.
+    """
+    for heading in (*SPECIFICATION_SECTIONS, SPECIFICATION_END):
+        if heading not in prompt:
+            raise ValueError(
+                f"public prompt has no {heading!r} section; the specification "
+                "boundary must be re-established before it can be supplied"
+            )
+    return prompt[: prompt.index(SPECIFICATION_END)].strip()
 
 
 def select_system(
@@ -246,6 +280,15 @@ def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
             public, cell.benchmark_id, cell.tier
         )
         channels = observed_channels(development.train)
+        # Frozen at prepare time so the text a task used is part of the sealed
+        # plan rather than something re-read at run time.
+        specification = (
+            public_task_specification(
+                public_prompt_text(public, cell.benchmark_id, cell.tier)
+            )
+            if plan.prompt_policy.supplies_public_task_specification
+            else ""
+        )
         for repetition in plan.repetitions:
             rows.append(
                 {
@@ -256,6 +299,7 @@ def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
                     "public_identity": identity,
                     "channels": list(channels),
                     "searched_targets": list(context.targets),
+                    "prompt": specification,
                 }
             )
     root.mkdir(parents=True, exist_ok=True)

@@ -100,8 +100,11 @@ def test_the_specification_names_the_variables_and_the_derivative() -> None:
     """The adaptation must be unambiguous about what is being asked."""
     block = specification_block("Recover the glucose flux.", ("y", "u"), 1)
     assert "Recover the glucose flux." in block
-    assert "x0 = y" in block and "x1 = u" in block
-    assert "derivative of x1 (u)" in block
+    # Upstream's SYSTEM_TEMPLATE says "Independent variables: x_0, x_1", so the
+    # specification must use the same spelling or one prompt names a variable
+    # two ways.
+    assert "x_0 = y" in block and "x_1 = u" in block
+    assert "derivative of x_1 (u)" in block
     # nothing about our own pipeline leaks into their prompt
     for forbidden in ("Autoformalism", "judge", "schema", "proposer"):
         assert forbidden.lower() not in block.lower()
@@ -187,3 +190,38 @@ def test_a_changed_checkout_names_its_remedy(tmp_path: Path, monkeypatch) -> Non
     )
     with pytest.raises(ValueError, match="delete"):
         campaign.run(tmp_path, 0)
+
+
+def test_only_the_public_scientific_sections_reach_a_vendored_prompt() -> None:
+    """Our modelling requirements and response format are not theirs to obey."""
+    from autoformalism.rebuttal.llm_ode_campaign import public_task_specification
+
+    prompt = "\n".join(
+        [
+            "A. Task specification",
+            "Recover the absorption flux.",
+            "",
+            "B. Available data",
+            "Target channels:",
+            "- y: observed",
+            "",
+            "C. Modeling requirements",
+            "1. Propose an explicit continuous-time model.",
+            "",
+            "D. Response format",
+            "Return JSON matching the candidate schema.",
+        ]
+    )
+    specification = public_task_specification(prompt)
+    assert "Recover the absorption flux." in specification
+    assert "- y: observed" in specification
+    for withheld in ("Modeling requirements", "Response format", "JSON", "schema"):
+        assert withheld not in specification
+
+
+def test_a_reordered_public_prompt_is_refused_rather_than_passed_whole() -> None:
+    """A silent prefix would hand over the whole prompt if the format changed."""
+    from autoformalism.rebuttal.llm_ode_campaign import public_task_specification
+
+    with pytest.raises(ValueError, match="boundary must be re-established"):
+        public_task_specification("A. Task specification\nB. Available data\nno C")

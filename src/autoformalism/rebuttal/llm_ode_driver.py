@@ -42,7 +42,11 @@ from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.rebuttal.final_evaluation_adapters import _equation_candidate
-from autoformalism.rebuttal.llm_ode_campaign import CellArrays, select_system
+from autoformalism.rebuttal.llm_ode_campaign import (
+    CellArrays,
+    select_system,
+    specification_block,
+)
 from autoformalism.rebuttal.llm_ode_upstream import (
     InexpressibleEquation,
     load_upstream,
@@ -184,14 +188,23 @@ def build_searcher(
             )
             for name, index in zip(targets, indices, strict=True)
         ]
+        # Each searcher is proposing a different derivative, so each gets its
+        # own specification; one shared string would tell every island it was
+        # working on the same target.
+        specifications = [
+            specification_block(prompt, train.channels, index) if prompt else ""
+            for index in indices
+        ]
         error: str | None = None
         try:
-            with _specification_appended(upstream_module, prompt):
-                for iteration in range(1, iterations + 1):
-                    for searcher in searchers:
+            for iteration in range(1, iterations + 1):
+                for searcher, specification in zip(
+                    searchers, specifications, strict=True
+                ):
+                    with _specification_appended(upstream_module, specification):
                         searcher.step()
-                    if iteration % 25 == 0:
-                        LOGGER.info("iteration %d of %d", iteration, iterations)
+                if iteration % 25 == 0:
+                    LOGGER.info("iteration %d of %d", iteration, iterations)
         except Exception as exc:  # upstream raised; keep whatever it found
             error = f"{type(exc).__name__}: {exc}"
             LOGGER.warning("search stopped early: %s", error)
