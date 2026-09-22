@@ -86,13 +86,71 @@ Its direct Gt coefficient is 1.54 times canonical +0.079, substantially closer
 than the incumbent's 12.12 times. The latent filters have 59.2- and 40.6-minute
 time scales, making this an interesting candidate for the *existing* diagnostic
 probes. However, these filters depend only on u and cannot restore the missing
-positive EGP response. No new trajectories have been generated for this trial,
-and improved interventional performance is not established by its coefficients.
+positive EGP response. The subsequent frozen-parameter replay below tests this
+lead directly rather than inferring interventional accuracy from coefficients.
 
 All four leading new/trial records in the table exhausted their fitting allocation
 and do not report verified native convergence. They are usable retained parameter
 vectors, not proof that their structures cannot fit better. No refitting or
 post-inspection editing was performed.
+
+### Round-13 trajectory inspection
+
+The strongest two new leads were replayed on all 16 original training and four
+validation trajectories, with their saved parameters and initial-condition maps.
+The Full round-12 parent was also replayed. All six aggregate scores reproduce
+the saved values within 2e-15. The compact inventory omitted historical data
+hashes; the replay freezes the previously authenticated public plan for each
+matching benchmark cell and verifies this score reproduction.
+
+| Frozen model | Training NMSE | Validation NMSE | Status |
+| --- | ---: | ---: | --- |
+| Full, perturbed named T1, seed 1, round 12 | 0.352996 | 0.384974 | Previous retained model |
+| Full, same cell and seed, round 13 | 0.042353 | 0.059328 | Retained model |
+| Brief-only, canonical obfuscated T1, seed 1, round 13 | 0.018923 | 0.017761 | Unretained fitted trial |
+| Brief-only incumbent, same cell and seed | 0.034149 | 0.014079 | Retained model |
+
+Full round 13 improves the meal-response amplitudes substantially: 13 of its
+16 training trajectories have NMSE below 0.05. It still responds too early on
+some schedules and undershoots the late validation tails. This is a useful
+predictive improvement, despite the physiological coefficient problems above.
+
+The Brief-only trial has 14 of 16 training trajectories below 0.05 and all four
+validation trajectories below 0.05. It also shows artificial short dips at meal
+arrival, consistent with its fitted negative direct meal coefficient. These
+features are visible in the absolute trajectories, not merely inferred from
+the equations.
+
+The Brief-only trial was additionally evaluated on the **same seven previously
+frozen canonical diagnostic cases**: fasting and meal responses with initial
+tissue glucose unchanged or changed by +/-20%, and a split-meal schedule. All
+other initial physical states are held fixed for the tissue-glucose preparation;
+the supplied auxiliary trajectories come from the corresponding reference
+simulation. These are post-selection diagnostic cases, not registered test data.
+The canonical probes were not applied to the perturbed Full model.
+
+For fasting with initial tissue glucose +20%, the relative squared error in
+the *change from each model's own unperturbed control* is 0.271 for the new
+Brief-only trial, versus 1.449 for its incumbent and 1.543 for Sol repetition 0
+with no extra latent states. This confirms a substantially better incremental
+response to this preparation. However, absolute-trajectory NMSE is 0.0161,
+0.0111 and 0.0118 respectively: baseline offsets can reverse the comparison.
+Both absolute trajectories and matched-control differences are therefore shown.
+The trial also has worse split-meal effect error (0.118 versus 0.0735 and 0.0749),
+with sharp dips from its direct negative meal term. It is not an across-the-board
+interventional improvement or a clean mechanism-recovery example.
+
+All 67 new rollouts completed; deterministic resume reused every checkpoint
+without a new integration. Eight selected trajectories were independently
+checked with DOP853 at tighter tolerances and a 0.5-minute maximum step; the
+largest prediction difference from the Radau replay was 3.50e-6 mg/kg. No
+parameters were refitted and no model calls or test data were used.
+
+Curves, all-trajectory sheets, overview figures, exact model identities and
+verification records are in `artifacts/t1-round13-inspection-2026-09-22/`.
+The archive still contains no round-15 records, so this inspection does not
+assess the user's completed final round. Refresh the checkpoint inventory
+before drawing conclusions about rounds 13-15 as a whole.
 
 ### Partial status and wider benchmark coverage
 
