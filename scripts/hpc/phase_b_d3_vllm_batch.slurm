@@ -20,7 +20,11 @@ readonly af_user="${SLURM_JOB_USER:-${USER:?}}"
 : "${AF_REPO_ROOT:?AF_REPO_ROOT is required}"
 : "${AF_PYTHON:=${AF_PROJECT}/venvs/autoformalism-v21/bin/python}"
 : "${AF_D3_OUTPUT_ROOT:?AF_D3_OUTPUT_ROOT is required}"
-: "${AF_TASK_INDICES:?AF_TASK_INDICES is required}"
+# Slurm's --export is a comma-separated list, so a comma-separated *value*
+# is silently truncated at its first element: a 60-task list arrived as one
+# task and the array reported success having run almost nothing. The list
+# travels as a file, whose path holds no commas.
+: "${AF_TASK_INDEX_FILE:=}"
 : "${AF_BATCH_SIZE:?AF_BATCH_SIZE is required}"
 : "${AF_LOCAL_MODEL:=openai/gpt-oss-120b}"
 : "${AF_TENSOR_PARALLEL_SIZE:=1}"
@@ -64,7 +68,22 @@ mkdir -p "${AF_HF_HOME}" "${apptainer_cache}" "${apptainer_tmp}" \
 cd "${AF_REPO_ROOT}"
 
 # This batch's slice of the task list.
-IFS=',' read -r -a all_indices <<< "${AF_TASK_INDICES}"
+if [[ -n "${AF_TASK_INDEX_FILE}" ]]; then
+  [[ -f "${AF_TASK_INDEX_FILE}" ]] || {
+    echo "AF_TASK_INDEX_FILE does not exist: ${AF_TASK_INDEX_FILE}" >&2
+    exit 1
+  }
+  # read, not mapfile: bash 3.2 has no mapfile and the local harness uses it
+  all_indices=()
+  while IFS= read -r index_line; do
+    [[ -n "${index_line}" ]] && all_indices+=("${index_line}")
+  done < "${AF_TASK_INDEX_FILE}"
+else
+  : "${AF_TASK_INDICES:?set AF_TASK_INDEX_FILE or AF_TASK_INDICES}"
+  IFS=',' read -r -a all_indices <<< "${AF_TASK_INDICES}"
+fi
+((${#all_indices[@]})) || { echo "no task indices supplied" >&2; exit 1; }
+echo "task_list_size=${#all_indices[@]}"
 readonly slice_start=$((batch * AF_BATCH_SIZE))
 batch_indices=("${all_indices[@]:${slice_start}:${AF_BATCH_SIZE}}")
 ((${#batch_indices[@]})) || { echo "batch ${batch} is empty"; exit 0; }

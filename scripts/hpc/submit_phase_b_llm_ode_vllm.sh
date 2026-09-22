@@ -4,6 +4,8 @@
 #   AF_TIER          easy | hard | all   (default easy)
 #   AF_BATCH_SIZE    tasks per GPU job   (default 4)
 #   AF_TASK_INDICES  explicit comma list, overrides AF_TIER (smoke: "0")
+#                    The list reaches the job as a file, never through
+#                    --export, which is itself comma separated.
 #   AF_BATCH_HOURS   walltime per batch  (default 12:00:00)
 #   AF_LLM_ODE_ROOT  the pinned upstream checkout
 #
@@ -78,7 +80,13 @@ echo "upstream=${AF_LLM_ODE_ROOT} commit=${actual}"
 echo "cluster=${AF_CLUSTER} account=${AF_ACCOUNT} partition=${AF_GPU_PARTITION}"
 echo "gpu=${AF_GPU_REQUEST} tensor_parallel=${AF_TENSOR_PARALLEL_SIZE}"
 
-readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_LLM_ODE_OUTPUT_ROOT=${AF_LLM_ODE_OUTPUT_ROOT},AF_LLM_ODE_ROOT=${AF_LLM_ODE_ROOT},AF_LOCAL_MODEL=${AF_LOCAL_MODEL},AF_TASK_INDICES=${indices},AF_BATCH_SIZE=${AF_BATCH_SIZE},AF_LLM_ODE_CONFIG=${AF_LLM_ODE_CONFIG},AF_PUBLIC_ROOT=${AF_PUBLIC_ROOT},AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}"
+# Slurm splits --export on commas, so a comma-separated value arrives
+# truncated at its first element. Hand over a path instead.
+readonly index_file="${AF_LLM_ODE_OUTPUT_ROOT}/task_indices_${AF_TIER}.txt"
+tr ',' '\n' <<< "${indices}" | grep -v '^$' > "${index_file}"
+echo "index_file=${index_file} ($(wc -l < "${index_file}" | tr -d ' ') entries)"
+
+readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_PYTHON=${AF_PYTHON},AF_LLM_ODE_OUTPUT_ROOT=${AF_LLM_ODE_OUTPUT_ROOT},AF_LLM_ODE_ROOT=${AF_LLM_ODE_ROOT},AF_LOCAL_MODEL=${AF_LOCAL_MODEL},AF_TASK_INDEX_FILE=${index_file},AF_BATCH_SIZE=${AF_BATCH_SIZE},AF_LLM_ODE_CONFIG=${AF_LLM_ODE_CONFIG},AF_PUBLIC_ROOT=${AF_PUBLIC_ROOT},AF_TENSOR_PARALLEL_SIZE=${AF_TENSOR_PARALLEL_SIZE}"
 
 batch_job="$(sbatch --parsable --account="${AF_ACCOUNT}" \
   --partition="${AF_GPU_PARTITION}" --time="${AF_BATCH_HOURS}" \
