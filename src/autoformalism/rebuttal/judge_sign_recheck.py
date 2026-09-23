@@ -198,7 +198,11 @@ def verify(root: Path) -> dict:
 
 def run_one(root: Path, index: int, base_url: str) -> dict:
     """Rejudge both stages/orientations once, only when symbolic evidence changed."""
-    plan = verify(root)
+    return run_verified_review(root, verify(root), index, base_url)
+
+
+def run_verified_review(root: Path, plan: dict, index: int, base_url: str) -> dict:
+    """Execute one review after the campaign-specific provenance verifier succeeds."""
     row = plan["reviews"][index]
     work = root / "reviews" / row["historical_request_sha256"]
     with public._lock(work):
@@ -251,7 +255,11 @@ def run_one(root: Path, index: int, base_url: str) -> dict:
 
 def report(root: Path) -> dict:
     """Separate affected-review availability, findings, and new costs from history."""
-    plan = verify(root)
+    return report_verified_plan(root, verify(root))
+
+
+def report_verified_plan(root: Path, plan: dict) -> dict:
+    """Report a verified local or portable plan using the same review accounting."""
     by_request = {}
     costs = []
     for row in plan["reviews"]:
@@ -278,7 +286,7 @@ def report(root: Path) -> dict:
         }
     value = {
         "identity": plan["artifact_sha256"],
-        "protocol": PROTOCOL,
+        "protocol": plan["protocol"],
         "unique_reviews": len(by_request),
         "affected_unique_reviews": sum(r["affected"] for r in by_request.values()),
         "status_counts": dict(Counter(r["status"] for r in by_request.values())),
@@ -299,6 +307,9 @@ def report(root: Path) -> dict:
         "test_data_opened": False,
         "automatic_followup": False,
     }
+    if "execution" in plan:
+        value["execution"] = plan["execution"]
+        value["origin_plan_sha256"] = plan["origin_plan_sha256"]
     public._write(root / "summary.json", value)
     lines = [
         "# Saved scientific-judge sign recheck",
@@ -316,6 +327,11 @@ def report(root: Path) -> dict:
         "| Task | Stage | Affected | Status | Old findings | New findings |",
         "| --- | --- | --- | --- | ---: | ---: |",
     ]
+    if "execution" in plan:
+        lines[7:7] = [
+            "Portable Delta execution: four A40 GPUs; runtime differs from ACES.",
+            "Image hashes are recorded; bitwise-identical answers are not assumed.",
+        ]
     for row in value["rows"]:
         count = len(row["new_findings"]) if row["new_findings"] is not None else "—"
         lines.append(
