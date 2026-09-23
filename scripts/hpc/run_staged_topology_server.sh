@@ -24,7 +24,7 @@ readonly protocol platform
 case "${protocol}" in
   basin-equation-repair-1) worker_script=basin_repair_pilot.py ;;
   detention-process-pilot-1|detention-process-pilot-2|detention-process-pilot-3) worker_script=detention_process_pilot.py ;;
-  review-deadline-1|review-deadline-2|review-deadline-3|review-deadline-4|review-deadline-5|review-deadline-6|shared-process-pilot-1|shared-process-integration-1) worker_script=review_deadline.py ;;
+  review-deadline-1|review-deadline-2|review-deadline-3|review-deadline-4|review-deadline-5|review-deadline-6|review-deadline-7|shared-process-pilot-1|shared-process-integration-1) worker_script=review_deadline.py ;;
   prefit-numerical-sibling-1) worker_script=prefit_numerical_sibling.py ;;
   prefit-requirement-feedback-1) worker_script=prefit_requirement_campaign.py ;;
   prefit-matched-feedback-1) worker_script=prefit_feedback_campaign.py ;;
@@ -244,6 +244,10 @@ for _ in $(seq 1 300); do
 done
 [[ "${ready}" == true ]] || { echo 'server startup deadline exceeded' >&2; exit 1; }
 date -u +%Y-%m-%dT%H:%M:%SZ >"${runtime_root}/ready-${SLURM_JOB_ID}.txt"
+if [[ "$protocol" == review-deadline-7 ]]; then
+  "${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/review_response.py" check-server \
+    --root "${AF_OUTPUT_ROOT}" --base-url "${endpoint}"
+fi
 "${AF_PYTHON}" "${AF_REPO_ROOT}/scripts/${worker_script}" run \
   --plan "${plan}" --output "${AF_OUTPUT_ROOT}/results" \
   --base-url "${endpoint}" --wall-seconds "${worker_seconds}" \

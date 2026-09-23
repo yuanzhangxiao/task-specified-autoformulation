@@ -37,6 +37,7 @@ from autoformalism.rebuttal.staged_multiround_feedback_campaign import (
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.public_fitting import (
     PublicFitRequest,
+    PublicFitResult,
     PublicSplit,
 )
 from autoformalism.schemas.staged_topology import PublicScientificBrief
@@ -214,7 +215,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
         if index and plan["protocol"] in io.CONTENT_PROTOCOLS
         else BudgetedRepairClient
     )
-    if index and plan["protocol"] == io.MULTI_PROTOCOL:
+    if index and plan["protocol"] in io.MULTI_PROTOCOLS:
         parent = io.read_round(root, task, index - 1)
         if (
             parent
@@ -223,6 +224,10 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
             and task["arm"] != "refit_only"
         ):
             client_type = BudgetedRepairClient
+    if index and plan["protocol"] == io.RESPONSE_PROTOCOL:
+        from autoformalism.llm.response_revision import ResponseRevisionClient
+
+        client_type = ResponseRevisionClient
     return client_type(
         settings=settings,
         seed=task["seed"],
@@ -272,7 +277,7 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
 
     edits = (
         review_revision_multi
-        if plan["protocol"] == io.MULTI_PROTOCOL
+        if plan["protocol"] in io.MULTI_PROTOCOLS
         else shared_model_revision
         if plan["protocol"] == io.INTEGRATION_PROTOCOL
         else review_revision_v6
@@ -289,7 +294,7 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     for attempt in range(3):
         raw, record = None, None
         user = edits.payload(bundle, packet, selected["fit"]["parameters"], feedback)
-        if plan["protocol"] == io.MULTI_PROTOCOL:
+        if plan["protocol"] in io.MULTI_PROTOCOLS:
             from autoformalism.search.review_multi_construction import public_contract
 
             user["public_target_contract"] = public_contract(
@@ -357,7 +362,7 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                 "decision": decision,
                 "attempts": attempts,
                 "revision_policy": review_revision_multi.POLICY
-                if plan["protocol"] == io.MULTI_PROTOCOL
+                if plan["protocol"] in io.MULTI_PROTOCOLS
                 else "general-shared-revision-1"
                 if plan["protocol"] == io.INTEGRATION_PROTOCOL
                 else "scientific-content-revision-"
@@ -419,7 +424,7 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
         "status": "revision_failed",
         "attempts": attempts,
         "revision_policy": review_revision_multi.POLICY
-        if plan["protocol"] == io.MULTI_PROTOCOL
+        if plan["protocol"] in io.MULTI_PROTOCOLS
         else "general-shared-revision-1"
         if plan["protocol"] == io.INTEGRATION_PROTOCOL
         else "scientific-content-revision-"
@@ -454,7 +459,7 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
     }
     if (
         index
-        and plan["protocol"] == io.MULTI_PROTOCOL
+        and plan["protocol"] in io.MULTI_PROTOCOLS
         and parent["selected"] is None
         and task["arm"] != "refit_only"
     ):
@@ -537,6 +542,11 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
                 )
             except (ValueError, KeyError, ModelValidationError) as error:
                 payload.update(status="contract_failed", error=str(error))
+    elif plan["protocol"] == io.RESPONSE_PROTOCOL:
+        from autoformalism.search.response_revision import propose
+
+        response = response_for_selected(root, plan, task, parent["selected"])
+        payload.update(propose(plan, task, parent, client, response))
     elif plan["protocol"] in io.CONTENT_PROTOCOLS:
         payload.update(_content_revision(plan, task, parent, client))
     else:
@@ -624,7 +634,7 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
     return sealed_write(path, payload)
 
 
-def replay_packet(root, directory, request, result, training):
+def replay_packet(root, directory, request, result, training, *, response=False):
     """Fixed-parameter training evidence only, with its own consumed replay marker."""
     path = directory / "packet.json"
     if path.exists():
@@ -691,8 +701,77 @@ def replay_packet(root, directory, request, result, training):
             {"packet": None, "error": "training replay disagrees with retained score"},
         )
         return None
+    if response:
+        from autoformalism.search.response_evidence import build_response_evidence
+
+        features = build_response_evidence(
+            split, model.validated.context, predictions, packet.model_dump(mode="json")
+        )
+        sealed_write(
+            directory / "response.json", {"evidence": features.model_dump(mode="json")}
+        )
     sealed_write(path, {"packet": packet.model_dump(mode="json"), "error": None})
     return packet.model_dump(mode="json")
+
+
+def response_for_selected(root, plan, task, selected):
+    """Cache fixed-parameter training replay, with no optimizer or held-out replay."""
+    from autoformalism.schemas.response_evidence import ResponseEvidence
+
+    if selected is None or selected.get("packet") is None:
+        return None
+    expected = selected["packet"]
+    evidence = selected.get("response_evidence")
+    if evidence is None:
+        key = content_hash(
+            {
+                "request": selected["request"],
+                "fit": selected["fit"],
+                "packet": expected,
+                "policy": "training-response-evidence-1",
+            }
+        )
+        directory = root / "response-cache" / key
+        with public._lock(directory):
+            generated = replay_packet(
+                root,
+                directory,
+                PublicFitRequest.model_validate(selected["request"]),
+                PublicFitResult.model_validate(selected["fit"]),
+                PublicSplit.model_validate(plan["cells"][task["cell"]]["training"]),
+                response=True,
+            )
+            if generated is None:
+                return None
+            # Replays may differ by numerical roundoff or status presentation.
+            # Verify every scored row before associating new shapes with old IDs.
+            old_rows = {r["evidence_id"]: r for r in expected["rows"]}
+            new_rows = {r["evidence_id"]: r for r in generated["rows"]}
+            if old_rows.keys() != new_rows.keys():
+                raise ValueError("response replay row coverage differs")
+            for name, old_row in old_rows.items():
+                new_row = new_rows[name]
+                if any(
+                    old_row[k] != new_row[k]
+                    for k in ("trajectory_id", "target", "sample_count")
+                ) or not math.isclose(
+                    old_row["normalized_mse"],
+                    new_row["normalized_mse"],
+                    rel_tol=1e-5,
+                    abs_tol=1e-8,
+                ):
+                    raise ValueError("response replay row differs: " + name)
+            evidence = sealed_read(directory / "response.json")["evidence"]
+            evidence = {
+                **evidence,
+                "source_packet_sha256": content_hash(expected),
+                "numerical_status": expected["numerical_status"],
+            }
+    value = ResponseEvidence.model_validate(evidence)
+    for key in ("candidate_sha256", "parameter_sha256", "training_content_sha256"):
+        if getattr(value, key) != expected[key]:
+            raise ValueError("response evidence identity differs: " + key)
+    return value.model_dump(mode="json")
 
 
 def selection_key(value):
@@ -796,13 +875,35 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                 result = sibling_fit.execute_child_fit(fit_directory)
             packet = None
             if result.training.available and result.parameters is not None:
-                packet = replay_packet(root, directory, request, result, training)
+                packet = replay_packet(
+                    root,
+                    directory,
+                    request,
+                    result,
+                    training,
+                    **(
+                        {"response": True}
+                        if plan["protocol"] == io.RESPONSE_PROTOCOL
+                        else {}
+                    ),
+                )
             trial = {
                 "bundle": bundle,
                 "request": request.model_dump(mode="json"),
                 "certificate": certificate,
                 "fit": result.model_dump(mode="json"),
                 "packet": packet,
+                **(
+                    {
+                        "response_evidence": sealed_read(directory / "response.json")[
+                            "evidence"
+                        ]
+                        if packet is not None
+                        else None
+                    }
+                    if plan["protocol"] == io.RESPONSE_PROTOCOL
+                    else {}
+                ),
                 "origin_task": task["task_id"],
                 "origin_round": index
                 + plan.get("continuation", {}).get("source_round", 0),
@@ -826,7 +927,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
         }
         if continuation:
             closed = selected is None
-        if plan["protocol"] == io.MULTI_PROTOCOL:
+        if plan["protocol"] in io.MULTI_PROTOCOLS:
             closed = (
                 False  # The frozen visit limit, not a failed proposal, ends this phase.
             )
@@ -854,7 +955,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                             (parent or {}).get("construction_draft"),
                         )
                     }
-                    if plan["protocol"] == io.MULTI_PROTOCOL
+                    if plan["protocol"] in io.MULTI_PROTOCOLS
                     else {}
                 ),
                 **(

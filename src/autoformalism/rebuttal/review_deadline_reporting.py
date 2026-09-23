@@ -153,6 +153,16 @@ def report(root: Path) -> dict:
                     else None,
                 }
             )
+            if plan["protocol"] == io.RESPONSE_PROTOCOL:
+                rows[-1].update(
+                    prompt_input_tokens=[
+                        r["prompt_preflight"]["input_tokens"]
+                        for r in records
+                        if "prompt_preflight" in r
+                    ],
+                    delivery_failure=(result or {}).get("proposal_status")
+                    in {"request_preflight_failed", "provider_request_failed"},
+                )
             if plan["protocol"] in io.PARAMETER_PROTOCOLS:
                 certificate = (selected or {}).get("certificate", {})
                 states = {
@@ -228,6 +238,14 @@ def report(root: Path) -> dict:
         ),
         "fallback_fits": sum(r["fit_trigger"] == "incumbent_fallback" for r in rows),
     }
+    if plan["protocol"] == io.RESPONSE_PROTOCOL:
+        value.update(
+            evidence_policy="training-response-evidence-1",
+            delivery_failure_visits=sum(r["delivery_failure"] for r in rows),
+            max_prompt_input_tokens=max(
+                (n for r in rows for n in r["prompt_input_tokens"]), default=None
+            ),
+        )
     public._write(root / "summary.json", value)
     if plan["protocol"] in {io.REVISION_PROTOCOL, *io.SHARED_PROTOCOLS}:
         public._write(

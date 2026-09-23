@@ -86,7 +86,7 @@ def example(*, draft=False):
     return bundle, packet, truth, request, train, val
 
 
-def fixture(root: Path, *, real_fit=False):
+def fixture(root: Path, *, real_fit=False, fitted_only=False):
     """Seal one synthetic fitted branch and one failed construction."""
     bundle, packet, params, request, train, val = example()
     draft, *_ = example(draft=True)
@@ -95,7 +95,7 @@ def fixture(root: Path, *, real_fit=False):
         serving_image_sha256="0" * 64,
         model_settings=io.StagedModelSettings(),
         public_cells=(CELL,),
-        seeds=(0, 1),
+        seeds=(0,) if fitted_only else (0, 1),
         full_only=True,
         rounds=3,
         fit_profile="collocation-multi-target-v1",

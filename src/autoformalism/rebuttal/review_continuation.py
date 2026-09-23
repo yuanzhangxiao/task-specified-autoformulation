@@ -80,11 +80,11 @@ def verify_imports(root: Path, plan: dict) -> None:
             task,
             ledger.get("source_phase_round", ledger["source_round"]),
             profile=plan["config"]["fit_profile"]
-            if plan["protocol"] == io.MULTI_PROTOCOL
+            if plan["protocol"] in io.MULTI_PROTOCOLS
             else "collocation-single-target-v2",
         )
         draft = None
-        if plan["protocol"] == io.MULTI_PROTOCOL:
+        if plan["protocol"] in io.MULTI_PROTOCOLS:
             entry = ledger["construction_drafts"].get(task["task_id"])
             if entry:
                 record = sealed_read(root / "imports" / task["task_id"] / "draft.json")
@@ -108,11 +108,11 @@ def verify_imports(root: Path, plan: dict) -> None:
             or anchor.get("closed")
             != (
                 False
-                if plan["protocol"] == io.MULTI_PROTOCOL
+                if plan["protocol"] in io.MULTI_PROTOCOLS
                 else source.get("selected") is None
             )
             or (
-                plan["protocol"] == io.MULTI_PROTOCOL
+                plan["protocol"] in io.MULTI_PROTOCOLS
                 and anchor.get("construction_draft") != draft
             )
         ):
@@ -133,7 +133,7 @@ def prepare(
         raise ValueError("source and continuation must be disjoint directories")
     if protocol not in io.CONTINUATION_PROTOCOLS:
         raise ValueError("unsupported continuation protocol")
-    limit = 12 if protocol == io.MULTI_PROTOCOL else 5
+    limit = 12 if protocol in io.MULTI_PROTOCOLS else 5
     if source_round < 0 or not 1 <= visits <= limit:
         raise ValueError(
             f"choose a source round and between one and {limit} new visits"
@@ -165,11 +165,15 @@ def prepare(
                 task,
                 phase_round,
                 profile=original["config"]["fit_profile"]
-                if protocol == io.MULTI_PROTOCOL
+                if protocol in io.MULTI_PROTOCOLS
                 else "collocation-single-target-v2",
             )
             results[task["task_id"]] = result
-            if protocol == io.MULTI_PROTOCOL and result["selected"] is None:
+            if protocol == io.RESPONSE_PROTOCOL and result["selected"] is None:
+                raise ValueError(
+                    "response continuation requires a fitted incumbent for every task"
+                )
+            if protocol in io.MULTI_PROTOCOLS and result["selected"] is None:
                 item = _draft_record(source, task, result, phase_round)
                 if item:
                     from autoformalism.rebuttal.review_deadline_pipeline import (
@@ -192,14 +196,14 @@ def prepare(
             "on_revision_failure": "same_visit_incumbent_refit_then_next_visit",
             "automatic_expansion": False,
         }
-        if protocol in io.PARAMETER_PROTOCOLS or protocol == io.MULTI_PROTOCOL:
+        if protocol in io.PARAMETER_PROTOCOLS or protocol in io.MULTI_PROTOCOLS:
             ledger.update(
                 source_phase_round=phase_round, source_protocol=original["protocol"]
             )
         if protocol == io.REVISION_PROTOCOL:
             ledger["revision_size_policy"] = "advisory_initial_construction_references"
             ledger["unused_new_parameter_policy"] = "discard_with_audit"
-        if protocol == io.MULTI_PROTOCOL:
+        if protocol in io.MULTI_PROTOCOLS:
             ledger.update(
                 construction_drafts={
                     key: {
@@ -212,6 +216,20 @@ def prepare(
                 failed_construction_policy="bounded_public_contract_repair_then_retry_next_visit",
                 public_target_gate="unchanged_frozen_contract_exposed_before_construction",
                 revision_policy="scientific-content-multi-revision-1",
+            )
+        if protocol == io.RESPONSE_PROTOCOL:
+            ledger.update(
+                revision_policy="response-oriented-revision-1",
+                evidence_policy="training-response-evidence-1",
+                prompt_policy={
+                    "input_limit": 24000,
+                    "context_tokens": 32768,
+                    "output_reserve": original["config"]["model_settings"][
+                        "max_output_tokens"
+                    ],
+                    "safety_tokens": 512,
+                },
+                provider_failure_policy="record_and_preserve_without_refit_or_blind_retry",
             )
         if (root / "plan.json").exists():
             plan = io.verify(root)
@@ -257,11 +275,11 @@ def prepare(
                     "trial": None,
                     "selected": result["selected"],
                     "closed": False
-                    if protocol == io.MULTI_PROTOCOL
+                    if protocol in io.MULTI_PROTOCOLS
                     else result["selected"] is None,
                     **(
                         {"construction_draft": item[0][item[1]] if item else None}
-                        if protocol == io.MULTI_PROTOCOL
+                        if protocol in io.MULTI_PROTOCOLS
                         else {}
                     ),
                     "source_result_sha256": result["artifact_sha256"],

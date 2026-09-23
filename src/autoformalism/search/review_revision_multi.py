@@ -122,7 +122,9 @@ def payload(
     return value
 
 
-def apply_edits(bundle: dict, packet: dict | None, raw: dict) -> dict:
+def apply_edits(
+    bundle: dict, packet: dict | None, raw: dict, *, reference_catalog=None
+) -> dict:
     """Compile all outputs atomically; unresolved citations never become evidence."""
     reply = ScientificRevision.model_validate(raw)
     mappings, duplicates = v3._unique(reply.output_mappings, "channel")
@@ -142,7 +144,7 @@ def apply_edits(bundle: dict, packet: dict | None, raw: dict) -> dict:
         parameter_specs=specs,
         enforce_size_limits=False,
         output_mappings=[m.model_dump(mode="json") for m in mappings],
-        reference_catalog={} if packet is None else None,
+        reference_catalog={} if packet is None else reference_catalog,
     )
     result["provenance"].update(
         protocol=POLICY,

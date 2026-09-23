@@ -160,7 +160,7 @@ def submit(root: Path, index: int) -> dict:
             gpu.append(f"--dependency=afterok:{prep}")
         proposer = queue("propose", index, gpu)
         success_dependency = (
-            "afterok" if plan["protocol"] == io.MULTI_PROTOCOL else "afterany"
+            "afterok" if plan["protocol"] in io.MULTI_PROTOCOLS else "afterany"
         )
         fit = queue(
             "fit",

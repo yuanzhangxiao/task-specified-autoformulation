@@ -27,7 +27,7 @@ def interrupted(root, plan, task, index, reason):
     parent = io.read_round(root, task, index - 1) if index else None
     proposal = directory / "proposal.json"
     saved = sealed_read(proposal) if proposal.exists() else {}
-    multi = plan["protocol"] == io.MULTI_PROTOCOL
+    multi = plan["protocol"] in io.MULTI_PROTOCOLS
     draft = (
         saved.get("construction_draft")
         or saved.get("bundle")
@@ -230,12 +230,21 @@ def main():
                         if task["arm"] == "refit_only":
                             pipeline.fit_one(root, plan, task, 0)
                 value = reporting.report(root)
-                if plan["protocol"] == io.MULTI_PROTOCOL and any(
+                if plan["protocol"] in io.MULTI_PROTOCOLS and any(
                     io.read_round(root, task, args.round) is None
                     for task in plan["tasks"]
                 ):
                     raise ValueError(
                         "round incomplete: missing task results; inspect logs"
+                    )
+                if plan["protocol"] == io.RESPONSE_PROTOCOL and any(
+                    io.read_round(root, task, args.round).get("proposal_status")
+                    in {"provider_request_failed", "request_preflight_failed"}
+                    for task in plan["tasks"]
+                ):
+                    raise ValueError(
+                        "request delivery failed: incumbents retained; automatic "
+                        "continuation stopped. Inspect review_response.py audit."
                     )
     elif command == "report":
         value = reporting.report(root)

@@ -32,11 +32,13 @@ CONTINUATION_PROTOCOL = "review-deadline-3"
 PARAMETER_PROTOCOL = "review-deadline-4"
 REVISION_PROTOCOL = "review-deadline-5"
 MULTI_PROTOCOL = "review-deadline-6"
+RESPONSE_PROTOCOL = "review-deadline-7"
+MULTI_PROTOCOLS = {MULTI_PROTOCOL, RESPONSE_PROTOCOL}
 SHARED_PROTOCOL = "shared-process-pilot-1"
 INTEGRATION_PROTOCOL = "shared-process-integration-1"
 SHARED_PROTOCOLS = {SHARED_PROTOCOL, INTEGRATION_PROTOCOL}
 PARAMETER_PROTOCOLS = {PARAMETER_PROTOCOL, REVISION_PROTOCOL}
-CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, *PARAMETER_PROTOCOLS, MULTI_PROTOCOL}
+CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, *PARAMETER_PROTOCOLS, *MULTI_PROTOCOLS}
 SCIENTIFIC_PROTOCOLS = {*CONTINUATION_PROTOCOLS, *SHARED_PROTOCOLS}
 CONTENT_PROTOCOLS = {CONTENT_PROTOCOL, *SCIENTIFIC_PROTOCOLS}
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
@@ -54,6 +56,7 @@ class DeadlineConfig(StrictSchema):
         "review-deadline-4",
         "review-deadline-5",
         "review-deadline-6",
+        "review-deadline-7",
         "shared-process-pilot-1",
         "shared-process-integration-1",
     ] = PROTOCOL
@@ -81,10 +84,10 @@ class DeadlineConfig(StrictSchema):
 
     @model_validator(mode="after")
     def bounded_matrix(self):
-        if self.protocol != MULTI_PROTOCOL and self.rounds > 6:
+        if self.protocol not in MULTI_PROTOCOLS and self.rounds > 6:
             raise ValueError("historical protocols allow at most six phase visits")
         if self.full_only and (
-            self.protocol not in {CONTENT_PROTOCOL, MULTI_PROTOCOL}
+            self.protocol not in {CONTENT_PROTOCOL, *MULTI_PROTOCOLS}
             or self.no_latent_cells
             or self.no_spec_cells
         ):
@@ -93,7 +96,7 @@ class DeadlineConfig(StrictSchema):
             )
         if self.fit_profile == "collocation-multi-target-v1" and self.protocol not in {
             CONTENT_PROTOCOL,
-            MULTI_PROTOCOL,
+            *MULTI_PROTOCOLS,
         }:
             raise ValueError("multi-target pilots require review-deadline-2")
         if self.protocol in SHARED_PROTOCOLS and (
@@ -194,10 +197,16 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
         )
     if protocol == REVISION_PROTOCOL:
         paths += ("scripts/smoke_review_revision.py",)
-    if protocol == MULTI_PROTOCOL:
+    if protocol in MULTI_PROTOCOLS:
         paths += (
             "scripts/smoke_review_multi.py",
             "scripts/hpc/submit_review_multi_aces.sh",
+        )
+    if protocol == RESPONSE_PROTOCOL:
+        paths += (
+            "scripts/review_response.py",
+            "scripts/smoke_review_response.py",
+            "scripts/hpc/submit_review_response_aces.sh",
         )
     if protocol in SHARED_PROTOCOLS:
         paths += (
