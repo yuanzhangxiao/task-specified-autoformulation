@@ -6,11 +6,12 @@ the models measured are exactly the models evaluated -- not whatever else is
 lying in a development directory. It opens no data of any kind; it parses the
 saved expression strings.
 
-Complexity is reported three ways because no single count is neutral. Node
-count is the expression-tree size, comparable to the traversal count upstream
-symbolic-regression tools report. Term count is the number of additive terms,
-which is what a reader means by "how many terms is this model". Operator count
-excludes the leaves, separating structure from how many channels are named.
+The counts are the project's own, from `autoformalism.pruning.process_aware`,
+which is what the pruner already uses to decide whether one model is smaller
+than another. Using a second definition here would put two different numbers
+called "complexity" in one paper. `complexity()` itself takes a fit request, so
+this applies its constituent counts to the candidate the evaluation adapters
+build from the same saved equations.
 """
 
 from __future__ import annotations
@@ -21,47 +22,49 @@ import json
 import statistics
 from pathlib import Path
 
+from autoformalism.expressions import ValidationContext
+from autoformalism.pruning.process_aware import definitions, terms
+from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
+
 #: Method labels whose saved artifacts carry a symbolic equation set.
 SYMBOLIC_KINDS = ("pysr", "sindy", "llm_sr", "llm_ode")
 
 
-def expression_complexity(expression: str) -> dict[str, int] | None:
-    """Tree size, additive terms and operator count for one right-hand side."""
+def model_complexity(equations: dict[str, str]) -> dict[str, int] | None:
+    """The project's own counts, applied to one saved symbolic model.
+
+    Mirrors ``pruning.process_aware.complexity``: the same signed additive
+    term decomposition, and the same node count over every definition,
+    observation mapping and initial-condition expression.
+    """
+    if not equations:
+        return None
     try:
-        tree = ast.parse(expression, mode="eval")
+        candidate = equation_candidate(
+            "complexity", equations, ValidationContext(targets=tuple(equations))
+        )
+    except Exception:
+        return None
+    expressions = (
+        list(definitions(candidate).values())
+        + [item.expression for item in candidate.observation_mappings]
+        + [item.expression for item in candidate.initial_conditions if item.expression]
+    )
+    try:
+        nodes = sum(
+            sum(1 for _ in ast.walk(ast.parse(item, mode="eval")))
+            for item in expressions
+        )
+        decomposed = len(terms(candidate))
     except SyntaxError:
         return None
-    nodes = [node for node in ast.walk(tree) if not isinstance(node, ast.Load)]
-    operators = [
-        node
-        for node in nodes
-        if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.Call))
-    ]
-
-    def additive_terms(node: ast.AST) -> int:
-        """Count top-level terms, so a + b + c is three and a * b is one."""
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
-            return additive_terms(node.left) + additive_terms(node.right)
-        return 1
-
     return {
-        "nodes": len(nodes) - 1,  # discard the Expression wrapper
-        "terms": additive_terms(tree.body),
-        "operators": len(operators),
+        "states": len(candidate.states),
+        "processes": len(candidate.processes),
+        "parameters": len(candidate.parameters),
+        "terms": decomposed,
+        "expression_nodes": nodes,
     }
-
-
-def model_complexity(equations: dict[str, str]) -> dict[str, int] | None:
-    """Sum over a model's state equations; a model is all of its equations."""
-    totals = {"nodes": 0, "terms": 0, "operators": 0, "equations": 0}
-    for expression in equations.values():
-        measured = expression_complexity(expression)
-        if measured is None:
-            return None
-        for key, value in measured.items():
-            totals[key] += value
-        totals["equations"] += 1
-    return totals if totals["equations"] else None
 
 
 def quartiles(values: list[float]) -> dict[str, float | None]:
@@ -128,7 +131,9 @@ def collect(requests_path: Path) -> dict:
     summary = {
         kind: {
             measure: quartiles([float(row[measure]) for row in rows])
-            for measure in ("nodes", "terms", "operators", "equations")
+            for measure in (
+                "states", "processes", "parameters", "terms", "expression_nodes"
+            )
         }
         for kind, rows in sorted(per_method.items())
     }
