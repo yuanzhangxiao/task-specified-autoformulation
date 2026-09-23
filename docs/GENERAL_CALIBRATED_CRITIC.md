@@ -193,3 +193,10 @@ If an allocation fails, inspect its logs/receipts first. The CLI supports replay
 individual stages with `--index` without repeating completed work, but the
 submission wrapper deliberately does not duplicate an existing or uncertain job
 chain. Review this pilot before Milestone 5's controlled component comparisons.
+
+## Sign-evidence correction after the first pilot
+
+The first completed pilot exposed inconsistent outer-sign extraction for forms
+such as `-k*x` versus `-(k*x)`. See [the bounded saved-pair recheck](JUDGE_SIGN_RECHECK.md).
+It versions the deterministic evidence and rejudges affected saved pairs only,
+without rerunning proposals/fits or altering the historical selections.

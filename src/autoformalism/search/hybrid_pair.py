@@ -26,6 +26,7 @@ from autoformalism.judging import (
     semantic_absolute_units,
     structural_facts,
 )
+from autoformalism.judging.hybrid import LEGACY_SIGN_POLICY, validate_sign_policy
 from autoformalism.llm import LLMClient
 from autoformalism.llm.exceptions import LLMError
 from autoformalism.schemas import (
@@ -118,8 +119,11 @@ class PairedHybridJudge:
         atomic_system_prompt: str,
         scoring: HybridScoringConfig | None = None,
         repair_missing_atomic_units: bool = False,
+        sign_policy: str = LEGACY_SIGN_POLICY,
         identity: str,
     ) -> None:
+        validate_sign_policy(sign_policy)
+        self._sign_policy = sign_policy
         if not seeded_clients:
             raise ValueError("paired hybrid judge requires at least one seed")
         if len({seed for seed, _client in seeded_clients}) != len(seeded_clients):
@@ -140,6 +144,8 @@ class PairedHybridJudge:
                 == "neutral_fixed_denominator"
                 else LEGACY_PAIRWISE_SEARCH_PROTOCOL_VERSION
             )
+        if sign_policy != LEGACY_SIGN_POLICY:
+            self._protocol_version += ":" + sign_policy
         fingerprint_payload = {
             "protocol": self._protocol_version,
             "identity": identity,
@@ -266,7 +272,9 @@ class PairedHybridJudge:
             candidate_b,
             task_inputs=self._task_inputs,
         )
-        atomic_plan = build_atomic_evidence_plan(candidate_a, candidate_b)
+        atomic_plan = build_atomic_evidence_plan(
+            candidate_a, candidate_b, sign_policy=self._sign_policy
+        )
         atomic_request = {
             "public_requirement_registry": self._requirements.model_dump(
                 mode="json"
@@ -313,10 +321,12 @@ class PairedHybridJudge:
             },
             "deterministic_structural_facts": {
                 "candidate_a": structural_facts(
-                    candidate_a, task_inputs=self._task_inputs
+                    candidate_a, task_inputs=self._task_inputs,
+                    sign_policy=self._sign_policy,
                 ),
                 "candidate_b": structural_facts(
-                    candidate_b, task_inputs=self._task_inputs
+                    candidate_b, task_inputs=self._task_inputs,
+                    sign_policy=self._sign_policy,
                 ),
             },
             "runtime_owned_absolute_assessments": [

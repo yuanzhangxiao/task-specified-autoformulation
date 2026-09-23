@@ -38,6 +38,7 @@ from autoformalism.schemas import (
     ScientificRequirement,
 )
 from autoformalism.schemas.base import Identifier, StrictSchema, UnitInterval
+from autoformalism.sign_contract import strip_outer_negative_factors
 
 _CANDIDATE_SUBJECT = "candidate"
 STRUCTURAL_FACTS_SCHEMA_VERSION = "structural-facts-2"
@@ -45,6 +46,16 @@ MODEL_SEMANTIC_STRUCTURAL_FACTS_SCHEMA_VERSION = (
     "structural-facts-3-model-semantics"
 )
 ATOMIC_EVIDENCE_SCHEMA_VERSION = "atomic-evidence-plan-1"
+LEGACY_SIGN_POLICY = "top-level-sign-1"
+FACTOR_SIGN_POLICY = "outer-factor-sign-2"
+
+
+def validate_sign_policy(policy: str) -> None:
+    """Reject unknown evidence semantics rather than silently selecting a default."""
+    if policy not in {LEGACY_SIGN_POLICY, FACTOR_SIGN_POLICY}:
+        raise ValueError(f"unknown judge sign evidence policy: {policy}")
+
+
 _SEMANTIC_CANDIDATE_CRITERIA = (
     AbsoluteCriterion.SOURCE_ROLES_CONSISTENT,
     AbsoluteCriterion.SINK_ROLES_CONSISTENT,
@@ -107,23 +118,28 @@ def candidate_claims(candidate: CandidateModel) -> tuple[ProposerClaim, ...]:
 
 
 def _signed_additive_terms(
-    node: ast.expr, polarity: int = 1
+    node: ast.expr, polarity: int = 1, *, sign_policy: str = LEGACY_SIGN_POLICY
 ) -> list[tuple[int, ast.expr]]:
     """Flatten top-level addition while preserving deterministic polarity."""
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return [
-            *_signed_additive_terms(node.left, polarity),
-            *_signed_additive_terms(node.right, polarity),
+            *_signed_additive_terms(node.left, polarity, sign_policy=sign_policy),
+            *_signed_additive_terms(node.right, polarity, sign_policy=sign_policy),
         ]
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub):
         return [
-            *_signed_additive_terms(node.left, polarity),
-            *_signed_additive_terms(node.right, -polarity),
+            *_signed_additive_terms(node.left, polarity, sign_policy=sign_policy),
+            *_signed_additive_terms(node.right, -polarity, sign_policy=sign_policy),
         ]
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        return _signed_additive_terms(node.operand, -polarity)
+        return _signed_additive_terms(node.operand, -polarity, sign_policy=sign_policy)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
-        return _signed_additive_terms(node.operand, polarity)
+        return _signed_additive_terms(node.operand, polarity, sign_policy=sign_policy)
+    if sign_policy == FACTOR_SIGN_POLICY:
+        unsigned, count = strip_outer_negative_factors(ast.Expression(body=node))
+        # Unlike construction's topology-owned convention, evidence must retain
+        # every sign algebraically. Never change the candidate or infer positivity.
+        return [(polarity * (-1 if count % 2 else 1), unsigned.body)]
     return [(polarity, node)]
 
 
@@ -132,10 +148,12 @@ def _algebraic_expression_facts(
     *,
     location: str,
     parser: RestrictedParser,
+    sign_policy: str = LEGACY_SIGN_POLICY,
 ) -> dict[str, object]:
     """Return syntax-only additive, polarity, and exact-repeat facts."""
+    validate_sign_policy(sign_policy)
     parsed = parser.parse(source, location=location)
-    raw_terms = _signed_additive_terms(parsed.tree.body)
+    raw_terms = _signed_additive_terms(parsed.tree.body, sign_policy=sign_policy)
     terms = []
     repeat_groups: dict[tuple[int, str], list[str]] = defaultdict(list)
     symbol_occurrences: dict[str, dict[str, list[str]]] = defaultdict(
@@ -201,8 +219,10 @@ def structural_facts(
     task_inputs: tuple[str, ...],
     include_model_semantics: bool = False,
     causal_observation_resets: bool = False,
+    sign_policy: str = LEGACY_SIGN_POLICY,
 ) -> dict[str, object]:
     """Return certified dependency facts for one canonical candidate."""
+    validate_sign_policy(sign_policy)
     parser = RestrictedParser()
     graph: dict[str, set[str]] = {}
     algebraic_expressions: dict[str, object] = {}
@@ -219,6 +239,7 @@ def structural_facts(
             process.expression,
             location=location,
             parser=parser,
+            sign_policy=sign_policy,
         )
         expression_symbols[process.name] = symbols
         for symbol in symbols:
@@ -231,6 +252,7 @@ def structural_facts(
             equation.rhs,
             location=location,
             parser=parser,
+            sign_policy=sign_policy,
         )
         expression_symbols[equation.state] = symbols
         for symbol in symbols:
@@ -298,6 +320,8 @@ def structural_facts(
         ],
         "algebraic_expressions": algebraic_expressions,
     }
+    if sign_policy != LEGACY_SIGN_POLICY:
+        facts["schema_version"] += ":" + sign_policy
     if include_model_semantics:
         identity_channels = {
             mapping.expression.replace(" ", ""): mapping.channel
@@ -408,6 +432,7 @@ class AtomicEvidencePlan:
 
     occurrences: tuple[SignedOccurrence, ...]
     repeat_candidates: tuple[ExactRepeatCandidate, ...]
+    sign_policy: str = LEGACY_SIGN_POLICY
 
     @property
     def occurrence_ids(self) -> set[str]:
@@ -422,7 +447,9 @@ class AtomicEvidencePlan:
     def prompt_payload(self) -> dict[str, object]:
         """Return only sign-blinded facts safe for the first LLM stage."""
         return {
-            "schema_version": ATOMIC_EVIDENCE_SCHEMA_VERSION,
+            "schema_version": ATOMIC_EVIDENCE_SCHEMA_VERSION
+            if self.sign_policy == LEGACY_SIGN_POLICY
+            else "atomic-evidence-plan-2-outer-factors",
             "signed_occurrences": [
                 item.prompt_payload() for item in self.occurrences
             ],
@@ -436,6 +463,7 @@ def _candidate_atomic_occurrences(
     candidate: CandidateModel,
     *,
     candidate_side: str,
+    sign_policy: str = LEGACY_SIGN_POLICY,
 ) -> tuple[tuple[SignedOccurrence, ...], tuple[ExactRepeatCandidate, ...]]:
     """Build stable sign-blinded units for one canonical candidate."""
     parser = RestrictedParser()
@@ -454,6 +482,7 @@ def _candidate_atomic_occurrences(
             source_expression,
             location=location,
             parser=parser,
+            sign_policy=sign_policy,
         )
         by_term_id: dict[str, SignedOccurrence] = {}
         for term in facts["top_level_additive_terms"]:
@@ -499,17 +528,21 @@ def _candidate_atomic_occurrences(
 def build_atomic_evidence_plan(
     candidate_a: CandidateModel,
     candidate_b: CandidateModel,
+    *,
+    sign_policy: str = LEGACY_SIGN_POLICY,
 ) -> AtomicEvidencePlan:
     """Build symmetric atomic questions while retaining signs only at runtime."""
+    validate_sign_policy(sign_policy)
     left_occurrences, left_repeats = _candidate_atomic_occurrences(
-        candidate_a, candidate_side="candidate_a"
+        candidate_a, candidate_side="candidate_a", sign_policy=sign_policy
     )
     right_occurrences, right_repeats = _candidate_atomic_occurrences(
-        candidate_b, candidate_side="candidate_b"
+        candidate_b, candidate_side="candidate_b", sign_policy=sign_policy
     )
     return AtomicEvidencePlan(
         occurrences=(*left_occurrences, *right_occurrences),
         repeat_candidates=(*left_repeats, *right_repeats),
+        sign_policy=sign_policy,
     )
 
 

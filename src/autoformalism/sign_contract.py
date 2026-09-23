@@ -18,10 +18,11 @@ _FIXED_SIGNS = {InteractionPolarity.POSITIVE, InteractionPolarity.NEGATIVE}
 def strip_outer_negative_factors(tree: ast.Expression) -> tuple[ast.Expression, int]:
     """Remove explicit signs in the outer product/quotient, not inside a law.
 
-    This implements a topology-owned sign convention, not algebraic equivalence
-    or an absolute-value transform. Calls, powers, sums and differences are
-    opaque; their internal signs and the magnitude of numeric factors survive.
-    The caller must first establish that topology owns a fixed outer sign.
+    Calls, powers, sums and differences are opaque; their internal signs and
+    the magnitude of numeric factors survive. Construction callers establish
+    that topology owns a fixed outer sign before dropping the returned signs.
+    Evidence callers instead retain the parity of the count: multiplying the
+    returned expression by (-1)**count preserves the original expression.
     """
     removed = 0
 

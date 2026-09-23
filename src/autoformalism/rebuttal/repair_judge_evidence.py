@@ -5,11 +5,16 @@ from __future__ import annotations
 import re
 
 from autoformalism.judging import build_atomic_evidence_plan
+from autoformalism.judging.hybrid import LEGACY_SIGN_POLICY
 from autoformalism.schemas import CandidateModel
 
 
 def named_references(
-    parent: CandidateModel, candidate: CandidateModel, observation: str
+    parent: CandidateModel,
+    candidate: CandidateModel,
+    observation: str,
+    *,
+    sign_policy: str = LEGACY_SIGN_POLICY,
 ) -> dict:
     """Resolve only exact atomic IDs on the current candidate in both orientations.
 
@@ -23,7 +28,7 @@ def named_references(
         ("forward", parent, candidate, "candidate_b"),
         ("reverse", candidate, parent, "candidate_a"),
     ):
-        plan = build_atomic_evidence_plan(left, right)
+        plan = build_atomic_evidence_plan(left, right, sign_policy=sign_policy)
         for item in plan.occurrences:
             if item.candidate_side == side:
                 index[item.occurrence_id] = {

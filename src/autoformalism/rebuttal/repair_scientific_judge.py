@@ -17,6 +17,7 @@ from pathlib import Path
 from autoformalism.execution import _prediction_protocol_prompt, _symbol_contract
 from autoformalism.expressions import ValidationContext
 from autoformalism.judging import HybridScoringConfig, extract_public_requirements
+from autoformalism.judging.hybrid import LEGACY_SIGN_POLICY, validate_sign_policy
 from autoformalism.judging.prompts import (
     ATOMIC_EVIDENCE_PROMPT,
     ATOMIC_STAGE_TWO_NOTE,
@@ -31,9 +32,10 @@ from autoformalism.search.hybrid_pair import PairedHybridJudge
 from autoformalism.staged_topology import content_hash
 
 
-def judge_protocol() -> dict:
+def judge_protocol(*, sign_policy: str = LEGACY_SIGN_POLICY) -> dict:
     """Freeze existing scientific protocol independently from repair prompts."""
-    return {
+    validate_sign_policy(sign_policy)
+    protocol = {
         "model": "openai/gpt-oss-120b",
         "reasoning_effort": "low",
         "temperature": 0.2,
@@ -51,6 +53,9 @@ def judge_protocol() -> dict:
             "second_stage_note": ATOMIC_STAGE_TWO_NOTE,
         },
     }
+    if sign_policy != LEGACY_SIGN_POLICY:
+        protocol["sign_evidence_policy"] = sign_policy
+    return protocol
 
 
 def review_request(
@@ -60,6 +65,7 @@ def review_request(
     public_prompt: str,
     seed: int,
     revision: str,
+    *, sign_policy: str = LEGACY_SIGN_POLICY,
 ) -> dict:
     """Closed allowlist: no fits, trajectories, certificates or repair history."""
     return {
@@ -69,13 +75,16 @@ def review_request(
         "public_prompt": public_prompt,
         "seed": seed,
         "model_revision": revision,
-        "protocol": judge_protocol(),
+        "protocol": judge_protocol(sign_policy=sign_policy),
     }
 
 
 def perform_review(request: dict, directory: Path, base_url: str) -> dict:
     """Cache both orientations and report advisory scientific concerns only."""
     identity = content_hash(request)
+    sign_policy = request["protocol"].get("sign_evidence_policy", LEGACY_SIGN_POLICY)
+    if request["protocol"] != judge_protocol(sign_policy=sign_policy):
+        raise ValueError("frozen scientific judge protocol differs")
     path = directory / "review.json"
     if path.exists():
         saved = json.loads(path.read_text())
@@ -84,6 +93,8 @@ def perform_review(request: dict, directory: Path, base_url: str) -> dict:
         return saved
     marker = directory / "review_started.json"
     if marker.exists():
+        if json.loads(marker.read_text())["request_sha256"] != identity:
+            raise ValueError("scientific review marker identity differs")
         saved = {
             "request_sha256": identity,
             "status": "interrupted",
@@ -99,8 +110,6 @@ def perform_review(request: dict, directory: Path, base_url: str) -> dict:
         CandidateModel.model_validate(request[k]) for k in ("parent", "candidate")
     )
     protocol = request["protocol"]
-    if protocol != judge_protocol():
-        raise ValueError("frozen scientific judge protocol differs")
     model = protocol["model"]
     seeds = [12000 + 2 * request["seed"] + i for i in range(2)]
     clients = tuple(
@@ -148,6 +157,7 @@ def perform_review(request: dict, directory: Path, base_url: str) -> dict:
         + ATOMIC_EVIDENCE_PROMPT,
         scoring=HybridScoringConfig(**protocol["scoring"]),
         identity=identity,
+        sign_policy=sign_policy,
     )
     pair = judge.compare(parent, candidate)
     findings = []
@@ -169,7 +179,8 @@ def perform_review(request: dict, directory: Path, base_url: str) -> dict:
                             "request_sha256": identity,
                             "subject_id": item.subject_id,
                             **named_references(
-                                parent, candidate, item.candidate_b.evidence
+                                parent, candidate, item.candidate_b.evidence,
+                                sign_policy=sign_policy,
                             ),
                         },
                     ).model_dump(mode="json")
