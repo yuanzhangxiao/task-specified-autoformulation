@@ -187,10 +187,19 @@ Milestone 3 implementation (2026-09-22):
 [PROCESS_AWARE_PRUNING.md](PROCESS_AWARE_PRUNING.md) defines one training-ranked
 atomic deletion and a paired unchanged-model refit per retained parent. Existing
 public predicates and the frozen fitter are reused. Unresolved obligations skip
-automatic deletion. The pilot is pending ACES results; it is not automatically
-enabled in the production controller.
+automatic deletion. The ACES pilot completed all six decisions and ten fits:
+three smaller models retained, one deletion rejected, and two CSTR deletions
+skipped for unresolved requirements. Each accepted deletion removed one term and
+one parameter; none removed a state or named process. One accepted model used the
+declared 1% NMSE tradeoff. This passes the engineering gate without establishing
+better scientific recovery; pruning remains opt-in.
 
 ## Milestone 4 — calibrated judge as critic, with separate routing
+
+Implemented as the opt-in [general calibrated critic pilot](GENERAL_CALIBRATED_CRITIC.md).
+It imports the six actual Milestone 3 selections, reuses the established judge
+unchanged, and exercises one general revision and at most one child fit per parent.
+The live ACES result is still pending; this does not enable production defaults.
 
 Reuse the existing calibrated GPT-OSS-120B scientific judge and its assessment
 rubric. Do not silently add fitting scores or routing instructions to its

@@ -64,6 +64,38 @@ unchanged control. The preparation job also runs two small synthetic smoke fits.
 No benchmark fitting is rerun during preparation. No model is automatically
 promoted into the original campaign and no further round is submitted.
 
+## Simple mathematical description
+
+At the retained parameters, write a defining equation as $F_i=\sum_j T_{ij}$.
+Over all recorded **training** rollout times, compute
+
+$$
+r_{ij}=\frac{\operatorname{RMS}(T_{ij})}
+{\max(\operatorname{RMS}(F_i),10^{-12})}.
+$$
+
+For a deletion unit $U$ affecting several consumers, use
+$r(U)=\max_{(i,j)\in U}r_{ij}$. Choose the legal unit with the smallest $r(U)$;
+then remove it and refit. There is no threshold on coefficient magnitude.
+This is one greedy deletion, not an exhaustive or iterative pruning search.
+
+Let $E_b=\min(E_{\mathrm{parent}},E_{\mathrm{refit\ control}})$ be the best
+available unpruned validation NMSE. Accept the pruned model only if its public
+checks pass, its complexity vector is strictly smaller without increasing any
+component, and
+
+$$
+E_{\mathrm{pruned}} \le E_b+\max(10^{-6},0.01E_b).
+$$
+
+The first live pilot produced six completed decisions and ten completed fits:
+three pruned selections, one rejected deletion, and two skips for unresolved CSTR
+requirements. Each accepted deletion removed one parameter and one term. None of
+the accepted changes removed a state or named process. Two retained essentially
+the same NMSE; the alien-device brief-only deletion increased validation NMSE
+from 0.99737244 to 1.00646147 (about 0.91%), within the declared 1% tolerance.
+This establishes working simplification, not improved scientific recovery.
+
 ## Checkpoints and outputs
 
 `plan.json` seals source lineage, public train/validation arrays, policy, package,
