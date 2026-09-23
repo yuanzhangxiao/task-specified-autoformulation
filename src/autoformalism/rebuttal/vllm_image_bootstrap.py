@@ -17,6 +17,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 VERSION = "0.27.1"
 REPOSITORY = "vllm/vllm-openai"
 TAG = f"v{VERSION}"
+PACKING_ARGS = "-processors 4 -mem 4G"
 MEDIA_TYPES = (
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.oci.image.manifest.v1+json",
@@ -88,6 +89,72 @@ def check_version(runtime: str, image: Path) -> None:
         raise ValueError(f"requires vLLM {VERSION}, image reports {value!r}")
 
 
+def build_sif(
+    runtime: str,
+    output: Path,
+    source: str,
+    environment: dict[str, str],
+    *,
+    timeout: int,
+) -> None:
+    """Use explicit packing bounds, independent of host CPU/memory defaults."""
+    subprocess.run(
+        [
+            runtime,
+            "build",
+            "--force",
+            "--disable-cache",
+            "--arch",
+            "amd64",
+            "--mksquashfs-args",
+            PACKING_ARGS,
+            str(output),
+            source,
+        ],
+        env=environment,
+        check=True,
+        timeout=timeout,
+    )
+
+
+def packing_preflight(
+    runtime: str,
+    directory: Path,
+    environment: dict[str, str],
+) -> None:
+    """Check packing on the destination filesystem before downloading OCI layers."""
+    help_text = subprocess.run(
+        [runtime, "build", "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout
+    if "--mksquashfs-args" not in help_text:
+        raise ValueError(
+            "container runtime lacks build --mksquashfs-args; "
+            "load Apptainer with that option before retrying"
+        )
+    print(json.dumps({"event": "packing_preflight", "args": PACKING_ARGS}), flush=True)
+    with tempfile.TemporaryDirectory(prefix="packing-check-", dir=directory) as tmp:
+        source = Path(tmp) / "rootfs"
+        source.mkdir()
+        (source / "packing-check.txt").write_text("vLLM image packing preflight\n")
+        try:
+            build_sif(
+                runtime,
+                Path(tmp) / "check.sif",
+                str(source),
+                environment,
+                timeout=120,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                "local SIF packing preflight failed; no full OCI build was attempted"
+            ) from exc
+    print(json.dumps({"event": "packing_preflight_passed"}), flush=True)
+
+
 def prepare(image: Path, scratch: Path) -> dict:
     """Validate before atomic publication; reuse completed or publication-ready work."""
     image = image.absolute()
@@ -135,27 +202,26 @@ def prepare(image: Path, scratch: Path) -> dict:
                         "SINGULARITY_TMPDIR": tmp,
                         "SINGULARITY_CACHEDIR": str(Path(tmp) / "cache"),
                     }
+                    packing_preflight(runtime, directory, environment)
+                    print(
+                        json.dumps({"event": "oci_build", "uri": source["uri"]}),
+                        flush=True,
+                    )
                     # Only this helper's unpublished candidate can be replaced.
-                    subprocess.run(
-                        [
-                            runtime,
-                            "pull",
-                            "--force",
-                            "--disable-cache",
-                            "--arch",
-                            "amd64",
-                            str(candidate),
-                            source["uri"],
-                        ],
-                        env=environment,
-                        check=True,
+                    build_sif(
+                        runtime,
+                        candidate,
+                        source["uri"],
+                        environment,
                         timeout=6600,
                     )
                 check_version(runtime, candidate)
                 value = sealed_write(
                     ready_path,
                     {
-                        "protocol": "vllm-sif-bootstrap-1",
+                        "protocol": "vllm-sif-bootstrap-2",
+                        "mksquashfs_args": PACKING_ARGS,
+                        "packing_preflight_passed": True,
                         "vllm_version": VERSION,
                         "image_sha256": image_hash(candidate),
                         "oci_source_sha256": source["artifact_sha256"],

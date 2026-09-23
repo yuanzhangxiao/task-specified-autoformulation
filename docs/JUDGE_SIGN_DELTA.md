@@ -112,7 +112,7 @@ allocation, before the original prepare/review/report chain. It resolves the
 official `vllm/vllm-openai:v0.27.1` tag once, verifies the registry manifest digest,
 and records a digest-addressed OCI URI. Subsequent build attempts use that saved
 digest. It creates an amd64 SIF using
-[Apptainer pull](https://apptainer.org/docs/user/latest/cli/apptainer_pull.html),
+[Apptainer build](https://apptainer.org/docs/user/1.4/cli/apptainer_build.html),
 checks the installed vLLM package version without importing the GPU stack, then
 publishes the validated file atomically. Existing unrelated images are never
 overwritten. Completed builds and interrupted publication resume from their
@@ -128,12 +128,49 @@ uses a private temporary directory and disables the shared image cache; it does
 not clear existing container or model caches. See Apptainer's
 [build environment documentation](https://apptainer.org/docs/user/latest/build_env.html).
 
-The plan uploaded from ACES and the existing failed-submission output path can be
-reused, because the missing-file check stopped before creating submission intents.
+The plan uploaded from ACES can be reused. The original missing-file error stopped
+before creating submission intents, so that particular output path could be reused.
+Once jobs have been submitted, use a new output path for an authorized recovery;
+the original path remains the immutable record of those jobs.
 Once submitted, keep using the same `--prepare-image` invocation for idempotent
 inspection; it returns the saved job IDs. If image preparation fails, inspect
 `logs/image-*.err` and `logs/image-*.out` before resubmitting anything. This stage
-requires registry access and storage on Delta; neither was exercised locally.
+requires registry access and storage on Delta; these were not exercised locally.
+
+### Recovery after image job 22338341
+
+The first live bootstrap downloaded and extracted the pinned OCI image, then
+Apptainer's bundled `mksquashfs` exited with status 139 while creating the SIF.
+The log establishes a packing crash; it does not establish an out-of-memory,
+quota or extended-attribute cause. Prepare 22338342 and review 22338343 were
+cancelled before execution. Report 22338344 then failed because preparation had
+not created `plan.json`. No judge requests ran in that chain.
+
+Bootstrap version 2 uses `build --mksquashfs-args '-processors 4 -mem 4G'` to
+bound packing resources. It first checks that the runtime exposes the option,
+then packs a tiny local directory on the SIF destination filesystem. A failed
+check stops before the full OCI build. These options are documented in
+[Apptainer's build guide](https://apptainer.org/docs/user/1.4/build_a_container.html#mksquashfs-args).
+Passing a small packing check does not guarantee that packing the full image will
+succeed. There is one full build attempt per invocation, with no automatic retry.
+
+For this recovery use a new pinned source archive, set
+`AF_OUTPUT_ROOT=/work/hdd/bibo/yxiao2/phase_b/judge-sign-recheck-delta-v2`, and set
+`AF_IMAGE_TMP_ROOT=/tmp` so extraction uses a private directory on the CPU node.
+The 40 GiB free-space check still applies. Keep the original `AF_VLLM_IMAGE` path
+and its `.build/oci_source.json`; the saved source is
+`sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967`.
+Do not delete that pin or the v1 campaign to retry. Then use `--prepare-image` as
+above. The helper can replace only its unpublished `candidate.sif`; it preserves
+validated images and resumes interrupted publication without another build.
+
+The new image stdout log records `packing_preflight`,
+`packing_preflight_passed` and `oci_build` events. A successful receipt includes
+the packing arguments, exact OCI and SIF hashes and the vLLM version check. The
+previous unpacking directory was temporary and is not a reusable checkpoint, so
+a new full build still downloads/extracts the layers. If packing fails again,
+inspect the image logs before another attempt; neither a new judge model nor a
+new image tag is substituted automatically.
 
 Submission is idempotent. Repeating the submit command returns existing job IDs;
 it does not resubmit failures. Partial/uncertain scheduler replies retain intents
@@ -151,6 +188,8 @@ af_jobs=$(jq -r '[.jobs[]] | join(",")' "$ROOT/submission_manifest.json")
 squeue -j "$af_jobs" -o '%.18i %.25j %.10T %R'
 sacct -j "$af_jobs" --format=JobID,JobName%25,State,ExitCode,Elapsed
 ```
+
+For the recovery above, use `judge-sign-recheck-delta-v2` in `ROOT` instead.
 
 After preparation the report exists but can still show pending reviews. After
 the report job finishes:
@@ -180,3 +219,11 @@ The image-bootstrap follow-up passed 49 focused tests, including mock OCI pulls,
 wrong-version rejection, existing-image preservation, interrupted publication and
 the four-job dependency chain. The offline sign-review smoke and changed-file
 lint passed; repository-wide lint retains the same 37 unrelated findings.
+
+The packing-recovery follow-up passed 53 focused tests, the mocked sign-review
+smoke, changed-file Ruff and Python 3.11/shell syntax checks. A broad pytest run
+was stopped after source-identity drift during concurrent checkout edits
+(426 passed, five skipped, four fixture errors); all four affected basin-audit
+tests passed on an isolated rerun. Repository-wide Ruff reported 39 findings
+outside this change, including two in concurrently edited files. A real
+Apptainer build remains a Delta verification step; no cluster session was opened.

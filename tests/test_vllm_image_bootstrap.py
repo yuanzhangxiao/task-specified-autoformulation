@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -34,7 +35,13 @@ def mock_registry(monkeypatch, *, bad_digest=False):
     return calls
 
 
-def mock_runtime(monkeypatch, version=bootstrap.VERSION):
+def mock_runtime(
+    monkeypatch,
+    version=bootstrap.VERSION,
+    *,
+    fail_stage=None,
+    supports_bounds=True,
+):
     """Exercise real filesystem publication with a fake Apptainer subprocess."""
     calls = []
     monkeypatch.setattr(bootstrap.shutil, "which", lambda _: "/mock/apptainer")
@@ -44,12 +51,23 @@ def mock_runtime(monkeypatch, version=bootstrap.VERSION):
 
     def run(argv, **kwargs):
         calls.append(argv)
-        if argv[1] == "pull":
-            from pathlib import Path
-
+        if argv[-1] == "--help":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout="--mksquashfs-args" if supports_bounds else "old help",
+            )
+        if argv[1] == "build":
+            stage = "oci" if argv[-1].startswith("docker://") else "preflight"
+            if stage == fail_stage:
+                raise subprocess.CalledProcessError(255, argv)
             Path(argv[-2]).write_bytes(b"synthetic-sif-bytes")
-            assert "@sha256:" in argv[-1]
+            if stage == "oci":
+                assert "@sha256:" in argv[-1]
+            else:
+                assert (Path(argv[-1]) / "packing-check.txt").is_file()
             assert "--disable-cache" in argv
+            assert argv[argv.index("--mksquashfs-args") + 1] == bootstrap.PACKING_ARGS
             assert kwargs["env"]["APPTAINER_TMPDIR"]
         else:
             assert argv[1] == "exec" and "--nv" not in argv
@@ -83,7 +101,9 @@ def test_build_and_resume(tmp_path, monkeypatch):
     assert image.read_bytes() == b"synthetic-sif-bytes"
     assert result["gpu_calls"] == 0
     assert bootstrap.prepare(image, scratch) == result
-    assert len(calls) == 2 and len(network) == 2
+    assert len(calls) == 4 and len(network) == 2
+    assert result["mksquashfs_args"] == "-processors 4 -mem 4G"
+    assert result["packing_preflight_passed"] is True
     directory = image.with_name(image.name + ".build")
     assert not (directory / "candidate.sif").exists()
     assert sealed_read(directory / "result.json") == result
@@ -122,7 +142,7 @@ def test_resume_publication_without_new_download(tmp_path, monkeypatch, stage):
     monkeypatch.setattr(bootstrap, "sealed_write", write)
     result = bootstrap.prepare(image, scratch)
     assert result["image_sha256"] == bootstrap.image_hash(image)
-    assert len(network) == len(calls) == 2
+    assert len(network) == 2 and len(calls) == 4
 
 
 def test_existing_foreign_image_is_preserved(tmp_path, monkeypatch):
@@ -142,4 +162,59 @@ def test_published_image_corruption_not_overwritten(tmp_path, monkeypatch):
     image.write_bytes(b"changed")
     with pytest.raises(ValueError, match="published SIF differs"):
         bootstrap.prepare(image, scratch)
-    assert image.read_bytes() == b"changed" and len(calls) == 2
+    assert image.read_bytes() == b"changed" and len(calls) == 4
+
+
+@pytest.mark.parametrize("supported", [True, False])
+def test_packing_failure_stops_before_full_download(tmp_path, monkeypatch, supported):
+    mock_registry(monkeypatch)
+    calls = mock_runtime(
+        monkeypatch,
+        fail_stage="preflight",
+        supports_bounds=supported,
+    )
+    image = tmp_path / "vllm.sif"
+    with pytest.raises(
+        (RuntimeError, ValueError), match=r"preflight failed|lacks build"
+    ):
+        bootstrap.prepare(image, tmp_path / "scratch")
+    assert not any(arg.startswith("docker://") for call in calls for arg in call)
+    assert not image.exists()
+    assert not (tmp_path / "vllm.sif.build/validated.json").exists()
+    assert not list((tmp_path / "scratch").iterdir())
+
+
+def test_failed_build_keeps_digest_for_explicit_retry(tmp_path, monkeypatch):
+    network = mock_registry(monkeypatch)
+    calls = mock_runtime(monkeypatch, fail_stage="oci")
+    image, scratch = tmp_path / "vllm.sif", tmp_path / "scratch"
+    with pytest.raises(subprocess.CalledProcessError):
+        bootstrap.prepare(image, scratch)
+    assert not image.exists()
+    assert not (tmp_path / "vllm.sif.build/validated.json").exists()
+    assert len(calls) == 3  # Capability check, tiny pack, one OCI build; no retry.
+    source = sealed_read(tmp_path / "vllm.sif.build/oci_source.json")
+    (tmp_path / "vllm.sif.build/candidate.sif").write_bytes(b"partial old pull")
+    retried = mock_runtime(monkeypatch)
+    result = bootstrap.prepare(image, scratch)
+    assert result["oci_source_sha256"] == source["artifact_sha256"]
+    assert len(network) == 2
+    assert retried[-2][-1] == calls[-1][-1] == source["uri"]
+
+
+def test_legacy_validated_image_resumes_without_packing(tmp_path, monkeypatch):
+    calls = mock_runtime(monkeypatch)
+    image = tmp_path / "vllm.sif"
+    image.write_bytes(b"already published")
+    directory = tmp_path / "vllm.sif.build"
+    bootstrap.sealed_write(
+        directory / "validated.json",
+        {
+            "protocol": "vllm-sif-bootstrap-1",
+            "image_sha256": bootstrap.image_hash(image),
+            "vllm_version": bootstrap.VERSION,
+            "gpu_calls": 0,
+        },
+    )
+    assert bootstrap.prepare(image, tmp_path / "scratch")["protocol"].endswith("-1")
+    assert not calls
