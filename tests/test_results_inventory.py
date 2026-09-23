@@ -97,3 +97,53 @@ def test_identity_fields_are_carried_through(tmp_path: Path, name: str) -> None:
     entry = inventory.inventory_root(root)[name]
     assert entry["plan_sha256"] == "d" * 64
     assert entry["test_data_opened"] is False
+
+
+def test_a_frozen_test_evaluation_root_is_discovered(tmp_path: Path) -> None:
+    """It writes none of plan.json, summary.json or results/.
+
+    A scan that looked only for those reported the absence of any test
+    evaluation as a fact, when the instrument simply could not see one.
+    """
+    root = tmp_path / "external-baseline-test-v1"
+    root.mkdir()
+    (root / "external_baseline_freeze.json").write_text(
+        json.dumps({"execution_authorized": True, "planned": 480})
+    )
+    (root / "external_baseline_roster.jsonl").write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {"method": "pysr", "status": "complete",
+                 "benchmark_id": "a", "normalized_mse": 1.0},
+                {"method": "pysr", "status": "source_unavailable",
+                 "benchmark_id": "b"},
+                {"method": "d3", "status": "complete",
+                 "benchmark_id": "a", "normalized_mse": 2.5},
+            ]
+        )
+    )
+    assert any(
+        (root / marker).exists() for marker in inventory.ROOT_MARKERS
+    ), "a scan would skip this directory entirely"
+
+    record = inventory.inventory_root(root)
+    assert record["external_baseline_freeze.json"]["execution_authorized"] is True
+    groups = record["external_baseline_roster.jsonl"]["groups"]
+    assert groups["pysr"]["rows"] == 2 and groups["pysr"]["scored"] == 1
+    assert groups["d3"]["scored"] == 1
+
+
+def test_a_roster_line_that_will_not_parse_does_not_lose_the_rest(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "eval"
+    root.mkdir()
+    (root / "external_baseline_roster.jsonl").write_text(
+        '{"method": "pysr", "status": "complete", "normalized_mse": 1.0}\n'
+        "{ not json\n"
+        '{"method": "pysr", "status": "complete", "normalized_mse": 3.0}\n'
+    )
+    entry = inventory.inventory_root(root)["external_baseline_roster.jsonl"]
+    assert entry["lines"] == 3
+    assert entry["groups"]["pysr"]["scored"] == 2

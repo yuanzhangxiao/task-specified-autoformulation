@@ -19,6 +19,19 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+#: Artifacts that mark a directory as something worth inventorying. The
+#: frozen test evaluation writes none of plan.json, summary.json or results/,
+#: so a scan that looked only for those reported its absence as fact.
+ROOT_MARKERS = (
+    "plan.json",
+    "summary.json",
+    "results",
+    "external_baseline_freeze.json",
+    "execution_record.json",
+    "external_baseline_report.json",
+    "external_baseline_roster.jsonl",
+)
+
 #: Statuses that mean the method ran and reached a scientific conclusion,
 #: including an honest failure to find a model.
 TERMINAL = {
@@ -93,7 +106,14 @@ def inventory_root(root: Path) -> dict:
     if not record["exists"]:
         return record
 
-    for name in ("plan.json", "summary.json", "manifest.json"):
+    for name in (
+        "plan.json",
+        "summary.json",
+        "manifest.json",
+        "external_baseline_freeze.json",
+        "execution_record.json",
+        "external_baseline_report.json",
+    ):
         path = root / name
         if not path.is_file():
             continue
@@ -105,6 +125,8 @@ def inventory_root(root: Path) -> dict:
                 "plan_sha256", "artifact_sha256", "test_data_opened",
                 "private_reference_opened", "parameter_refit_applied",
                 "reporting_qualifications", "submission_id",
+                "execution_authorized", "plan_path", "evaluator_commit",
+                "chain_inputs_digest", "scored", "planned",
             ):
                 if field in payload:
                     entry[field] = payload[field]
@@ -140,6 +162,28 @@ def inventory_root(root: Path) -> dict:
             "with_frozen_model": frozen,
             **summarize_rows(rows),
         }
+
+    for name in ("external_baseline_roster.jsonl", "withheld_source_outcomes.jsonl"):
+        path = root / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        lines = [line for line in text.splitlines() if line.strip()]
+        parsed = []
+        for line in lines:
+            try:
+                parsed.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        entry = {"sha256": sha256(path), "lines": len(lines)}
+        if parsed:
+            grouped: dict[str, list[dict]] = {}
+            for row in parsed:
+                grouped.setdefault(group_key(row), []).append(row)
+            entry["groups"] = {
+                key: summarize_rows(items) for key, items in sorted(grouped.items())
+            }
+        record[name] = entry
 
     submissions = root / "submissions"
     if submissions.is_dir():
@@ -181,10 +225,7 @@ def main() -> None:
                 child
                 for child in sorted(directory.iterdir())
                 if child.is_dir()
-                and any(
-                    (child / name).exists()
-                    for name in ("plan.json", "summary.json", "results")
-                )
+                and any((child / name).exists() for name in ROOT_MARKERS)
             )
     seen: set[Path] = set()
     records = []
@@ -206,7 +247,11 @@ def main() -> None:
         if not record["exists"]:
             print("    (missing)")
             continue
-        for name in ("plan.json", "summary.json"):
+        for name in (
+            "plan.json", "summary.json", "external_baseline_freeze.json",
+            "execution_record.json", "external_baseline_report.json",
+            "external_baseline_roster.jsonl",
+        ):
             entry = record.get(name)
             if not entry:
                 continue
