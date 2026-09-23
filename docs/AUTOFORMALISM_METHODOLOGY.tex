@@ -1,0 +1,166 @@
+% Drop-in manuscript section. Requires amsmath and amssymb.
+% Scope/version notes and source map: AUTOFORMALISM_METHODOLOGY_REVIEW.md.
+\section{Method}
+\label{sec:autoformalism-method}
+
+Autoformalism constructs task-sufficient dynamical models from a scientific
+specification and partially observed trajectories. A language-model proposer
+supplies variables and mechanisms; a deterministic runtime assembles and checks
+the equations; numerical fitting estimates their parameters. Bounded revision
+uses training residuals, while validation selects among candidates. Shared
+processes, pruning, and scientific critique are configurable modules; each
+experiment specifies which are enabled.
+
+\subsection{Model and information boundary}
+\label{sec:af-model}
+
+Given permitted inputs $u(t)$, fixed covariates $c$, and observed outputs $y(t)$,
+a candidate $\mathcal M$ defines
+\begin{equation}
+ \begin{aligned}
+ \dot{x}&=F_{\mathcal M}(t,x,u,c;\theta),\\
+ \widehat y&=H_{\mathcal M}(t,x,u,c;\theta).
+ \end{aligned}
+ \label{eq:af-model}
+\end{equation}
+The state $x$ may include unobserved variables, and named algebraic processes
+form an acyclic dependency graph. Parameters $\theta$ are shared across
+trajectories. Observed states start from their measured initial values; latent
+states use declared constants, shared fitted values, or causal maps of available
+initial observations, inputs, and covariates. Any initializer coefficients are
+fitted on training data and fixed for validation and testing. Predictions are
+open rollouts: subsequent output measurements neither reset states nor serve as
+forcing. Test trajectories and metrics remain inaccessible until model selection
+and the protocol are frozen.
+
+\subsection{Staged model construction}
+\label{sec:af-construction}
+
+Construction proceeds through variable selection, optional shared-process
+proposal, topology, and interaction functions. Topology specifies signed
+hyperedges from sets of drivers to equation targets. The interaction stage
+supplies a function for each declared dependency. The \textit{full} variant also
+receives descriptive training-trajectory summaries during initial construction;
+\textit{brief-only} omits these summaries. Both use the same subsequent fitting
+and residual-feedback procedure.
+
+A shared process declares its drivers, consumers, contribution signs, scientific
+meaning, and any known conversions. Its function $P_p$ and internal parameters
+are defined once and referenced by every consumer:
+\begin{equation}
+ F_i=\sum_j T_{ij}^{\mathrm{ordinary}}
+       +\sum_{p\in\mathcal P_i}s_{ip}g_{ip}d_{ip}P_p.
+ \label{eq:af-process}
+\end{equation}
+Here $\mathcal P_i$ indexes processes consumed by equation $i$,
+$s_{ip}\in\{-1,+1\}$ is the declared sign, $g_{ip}\geq0$ a fitted gain,
+and $d_{ip}$ a declared conversion factor. A declared transfer with complete
+conversions uses opposite signs and a common gain; a shared influence uses
+separate consumer gains. When conversions are unknown, effective independent
+gains absorb the missing conversions, without imposing conservation. The runtime
+owns outer signs and gain assembly and propagates changes to the shared law
+across its consumers. Empty or invalid optional process suggestions allow ordinary
+construction to continue.
+
+All proposals pass typed schemas and a restricted expression grammar. The runtime
+checks symbol closure, causal initialization, algebraic acyclicity, and public
+requirements derived from the equations, including applicable input--target
+paths, dynamic mediation, and nonlinear-feedback predicates. Explicit violations
+block acceptance. Unresolved predicates remain labelled as such; the development
+policy can retain these candidates without treating them as certified passes.
+Unambiguous representation errors are normalized mechanically; ambiguous changes
+to scientific content return to the proposer. Coordinated edits commit atomically,
+and repair prompts show the actual current model and failed checks.
+
+\subsection{Bounded numerical fitting}
+\label{sec:af-fitting}
+
+For output $q$, let $\sigma_q$ be its pooled training standard deviation, floored
+at $10^{-8}$. Define the residual at time $t_k$ of trajectory $r$ by
+\begin{equation}
+ \begin{aligned}
+ e_{rkq}(\theta)&=
+ \frac{\widehat y_{rq}(t_k;\theta)-y_{rq}(t_k)}{\sigma_q},\\
+ E_D&=\frac{1}{N_D}\sum_{(r,k,q)\in\mathcal I_D}e_{rkq}^{\,2},
+ \end{aligned}
+ \label{eq:af-loss}
+\end{equation}
+where $\mathcal I_D$ indexes the $N_D$ scalar output observations in split $D$.
+Fitting minimizes
+$\frac12\sum_{\mathrm{train}}e_{rkq}^{\,2}$ within fixed time and evaluation
+budgets. NMSE $E_D$ measures output trajectories, with no latent-state error term;
+validation uses the training scales and fixed fitted parameters.
+
+We initialize by collocation, jointly optimizing parameters and trajectory nodes
+under the model equations and causal boundary conditions. Only parameters pass
+to subsequent initial-value simulations. Training-rollout screening precedes
+bounded least-squares refinement with forward-sensitivity derivatives; supported
+nonsmooth cases have a bounded exact-rollout polling fallback. The best finite
+training-evaluated point is retained. Numerical termination, budget exhaustion,
+and predictive error are reported separately: an unfinished optimization does
+not establish that the proposed structure cannot fit the observations.
+
+\subsection{Feedback, revision, and selection}
+\label{sec:af-revision}
+
+At retained parameters, training residuals identify where mismatch occurs over
+time and across input conditions. The proposer receives these patterns, numerical
+status, deterministic findings, and the complete current model. It may jointly
+revise states, dependencies, laws, shared processes, and initializers. These are
+conditional observations about a fitted candidate, not diagnoses proving a missing
+mechanism. Accepted revisions are recompiled and fitted using compatible parent
+parameter values. Among candidates with eligible public checks and complete
+finite rollouts, selection minimizes validation NMSE, breaking ties by additive
+term count and retaining the incumbent on an exact tie. A fixed round budget
+bounds each lineage.
+
+An optional scientific critic reuses the established GPT-OSS-120B paired judge.
+Its two stages assess sign-blinded atomic contributions and broader symbolic
+consistency in both candidate orderings. The judge receives public requirements
+and symbolic models, without trajectories, fitted values, or numerical scores.
+Consensus concerns are supplied as separately labelled advice alongside
+deterministic and numerical feedback. Reviews use the actual model after pruning
+or revision and before any new fit. Critic preferences neither select nor veto
+candidates and cannot override deterministic failures. This advisory role supplies
+revision hypotheses, rather than scientific certification.
+
+\subsection{Process-aware pruning}
+\label{sec:af-pruning}
+
+Pruning removes one weak legal contribution from a retained model. An ordinary
+deletion unit is a complete signed additive term. Removing a shared process
+removes all its consumer contributions together; editing its defining law
+propagates to all consumers. Ambiguous deletions are excluded, observation
+mappings are preserved, and unreachable states, processes, parameters, and
+initializers are cleaned up. Automatic deletion is skipped when public obligations
+are unresolved.
+
+Write a defining right-hand side as $F_i=\sum_jT_{ij}$. On the parent's training
+rollouts at recorded times, compute
+\begin{equation}
+ \begin{aligned}
+ r_{ij}&=\frac{\operatorname{RMS}(T_{ij})}
+                  {\max\{\operatorname{RMS}(F_i),10^{-12}\}},\\
+ r(U)&=\max_{(i,j)\in U}r_{ij}.
+ \end{aligned}
+ \label{eq:af-pruning-rank}
+\end{equation}
+Here $T_{ij}$ is the entire signed contribution, including fitted coefficients,
+and $\operatorname{RMS}(T)=\sqrt{N^{-1}\sum_{n=1}^N T(t_n)^2}$ pools training
+samples. A deletion unit $U$ is ranked by its largest affected-term ratio. The
+lowest-ranked legal unit is fixed before refitting or inspecting new validation
+scores. This is one greedy deletion, not an exhaustive sparsity search.
+
+We refit the pruned model and an unchanged control with equal allocations and
+compatible parent warm starts. Let $E_b$ be the better available validation NMSE
+of the retained parent and refitted control. The pruned model is accepted only
+if public checks pass, no component of the complexity vector increases, at least
+one decreases, and
+\begin{equation}
+ E_{\mathrm{pruned}}\leq E_b+\max\{10^{-6},0.01E_b\}.
+ \label{eq:af-pruning-accept}
+\end{equation}
+Complexity counts states, named processes, fitted parameters, additive terms,
+and expression-tree nodes. The tolerance is a declared simplification policy,
+not a scientific threshold. Prompts, replies, fitted checkpoints, decisions,
+and call/token usage are recorded for reproducible, bounded resume.
