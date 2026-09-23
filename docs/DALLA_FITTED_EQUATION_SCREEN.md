@@ -237,6 +237,53 @@ active absorption memory, a good physiological balance and accurate fitting.
 The remaining nonlinear models are not declared invalid merely because the
 affine screen does not apply.
 
+### Do the structural leads match held-out interventions?
+
+The four structural/balance leads above were replayed with frozen parameters on
+all 16 training and four validation trajectories each. The canonical round-10
+trial additionally received all seven existing canonical diagnostic probes.
+All 87 rollouts completed; all eight aggregate original scores reproduce within
+1e-13, and resume performed no new integration. No refitting, LLM calls or
+registered test access occurred.
+
+| Model | 75 g at minute 30 | 105 g at minute 90 | 30 + 75 g at minutes 0 / 90 | Combined initial-condition change |
+| --- | ---: | ---: | ---: | ---: |
+| Full canonical obfuscated, seed 1, round-10 trial | 0.308211 | 0.485714 | 0.117793 | 0.072559 |
+| Full perturbed obfuscated, seed 0, round-14 trial | 0.388185 | 0.506134 | 0.121667 | 0.044729 |
+| Full perturbed named, seed 1, round 5 | 0.266261 | 0.544928 | 0.443490 | 0.483717 |
+| Full perturbed named, seed 0, round-3 trial | 1.228218 | 1.032848 | 0.913797 | 0.919777 |
+
+Entries are per-trajectory NMSE using that cell's original training scale. Each
+model is compared with its own canonical or perturbed reference. Both promising
+reduced models respond too early and generally overshoot the held-out meal
+responses. They are structurally reasonable leads, not convincing examples of
+accurate interventional generalization. Some individual training curves and
+the fourth validation case fit better; this does not rescue their systematic
+meal-response discrepancies.
+
+The canonical round-10 trial scores 0.187470 for the existing 60 g / minute-60
+diagnostic and 0.103714 for two 30 g meals at minutes 60 and 90. Its relative
+squared meal-spacing effect error is 0.661545. The shape is qualitatively
+responsive, but the timing and magnitude differ substantially. Its independent
+tissue-initialization effect errors equal one because it ignores Gt and predicts
+no effect when initial Gp and the meal input are unchanged.
+
+There is **no held-out insulin infusion schedule in these downloaded T1
+validation data**. The fourth case changes initial Gp by +5% and initial
+plasma/liver insulin by -7.5%, with no meal. It is not an isolated insulin
+intervention or a time-varying insulin schedule. Both reduced leads use only
+the meal forcing and initial Gp (with fixed learned latent initials), so an
+insulin-only change holding those arguments fixed cannot change their output.
+The lower error on the combined initial-condition case therefore does not
+establish insulin-response recovery. The other two leads can receive indirect
+insulin effects through auxiliaries, but their meal fits are poor and no separate
+insulin-schedule replay has been performed.
+
+The curves and every per-trajectory score are in
+`artifacts/t1-structural-leads-2026-09-22/`. These findings support retrieving
+round 15 and preparing the bounded T1-hard pilot below; they do not prove that
+every exported candidate fails every possible intervention.
+
 ### Proposed next pilot
 
 Keep the structurally plausible reduced-model leads and retrieve the missing
