@@ -14,7 +14,10 @@ fi
 if [[ "$mode" == prepare ]]; then
   "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_review_continuation.py
   protocol="$(jq -r '.protocol' "$AF_OUTPUT_ROOT/plan.json")"
-  if [[ "$protocol" == review-deadline-5 ]]; then
+  if [[ "$protocol" == review-deadline-6 ]]; then
+    PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT" "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_review_multi.py tests/test_multi_target_profile.py
+    "$AF_PYTHON" scripts/smoke_review_multi.py --output "$AF_OUTPUT_ROOT/controller-smoke"
+  elif [[ "$protocol" == review-deadline-5 ]]; then
     "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_review_revision_v5.py
     "$AF_PYTHON" scripts/smoke_review_revision.py
     "$AF_PYTHON" scripts/audit_review_parameters.py --root "$AF_OUTPUT_ROOT"

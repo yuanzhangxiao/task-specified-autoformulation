@@ -43,6 +43,7 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import numerical_sibling as revision
 from autoformalism.search import review_model_edits as content_edits
 from autoformalism.search import (
+    review_revision_multi,
     review_revision_v3,
     review_revision_v4,
     review_revision_v5,
@@ -213,6 +214,15 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
         if index and plan["protocol"] in io.CONTENT_PROTOCOLS
         else BudgetedRepairClient
     )
+    if index and plan["protocol"] == io.MULTI_PROTOCOL:
+        parent = io.read_round(root, task, index - 1)
+        if (
+            parent
+            and parent["selected"] is None
+            and not parent.get("construction_draft")
+            and task["arm"] != "refit_only"
+        ):
+            client_type = BudgetedRepairClient
     return client_type(
         settings=settings,
         seed=task["seed"],
@@ -261,7 +271,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     from autoformalism.search import shared_model_revision
 
     edits = (
-        shared_model_revision
+        review_revision_multi
+        if plan["protocol"] == io.MULTI_PROTOCOL
+        else shared_model_revision
         if plan["protocol"] == io.INTEGRATION_PROTOCOL
         else review_revision_v6
         if plan["protocol"] == io.SHARED_PROTOCOL
@@ -277,6 +289,15 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     for attempt in range(3):
         raw, record = None, None
         user = edits.payload(bundle, packet, selected["fit"]["parameters"], feedback)
+        if plan["protocol"] == io.MULTI_PROTOCOL:
+            from autoformalism.search.review_multi_construction import public_contract
+
+            user["public_target_contract"] = public_contract(
+                plan["cells"][task["cell"]], task
+            )
+            user["public_requirement_findings"] = _certificate_feedback(
+                selected["certificate"], task
+            )
         if plan["protocol"] == io.INTEGRATION_PROTOCOL:
             user["public_requirement_findings"] = selected["certificate"]
             user["fitting_status"] = {
@@ -335,7 +356,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
                 "certificate": certificate,
                 "decision": decision,
                 "attempts": attempts,
-                "revision_policy": "general-shared-revision-1"
+                "revision_policy": review_revision_multi.POLICY
+                if plan["protocol"] == io.MULTI_PROTOCOL
+                else "general-shared-revision-1"
                 if plan["protocol"] == io.INTEGRATION_PROTOCOL
                 else "scientific-content-revision-"
                 + (
@@ -395,7 +418,9 @@ def _content_revision(plan: dict, task: dict, parent: dict, client) -> dict:
     return {
         "status": "revision_failed",
         "attempts": attempts,
-        "revision_policy": "general-shared-revision-1"
+        "revision_policy": review_revision_multi.POLICY
+        if plan["protocol"] == io.MULTI_PROTOCOL
+        else "general-shared-revision-1"
         if plan["protocol"] == io.INTEGRATION_PROTOCOL
         else "scientific-content-revision-"
         + (
@@ -427,7 +452,16 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
         "status": "construction_failed",
         "decision": None,
     }
-    if index and (parent["selected"] is None or parent["closed"]):
+    if (
+        index
+        and plan["protocol"] == io.MULTI_PROTOCOL
+        and parent["selected"] is None
+        and task["arm"] != "refit_only"
+    ):
+        from autoformalism.search.review_multi_construction import propose
+
+        payload.update(propose(plan, task, parent, client, directory))
+    elif index and (parent["selected"] is None or parent["closed"]):
         payload["status"] = "closed_lineage"
     elif task["arm"] == "refit_only":
         if index:
@@ -792,6 +826,10 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
         }
         if continuation:
             closed = selected is None
+        if plan["protocol"] == io.MULTI_PROTOCOL:
+            closed = (
+                False  # The frozen visit limit, not a failed proposal, ends this phase.
+            )
         return sealed_write(
             directory / "result.json",
             {
@@ -807,6 +845,18 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                 "cost": proposal["cost"],
                 "test_data_opened": False,
                 "selected_new_trial": selected is not None and selected is trial,
+                **(
+                    {
+                        "construction_draft": None
+                        if selected is not None
+                        else proposal.get(
+                            "construction_draft",
+                            (parent or {}).get("construction_draft"),
+                        )
+                    }
+                    if plan["protocol"] == io.MULTI_PROTOCOL
+                    else {}
+                ),
                 **(
                     {
                         "proposal_status": proposal["status"],

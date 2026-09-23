@@ -164,11 +164,13 @@ def apply_content(
     enforce_size_limits: bool = True,
     content_model: type[legacy.ModelEdits] = CheckedContent,
     enforce_patch_limits: bool = True,
+    output_mappings: list[dict] | None = None,
+    reference_catalog: dict[str, str] | None = None,
 ) -> dict:
     """Compile already schema-validated content using an explicit runtime policy."""
     equations, duplicates = _unique(reply.equations, "component")
     initializers, initial_duplicates = _unique(reply.initializers, "state")
-    available = references(packet)
+    available = references(packet) if reference_catalog is None else reference_catalog
     canonical = set(available.values())
     valid, invalid = [], []
     for ref in reply.evidence_refs:
@@ -199,16 +201,24 @@ def apply_content(
                 "terms; parameters and JSON fields are not modeled variables."
             )
     targets = bundle["context"]["targets"]
-    if len(targets) != 1:
+    if output_mappings is None and len(targets) != 1:
         raise ValueError("revision-3 requires exactly one public output")
+    if output_mappings is not None:
+        channels = [m["channel"] for m in output_mappings]
+        if len(set(channels)) != len(channels) or not set(channels) <= set(targets):
+            raise ValueError("output mappings require distinct declared public targets")
     patch = {
         "hypothesis": reply.hypothesis,
         "evidence_ids": list(dict.fromkeys(valid)),
         "equations": [e.model_dump(mode="json") for e in equations],
         "remove": variables,
-        "mappings": []
-        if reply.output_expression is None
-        else [{"channel": targets[0], "expression": reply.output_expression}],
+        "mappings": output_mappings
+        if output_mappings is not None
+        else (
+            []
+            if reply.output_expression is None
+            else [{"channel": targets[0], "expression": reply.output_expression}]
+        ),
         "initializers": [i.model_dump(mode="json") for i in initializers],
     }
     content = content_model.model_validate(translate_names(patch, inverse))

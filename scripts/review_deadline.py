@@ -26,6 +26,13 @@ def interrupted(root, plan, task, index, reason):
         return old
     parent = io.read_round(root, task, index - 1) if index else None
     proposal = directory / "proposal.json"
+    saved = sealed_read(proposal) if proposal.exists() else {}
+    multi = plan["protocol"] == io.MULTI_PROTOCOL
+    draft = (
+        saved.get("construction_draft")
+        or saved.get("bundle")
+        or (parent or {}).get("construction_draft")
+    )
     return sealed_write(
         directory / "result.json",
         {
@@ -35,8 +42,17 @@ def interrupted(root, plan, task, index, reason):
             "error": reason,
             "trial": None,
             "selected": parent["selected"] if parent else None,
-            "closed": parent is None or parent["selected"] is None,
-            "cost": sealed_read(proposal).get("cost", {}) if proposal.exists() else {},
+            "closed": False if multi else parent is None or parent["selected"] is None,
+            "cost": saved.get("cost", {}),
+            **(
+                {
+                    "construction_draft": draft
+                    if not (parent or {}).get("selected")
+                    else None
+                }
+                if multi
+                else {}
+            ),
             "test_data_opened": False,
             "fresh_budget_on_resume": False,
         },
@@ -214,6 +230,13 @@ def main():
                         if task["arm"] == "refit_only":
                             pipeline.fit_one(root, plan, task, 0)
                 value = reporting.report(root)
+                if plan["protocol"] == io.MULTI_PROTOCOL and any(
+                    io.read_round(root, task, args.round) is None
+                    for task in plan["tasks"]
+                ):
+                    raise ValueError(
+                        "round incomplete: missing task results; inspect logs"
+                    )
     elif command == "report":
         value = reporting.report(root)
     elif command == "export":

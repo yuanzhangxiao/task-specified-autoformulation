@@ -130,7 +130,9 @@ def payload(bundle: dict, packet: dict, parameters: dict, retry=None) -> dict:
     return value
 
 
-def _cleanup(bundle: dict, reply: ScientificRevision) -> tuple[dict, list[dict]]:
+def _cleanup(
+    bundle: dict, reply: ScientificRevision, *, output_mappings: tuple | None = None
+) -> tuple[dict, list[dict]]:
     """Drop only unused new metadata; never drop a symbol used by an initializer."""
     parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
     inverse = {v: k for k, v in parameter_aliases(parent).items()}
@@ -140,11 +142,16 @@ def _cleanup(bundle: dict, reply: ScientificRevision) -> tuple[dict, list[dict]]
         definitions.pop(name, None)
     definitions.update({e.component: e.expression for e in reply.equations})
     values = list(definitions.values())
-    values += (
-        [reply.output_expression]
-        if reply.output_expression is not None
-        else [m.expression for m in parent.observation_mappings]
-    )
+    if output_mappings is None:
+        values += (
+            [reply.output_expression]
+            if reply.output_expression is not None
+            else [m.expression for m in parent.observation_mappings]
+        )
+    else:
+        mappings = {m.channel: m.expression for m in parent.observation_mappings}
+        mappings.update({m.channel: m.expression for m in output_mappings})
+        values += list(mappings.values())
     # Conservative: preserve references in unchanged and replacement boundaries.
     maps = [
         r["initial"]["expression"]

@@ -24,7 +24,7 @@ readonly protocol platform
 case "${protocol}" in
   basin-equation-repair-1) worker_script=basin_repair_pilot.py ;;
   detention-process-pilot-1|detention-process-pilot-2|detention-process-pilot-3) worker_script=detention_process_pilot.py ;;
-  review-deadline-1|review-deadline-2|review-deadline-3|review-deadline-4|review-deadline-5|shared-process-pilot-1|shared-process-integration-1) worker_script=review_deadline.py ;;
+  review-deadline-1|review-deadline-2|review-deadline-3|review-deadline-4|review-deadline-5|review-deadline-6|shared-process-pilot-1|shared-process-integration-1) worker_script=review_deadline.py ;;
   prefit-numerical-sibling-1) worker_script=prefit_numerical_sibling.py ;;
   prefit-requirement-feedback-1) worker_script=prefit_requirement_campaign.py ;;
   prefit-matched-feedback-1) worker_script=prefit_feedback_campaign.py ;;

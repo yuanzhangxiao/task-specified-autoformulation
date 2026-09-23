@@ -159,11 +159,14 @@ def submit(root: Path, index: int) -> dict:
             )
             gpu.append(f"--dependency=afterok:{prep}")
         proposer = queue("propose", index, gpu)
+        success_dependency = (
+            "afterok" if plan["protocol"] == io.MULTI_PROTOCOL else "afterany"
+        )
         fit = queue(
             "fit",
             index,
             [
-                f"--dependency=afterany:{proposer}",
+                f"--dependency={success_dependency}:{proposer}",
                 "--partition=cpu",
                 f"--array=0-{len(plan['tasks']) - 1}%16",
                 "--cpus-per-task=1",
@@ -188,7 +191,7 @@ def submit(root: Path, index: int) -> dict:
                 "dispatch",
                 index + 1,
                 [
-                    f"--dependency=afterany:{finish}",
+                    f"--dependency={success_dependency}:{finish}",
                     "--partition=cpu",
                     "--cpus-per-task=1",
                     "--mem=4G",

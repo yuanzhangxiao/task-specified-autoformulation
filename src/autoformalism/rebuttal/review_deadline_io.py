@@ -31,11 +31,12 @@ CONTENT_PROTOCOL = "review-deadline-2"
 CONTINUATION_PROTOCOL = "review-deadline-3"
 PARAMETER_PROTOCOL = "review-deadline-4"
 REVISION_PROTOCOL = "review-deadline-5"
+MULTI_PROTOCOL = "review-deadline-6"
 SHARED_PROTOCOL = "shared-process-pilot-1"
 INTEGRATION_PROTOCOL = "shared-process-integration-1"
 SHARED_PROTOCOLS = {SHARED_PROTOCOL, INTEGRATION_PROTOCOL}
 PARAMETER_PROTOCOLS = {PARAMETER_PROTOCOL, REVISION_PROTOCOL}
-CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, *PARAMETER_PROTOCOLS}
+CONTINUATION_PROTOCOLS = {CONTINUATION_PROTOCOL, *PARAMETER_PROTOCOLS, MULTI_PROTOCOL}
 SCIENTIFIC_PROTOCOLS = {*CONTINUATION_PROTOCOLS, *SHARED_PROTOCOLS}
 CONTENT_PROTOCOLS = {CONTENT_PROTOCOL, *SCIENTIFIC_PROTOCOLS}
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
@@ -52,6 +53,7 @@ class DeadlineConfig(StrictSchema):
         "review-deadline-3",
         "review-deadline-4",
         "review-deadline-5",
+        "review-deadline-6",
         "shared-process-pilot-1",
         "shared-process-integration-1",
     ] = PROTOCOL
@@ -61,7 +63,7 @@ class DeadlineConfig(StrictSchema):
     served_context_tokens: Literal[32768] = 32768
     public_cells: tuple[str, ...] = Field(min_length=1, max_length=8)
     seeds: tuple[int, ...] = (0, 1)
-    rounds: int = Field(default=3, ge=1, le=6)
+    rounds: int = Field(default=3, ge=1, le=13)
     no_latent_cells: tuple[str, ...] = ()
     no_spec_cells: tuple[str, ...] = ()
     full_only: bool = False
@@ -79,18 +81,20 @@ class DeadlineConfig(StrictSchema):
 
     @model_validator(mode="after")
     def bounded_matrix(self):
+        if self.protocol != MULTI_PROTOCOL and self.rounds > 6:
+            raise ValueError("historical protocols allow at most six phase visits")
         if self.full_only and (
-            self.protocol != CONTENT_PROTOCOL
+            self.protocol not in {CONTENT_PROTOCOL, MULTI_PROTOCOL}
             or self.no_latent_cells
             or self.no_spec_cells
         ):
             raise ValueError(
                 "full-only pilots require review-deadline-2 without ablation cells"
             )
-        if (
-            self.fit_profile == "collocation-multi-target-v1"
-            and self.protocol != CONTENT_PROTOCOL
-        ):
+        if self.fit_profile == "collocation-multi-target-v1" and self.protocol not in {
+            CONTENT_PROTOCOL,
+            MULTI_PROTOCOL,
+        }:
             raise ValueError("multi-target pilots require review-deadline-2")
         if self.protocol in SHARED_PROTOCOLS and (
             self.no_latent_cells or self.no_spec_cells or self.rounds != 2
@@ -190,6 +194,11 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
         )
     if protocol == REVISION_PROTOCOL:
         paths += ("scripts/smoke_review_revision.py",)
+    if protocol == MULTI_PROTOCOL:
+        paths += (
+            "scripts/smoke_review_multi.py",
+            "scripts/hpc/submit_review_multi_aces.sh",
+        )
     if protocol in SHARED_PROTOCOLS:
         paths += (
             "scripts/submit_shared_process_pilot.py",

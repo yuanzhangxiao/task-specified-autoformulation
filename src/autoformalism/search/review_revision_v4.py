@@ -70,7 +70,7 @@ def payload(bundle, packet, parameters, retry=None) -> dict:
 
 
 def _resolve(
-    bundle: dict, reply: ScientificRevision
+    bundle: dict, reply: ScientificRevision, *, output_mappings: tuple = ()
 ) -> tuple[tuple[ParameterSpec, ...], dict]:
     """Resolve every new role against all edited RHS and output occurrences."""
     parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
@@ -105,6 +105,7 @@ def _resolve(
     expressions = [(e.component, e.expression) for e in reply.equations]
     if reply.output_expression is not None:
         expressions.append(("public_output", reply.output_expression))
+    expressions.extend((f"output_{m.channel}", m.expression) for m in output_mappings)
     symbols = {s.name for s in parent.states} | {p.name for p in parent.processes}
     symbols |= {e.component for e in reply.equations}
     context = ValidationContext.model_validate(bundle["context"])

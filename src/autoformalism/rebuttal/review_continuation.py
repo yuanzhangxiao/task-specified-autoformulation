@@ -12,7 +12,13 @@ from autoformalism.schemas.public_fitting import PublicFitRequest, PublicFitResu
 from autoformalism.search import review_model_edits
 
 
-def _check_result(result: dict, task: dict, index: int) -> None:
+def _check_result(
+    result: dict,
+    task: dict,
+    index: int,
+    *,
+    profile: str = "collocation-single-target-v2",
+) -> None:
     if result.get("task") != task or result.get("round") != index:
         raise ValueError("source checkpoint task/round mismatch")
     if result.get("test_data_opened") is not False:
@@ -22,7 +28,7 @@ def _check_result(result: dict, task: dict, index: int) -> None:
         return
     request = PublicFitRequest.model_validate(selected["request"])
     fit = PublicFitResult.model_validate(selected["fit"])
-    if request.profile != "collocation-single-target-v2":
+    if request.profile != profile or fit.profile != profile:
         raise ValueError("source fitter profile differs")
     if (
         fit.parameters is None
@@ -37,6 +43,29 @@ def _check_result(result: dict, task: dict, index: int) -> None:
         )
 
 
+def _draft_record(
+    source: Path, task: dict, result: dict, index: int
+) -> tuple[dict, str] | None:
+    """Recover only recorded executable drafts, never infer a missing proposal."""
+    if result.get("construction_draft") is not None:
+        return result, "construction_draft"
+    for at in range(index, -1, -1):
+        path = io.round_path(source, task, at) / "proposal.json"
+        if not path.exists():
+            continue
+        proposal = sealed_read(path)
+        if (
+            proposal.get("task") != task
+            or proposal.get("round") != at
+            or proposal.get("test_data_opened") is not False
+        ):
+            raise ValueError("draft proposal identity/public boundary differs")
+        for field in ("construction_draft", "bundle"):
+            if proposal.get(field) is not None:
+                return proposal, field
+    return None
+
+
 def verify_imports(root: Path, plan: dict) -> None:
     """Copied source and imported checkpoint must agree, including learned initials."""
     ledger = plan["continuation"]
@@ -47,8 +76,26 @@ def verify_imports(root: Path, plan: dict) -> None:
         if source["artifact_sha256"] != ledger["results"][task["task_id"]]:
             raise ValueError("source checkpoint hash differs")
         _check_result(
-            source, task, ledger.get("source_phase_round", ledger["source_round"])
+            source,
+            task,
+            ledger.get("source_phase_round", ledger["source_round"]),
+            profile=plan["config"]["fit_profile"]
+            if plan["protocol"] == io.MULTI_PROTOCOL
+            else "collocation-single-target-v2",
         )
+        draft = None
+        if plan["protocol"] == io.MULTI_PROTOCOL:
+            entry = ledger["construction_drafts"].get(task["task_id"])
+            if entry:
+                record = sealed_read(root / "imports" / task["task_id"] / "draft.json")
+                if (
+                    record["artifact_sha256"] != entry["sha256"]
+                    or record["task"] != task
+                    or record["round"] != entry["round"]
+                    or record.get("test_data_opened") is not False
+                ):
+                    raise ValueError("imported construction draft differs")
+                draft = record[entry["field"]]
         anchor = io.read_round(root, task, 0)
         if (
             anchor is None
@@ -58,7 +105,16 @@ def verify_imports(root: Path, plan: dict) -> None:
             or anchor.get("task") != task
             or anchor.get("status") != "imported_checkpoint"
             or anchor.get("cost") != {"physical_requests": 0}
-            or anchor.get("closed") != (source.get("selected") is None)
+            or anchor.get("closed")
+            != (
+                False
+                if plan["protocol"] == io.MULTI_PROTOCOL
+                else source.get("selected") is None
+            )
+            or (
+                plan["protocol"] == io.MULTI_PROTOCOL
+                and anchor.get("construction_draft") != draft
+            )
         ):
             raise ValueError("imported anchor differs from its source")
 
@@ -77,8 +133,11 @@ def prepare(
         raise ValueError("source and continuation must be disjoint directories")
     if protocol not in io.CONTINUATION_PROTOCOLS:
         raise ValueError("unsupported continuation protocol")
-    if source_round < 0 or not 1 <= visits <= 5:
-        raise ValueError("choose a source round and between one and five new visits")
+    limit = 12 if protocol == io.MULTI_PROTOCOL else 5
+    if source_round < 0 or not 1 <= visits <= limit:
+        raise ValueError(
+            f"choose a source round and between one and {limit} new visits"
+        )
     with io.execution_lease(source, exclusive=True), public._lock(root):
         io.require_open(source)
         original = io.verify(source, execution=False)
@@ -96,13 +155,30 @@ def prepare(
         )
         if not 0 <= phase_round < original["config"]["rounds"]:
             raise ValueError("source round is outside the original campaign")
-        results = {}
+        results, drafts = {}, {}
         for task in original["tasks"]:
             result = io.read_round(source, task, phase_round)
             if result is None:
                 raise ValueError(f"source round incomplete: {task['task_id']}")
-            _check_result(result, task, phase_round)
+            _check_result(
+                result,
+                task,
+                phase_round,
+                profile=original["config"]["fit_profile"]
+                if protocol == io.MULTI_PROTOCOL
+                else "collocation-single-target-v2",
+            )
             results[task["task_id"]] = result
+            if protocol == io.MULTI_PROTOCOL and result["selected"] is None:
+                item = _draft_record(source, task, result, phase_round)
+                if item:
+                    from autoformalism.rebuttal.review_deadline_pipeline import (
+                        certificates,
+                    )
+
+                    record, field = item
+                    certificates(record[field], original["cells"][task["cell"]], task)
+                    drafts[task["task_id"]] = item
         ledger = {
             "source_root": str(source),
             "source_plan_sha256": original["artifact_sha256"],
@@ -116,13 +192,27 @@ def prepare(
             "on_revision_failure": "same_visit_incumbent_refit_then_next_visit",
             "automatic_expansion": False,
         }
-        if protocol in io.PARAMETER_PROTOCOLS:
+        if protocol in io.PARAMETER_PROTOCOLS or protocol == io.MULTI_PROTOCOL:
             ledger.update(
                 source_phase_round=phase_round, source_protocol=original["protocol"]
             )
         if protocol == io.REVISION_PROTOCOL:
             ledger["revision_size_policy"] = "advisory_initial_construction_references"
             ledger["unused_new_parameter_policy"] = "discard_with_audit"
+        if protocol == io.MULTI_PROTOCOL:
+            ledger.update(
+                construction_drafts={
+                    key: {
+                        "sha256": rec["artifact_sha256"],
+                        "field": field,
+                        "round": rec["round"],
+                    }
+                    for key, (rec, field) in drafts.items()
+                },
+                failed_construction_policy="bounded_public_contract_repair_then_retry_next_visit",
+                public_target_gate="unchanged_frozen_contract_exposed_before_construction",
+                revision_policy="scientific-content-multi-revision-1",
+            )
         if (root / "plan.json").exists():
             plan = io.verify(root)
             if plan.get("continuation") != ledger or plan["protocol"] != protocol:
@@ -147,6 +237,13 @@ def prepare(
                 dest.write_bytes(data)
         for task in original["tasks"]:
             result = results[task["task_id"]]
+            item = drafts.get(task["task_id"])
+            if item:
+                record, field = item
+                sealed_write(
+                    root / "imports" / task["task_id"] / "draft.json",
+                    {k: v for k, v in record.items() if k != "artifact_sha256"},
+                )
             sealed_write(
                 root / "imports" / task["task_id"] / "result.json",
                 {k: v for k, v in result.items() if k != "artifact_sha256"},
@@ -159,7 +256,14 @@ def prepare(
                     "status": "imported_checkpoint",
                     "trial": None,
                     "selected": result["selected"],
-                    "closed": result["selected"] is None,
+                    "closed": False
+                    if protocol == io.MULTI_PROTOCOL
+                    else result["selected"] is None,
+                    **(
+                        {"construction_draft": item[0][item[1]] if item else None}
+                        if protocol == io.MULTI_PROTOCOL
+                        else {}
+                    ),
                     "source_result_sha256": result["artifact_sha256"],
                     "cost": {"physical_requests": 0},
                     "test_data_opened": False,

@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/DALLA_MULTI_TARGET_CONTINUATION.md` defines opt-in `review-deadline-6`:
+channel-addressed revisions, advisory citation audits, explicit frozen public
+target contracts, bounded repair of unfitted construction drafts, and retained
+incumbents after failed revisions. It imports the completed three-visit pilot
+into a separate twelve-visit phase with the same joint-target fitter. Running
+and historical campaigns remain unchanged; live confirmation is pending.
+
 `docs/DALLA_MULTI_TARGET_PILOTS.md` defines the opt-in Full-only T1-hard and
 T2-easy/hard development pilots. The versioned multi-target collocation profile
 fits every required output, including algebraic observations, with separate
