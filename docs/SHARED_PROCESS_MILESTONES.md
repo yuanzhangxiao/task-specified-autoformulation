@@ -165,8 +165,10 @@ gain assembly, and ordinary whole-model revision. See
 [SHARED_PROCESS_INTEGRATION.md](SHARED_PROCESS_INTEGRATION.md). A six-lineage,
 three-family pilot checks construction and one revision using the frozen fitter.
 It excludes the basin-specific scientific repair controller and probes. Milestone
-2 remains pending this cross-benchmark evidence; pruning and the calibrated critic
-remain subsequent work.
+2 has now passed this engineering integration gate: all 12 round rows completed,
+all six revisions committed, and four new trials were retained. The current models
+do not demonstrate multi-consumer shared-process discovery or its benefit. Both
+CSTR variants retain an unresolved graph-inference obligation; it is not a pass.
 
 ## Milestone 3 — process-aware pruning
 
@@ -180,6 +182,13 @@ Pruning cannot delete a target, violate a declared balance, or use test results.
 Measure parameter/state/process reductions, NMSE changes, runtime and deterministic
 mechanism evidence with pruning on/off. This is model selection, not evidence that
 every small fitted coefficient is scientifically unnecessary.
+
+Milestone 3 implementation (2026-09-22):
+[PROCESS_AWARE_PRUNING.md](PROCESS_AWARE_PRUNING.md) defines one training-ranked
+atomic deletion and a paired unchanged-model refit per retained parent. Existing
+public predicates and the frozen fitter are reused. Unresolved obligations skip
+automatic deletion. The pilot is pending ACES results; it is not automatically
+enabled in the production controller.
 
 ## Milestone 4 — calibrated judge as critic, with separate routing
 

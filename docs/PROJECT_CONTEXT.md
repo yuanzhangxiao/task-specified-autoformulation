@@ -13,7 +13,15 @@ consumer propagation records. It reuses the ordinary public predicate checks,
 training residual evidence, validation selection and frozen fitter. Six lineages
 span obfuscated Dalla Man, CSTR and the alien device for construction plus one
 revision. Basin-specific probes/repair actions are not part of this path. Live
-integration evidence is pending; no new critic, pruning or test access is enabled.
+integration completed all 12 round rows; scientific benefit from reuse remains
+unestablished. No new critic or test access is enabled.
+
+`docs/PROCESS_AWARE_PRUNING.md` defines opt-in Milestone 3: one training-ranked
+atomic term/process deletion and one equal-allocation unchanged-model refit per
+retained parent. It preserves shared consumers and causal boundaries, rechecks
+public predicates and uses the frozen fitter. Unresolved obligations skip
+automatic deletion; the two CSTR graph ambiguities remain unresolved. The live
+pruning comparison is pending and does not automatically change prior campaigns.
 
 `docs/BASIN_SAVED_REPAIR_FIT.md` defines the opt-in saved-reply fitting handoff.
 Repair-v3 normalizes compatible equality cycles and empty binding entries, while
