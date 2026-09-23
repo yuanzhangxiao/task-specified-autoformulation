@@ -228,6 +228,15 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
         from autoformalism.llm.response_revision import ResponseRevisionClient
 
         client_type = ResponseRevisionClient
+    if index and plan["protocol"] == io.FRESH_PROTOCOL:
+        parent = io.read_round(root, task, index - 1)
+        if (
+            parent
+            and parent["selected"] is None
+            and not parent.get("construction_draft")
+        ):
+            # A fresh inventory needs the construction allowance, not three calls.
+            client_type = BudgetedRepairClient
     return client_type(
         settings=settings,
         seed=task["seed"],
@@ -457,7 +466,13 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
         "status": "construction_failed",
         "decision": None,
     }
-    if (
+    if plan["protocol"] == io.FRESH_PROTOCOL and (
+        index == 0 or (parent is not None and parent["selected"] is None)
+    ):
+        from autoformalism.search.fresh_shared import propose
+
+        payload.update(propose(plan, task, parent or {}, client, directory))
+    elif (
         index
         and plan["protocol"] in io.MULTI_PROTOCOLS
         and parent["selected"] is None
@@ -791,7 +806,7 @@ def selection_key(value):
 def select_candidate(plan: dict, incumbent: dict | None, trial: dict | None):
     """Use the plan's selection rule in normal fitting and recovery publication."""
     audit = None
-    if plan["protocol"] == io.INTEGRITY_PROTOCOL:
+    if plan["protocol"] in io.INTEGRITY_PROTOCOLS:
         from autoformalism.search.review_integrity import selection_decision
 
         audit = selection_decision(selection_key(incumbent), selection_key(trial))

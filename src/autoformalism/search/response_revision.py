@@ -51,7 +51,7 @@ def propose(plan, task, parent, client, response):
     from autoformalism.rebuttal import review_deadline_io as io
     from autoformalism.rebuttal import review_deadline_pipeline as pipeline
 
-    strict_parameters = plan["protocol"] == io.INTEGRITY_PROTOCOL
+    strict_parameters = plan["protocol"] in io.INTEGRITY_PROTOCOLS
     selected = parent["selected"]
     bundle, packet = selected["bundle"], selected["packet"]
     if response is None:
@@ -61,6 +61,10 @@ def propose(plan, task, parent, client, response):
         user = payload(
             bundle, packet, selected["fit"]["parameters"], response, feedback
         )
+        if plan["protocol"] == io.FRESH_PROTOCOL:
+            from autoformalism.search.fresh_shared import add_relationships
+
+            add_relationships(user)
         if strict_parameters:
             user["parameter_declaration_policy"] = {
                 "policy": PARAMETER_POLICY,
@@ -112,6 +116,10 @@ def propose(plan, task, parent, client, response):
                 reference_catalog=refs,
                 reject_existing_role_conflicts=strict_parameters,
             )
+            if plan["protocol"] == io.FRESH_PROTOCOL:
+                from autoformalism.search.fresh_shared import propagation
+
+                propagation(bundle, decision)
             certificate = None
             if decision["bundle"] is not None:
                 certificate = pipeline.certificates(

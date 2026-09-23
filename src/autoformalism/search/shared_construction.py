@@ -25,7 +25,16 @@ def _stage(path: Path, build):
     return sealed_write(path, {"result": build()})["result"]
 
 
-def construct(cell, task, client, directory, *, build_bundle, certificate_for):
+def construct(
+    cell,
+    task,
+    client,
+    directory,
+    *,
+    build_bundle,
+    certificate_for,
+    retain_failed_draft=False,
+):
     """Preserve one variable inventory and one budget across process fallback.
 
     Callbacks are the campaign's existing canonical reconstruction and public
@@ -69,6 +78,7 @@ def construct(cell, task, client, directory, *, build_bundle, certificate_for):
         ScientificVariable.model_validate(v) for v in variables["inventory"]
     )
     attempts = []
+    last_draft = None
     for route in ("process", "ordinary_fallback"):
         output = directory / route
         topology = functions = bundle = certificate = None
@@ -120,6 +130,7 @@ def construct(cell, task, client, directory, *, build_bundle, certificate_for):
                     cell["training"],
                 )
                 certificate = certificate_for(bundle, cell, task)
+                last_draft = bundle
                 if not certificate["eligible_for_development_selection"]:
                     error, bundle = "public requirement check failed", None
             else:
@@ -156,4 +167,5 @@ def construct(cell, task, client, directory, *, build_bundle, certificate_for):
         "attempts": attempts,
         "construction_policy": POLICY,
         "fallback_used": len(attempts) > 1,
+        **({"construction_draft": last_draft} if retain_failed_draft else {}),
     }

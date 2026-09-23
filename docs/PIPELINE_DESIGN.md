@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+`shared-multi-pruning-1` composes the general shared constructor with the existing
+multi-output fitter and response-oriented revision controller. Public target roles
+are exposed before construction; unresolved executable drafts receive bounded
+repair, while failed revisions preserve fitted incumbents. After the last search
+visit, training-ranked atomic pruning competes against an equal-budget unchanged
+refit and the parent. Ordinary search and pruning keep their separate frozen
+selection tolerances. The critic remains off. See `DALLA_SHARED_MULTI_PRUNING.md`.
+
 The opt-in `shared-process-integration-1` path extends general staged construction
 with optional signed shared laws and reuses whole-model revision, public checks,
 training residual feedback and the frozen open-loop fitter. A named law is compiled

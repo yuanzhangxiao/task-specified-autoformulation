@@ -360,8 +360,13 @@ def run_one(root: Path, index: int) -> dict:
     if index not in range(len(plan["rows"])):
         raise ValueError("task index outside frozen matrix")
     row = plan["rows"][index]
-    cell = plan["cells"][row["task"]["cell"]]
     directory = root / "results" / row["task"]["task_id"]
+    return execute_row(directory, plan, row, index)
+
+
+def execute_row(directory: Path, plan: dict, row: dict, index: int) -> dict:
+    """Apply the same bounded pruning experiment to a verified parent snapshot."""
+    cell = plan["cells"][row["task"]["cell"]]
     with public._lock(directory):
         result_path = directory / "result.json"
         if result_path.exists():

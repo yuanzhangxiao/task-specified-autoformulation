@@ -102,12 +102,22 @@ def fresh(cell: dict, task: dict, client, directory) -> dict:
     return value
 
 
-def propose(plan: dict, task: dict, parent: dict, client, directory) -> dict:
+def propose(
+    plan: dict,
+    task: dict,
+    parent: dict,
+    client,
+    directory,
+    *,
+    fresh_builder=None,
+    strict_parameters=False,
+    shared_relationships=False,
+) -> dict:
     """Repair a saved unfitted draft, or construct if none exists."""
     cell = plan["cells"][task["cell"]]
     bundle = parent.get("construction_draft")
-    value = {} if bundle else fresh(cell, task, client, directory)
-    bundle = bundle or value.get("bundle")
+    value = {} if bundle else (fresh_builder or fresh)(cell, task, client, directory)
+    bundle = bundle or value.get("bundle") or value.get("construction_draft")
     if bundle is None:
         return {**value, "construction_draft": None}
     certificate = pipeline.certificates(bundle, cell, task)
@@ -137,6 +147,16 @@ def propose(plan: dict, task: dict, parent: dict, client, directory) -> dict:
             if task["arm"] == "brief_only"
             else cell["evidence"],
         )
+        if shared_relationships:
+            from autoformalism.search.fresh_shared import add_relationships
+
+            add_relationships(user)
+        if strict_parameters:
+            user["parameter_declaration_policy"] = (
+                "Reuse existing canonical names/aliases without redeclaration. "
+                "Their declared roles are immutable. To change a role, introduce "
+                "a new name and update the intended expressions explicitly."
+            )
         try:
             record = client.call(
                 system=edits.SYSTEM_PROMPT,
@@ -146,7 +166,13 @@ def propose(plan: dict, task: dict, parent: dict, client, directory) -> dict:
                 attempt=attempt,
             )
             raw = visible_response(record)
-            decision = edits.apply_edits(bundle, None, raw)
+            decision = edits.apply_edits(
+                bundle, None, raw, reject_existing_role_conflicts=strict_parameters
+            )
+            if shared_relationships:
+                from autoformalism.search.fresh_shared import propagation
+
+                propagation(bundle, decision)
             draft = decision["bundle"] or bundle
             checked = pipeline.certificates(draft, cell, task)
             if not checked["eligible_for_development_selection"]:

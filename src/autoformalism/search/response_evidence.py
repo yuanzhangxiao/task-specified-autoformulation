@@ -273,7 +273,7 @@ def presentation(
 def compact_user(user: dict, *, per_target: int, samples: bool) -> dict:
     """Shrink only optional evidence examples; preserve model and public contract."""
     value = copy.deepcopy(user)
-    evidence = value.get("training_evidence", {})
+    evidence = value.get("training_evidence") or {}
     if evidence.get("protocol") != "training-response-evidence-1":
         return value
     kept, counts = [], {}

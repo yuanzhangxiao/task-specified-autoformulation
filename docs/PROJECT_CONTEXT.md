@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/DALLA_SHARED_MULTI_PRUNING.md` defines the opt-in fresh
+`shared-multi-pruning-1` campaign: general shared-process construction, joint-output
+fitting, compact response revisions, public-contract repair and v8 parameter/selection
+safeguards, followed by one bounded paired pruning experiment. Six Full lineages
+cover T1-hard and T2-easy/hard for 15 search visits. No previous models are imported;
+the scientific critic and automatic test access are off. ACES execution is pending.
+
 `docs/DALLA_MULTI_TARGET_CONTINUATION.md` defines opt-in `review-deadline-6`:
 channel-addressed revisions, advisory citation audits, explicit frozen public
 target contracts, bounded repair of unfitted construction drafts, and retained
