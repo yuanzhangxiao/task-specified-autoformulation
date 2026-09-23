@@ -31,7 +31,12 @@ def submission_fixture(tmp_path, protocol="review-deadline-2"):
     (root / "plan.json").write_text(
         json.dumps(
             {
-                "config": {"rounds": 3, "protocol": protocol},
+                "config": {
+                    "rounds": 3,
+                    "protocol": protocol,
+                    "fit_profile": "collocation-single-target-v2",
+                },
+                "cells": {"cell": {"assets": {"train.csv": "synthetic-digest"}}},
                 "tasks": [
                     {"index": 0, "arm": "full", "task_id": "full"},
                     {"index": 1, "arm": "refit_only", "task_id": "refit"},

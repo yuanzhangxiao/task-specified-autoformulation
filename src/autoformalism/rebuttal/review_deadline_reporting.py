@@ -91,6 +91,20 @@ def report(root: Path) -> dict:
                     "retained_validation_nmse": metric.get("validation", {}).get(
                         "normalized_mse"
                     ),
+                    "retained_train_per_target_nmse": metric.get("training", {}).get(
+                        "per_target_normalized_mse", {}
+                    ),
+                    "retained_validation_per_target_nmse": metric.get(
+                        "validation", {}
+                    ).get("per_target_normalized_mse", {}),
+                    "trial_train_per_target_nmse": (trial or {})
+                    .get("fit", {})
+                    .get("training", {})
+                    .get("per_target_normalized_mse", {}),
+                    "trial_validation_per_target_nmse": (trial or {})
+                    .get("fit", {})
+                    .get("validation", {})
+                    .get("per_target_normalized_mse", {}),
                     "native_converged": metric.get("native_optimizer_converged"),
                     "budget_exhausted": metric.get("budget_exhausted"),
                     "all_graph_requirements_certified": selected["certificate"][

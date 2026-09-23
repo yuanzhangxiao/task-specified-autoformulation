@@ -51,6 +51,20 @@ account="${AF_ACCOUNT:-156264627414}"
 module load GCCcore/13.2.0 Python/3.11.5
 export PYTHONPATH="$repo/src" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 "$python" "$repo/scripts/review_deadline.py" prepare --config "$AF_CONFIG" --public-root "$AF_PUBLIC_ROOT" --root "$root"
+"$python" - "$root/plan.json" "$(git -C "$repo" rev-parse HEAD)" <<'PY'
+import json, sys
+from pathlib import Path
+plan = json.loads(Path(sys.argv[1]).read_text())
+print(json.dumps({
+    'preflight': 'frozen', 'commit': sys.argv[2],
+    'output_root': str(Path(sys.argv[1]).parent),
+    'fit_profile': plan['config']['fit_profile'],
+    'lineages': len(plan['tasks']), 'visits_per_lineage': plan['config']['rounds'],
+    'planned_task_visits': len(plan['tasks']) * plan['config']['rounds'],
+    'tasks': plan['tasks'],
+    'public_asset_hashes': {c: v['assets'] for c, v in plan['cells'].items()},
+}, indent=2))
+PY
 rounds="$(jq -r '.config.rounds' "$root/plan.json")"
 (( round < rounds )) || { echo 'Round outside frozen campaign' >&2; exit 2; }
 manifest="$root/submission-round-$round.json"

@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/DALLA_MULTI_TARGET_PILOTS.md` defines the opt-in Full-only T1-hard and
+T2-easy/hard development pilots. The versioned multi-target collocation profile
+fits every required output, including algebraic observations, with separate
+training scales and the existing budgets. Historical profiles/matrices retain
+their restrictions. No test access or multi-target continuation import is enabled.
+
 `docs/SHARED_PROCESS_INTEGRATION.md` defines the opt-in general Milestone 2 pilot:
 fresh variables, optional signed shared processes with same-inventory fallback,
 existing identified function delivery, and whole-model revision with explicit

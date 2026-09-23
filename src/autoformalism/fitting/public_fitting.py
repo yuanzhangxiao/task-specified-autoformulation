@@ -115,7 +115,7 @@ def _runtime() -> dict:
 
 
 def profile_settings(request: PublicFitRequest) -> dict:
-    """Materialize the two existing profiles, without promoting diagnostic budgets."""
+    """Materialize frozen budgets; joint outputs use the same collocation budget."""
     if request.profile == "general-rollout-v1":
         return FitConfig(
             number_of_starts=1,
@@ -312,7 +312,10 @@ def _capability(request, model) -> str | None:
         request.context.targets
     ) != ("v01",):
         return "collocation-feasible-v1 currently requires the single target v01"
-    if len(request.context.targets) != 1:
+    if (
+        request.profile == "collocation-single-target-v2"
+        and len(request.context.targets) != 1
+    ):
         return "collocation-single-target-v2 requires exactly one public target"
     try:
         from autoformalism.fitting.sensitivity_probe import (

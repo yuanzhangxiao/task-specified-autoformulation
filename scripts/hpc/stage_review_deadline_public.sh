@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run on the Mac: transfer only six development cells through existing SSH aliases.
+# Run on the Mac: transfer configured development cells through existing SSH aliases.
 set -euo pipefail
 repo="${AF_REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 python="${AF_LOCAL_PYTHON:-$repo/.venv/bin/python}"
@@ -8,11 +8,15 @@ destination="${AF_PUBLIC_ROOT:-/scratch/user/u.yx126462/phase_b/review-deadline-
 [[ "$source_root" =~ ^/[a-zA-Z0-9_./-]+$ && "$destination" =~ ^/[a-zA-Z0-9_./-]+$ ]] || { echo 'Use simple absolute remote paths' >&2; exit 2; }
 local_stage="$(mktemp -d "${TMPDIR:-/tmp}/review-development.XXXXXX")"
 trap 'rm -rf "$local_stage"' EXIT
-"$python" - "$repo/configs/review_deadline_v1.json" > "$local_stage/files.txt" <<'PY'
+"$python" - "${AF_CONFIG:-$repo/configs/review_deadline_v1.json}" > "$local_stage/files.txt" <<'PY'
 import json, sys
 with open(sys.argv[1]) as stream:
     config=json.load(stream)
 for cell in config['public_cells']:
+    if not isinstance(cell, str) or not cell.startswith('phase_b_') or not all(
+        c.isalnum() or c == '_' for c in cell
+    ):
+        raise SystemExit('Invalid public cell identifier')
     for name in ('manifest.json','proposer_prompt.txt','train.csv','validation.csv'):
         print('phase_b_v1/'+cell+'/'+name)
 PY

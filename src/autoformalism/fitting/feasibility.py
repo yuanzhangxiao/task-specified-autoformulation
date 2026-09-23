@@ -67,7 +67,8 @@ class GuardedOracle(SymbolicOracle):
                 if not (self.reject_invalid_trials and valid_before):
                     raise SensitivityUnavailable(str(error)) from error
             residual = np.full(
-                sum(t.number_of_rows for t in self.training.trajectories),
+                len(self.system.channels)
+                * sum(t.number_of_rows for t in self.training.trajectories),
                 self.settings.failure_penalty,
             )
         if self.with_sensitivities and self.fail_fast and self.failures.count != before:

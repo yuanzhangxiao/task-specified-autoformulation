@@ -1,7 +1,7 @@
 """Opt-in collocation initialization plus forward-sensitivity refinement.
 
 This adapter transfers the verified synthetic fitter route to eligible frozen
-single-target candidates.  It remains separate from the production default:
+candidates with one or more public targets. It remains separate from the default:
 unsupported expression graphs fail closed instead of silently falling back to
 finite differences.
 """
@@ -120,11 +120,7 @@ def fit_collocation_forward_sensitivity(
         raise SensitivityContractError(
             "collocation-sensitivity scoring requires validation data"
         )
-    if len(model.validated.context.targets) != 1:
-        raise SensitivityContractError(
-            "current transfer adapter requires exactly one target"
-        )
-    target = model.validated.context.targets[0]
+    targets = model.validated.context.targets
     initialization_audit = None
     if initialization_plan is not None:
         model, guesses, initialization_audit = apply_initialization_plan(
@@ -137,8 +133,12 @@ def fit_collocation_forward_sensitivity(
         }
     system = SymbolicODE(model, allow_piecewise=config.piecewise_policy == "allow")
     settings = config.fit_config()
-    scale = TrainingScaler().fit(training).scales[f"target:{target}"].standard_deviation
-    if not np.isfinite(scale) or scale <= 0.0:
+    fitted_scaler = TrainingScaler().fit(training)
+    scales = {
+        target: fitted_scaler.scales[f"target:{target}"].standard_deviation
+        for target in targets
+    }
+    if not scales or any(not np.isfinite(s) or s <= 0.0 for s in scales.values()):
         raise SensitivityContractError(
             "training target scale must be positive and finite"
         )
@@ -146,7 +146,7 @@ def fit_collocation_forward_sensitivity(
     layout = RolloutOracle(
         model,
         training,
-        {target: scale},
+        scales,
         settings,
         directory / "layout",
         None,
@@ -225,7 +225,7 @@ def fit_collocation_forward_sensitivity(
             lower=layout.lower,
             upper=layout.upper,
             start=theta,
-            scale=scale,
+            scale=scales,
             settings=settings,
             method="collocation_init",
             seconds=max(
@@ -257,7 +257,7 @@ def fit_collocation_forward_sensitivity(
                     lower=layout.lower,
                     upper=layout.upper,
                     start=layout.vector(point["parameters"]),
-                    scale=scale,
+                    scale=scales,
                     settings=settings,
                     method="collocation_init",
                     seconds=remaining / (len(alternatives) - index),
@@ -290,7 +290,7 @@ def fit_collocation_forward_sensitivity(
     oracle = SymbolicOracle(
         system,
         training,
-        scale,
+        scales,
         settings,
         directory / "sensitivity_calls",
         deadline,
@@ -303,7 +303,7 @@ def fit_collocation_forward_sensitivity(
         oracle = GuardedOracle(
             system,
             training,
-            scale,
+            scales,
             settings,
             directory / "sensitivity_calls",
             deadline,
@@ -322,7 +322,7 @@ def fit_collocation_forward_sensitivity(
         refinement = recover_refinement(
             system,
             training,
-            scale,
+            scales,
             settings,
             config,
             directory / "recovery",
@@ -376,7 +376,7 @@ def fit_collocation_forward_sensitivity(
         training,
         global_parameters=parameters,
         global_initial_conditions={},
-        target_scales={target: scale},
+        target_scales=scales,
         config=settings,
         fit_trajectory_initial_conditions=False,
     )
@@ -401,7 +401,7 @@ def fit_collocation_forward_sensitivity(
         validation,
         global_parameters=parameters,
         global_initial_conditions={},
-        target_scales={target: scale},
+        target_scales=scales,
         config=settings,
         fit_trajectory_initial_conditions=False,
     )

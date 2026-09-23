@@ -7,6 +7,7 @@ It never evaluates proposer text as Python or changes production fitter defaults
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -411,6 +412,23 @@ def symbolic_rollout(
     return values, jacobian, states, counters
 
 
+def observation_scales(
+    channels: tuple[str, ...], scale: float | Mapping[str, float]
+) -> dict[str, float]:
+    """Require one positive scale per output; keep scalar call compatibility."""
+    if isinstance(scale, Mapping):
+        if set(scale) != set(channels):
+            raise ValueError("scales must cover exactly the model's target channels")
+        result = {channel: float(scale[channel]) for channel in channels}
+    else:
+        if len(channels) != 1:
+            raise ValueError("multiple targets require a mapping of training scales")
+        result = {channels[0]: float(scale)}
+    if not result or any(not np.isfinite(s) or s <= 0 for s in result.values()):
+        raise ValueError("training target scales must be positive and finite")
+    return result
+
+
 class SymbolicOracle(RolloutOracle):
     """Instrument comparable compiled finite-difference and sensitivity arms."""
 
@@ -418,23 +436,19 @@ class SymbolicOracle(RolloutOracle):
         self,
         system: SymbolicODE,
         training: DatasetSplit,
-        scale: float,
+        scale: float | Mapping[str, float],
         settings: FitConfig,
         directory: Path,
         deadline: float,
         *,
         sensitivities: bool,
     ):
-        if len(system.channels) != 1:
-            raise ValueError("probe requires exactly one target")
-        self.target = system.channels[0]
+        self.target_scales = observation_scales(system.channels, scale)
         super().__init__(
-            system.model, training, {self.target: scale}, settings, directory, deadline
+            system.model, training, self.target_scales, settings, directory, deadline
         )
         if self.names != system.names:
-            raise ValueError(
-                "probe requires the production parameter order and one target"
-            )
+            raise ValueError("probe requires the production parameter order")
         self.system, self.training, self.scale = system, training, scale
         self.settings, self.deadline = settings, deadline
         self.with_sensitivities = sensitivities
@@ -463,11 +477,14 @@ class SymbolicOracle(RolloutOracle):
                     self.deadline,
                     sensitivities=self.with_sensitivities,
                 )
-                residuals.append(
-                    (predictions[:, 0] - trajectory.targets[self.target]) / self.scale
-                )
-                if jac is not None:
-                    matrices.append(jac[:, 0, :] / self.scale)
+                # Match the production residual order: trajectory, channel, time.
+                for column, channel in enumerate(self.system.channels):
+                    scale = self.target_scales[channel]
+                    residuals.append(
+                        (predictions[:, column] - trajectory.targets[channel]) / scale
+                    )
+                    if jac is not None:
+                        matrices.append(jac[:, column, :] / scale)
                 for key, value in counts.items():
                     self.solver_counts[key] += value
             residual = np.concatenate(residuals)
@@ -504,7 +521,9 @@ class SymbolicOracle(RolloutOracle):
                 error=str(error),
                 diagnostic=getattr(error, "diagnostic", None),
             )
-            size = sum(t.number_of_rows for t in self.training.trajectories)
+            size = len(self.system.channels) * sum(
+                t.number_of_rows for t in self.training.trajectories
+            )
             self.last_x = values.copy()
             self.last_jac = np.zeros((size, len(values)))
             return np.full(size, self.settings.failure_penalty)

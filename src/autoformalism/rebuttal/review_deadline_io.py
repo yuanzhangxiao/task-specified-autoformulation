@@ -64,11 +64,12 @@ class DeadlineConfig(StrictSchema):
     rounds: int = Field(default=3, ge=1, le=6)
     no_latent_cells: tuple[str, ...] = ()
     no_spec_cells: tuple[str, ...] = ()
+    full_only: bool = False
     limits: ModelingLimits = ModelingLimits()
     evidence: EvidenceSettings = EvidenceSettings()
-    fit_profile: Literal["collocation-single-target-v2"] = (
-        "collocation-single-target-v2"
-    )
+    fit_profile: Literal[
+        "collocation-single-target-v2", "collocation-multi-target-v1"
+    ] = "collocation-single-target-v2"
     scientific_judge: Literal["off"] = "off"
     revision_attempts: Literal[3] = 3
     wall_seconds: int = Field(default=25200, ge=600, le=43200)
@@ -78,6 +79,19 @@ class DeadlineConfig(StrictSchema):
 
     @model_validator(mode="after")
     def bounded_matrix(self):
+        if self.full_only and (
+            self.protocol != CONTENT_PROTOCOL
+            or self.no_latent_cells
+            or self.no_spec_cells
+        ):
+            raise ValueError(
+                "full-only pilots require review-deadline-2 without ablation cells"
+            )
+        if (
+            self.fit_profile == "collocation-multi-target-v1"
+            and self.protocol != CONTENT_PROTOCOL
+        ):
+            raise ValueError("multi-target pilots require review-deadline-2")
         if self.protocol in SHARED_PROTOCOLS and (
             self.no_latent_cells or self.no_spec_cells or self.rounds != 2
         ):
@@ -99,7 +113,12 @@ class DeadlineConfig(StrictSchema):
         for cell in self.public_cells:
             spec = BenchmarkRegistry().get(cell)
             context = public_validation_context(cell)
-            if spec.one_step_target_history or len(context.targets) != 1:
+            if spec.one_step_target_history:
+                raise ValueError("deadline campaign requires open rollouts")
+            if (
+                self.fit_profile == "collocation-single-target-v2"
+                and len(context.targets) != 1
+            ):
                 raise ValueError(
                     "deadline campaign requires single-target open rollouts"
                 )
@@ -129,6 +148,8 @@ def tasks(config: DeadlineConfig) -> list[dict]:
             if cell in config.no_spec_cells:
                 arms.append("no_spec")
             arms.append("refit_only")
+            if config.full_only:
+                arms = ["full"]
             for arm in arms:
                 result.append(
                     {
@@ -318,8 +339,8 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                     "no separate refit arm; no-change/failed revision reuses the "
                     "same visit fit allowance"
                     if config.protocol == INTEGRATION_PROTOCOL
-                    else
-                    "same C+S budget and retained parameter seed; no revision calls"
+                    else "same C+S budget and retained parameter seed; "
+                    "no revision calls"
                 ),
             },
         )

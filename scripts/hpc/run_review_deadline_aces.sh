@@ -20,6 +20,10 @@ case "$mode" in
       "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_review_deadline_v2.py tests/test_review_deadline_v2_submission.py
       "$AF_PYTHON" scripts/smoke_review_deadline_v2.py
     fi
+    if [[ "$(jq -r '.config.fit_profile' "$AF_OUTPUT_ROOT/plan.json")" == collocation-multi-target-v1 ]]; then
+      PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT" "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_multi_target_profile.py tests/test_dalla_pilot.py
+      "$AF_PYTHON" scripts/smoke_multi_target_fitting.py --output "$AF_OUTPUT_ROOT/multi-target-smoke"
+    fi
     runtime="$(command -v apptainer || command -v singularity)"
     actual="$(sha256sum "$AF_VLLM_IMAGE")"
     [[ "${actual%% *}" == "$(jq -r '.config.serving_image_sha256' "$AF_OUTPUT_ROOT/plan.json")" ]] || exit 2

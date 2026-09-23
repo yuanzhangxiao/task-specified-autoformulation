@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing
+from collections.abc import Mapping
 from itertools import pairwise
 from pathlib import Path
 from time import monotonic
@@ -18,7 +19,11 @@ from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.expressions import compile_candidate
 from autoformalism.fitting.collocation_progress import CollocationProgress
 from autoformalism.fitting.models import FitConfig
-from autoformalism.fitting.sensitivity_probe import SymbolicODE, symbolic_rollout
+from autoformalism.fitting.sensitivity_probe import (
+    SymbolicODE,
+    observation_scales,
+    symbolic_rollout,
+)
 from autoformalism.fitting.simulation import trajectory_forcing
 from autoformalism.fitting.start_design import target_node_branch
 from autoformalism.rebuttal.fitter_diagnostic import (
@@ -372,7 +377,7 @@ def latent_start(
     lower: np.ndarray,
     upper: np.ndarray,
     start: np.ndarray,
-    scale: float,
+    scale: float | Mapping[str, float],
     settings: FitConfig,
     method: str,
     seconds: float,
@@ -397,6 +402,7 @@ def latent_start(
         raise ValueError("mesh refinement is only supported for collocation")
     if training.name is not SplitName.TRAIN:
         raise ValueError("initializer requires training split")
+    scales = observation_scales(system.channels, scale)
     if node_start not in {"rollout_required", "rollout_or_observed"}:
         raise ValueError("unknown collocation node initialization policy")
     if node_start != "rollout_required" and method != "collocation_init":
@@ -475,9 +481,12 @@ def latent_start(
             ]
             if node_start == "rollout_or_observed":
                 check_node_guess(system, data.time[0], guess[0], start, inputs[0])
-            predicted = system.observe(data.time[0], current, theta, inputs[0])[0]
-            residual = (predicted - data.targets[system.channels[0]][0]) / scale
-            objective += residual**2
+            predicted = system.observe(data.time[0], current, theta, inputs[0])
+            for column, channel in enumerate(system.channels):
+                residual = (predicted[column] - data.targets[channel][0]) / scales[
+                    channel
+                ]
+                objective += residual**2
             for i in range(len(data.time) - 1):
                 if monotonic() >= deadline:
                     raise TimeoutError("initializer construction deadline reached")
@@ -529,10 +538,12 @@ def latent_start(
                         opti.subject_to(inner == current + dt * (5 * first - last) / 12)
                         opti.subject_to(end == current + dt * (3 * first + last) / 4)
                     current = end
-                predicted = system.observe(t1, current, theta, u1)[0]
-                objective += (
-                    (predicted - data.targets[system.channels[0]][i + 1]) / scale
-                ) ** 2
+                predicted = system.observe(t1, current, theta, u1)
+                for column, channel in enumerate(system.channels):
+                    objective += (
+                        (predicted[column] - data.targets[channel][i + 1])
+                        / scales[channel]
+                    ) ** 2
         opti.minimize(objective)
         events = []
         progress = (
