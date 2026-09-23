@@ -61,7 +61,7 @@ def scheduler_record(job: str, argv: list[str], *, since: float) -> dict:
                 + (datetime.fromtimestamp(since, UTC) - timedelta(days=1))
                 .date()
                 .isoformat(),
-                "--format=JobIDRaw,User,JobName%80,State%40,ExitCode,SubmitLine%4096",
+                "--format=JobIDRaw,User%80,JobName%80,State%40,ExitCode,SubmitLine%4096",
             ],
             text=True,
             capture_output=True,

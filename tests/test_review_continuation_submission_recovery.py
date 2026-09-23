@@ -135,6 +135,7 @@ def test_retired_successful_prepare_uses_accounting_without_stale_dependency(
         if command[0] == "scontrol":
             return subprocess.CompletedProcess(command, 1, "", "Invalid job id")
         if command[0] == "sacct":
+            assert "User%80" in command[-1]
             line = (
                 f"2157971|{getpass.getuser()}|review-v8-prepare-0|COMPLETED|0:0|"
                 f"{shlex.join(argv)}\n"
