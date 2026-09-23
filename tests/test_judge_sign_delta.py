@@ -188,3 +188,35 @@ def test_delta_submission_idempotency_and_resources(tmp_path, monkeypatch, affec
     with pytest.raises(ValueError, match="partial submission"):
         submitter.submit(source, root)
     assert len(calls) == count
+
+
+def test_missing_image_requires_opt_in_and_builds_before_prepare(tmp_path, monkeypatch):
+    from scripts import submit_judge_sign_delta as submitter
+
+    source, root = exported_plan(tmp_path), tmp_path / "delta"
+    image = tmp_path / "missing-vllm.sif"
+    monkeypatch.setattr(submitter, "source_commit", lambda _: "c" * 40)
+    monkeypatch.setenv("AF_COMMIT", "c" * 40)
+    monkeypatch.setenv("AF_PYTHON", __file__)
+    monkeypatch.setenv("AF_VLLM_IMAGE", str(image))
+    monkeypatch.setenv("AF_HF_HOME", str(tmp_path / "hf"))
+    calls = []
+
+    def queue(*args):
+        calls.append(args)
+        return str(100 + len(calls))
+
+    monkeypatch.setattr(submitter, "submit_job", queue)
+    with pytest.raises(ValueError, match=r"missing AF_VLLM_IMAGE:.*missing-vllm\.sif"):
+        submitter.submit(source, root)
+    assert not calls and not root.exists()
+    result = submitter.submit(source, root, prepare_image=True)
+    assert list(result["jobs"]) == ["image", "prepare", "review", "report"]
+    assert "--partition=cpu" in calls[0][2]
+    assert not any("gpu" in arg for arg in calls[0][2])
+    assert "--dependency=afterok:101" in calls[1][2]
+    assert "--dependency=afterok:102" in calls[2][2]
+    assert "--dependency=afterany:103" in calls[3][2]
+    image.write_bytes(b"built later")
+    assert submitter.submit(source, root, prepare_image=True) == result
+    assert len(calls) == 4

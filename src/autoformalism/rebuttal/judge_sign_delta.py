@@ -97,6 +97,7 @@ def launcher_hash() -> str:
         "scripts/submit_judge_sign_delta.py",
         "scripts/hpc/run_judge_sign_recheck_delta.sh",
         "scripts/smoke_judge_sign_delta.py",
+        "scripts/prepare_vllm_image.py",
         "scripts/submit_shared_process_pilot.py",
         "scripts/submit_review_continuation.py",
     )

@@ -10,7 +10,7 @@ from autoformalism.rebuttal import judge_sign_delta as campaign
 from scripts.submit_shared_process_pilot import source_commit, submit_job
 
 
-def submit(source: Path, root: Path) -> dict:
+def submit(source: Path, root: Path, *, prepare_image: bool = False) -> dict:
     """Record submission intents; never silently repeat an uncertain queue operation."""
     source, root = source.resolve(), root.resolve()
     if source.is_relative_to(root):
@@ -20,8 +20,15 @@ def submit(source: Path, root: Path) -> dict:
     if os.environ.get("AF_COMMIT", commit) != commit:
         raise ValueError("pinned commit differs")
     for name in ("AF_PYTHON", "AF_VLLM_IMAGE"):
-        if not Path(os.environ[name]).is_file():
-            raise ValueError(f"missing {name}")
+        value = os.environ.get(name)
+        if not value:
+            raise ValueError(f"set {name}")
+        if name == "AF_VLLM_IMAGE" and prepare_image:
+            image = Path(value)
+            if image.is_symlink() or (image.exists() and not image.is_file()):
+                raise ValueError(f"invalid image output path: {image}")
+        elif not Path(value).is_file():
+            raise ValueError(f"missing {name}: {value}")
     if not os.environ.get("AF_HF_HOME"):
         raise ValueError("set AF_HF_HOME")
     identity = {
@@ -34,6 +41,10 @@ def submit(source: Path, root: Path) -> dict:
         "hf_home": os.environ["AF_HF_HOME"],
         "cpu_account": os.environ.get("AF_CPU_ACCOUNT", "bibo-delta-cpu"),
         "gpu_account": os.environ.get("AF_GPU_ACCOUNT", "bibo-delta-gpu"),
+        "prepare_image": prepare_image,
+        "image_scratch": os.environ.get(
+            "AF_IMAGE_TMP_ROOT", str(root.parent / "vllm-image-build")
+        ),
     }
     os.environ.update(
         AF_REPO_ROOT=str(campaign.REPO),
@@ -41,6 +52,7 @@ def submit(source: Path, root: Path) -> dict:
         AF_OUTPUT_ROOT=str(root),
         AF_COMMIT=commit,
         AF_SIGN_ORIGIN_SHA256=imported["artifact_sha256"],
+        AF_IMAGE_TMP_ROOT=identity["image_scratch"],
         PYTHONDONTWRITEBYTECODE="1",
     )
     public = campaign.original.public
@@ -85,12 +97,24 @@ def submit(source: Path, root: Path) -> dict:
             )
             return jobs[stage]
 
+        image_dependencies = []
+        if prepare_image:
+            image_job = queue(
+                "image",
+                [
+                    "--cpus-per-task=8",
+                    "--mem=32G",
+                    "--time=02:00:00",
+                ],
+            )
+            image_dependencies = [f"--dependency=afterok:{image_job}"]
         prior = queue(
             "prepare",
             [
                 "--cpus-per-task=4",
                 "--mem=16G",
                 "--time=01:00:00",
+                *image_dependencies,
             ],
         )
         affected = sum(r["affected"] for r in imported["reviews"])
@@ -131,5 +155,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-plan", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument(
+        "--prepare-image",
+        action="store_true",
+        help="build a missing persistent vLLM SIF in a CPU job first",
+    )
     args = parser.parse_args()
-    print(json.dumps(submit(args.source_plan, args.root), indent=2))
+    print(
+        json.dumps(
+            submit(args.source_plan, args.root, prepare_image=args.prepare_image),
+            indent=2,
+        )
+    )

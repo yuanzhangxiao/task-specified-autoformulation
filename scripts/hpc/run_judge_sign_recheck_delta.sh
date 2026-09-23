@@ -9,6 +9,8 @@ if [[ -f SOURCE_COMMIT ]]; then [[ "$(cat SOURCE_COMMIT)" == "$AF_COMMIT" ]]; el
 stage="${1:?stage}"
 cli=("$AF_PYTHON" "$AF_REPO_ROOT/scripts/judge_sign_delta.py")
 case "$stage" in
+ image) exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/prepare_vllm_image.py" \
+   --image "${AF_VLLM_IMAGE:?}" --scratch "${AF_IMAGE_TMP_ROOT:?}" ;;
  report) exec "${cli[@]}" report --root "$AF_OUTPUT_ROOT" ;;
  prepare|review) ;;
  *) echo 'Unknown stage' >&2; exit 2 ;;

@@ -89,6 +89,52 @@ Four A40 GPUs use tensor parallelism 4, rather than the ACES two-H100 configurat
 Runtime/image/hardware differences mean bitwise-identical model answers are not
 assumed. This is not a speed comparison or renewed scientific calibration.
 
+### Missing container image
+
+The original instructions assumed a persistent SIF. The user's Delta installation
+only has `ollama.sif`; older judge launchers could build a temporary vLLM sandbox
+instead of retaining an image. Ollama cannot be substituted for the vLLM backend.
+An unset variable after the supplied parenthesized block is expected: exports in
+a subshell do not persist in the caller's shell. The earlier `missing
+AF_VLLM_IMAGE` traceback was a missing file at the configured path, before any
+scheduler submission.
+
+Use a new pinned archive with the opt-in image stage:
+
+```bash
+"$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_judge_sign_delta.py" \
+  --source-plan /work/hdd/bibo/yxiao2/phase_b/judge-sign-aces-plan.json \
+  --root "$AF_OUTPUT_ROOT" --prepare-image
+```
+
+This adds `sign-delta-image`, a CPU job with eight CPUs, 32 GB and a two-hour
+allocation, before the original prepare/review/report chain. It resolves the
+official `vllm/vllm-openai:v0.27.1` tag once, verifies the registry manifest digest,
+and records a digest-addressed OCI URI. Subsequent build attempts use that saved
+digest. It creates an amd64 SIF using
+[Apptainer pull](https://apptainer.org/docs/user/latest/cli/apptainer_pull.html),
+checks the installed vLLM package version without importing the GPU stack, then
+publishes the validated file atomically. Existing unrelated images are never
+overwritten. Completed builds and interrupted publication resume from their
+receipts without a new download.
+
+The SIF is retained at `AF_VLLM_IMAGE`. Its adjacent `<filename>.build/` directory
+holds `oci_source.json`, `validated.json` and `result.json`, including the exact
+OCI and SIF hashes. An unfinished `candidate.sif` remains there until publication.
+Temporary unpacking files use `AF_IMAGE_TMP_ROOT`, defaulting to
+`/work/hdd/bibo/yxiao2/phase_b/vllm-image-build` for this campaign, with an initial
+40 GiB free-space check. This check cannot detect every per-user quota. The helper
+uses a private temporary directory and disables the shared image cache; it does
+not clear existing container or model caches. See Apptainer's
+[build environment documentation](https://apptainer.org/docs/user/latest/build_env.html).
+
+The plan uploaded from ACES and the existing failed-submission output path can be
+reused, because the missing-file check stopped before creating submission intents.
+Once submitted, keep using the same `--prepare-image` invocation for idempotent
+inspection; it returns the saved job IDs. If image preparation fails, inspect
+`logs/image-*.err` and `logs/image-*.out` before resubmitting anything. This stage
+requires registry access and storage on Delta; neither was exercised locally.
+
 Submission is idempotent. Repeating the submit command returns existing job IDs;
 it does not resubmit failures. Partial/uncertain scheduler replies retain intents
 and stop for inspection. Completed reviews are reused by the run CLI, while an
@@ -129,3 +175,8 @@ Verification on 2026-09-23: 40 focused sign-correction/recheck/Delta tests passe
 as did the offline smoke, changed-file Ruff, Python 3.11 syntax parsing and shell
 syntax validation. Repository-wide `ruff check .` reports 37 existing findings in
 unrelated `analysis/claude` files. No cluster session was opened during this work.
+
+The image-bootstrap follow-up passed 49 focused tests, including mock OCI pulls,
+wrong-version rejection, existing-image preservation, interrupted publication and
+the four-job dependency chain. The offline sign-review smoke and changed-file
+lint passed; repository-wide lint retains the same 37 unrelated findings.
