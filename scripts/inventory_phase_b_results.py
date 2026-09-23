@@ -100,6 +100,22 @@ def group_key(row: dict) -> str:
     return "unknown"
 
 
+def find_artifact(root: Path, name: str) -> Path | None:
+    """Locate one artifact at the root or one directory below it.
+
+    The frozen evaluation writes into `frozen/` and `final-evaluation/`
+    subdirectories rather than the root, so looking only at the top level
+    found nothing and reported that as an absence.
+    """
+    direct = root / name
+    if direct.is_file():
+        return direct
+    for child in sorted(root.iterdir()) if root.is_dir() else []:
+        if child.is_dir() and (child / name).is_file():
+            return child / name
+    return None
+
+
 def inventory_root(root: Path) -> dict:
     """Describe one campaign or evaluation directory without interpreting it."""
     record: dict[str, Any] = {"root": str(root), "exists": root.is_dir()}
@@ -114,11 +130,15 @@ def inventory_root(root: Path) -> dict:
         "execution_record.json",
         "external_baseline_report.json",
     ):
-        path = root / name
-        if not path.is_file():
+        path = find_artifact(root, name)
+        if path is None:
             continue
         payload = read_json(path)
-        entry = {"sha256": sha256(path), "bytes": path.stat().st_size}
+        entry = {
+            "sha256": sha256(path),
+            "bytes": path.stat().st_size,
+            "path": str(path.relative_to(root)),
+        }
         if isinstance(payload, dict):
             for field in (
                 "protocol", "schema_version", "status", "expected",
@@ -164,8 +184,8 @@ def inventory_root(root: Path) -> dict:
         }
 
     for name in ("external_baseline_roster.jsonl", "withheld_source_outcomes.jsonl"):
-        path = root / name
-        if not path.is_file():
+        path = find_artifact(root, name)
+        if path is None:
             continue
         text = path.read_text(encoding="utf-8")
         lines = [line for line in text.splitlines() if line.strip()]
@@ -175,7 +195,11 @@ def inventory_root(root: Path) -> dict:
                 parsed.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-        entry = {"sha256": sha256(path), "lines": len(lines)}
+        entry = {
+            "sha256": sha256(path),
+            "lines": len(lines),
+            "path": str(path.relative_to(root)),
+        }
         if parsed:
             grouped: dict[str, list[dict]] = {}
             for row in parsed:
@@ -225,7 +249,15 @@ def main() -> None:
                 child
                 for child in sorted(directory.iterdir())
                 if child.is_dir()
-                and any((child / name).exists() for name in ROOT_MARKERS)
+                and any(
+                    (child / name).exists()
+                    or any(
+                        (grandchild / name).exists()
+                        for grandchild in child.iterdir()
+                        if grandchild.is_dir()
+                    )
+                    for name in ROOT_MARKERS
+                )
             )
     seen: set[Path] = set()
     records = []

@@ -147,3 +147,55 @@ def test_a_roster_line_that_will_not_parse_does_not_lose_the_rest(
     entry = inventory.inventory_root(root)["external_baseline_roster.jsonl"]
     assert entry["lines"] == 3
     assert entry["groups"]["pysr"]["scored"] == 2
+
+
+def test_artifacts_in_subdirectories_are_found(tmp_path: Path) -> None:
+    """The frozen evaluation writes into frozen/ and final-evaluation/.
+
+    Looking only at the top level found nothing and reported that as an
+    absence, twice: first because the filenames were unknown, then because
+    the depth was.
+    """
+    root = tmp_path / "external-baseline-evaluation-v1"
+    (root / "frozen").mkdir(parents=True)
+    (root / "final-evaluation").mkdir()
+    (root / "frozen" / "execution_record.json").write_text(
+        json.dumps({"execution_authorized": True})
+    )
+    (root / "frozen" / "external_baseline_roster.jsonl").write_text(
+        json.dumps({"method": "sindy", "status": "complete",
+                    "benchmark_id": "a", "normalized_mse": 1.5})
+    )
+    (root / "final-evaluation" / "external_baseline_report.json").write_text(
+        json.dumps({"status": "complete"})
+    )
+
+    record = inventory.inventory_root(root)
+    assert record["execution_record.json"]["path"] == "frozen/execution_record.json"
+    assert record["execution_record.json"]["execution_authorized"] is True
+    assert record["external_baseline_report.json"]["status"] == "complete"
+    roster = record["external_baseline_roster.jsonl"]
+    assert roster["path"] == "frozen/external_baseline_roster.jsonl"
+    assert roster["groups"]["sindy"]["scored"] == 1
+
+
+def test_a_scan_discovers_a_root_whose_artifacts_are_nested(tmp_path: Path) -> None:
+    """--scan must reach the same roots inventory_root can describe."""
+    root = tmp_path / "external-baseline-evaluation-v1"
+    (root / "frozen").mkdir(parents=True)
+    (root / "frozen" / "external_baseline_freeze.json").write_text("{}")
+    discovered = [
+        child
+        for child in sorted(tmp_path.iterdir())
+        if child.is_dir()
+        and any(
+            (child / name).exists()
+            or any(
+                (grandchild / name).exists()
+                for grandchild in child.iterdir()
+                if grandchild.is_dir()
+            )
+            for name in inventory.ROOT_MARKERS
+        )
+    ]
+    assert discovered == [root]
