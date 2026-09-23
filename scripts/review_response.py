@@ -25,8 +25,8 @@ def latest_source(root: Path) -> int:
 def prepare(root: Path) -> dict:
     """Compute imported response features on CPU before allocating a proposer GPU."""
     plan = io.verify(root)
-    if plan["protocol"] != io.RESPONSE_PROTOCOL:
-        raise ValueError("response preparation requires review-deadline-7")
+    if plan["protocol"] not in io.RESPONSE_PROTOCOLS:
+        raise ValueError("response preparation requires review-deadline-7 or -8")
     rows = []
     for task in plan["tasks"]:
         selected = io.read_round(root, task, 0)["selected"]

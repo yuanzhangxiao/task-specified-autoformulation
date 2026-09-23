@@ -123,14 +123,26 @@ def payload(
 
 
 def apply_edits(
-    bundle: dict, packet: dict | None, raw: dict, *, reference_catalog=None
+    bundle: dict,
+    packet: dict | None,
+    raw: dict,
+    *,
+    reference_catalog=None,
+    reject_existing_role_conflicts: bool = False,
 ) -> dict:
     """Compile all outputs atomically; unresolved citations never become evidence."""
     reply = ScientificRevision.model_validate(raw)
     mappings, duplicates = v3._unique(reply.output_mappings, "channel")
     cleaned, discarded = v5._cleanup(bundle, reply, output_mappings=tuple(mappings))
     reply = ScientificRevision.model_validate(cleaned)
-    specs, audit = v4._resolve(bundle, reply, output_mappings=tuple(mappings))
+    specs, audit = v4._resolve(
+        bundle,
+        reply,
+        output_mappings=tuple(mappings),
+        reject_existing_role_conflicts=reject_existing_role_conflicts,
+    )
+    if reject_existing_role_conflicts:
+        audit["existing_parameter_policy"] = "reject-conflicting-existing-role-1"
     # This binding is compiler provenance only, never a fabricated ResidualEvidence.
     binding = (
         packet

@@ -237,7 +237,7 @@ def main():
                     raise ValueError(
                         "round incomplete: missing task results; inspect logs"
                     )
-                if plan["protocol"] == io.RESPONSE_PROTOCOL and any(
+                if plan["protocol"] in io.RESPONSE_PROTOCOLS and any(
                     io.read_round(root, task, args.round).get("proposal_status")
                     in {"provider_request_failed", "request_preflight_failed"}
                     for task in plan["tasks"]

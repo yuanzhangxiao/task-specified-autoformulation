@@ -4,6 +4,11 @@
 `training-response-evidence-1`. It is opt-in. Previously submitted protocol-6
 jobs and their pinned checkouts keep their original behavior.
 
+The prospective [protocol-8 correction](REVIEW_INTEGRITY_V8.md) adds explicit
+repair of conflicting existing parameter declarations and validation tolerance
+before complexity tie-breaking. It preserves this response-evidence policy and
+the public scientific requirements.
+
 The diagnosed T2-easy requests had about 39,200–40,200 raw message tokens before
 chat formatting, against a 32,768-token server context and an 8,192-token output
 allowance. The old packet was not literally every sample: it repeated summaries

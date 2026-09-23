@@ -491,9 +491,9 @@ def finalize(root: Path) -> dict:
                 root, plan, task, index
             )
             trial = receipt.get("trial") if receipt["status"] == "replayed" else None
-            selected = parent["selected"]
-            if pipeline.selection_key(trial) < pipeline.selection_key(selected):
-                selected = trial
+            selected, selection_audit = pipeline.select_candidate(
+                plan, parent["selected"], trial
+            )
             if trial is not None:
                 for name, value in (
                     ("fit/backend_result.json", receipt["backend"]),
@@ -522,7 +522,10 @@ def finalize(root: Path) -> dict:
                     "closed": selected is None,
                     "parent_sha256": parent["artifact_sha256"],
                     "proposal_sha256": proposal["artifact_sha256"],
-                    "selection_uses": "validation_only_then_complexity",
+                    "selection_uses": selection_audit["policy"]
+                    if selection_audit is not None
+                    else "validation_only_then_complexity",
+                    **({"selection_audit": selection_audit} if selection_audit else {}),
                     "cost": proposal["cost"],
                     "proposal_status": proposal["status"],
                     "fit_trigger": "incumbent_fallback"

@@ -69,6 +69,17 @@ def _draft_record(
 def verify_imports(root: Path, plan: dict) -> None:
     """Copied source and imported checkpoint must agree, including learned initials."""
     ledger = plan["continuation"]
+    if plan["protocol"] == io.INTEGRITY_PROTOCOL:
+        from autoformalism.search.review_integrity import (
+            PARAMETER_POLICY,
+            selection_policy,
+        )
+
+        if (
+            ledger.get("parameter_declaration_policy") != PARAMETER_POLICY
+            or ledger.get("selection_policy") != selection_policy()
+        ):
+            raise ValueError("continuation integrity policies differ")
     if set(ledger["results"]) != {t["task_id"] for t in plan["tasks"]}:
         raise ValueError("import ledger omits a lineage")
     for task in plan["tasks"]:
@@ -169,7 +180,7 @@ def prepare(
                 else "collocation-single-target-v2",
             )
             results[task["task_id"]] = result
-            if protocol == io.RESPONSE_PROTOCOL and result["selected"] is None:
+            if protocol in io.RESPONSE_PROTOCOLS and result["selected"] is None:
                 raise ValueError(
                     "response continuation requires a fitted incumbent for every task"
                 )
@@ -217,7 +228,7 @@ def prepare(
                 public_target_gate="unchanged_frozen_contract_exposed_before_construction",
                 revision_policy="scientific-content-multi-revision-1",
             )
-        if protocol == io.RESPONSE_PROTOCOL:
+        if protocol in io.RESPONSE_PROTOCOLS:
             ledger.update(
                 revision_policy="response-oriented-revision-1",
                 evidence_policy="training-response-evidence-1",
@@ -230,6 +241,16 @@ def prepare(
                     "safety_tokens": 512,
                 },
                 provider_failure_policy="record_and_preserve_without_refit_or_blind_retry",
+            )
+        if protocol == io.INTEGRITY_PROTOCOL:
+            from autoformalism.search.review_integrity import (
+                PARAMETER_POLICY,
+                selection_policy,
+            )
+
+            ledger.update(
+                parameter_declaration_policy=PARAMETER_POLICY,
+                selection_policy=selection_policy(),
             )
         if (root / "plan.json").exists():
             plan = io.verify(root)

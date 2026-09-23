@@ -11,6 +11,7 @@ from autoformalism.rebuttal.staged_multiround_feedback_campaign import (
 )
 from autoformalism.search import review_revision_multi as edits
 from autoformalism.search.response_evidence import presentation
+from autoformalism.search.review_integrity import PARAMETER_POLICY
 from autoformalism.search.review_multi_construction import public_contract
 from autoformalism.staged_topology import content_hash
 
@@ -47,8 +48,10 @@ def payload(bundle, packet, parameters, response, retry=None):
 
 def propose(plan, task, parent, client, response):
     """Three equation attempts; deterministic delivery failures stop immediately."""
+    from autoformalism.rebuttal import review_deadline_io as io
     from autoformalism.rebuttal import review_deadline_pipeline as pipeline
 
+    strict_parameters = plan["protocol"] == io.INTEGRITY_PROTOCOL
     selected = parent["selected"]
     bundle, packet = selected["bundle"], selected["packet"]
     if response is None:
@@ -58,6 +61,17 @@ def propose(plan, task, parent, client, response):
         user = payload(
             bundle, packet, selected["fit"]["parameters"], response, feedback
         )
+        if strict_parameters:
+            user["parameter_declaration_policy"] = {
+                "policy": PARAMETER_POLICY,
+                "rule": (
+                    "Existing canonical names and displayed aliases refer to the "
+                    "same immutable parameter declaration. A conflicting role in "
+                    "new_parameters is rejected, not silently ignored. Omit the "
+                    "declaration to reuse that parameter; use a fresh name and "
+                    "update intended references for an independent quantity."
+                ),
+            }
         user["public_target_contract"] = public_contract(
             plan["cells"][task["cell"]], task
         )
@@ -91,7 +105,13 @@ def propose(plan, task, parent, client, response):
             shown = json.loads(record["request"]["body"]["messages"][1]["content"])
             refs = {r["ref"]: r["record"] for r in shown["evidence_catalog"]}
             raw = visible_response(record)
-            decision = edits.apply_edits(bundle, packet, raw, reference_catalog=refs)
+            decision = edits.apply_edits(
+                bundle,
+                packet,
+                raw,
+                reference_catalog=refs,
+                reject_existing_role_conflicts=strict_parameters,
+            )
             certificate = None
             if decision["bundle"] is not None:
                 certificate = pipeline.certificates(

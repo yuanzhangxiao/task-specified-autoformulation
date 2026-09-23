@@ -33,7 +33,9 @@ PARAMETER_PROTOCOL = "review-deadline-4"
 REVISION_PROTOCOL = "review-deadline-5"
 MULTI_PROTOCOL = "review-deadline-6"
 RESPONSE_PROTOCOL = "review-deadline-7"
-MULTI_PROTOCOLS = {MULTI_PROTOCOL, RESPONSE_PROTOCOL}
+INTEGRITY_PROTOCOL = "review-deadline-8"
+RESPONSE_PROTOCOLS = {RESPONSE_PROTOCOL, INTEGRITY_PROTOCOL}
+MULTI_PROTOCOLS = {MULTI_PROTOCOL, *RESPONSE_PROTOCOLS}
 SHARED_PROTOCOL = "shared-process-pilot-1"
 INTEGRATION_PROTOCOL = "shared-process-integration-1"
 SHARED_PROTOCOLS = {SHARED_PROTOCOL, INTEGRATION_PROTOCOL}
@@ -57,6 +59,7 @@ class DeadlineConfig(StrictSchema):
         "review-deadline-5",
         "review-deadline-6",
         "review-deadline-7",
+        "review-deadline-8",
         "shared-process-pilot-1",
         "shared-process-integration-1",
     ] = PROTOCOL
@@ -202,12 +205,14 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
             "scripts/smoke_review_multi.py",
             "scripts/hpc/submit_review_multi_aces.sh",
         )
-    if protocol == RESPONSE_PROTOCOL:
+    if protocol in RESPONSE_PROTOCOLS:
         paths += (
             "scripts/review_response.py",
             "scripts/smoke_review_response.py",
             "scripts/hpc/submit_review_response_aces.sh",
         )
+    if protocol == INTEGRITY_PROTOCOL:
+        paths += ("scripts/hpc/submit_review_integrity_aces.sh",)
     if protocol in SHARED_PROTOCOLS:
         paths += (
             "scripts/submit_shared_process_pilot.py",

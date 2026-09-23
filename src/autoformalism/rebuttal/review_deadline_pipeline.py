@@ -224,7 +224,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
             and task["arm"] != "refit_only"
         ):
             client_type = BudgetedRepairClient
-    if index and plan["protocol"] == io.RESPONSE_PROTOCOL:
+    if index and plan["protocol"] in io.RESPONSE_PROTOCOLS:
         from autoformalism.llm.response_revision import ResponseRevisionClient
 
         client_type = ResponseRevisionClient
@@ -542,7 +542,7 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
                 )
             except (ValueError, KeyError, ModelValidationError) as error:
                 payload.update(status="contract_failed", error=str(error))
-    elif plan["protocol"] == io.RESPONSE_PROTOCOL:
+    elif plan["protocol"] in io.RESPONSE_PROTOCOLS:
         from autoformalism.search.response_revision import propose
 
         response = response_for_selected(root, plan, task, parent["selected"])
@@ -788,6 +788,19 @@ def selection_key(value):
     return (fit["validation"]["normalized_mse"], terms)
 
 
+def select_candidate(plan: dict, incumbent: dict | None, trial: dict | None):
+    """Use the plan's selection rule in normal fitting and recovery publication."""
+    audit = None
+    if plan["protocol"] == io.INTEGRITY_PROTOCOL:
+        from autoformalism.search.review_integrity import selection_decision
+
+        audit = selection_decision(selection_key(incumbent), selection_key(trial))
+        choose_trial = audit["choose_trial"]
+    else:
+        choose_trial = selection_key(trial) < selection_key(incumbent)
+    return (trial if choose_trial else incumbent), audit
+
+
 def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
     """Preserve the incumbent; changes and unchanged controls get the same profile."""
     io.require_open(root)
@@ -883,7 +896,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                     training,
                     **(
                         {"response": True}
-                        if plan["protocol"] == io.RESPONSE_PROTOCOL
+                        if plan["protocol"] in io.RESPONSE_PROTOCOLS
                         else {}
                     ),
                 )
@@ -901,7 +914,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                         if packet is not None
                         else None
                     }
-                    if plan["protocol"] == io.RESPONSE_PROTOCOL
+                    if plan["protocol"] in io.RESPONSE_PROTOCOLS
                     else {}
                 ),
                 "origin_task": task["task_id"],
@@ -912,9 +925,7 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                 ),
             }
             status = result.status
-        selected = incumbent
-        if selection_key(trial) < selection_key(incumbent):
-            selected = trial
+        selected, selection_audit = select_candidate(plan, incumbent, trial)
         closed = selected is None or proposal["status"] in {
             "closed_lineage",
             "no_change",
@@ -942,7 +953,10 @@ def fit_one(root: Path, plan: dict, task: dict, index: int) -> dict | None:
                 "closed": closed,
                 "proposal_sha256": proposal["artifact_sha256"],
                 "parent_sha256": parent["artifact_sha256"] if parent else None,
-                "selection_uses": "validation_only_then_complexity",
+                "selection_uses": selection_audit["policy"]
+                if selection_audit is not None
+                else "validation_only_then_complexity",
+                **({"selection_audit": selection_audit} if selection_audit else {}),
                 "cost": proposal["cost"],
                 "test_data_opened": False,
                 "selected_new_trial": selected is not None and selected is trial,

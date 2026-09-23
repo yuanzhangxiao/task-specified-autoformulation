@@ -153,7 +153,7 @@ def report(root: Path) -> dict:
                     else None,
                 }
             )
-            if plan["protocol"] == io.RESPONSE_PROTOCOL:
+            if plan["protocol"] in io.RESPONSE_PROTOCOLS:
                 rows[-1].update(
                     prompt_input_tokens=[
                         r["prompt_preflight"]["input_tokens"]
@@ -163,6 +163,8 @@ def report(root: Path) -> dict:
                     delivery_failure=(result or {}).get("proposal_status")
                     in {"request_preflight_failed", "provider_request_failed"},
                 )
+            if plan["protocol"] == io.INTEGRITY_PROTOCOL:
+                rows[-1]["selection_audit"] = (result or {}).get("selection_audit")
             if plan["protocol"] in io.PARAMETER_PROTOCOLS:
                 certificate = (selected or {}).get("certificate", {})
                 states = {
@@ -238,7 +240,7 @@ def report(root: Path) -> dict:
         ),
         "fallback_fits": sum(r["fit_trigger"] == "incumbent_fallback" for r in rows),
     }
-    if plan["protocol"] == io.RESPONSE_PROTOCOL:
+    if plan["protocol"] in io.RESPONSE_PROTOCOLS:
         value.update(
             evidence_policy="training-response-evidence-1",
             delivery_failure_visits=sum(r["delivery_failure"] for r in rows),

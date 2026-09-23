@@ -23,12 +23,12 @@ CLI = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CLI)
 
 
-def run(root: Path) -> dict:
+def run(root: Path, *, protocol: str = io.RESPONSE_PROTOCOL) -> dict:
     """Use a real three-target fit; the proposer and tokenizer are software controls."""
     source, output = root / "source", root / "continuation"
     MULTI.fixture(source, real_fit=True, fitted_only=True)
     before = {str(p): p.read_bytes() for p in source.rglob("*.json")}
-    plan = continuation.prepare(source, output, 2, 2, protocol=io.RESPONSE_PROTOCOL)
+    plan = continuation.prepare(source, output, 2, 2, protocol=protocol)
     preview = CLI.prepare(output)
     assert CLI.prepare(output) == preview
     assert {e["target"] for e in preview["rows"][0]["evidence"]["examples"]} == {
@@ -53,6 +53,15 @@ def run(root: Path) -> dict:
                 "output_mappings": [{"channel": "U", "expression": "disposal+offset"}],
                 "new_parameters": [{"name": "offset"}],
             }
+            if protocol == io.INTEGRITY_PROTOCOL:
+                assert user["parameter_declaration_policy"]
+                if len(generation_calls) == 1:
+                    raw["new_parameters"].append({"name": "c", "role": "time_constant"})
+                else:
+                    assert (
+                        user["retry_feedback"]["code"]
+                        == "EXISTING_PARAMETER_ROLE_CONFLICT"
+                    )
             return {
                 "choices": [
                     {"finish_reason": "stop", "message": {"content": json.dumps(raw)}}
@@ -77,6 +86,9 @@ def run(root: Path) -> dict:
             assert set(
                 result["trial"]["fit"]["training"]["per_target_normalized_mse"]
             ) == {"Gp", "I", "U"}
+            if protocol == io.INTEGRITY_PROTOCOL:
+                assert len(proposal["attempts"]) == 2
+                assert result["selection_audit"]["comparison_tolerance"] is not None
         else:
             assert proposal["status"] == "provider_request_failed", proposal
             assert len(proposal["attempts"]) == 1
@@ -91,6 +103,7 @@ def run(root: Path) -> dict:
     assert {str(p): p.read_bytes() for p in source.rglob("*.json")} == before
     return {
         "status": "pass",
+        "protocol": protocol,
         "real_multi_target_fits": True,
         "training_response_replay": True,
         "delivery_failure_preserves_without_refit": True,
@@ -106,4 +119,10 @@ def run(root: Path) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    print(json.dumps(run(parser.parse_args().output), indent=2))
+    parser.add_argument(
+        "--protocol",
+        choices=sorted(io.RESPONSE_PROTOCOLS),
+        default=io.RESPONSE_PROTOCOL,
+    )
+    args = parser.parse_args()
+    print(json.dumps(run(args.output, protocol=args.protocol), indent=2))

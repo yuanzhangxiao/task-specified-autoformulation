@@ -70,7 +70,11 @@ def payload(bundle, packet, parameters, retry=None) -> dict:
 
 
 def _resolve(
-    bundle: dict, reply: ScientificRevision, *, output_mappings: tuple = ()
+    bundle: dict,
+    reply: ScientificRevision,
+    *,
+    output_mappings: tuple = (),
+    reject_existing_role_conflicts: bool = False,
 ) -> tuple[tuple[ParameterSpec, ...], dict]:
     """Resolve every new role against all edited RHS and output occurrences."""
     parent = CandidateModel.model_validate(bundle["initialization"]["base_candidate"])
@@ -81,6 +85,25 @@ def _resolve(
     for parameter in reply.new_parameters:
         name = inverse.get(parameter.name, parameter.name)
         if name in existing:
+            if (
+                reject_existing_role_conflicts
+                and parameter.role is not None
+                and parameter.role != existing[name].role
+            ):
+                raise RevisionContractError(
+                    "EXISTING_PARAMETER_ROLE_CONFLICT",
+                    "This name identifies an existing parameter with an immutable "
+                    "role. To reuse it, remove the new declaration and keep its "
+                    "existing meaning. For an independent quantity, choose a fresh "
+                    "name, declare its role, and update the intended references. "
+                    "The runtime has not renamed or reinterpreted the parameter.",
+                    referenced_name=parameter.name,
+                    canonical_name=name,
+                    display_name=aliases[name],
+                    existing_role=existing[name].role.value,
+                    requested_role=parameter.role.value,
+                    incumbent_unchanged=True,
+                )
             inherited.append(
                 {
                     "parameter": name,
