@@ -118,6 +118,13 @@ previously rejected candidates or remove a state already retained by v7.
 ```bash
 module load GCCcore/13.2.0 Python/3.11.5
 export AF_REPO_ROOT=/scratch/user/u.yx126462/repos/autoformalism-review-integrity-v8
+AF_CODE_COMMIT=f9c739273c6cef5fb6fe0e19fb9c6dfb459cc3e1
+if [ ! -d "$AF_REPO_ROOT/.git" ]; then
+  git clone --branch codex/prefit-aces-v1 \
+    git@github.com:yuanzhangxiao/task-specified-autoformulation.git "$AF_REPO_ROOT"
+fi
+git -C "$AF_REPO_ROOT" fetch origin codex/prefit-aces-v1
+git -C "$AF_REPO_ROOT" checkout --detach "$AF_CODE_COMMIT"
 export AF_PYTHON=/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python
 export AF_SOURCE_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/dalla-response-feedback-r14-v1
 export AF_OUTPUT_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/dalla-review-integrity-r17-v1
