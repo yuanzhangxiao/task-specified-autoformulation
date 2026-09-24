@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from autoformalism.judging.prompts import (
     ATOMIC_STAGE_TWO_NOTE,
     HYBRID_JUDGE_PROMPT,
 )
-from autoformalism.llm import LLMConfig, create_llm_client
+from autoformalism.llm import LLMClient, LLMConfig, create_llm_client
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.repair_evidence import Finding, model_hash
 from autoformalism.rebuttal.repair_judge_evidence import named_references, review_status
@@ -79,7 +80,13 @@ def review_request(
     }
 
 
-def perform_review(request: dict, directory: Path, base_url: str) -> dict:
+def perform_review(
+    request: dict,
+    directory: Path,
+    base_url: str,
+    *,
+    client_factory: Callable[[LLMConfig], LLMClient] | None = None,
+) -> dict:
     """Cache both orientations and report advisory scientific concerns only."""
     identity = content_hash(request)
     sign_policy = request["protocol"].get("sign_evidence_policy", LEGACY_SIGN_POLICY)
@@ -115,7 +122,7 @@ def perform_review(request: dict, directory: Path, base_url: str) -> dict:
     clients = tuple(
         (
             seed,
-            create_llm_client(
+            (client_factory or create_llm_client)(
                 LLMConfig(
                     provider="vllm",
                     model=model,
