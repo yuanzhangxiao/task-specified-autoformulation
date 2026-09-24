@@ -131,7 +131,7 @@ def profile_settings(request: PublicFitRequest) -> dict:
             absolute_tolerance=1e-9,
         ).model_dump(mode="json")
     # Stored explicitly so prepare/inspect do not require optional CasADi.
-    return {
+    settings = {
         "protocol": "collocation-forward-sensitivity-1",
         "initializer_seconds": 120.0,
         "refinement_seconds": 180.0,
@@ -151,6 +151,15 @@ def profile_settings(request: PublicFitRequest) -> dict:
         "recovery_max_starts": 10,
         "recovery_probe_seconds": 10.0,
     }
+    if request.profile == "collocation-rescue-v1":
+        settings.update(
+            initializer_seconds=300.0,
+            refinement_seconds=900.0,
+            maximum_function_evaluations=1200,
+            node_warmup_seconds=30.0,
+            recovery_probe_seconds=60.0,
+        )
+    return settings
 
 
 def pack_split(split: DatasetSplit) -> PublicSplit:

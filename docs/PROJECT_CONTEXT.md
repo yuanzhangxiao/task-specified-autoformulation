@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/DALLA_DEMONSTRATION_RESCUE.md` defines a separate CPU-only salvage campaign
+for six historical Dalla starting vectors. It imports explicit requests/parameters,
+replays each seed, refits with the opt-in `collocation-rescue-v1` larger allocation,
+and reuses the existing paired one-deletion pruning rule. A saved time-constant
+name collision is explicitly corrected without changing incumbent declarations.
+Original profiles, benchmark data, prior campaigns and intervention outcomes are
+not changed or used for fitting. ACES numerical results remain pending.
+
 `docs/DALLA_SHARED_MULTI_PRUNING.md` defines the opt-in fresh
 `shared-multi-pruning-1` campaign: general shared-process construction, joint-output
 fitting, compact response revisions, public-contract repair and v8 parameter/selection

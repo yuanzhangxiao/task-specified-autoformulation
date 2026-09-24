@@ -18,6 +18,7 @@ FitProfile = Literal[
     "collocation-feasible-v1",
     "collocation-single-target-v2",
     "collocation-multi-target-v1",
+    "collocation-rescue-v1",
 ]
 
 

@@ -1,5 +1,12 @@
 # Phase 1 Pipeline Design
 
+The opt-in `dalla-demonstration-rescue-1` adapter imports frozen historical models
+for a bounded demonstration search. A complete starting-vector replay remains
+available alongside the new fit, followed by the existing paired pruning stage.
+`collocation-rescue-v1` changes only numerical allocation limits; old profiles
+remain reproducible. Intervention data are absent from this execution interface.
+See `DALLA_DEMONSTRATION_RESCUE.md` for the exact six starts and checkpoint policy.
+
 `shared-multi-pruning-1` composes the general shared constructor with the existing
 multi-output fitter and response-oriented revision controller. Public target roles
 are exposed before construction; unresolved executable drafts receive bounded
