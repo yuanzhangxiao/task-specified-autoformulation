@@ -211,7 +211,24 @@ def require_executable_freeze(plan: ExternalBaselineFreezePlan) -> None:
         )
 
 
-def reject_refit_derived_source(path: Path) -> None:
+def development_result(path: Path, *, nested: str | None = None) -> dict:
+    """The saved development selection a guard should inspect.
+
+    A campaign seals its selection beside its own result wrapper, so the file
+    named as the source is not itself a development result. Reading the wrong
+    one makes every guard below fail on a schema that was never meant to be
+    there.
+    """
+    payload = _read_object(path)
+    if nested is None:
+        return payload
+    inner = payload.get(nested)
+    if not isinstance(inner, dict):
+        raise ValueError(f"source has no {nested!r} development selection: {path}")
+    return inner
+
+
+def reject_refit_derived_source(path: Path, *, nested: str | None = None) -> None:
     """Fail closed on a source refit with validation data, for this campaign.
 
     Fitting on train plus validation does not invalidate an independent test
@@ -222,7 +239,7 @@ def reject_refit_derived_source(path: Path) -> None:
     rather than the refit ones, and including it would break the chosen
     train-only equal-data contract.
     """
-    payload = _read_object(path)
+    payload = development_result(path, nested=nested)
     schema = payload.get("schema_version")
     if schema == REFIT_DERIVED_SCHEMA:
         raise ValueError(
@@ -641,8 +658,15 @@ def _resolve_one(
         )
     present = tuple(item for item in (*required, *optional) if item.is_file())
     if evaluator_status == "ready":
-        reject_refit_derived_source(source_path)
-        _validate_identity(source_path, cell, repetition)
+        # A native campaign seals its selection beside the result wrapper it
+        # names as the source, so the guards read that file instead.
+        if plan_method.source_layout == "d3_native_campaign":
+            guarded = source_path.with_name("native-selection.json")
+            nested = "selection"
+        else:
+            guarded, nested = source_path, None
+        reject_refit_derived_source(guarded, nested=nested)
+        _validate_identity(guarded, cell, repetition, nested=nested)
         status_path = source_path.with_name("run_status.json")
         if status_path.is_file():
             require_complete_run_status(status_path)
@@ -814,9 +838,11 @@ def _validate_identity(
     path: Path,
     cell: FinalEvaluationPilotCell,
     repetition: int,
+    *,
+    nested: str | None = None,
 ) -> None:
     """Confirm the saved result names the exact planned cell and repetition."""
-    payload = _read_object(path)
+    payload = development_result(path, nested=nested)
     actual = (
         str(payload.get("benchmark_id")),
         str(payload.get("tier")),

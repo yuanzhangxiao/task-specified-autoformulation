@@ -11,6 +11,7 @@ from statistics import median
 import pytest
 
 from autoformalism.rebuttal.external_baseline_freeze import (
+    REFIT_PROTOCOL,
     ExternalBaselineFreezePlan,
     ExternalBaselineSource,
     load_external_baseline_plan,
@@ -78,7 +79,13 @@ def _method(method_id: str, **overrides: object) -> dict:
     return base
 
 
-def _d3_method() -> dict:
+def _d3_method(**overrides) -> dict:
+    """Blocked by default, as it was before the campaign existed."""
+    defaults = {
+        "implementation_status": "blocked",
+        "blocking_gap": "campaign reader and discrete test protocol are missing",
+    }
+    defaults.update(overrides)
     return _method(
         "d3_native_no_tools",
         source_kind="d3",
@@ -86,8 +93,7 @@ def _d3_method() -> dict:
         execution_semantics="discrete_increment_recursive_rollout",
         parameter_provenance="checkpoint_fitted_train_only",
         prompt_sensitive=True,
-        implementation_status="blocked",
-        blocking_gap="campaign reader and discrete test protocol are missing",
+        **defaults,
     )
 
 
@@ -1369,3 +1375,60 @@ def test_the_chain_digest_ignores_how_a_path_is_spelled() -> None:
         },
     ).stdout.strip()
     assert other != relative
+
+
+def test_a_ready_d3_campaign_resolves_against_its_sealed_selection(
+    tmp_path: Path,
+) -> None:
+    """The guards must read the selection, not the campaign's own wrapper.
+
+    Every other D3 test here declares the method blocked, so evaluator_status
+    is evaluator_unsupported and the guards are skipped. With the campaign
+    finished the method becomes ready, and the guards then ran against
+    results/<i>/result.json -- which carries no schema_version and no seed,
+    so both failed on a file that was never a development result.
+    """
+    rows = [{"benchmark_id": CELL["benchmark_id"], "tier": CELL["tier"],
+             "repetition": 0}]
+    root = _d3_campaign(tmp_path, rows=rows, results={0: True})
+    plan = _plan([_d3_method(implementation_status="ready", blocking_gap=None)])
+
+    requests, sources = resolve_external_baseline_sources(
+        plan, roots={"d3_native_no_tools": root}
+    )
+    assert len(requests) == 1
+    assert sources[0].artifact_status == "available"
+    assert sources[0].adapter_requested is True
+    assert sources[0].source_path.endswith("results/0/result.json")
+
+
+def test_a_ready_d3_task_whose_selection_names_another_cell_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Identity is checked against the selection, so it must still be checked."""
+    rows = [{"benchmark_id": CELL["benchmark_id"], "tier": CELL["tier"],
+             "repetition": 0}]
+    root = _d3_campaign(tmp_path, rows=rows, results={0: True})
+    path = root / "results" / "0" / "native-selection.json"
+    payload = json.loads(path.read_text())
+    payload["selection"]["seed"] = 7
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    plan = _plan([_d3_method(implementation_status="ready", blocking_gap=None)])
+    with pytest.raises(ValueError, match="identity differs from the plan"):
+        resolve_external_baseline_sources(plan, roots={"d3_native_no_tools": root})
+
+
+def test_a_ready_d3_task_with_a_refit_selection_is_refused(tmp_path: Path) -> None:
+    """The refit guard applies to a campaign selection like any other source."""
+    rows = [{"benchmark_id": CELL["benchmark_id"], "tier": CELL["tier"],
+             "repetition": 0}]
+    root = _d3_campaign(tmp_path, rows=rows, results={0: True})
+    path = root / "results" / "0" / "native-selection.json"
+    payload = json.loads(path.read_text())
+    payload["selection"]["finalization_protocol"] = REFIT_PROTOCOL
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    plan = _plan([_d3_method(implementation_status="ready", blocking_gap=None)])
+    with pytest.raises(ValueError, match="train-plus-validation refit"):
+        resolve_external_baseline_sources(plan, roots={"d3_native_no_tools": root})
