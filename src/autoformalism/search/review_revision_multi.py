@@ -12,6 +12,7 @@ from autoformalism.search import review_model_edits as legacy
 from autoformalism.search import review_revision_v3 as v3
 from autoformalism.search import review_revision_v4 as v4
 from autoformalism.search import review_revision_v5 as v5
+from autoformalism.search import review_revision_v6 as v6
 from autoformalism.staged_topology import content_hash
 
 POLICY = "scientific-content-multi-revision-1"
@@ -36,8 +37,19 @@ class ScientificRevision(StrictSchema):
         return None
 
 
-SYSTEM_PROMPT = (
-    v5.SYSTEM_PROMPT.replace(
+class WholeModelRevision(ScientificRevision):
+    """Multi-output counterpart of the existing unbounded patch-count contract."""
+
+    equations: tuple[v4.EquationContent, ...] = ()
+    remove_variables: tuple[Identifier, ...] = ()
+    output_mappings: tuple[MappingEdit, ...] = ()
+    initializers: tuple[legacy.InitializerContent, ...] = ()
+    new_parameters: tuple[v4.RevisionParameter, ...] = ()
+
+
+def _system_prompt(base: str) -> str:
+    """Address output mappings while preserving the chosen base revision policy."""
+    return base.replace(
         "remove_variables, output_expression,", "remove_variables, output_mappings,"
     ).replace(
         "output_expression optionally replaces the expression for the one "
@@ -48,8 +60,7 @@ SYSTEM_PROMPT = (
         "PUBLIC target channels. Omitted mappings stay unchanged. "
         "Mapping edits do not\ndefine internal variables: use equations for those. "
         "All targets remain required.",
-    )
-    + """
+    ) + """
 
 Read public_target_contract before editing: it lists every enforced output mapping,
 composition dependency and representation requirement with its public provenance.
@@ -62,7 +73,16 @@ An empty patch cannot resolve a failing public predicate. Unrelated valid equati
 outputs and initializers should remain unchanged. Before any fit, all public checks
 must pass. Scientific claims remain unverified even when their citations resolve.
 """
-)
+
+
+SYSTEM_PROMPT = _system_prompt(v5.SYSTEM_PROMPT)
+WHOLE_MODEL_SYSTEM_PROMPT = _system_prompt(v6.SYSTEM_PROMPT)
+
+
+def whole_model_contract(value: dict) -> None:
+    """Show storage capacities instead of the removed per-patch list quotas."""
+    value["patch_count_limits"] = None
+    value["serialization_capacity"] = v6.serialization_capacity()
 
 
 def payload(
@@ -129,12 +149,14 @@ def apply_edits(
     *,
     reference_catalog=None,
     reject_existing_role_conflicts: bool = False,
+    whole_model: bool = False,
 ) -> dict:
     """Compile all outputs atomically; unresolved citations never become evidence."""
-    reply = ScientificRevision.model_validate(raw)
+    schema = WholeModelRevision if whole_model else ScientificRevision
+    reply = schema.model_validate(raw)
     mappings, duplicates = v3._unique(reply.output_mappings, "channel")
     cleaned, discarded = v5._cleanup(bundle, reply, output_mappings=tuple(mappings))
-    reply = ScientificRevision.model_validate(cleaned)
+    reply = schema.model_validate(cleaned)
     specs, audit = v4._resolve(
         bundle,
         reply,
@@ -157,6 +179,11 @@ def apply_edits(
         enforce_size_limits=False,
         output_mappings=[m.model_dump(mode="json") for m in mappings],
         reference_catalog={} if packet is None else reference_catalog,
+        **(
+            {"content_model": v6.CheckedContent, "enforce_patch_limits": False}
+            if whole_model
+            else {}
+        ),
     )
     result["provenance"].update(
         protocol=POLICY,
@@ -171,6 +198,10 @@ def apply_edits(
             "after": v5.model_size(result["bundle"] or bundle),
         },
     )
+    if whole_model:
+        result["provenance"].update(
+            protocol="scientific-content-multi-whole-model-1", patch_count_limits=None
+        )
     if result["bundle"]:
         result["bundle"]["revision_provenance"] = result["provenance"]
     return result

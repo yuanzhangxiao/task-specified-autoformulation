@@ -36,6 +36,7 @@ from autoformalism.schemas.staged_topology import (
     TargetDependency,
     VariableReply,
 )
+from autoformalism.search import scientific_verification
 from autoformalism.staging import enrich_topology_proposal
 from autoformalism.targets import PublicTargetContract
 
@@ -356,6 +357,8 @@ def freeze_inventory(
     ]
     if missing:
         raise ValueError(f"missing generated targets: {missing}")
+    if not scientific_verification.enabled():
+        return inventory
     active = {item.name for item in inventory if item.definition != "unused"}
     missing_drivers = {
         driver for item in brief.requirements for driver in item.drivers
@@ -436,7 +439,9 @@ def validate_equation(
 def public_structure_checks(
     brief: PublicScientificBrief, equations: tuple[EquationDefinition, ...]
 ) -> tuple[dict[str, object], ...]:
-    """Report necessary public paths separately from scientific correctness."""
+    """Report active search obligations, not the independent final assessment."""
+    if not scientific_verification.enabled():
+        return ()
     dependencies = {
         item.name: {source for term in item.terms for source in term.sources}
         for item in equations

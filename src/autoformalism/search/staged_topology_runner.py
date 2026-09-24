@@ -22,6 +22,7 @@ from autoformalism.schemas.staged_topology import (
     VariableReply,
     equation_reply_model,
 )
+from autoformalism.search import scientific_verification
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_topology_prompts import (
     render_equation_topology_system_prompt,
@@ -211,6 +212,8 @@ def _validate_memory_equation_obligations(
     memory_candidates: dict[str, set[str]],
 ) -> None:
     """Enforce the typed driver-to-memory-to-target path locally."""
+    if not scientific_verification.enabled():
+        return
     dependencies = {
         equation.name: {source for term in equation.terms for source in term.sources}
         for equation in (*equations, definition)
@@ -481,6 +484,10 @@ def run_staged_topology(
                         memory_candidates,
                     )
                     gaps = _agenda_gaps(brief, item, inventory, memory_candidates)
+                    if not scientific_verification.enabled():
+                        gaps = tuple(
+                            g for g in gaps if g.startswith("generated_target:")
+                        )
                     accepted_names = [
                         str(decision["name"])
                         for decision in decisions

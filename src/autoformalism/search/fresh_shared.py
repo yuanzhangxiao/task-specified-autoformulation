@@ -42,7 +42,7 @@ def propose(plan: dict, task: dict, parent: dict, client, directory) -> dict:
         directory,
         fresh_builder=fresh,
         strict_parameters=True,
-        shared_relationships=True,
+        shared_relationships=task.get("shared_processes", True),
     )
 
 

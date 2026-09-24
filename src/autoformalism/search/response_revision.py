@@ -16,9 +16,7 @@ from autoformalism.search.review_multi_construction import public_contract
 from autoformalism.staged_topology import content_hash
 
 POLICY = "response-oriented-revision-1"
-SYSTEM_PROMPT = (
-    edits.SYSTEM_PROMPT.replace("e.g. E001", "e.g. R001")
-    + """
+RESPONSE_PROMPT = """
 
 training_evidence is a compact response comparison, measured on complete training
 rollouts. Compare observed and predicted amplitudes, peaks, return toward initial
@@ -29,6 +27,9 @@ Optional diagnostic samples are a small selection; the fitting objective still
 uses all training samples. Cite only R... identifiers actually in evidence_catalog.
 Do not treat a response summary as proof of the faulty term or of convergence.
 """
+SYSTEM_PROMPT = edits.SYSTEM_PROMPT.replace("e.g. E001", "e.g. R001") + RESPONSE_PROMPT
+WHOLE_MODEL_SYSTEM_PROMPT = (
+    edits.WHOLE_MODEL_SYSTEM_PROMPT.replace("e.g. E001", "e.g. R001") + RESPONSE_PROMPT
 )
 
 
@@ -52,6 +53,7 @@ def propose(plan, task, parent, client, response):
     from autoformalism.rebuttal import review_deadline_pipeline as pipeline
 
     strict_parameters = plan["protocol"] in io.INTEGRITY_PROTOCOLS
+    whole_model = plan["protocol"] == io.ABLATION_PROTOCOL
     selected = parent["selected"]
     bundle, packet = selected["bundle"], selected["packet"]
     if response is None:
@@ -61,7 +63,11 @@ def propose(plan, task, parent, client, response):
         user = payload(
             bundle, packet, selected["fit"]["parameters"], response, feedback
         )
-        if plan["protocol"] == io.FRESH_PROTOCOL:
+        if whole_model:
+            edits.whole_model_contract(user)
+        if plan["protocol"] in io.FRESH_PROTOCOLS and task.get(
+            "shared_processes", True
+        ):
             from autoformalism.search.fresh_shared import add_relationships
 
             add_relationships(user)
@@ -82,12 +88,16 @@ def propose(plan, task, parent, client, response):
         user["public_requirement_findings"] = pipeline._certificate_feedback(
             selected["certificate"], task
         )
+        if parent.get("scientific_advice") is not None:
+            user["scientific_advice"] = parent["scientific_advice"]
         record, raw = None, None
         try:
             record = client.call(
-                system=SYSTEM_PROMPT,
+                system=WHOLE_MODEL_SYSTEM_PROMPT if whole_model else SYSTEM_PROMPT,
                 user=json.dumps(user, sort_keys=True, separators=(",", ":")),
-                response_model=edits.ScientificRevision,
+                response_model=edits.WholeModelRevision
+                if whole_model
+                else edits.ScientificRevision,
                 step="review_response_content",
                 attempt=attempt,
             )
@@ -115,8 +125,9 @@ def propose(plan, task, parent, client, response):
                 raw,
                 reference_catalog=refs,
                 reject_existing_role_conflicts=strict_parameters,
+                whole_model=whole_model,
             )
-            if plan["protocol"] == io.FRESH_PROTOCOL:
+            if plan["protocol"] in io.FRESH_PROTOCOLS:
                 from autoformalism.search.fresh_shared import propagation
 
                 propagation(bundle, decision)

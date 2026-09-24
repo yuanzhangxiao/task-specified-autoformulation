@@ -32,6 +32,7 @@ from autoformalism.schemas.staged_topology import (
     ModelingLimits,
     PublicScientificBrief,
 )
+from autoformalism.search import scientific_verification
 from autoformalism.search.causal_initialization import compile_initialization_result
 from autoformalism.search.staged_function_runner import run_staged_functions
 from autoformalism.staged_functions import has_nonlinear_source_dependence
@@ -348,7 +349,10 @@ def deterministic_prefit_audit(
         ),
         "frozen_term_sources_and_signs_preserved": sign_and_source_match,
         "latent_initializer_coverage": initialized & latent == latent,
-        "nonlinear_obligations_satisfied": nonlinear_passed == nonlinear_required,
+        "nonlinear_obligations_satisfied": (
+            not scientific_verification.enabled()
+            or nonlinear_passed == nonlinear_required
+        ),
         "candidate_schema_and_expression_contracts_validated": True,
     }
     return {

@@ -33,6 +33,7 @@ from autoformalism.schemas.staged_functions import (
     OuterWeightDomainDerivation,
 )
 from autoformalism.schemas.staged_topology import OuterWeightSign
+from autoformalism.search import scientific_verification
 from autoformalism.sign_contract import (
     analyze_outer_weight,
     strip_outer_negative_factors,
@@ -153,7 +154,8 @@ def bind_function_reply(
         )
     active_obligation = obligation or InteractionFunctionObligation()
     if (
-        active_obligation.requires_nonlinear_source_dependence
+        scientific_verification.enabled()
+        and active_obligation.requires_nonlinear_source_dependence
         and not has_nonlinear_source_dependence(parsed.tree, expected)
     ):
         raise ValueError(

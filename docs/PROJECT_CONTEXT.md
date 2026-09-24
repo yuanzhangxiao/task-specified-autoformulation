@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/FINAL_COMPONENT_CAMPAIGN.md` defines the fresh nine-benchmark deadline
+campaign, adding canonical named T1-hard and T2-easy/hard to the original six.
+The primary critic/verifier factorial retains both prompt variants and two seeds;
+shared-process and pruning comparisons are restricted to four Dalla cells.
+Persistent site workers reuse the existing joint-output fitter, revision and
+pruning paths. Corrected Jetstream critic advice requires the complete known-case
+revalidation gate. All endpoints must be frozen before separate held-out scoring.
+Implementation is locally tested; no remote campaign has been launched here.
+
 `docs/DALLA_DEMONSTRATION_RESCUE.md` defines a separate CPU-only salvage campaign
 for six historical Dalla starting vectors. It imports explicit requests/parameters,
 replays each seed, refits with the opt-in `collocation-rescue-v1` larger allocation,

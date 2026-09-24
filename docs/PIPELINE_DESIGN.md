@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+The opt-in `final-component-campaign-1` composes existing shared construction,
+joint-output fitting, whole-model response revisions, paired pruning, and the
+corrected advisory judge. A scoped verifier flag disables scientific admission
+and repair gates while retaining compiler, causality and generated-target
+contracts. Every arm retains the same specification and receives independent
+final assessment. Whole cell/seed/prompt blocks can run on separate sites, with
+per-unit locks and immutable receipts; the test interface requires an explicit
+terminal export. See `FINAL_COMPONENT_CAMPAIGN.md` for the frozen nine-cell matrix,
+managed-judge prerequisite and run commands.
+
 The opt-in `dalla-demonstration-rescue-1` adapter imports frozen historical models
 for a bounded demonstration search. A complete starting-vector replay remains
 available alongside the new fit, followed by the existing paired pruning stage.

@@ -8,6 +8,7 @@ from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.llm.staged_topology import visible_response
 from autoformalism.rebuttal import review_deadline_pipeline as pipeline
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
+from autoformalism.rebuttal.review_deadline_io import ABLATION_PROTOCOL
 from autoformalism.rebuttal.staged_multiround_feedback_campaign import (
     RevisionContractError,
 )
@@ -114,6 +115,7 @@ def propose(
     shared_relationships=False,
 ) -> dict:
     """Repair a saved unfitted draft, or construct if none exists."""
+    whole_model = plan["protocol"] == ABLATION_PROTOCOL
     cell = plan["cells"][task["cell"]]
     bundle = parent.get("construction_draft")
     value = {} if bundle else (fresh_builder or fresh)(cell, task, client, directory)
@@ -138,6 +140,8 @@ def propose(
     for attempt in range(3):
         raw, record = None, None
         user = edits.payload(bundle, None, None, retry)
+        if whole_model:
+            edits.whole_model_contract(user)
         user.update(
             public_target_contract=public_contract(cell, task),
             public_requirement_findings=pipeline._certificate_feedback(
@@ -159,15 +163,21 @@ def propose(
             )
         try:
             record = client.call(
-                system=edits.SYSTEM_PROMPT,
+                system=edits.WHOLE_MODEL_SYSTEM_PROMPT
+                if whole_model
+                else edits.SYSTEM_PROMPT,
                 user=json.dumps(user, sort_keys=True, separators=(",", ":")),
-                response_model=edits.ScientificRevision,
+                response_model=edits.WholeModelRevision
+                if whole_model
+                else edits.ScientificRevision,
                 step="repair_public_construction",
                 attempt=attempt,
             )
             raw = visible_response(record)
             decision = edits.apply_edits(
-                bundle, None, raw, reject_existing_role_conflicts=strict_parameters
+                bundle, None, raw,
+                reject_existing_role_conflicts=strict_parameters,
+                whole_model=whole_model,
             )
             if shared_relationships:
                 from autoformalism.search.fresh_shared import propagation

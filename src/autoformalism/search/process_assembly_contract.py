@@ -11,6 +11,7 @@ from pydantic import StrictBool
 
 from autoformalism.expressions.parser import RestrictedParser
 from autoformalism.schemas.staged_functions import InteractionFunctionReply
+from autoformalism.search import scientific_verification
 from autoformalism.staged_functions import normalize_topology_owned_sign
 from autoformalism.staged_topology import _ancestors
 
@@ -175,6 +176,8 @@ def process_paths(brief, source: dict) -> set[tuple[str, str]]:
 
 def preserve_paths(brief, before: dict, after: dict) -> None:
     """A local source edit cannot silently sever an existing process-target claim."""
+    if not scientific_verification.enabled():
+        return
     lost = sorted(process_paths(brief, before) - process_paths(brief, after))
     if lost:
         raise ValueError(

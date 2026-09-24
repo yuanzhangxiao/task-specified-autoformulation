@@ -132,7 +132,7 @@ def certificates(bundle: dict, cell: dict, task: dict) -> dict:
     )
     ablation_pass = task["arm"] != "no_latent" or not non_target_states
     eligible = not target_failed and not mechanism_failed and ablation_pass
-    if task["arm"] == "no_spec":
+    if task["arm"] == "no_spec" or task.get("scientific_verifier") is False:
         # Withheld scientific requirements are scored only after construction;
         # they must not secretly constrain the ablated model's selection.
         eligible = all(
@@ -142,6 +142,11 @@ def certificates(bundle: dict, cell: dict, task: dict) -> dict:
             in {"explicit_observation_mapping", "generated_model_path"}
         )
     return {
+        **(
+            {"scientific_verifier_enabled": task["scientific_verifier"]}
+            if "scientific_verifier" in task
+            else {}
+        ),
         "runtime_valid": True,
         "targets": target_payload,
         "mechanisms": mechanisms.model_dump(mode="json"),
@@ -228,7 +233,7 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
         from autoformalism.llm.response_revision import ResponseRevisionClient
 
         client_type = ResponseRevisionClient
-    if index and plan["protocol"] == io.FRESH_PROTOCOL:
+    if index and plan["protocol"] in io.FRESH_PROTOCOLS:
         parent = io.read_round(root, task, index - 1)
         if (
             parent
@@ -250,6 +255,8 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
 
 def _certificate_feedback(certificate: dict, task: dict) -> dict:
     """Expose failed public predicates without leaking withheld ablation criteria."""
+    if task.get("scientific_verifier") is False:
+        return {}  # Offline certificates cannot leak into ablated repair feedback.
     targets = [
         p
         for p in certificate["targets"]["predicates"]
@@ -466,7 +473,7 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
         "status": "construction_failed",
         "decision": None,
     }
-    if plan["protocol"] == io.FRESH_PROTOCOL and (
+    if plan["protocol"] in io.FRESH_PROTOCOLS and (
         index == 0 or (parent is not None and parent["selected"] is None)
     ):
         from autoformalism.search.fresh_shared import propose
@@ -560,6 +567,10 @@ def propose_one(root: Path, plan: dict, task: dict, index: int, client) -> dict 
     elif plan["protocol"] in io.RESPONSE_PROTOCOLS:
         from autoformalism.search.response_revision import propose
 
+        if plan["protocol"] == io.ABLATION_PROTOCOL:
+            from autoformalism.rebuttal.component_critic import advice
+
+            parent = {**parent, "scientific_advice": advice(root, task, parent)}
         response = response_for_selected(root, plan, task, parent["selected"])
         payload.update(propose(plan, task, parent, client, response))
     elif plan["protocol"] in io.CONTENT_PROTOCOLS:

@@ -48,12 +48,13 @@ def construct(
         if task["arm"] == "full"
         else None
     )
+    sharing = task.get("shared_processes", True)
     options = {
         "hybrid_variable_construction": True,
         "audit_public_polarity_policy": True,
         "proposer_owns_unfixed_signs": True,
         "training_evidence": evidence,
-        "shared_process_guidance": True,
+        "shared_process_guidance": sharing,
     }
     variables = _stage(
         directory / "variables.json",
@@ -79,7 +80,8 @@ def construct(
     )
     attempts = []
     last_draft = None
-    for route in ("process", "ordinary_fallback"):
+    routes = ("process", "ordinary_fallback") if sharing else ("ordinary",)
+    for route in routes:
         output = directory / route
         topology = functions = bundle = certificate = None
         error = None
@@ -115,7 +117,7 @@ def construct(
                         function_repair_policy="certified_outer_gain",
                         initialization_policy="causal_training",
                         training_evidence=evidence,
-                        shared_process_guidance=True,
+                        shared_process_guidance=sharing,
                         dependency_policy="local-function-dependencies-1",
                         assembly_policy="process-assembly-contract-1",
                         function_delivery_policy="identified-function-delivery-1",

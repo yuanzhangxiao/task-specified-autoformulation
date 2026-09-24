@@ -18,6 +18,7 @@ from autoformalism.schemas.public_fitting import (
     PublicFitResult,
     PublicSplit,
 )
+from autoformalism.search import scientific_verification
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "general-process-pruning-1"
@@ -72,6 +73,8 @@ def certificate(request: PublicFitRequest, cell: dict, task: dict) -> dict:
 
 def certified(value: dict) -> bool:
     """Ambiguous obligations remain unresolved, never silently counted as passes."""
+    if value.get("scientific_verifier_enabled") is False:
+        return value["eligible_for_development_selection"]
     return (
         value["eligible_for_development_selection"]
         and value["all_public_graph_requirements_certified"]
@@ -238,7 +241,7 @@ def choose(row: dict, cell: dict) -> dict:
         if c.kind.value
         in {"conservation", "custom", "monotone_increasing", "monotone_decreasing"}
     ]
-    if unchecked:
+    if unchecked and scientific_verification.enabled():
         return {
             "status": "declared_constraints_require_review",
             "request": None,

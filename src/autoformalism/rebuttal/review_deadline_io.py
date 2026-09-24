@@ -35,7 +35,9 @@ MULTI_PROTOCOL = "review-deadline-6"
 RESPONSE_PROTOCOL = "review-deadline-7"
 INTEGRITY_PROTOCOL = "review-deadline-8"
 FRESH_PROTOCOL = "shared-multi-pruning-1"
-INTEGRITY_PROTOCOLS = {INTEGRITY_PROTOCOL, FRESH_PROTOCOL}
+ABLATION_PROTOCOL = "final-component-campaign-1"
+FRESH_PROTOCOLS = {FRESH_PROTOCOL, ABLATION_PROTOCOL}
+INTEGRITY_PROTOCOLS = {INTEGRITY_PROTOCOL, *FRESH_PROTOCOLS}
 RESPONSE_PROTOCOLS = {RESPONSE_PROTOCOL, *INTEGRITY_PROTOCOLS}
 MULTI_PROTOCOLS = {MULTI_PROTOCOL, *RESPONSE_PROTOCOLS}
 SHARED_PROTOCOL = "shared-process-pilot-1"
@@ -45,9 +47,9 @@ PARAMETER_PROTOCOLS = {PARAMETER_PROTOCOL, REVISION_PROTOCOL}
 CONTINUATION_PROTOCOLS = {
     CONTINUATION_PROTOCOL,
     *PARAMETER_PROTOCOLS,
-    *(MULTI_PROTOCOLS - {FRESH_PROTOCOL}),
+    *(MULTI_PROTOCOLS - FRESH_PROTOCOLS),
 }
-SCIENTIFIC_PROTOCOLS = {*CONTINUATION_PROTOCOLS, *SHARED_PROTOCOLS, FRESH_PROTOCOL}
+SCIENTIFIC_PROTOCOLS = {*CONTINUATION_PROTOCOLS, *SHARED_PROTOCOLS, *FRESH_PROTOCOLS}
 CONTENT_PROTOCOLS = {CONTENT_PROTOCOL, *SCIENTIFIC_PROTOCOLS}
 ARMS = ("full", "brief_only", "refit_only", "no_latent", "no_spec")
 FILES = ("manifest.json", "proposer_prompt.txt", "train.csv", "validation.csv")
@@ -69,12 +71,13 @@ class DeadlineConfig(StrictSchema):
         "shared-process-pilot-1",
         "shared-process-integration-1",
         "shared-multi-pruning-1",
+        "final-component-campaign-1",
     ] = PROTOCOL
-    platform: Literal["aces-h100x1"] = "aces-h100x1"
+    platform: Literal["aces-h100x1", "delta-a40x1", "koa-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     model_settings: StagedModelSettings
     served_context_tokens: Literal[32768] = 32768
-    public_cells: tuple[str, ...] = Field(min_length=1, max_length=8)
+    public_cells: tuple[str, ...] = Field(min_length=1, max_length=9)
     seeds: tuple[int, ...] = (0, 1)
     rounds: int = Field(default=3, ge=1, le=15)
     no_latent_cells: tuple[str, ...] = ()
@@ -85,7 +88,9 @@ class DeadlineConfig(StrictSchema):
     fit_profile: Literal[
         "collocation-single-target-v2", "collocation-multi-target-v1"
     ] = "collocation-single-target-v2"
-    scientific_judge: Literal["off"] = "off"
+    scientific_judge: Literal["off", "advisory-jetstream"] = "off"
+    campaign_blocks: tuple[int, ...] | None = None
+    secondary_shared_comparison: bool = False
     revision_attempts: Literal[3] = 3
     wall_seconds: int = Field(default=25200, ge=600, le=43200)
     shutdown_margin_seconds: Literal[300] = 300
@@ -94,7 +99,21 @@ class DeadlineConfig(StrictSchema):
 
     @model_validator(mode="after")
     def bounded_matrix(self):
-        if self.protocol != FRESH_PROTOCOL and self.rounds > 13:
+        if self.protocol != ABLATION_PROTOCOL and (
+            self.platform != "aces-h100x1"
+            or self.scientific_judge != "off"
+            or self.campaign_blocks is not None
+            or self.secondary_shared_comparison
+            or len(self.public_cells) > 8
+        ):
+            raise ValueError(
+                "component campaign options require its versioned protocol"
+            )
+        if self.protocol == ABLATION_PROTOCOL:
+            from autoformalism.rebuttal.component_campaign import validate_config
+
+            validate_config(self)
+        if self.protocol not in FRESH_PROTOCOLS and self.rounds > 13:
             raise ValueError("historical protocols allow at most thirteen rounds")
         if self.protocol == FRESH_PROTOCOL and (
             not self.full_only or self.fit_profile != "collocation-multi-target-v1"
@@ -152,6 +171,10 @@ class DeadlineConfig(StrictSchema):
 
 def tasks(config: DeadlineConfig) -> list[dict]:
     """Counterbalance fresh-construction arm order; refit shares full round zero."""
+    if config.protocol == ABLATION_PROTOCOL:
+        from autoformalism.rebuttal.component_campaign import tasks as campaign_tasks
+
+        return campaign_tasks(config)
     if config.protocol == INTEGRATION_PROTOCOL:
         from autoformalism.rebuttal.shared_process_integration import (
             tasks as integration_tasks,
@@ -243,7 +266,7 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
             "scripts/hpc/submit_shared_process_integration_aces.sh",
             "scripts/smoke_shared_process_integration.py",
         )
-    if protocol == FRESH_PROTOCOL:
+    if protocol in FRESH_PROTOCOLS:
         paths += (
             "scripts/submit_fresh_shared.py",
             "scripts/recover_review_continuation_submission.py",
@@ -253,6 +276,13 @@ def launcher_hash(protocol: str = PROTOCOL) -> str:
             "scripts/hpc/submit_fresh_shared_aces.sh",
             "scripts/submit_shared_process_pilot.py",
             "scripts/submit_review_continuation.py",
+        )
+    if protocol == ABLATION_PROTOCOL:
+        paths += (
+            "scripts/component_campaign.py",
+            "scripts/submit_component_campaign.py",
+            "scripts/hpc/submit_final_components_aces.sh",
+            "scripts/hpc/run_component_campaign.sh",
         )
     return content_hash(
         {p: hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in paths}
@@ -324,6 +354,12 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
             from autoformalism.rebuttal.fresh_shared import policy
 
             extra["fresh_shared_policy"] = policy()
+        if config.protocol == ABLATION_PROTOCOL:
+            from autoformalism.rebuttal.component_campaign import (
+                policy as campaign_policy,
+            )
+
+            extra["component_policy"] = campaign_policy()
         return sealed_write(
             root / "plan.json",
             {
@@ -343,7 +379,7 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                                 "general-shared-revision-1"
                                 if config.protocol == INTEGRATION_PROTOCOL
                                 else "response-oriented-revision-1"
-                                if config.protocol == FRESH_PROTOCOL
+                                if config.protocol in FRESH_PROTOCOLS
                                 else "scientific-content-revision-6"
                                 if config.protocol == SHARED_PROTOCOL
                                 else "model-content-inferred-routing-1"
@@ -352,7 +388,7 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                         }
                     }
                     if config.protocol
-                    in {CONTENT_PROTOCOL, *SHARED_PROTOCOLS, FRESH_PROTOCOL}
+                    in {CONTENT_PROTOCOL, *SHARED_PROTOCOLS, *FRESH_PROTOCOLS}
                     else {}
                 ),
                 "test_data_opened": False,
@@ -360,7 +396,7 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                 **extra,
                 "selection": (
                     "certified-failures-excluded_then-validation-tolerance-then-terms-1"
-                    if config.protocol == FRESH_PROTOCOL
+                    if config.protocol in FRESH_PROTOCOLS
                     else "certified-failures-excluded_then-validation-nmse"
                     "_then-additive-terms"
                 ),
@@ -391,14 +427,14 @@ def freeze(config_path: Path, public_root: Path, root: Path) -> dict:
                             "comparison_claim": "integration_only",
                         }
                     }
-                    if config.protocol in {INTEGRATION_PROTOCOL, FRESH_PROTOCOL}
+                    if config.protocol in {INTEGRATION_PROTOCOL, *FRESH_PROTOCOLS}
                     else {}
                 ),
                 "round_zero_control": "no-iteration endpoint; not equal total compute",
                 "refit_control": (
                     "no separate refit arm; no-change/failed revision reuses the "
                     "same visit fit allowance"
-                    if config.protocol in {INTEGRATION_PROTOCOL, FRESH_PROTOCOL}
+                    if config.protocol in {INTEGRATION_PROTOCOL, *FRESH_PROTOCOLS}
                     else "same C+S budget and retained parameter seed; "
                     "no revision calls"
                 ),
@@ -421,6 +457,11 @@ def verify(root: Path, *, execution: bool = True) -> dict:
 
         if plan.get("fresh_shared_policy") != policy():
             raise ValueError("fresh shared policy differs")
+    if config.protocol == ABLATION_PROTOCOL:
+        from autoformalism.rebuttal.component_campaign import policy as campaign_policy
+
+        if plan.get("component_policy") != campaign_policy():
+            raise ValueError("component policy differs")
     if execution and (
         plan["source_sha256"] != public._source_identity()
         or plan["runtime"] != public._runtime()

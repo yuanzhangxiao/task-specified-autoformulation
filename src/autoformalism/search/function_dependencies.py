@@ -14,6 +14,7 @@ from copy import deepcopy
 from autoformalism.expressions.parser import RestrictedParser
 from autoformalism.schemas.staged_functions import InteractionFunctionReply
 from autoformalism.schemas.staged_topology import EquationDefinition, ScientificVariable
+from autoformalism.search import scientific_verification
 from autoformalism.search import shared_process_contract as shared
 from autoformalism.search import signed_processes as signed
 from autoformalism.staged_topology import (
@@ -28,6 +29,8 @@ POLICY = "local-function-dependencies-1"
 
 def required_checks(brief, equations) -> list[dict]:
     """Retain legacy predicates and enforce the typed dynamic-memory flag too."""
+    if not scientific_verification.enabled():
+        return []
     checks = list(public_structure_checks(brief, equations))
     graph = {e.name: {n for t in e.terms for n in t.sources} for e in equations}
     dynamic = {e.name for e in equations if e.definition == "differential"}
