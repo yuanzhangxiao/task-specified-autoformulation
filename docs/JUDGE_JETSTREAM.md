@@ -1,5 +1,9 @@
 # Jetstream paired-judge compatibility pilot
 
+After a successful compatibility pair, use
+[the existing labeled-case assessment](JUDGE_JETSTREAM_CALIBRATION.md) to check
+coverage, accuracy and consistency before treating the endpoint as validated.
+
 This is one separately recorded execution of the existing scientific judge, not
 a replacement for the pending ACES/Delta sign-recheck campaigns or a new judge
 calibration. No optimizer, proposer, solver rollout, model selection, or test
