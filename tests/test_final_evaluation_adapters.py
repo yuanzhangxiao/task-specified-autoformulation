@@ -352,3 +352,100 @@ def test_request_manifest_rejects_duplicate_identifiers(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="identifiers must be unique"):
         _read_requests(path)
+
+
+# --- run identity for a native campaign -----------------------------------
+
+
+def _campaign_task(directory: Path, *, repetition: int, sealed: bool) -> Path:
+    """One campaign result directory, as phase_b_d3 writes it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    wrapper = directory / "result.json"
+    wrapper.write_text(
+        json.dumps(
+            {
+                "benchmark_id": "phase_b_cell",
+                "tier": "easy",
+                "repetition": repetition,
+                "status": "complete",
+            }
+        ),
+        encoding="utf-8",
+    )
+    if sealed:
+        (directory / "native-selection.json").write_text(
+            json.dumps(
+                {
+                    "plan_sha256": "a" * 64,
+                    "selection": {
+                        "schema_version": "phase-b-baseline-development-result-1",
+                        "method": "d3", "benchmark_id": "phase_b_cell",
+                        "tier": "easy", "seed": repetition,
+                        "equations": {"G": "0.5*G"},
+                        "selected_hyperparameters": {},
+                        "training_normalized_mse": 0.1,
+                        "validation_normalized_mse": 0.2,
+                        "status": "development_complete",
+                        "test_data_opened": False,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+    return wrapper
+
+
+@pytest.mark.parametrize("repetition", [0, 1, 2])
+def test_every_repetition_of_a_campaign_resolves_to_itself(
+    tmp_path: Path, repetition: int
+) -> None:
+    """A campaign wrapper records `repetition`; a development result `seed`.
+
+    Reading the wrapper and defaulting a missing `seed` to 0 made every task
+    look like repetition 0, so the first repetition of each cell matched by
+    coincidence and the other two failed. Two thirds of a finished campaign
+    could not be adapted.
+    """
+    from autoformalism.rebuttal.final_evaluation_adapters import (
+        identity_payload,
+        identity_repetition,
+    )
+
+    wrapper = _campaign_task(
+        tmp_path / str(repetition), repetition=repetition, sealed=True
+    )
+    payload = identity_payload(wrapper)
+    assert identity_repetition(payload, wrapper) == repetition
+    assert payload["benchmark_id"] == "phase_b_cell"
+
+
+def test_a_wrapper_without_a_sealed_selection_still_reports_its_repetition(
+    tmp_path: Path,
+) -> None:
+    from autoformalism.rebuttal.final_evaluation_adapters import (
+        identity_payload,
+        identity_repetition,
+    )
+
+    wrapper = _campaign_task(tmp_path / "bare", repetition=2, sealed=False)
+    assert identity_repetition(identity_payload(wrapper), wrapper) == 2
+
+
+def test_a_source_recording_no_repetition_is_refused_not_defaulted(
+    tmp_path: Path,
+) -> None:
+    """Defaulting is what made a missing field into a wrong answer."""
+    from autoformalism.rebuttal.final_evaluation_adapters import (
+        identity_payload,
+        identity_repetition,
+    )
+
+    directory = tmp_path / "anonymous"
+    directory.mkdir()
+    path = directory / "result.json"
+    path.write_text(
+        json.dumps({"benchmark_id": "phase_b_cell", "tier": "easy"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="neither seed nor repetition"):
+        identity_repetition(identity_payload(path), path)

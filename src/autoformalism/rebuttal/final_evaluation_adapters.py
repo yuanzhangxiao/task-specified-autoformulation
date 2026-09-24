@@ -122,6 +122,36 @@ def adapt_source(
     return _adapt_d3(request, context)
 
 
+def identity_payload(path: Path) -> dict:
+    """The object carrying a source's run identity.
+
+    A native campaign names its result wrapper as the source and seals the
+    development selection beside it. The wrapper records ``repetition``; a
+    development result records ``seed``. Reading the wrong file yields neither.
+    """
+    selection = path.with_name("native-selection.json")
+    if selection.is_file():
+        sealed = _read_object(selection).get("selection")
+        if isinstance(sealed, dict):
+            return sealed
+    return _read_object(path)
+
+
+def identity_repetition(payload: dict, path: Path) -> int:
+    """The repetition this source belongs to, under either field name.
+
+    Never defaulted. A missing field previously became repetition 0, which
+    matched the first repetition of every cell and mismatched the rest, so
+    two thirds of a campaign failed to adapt while the remaining third looked
+    correct.
+    """
+    for field in ("seed", "repetition"):
+        value = payload.get(field)
+        if value is not None:
+            return int(value)
+    raise ValueError(f"source records neither seed nor repetition: {path}")
+
+
 def source_identity(request: SourceAdapterRequest) -> tuple[str, str, int]:
     """Read only public run identity needed to construct the validation context."""
     path = request.source_path.expanduser().resolve()
@@ -149,11 +179,11 @@ def source_identity(request: SourceAdapterRequest) -> tuple[str, str, int]:
             int(config["repetition"]),
         )
     else:
-        payload = _read_object(identity_path)
+        payload = identity_payload(identity_path)
         actual = (
             str(payload["benchmark_id"]),
             str(payload["tier"]),
-            int(payload.get("seed", 0)),
+            identity_repetition(payload, identity_path),
         )
     if expected is not None and actual != expected:
         raise ValueError(
