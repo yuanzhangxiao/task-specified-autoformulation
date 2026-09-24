@@ -61,6 +61,7 @@ def _plan(origin: dict, index: int | None) -> dict:
         ],
         "execution": {
             "transport_policy": jetstream.POLICY,
+            "output_contract": jetstream.OUTPUT_CONTRACT,
             "endpoint": jetstream.ENDPOINT,
             "model_alias": jetstream.MODEL,
             "served_model_revision": None,
@@ -109,7 +110,11 @@ def verify(root: Path) -> dict:
     return plan
 
 
-def run(root: Path, key_supplier: Callable[[], str]) -> dict:
+def run(
+    root: Path,
+    key_supplier: Callable[[], str],
+    progress: Callable[[str], None] | None = None,
+) -> dict:
     """Run once; reuse completed results and retain interrupted-review accounting."""
     plan = verify(root)
     with original.public._lock(root):
@@ -129,7 +134,7 @@ def run(root: Path, key_supplier: Callable[[], str]) -> dict:
             def key_supplier() -> str:
                 return key
 
-        transport = jetstream.JetstreamTransport(root / "calls", key_supplier)
+        transport = jetstream.JetstreamTransport(root / "calls", key_supplier, progress)
         try:
             review = judge.perform_review(
                 plan["request"],

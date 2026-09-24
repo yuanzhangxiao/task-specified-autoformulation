@@ -5,6 +5,8 @@ import argparse
 import getpass
 import json
 import os
+import sys
+import time
 from pathlib import Path
 
 from autoformalism.rebuttal import judge_jetstream as pilot
@@ -48,7 +50,12 @@ def main() -> None:
                 "Jetstream API key (hidden; not saved): "
             )
 
-        pilot.run(args.root, key)
+        def progress(message: str) -> None:
+            print(
+                f"[{time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True
+            )
+
+        pilot.run(args.root, key, progress)
     if args.command == "verify":
         print(json.dumps({"identity": pilot.verify(args.root)["artifact_sha256"]}))
         return

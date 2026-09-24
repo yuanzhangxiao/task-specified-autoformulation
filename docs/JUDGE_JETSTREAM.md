@@ -35,7 +35,7 @@ cache and need fewer; retries can need more. A transport cap of 80 requests is
 the existing theoretical maximum (two seeds, two orientations, two stages,
 ten attempts). It is not a new token or scientific-complexity limit.
 
-Only the transport endpoint and model alias change:
+The transport uses the following endpoint and alias:
 
 | Item | Value |
 | --- | --- |
@@ -43,6 +43,22 @@ Only the transport endpoint and model alias change:
 | Served alias | `gpt-oss-120b` |
 | Prompt/protocol model name | `openai/gpt-oss-120b` (unchanged) |
 | Authentication | Hidden prompt, or `AF_JETSTREAM_API_KEY` environment variable |
+
+Transport policy `jetstream-authenticated-proxy-2` also encodes the existing
+atomic unit contract in the wire response schema. Allowed occurrence/repeat IDs
+come only from the runtime's sign-blinded request, with exact list lengths. An
+empty requested repeat list requires an empty response list. Scientific direction,
+relation and evidence fields are unchanged. Exact counts use the actual local
+schema limit rather than inheriting the generic compact-schema array cap of 32.
+Prompts, sampling, local parsing, uniqueness checks and exact-unit validation
+remain unchanged. No saved answer is edited or retrospectively accepted. The
+endpoint may ignore requested constraints; local validation remains authoritative.
+The output contract is recorded in the execution identity and cache namespace.
+
+The CLI now prints timestamped request starts, HTTP completion times, stage
+acceptance, tokens and bounded rejection diagnostics. A quiet interval between
+start and completion is an in-flight HTTP call, with the existing 900-second
+timeout. The API key and complete response bodies are not printed.
 
 No credential is accepted as a CLI argument or written into artifacts. Redirects
 are refused. Responses/errors are scrubbed for credential echoes. The managed
@@ -75,7 +91,7 @@ checkout and virtual environment available. For example, after setting
   : "${AF_COMMIT:?Set the supplied commit first}"
   AF_REPO_ROOT="$AF_BASE/tmp/jetstream-${AF_COMMIT:0:7}"
   AF_PYTHON="$AF_BASE/.venv/bin/python"
-  AF_OUTPUT_ROOT="$HOME/Downloads/judge-jetstream-pilot-v1"
+  AF_OUTPUT_ROOT="$HOME/Downloads/judge-jetstream-pilot-v2"
   AF_SOURCE_PLAN="$HOME/Downloads/judge-sign-aces-plan.json"
 
   [[ -f "$AF_SOURCE_PLAN" ]] || {
@@ -114,7 +130,7 @@ silently obtain a fresh review budget. Do not delete markers to restart it.
 ## Inspect
 
 ```bash
-ROOT="$HOME/Downloads/judge-jetstream-pilot-v1"
+ROOT="$HOME/Downloads/judge-jetstream-pilot-v2"
 cat "$ROOT/SUMMARY.md"
 python3 -m json.tool "$ROOT/summary.json"
 ```
@@ -132,6 +148,25 @@ After live schema/long-request compatibility succeeds, a separately selected set
 of existing labeled calibration cases is the next gate. This pilot does not run
 that gate or automatically extend to the remaining saved pairs.
 
+## Interrupted first live pilot
+
+The 2026-09-24 pilot selected source review 11. Seven calls returned HTTP 200,
+each with `finish_reason=stop`, in 9.3–12.4 seconds. The first orientation passed
+both atomic and comparative validation. Five reverse-orientation atomic replies
+then added eight unrequested repeat-pair IDs, despite an empty requested repeat
+list; one reply also added unrequested occurrence IDs. Those replies were
+correctly rejected. The eighth request was interrupted with no saved response.
+Observed usage was 43,279 tokens; the interrupted request's usage is unknown.
+No paired scientific judgment was completed, and no token-limit exhaustion was
+observed. This is evidence of working API delivery and an unresolved response
+contract problem, not fresh judge calibration.
+
+Keep `judge-jetstream-pilot-v1` intact. Its original pinned runner reports the
+terminal interruption on repeated execution. Run policy 2 in the new `v2`
+directory above. This is a separate, explicitly launched attempt with new usage;
+it does not resume the interrupted HTTP request or erase the old costs. Do not
+remove markers, copy caches between policies, or change the historical plan.
+
 Official service documentation:
 - https://docs.jetstream-cloud.org/inference-service/api/
 - https://docs.jetstream-cloud.org/inference-service/api-examples/
@@ -139,5 +174,7 @@ Official service documentation:
 Offline verification uses the real paired orchestration and provider parser with
 mocked HTTP responses. Tests check prompt identity, fixed settings, self-pair
 cache reuse, retries, accounting, key redaction, rejected redirects, tampering,
-interruption, and deterministic resume. `scripts/smoke_judge_jetstream.py` runs
+interruption, deterministic resume, request-specific schemas, and continued
+rejection of fabricated units when a provider ignores the wire constraints.
+`scripts/smoke_judge_jetstream.py` runs
 the complete offline import/review/report path without network access.

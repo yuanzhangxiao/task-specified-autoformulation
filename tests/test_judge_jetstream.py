@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import urllib.error
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,6 +15,8 @@ from autoformalism.rebuttal import judge_jetstream as pilot
 from autoformalism.rebuttal import judge_sign_recheck as original
 from autoformalism.rebuttal import repair_scientific_judge as judge
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
+from autoformalism.schemas.judge import AtomicJudgeResult
+from scripts.judge_jetstream import main
 from tests.test_judge_sign_delta import exported_plan
 from tests.test_judge_sign_recheck import mock_client
 
@@ -328,3 +331,151 @@ def test_result_identity_cannot_be_reused_from_another_pilot(tmp_path):
         pilot.run(root, lambda: pytest.fail("no key"))
     with pytest.raises(ValueError, match="another"):
         pilot.report(root)
+
+
+def atomic_body(count=2, repeats=(), suffix=""):
+    """Build a synthetic request; no saved scientific response enters the tests."""
+    schema = AtomicJudgeResult.model_json_schema()
+    schema["properties"]["signed_occurrence_assessments"]["maxItems"] = 32
+    plan = {
+        "signed_occurrences": [{"occurrence_id": f"occ_{i}"} for i in range(count)],
+        "exact_repeat_candidates": [{"repeat_pair_id": name} for name in repeats],
+    }
+    return {
+        "model": "openai/gpt-oss-120b",
+        "messages": [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "atomic_evidence_plan": plan,
+                    }
+                )
+                + suffix,
+            }
+        ],
+        "response_format": {
+            "json_schema": {"name": "AtomicJudgeResult", "schema": schema}
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "count,repeats", [(0, ()), (2, ()), (2, ("repeat_1",)), (33, ())]
+)
+def test_wire_schema_binds_ids_and_counts_without_changing_science(count, repeats):
+    original_body = atomic_body(count, repeats, "\n\nRepair diagnostic: example")
+    before = json.dumps(original_body)
+    payload = jetstream.wire_payload(original_body)
+    schema = payload["response_format"]["json_schema"]["schema"]
+    assert payload["messages"] == original_body["messages"]
+    assert json.dumps(original_body) == before
+    for field, expected in (
+        ("signed_occurrence_assessments", count),
+        ("repeated_contribution_assessments", len(repeats)),
+    ):
+        assert schema["properties"][field]["minItems"] == expected
+        assert schema["properties"][field]["maxItems"] == expected
+        assert field in schema["required"]
+    if count:
+        ids = schema["$defs"]["AtomicSignedOccurrenceAssessment"]["properties"][
+            "occurrence_id"
+        ]
+        assert set(ids["enum"]) == {f"occ_{i}" for i in range(count)}
+    if repeats:
+        ids = schema["$defs"]["AtomicRepeatedContributionAssessment"]["properties"][
+            "repeat_pair_id"
+        ]
+        assert ids["enum"] == list(repeats)
+    original_schema = original_body["response_format"]["json_schema"]["schema"]
+    for name in ("ExpectedContributionDirection", "RepeatedContributionRelation"):
+        assert schema["$defs"][name] == original_schema["$defs"][name]
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing_plan", "invalid_json", "duplicate", "oversized"]
+)
+def test_invalid_atomic_plan_cannot_dispatch(tmp_path, mutation):
+    body = atomic_body(257 if mutation == "oversized" else 2)
+    if mutation == "invalid_json":
+        body["messages"][0]["content"] = "not JSON"
+    elif mutation == "missing_plan":
+        body["messages"][0]["content"] = "{}"
+    elif mutation == "duplicate":
+        body["messages"][0]["content"] = body["messages"][0]["content"].replace(
+            "occ_1", "occ_0"
+        )
+    transport = jetstream.JetstreamTransport(tmp_path, lambda: pytest.fail("no key"))
+    with pytest.raises(LLMProviderError, match="bind"):
+        transport(jetstream.BASE_URL + "/v1/chat/completions", body, 900)
+    assert not list(tmp_path.glob("call-*"))
+
+
+def test_provider_ignoring_wire_ids_is_still_rejected_and_progress_is_visible(tmp_path):
+    root = tmp_path / "jetstream"
+    plan = pilot.freeze(distinct_pair_plan(tmp_path), root)
+
+    class ExtraRepeatEndpoint(Endpoint):
+        def open(self, request, timeout):
+            correct = self.replies[0]
+            response = super().open(request, timeout)
+            if len(self.requests) != 1:
+                return response
+            self.replies.insert(0, correct)
+            value = json.loads(response.read())
+            content = json.loads(value["choices"][0]["message"]["content"])
+            content["repeated_contribution_assessments"] = [
+                {
+                    "repeat_pair_id": "invented_repeat",
+                    "relation": "same_physical_contribution",
+                    "evidence": "Invented unit.",
+                }
+            ]
+            value["choices"][0]["message"]["content"] = json.dumps(content)
+            response = io.BytesIO(json.dumps(value).encode())
+            response.status = 200
+            return response
+
+    endpoint = ExtraRepeatEndpoint(plan["request"])
+    messages = []
+    with patch.object(jetstream.urllib.request, "build_opener", return_value=endpoint):
+        result = pilot.run(root, lambda: TOKEN, messages.append)
+    assert result["status"] == "reviewed"
+    assert len(endpoint.requests) == 5
+    assert any("extra_repeats=['invented_repeat']" in m for m in messages)
+    assert sum(": accepted," in m for m in messages) == 4
+    assert sum(": sending " in m for m in messages) == 5
+    assert TOKEN not in "\n".join(messages)
+    assert pilot.report(root)["cost"]["physical_requests_started"] == 5
+
+
+def test_cli_prints_progress_without_credentials(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "jetstream"
+    plan = pilot.freeze(distinct_pair_plan(tmp_path), root)
+    endpoint = Endpoint(plan["request"])
+    monkeypatch.setattr("sys.argv", ["judge_jetstream.py", "run", "--root", str(root)])
+    with (
+        patch.dict(os.environ, {"AF_JETSTREAM_API_KEY": TOKEN}),
+        patch.object(jetstream.urllib.request, "build_opener", return_value=endpoint),
+    ):
+        main()
+    output = capsys.readouterr()
+    assert "call-000: sending AtomicJudgeResult" in output.err
+    assert ": accepted," in output.err
+    assert json.loads(output.out)["paired_review_completed"]
+    assert TOKEN not in output.err + output.out
+
+
+def test_progress_output_failure_does_not_abort_saved_calls(tmp_path):
+    transport = jetstream.JetstreamTransport(tmp_path, lambda: TOKEN)
+    transport._key = TOKEN
+    seen = []
+    transport._progress = seen.append
+    transport.notify(f"echo {TOKEN}")
+    assert seen == ["echo [REDACTED]"]
+
+    def closed(message):
+        raise BrokenPipeError
+
+    transport._progress = closed
+    transport.notify("diagnostic")
