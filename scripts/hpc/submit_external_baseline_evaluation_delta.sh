@@ -57,7 +57,20 @@ if [[ "${AF_RESUME_FROM}" != "prepare" && -f "${sealed_record}" ]]; then
 fi
 mkdir -p logs "${AF_OUTPUT_ROOT}"
 
-readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_EVALUATOR_CODE_COMMIT=${commit},AF_CHAIN_INPUTS_DIGEST=${digest},AF_EVAL_PLAN=${AF_EVAL_PLAN}"
+# The source roots are forwarded explicitly rather than left to ALL. Each has
+# a default inside the stage scripts pointing at an earlier campaign, so a
+# value that failed to propagate would not fail: it would quietly evaluate a
+# different set of models. Empty is safe, because the stage scripts assign
+# their defaults with ":=", which also fires on an empty value. No path here
+# contains a comma, which --export would split on.
+readonly common="ALL,AF_REPO_ROOT=${AF_REPO_ROOT},AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT},AF_EVALUATOR_CODE_COMMIT=${commit},AF_CHAIN_INPUTS_DIGEST=${digest},AF_EVAL_PLAN=${AF_EVAL_PLAN},AF_D3_CAMPAIGN_ROOT=${AF_D3_CAMPAIGN_ROOT:-},AF_SYMBOLIC_FREEZE=${AF_SYMBOLIC_FREEZE:-},AF_HIDDEN_AUDIT=${AF_HIDDEN_AUDIT:-},AF_SOL_FREEZE_MANIFEST=${AF_SOL_FREEZE_MANIFEST:-},AF_PUBLIC_DATA_ROOT=${AF_PUBLIC_DATA_ROOT:-}"
+for path in "${AF_D3_CAMPAIGN_ROOT:-}" "${AF_SYMBOLIC_FREEZE:-}" \
+            "${AF_HIDDEN_AUDIT:-}" "${AF_PUBLIC_DATA_ROOT:-}"; do
+  [[ "${path}" != *,* ]] || { echo "path contains a comma: ${path}" >&2; exit 2; }
+done
+echo "d3_campaign_root=${AF_D3_CAMPAIGN_ROOT:-<stage default>}"
+echo "symbolic_freeze=${AF_SYMBOLIC_FREEZE:-<stage default>}"
+echo "hidden_audit=${AF_HIDDEN_AUDIT:-<stage default>}"
 # Plain variables rather than an associative array: bash 3.2 lacks -A.
 job_prepare=""
 job_postfreeze=""
