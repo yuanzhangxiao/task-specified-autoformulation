@@ -1,5 +1,15 @@
 # Dalla demonstration rescue on ACES
 
+Results received 2026-09-24: all six tasks completed. Fixed-parameter local
+replay reproduced every selected training/validation NMSE to within 4e-15.
+R4's numerical fit improved substantially; Brief-only R9 gives a reasonable
+predictive illustration on the existing canonical intervention probes, but
+incorrect fitted signs remain. This run does not establish full physiological
+recovery or a substantial pruning benefit. The complete inspection is in
+[`2026-09-24-dalla-rescue-results.md`](../work/agent-comms/2026-09-24-dalla-rescue-results.md),
+with curves and all-case metrics under
+`artifacts/dalla-rescue-inspection-2026-09-24/` (generated, not committed).
+
 Protocol `dalla-demonstration-rescue-1` imports six explicitly selected starting
 vectors in a separate development experiment. It does not restart the interrupted
 fresh campaign, modify historical results, call an LLM, or open intervention/test
