@@ -26,6 +26,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicFitRequest, PublicSplit
 from autoformalism.search import sign_review
+from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "dalla-sign-repair-1"
 REPO = rescue.REPO
@@ -76,10 +77,14 @@ def freeze(source: Path, config_path: Path, root: Path) -> dict:
     rows = []
     for item in packet["models"]:
         value = item["result"]
-        if value["artifact_sha256"] != public.content_sha256(
+        # Rescue results are sealed with content_hash, not the compact JSON
+        # convention used for public fitting identities.
+        if value["artifact_sha256"] != content_hash(
             {k: v for k, v in value.items() if k != "artifact_sha256"}
         ):
-            raise ValueError("source result digest differs")
+            raise ValueError(
+                f"source result digest differs: {item['task']['task_id']}"
+            )
         if value.get("test_data_opened") is not False or value["task"] != item["task"]:
             raise ValueError("source task or data boundary differs")
         request = PublicFitRequest.model_validate(value["selected_request"])

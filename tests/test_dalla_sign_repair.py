@@ -8,6 +8,7 @@ import pytest
 from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal import dalla_sign_repair as campaign
 from autoformalism.rebuttal.prefit_replay import sealed_read
+from autoformalism.staged_topology import content_hash
 from scripts import submit_dalla_sign_repair as submitter
 from scripts.smoke_dalla_sign_repair import fixture, transport
 from tests.test_process_pruning_campaign import backend
@@ -132,7 +133,7 @@ def test_no_eligible_gains_skip_without_calls(tmp_path):
     )
     parameter.update(role="nonnegative_coefficient", domain="nonnegative")
     result["selected_request"]["parameter_guesses"]["c"] = 0.1
-    result["artifact_sha256"] = public.content_sha256(
+    result["artifact_sha256"] = content_hash(
         {k: v for k, v in result.items() if k != "artifact_sha256"}
     )
     public._write(source, packet)
@@ -149,6 +150,39 @@ def test_input_and_result_tampering_fail_closed(tmp_path):
     source.write_text(source.read_text() + "\n")
     with pytest.raises(ValueError, match="identity"):
         campaign.verify(root)
+
+
+def test_import_uses_rescue_seal_without_rewriting_source(tmp_path):
+    source, config, root = fixture(tmp_path)
+    result = sealed_read(tmp_path / "source-result.json")
+    payload = {k: v for k, v in result.items() if k != "artifact_sha256"}
+    assert result["artifact_sha256"] != public.content_sha256(payload)
+    before = source.read_bytes()
+    plan = campaign.freeze(source, config, root)
+    assert plan["rows"][0]["source_result_sha256"] == result["artifact_sha256"]
+    assert source.read_bytes() == before
+    assert campaign.freeze(source, config, root) == plan
+
+
+@pytest.mark.parametrize("alteration", ["parameter", "digest", "compact_digest"])
+def test_import_rejects_changed_payload_or_wrong_seal(tmp_path, alteration):
+    source, config, root = fixture(tmp_path)
+    packet = public._read(source)
+    result = packet["models"][0]["result"]
+    if alteration == "parameter":
+        result["selected_fit"]["parameters"]["c"] = 1.0
+    elif alteration == "digest":
+        result["artifact_sha256"] = "0" * 64
+    else:
+        result["artifact_sha256"] = public.content_sha256(
+            {k: v for k, v in result.items() if k != "artifact_sha256"}
+        )
+    public._write(source, packet)
+    with pytest.raises(
+        ValueError, match="source result digest differs: toy_seed0_full"
+    ):
+        campaign.freeze(source, config, root)
+    assert not (root / "plan.json").exists()
 
 
 def test_nonnegative_integrity_rejects_negative_fit(tmp_path):

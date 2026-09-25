@@ -8,6 +8,7 @@ from pathlib import Path
 from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal import dalla_rescue as rescue
 from autoformalism.rebuttal import dalla_sign_repair as campaign
+from autoformalism.rebuttal.prefit_replay import sealed_write
 from scripts.smoke_process_pruning import fixture as pruning_fixture
 
 
@@ -37,7 +38,7 @@ def fixture(root: Path) -> tuple[Path, Path, Path]:
         "selected_fit": fit,
         "test_data_opened": False,
     }
-    result["artifact_sha256"] = public.content_sha256(result)
+    result = sealed_write(root / "source-result.json", result)
     public._write(
         source,
         {

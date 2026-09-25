@@ -5,6 +5,16 @@ from the retained endpoints in the original rescue `models.json`. It does not
 overwrite the rescue campaign or change benchmark data, finalized prompts,
 historical fit profiles, or current pipeline defaults.
 
+The importer verifies each source result using the rescue writer's sealed-artifact
+JSON digest (`staged_topology.content_hash`). Public-fit identities use a different
+compact JSON serialization and cannot verify those seals. The original `7f517e2`
+launcher mistakenly used the compact digest and stopped with `source result digest
+differs` before creating a plan or submitting any job. The corrected importer
+retains the original seals and rejects changed payloads; do not rewrite source
+checksums or bypass verification. Use the corrected source archive and repeat the
+submission command with the same input and output paths. Existing submission
+receipts, if any, must still be preserved and checked.
+
 The original constructions behind R4/R13 and R9 left their direct gains real.
 The proposer chose unrestricted topology signs, so the fitter could reverse
 source/sink interpretations while respecting every numerical bound. This
@@ -178,3 +188,10 @@ sign and performed no benchmark fit. Changed Python files pass Ruff. Repository
 Ruff retains 37 pre-existing findings under `analysis/claude/`. A broader pytest
 run was stopped after 423 passes and five dependency skips; the full suite was
 not completed.
+
+Digest-fix verification: 81 sign/rescue/topology tests passed, including producer-
+sealed input, exact resume, modified fitted parameters, corrupt seals and rejection
+of the wrong compact digest. All six downloaded rescue endpoints pass the real
+freeze/verify/resume path without source changes, LLM calls or benchmark fitting.
+The synthetic paired-fit smoke also passes. Changed files pass Ruff; repository
+Ruff retains the same 37 unrelated findings under `analysis/claude/`.
