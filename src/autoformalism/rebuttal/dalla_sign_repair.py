@@ -25,7 +25,7 @@ from autoformalism.rebuttal import dalla_rescue as rescue
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicFitRequest, PublicSplit
-from autoformalism.search import sign_review
+from autoformalism.search import directional_sign_review, sign_review
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "dalla-sign-repair-1"
@@ -35,12 +35,13 @@ REPO = rescue.REPO
 class Config(StrictSchema):
     """Pinned local serving and per-model physical request allocation."""
 
-    protocol: Literal["dalla-sign-repair-1"] = PROTOCOL
+    protocol: Literal["dalla-sign-repair-1", "dalla-sign-repair-2"] = PROTOCOL
     platform: Literal["aces-h100x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     model_settings: StagedModelSettings
     served_context_tokens: int = Field(default=32768, ge=8192)
     wall_seconds: int = Field(default=3000, ge=60, le=7200)
+    selected_task_ids: tuple[str, ...] = ()
 
 
 def launcher_hash() -> str:
@@ -75,16 +76,27 @@ def freeze(source: Path, config_path: Path, root: Path) -> dict:
     ):
         raise ValueError("requires original public-only rescue models.json")
     rows = []
+    selected = set(config.selected_task_ids)
+    available = {item["task"]["task_id"] for item in packet["models"]}
+    if len(selected) != len(config.selected_task_ids) or not selected <= available:
+        raise ValueError("selected task IDs must be unique and present in source")
+    if config.protocol == "dalla-sign-repair-1" and selected:
+        raise ValueError("task selection requires the v2 protocol")
+    adapter = (
+        directional_sign_review
+        if config.protocol == "dalla-sign-repair-2"
+        else sign_review
+    )
     for item in packet["models"]:
+        if selected and item["task"]["task_id"] not in selected:
+            continue
         value = item["result"]
         # Rescue results are sealed with content_hash, not the compact JSON
         # convention used for public fitting identities.
         if value["artifact_sha256"] != content_hash(
             {k: v for k, v in value.items() if k != "artifact_sha256"}
         ):
-            raise ValueError(
-                f"source result digest differs: {item['task']['task_id']}"
-            )
+            raise ValueError(f"source result digest differs: {item['task']['task_id']}")
         if value.get("test_data_opened") is not False or value["task"] != item["task"]:
             raise ValueError("source task or data boundary differs")
         request = PublicFitRequest.model_validate(value["selected_request"])
@@ -102,7 +114,7 @@ def freeze(source: Path, config_path: Path, root: Path) -> dict:
                 "parameters": parameters,
                 "original_fit": value["selected_fit"],
                 "source_result_sha256": value["artifact_sha256"],
-                "review_context": sign_review.context(request, cell["brief"]),
+                "review_context": adapter.context(request, cell["brief"]),
             }
         )
     import re
@@ -115,7 +127,7 @@ def freeze(source: Path, config_path: Path, root: Path) -> dict:
     ):
         raise ValueError("requires 1-12 unique safe task identifiers")
     plan = {
-        "protocol": PROTOCOL,
+        "protocol": config.protocol,
         "config": config.model_dump(mode="json"),
         "source": str(source),
         "source_file_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
@@ -125,7 +137,7 @@ def freeze(source: Path, config_path: Path, root: Path) -> dict:
         "runtime": public._runtime(),
         "source_sha256": public._source_identity(),
         "launcher_sha256": launcher_hash(),
-        "sign_policy": sign_review.POLICY,
+        "sign_policy": adapter.POLICY,
         "fit_policy": rescue.POLICY,
         "test_data_opened": False,
     }
@@ -137,9 +149,15 @@ def verify(root: Path) -> dict:
     """Reject changed input, runtime, policies or code instead of changing a run."""
     rescue.pruning.history.require_open(root)
     plan = sealed_read(root / "plan.json")
+    config = Config.model_validate(plan["config"])
+    adapter = (
+        directional_sign_review
+        if config.protocol == "dalla-sign-repair-2"
+        else sign_review
+    )
     if (
-        plan["protocol"] != PROTOCOL
-        or plan["sign_policy"] != sign_review.POLICY
+        plan["protocol"] != config.protocol
+        or plan["sign_policy"] != adapter.POLICY
         or plan["fit_policy"] != rescue.POLICY
         or plan["runtime"] != public._runtime()
         or plan["source_sha256"] != public._source_identity()
@@ -162,11 +180,20 @@ def checked_review(root: Path, plan: dict, row: dict) -> dict:
     if value["identity"] != plan["artifact_sha256"] or value["task"] != row["task"]:
         raise ValueError("review identity differs")
     if value["status"] in {"repaired", "unchanged"}:
-        expected = sign_review.apply(
-            PublicFitRequest.model_validate(row["request"]),
-            plan["cells"][row["task"]["cell"]]["brief"],
-            value["reply"],
-        )
+        request = PublicFitRequest.model_validate(row["request"])
+        brief = plan["cells"][row["task"]["cell"]]["brief"]
+        if plan["protocol"] == "dalla-sign-repair-2":
+            rebuilt = directional_sign_review.finish(
+                request, brief, value["direction_history"]
+            )
+            if (
+                rebuilt["reply"] != value["reply"]
+                or rebuilt["status"] != value["status"]
+            ):
+                raise ValueError("saved semantic review differs")
+            expected = rebuilt["patch"]
+        else:
+            expected = sign_review.apply(request, brief, value["reply"])
         if (
             value["patch"] != expected
             or (value["status"] == "repaired") != expected["changed"]
@@ -204,8 +231,30 @@ def review_one(
             transport=transport,
             can_start=can_start,
         )
-        status = "no_eligible_gains"
-        if row["review_context"]["eligible_slots"]:
+        status, extra = "no_eligible_gains", {}
+        if (
+            row["review_context"]["eligible_slots"]
+            and plan["protocol"] == "dalla-sign-repair-2"
+        ):
+            reviewed = directional_sign_review.run(
+                client,
+                PublicFitRequest.model_validate(row["request"]),
+                plan["cells"][row["task"]["cell"]]["brief"],
+            )
+            status, reply, patch, attempts = (
+                reviewed[k] for k in ("status", "reply", "patch", "attempts")
+            )
+            extra["direction_history"] = reviewed["direction_history"]
+            if patch["changed"]:
+                certificate = rescue.pruning.certificate(
+                    PublicFitRequest.model_validate(patch["request"]),
+                    plan["cells"][row["task"]["cell"]],
+                    row["task"],
+                )
+                if not certificate["eligible_for_development_selection"]:
+                    status = "admission_failed"
+                    extra["admission_certificate"] = certificate
+        elif row["review_context"]["eligible_slots"]:
             status = "attempts_exhausted"
             diagnostic = None
             for attempt in range(client.settings.attempts_per_step):
@@ -275,6 +324,7 @@ def review_one(
                 ),
                 "scientific_correctness_certified": False,
                 "test_data_opened": False,
+                **extra,
             },
         )
 
@@ -478,6 +528,16 @@ def report(root: Path) -> dict:
                         for arm, v in fits.items()
                     },
                     "sign_integrity": audit,
+                    "citation_audit": review["patch"]["provenance"].get(
+                        "citation_audit", []
+                    )
+                    if review and review["patch"]
+                    else [],
+                    "unresolved_slots": review["patch"]["provenance"].get(
+                        "unresolved_slots", []
+                    )
+                    if review and review["patch"]
+                    else [],
                 }
             )
             models.append(
@@ -490,7 +550,7 @@ def report(root: Path) -> dict:
                 }
             )
         result = {
-            "protocol": PROTOCOL,
+            "protocol": plan["protocol"],
             "plan_sha256": plan["artifact_sha256"],
             "status": "partial"
             if any(r["status"] in {"review_pending", "fit_pending"} for r in rows)
@@ -506,7 +566,7 @@ def report(root: Path) -> dict:
         public._write(
             root / "models.json",
             {
-                "protocol": PROTOCOL,
+                "protocol": plan["protocol"],
                 "plan_sha256": plan["artifact_sha256"],
                 "cells": plan["cells"],
                 "models": models,

@@ -158,7 +158,7 @@ def submit(
             ],
         )
         result = {
-            "protocol": io.PROTOCOL,
+            "protocol": settings.protocol,
             "identity": identity,
             "jobs": {
                 "prepare": prepare,
@@ -172,7 +172,11 @@ def submit(
             "maximum_llm_calls": sum(
                 bool(r["review_context"]["eligible_slots"]) for r in plan["rows"]
             )
-            * settings.model_settings.attempts_per_step,
+            * min(
+                settings.model_settings.maximum_requests,
+                settings.model_settings.attempts_per_step
+                * (2 if settings.protocol == "dalla-sign-repair-2" else 1),
+            ),
             "test_data_opened": False,
         }
         public._write(manifest, result)

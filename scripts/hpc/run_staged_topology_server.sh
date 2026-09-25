@@ -22,7 +22,7 @@ else
 fi
 readonly protocol platform
 case "${protocol}" in
-  dalla-sign-repair-1) worker_script=dalla_sign_repair.py ;;
+  dalla-sign-repair-1|dalla-sign-repair-2) worker_script=dalla_sign_repair.py ;;
   final-component-campaign-1) worker_script=component_campaign.py ;;
   basin-equation-repair-1) worker_script=basin_repair_pilot.py ;;
   detention-process-pilot-1|detention-process-pilot-2|detention-process-pilot-3) worker_script=detention_process_pilot.py ;;
@@ -211,7 +211,7 @@ trap cleanup EXIT
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader \
   >"${runtime_root}/gpu-${SLURM_JOB_ID}.txt"
 date -u +%Y-%m-%dT%H:%M:%SZ >"${runtime_root}/started-${SLURM_JOB_ID}.txt"
-if [[ ( "$protocol" == dalla-sign-repair-1 || "$protocol" == final-component-campaign-1 || "$protocol" == basin-equation-repair-1 || "$protocol" == shared-process-pilot-1 || "$protocol" == shared-process-integration-1 || "$protocol" == shared-multi-pruning-1 || "$protocol" == detention-process-pilot-1 || "$protocol" == detention-process-pilot-2 || "$protocol" == detention-process-pilot-3 ) && -f "$AF_REPO_ROOT/SOURCE_COMMIT" ]]; then
+if [[ ( "$protocol" == dalla-sign-repair-1 || "$protocol" == dalla-sign-repair-2 || "$protocol" == final-component-campaign-1 || "$protocol" == basin-equation-repair-1 || "$protocol" == shared-process-pilot-1 || "$protocol" == shared-process-integration-1 || "$protocol" == shared-multi-pruning-1 || "$protocol" == detention-process-pilot-1 || "$protocol" == detention-process-pilot-2 || "$protocol" == detention-process-pilot-3 ) && -f "$AF_REPO_ROOT/SOURCE_COMMIT" ]]; then
   [[ "$(cat "$AF_REPO_ROOT/SOURCE_COMMIT")" == "${AF_COMMIT:?}" ]] || exit 2
   printf '%s\n' "$AF_COMMIT" >"${runtime_root}/commit-${SLURM_JOB_ID}.txt"
 else

@@ -1,5 +1,122 @@
 # Public-context sign repair of the Dalla rescue models
 
+## Current follow-up: directional review and advisory citations (v2)
+
+`configs/dalla_sign_repair_v2.json` selects only `full_perturbed_r4` from the
+**original rescue** packet. Use a new output root, `dalla-sign-repair-v2-r4`.
+Do not use the v1 sign-repair `models.json` as input. Historical v1 results and
+their pinned implementation retain the semantics documented below.
+
+This follow-up responds to two separate v1 failures: an exact-quotation rule
+discarded all R4 attempts, while exact but irrelevant quotations accompanied
+questionable decisions elsewhere. Causal dependence alone does not determine a
+positive coefficient. A literal quotation match cannot establish scientific
+support. Nor does a correct outer sign prove that its inner law has the desired
+effect throughout the state domain.
+
+V2 asks for the mechanism role (source, sink, transfer, feedback or unknown),
+directional rationale, and explicit donor/recipient when claiming a transfer.
+Mechanical checks enforce the consistency of this claimed interpretation and
+the permitted patch scope; they do not establish that the interpretation is true.
+A separate cached call to the same GPT-OSS-20B model assesses each proposal using
+the full public description and symbolic candidate. It returns supported,
+contradicted, or insufficient, with an explanation. This is a fallible semantic
+assessment, not the integrated scientific critic or independent certification.
+
+Supported slots are retained while only unresolved slots are retried. An
+unrestricted choice is accepted when direction is underdetermined; exhausted
+slots preserve their original expressions and declarations. A supported partial
+patch can proceed while explicitly recording unresolved slots. No usable
+decision means no additional numerical fit. Every call, failure and unknown
+usage event remains cached and charged across resume.
+
+**Citations are advisory metadata.** Missing/null quotes become empty strings;
+inaccurate or irrelevant quotations do not invalidate otherwise supported sign
+decisions. `quote_exact` is only a string-presence check. `citation_credited`
+requires both an exact public quotation and an explicit semantic assessment of
+its relevance. It remains the assessor's judgment, not verified scientific
+evidence. Neither a quote match nor `citation_credited` admits a patch by itself.
+The runtime does not invent or replace quotations to obtain acceptance.
+
+The public input contains no reference equation, fitted value, NMSE, trajectory
+array, validation or intervention outcome. Named and anonymous channel meanings
+remain as disclosed. No Dalla-specific coefficient direction is hard-coded.
+Existing sign enforcement, matched rescue allocations and pruning are reused.
+
+The pilot permits at most three proposal/assessment pairs (six physical LLM
+requests in total), one H100 review allocation, and one CPU array task. That task
+runs the repaired and unchanged-control arms sequentially, with at most six
+rescue-profile fits total, plus starting-vector replays. This is demonstration
+development, not an unbiased estimate of the general sign-review success rate.
+Intervention performance remains to be evaluated after numerical endpoints are
+frozen; the review itself cannot establish that a useful model will result.
+
+### Launch v2 on ACES
+
+Upload the supplied `dalla-sign-repair-COMMIT.tar.gz` archive to group scratch and
+replace `COMMIT` below with its short commit identifier. These commands submit
+jobs; no benchmark fit runs on the login node.
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
+AF_ARCHIVE=dalla-sign-repair-COMMIT
+mkdir -p "$AF_GROUP/repos"
+tar -xzf "$AF_GROUP/$AF_ARCHIVE.tar.gz" -C "$AF_GROUP/repos"
+export AF_REPO_ROOT="$AF_GROUP/repos/$AF_ARCHIVE"
+export AF_COMMIT="$(cat "$AF_REPO_ROOT/SOURCE_COMMIT")"
+export AF_OUTPUT_ROOT="$AF_GROUP/dalla-sign-repair-v2-r4"
+export AF_PYTHON=/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python
+export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT"
+export PYTHONDONTWRITEBYTECODE=1
+module load GCCcore/13.2.0 Python/3.11.5
+"$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_dalla_sign_repair.py" \
+  --inputs "$AF_GROUP/dalla-demonstration-rescue-v1/models.json" \
+  --config "$AF_REPO_ROOT/configs/dalla_sign_repair_v2.json" \
+  --root "$AF_OUTPUT_ROOT"
+BASH
+```
+
+Inspect the review (once the GPU job finishes), then the fitted endpoints:
+
+```bash
+AF_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/dalla-sign-repair-v2-r4
+AF_IDS=$(jq -er '.jobs | [.[]] | join(",")' "$AF_ROOT/submission_manifest.json")
+sacct -j "$AF_IDS" -X --format=JobID,JobName%30,State,ExitCode,Elapsed
+jq '{status,physical_requests,reply,attempts,direction_history}' \
+  "$AF_ROOT/results/full_perturbed_r4/review.json"
+jq '{status,expected,rows}' "$AF_ROOT/summary.json"
+```
+
+Download `models.json` after completion. `rows[].citation_audit` and
+`rows[].unresolved_slots` explain the review limitations alongside the fitted
+outcomes. Repeating the submission command reuses confirmed scheduler receipts;
+an ambiguous scheduler reply still requires inspection/adoption, not deletion.
+
+### Local v2 verification
+
+```bash
+PYTHONPATH=src:. .venv/bin/python -m pytest -q \
+  tests/test_directional_sign_review.py tests/test_sign_review.py \
+  tests/test_dalla_sign_repair.py tests/test_dalla_rescue.py \
+  tests/test_topology_owned_sign.py tests/test_process_pruning_campaign.py
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=src:. \
+  .venv/bin/python scripts/smoke_dalla_sign_repair.py --protocol dalla-sign-repair-2
+.venv/bin/ruff check .
+```
+
+V2 verification on 2026-09-24: 117 focused tests passed, including absent/incorrect
+citations, malformed assessments, supported-slot retention, interrupted calls,
+budget accounting, paired fits and deterministic resume. The synthetic numerical
+smoke passed with two mocked requests and no live LLM or benchmark data. All six
+eligible gains of the real R4 input pass the freeze/verify/resume import path
+without fitting. Changed Python files pass Ruff; repository-wide Ruff still
+reports 37 unrelated findings in `analysis/claude/`. The full pytest suite was
+not run for this follow-up.
+
+## Historical v1 protocol and launch
+
 Protocol: `dalla-sign-repair-1`. This is a separate development campaign, starting
 from the retained endpoints in the original rescue `models.json`. It does not
 overwrite the rescue campaign or change benchmark data, finalized prompts,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic cached sign repair, two real rescue/pruning arms, and exact resume."""
 
+import argparse
 import json
 import tempfile
 from pathlib import Path
@@ -12,7 +13,9 @@ from autoformalism.rebuttal.prefit_replay import sealed_write
 from scripts.smoke_process_pruning import fixture as pruning_fixture
 
 
-def fixture(root: Path) -> tuple[Path, Path, Path]:
+def fixture(
+    root: Path, *, protocol: str = "dalla-sign-repair-1"
+) -> tuple[Path, Path, Path]:
     """Create a public toy with one unprotected state-equation clearance gain."""
     toy = pruning_fixture(root / "toy")
     row = toy["rows"][0]
@@ -51,9 +54,11 @@ def fixture(root: Path) -> tuple[Path, Path, Path]:
         },
     )
     config = root / "config.json"
-    public._write(
-        config, public._read(campaign.REPO / "configs/dalla_sign_repair_v1.json")
-    )
+    version = "v2" if protocol == "dalla-sign-repair-2" else "v1"
+    settings = public._read(campaign.REPO / f"configs/dalla_sign_repair_{version}.json")
+    if version == "v2":
+        settings["selected_task_ids"] = [row["task"]["task_id"]]
+    public._write(config, settings)
     return source, config, root / "campaign"
 
 
@@ -80,11 +85,50 @@ def transport(url, body, timeout):
     }
 
 
-def run(root: Path) -> dict:
-    source, config, output = fixture(root)
+def direction_transport(url, body, timeout):
+    """Exercise optional bad citations and a separately logged toy assessment."""
+    payload = json.loads(body["messages"][1]["content"])
+    if "proposed" in payload:
+        reply = {
+            "assessments": [
+                {
+                    "slot_id": d["slot_id"],
+                    "verdict": "supported",
+                    "quoted_text_supports_direction": False,
+                    "rationale": "Public clearance supports the removal direction.",
+                }
+                for d in payload["proposed"]["decisions"]
+            ]
+        }
+        return {
+            "choices": [
+                {"finish_reason": "stop", "message": {"content": json.dumps(reply)}}
+            ],
+            "usage": {"total_tokens": 100},
+        }
+    response = transport(url, body, timeout)
+    reply = json.loads(response["choices"][0]["message"]["content"])
+    for d in reply["decisions"]:
+        d.update(
+            mechanism_role="sink",
+            donor=None,
+            recipient=None,
+            public_quote="Paraphrased clearance, not an exact quotation",
+        )
+    response["choices"][0]["message"]["content"] = json.dumps(reply)
+    return response
+
+
+def run(root: Path, *, protocol: str = "dalla-sign-repair-1") -> dict:
+    source, config, output = fixture(root, protocol=protocol)
     campaign.freeze(source, config, output)
     review = campaign.review_one(
-        output, 0, base_url="http://synthetic.invalid", transport=transport
+        output,
+        0,
+        base_url="http://synthetic.invalid",
+        transport=direction_transport
+        if protocol == "dalla-sign-repair-2"
+        else transport,
     )
     assert review["status"] == "repaired"
     assert campaign.fit_one(output, 0)["sign_integrity"]["passed"]
@@ -107,7 +151,8 @@ def run(root: Path) -> dict:
     return {
         "status": "passed",
         "live_llm_calls": 0,
-        "recorded_mock_requests": 1,
+        "protocol": protocol,
+        "recorded_mock_requests": review["physical_requests"],
         "benchmark_data_used": False,
         "exact_resume": True,
         "repaired_training": row["arms"]["repaired"]["training"]["normalized_mse"],
@@ -116,5 +161,12 @@ def run(root: Path) -> dict:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--protocol",
+        choices=("dalla-sign-repair-1", "dalla-sign-repair-2"),
+        default="dalla-sign-repair-1",
+    )
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="sign-repair-smoke-") as directory:
-        print(json.dumps(run(Path(directory)), indent=2))
+        print(json.dumps(run(Path(directory), protocol=args.protocol), indent=2))

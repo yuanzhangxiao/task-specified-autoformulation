@@ -14,8 +14,8 @@ fi
 case "${1:?stage}" in
  prepare)
    "$AF_PYTHON" scripts/dalla_sign_repair.py verify --root "$AF_OUTPUT_ROOT"
-   "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_sign_review.py tests/test_dalla_sign_repair.py tests/test_dalla_rescue.py
-   "$AF_PYTHON" scripts/smoke_dalla_sign_repair.py
+   "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_sign_review.py tests/test_directional_sign_review.py tests/test_dalla_sign_repair.py tests/test_dalla_rescue.py
+   "$AF_PYTHON" scripts/smoke_dalla_sign_repair.py --protocol "$(jq -er '.protocol' "$AF_OUTPUT_ROOT/plan.json")"
    actual="$(sha256sum "$AF_VLLM_IMAGE")"
    [[ "${actual%% *}" == "$(jq -er '.config.serving_image_sha256' "$AF_OUTPUT_ROOT/plan.json")" ]]
    runtime="$(command -v apptainer || command -v singularity)"

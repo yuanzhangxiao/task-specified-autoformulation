@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `dalla-sign-repair-2` follow-up selects original named R4 only.
+Quotation mistakes are advisory metadata; a separate, fallible public-context
+assessment checks directional explanations and retries unresolved slots while
+retaining supported choices. It reuses paired rescue/pruning fits and preserves
+v1 results and pipeline defaults. See `docs/DALLA_SIGN_REPAIR.md` for limits and
+ACES commands. Live review, refitting and intervention benefit are unestablished.
+
 `docs/DALLA_SIGN_REPAIR.md` defines a separate public-context repair of the saved
 rescue endpoints. The proposer explicitly reviews isolated real outer gains;
 fixed choices become nonnegative magnitudes with protected assembly signs.

@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+Opt-in `dalla-sign-repair-2` adds explicit flow interpretations, a separate cached
+semantic assessment, and advisory citation accounting to the isolated-gain adapter.
+Supported slots survive retries; unresolved signs preserve their original terms.
+Quotation presence is a string check, not proof of support. The same 20B model
+assesses semantics, so this pilot supplies fallible advice, not certification.
+The bounded R4-only follow-up reuses the paired rescue/pruning runner and does not
+alter the ordinary pipeline, old profiles, finalized prompts or historical runs.
+
 The opt-in `dalla-sign-repair-1` adapter reviews isolated historical real outer
 gains using the original public task and symbolic model. A schema-constrained
 sign patch changes only whole-term assembly operators and magnitude domains;

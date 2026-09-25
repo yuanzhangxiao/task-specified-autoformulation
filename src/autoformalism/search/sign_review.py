@@ -145,7 +145,13 @@ def context(request: PublicFitRequest, brief: dict) -> dict:
     }
 
 
-def apply(request: PublicFitRequest, brief: dict, raw: dict) -> dict:
+def apply(
+    request: PublicFitRequest,
+    brief: dict,
+    raw: dict,
+    *,
+    advisory_citations: bool = False,
+) -> dict:
     """Validate exact coverage, then commit only fixed assembly/domain decisions."""
     review = SignReview.model_validate(raw)
     catalog = slots(request)
@@ -161,9 +167,13 @@ def apply(request: PublicFitRequest, brief: dict, raw: dict) -> dict:
     records = []
     for slot in catalog:
         decision = decisions[slot["slot_id"]]
-        if decision.basis == "public_task" and (
-            not decision.public_quote.strip()
-            or decision.public_quote not in brief["scientific_context"]
+        if (
+            not advisory_citations
+            and decision.basis == "public_task"
+            and (
+                not decision.public_quote.strip()
+                or decision.public_quote not in brief["scientific_context"]
+            )
         ):
             raise ValueError(
                 "public_quote must be an exact excerpt of scientific_context"
@@ -173,7 +183,11 @@ def apply(request: PublicFitRequest, brief: dict, raw: dict) -> dict:
             and decision.outer_weight_sign != "unrestricted"
         ):
             raise ValueError("undetermined evidence cannot impose a fixed sign")
-        if decision.basis != "public_task" and decision.public_quote:
+        if (
+            not advisory_citations
+            and decision.basis != "public_task"
+            and decision.public_quote
+        ):
             raise ValueError("public_quote requires basis=public_task")
         if decision.outer_weight_sign == "unrestricted":
             continue
