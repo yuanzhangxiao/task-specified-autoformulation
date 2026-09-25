@@ -1,5 +1,60 @@
 # Review and manuscript handoff
 
+## Current revision: concise MAP-motivated Section 4 (24 September 2026)
+
+`AUTOFORMALISM_METHODOLOGY.tex` now matches
+`paper_to_revise/sections/method.tex`. The latter is the file included by the
+manuscript's Section 4. Both contain the same short section with six displayed
+equations (558 prose words by `texcount`); the preview wrapper numbers the section
+as 4 and renders one page in its generic two-column layout. The previous untracked
+manuscript section was preserved locally at
+`backups/method-section-2026-09-24/method-before-map.tex` before replacement.
+`AUTOFORMALISM_ALGORITHM.tex` remains unchanged.
+
+The derivation distinguishes exact algebra from implementation choices:
+
+- MAP supplies the starting factorization. A chosen working prior encodes
+  implemented admissibility and structural complexity; it is not an estimate of
+  all scientific plausibility.
+- Negative logarithms yield a constrained regularized objective. Conditional
+  parameter fitting uses training residuals without an L1 sparsity penalty.
+- Validation-based ranking, finite-budget fitting, numerical ties and local
+  pruning are stated approximations or policies, not exact MAP identities.
+- Critic findings condition the proposal distribution. Critic scores do not
+  become a posterior energy or a selection reward.
+- Shared laws remain single definitions reused across consumers. Pruning tests
+  one training-ranked deletion against the parent and an equal-budget refit.
+
+The older method's figures were omitted from this short section because their
+captions described judge-weighted selection and closed-form fitting. No other
+manuscript section or figure was changed. Before submitting the whole paper,
+align the abstract, introduction, comparison table in Section 3, conclusion and
+pruning appendix: they still contain claims about an LLM energy prior,
+closed-form fitting, Takens-style surrogate states or bootstrap pruning that do
+not describe this pipeline. Existing experiment sections must also identify
+which historical protocol produced their results.
+
+Verification for this documentation revision:
+
+- Standalone `pdflatex` compilation passes, with no unresolved references or
+  overfull boxes; the final one-page PDF was rendered and visually inspected.
+- `pytest` passes all 77 tests in `test_component_campaign.py`,
+  `test_review_integrity.py`, `test_process_pruning.py`,
+  `test_process_pruning_campaign.py` and `test_general_critic.py`.
+- `scripts/smoke_fresh_shared.py` passes construction, multi-output fitting,
+  pruning and deterministic resume without live LLM calls or test access.
+- `ruff check .` reports the existing 37 issues in unrelated `analysis/claude`
+  files; no Python implementation files changed.
+- Full-manuscript `latexmk` reaches BibTeX but stops on the pre-existing duplicate
+  `lecun2006tutorial` entry at line 303 of `autoformulation_dynamics.bib`.
+  That bibliography is outside this edit. The standalone section builds cleanly.
+
+The dated review below describes the earlier, longer methodology draft. It is
+retained as historical context; its length and draft-specific instructions do
+not supersede this revision.
+
+## Earlier review: 23 September 2026
+
 Reviewed 23 September 2026 against checkout `2f47b81b347e9f069b49041d933b21ad8ed0dd46`.
 The original `AUTOFORMALISM_ALGORITHM.tex` remains unchanged.
 
