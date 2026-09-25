@@ -59,6 +59,26 @@ def equations_of(subject: dict) -> dict[str, str]:
     }
 
 
+def replayable_model(subject: dict | None) -> dict[str, Any] | None:
+    """Everything needed to run this model again, not just its equations.
+
+    Coefficients are embedded numerically for the symbolic baselines, so their
+    right-hand sides are self-contained. D3's are fitted and stored apart, so
+    equations alone are an incomplete model. Execution semantics matter as
+    much: replaying a discrete increment map through an ODE solver silently
+    reinterprets what the method learned.
+    """
+    if subject is None:
+        return None
+    return {
+        "candidate": subject.get("candidate"),
+        "parameterization": subject.get("parameterization"),
+        "validation_context": subject.get("validation_context"),
+        "execution_semantics": subject.get("execution_semantics"),
+        "source_provenance": subject.get("source_provenance"),
+    }
+
+
 def metrics_of(record: dict | None) -> dict[str, Any]:
     """Flatten the separate endpoints, keeping each one distinguishable."""
     if record is None:
@@ -119,6 +139,26 @@ def collect(label: str, root: Path) -> tuple[list[dict], dict]:
                 "reason": planned.get("reason") or outcome.get("error") or "",
                 "equation_count": len(equations),
                 "equations": equations,
+                # The complete model, for replaying it on other conditions.
+                "model": replayable_model(subject),
+                "execution_semantics": (
+                    (subject or {}).get("execution_semantics")
+                ),
+                "parameterization_status": (
+                    ((subject or {}).get("parameterization") or {}).get("status")
+                ),
+                "fitted_parameter_count": len(
+                    ((subject or {}).get("parameterization") or {}).get(
+                        "global_parameters"
+                    )
+                    or {}
+                ),
+                "fitted_initial_condition_count": len(
+                    ((subject or {}).get("parameterization") or {}).get(
+                        "global_initial_conditions"
+                    )
+                    or {}
+                ),
                 "source_path": planned.get("source_path"),
                 "subject_id": subject_id,
                 **metrics_of(record),
@@ -208,8 +248,13 @@ def main() -> None:
         encoding="utf-8",
     )
     # The same rows flattened, for anything that reads a table.
+    # The CSV is a summary; nested structures live in models.jsonl.
     flat = [
-        {key: value for key, value in row.items() if key != "equations"}
+        {
+            key: value
+            for key, value in row.items()
+            if key not in {"equations", "model"}
+        }
         | {"equations": json.dumps(row["equations"], sort_keys=True)}
         for row in rows
     ]
@@ -226,6 +271,17 @@ def main() -> None:
         "methods": sorted({str(row["method"]) for row in rows}),
         "with_model": sum(1 for row in rows if row["equation_count"]),
         "with_score": sum(1 for row in rows if row["target_nmse"] is not None),
+        "replayable": sum(1 for row in rows if row["model"] is not None),
+        "with_fitted_parameters": sum(
+            1 for row in rows if row["fitted_parameter_count"]
+        ),
+        "execution_semantics": sorted(
+            {
+                str(row["execution_semantics"])
+                for row in rows
+                if row["execution_semantics"]
+            }
+        ),
     }
     (out / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

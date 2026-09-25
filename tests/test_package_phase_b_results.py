@@ -150,3 +150,69 @@ def test_a_superseded_method_is_dropped_only_when_stated(tmp_path: Path) -> None
     assert early_entry["superseded_methods"] == ["d3_native_no_tools"]
     assert early_entry["rows_superseded"] == 2
     assert manifest["planned_total"] == 2
+
+
+def _subject_with_parameters(root: Path) -> None:
+    """Rewrite the fixture's subject as a D3-shaped one: fitted, discrete."""
+    (root / "adapted" / "frozen_evaluation_subjects.jsonl").write_text(
+        json.dumps(
+            {
+                "subject_id": "s0",
+                "execution_semantics": "discrete_increment_recursive_rollout",
+                "candidate": {
+                    "candidate_id": "d3_abc",
+                    "state_equations": [{"state": "G", "rhs": "k_g * G + k_m * u"}],
+                    "observation_mappings": [{"channel": "G", "expression": "G"}],
+                    "initial_conditions": [{"state": "G", "scope": "global",
+                                            "expression": "G"}],
+                },
+                "parameterization": {
+                    "status": "available",
+                    "global_parameters": {"k_g": -0.5, "k_m": 0.2},
+                    "global_initial_conditions": {"G": 90.0},
+                },
+                "validation_context": {"targets": ["G"], "auxiliaries": ["u"]},
+                "source_provenance": {"path": "/some/result.json"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_the_package_carries_what_replaying_a_model_requires(
+    tmp_path: Path,
+) -> None:
+    """Equations alone are an incomplete model for a method that fits apart.
+
+    D3's coefficients live in the parameterization, not in its right-hand
+    sides, and its execution semantics are discrete: replaying it through an
+    ODE solver would reinterpret what it learned.
+    """
+    root = _evaluation(tmp_path / "eval", method="d3_native_no_tools")
+    _subject_with_parameters(root)
+    rows, _ = package.collect("d3", root)
+
+    scored = next(row for row in rows if row["request_id"] == "r0")
+    model = scored["model"]
+    assert model["parameterization"]["global_parameters"] == {"k_g": -0.5, "k_m": 0.2}
+    assert model["parameterization"]["global_initial_conditions"] == {"G": 90.0}
+    assert model["execution_semantics"] == "discrete_increment_recursive_rollout"
+    assert model["validation_context"]["auxiliaries"] == ["u"]
+    # the candidate is whole, not reduced to its right-hand sides
+    assert model["candidate"]["observation_mappings"]
+    assert model["candidate"]["initial_conditions"]
+    # and the flat summary says how much was fitted, without the nesting
+    assert scored["fitted_parameter_count"] == 2
+    assert scored["fitted_initial_condition_count"] == 1
+    assert scored["parameterization_status"] == "available"
+
+
+def test_an_identity_without_a_model_carries_no_replay_payload(
+    tmp_path: Path,
+) -> None:
+    rows, _ = package.collect("sept", _evaluation(tmp_path / "eval"))
+    missing = next(row for row in rows if row["request_id"] == "r1")
+    assert missing["model"] is None
+    assert missing["fitted_parameter_count"] == 0
+    assert missing["execution_semantics"] is None

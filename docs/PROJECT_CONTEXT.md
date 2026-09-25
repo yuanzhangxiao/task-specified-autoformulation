@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `dalla-canonical-sign-rescue-1` diagnostic pairs explicit,
+reference-informed R9/R2 sign hypotheses with unchanged historical controls.
+It permits an identity-bound correction to an already constrained assembly sign
+and reuses the existing rescue/pruning CPU budgets. This is assisted development,
+not autonomous mechanism recovery. See `docs/DALLA_CANONICAL_RESCUE.md`.
+
 `dalla-sign-diagnostic-1` is a separately labeled assisted R4 experiment while
 automatic sign review remains queued. Explicit, identity-bound sign hypotheses
 feed the existing paired rescue/pruning fitter in two independent CPU tasks.

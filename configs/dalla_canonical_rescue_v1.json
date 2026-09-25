@@ -1,0 +1,118 @@
+{
+  "protocol": "dalla-canonical-sign-rescue-1",
+  "decision_source": "assistant_specified_reference_informed_diagnostic",
+  "models": [
+    {
+      "task_id": "brief_canonical_r9",
+      "source_row_sha256": "cce8f7866347bbb4ee57176091645d7214cb7604e0c52aee5d64e40a6c2b6ab4",
+      "assumptions": [
+        "Explicitly assisted, post-hoc demonstration rescue. This does not measure autonomous scientific recovery.",
+        "Canonical reference channel interpretation informs directions only, including anonymous v02=EGP, v03=Uii, v04=E, v05=Gt. No reference numerical coefficients or new inner laws are supplied.",
+        "Both arms start from this same original historical checkpoint, not the prior all-positive repair or a later pruned endpoint.",
+        "Initial conditions remain training-fitted and can be signed. Positive outer gains do not certify global state positivity or total intervention monotonicity.",
+        "A changed domain or outer operator resets that gain to the ordinary role-based start; no absolute value of a wrong-signed fit is used. Other saved parameters are retained.",
+        "Parameters, seed retention and pruning ranking use training; pruning acceptance uses validation. Existing intervention observations motivated this exploratory study but are not optimization or selection inputs."
+      ],
+      "edits": [
+        {
+          "state": "v01",
+          "parameter": "k1_term_0_0_0d2f79ff2b",
+          "original_expression": "k1_term_0_0_0d2f79ff2b * u01",
+          "sign": "positive",
+          "rationale": "Meal appearance is hypothesized to be an additive glucose source through the existing pathway."
+        },
+        {
+          "state": "v01",
+          "parameter": "k2_term_0_1_c80987e81f",
+          "original_expression": "k2_term_0_1_c80987e81f * v02",
+          "sign": "positive",
+          "rationale": "Endogenous glucose production is treated as a source in the plasma balance."
+        },
+        {
+          "state": "v01",
+          "parameter": "k3_term_0_2_824484ea8f",
+          "original_expression": "k3_term_0_2_824484ea8f * v03",
+          "sign": "negative",
+          "rationale": "Insulin-independent glucose utilization is treated as removal from the plasma balance."
+        },
+        {
+          "state": "v01",
+          "parameter": "k4_term_0_3_23e4b2cd58",
+          "original_expression": "k4_term_0_3_23e4b2cd58 * v04",
+          "sign": "negative",
+          "rationale": "Renal glucose excretion is treated as removal from the plasma balance."
+        },
+        {
+          "state": "v01",
+          "parameter": "k5_term_0_4_715922181c",
+          "original_expression": "k5_term_0_4_715922181c * v05",
+          "sign": "positive",
+          "rationale": "Reference-informed canonical compartment interpretation: tissue-to-plasma return is a positive contribution. This is an assisted sign hypothesis, not entailed by the public tissue-mass label."
+        },
+        {
+          "state": "v01",
+          "parameter": "k6_term_0_5_9463ecc079",
+          "original_expression": "k6_term_0_5_9463ecc079 * v01",
+          "sign": "negative",
+          "rationale": "Plasma self-clearance and outward exchange are represented as dissipative self-feedback, with a nonnegative fitted magnitude."
+        }
+      ]
+    },
+    {
+      "task_id": "full_canonical_r2",
+      "source_row_sha256": "3985e85daa067ba5c662ce5dca462b1ee499f1a3800d329bbc7a43bab3761681",
+      "assumptions": [
+        "Explicitly assisted, post-hoc demonstration rescue. This does not measure autonomous scientific recovery.",
+        "Canonical reference channel interpretation informs directions only, including anonymous v02=EGP, v03=Uii, v04=E, v05=Gt. No reference numerical coefficients or new inner laws are supplied.",
+        "Both arms start from this same original historical checkpoint, not the prior all-positive repair or a later pruned endpoint.",
+        "Initial conditions remain training-fitted and can be signed. Positive outer gains do not certify global state positivity or total intervention monotonicity.",
+        "A changed domain or outer operator resets that gain to the ordinary role-based start; no absolute value of a wrong-signed fit is used. Other saved parameters are retained.",
+        "Parameters, seed retention and pruning ranking use training; pruning acceptance uses validation. Existing intervention observations motivated this exploratory study but are not optimization or selection inputs."
+      ],
+      "edits": [
+        {
+          "state": "Gp",
+          "parameter": "k_meal_term_0_0_5bfd891f4a",
+          "original_expression": "k_meal_term_0_0_5bfd891f4a * A",
+          "sign": "positive",
+          "rationale": "Meal appearance is hypothesized to be an additive glucose source through the existing pathway."
+        },
+        {
+          "state": "Gp",
+          "parameter": "k_EGP_term_0_1_6ace3e3183",
+          "original_expression": "k_EGP_term_0_1_6ace3e3183 * EGP",
+          "sign": "positive",
+          "rationale": "Endogenous glucose production is treated as a source in the plasma balance."
+        },
+        {
+          "state": "Gp",
+          "parameter": "k_Uii_term_0_2_8eb71fb75d",
+          "original_expression": "-(k_Uii_term_0_2_8eb71fb75d * Uii)",
+          "sign": "negative",
+          "rationale": "Insulin-independent glucose utilization is treated as removal from the plasma balance."
+        },
+        {
+          "state": "Gp",
+          "parameter": "k_E_term_0_3_1aaddcc94a",
+          "original_expression": "-(k_E_term_0_3_1aaddcc94a * E)",
+          "sign": "negative",
+          "rationale": "Renal glucose excretion is treated as removal from the plasma balance."
+        },
+        {
+          "state": "Gp",
+          "parameter": "k_Gt_term_0_4_839884af65",
+          "original_expression": "-(k_Gt_term_0_4_839884af65 * Gt)",
+          "sign": "positive",
+          "rationale": "Reference-informed canonical compartment interpretation: tissue-to-plasma return is a positive contribution. This is an assisted sign hypothesis, not entailed by the public tissue-mass label."
+        },
+        {
+          "state": "Gp",
+          "parameter": "k_Gp_term_0_5_c71abc5a04",
+          "original_expression": "-(k_Gp_term_0_5_c71abc5a04 * Gp)",
+          "sign": "negative",
+          "rationale": "Plasma self-clearance and outward exchange are represented as dissipative self-feedback, with a nonnegative fitted magnitude."
+        }
+      ]
+    }
+  ]
+}

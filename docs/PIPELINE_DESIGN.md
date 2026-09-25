@@ -1,5 +1,11 @@
 # Phase 1 Pipeline Design
 
+The opt-in `dalla-canonical-sign-rescue-1` diagnostic pairs explicit,
+reference-informed R9/R2 sign hypotheses with unchanged historical controls.
+It permits an identity-bound correction to an already constrained assembly sign
+and reuses the existing rescue/pruning CPU budgets. This is assisted development,
+not autonomous mechanism recovery. See `docs/DALLA_CANONICAL_RESCUE.md`.
+
 The separate `dalla-sign-diagnostic-1` development adapter applies a complete,
 explicitly assisted sign-decision record to one frozen rescue model. Mechanical
 scope/flow checks do not impersonate a semantic assessor. The existing rescue

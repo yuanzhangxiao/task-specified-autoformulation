@@ -19,8 +19,10 @@ def submit(
     *,
     site: str = "aces",
     adopt: dict | None = None,
+    campaign=io,
 ) -> dict:
     """Freeze on the login node; numerical work runs only in CPU allocations."""
+    io = campaign
     root = root.resolve()
     commit = source_commit(io.REPO)
     if os.environ.get("AF_COMMIT", commit) != commit:
@@ -98,7 +100,8 @@ def submit(
                 raise ValueError("cannot adopt without saved intent")
             return submit_job(directory, stage, opts, worker, stage, 0)
 
-        fit = queue("fit", ["--array=0-1%2", "--mem=16G", "--time=02:15:00"])
+        tasks = plan.get("task_count", 2)
+        fit = queue("fit", [f"--array=0-{tasks - 1}%2", "--mem=16G", "--time=02:15:00"])
         report = queue(
             "report", [f"--dependency=afterany:{fit}", "--mem=4G", "--time=00:15:00"]
         )
@@ -106,7 +109,7 @@ def submit(
             "protocol": io.PROTOCOL,
             "identity": identity,
             "jobs": {"fit": fit, "report": report},
-            "array_tasks": 2,
+            "array_tasks": tasks,
             "decision_source": io.LABEL,
             "gpus": 0,
             "live_llm_calls": 0,
@@ -123,7 +126,11 @@ if __name__ == "__main__":
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--site", choices=("aces", "delta"), default="aces")
     parser.add_argument("--adopt", action="append", default=[])
+    parser.add_argument("--campaign", choices=("r4", "canonical"), default="r4")
     args = parser.parse_args()
+    campaign = io
+    if args.campaign == "canonical":
+        from autoformalism.rebuttal import dalla_canonical_rescue as campaign
     print(
         json.dumps(
             submit(
@@ -132,6 +139,7 @@ if __name__ == "__main__":
                 args.root,
                 site=args.site,
                 adopt=dict(x.split("=", 1) for x in args.adopt),
+                campaign=campaign,
             ),
             indent=2,
         )
