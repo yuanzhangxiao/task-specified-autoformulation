@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+`dalla-sign-diagnostic-1` is a separately labeled assisted R4 experiment while
+automatic sign review remains queued. Explicit, identity-bound sign hypotheses
+feed the existing paired rescue/pruning fitter in two independent CPU tasks.
+It makes no provider calls and leaves ambiguous tissue coupling unrestricted.
+See `docs/DALLA_SIGN_DIAGNOSTIC.md`; it is not autonomous mechanism recovery.
+
 The opt-in `dalla-sign-repair-2` follow-up selects original named R4 only.
 Quotation mistakes are advisory metadata; a separate, fallible public-context
 assessment checks directional explanations and retries unresolved slots while

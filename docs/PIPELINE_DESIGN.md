@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+The separate `dalla-sign-diagnostic-1` development adapter applies a complete,
+explicitly assisted sign-decision record to one frozen rescue model. Mechanical
+scope/flow checks do not impersonate a semantic assessor. The existing rescue
+runner handles repaired/control CPU tasks independently, retaining its numerical
+allocation and training-selection policy. Public-context and model hashes bind
+the decisions; top-level and nested exports retain diagnostic provenance.
+Automatic review jobs, pipeline defaults and benchmark assets are unchanged.
+
 Opt-in `dalla-sign-repair-2` adds explicit flow interpretations, a separate cached
 semantic assessment, and advisory citation accounting to the isolated-gain adapter.
 Supported slots survive retries; unresolved signs preserve their original terms.

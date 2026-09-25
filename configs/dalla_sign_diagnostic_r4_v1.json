@@ -1,0 +1,68 @@
+{
+  "protocol": "dalla-sign-diagnostic-1",
+  "decision_source": "assistant_specified_under_user_authorization",
+  "task_id": "full_perturbed_r4",
+  "source_result_sha256": "f22c0b09be601928927946fa7b1d14e1c69c0a7a0d42f8b37ec1dbbd5fe43e06",
+  "request_sha256": "f1b43479aee42f6dac08b1bfa59f7849db96ee2f001c9f33003cc13674b2b477",
+  "public_context_sha256": "d0d54dd29cdf3698c8f155d604a8c09829d5b2287076f5d9856b6ce7c60f2df8",
+  "assumptions": [
+    "This assisted diagnostic was chosen after inspecting previous runs. It is not blinded autonomous discovery or an independent test estimate.",
+    "Production, utilization and excretion directions use explicitly disclosed public channel roles. No reference coefficients or equations are supplied.",
+    "The positive meal-filter contribution and negative target self-term are explicit structural hypotheses, not uniquely entailed by the task text. They are frozen before this diagnostic's fitting.",
+    "A positive meal-filter gain describes an incremental direct meal pathway with other supplied channels and initials held fixed; it does not assert that fitted Y or its entire contribution is always nonnegative.",
+    "The initial-condition policy, inner functions and topology are preserved. Tissue coupling remains unrestricted because the public tissue-mass label does not specify flow direction.",
+    "Pruning and parameter retention use training evidence. Previously inspected intervention probes are exploratory and are not optimization or selection inputs."
+  ],
+  "review": {
+    "decisions": [
+      {
+        "slot_id": "state_3_term_0",
+        "outer_weight_sign": "positive",
+        "basis": "model_structure",
+        "public_quote": "",
+        "mechanism_role": "source",
+        "rationale": "Interpret the existing meal-to-X-to-Y filter chain as a meal-appearance pathway. Its input and transfer gains are already nonnegative. Choose a nonnegative Y-to-Gp gain so an incremental meal pulse contributes positively through this direct pathway at fixed initial conditions and other supplied channels. This is a declared diagnostic interpretation, not a proof that Y is nonnegative or that every physiological meal intervention raises every sample."
+      },
+      {
+        "slot_id": "state_3_term_1",
+        "outer_weight_sign": "positive",
+        "basis": "public_task",
+        "public_quote": "EGP(t): endogenous glucose production rate",
+        "mechanism_role": "source",
+        "rationale": "The public channel is a glucose production rate. Preserve its interpretation as a source in the plasma-glucose balance by using a nonnegative coefficient on EGP. The coefficient is fitted, not fixed to a reference value."
+      },
+      {
+        "slot_id": "state_3_term_2",
+        "outer_weight_sign": "negative",
+        "basis": "public_task",
+        "public_quote": "Uii(t): supplied insulin-independent contribution to glucose utilization",
+        "mechanism_role": "sink",
+        "rationale": "The disclosed channel represents glucose utilization. Treat this existing utilization term as removal in the modeled glucose balance, with a negative assembly sign and a nonnegative fitted magnitude. This direction is not selected from its training correlation or fitted value."
+      },
+      {
+        "slot_id": "state_3_term_3",
+        "outer_weight_sign": "negative",
+        "basis": "public_task",
+        "public_quote": "E(t): renal excretion rate",
+        "mechanism_role": "sink",
+        "rationale": "The public context identifies renal excretion in a glucose-response model. Interpret the existing E term as glucose removal, using a negative assembly sign and a nonnegative fitted magnitude. No magnitude is imposed."
+      },
+      {
+        "slot_id": "state_3_term_4",
+        "outer_weight_sign": "unrestricted",
+        "basis": "undetermined",
+        "public_quote": "Gt(t): observed tissue glucose mass",
+        "mechanism_role": "unknown",
+        "rationale": "An observed tissue mass is not itself a specified donor-to-recipient flow rate. The public description does not determine this reduced term's direction. Preserve its existing expression and real coefficient; do not infer a sink from its displayed minus or impose a memorized exchange equation."
+      },
+      {
+        "slot_id": "state_3_term_5",
+        "outer_weight_sign": "negative",
+        "basis": "model_structure",
+        "public_quote": "",
+        "mechanism_role": "sink",
+        "rationale": "Adopt a dissipative interpretation of the existing first-order Gp self-term. A negative assembly sign gives self-clearance rather than self-amplification. This is an explicit reduced-model hypothesis, not a sign logically forced by the public description or a proof of stability of the complete system."
+      }
+    ]
+  }
+}
