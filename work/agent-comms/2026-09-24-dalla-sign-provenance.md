@@ -1,5 +1,9 @@
 # Sign provenance in the six Dalla rescue endpoints
 
+Follow-up: `2026-09-24-dalla-topology-sign-origin.md` now closes the original
+topology provenance gap discussed below. Both uploaded constructions declare
+all six terms unrestricted; neither handoff lost a fixed topology sign.
+
 ## Finding
 
 Yes: fitting can reverse the visible algebraic sign in these saved models because
