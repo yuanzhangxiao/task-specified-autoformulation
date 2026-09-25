@@ -241,6 +241,20 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
             "target_nmse_median_conditional_on_success": (
                 median(scored) if scored else None
             ),
+            "runtime_invalid": sum(row["runtime_valid"] is False for row in subset),
+            # A model that integrates but fails the public contract has both a
+            # score and an invalidity. Ranking it worst answers "how did the
+            # method do when its models had to be valid"; the roster median
+            # above answers "how did it do when they only had to run".
+            "target_nmse_median_full_roster_valid_only": full_roster_median(
+                [
+                    float(row["target_nmse"])
+                    for row in subset
+                    if row["target_nmse"] is not None
+                    and row["runtime_valid"] is not False
+                ],
+                len(subset),
+            ),
             "evaluated_but_unscored": sum(item is not None for item in unscored),
             "unscored_timeout": sum(item == "timeout" for item in unscored),
             "unscored_diverged": sum(item == "diverged" for item in unscored),
@@ -286,6 +300,9 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
         "full_roster_median_ranks_unscored_worst": True,
         "full_roster_median_is_the_lower_median": True,
         "conditional_median_is_diagnostic_only": True,
+        # Reported alongside the headline: a model can run and still fail the
+        # public contract, so both accountings are given rather than one.
+        "valid_only_median_also_ranks_runtime_invalid_worst": True,
         "pooled_cross_method_mean_reported": False,
         "weighted_overall_score_defined": False,
         "by_method": by_method,

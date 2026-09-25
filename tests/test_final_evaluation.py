@@ -268,14 +268,29 @@ def test_runtime_invalid_candidate_is_rejected_before_mechanism_scoring() -> Non
     assert record.public_mechanism.evaluation is None
 
 
-def test_runtime_invalid_candidate_cannot_carry_private_scores() -> None:
+def test_a_runtime_invalid_candidate_keeps_its_score_and_its_invalidity() -> None:
+    """Both facts are recorded, because both are true.
+
+    A model can integrate and produce a trajectory while failing the public
+    contract: an unused parameter declaration does not stop a rollout. This
+    previously raised, which discarded a real outcome and stopped a whole
+    campaign from being assembled. The record now carries the score and the
+    invalidity, so a report can rank the model worst on the public contract
+    while still saying what it scored.
+    """
     payload = _subject().model_dump(mode="json")
     payload["validation_context"]["targets"] = ["other"]
     payload["target_prediction"]["per_target_normalized_mse"] = {"other": 0.2}
     subject = FrozenEvaluationSubject.model_validate(payload)
 
-    with pytest.raises(ValueError, match="cannot carry available private metrics"):
-        evaluate_frozen_subject(subject, _spec())
+    record = evaluate_frozen_subject(subject, _spec())
+
+    assert record.runtime.valid is False
+    assert record.runtime.failures
+    assert record.public_mechanism.status == "invalid_runtime"
+    # the private metric survives, so a reader is not left guessing
+    assert record.target_prediction.status == "available"
+    assert record.target_prediction.per_target_normalized_mse == {"other": 0.2}
 
 
 def test_final_record_keeps_metrics_separate_without_overall_score() -> None:

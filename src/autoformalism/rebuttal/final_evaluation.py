@@ -464,13 +464,12 @@ def evaluate_frozen_subject(
         subject.validation_context,
     )
     if not runtime.valid:
-        if subject.target_prediction.status == "available" or any(
-            endpoint.status == "available"
-            for endpoint in (*subject.hidden_mechanisms, *subject.interventions)
-        ):
-            raise ValueError(
-                "runtime-invalid candidate cannot carry available private metrics"
-            )
+        # Recorded, not refused. A model can integrate and produce a
+        # trajectory while still failing the public contract -- an unused
+        # parameter declaration does not stop a rollout. Refusing here threw
+        # away a real outcome; both are reported instead, so a reader sees the
+        # score and the fact that the model was invalid, and the roster
+        # accounting can rank it worst on that basis.
         public = PublicMechanismEndpoint(status="invalid_runtime")
     elif mechanism_spec is not None:
         if mechanism_spec_not_applicable:
