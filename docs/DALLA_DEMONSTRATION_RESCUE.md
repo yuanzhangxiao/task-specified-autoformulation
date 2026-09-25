@@ -1,5 +1,8 @@
 # Dalla demonstration rescue on ACES
 
+Follow-up: [`DALLA_SIGN_REPAIR.md`](DALLA_SIGN_REPAIR.md) defines the separate
+public-context sign review and paired refit of these retained endpoints.
+
 Results received 2026-09-24: all six tasks completed. Fixed-parameter local
 replay reproduced every selected training/validation NMSE to within 4e-15.
 R4's numerical fit improved substantially; Brief-only R9 gives a reasonable

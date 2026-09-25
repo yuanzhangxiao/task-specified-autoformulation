@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+The opt-in `dalla-sign-repair-1` adapter reviews isolated historical real outer
+gains using the original public task and symbolic model. A schema-constrained
+sign patch changes only whole-term assembly operators and magnitude domains;
+internal laws, shared gains and boundary contracts are protected. It reuses the
+rescue/pruning runner for separate repaired and unchanged arms, with surviving
+sign/domain checks and durable provider/scheduler receipts. See
+`DALLA_SIGN_REPAIR.md`; historical campaigns and production defaults are unchanged.
+
 The opt-in `final-component-campaign-1` composes existing shared construction,
 joint-output fitting, whole-model response revisions, paired pruning, and the
 corrected advisory judge. A scoped verifier flag disables scientific admission

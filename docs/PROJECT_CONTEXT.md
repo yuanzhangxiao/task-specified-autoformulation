@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/DALLA_SIGN_REPAIR.md` defines a separate public-context repair of the saved
+rescue endpoints. The proposer explicitly reviews isolated real outer gains;
+fixed choices become nonnegative magnitudes with protected assembly signs.
+Repaired and unchanged arms receive the same additional rescue/pruning allocation.
+Original results, initializer contracts, benchmark assets and pipeline defaults
+remain unchanged; the campaign does not use intervention outcomes or test data.
+
 `docs/FINAL_COMPONENT_CAMPAIGN.md` defines the fresh nine-benchmark deadline
 campaign, adding canonical named T1-hard and T2-easy/hard to the original six.
 The primary critic/verifier factorial retains both prompt variants and two seeds;
