@@ -199,13 +199,17 @@ def certify_expressions(
     *,
     allow_piecewise: bool = False,
 ) -> tuple[dict[str, ParsedExpression], dict[str, ParsedExpression], SmoothnessAudit]:
-    """Resolve process aliases before checking complete equations and mappings."""
+    """Audit expressions in their rollout or initial-observation namespace."""
     validated = model.validated
     processes: dict[str, ast.AST] = {}
     audit = SmoothnessAudit(allow_piecewise=allow_piecewise)
 
-    def expanded(expression: ParsedExpression) -> ast.Expression:
-        tree = _Expand(processes).visit(deepcopy(expression.tree))
+    def expanded(
+        expression: ParsedExpression, *, expand_processes: bool = True
+    ) -> ast.Expression:
+        tree = deepcopy(expression.tree)
+        if expand_processes:
+            tree = _Expand(processes).visit(tree)
         _bounded_tree(tree)
         for node in ast.walk(tree):
             if (
@@ -227,12 +231,15 @@ def certify_expressions(
         processes[name] = expanded(validated.process_expressions[name]).body
 
     def certify(
-        expressions: Mapping[str, ParsedExpression], kind: str
+        expressions: Mapping[str, ParsedExpression],
+        kind: str,
+        *,
+        expand_processes: bool = True,
     ) -> dict[str, ParsedExpression]:
         result = {}
         for name, expression in expressions.items():
             audit.location = f"{kind}:{name}"
-            tree = audit.visit(expanded(expression))
+            tree = audit.visit(expanded(expression, expand_processes=expand_processes))
             result[name] = ParsedExpression(expression.source, tree, expression.symbols)
         return result
 
@@ -241,7 +248,12 @@ def certify_expressions(
     audit.rhs_piecewise = bool(audit.piecewise)
     observations = certify(validated.observation_expressions, "observation")
     if validated.context.fitted_initialization:
+        # Public channel names here denote measured values at t0, even when a
+        # generated process has that name. Expanding it would introduce hidden
+        # states or equation parameters into the independently validated map.
         audit.initial_expressions = certify(
-            validated.initial_condition_expressions, "initial_condition"
+            validated.initial_condition_expressions,
+            "initial_condition",
+            expand_processes=False,
         )
     return equations, observations, audit

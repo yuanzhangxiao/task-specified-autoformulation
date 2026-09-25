@@ -127,6 +127,107 @@ def test_boundary_derivatives_match_finite_differences_and_production():
     np.testing.assert_allclose(result.predictions["v01"], values[:, 0], atol=1e-8)
 
 
+def initial_channel_alias_problem(process_expression="gain*Uid", expression="a+b*U"):
+    """An algebraic output and its initial measurement share a public name."""
+    original, train, _ = problem()
+    payload = original.validated.candidate.model_dump(mode="json")
+    payload["processes"] = [
+        {"name": "Uid", "expression": "m+y"},
+        {"name": "U", "expression": process_expression},
+    ]
+    payload["parameters"].append(
+        {"name": "gain", "scope": "global", "role": "coefficient"}
+    )
+    payload["observation_mappings"].append({"channel": "U", "expression": "U"})
+    payload["state_equations"][1]["rhs"] = "Uid-0.7*y"
+    model = compile_candidate(
+        CandidateModel.model_validate(payload),
+        original.validated.context.model_copy(update={"targets": ("v01", "U")}),
+    )
+    row = train.trajectories[0]
+    row = replace(row, targets={**row.targets, "U": np.full_like(row.time, 11)})
+    plan = LatentInitializationPlan.model_validate(
+        {
+            "rules": {
+                "m": {
+                    "initial": {
+                        "mode": "map",
+                        "expression": expression,
+                        "parameters": [
+                            {"name": "a", "guess": 1},
+                            {"name": "b", "guess": 3},
+                        ],
+                    }
+                }
+            }
+        }
+    )
+    return model, row, plan
+
+
+@pytest.mark.parametrize("process_expression", ["gain*Uid", "gain"])
+def test_initial_target_alias_uses_measurement_not_generated_process(
+    process_expression,
+):
+    original, row, plan = initial_channel_alias_problem(process_expression)
+    model, _, _ = apply_initialization_plan(original, plan)
+    system = SymbolicODE(model)
+    parameters = {"rate": 0.3, "gain": 2, "init_m_a": 1, "init_m_b": 3}
+    theta = np.array([parameters[name] for name in system.names])
+    expected = trajectory_initial_state(model, row, {}, parameters=parameters)
+    np.testing.assert_array_equal(expected, [34, 0])
+    np.testing.assert_array_equal(
+        np.asarray(system.initial_symbolic(row, theta)).ravel(), expected
+    )
+    expected_jac = np.zeros((2, len(theta)))
+    expected_jac[0, system.names.index("init_m_a")] = 1
+    expected_jac[0, system.names.index("init_m_b")] = 11
+    np.testing.assert_array_equal(system.initial_sensitivity(row, theta), expected_jac)
+    # Generated output/RHS aliases must still be expanded in the rollout namespace.
+    values = np.array([row.fixed_covariates[name] for name in system.inputs])
+    np.testing.assert_allclose(
+        np.asarray(system.rhs(0, expected, theta, values)).ravel(), [-10.2, 34]
+    )
+    np.testing.assert_allclose(
+        np.asarray(system.observe(0, expected, theta, values)).ravel(),
+        [0, 68 if process_expression == "gain*Uid" else 2],
+    )
+    changed = row.targets["U"].copy()
+    changed[1:] = 1e6
+    future = replace(row, targets={**row.targets, "U": changed})
+    np.testing.assert_array_equal(
+        np.asarray(system.initial_symbolic(future, theta)).ravel(), expected
+    )
+    changed = changed.copy()
+    changed[0] = 5
+    boundary = replace(row, targets={**row.targets, "U": changed})
+    np.testing.assert_array_equal(
+        np.asarray(system.initial_symbolic(boundary, theta)).ravel(), [16, 0]
+    )
+
+
+def test_initial_alias_keeps_causal_and_domain_checks():
+    from autoformalism.fitting.sensitivity_contract import SensitivityContractError
+
+    original, _, plan = initial_channel_alias_problem(expression="a+b*Uid")
+    with pytest.raises(ValueError, match="unavailable"):
+        apply_initialization_plan(original, plan)
+    original, _, plan = initial_channel_alias_problem(expression="a+b*sqrt(abs(U)+1)")
+    model, _, _ = apply_initialization_plan(original, plan)
+    with pytest.raises(SensitivityContractError, match="domain not certified for sqrt"):
+        SymbolicODE(model, allow_piecewise=True)
+    original, _, plan = initial_channel_alias_problem(expression="a+b*abs(U)")
+    model, _, _ = apply_initialization_plan(original, plan)
+    with pytest.raises(SensitivityContractError, match="nonsmooth abs"):
+        SymbolicODE(model)
+    assert any(
+        item["location"] == "initial_condition:m"
+        for item in SymbolicODE(model, allow_piecewise=True).audit[
+            "piecewise_expressions"
+        ]
+    )
+
+
 def test_future_targets_cannot_change_initials_and_observed_boundary_is_exact():
     original, train, _ = problem()
     model, _, _ = apply_initialization_plan(original, map_plan())
