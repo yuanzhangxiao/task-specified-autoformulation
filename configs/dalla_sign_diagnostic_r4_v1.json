@@ -11,7 +11,7 @@
     "The positive meal-filter contribution and negative target self-term are explicit structural hypotheses, not uniquely entailed by the task text. They are frozen before this diagnostic's fitting.",
     "A positive meal-filter gain describes an incremental direct meal pathway with other supplied channels and initials held fixed; it does not assert that fitted Y or its entire contribution is always nonnegative.",
     "The initial-condition policy, inner functions and topology are preserved. Tissue coupling remains unrestricted because the public tissue-mass label does not specify flow direction.",
-    "Pruning and parameter retention use training evidence. Previously inspected intervention probes are exploratory and are not optimization or selection inputs."
+    "Parameter fitting, pre-pruning retention and pruning ranking use training evidence; pruning acceptance uses validation. Previously inspected intervention probes are exploratory and are not optimization or selection inputs."
   ],
   "review": {
     "decisions": [

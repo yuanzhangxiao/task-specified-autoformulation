@@ -30,7 +30,8 @@ LIMITATION = (
     "Assisted, post-hoc sign diagnostic on a selected historical model, not "
     "autonomous discovery or scientific certification. Directions have explicit "
     "public-role or structural-hypothesis rationales; ambiguity remains visible. "
-    "Fitting and pruning select on training. No intervention or test scoring."
+    "Parameters are fitted on training; pruning acceptance uses validation. "
+    "No intervention or test scoring."
 )
 
 

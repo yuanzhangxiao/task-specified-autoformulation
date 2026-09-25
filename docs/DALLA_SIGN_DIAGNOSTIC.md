@@ -53,6 +53,16 @@ may run concurrently, subject to scheduler resources. There is no GPU job,
 provider request, container download, separate preparation dependency or new
 fitter. The report depends on termination of the CPU array.
 
+Parameters, seed-versus-refit retention, and pruning contribution ranking use
+training data. The inherited pruning acceptance rule compares validation NMSE
+against a paired unpruned baseline with a frozen tolerance. Thus validation is
+used for development selection, not solely for untouched evaluation. The
+configuration prose and exported limitation in commit `d28c408` incorrectly
+described selection as training-only; this is a metadata correction, not a
+change to fitting or selection. Existing frozen results remain unchanged and
+do not need rerunning. Use their original pinned checkout for resume; the
+corrected source/configuration has a different identity.
+
 Freezing the small input packet on the login node performs validation only;
 benchmark integration and optimization occur in CPU jobs. Every worker verifies
 code, decisions, source packet, runtime and paired plan identities before fitting.
