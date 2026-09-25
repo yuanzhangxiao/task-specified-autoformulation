@@ -94,6 +94,61 @@ Download `models.json` after completion. `rows[].citation_audit` and
 outcomes. Repeating the submission command reuses confirmed scheduler receipts;
 an ambiguous scheduler reply still requires inspection/adoption, not deletion.
 
+### Recover the rejected review dependency
+
+The observed ACES preparation timeout still submitted job `2162020`, which
+completed successfully. Recovery adopted it but the original launcher then
+submitted `afterok:2162020`; ACES rejected that review with `Job dependency
+problem`. A completed job can remain in accounting after leaving the live
+dependency records. The earlier review `2161544` predates this preparation and
+does not establish that the new review was submitted.
+
+`scripts/recover_dalla_sign_submission.py` is a scheduler-only helper for this
+case. Copy it **outside the pinned scientific checkout** and point `AF_REPO_ROOT`
+to the original `dalla-sign-repair-dbb51ed` archive. It verifies the original plan,
+source/runtime/launcher identities, owned preparation command, successful exit,
+and explicit review rejection. It also checks for any matching original review
+before issuing a replacement. It preserves every original receipt and writes
+new attempt receipts in `submission-recovery-1/`.
+
+The helper submits review without a dependency after confirming preparation
+completed. Fit still requires successful review; report waits for fit termination.
+Verified completed stages are omitted from later dependencies. An accepted job
+whose reply timed out is recovered by matching the full command and owner in
+accounting, including array jobs. If accounting has not caught up, the helper
+stops and the same command can be rerun; it never resends an unconfirmed attempt.
+An explicit dependency rejection can get a new attempt only after the verified
+dependency condition changes. Old rejected receipts remain intact.
+
+After uploading the helper to group scratch (use the actual uploaded filename):
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
+export AF_REPO_ROOT="$AF_GROUP/repos/dalla-sign-repair-dbb51ed"
+export AF_COMMIT="$(cat "$AF_REPO_ROOT/SOURCE_COMMIT")"
+export AF_PYTHON=/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python
+export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT"
+export PYTHONDONTWRITEBYTECODE=1
+module load GCCcore/13.2.0 Python/3.11.5
+"$AF_PYTHON" "$AF_GROUP/recover_dalla_sign_submission.py" \
+  --root "$AF_GROUP/dalla-sign-repair-v2-r4" --prepare-job 2162020
+BASH
+```
+
+Successful recovery creates the normal `submission_manifest.json`, so the status
+and result commands above still apply. No new scientific checkout, refreeze,
+preparation run, extra model budget or changes to candidate/fitting code are needed.
+
+Recovery verification on 2026-09-25: 61 focused recovery/sign tests passed, including
+11 new scheduler recovery cases. A mock-scheduler smoke against the unchanged
+`dbb51ed` upload archive confirms plan/receipt preservation and duplicate-free
+resume. No live scheduler call, LLM request or benchmark fit ran locally. The
+helper and tests pass Ruff; repository Ruff still has 37 unrelated analysis findings.
+Accounting delays may still require rerunning the identical helper command; no
+unconfirmed scheduler response is treated as permission to resubmit.
+
 ### Local v2 verification
 
 ```bash
