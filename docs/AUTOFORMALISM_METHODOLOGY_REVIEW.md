@@ -1,6 +1,81 @@
 # Review and manuscript handoff
 
-## Current revision: concise MAP-motivated Section 4 (24 September 2026)
+## Current revision: Section 3 notation, conditional weights and algorithm (25 September 2026)
+
+Reviewed the supplied `Downloads/problem_formulation.tex` and `Downloads/method.tex`
+against the current fitting, verification, critic, revision and pruning paths.
+The new Method uses `\mathcal M=(\Gamma,f,h,g;\psi)` throughout (923 prose words
+and five numbered equations by `texcount`). It is identical
+in `docs/AUTOFORMALISM_METHODOLOGY.tex` and `paper_to_revise/sections/method.tex`.
+The supplied Section 3 and all implementation/experiment files are unchanged.
+Local source copies are preserved in `backups/method-section-2026-09-25/`.
+
+The main changes are:
+
+- MAP is converted to a negative-log objective, then to a working constrained
+  error/complexity surrogate. Training parameter fitting, validation selection,
+  advisory critique and local pruning are distinguished from exact optimization
+  of a posterior or one fixed weighted objective.
+- Equation (5) now compares integrated predictions through the observation map
+  `h` with target observations, pooled over trajectory/time/channel samples and
+  normalized with training-only channel scales. It does not equate latent state
+  coordinates with outputs or treat the full recorded data as joint noisy-state
+  likelihood terms that the fitter does not use.
+- Equations (6)--(8) expose an affine block of GMM weights. The analytical
+  pseudoinverse solution is conditional on trajectories, their derivatives and
+  all other parameters; signs/bounds require constrained least squares. Unknown
+  products across nested laws are not jointly linear. The response vector is a
+  derivative residual, not the observed output matrix. The production fitter
+  uses collocation initialization and joint bounded rollout refinement, without
+  an alternating analytical weight step or sparsity penalty.
+- The deterministic gate precedes fitting and includes actual equation-derived
+  scientific predicates. Explicit violations block fitting; unresolved public
+  predicates are not falsely called scientifically certified. The paired judge
+  supplies broader, fallible scientific critique without a numerical selection
+  score or veto. Scientific interpretation is not claimed to be exclusively
+  possible with an LLM.
+- The main text summarizes shared-process assembly, causal initializers,
+  revision and pruning. The new appendix table gives the full algorithm and
+  exact search/pruning selection rules, including parent/control comparison.
+
+### Manuscript integration
+
+The current manuscript already inputs `sections/method.tex`. Add the following
+inside its appendix when incorporating the new algorithm table:
+
+```latex
+\input{sections/appendix_method_algorithm}
+```
+
+The table requires `amsmath`, `amssymb`, `booktabs` and `tabularx`, already used by
+the current manuscript. The manuscript main file and other untracked paper files
+were not edited or added to this commit. In particular, the existing pruning
+appendix still describes bootstrap pruning and needs separate alignment before
+submission; the new table describes the implemented one-deletion comparison.
+The preview uses Section 4 and equations (4)--(8), assuming the three equations
+in the supplied Section 3 precede it. Actual manuscript numbering remains automatic.
+
+### Verification and limits
+
+- 113 relevant tests pass across component campaigns, review integrity,
+  pruning, critic, multiple targets, fitted initialization, public target
+  contracts and the restricted exact-derivative fitting path.
+- The fresh-shared smoke test checks synthetic construction, two-output fitting,
+  shared-law revision, pruning and deterministic resume without live LLM calls
+  or benchmark/test trajectories.
+- The standalone Method/appendix PDF compiles without unresolved references or
+  overfull boxes; all three pages were rendered and visually inspected. The main
+  section occupies about one and a half pages in the generic two-column preview,
+  with the algorithm appendix on its own page.
+- `ruff check .` reports 37 pre-existing issues in unrelated `analysis/claude`
+  files. This revision changes no Python implementation files.
+- No experimental efficacy or global MAP convergence is inferred from these
+  code checks. The conditional analytical formula is a property of an affine
+  subproblem, not a claim that every production fit is solved analytically.
+
+The dated reviews below describe earlier drafts and remain historical context.
+
+## Earlier revision: concise MAP-motivated Section 4 (24 September 2026)
 
 `AUTOFORMALISM_METHODOLOGY.tex` now matches
 `paper_to_revise/sections/method.tex`. The latter is the file included by the

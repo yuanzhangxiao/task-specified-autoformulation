@@ -1,0 +1,87 @@
+% Requires amsmath, amssymb, booktabs, and tabularx.
+\section{Autoformalism algorithm}
+\label{app:af-algorithm}
+
+Table~\ref{tab:af-algorithm} describes the full method, applied independently
+to each prescribed seed and prompt variant. Component ablations disable only
+their named scientific verifier, critic, shared-process stage, or pruning step;
+parsing, execution safety, causal boundaries, and target completeness remain.
+Every LLM request and numerical attempt is cached and checkpointed. Resume
+reuses completed work and consumed budgets. Failures and unresolved checks
+remain explicit in the reported denominators.
+
+Let $E$ be validation NMSE from Eq.~\eqref{eq:af-output-loss}, and $K_t$ the
+number of outer additive terms in state and process equations. Search prefers
+smaller $E$ when parent and trial differ by more than
+$\delta=10^{-8}+10^{-6}\max(|E_{\mathrm{parent}}|,|E_{\mathrm{trial}}|)$;
+within $\delta$, it prefers smaller $K_t$, retaining the parent on a tie.
+Pruning uses the count vector
+$K_v=(\text{states},\text{processes},\text{parameters},\text{terms},
+\text{expression nodes})$ and $E_b=\min(E_{\mathrm{parent}},E_{\mathrm{control}})$
+when the control is available. It requires componentwise
+$K_v(\mathrm{pruned})\le K_v(\mathrm{parent})$, at least one strict decrease,
+and $E_{\mathrm{pruned}}\le E_b+\max(10^{-6},0.01E_b)$.
+A failed control remains an incomplete paired comparison; a valid child can
+still compete with the historical parent. In the table, $\operatorname{RMS}$
+is the square root of the mean squared value over training-rollout samples.
+
+\begin{table*}[!htbp]
+\centering
+\caption{Bounded MAP-motivated model search and process-aware pruning.
+The analytical solution in Eq.~\eqref{eq:af-conditional-solution} describes
+an affine subproblem, not an additional step of the current numerical fitter.}
+\label{tab:af-algorithm}
+\small
+\renewcommand{\arraystretch}{1.14}
+\begin{tabularx}{\textwidth}{@{}rX@{}}
+\toprule
+ & \textbf{Input:} context $\mathcal C$, training and validation data,
+ prescribed lineages, visit/retry/fit budgets, component settings.\\
+ & \textbf{Output:} frozen models $\mathcal M=(\Gamma,f,h,g;\psi)$,
+ or explicit unavailable outcomes, with metrics, diagnostics, and costs.\\
+\midrule
+1 & Fit target scales $\sigma_q$ on training data. Keep test data inaccessible.\\
+2 & \textbf{For each} prescribed lineage, initialize the incumbent as unavailable.\\
+3 & \quad \textbf{For} each allowed search visit:\\
+4 & \qquad Initially propose variables, optional shared processes, signed
+ topology, analytic functions and initializers. If the optional route fails,
+ permit ordinary construction within the same budget.\\
+5 & \qquad Otherwise revise using the incumbent, public requirements,
+ training residuals and critic advice; without an incumbent, use bounded
+ unfitted repair or record closure.\\
+6 & \qquad Compile, preserve shared identities and apply unambiguous
+ mechanical repairs. Enforce the validity rubric; return failures for
+ bounded proposer repair.\\
+7 & \qquad If no admissible draft remains, retain the incumbent with any
+ prescribed unchanged-refit fallback. Without an admissible model, record
+ failure and skip fitting.\\
+8 & \qquad Obtain or reuse the enabled critic's paired symbolic review
+ against the incumbent when available. Save advice without selecting or
+ vetoing the candidate.\\
+9 & \qquad Fit $\psi$, including initializer parameters, on training data
+ using collocation and bounded rollout refinement with compatible warm starts.\\
+10 & \qquad Evaluate training and validation rollouts with frozen parameters
+ and training scales; record numerical failures.\\
+11 & \qquad Select the eligible finite candidate by validation error, then
+ additive-term count using $\delta$ above; otherwise preserve the incumbent.\\
+12 & \qquad Checkpoint the model, training feedback, review linkage and
+ costs. Do not pass validation or test scores to the proposer.\\
+13 & \quad \textbf{If} pruning is enabled and an incumbent is available:\\
+14 & \qquad Enumerate legal deletions preserving outputs, causality and
+ shared consumers. Skip deletion for unresolved public obligations or
+ if no legal candidate remains.\\
+15 & \qquad On the parent's training rollout, compute
+ $r(T)=\operatorname{RMS}(T)/\max\{\operatorname{RMS}(F_i),10^{-12}\}$
+ for contribution $T$ to equation $F_i$. Use the maximum consumer ratio for
+ coupled units. Freeze the weakest legal deletion before refitting; break
+ ties by stable identifier.\\
+16 & \qquad Delete that unit and unreachable declarations; recheck validity.
+ Refit the child and unchanged parent with equal budgets. A skipped deletion
+ can still receive its prescribed control.\\
+17 & \qquad Select parent, control or child by the rule above. Review changed
+ selected equations with the enabled critic, without altering selection.\\
+18 & Report every endpoint, including failures. Freeze selected models;
+ only then evaluate held-out test data without refitting or model changes.\\
+\bottomrule
+\end{tabularx}
+\end{table*}

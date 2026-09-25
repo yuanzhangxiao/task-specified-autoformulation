@@ -1,15 +1,21 @@
-% Compile from the repository root; the included section is manuscript-ready.
+% Compile from the repository root. Section 3 supplies three equations.
 \documentclass[10pt,twocolumn,letterpaper]{article}
 \usepackage[margin=0.75in,columnsep=0.25in]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern,microtype}
-\usepackage{amsmath,amssymb}
-\usepackage{flushend}
+\usepackage{amsmath,amssymb,booktabs,tabularx}
 \usepackage[hidelinks]{hyperref}
-\hypersetup{pdftitle={Autoformalism: MAP-motivated methodology},
-  pdfsubject={Concise Section 4: constrained search, advisory critique and pruning}}
+\hypersetup{pdftitle={Autoformalism: methodology and algorithm},
+  pdfsubject={Section 4 and appendix: MAP-motivated search and conditional linearity}}
 \setlength{\emergencystretch}{1em}
 \begin{document}
-\setcounter{section}{3}
+% Supply the preceding section reference in this standalone preview.
+\setcounter{section}{2}
+\refstepcounter{section}\label{sec:formulation}
+\setcounter{equation}{3}
 \input{docs/AUTOFORMALISM_METHODOLOGY.tex}
+\clearpage
+\onecolumn
+\appendix
+\input{paper_to_revise/sections/appendix_method_algorithm.tex}
 \end{document}

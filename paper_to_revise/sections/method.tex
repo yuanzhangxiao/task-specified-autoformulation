@@ -4,118 +4,170 @@
 \label{sec:method}
 \label{sec:autoformalism-method}
 
-Autoformalism combines staged language-model proposals, deterministic checks,
-numerical fitting, and pruning. MAP motivates the formulation; bounded search
-and validation-based selection implement its practical approximation.
+Autoformalism searches over $\mathcal M=(\Gamma,f,h,g;\psi)$ using staged
+LLM proposals, deterministic verification, scientific critique, numerical
+fitting, and pruning. These components implement a bounded, MAP-motivated
+search; they do not exactly optimize a known posterior.
 
-\subsection{MAP-motivated model search}
-\label{sec:af-map}
+\subsection{From MAP to practical model search}
 
-Write $M=(\Gamma,f)$ for the model structure, including observation and
-initialization rules, and $\psi$ for its continuous parameters. MAP maximizes
-$p(D\mid M,\psi)p(M,\psi\mid\mathcal C)$ given observations $D$ and context
-$\mathcal C$. We approximate the unknown context-conditioned prior by
+Taking negative logarithms of the MAP objective in
+Section~\ref{sec:formulation} gives
 \begin{equation}
- p_{\mathrm{work}}(M,\psi\mid\mathcal C)
- \propto
- \mathbf 1\{M\in\mathcal A_{\mathcal C},\,\psi\in\Theta_M\}
- e^{-\lambda K(M)},
- \label{eq:af-prior}
+ \min_{\mathcal M}\;
+ \underbrace{-\log p(\mathcal D\mid\mathcal M)}_{\mathcal L_{\mathrm{data}}}
+ -\log p(\mathcal M\mid\mathcal C).
+ \label{eq:af-map-energy}
 \end{equation}
-on bounded structure and parameter domains. Here $\mathcal A_{\mathcal C}$
-encodes the implemented admissibility requirements, $\Theta_M$ the parameter
-domains, and $K(M)$ structural complexity. Writing
-$L_D=-\log p(D\mid M,\psi)$, taking negative logarithms gives
+We use a Gaussian working likelihood for target prediction errors,
+conditional on supplied inputs and permitted initial information.
+For split $\mathcal D_s$, its normalized squared-error counterpart is
 \begin{equation}
- \min_{M\in\mathcal A_{\mathcal C},\,\psi\in\Theta_M}
- L_D(M,\psi)+\lambda K(M).
- \label{eq:af-map-surrogate}
+ E_s(\mathcal M)=\frac{1}{|\mathcal I_s|}
+ \sum_{(n,k,q)\in\mathcal I_s}
+ \left[
+ \frac{\widehat y_{n,q}(t_{n,k};\mathcal M)-y_{n,q}(t_{n,k})}
+ {\sigma_q}
+ \right]^2,
+ \label{eq:af-output-loss}
 \end{equation}
-Choosing the prior is a modeling approximation; the logarithmic reformulation
-is exact. Admissibility covers executable requirements, not complete scientific
-correctness. Explicit violations block acceptance when verification is enabled;
-unresolved predicates remain reported and may remain eligible for search.
+where $\widehat{\mathbf y}_n=h(\widehat{\mathbf x}_n,\mathbf u_n;\psi)$
+is obtained by integrating $f$ from $g(\boldsymbol\zeta_n;\psi)$.
+The index set $\mathcal I_s$ contains target-channel samples, and
+$\sigma_q>0$ is the training standard deviation with a numerical floor,
+reused on every split. Thus fitting compares predicted outputs, rather
+than substituting state coordinates for a general observation function $h$.
 
-\subsection{Staged model construction}
-\label{sec:af-construction}
+We approximate the structural preference in the unknown prior using
+$p_{\mathrm{work}}(\mathcal M\mid\mathcal C)\propto
+\mathbf 1\{\mathcal M\in\mathcal A_{\mathcal C}\}
+\exp[-\lambda K(\mathcal M)]$, on the permitted model and parameter domains.
+Here $\mathcal A_{\mathcal C}$ denotes implemented admissibility checks
+and $K$ structural complexity. After absorbing likelihood scaling into
+$\lambda$, this yields the surrogate
+$\min_{\mathcal M\in\mathcal A_{\mathcal C}}
+E_{\mathrm{tr}}(\mathcal M)+\lambda K(\mathcal M)$.
+For a fixed structure, $K$ is constant, motivating an inner parameter fit.
+In practice, we fit $\psi$ on training data, select
+structures by validation error with complexity preferences, and use
+scientific critique to guide proposals. This predictive selection and
+local pruning approximate the MAP tradeoff without evaluating an LLM
+score as a log prior or minimizing one fixed weighted objective.
 
-The proposer first selects observed and latent variables, optionally proposes
-shared processes, specifies signed dependency hyperedges, and supplies interaction
-functions. A shared process has one defining function and parameter set, reused
-by its consumers, with $\mathcal P_i$ indexing processes used by equation $i$:
+\subsection{Staged construction and graph meta models}
+
+The proposer selects variables $\Gamma$, optionally declares shared
+processes, specifies signed dependencies, and supplies analytic
+interaction functions, output mappings $h$, and causal initializers $g$.
+A graph meta model (GMM) represents dependencies as directed hyperedges:
+a set of state/input variables jointly contributes one function to a
+state derivative or algebraic definition. Shared processes have one
+law and parameter registry, reused across their consumers. Declared
+signs, conversions, and parameter sharing are preserved during assembly
+and coherent revision; shared syntax alone does not establish conservation.
+
+For a block of eligible outer weights $\theta$, the assembled dynamics
+can be written, with all remaining parameters collected in $\eta$, as
 \begin{equation}
- F_i=\sum_j T_{ij}+\sum_{p\in\mathcal P_i}s_{ip}a_{ip}d_{ip}P_p.
- \label{eq:af-process}
+ f_i(\mathbf x,\mathbf u;\psi)
+ =b_i(\mathbf x,\mathbf u;\eta)
+ +\sum_{j\in\mathcal E_i}\theta_{\kappa(i,j)}
+ \phi_{i,j}(\mathbf x_{S_{i,j}},\mathbf u;\eta),
+ \label{eq:af-gmm}
 \end{equation}
-Here $T_{ij}$ are ordinary contributions, $P_p$ a shared law,
-$s_{ip}$ a declared sign, $a_{ip}$ a consumer gain, and $d_{ip}$ a declared
-conversion factor. Explicit transfer declarations can tie gains; independent
-effective gains permit unknown conversions without claiming conservation.
-The runtime propagates shared-law edits to every consumer. Optional process
-failure permits ordinary construction to continue.
+where $\psi=(\theta,\eta)$, $b_i$ collects the remaining contributions,
+and $\kappa$ preserves tied weight identities. Basis functions may be
+nonlinear in their arguments and in $\eta$. We explain the resulting
+conditional analytical solution below.
 
-Typed schemas and a restricted expression grammar enforce symbol closure,
-causality, and algebraic acyclicity. Equation-derived checks assess applicable
-public paths, dynamic mediation, and nonlinear feedback. Unambiguous repairs
-are automatic; scientific ambiguities return to the proposer with the current
-model and diagnostics.
-Latent states use declared causal initializers. Rollouts generate subsequent
-outputs without resetting states from later target observations.
+\subsection{Deterministic validity and scientific critique}
 
-\subsection{Fitting and revision}
-\label{sec:af-revision}
+\textbf{Validity gate.} Before fitting, the runtime compiles the proposed
+model and checks a deterministic rubric: restricted expressions and
+symbol closure, complete generated targets and output mappings,
+algebraic acyclicity, causal initializers, and declared parameter/sign
+contracts. Equation-derived public requirements additionally check, when
+specified, input--target pathways, mediation through dynamic states,
+and nonlinear source or feedback dependence. Explicit violations trigger
+bounded repair; a model that still violates an enforced requirement is
+not fitted. The gate is operational admissibility, not certification of
+all scientific claims: unresolved scientific predicates remain reported
+and can remain development-eligible under the declared policy.
 
-For target channel $q$, fix its scale $\sigma_q$ from training observations.
-Let $e_{rkq}(M,\psi)=(\widehat y_{rq}(t_k;M,\psi)-y_{rq}(t_k))/\sigma_q$
-be the standardized residual for trajectory $r$ at time $t_k$.
-A Gaussian working likelihood yields the inner fitting problem
+\textbf{Scientific critic.} Beyond these executable checks, a judge LLM
+assesses the plausibility of the proposed mechanisms, variable meanings,
+and interpretation in context. We reuse the paired GPT-OSS-120B judge:
+atomic checks inform a comparative review in both candidate orders.
+It sees the public specification and symbolic models, without fitted
+values or prediction scores. Its findings provide fallible scientific
+advice for subsequent revisions; its score neither selects nor vetoes
+a model and cannot override the validity gate. Unchanged symbolic
+reviews are cached. This separates mechanically checkable requirements
+from broader scientific interpretation that our deterministic rubric
+does not establish.
+
+\subsection{Conditional linearity and numerical fitting}
+
+\textbf{What can be solved analytically.} Fix the state trajectories and
+all parameters $\eta$, including those inside nonlinear laws. If the
+expanded equations are affine in the chosen weights, stacking their
+basis evaluations gives a design matrix $\Phi$ and derivative targets
+$d=\operatorname{vec}(\dot X-b)$, where $X$ stacks state values on a
+fixed time grid. The conditional problem is
 \begin{equation}
- \widehat\psi_M\approx
- \arg\min_{\psi\in\Theta_M}\frac12
- \sum_{(r,k,q)\in\mathcal I_{\mathrm{tr}}}e_{rkq}(M,\psi)^2,
- \label{eq:af-fit}
+ \theta^\star(X,\eta)\in
+ \arg\min_{\theta\in\Theta_\theta}
+ \|\Phi(X,\eta)\theta-d(X,\eta)\|_2^2.
+ \label{eq:af-conditional-linear}
 \end{equation}
-where $\mathcal I_{\mathrm{tr}}$ indexes training observations.
-Collocation initialization and rollout-based refinement operate within fixed
-budgets. Because $K(M)$ is structural, fitting contains no sparsity penalty.
-Validation NMSE $E_{\mathrm{val}}$ is the mean squared standardized residual with
-training scales and fitted parameters, including initializer parameters, frozen.
-Validation-based structural selection is a predictive surrogate, not an exact
-MAP identity.
-
-The paired scientific critic supplies symbolic concerns $c_t$ from the public
-context and candidate equations, without trajectories or numerical scores.
-Alongside training-residual feedback $r_t$, these condition the proposer:
+For unrestricted weights, a minimum-norm solution is
 \begin{equation}
- M'_t\sim q_\phi(M\mid\mathcal C,M_t,r_t,c_t).
- \label{eq:af-critic-proposal}
+ \theta_{\mathrm{LS}}(X,\eta)
+ =\Phi(X,\eta)^\dagger d(X,\eta),
+ \label{eq:af-conditional-solution}
 \end{equation}
-Revisions can jointly change variables, topology, laws, and initializers.
-The runtime recompiles and fits each candidate. Among eligible finite candidates,
-lower validation NMSE wins outside a fixed numerical tolerance; within it, fewer
-additive terms wins, otherwise the incumbent is retained. This approximates an
-error-first, complexity-second policy, motivated by $\lambda\to0^+$ over a
-finite candidate set. Critic scores neither select nor veto models;
-the critic guides the search distribution rather than supplying a posterior
-energy. Test data remain inaccessible until selection is frozen.
+where $\dagger$ denotes the Moore--Penrose pseudoinverse.
+Sign or bound constraints instead require constrained linear least
+squares. Products of unknown gains across nested shared laws must be
+excluded from the same affine block. Crucially, $d$ contains fixed
+trajectory derivatives, not the observed outputs $\mathbf Y$;
+this conditional solution does not make rollout error quadratic in
+$\psi$ or solve the complete partially observed fitting problem.
 
-\subsection{Process-aware pruning}
-\label{sec:af-pruning}
+\textbf{Implemented fitter.} The current pipeline jointly fits the
+continuous parameters with an existing collocation initializer and
+bounded rollout-based refinement; it does not alternate analytical
+weight solves. Collocation estimates discretized state trajectories
+and parameters under the dynamical and initial-condition constraints.
+Refinement minimizes training output residuals through forward
+simulation, using the estimated parameters rather than treating
+collocation nodes as latent observations. Parameters of $f$, $h$, and
+$g$ are fitted together, including unknown constant latent initials or
+parameters of causal initial maps. They remain fixed for validation
+and test rollouts, which never reset states from later target values.
+There is no sparsity penalty in this fitting objective.
 
-Pruning tests one legal deletion with the lowest training-rollout contribution,
-measured by its RMS relative to its defining right-hand side. A shared-process
-deletion removes all consumer contributions together and uses their maximum
-ratio. Deletion precedes refitting; unreachable components are removed.
+\subsection{Revision, selection, and pruning}
 
-The pruned model and an unchanged control receive equal refitting budgets.
-Let $E_b$ be the better available validation NMSE of the parent and control.
-Accept the deletion only when applicable public checks pass, no count of states,
-processes, parameters, terms, or expression nodes increases, at least one decreases,
-and
-\begin{equation}
- E_{\mathrm{pruned}}\le E_b+\max\{10^{-6},0.01E_b\}.
- \label{eq:af-pruning-accept}
-\end{equation}
-Unresolved obligations skip deletion when verification is enabled. Pruning
-approximates structural regularization locally. These policies are not claimed
-to exactly optimize a single fixed-weight MAP objective.
+The proposer receives the current model, deterministic diagnostics,
+qualified training-residual feedback, and available critic findings.
+It can jointly revise $\Gamma,f,h,g$ within fixed budgets. Each new
+model passes the validity gate before review and fitting. Among eligible
+finite fits, lower validation error wins outside a fixed numerical
+tolerance; within it, fewer additive terms wins, otherwise the incumbent
+is retained. The critic influences which candidates are explored,
+not their numerical ranking.
+
+After search, pruning tests one legal deletion ranked by its contribution
+on the retained training rollout: the RMS of an additive contribution
+relative to its defining right-hand side. Coupled deletions use the
+largest ratio across consumers. Shared-law edits propagate to all uses,
+and unreachable components are removed. The pruned model and an
+unchanged control receive equal fitting budgets. A pruned model is
+retained only if the checks pass, complexity decreases without increasing
+any tracked count, and its validation NMSE is within a predeclared
+$1\%$ tolerance (absolute floor $10^{-6}$) of the better parent/control.
+Unresolved public obligations skip automatic deletion. These local
+simplifications implement the preference for parsimony. Final models
+are frozen before test evaluation; Table~\ref{tab:af-algorithm} gives
+the algorithm and exact selection rules.
