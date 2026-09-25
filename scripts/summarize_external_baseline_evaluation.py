@@ -41,6 +41,35 @@ def full_roster_median(scored: list[float], planned: int) -> float | None:
     return ranked[index] if index < len(ranked) else None
 
 
+def _worst_first_median(scored: list[float], planned: int) -> float | None:
+    """Roster median for a measure where larger is better.
+
+    The mirror of full_roster_median: an identity with no value ranks below
+    every observed one, so the median is taken from the top downwards.
+    """
+    if planned <= 0 or not scored:
+        return None
+    ranked = sorted(scored, reverse=True)
+    index = (planned - 1) // 2
+    return ranked[index] if index < len(ranked) else None
+
+
+def _complexity_summary(subset: list[dict[str, object]]) -> dict[str, object]:
+    """Median complexity over the models that exist, with the denominator."""
+    summary: dict[str, object] = {}
+    for field in ("states", "latent_states", "parameters", "terms"):
+        values = [
+            float(row[f"complexity_{field}"])
+            for row in subset
+            if row.get(f"complexity_{field}") is not None
+        ]
+        summary[f"complexity_{field}_median"] = median(values) if values else None
+    summary["complexity_measured"] = sum(
+        row.get("complexity_terms") is not None for row in subset
+    )
+    return summary
+
+
 def _unscored_reason(row: dict[str, object]) -> str | None:
     """Separate a compute limit from a model that could not be integrated."""
     if row["state"] != "evaluated" or row["target_nmse"] is not None:
@@ -190,6 +219,40 @@ def join(
                     if target is not None and target.status == "available"
                     else None
                 ),
+                # Already computed per subject by the frozen evaluator and
+                # never reported: compliance is the point of a task-specified
+                # benchmark, and complexity is what parsimony is argued over.
+                "mechanism_compliance": (
+                    record.public_mechanism.evaluation.mechanism_compliance
+                    if record is not None
+                    and record.public_mechanism.evaluation is not None
+                    else None
+                ),
+                "mechanism_coverage": (
+                    record.public_mechanism.evaluation.mechanism_coverage
+                    if record is not None
+                    and record.public_mechanism.evaluation is not None
+                    else None
+                ),
+                "mechanism_status": (
+                    record.public_mechanism.status if record is not None else None
+                ),
+                "complexity_states": (
+                    record.complexity.state_count if record is not None else None
+                ),
+                "complexity_latent_states": (
+                    record.complexity.latent_state_count
+                    if record is not None
+                    else None
+                ),
+                "complexity_parameters": (
+                    record.complexity.parameter_count if record is not None else None
+                ),
+                "complexity_terms": (
+                    record.complexity.additive_term_count
+                    if record is not None
+                    else None
+                ),
                 "target_status": target.status if target is not None else None,
                 "target_message": (
                     (target.message or "") if target is not None else ""
@@ -255,6 +318,23 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
                 ],
                 len(subset),
             ),
+            # Compliance is a fraction where higher is better, so an absent
+            # one ranks worst at the bottom: the roster convention mirrored.
+            "mechanism_compliance_median_full_roster": _worst_first_median(
+                [
+                    float(row["mechanism_compliance"])
+                    for row in subset
+                    if row["mechanism_compliance"] is not None
+                ],
+                len(subset),
+            ),
+            "mechanism_compliance_scored": sum(
+                row["mechanism_compliance"] is not None for row in subset
+            ),
+            # Complexity has no good direction, so a missing model is not
+            # infinitely complex. Reported over what exists, with its own
+            # denominator, rather than forced onto the roster convention.
+            **_complexity_summary(subset),
             "evaluated_but_unscored": sum(item is not None for item in unscored),
             "unscored_timeout": sum(item == "timeout" for item in unscored),
             "unscored_diverged": sum(item == "diverged" for item in unscored),
