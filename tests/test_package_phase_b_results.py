@@ -108,3 +108,45 @@ def test_an_empty_evaluation_root_yields_nothing_rather_than_failing(
     rows, provenance = package.collect("empty", tmp_path / "absent")
     assert rows == []
     assert provenance["planned"] == 0
+
+
+def test_a_superseded_method_is_dropped_only_when_stated(tmp_path: Path) -> None:
+    """An earlier run planned D3 before its campaign existed.
+
+    All 120 of its identities were missing, and a later run produced the real
+    ones. Merging both would count one method twice; choosing automatically by
+    which rows carry models would silently pick a winner. So it is declared.
+    """
+    import subprocess
+    import sys
+
+    early = _evaluation(tmp_path / "early", method="d3_native_no_tools")
+    late = _evaluation(tmp_path / "late", method="d3_native_no_tools")
+    script = (
+        Path(__file__).resolve().parent.parent
+        / "scripts" / "package_phase_b_results.py"
+    )
+
+    def run(*extra: str):
+        return subprocess.run(
+            [sys.executable, str(script),
+             "--evaluation", f"early={early}", "--evaluation", f"late={late}",
+             "--out", str(tmp_path / "out"), *extra],
+            capture_output=True, text=True, check=False,
+        )
+
+    # undeclared: refused, naming the method
+    refused = run()
+    assert refused.returncode != 0
+    assert "appears under two evaluations" in refused.stderr
+
+    # declared: the early rows are dropped and the bundle records that
+    accepted = run("--supersede", "early=d3_native_no_tools")
+    assert accepted.returncode == 0, accepted.stderr
+    manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())
+    early_entry = next(
+        item for item in manifest["evaluations"] if item["label"] == "early"
+    )
+    assert early_entry["superseded_methods"] == ["d3_native_no_tools"]
+    assert early_entry["rows_superseded"] == 2
+    assert manifest["planned_total"] == 2

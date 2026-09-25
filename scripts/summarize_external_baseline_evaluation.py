@@ -137,12 +137,16 @@ def load_evaluations(manifest: Path) -> tuple[list[dict[str, object]], list[dict
     seen: dict[str, str] = {}
     for entry in entries:
         label = str(entry["label"])
+        superseded = {str(item) for item in entry.get("superseded") or ()}
         joined = join(
             _read(Path(entry["roster"]), ExternalBaselineSource),
             _read(Path(entry["outcomes"]), SourceAdapterOutcome),
             _read(Path(entry["records"]), FinalEvaluationRecord),
             label=label,
         )
+        joined = [
+            row for row in joined if str(row["method_id"]) not in superseded
+        ]
         for row in joined:
             method = str(row["method_id"])
             if seen.setdefault(method, label) != label:
@@ -156,6 +160,7 @@ def load_evaluations(manifest: Path) -> tuple[list[dict[str, object]], list[dict
                 "label": label,
                 "roster": str(entry["roster"]),
                 "records": str(entry["records"]),
+                "superseded_methods": sorted(superseded),
                 "receipt": entry.get("receipt"),
                 "evaluated_on": entry.get("evaluated_on"),
                 "row_count": len(joined),

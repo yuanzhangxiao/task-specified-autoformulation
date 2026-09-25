@@ -154,8 +154,26 @@ def main() -> None:
         metavar="LABEL=ROOT",
         help="an evaluation root and the label to record it under",
     )
+    parser.add_argument(
+        "--supersede",
+        action="append",
+        default=[],
+        metavar="LABEL=METHOD",
+        help=(
+            "drop one method's rows from one evaluation, because a later run "
+            "produced them. Stated rather than inferred: choosing by which "
+            "rows carry models would silently pick a winner."
+        ),
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+
+    dropped: dict[str, set[str]] = {}
+    for item in args.supersede:
+        label, _, method = item.partition("=")
+        if not method:
+            parser.error(f"expected LABEL=METHOD, got {item!r}")
+        dropped.setdefault(label, set()).add(method)
 
     rows: list[dict] = []
     provenance: list[dict] = []
@@ -164,7 +182,11 @@ def main() -> None:
         if not root:
             parser.error(f"expected LABEL=ROOT, got {item!r}")
         collected, source = collect(label, Path(root).expanduser().resolve())
-        rows.extend(collected)
+        superseded = dropped.get(label, set())
+        kept = [row for row in collected if str(row["method"]) not in superseded]
+        source["superseded_methods"] = sorted(superseded)
+        source["rows_superseded"] = len(collected) - len(kept)
+        rows.extend(kept)
         provenance.append(source)
 
     seen: dict[str, str] = {}
