@@ -125,6 +125,8 @@ def analyze_interval(
                 return Interval(0.0, max(abs(argument.lower), abs(argument.upper)))
             values = (abs(argument.lower), abs(argument.upper))
             return Interval(min(values), max(values))
+        if function == "sin":
+            return _sine_interval(argument)
         if function == "tanh":
             return Interval(math.tanh(argument.lower), math.tanh(argument.upper))
         if function == "sigmoid":
@@ -184,6 +186,37 @@ def _safe_exp(value: float) -> float:
     if value == math.inf or value > math.log(float.fromhex("0x1.fffffffffffffp+1023")):
         return math.inf
     return math.exp(value)
+
+
+def _sine_interval(argument: Interval) -> Interval:
+    """Bound sine over an interval, accounting for the extrema inside it.
+
+    Unlike every other approved function, sine is not monotonic, so the image
+    of an interval is not the interval of its endpoints: sin over [0, pi]
+    reaches 1 at pi/2, which neither endpoint shows. A bound taken from the
+    endpoints alone would be unsound, which is worse than declining to bound
+    it at all.
+    """
+    if not (math.isfinite(argument.lower) and math.isfinite(argument.upper)):
+        return Interval(-1.0, 1.0)
+    if argument.upper - argument.lower >= 2.0 * math.pi:
+        return Interval(-1.0, 1.0)
+    values = (math.sin(argument.lower), math.sin(argument.upper))
+    lower, upper = min(values), max(values)
+    # The maxima sit at pi/2 + 2k*pi and the minima at -pi/2 + 2k*pi; if the
+    # first one at or after `lower` still falls inside, that extremum is hit.
+    period = 2.0 * math.pi
+    first_max = math.pi / 2.0 + period * math.ceil(
+        (argument.lower - math.pi / 2.0) / period
+    )
+    if first_max <= argument.upper:
+        upper = 1.0
+    first_min = -math.pi / 2.0 + period * math.ceil(
+        (argument.lower + math.pi / 2.0) / period
+    )
+    if first_min <= argument.upper:
+        lower = -1.0
+    return Interval(lower, upper)
 
 
 def _sigmoid(value: float) -> float:

@@ -66,7 +66,7 @@ def test_which_parameters_and_channels_were_used_is_reported() -> None:
         ("out = 0\nfor i in range(2):\n    out = out + x\nreturn out",
          "no expression equivalent"),
         ("if x > 0:\n    return x\nreturn v", "no expression equivalent"),
-        ("return np.sin(params[0] * x)", "not approved"),
+        ("return np.arctan(params[0] * x)", "not approved"),
         ("return params[0] * z", "unknown name"),
         ("return x.T * params[0]", "attribute access"),
         ("return x.mean() * params[0]", "attribute access"),

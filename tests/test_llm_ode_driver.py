@@ -48,10 +48,24 @@ class _FakeSearcher:
 
 
 class _FakeLlm:
+    """Stands in for upstream's client, including what the driver wraps."""
+
     def __init__(self, api_key: str, base_url: str) -> None:
         self.api_key = api_key
         self.base_url = base_url
         self.n_queries = 7
+        self.model_name = "m"
+        self.request_kwargs = {}
+        self.client = types.SimpleNamespace(
+            responses=types.SimpleNamespace(
+                create=lambda **kwargs: types.SimpleNamespace(
+                    output_text="x_0", usage={"total_tokens": 11}
+                )
+            )
+        )
+
+    def make_request(self, prompt):
+        return "x_0"
 
 
 def _install_fake_upstream(monkeypatch, frontiers: dict[str, list[str]]):
@@ -180,8 +194,12 @@ def test_the_specification_is_installed_and_then_removed(monkeypatch) -> None:
 def test_an_inexpressible_sweep_is_reported_with_the_operator_named(
     monkeypatch,
 ) -> None:
-    """The cost of our restricted grammar must be countable, not estimated."""
-    _install_fake_upstream(monkeypatch, {"y": ["sin(x_0)", "sin(x_0) + x_0"]})
+    """The cost of our restricted grammar must be countable, not estimated.
+
+    `sin` is approved now, so the operator here is one the grammar still
+    refuses; the counting mechanism is what is under test.
+    """
+    _install_fake_upstream(monkeypatch, {"y": ["cos(x_0)", "cos(x_0) + x_0"]})
     monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 0.1)
     search = driver.build_searcher(
         upstream_root=Path("/nonexistent"),
@@ -199,10 +217,10 @@ def test_an_inexpressible_sweep_is_reported_with_the_operator_named(
         context=object(),
     )
     assert outcome["status"] == "inexpressible"
-    assert outcome["accounting"]["inexpressible_operators"] == ["sin"]
+    assert outcome["accounting"]["inexpressible_operators"] == ["cos"]
     assert outcome["accounting"]["inexpressible_systems"] == 2
     assert outcome["accounting"]["scored_systems"] == 0
-    assert "sin" in outcome["error"]
+    assert "cos" in outcome["error"]
 
 
 def test_an_exploding_product_is_recorded_rather_than_truncated(monkeypatch) -> None:

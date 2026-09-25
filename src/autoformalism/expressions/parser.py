@@ -18,6 +18,7 @@ APPROVED_FUNCTION_ARITY: dict[str, tuple[int, int]] = {
     "max": (2, 64),
     "min": (2, 64),
     "sigmoid": (1, 1),
+    "sin": (1, 1),
     "softplus": (1, 1),
     "sqrt": (1, 1),
     "tanh": (1, 1),

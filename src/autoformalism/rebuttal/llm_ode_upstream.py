@@ -5,10 +5,11 @@ BFGS coefficient fitting, its Pareto selection -- comes from upstream. This
 module supplies data, appends the declared task specification, and converts the
 selected system into the restricted grammar the frozen evaluator parses.
 
-Upstream offers `sin` to its proposer and our grammar does not approve it, so a
-selected equation may be inexpressible here. That is a limit of our evaluator,
-not a failure of the method, and it is recorded with the offending operator
-named so the cost can be reported rather than estimated.
+Upstream offers `sin` to its proposer, and the evaluator now approves it: more
+than half the Pareto frontier was being discarded for using an operator the
+method was explicitly invited to use, which measured our grammar rather than
+the method. A selected equation can still fall outside the grammar for other
+reasons, and is then recorded with the offending operator named.
 """
 
 from __future__ import annotations
@@ -22,10 +23,11 @@ from pathlib import Path
 from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
 
 #: Upstream's SYSTEM_TEMPLATE offers +, -, *, **, /, sin, log, exp and abs.
-#: Every one but ``sin`` is in our approved set, so ``sin`` is the whole of the
-#: expressible gap. Detection is still computed from the parsed equation rather
-#: than from this tuple, which only records what upstream advertises.
-UNAPPROVED_UPSTREAM_FUNCTIONS = ("sin",)
+#: All of them are now in our approved set, so nothing upstream advertises is
+#: inexpressible here. Detection is still computed from the parsed equation
+#: rather than from this tuple, so a future divergence is caught by measurement
+#: and not by this comment.
+UNAPPROVED_UPSTREAM_FUNCTIONS: tuple[str, ...] = ()
 
 #: SymPy prints some approved operators with its own spelling: an equation
 #: containing ``abs`` comes back as ``Abs``. Renaming these before the grammar

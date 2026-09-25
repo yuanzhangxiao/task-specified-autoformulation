@@ -28,6 +28,7 @@ import numpy as np
 
 from autoformalism.data import DatasetSplit
 from autoformalism.expressions import ValidationContext
+from autoformalism.rebuttal.llm_call_log import CallLog
 from autoformalism.rebuttal.llm_sr_shim import ShimAccounting, complete
 from autoformalism.rebuttal.llm_sr_upstream import (
     InexpressibleProgram,
@@ -37,6 +38,7 @@ from autoformalism.rebuttal.llm_sr_upstream import (
     equation_body,
     refit_parameters,
 )
+from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
 LOGGER = logging.getLogger(__name__)
 
@@ -121,7 +123,7 @@ def build_searcher(
         score_rollout,
     ) -> dict:
         """One LLM-SR run per target, as their specification format requires."""
-        accounting = ShimAccounting()
+        accounting = ShimAccounting(log=CallLog(directory / "llm_calls.jsonl"))
         equations: dict[str, str] = {}
         inexpressible: list[str] = []
         started = monotonic()
@@ -157,7 +159,8 @@ def build_searcher(
                 return {
                     "status": "endpoint_unavailable",
                     "error": str(exc),
-                    "accounting": _accounting(accounting, started, inexpressible),
+                    "accounting": _accounting(accounting, started, inexpressible,
+                                  directory / 'llm_calls.jsonl'),
                 }
 
             best = best_sample(log_dir)
@@ -165,7 +168,8 @@ def build_searcher(
                 return {
                     "status": "no_candidates",
                     "error": f"no sample scored for target {target}",
-                    "accounting": _accounting(accounting, started, inexpressible),
+                    "accounting": _accounting(accounting, started, inexpressible,
+                                  directory / 'llm_calls.jsonl'),
                 }
             try:
                 body = equation_body(best["function"])
@@ -186,7 +190,8 @@ def build_searcher(
             return {
                 "status": "inexpressible",
                 "error": "; ".join(inexpressible),
-                "accounting": _accounting(accounting, started, inexpressible),
+                "accounting": _accounting(accounting, started, inexpressible,
+                                  directory / 'llm_calls.jsonl'),
             }
         error = score_rollout(equations, context, *development,
                               seconds=seconds_per_rollout)
@@ -195,7 +200,8 @@ def build_searcher(
                 "status": "rollout_failed",
                 "error": "the selected system did not complete a development rollout",
                 "equations": equations,
-                "accounting": _accounting(accounting, started, inexpressible),
+                "accounting": _accounting(accounting, started, inexpressible,
+                                  directory / 'llm_calls.jsonl'),
             }
         return {
             "status": "complete",
@@ -206,17 +212,22 @@ def build_searcher(
                 equations, context, development[0], development[0],
                 seconds=seconds_per_rollout,
             ),
-            "accounting": _accounting(accounting, started, inexpressible),
+            "accounting": _accounting(accounting, started, inexpressible,
+                                  directory / 'llm_calls.jsonl'),
         }
 
     return search
 
 
 def _accounting(
-    accounting: ShimAccounting, started: float, inexpressible: list[str]
+    accounting: ShimAccounting,
+    started: float,
+    inexpressible: list[str],
+    log_path: Path,
 ) -> dict:
     """What the run cost, and what our grammar could not read."""
     return {
+        **d3_accounting(log_path),
         "llm_requests": accounting.requests,
         "llm_samples": accounting.samples,
         "transport_failures": accounting.failures,

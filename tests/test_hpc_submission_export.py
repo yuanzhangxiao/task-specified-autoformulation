@@ -66,6 +66,22 @@ def submitted(tmp_path: Path, request) -> dict:
         repo / "scripts" / "list_phase_b_d3_task_indices.py",
     )
 
+    # A campaign must run from a pinned checkout, so the fixture is one.
+    for command in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "t@example.com"),
+        ("git", "config", "user.name", "t"),
+        ("git", "add", "-A"),
+        ("git", "commit", "-qm", "pinned"),
+    ):
+        subprocess.run(command, cwd=repo, check=True, capture_output=True)
+    head = subprocess.run(
+        ("git", "rev-parse", "HEAD"), cwd=repo, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(("git", "checkout", "-q", head), cwd=repo, check=True,
+                   capture_output=True)
+
     stubs = tmp_path / "bin"
     stubs.mkdir()
     recorded = tmp_path / "sbatch.args"
@@ -74,7 +90,18 @@ def submitted(tmp_path: Path, request) -> dict:
     upstream = tmp_path / "llm-ode"
     (upstream / "llmode").mkdir(parents=True)
     (upstream / "llmode" / "llmode.py").write_text("", encoding="utf-8")
-    _fake(stubs, "git", 'echo 31667d9ac948e8f411cd2f07726d7744784b5d5a\n')
+    # Behaves like the pinned checkout a campaign requires: detached HEAD,
+    # nothing uncommitted. A stub that answered everything made the new guard
+    # believe the repository was on a branch.
+    _fake(
+        stubs,
+        "git",
+        'case "$*" in\n'
+        '  *symbolic-ref*) exit 1 ;;\n'
+        '  *"diff --quiet"*) exit 0 ;;\n'
+        '  *rev-parse*) echo 31667d9ac948e8f411cd2f07726d7744784b5d5a ;;\n'
+        'esac\n',
+    )
 
     output = tmp_path / "out"
     output.mkdir()
@@ -265,3 +292,48 @@ def test_a_tampered_task_list_is_refused_before_the_model_loads(
     assert result.returncode != 0
     assert "does not match the manifest" in result.stderr
     assert "apptainer" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "script",
+    ["submit_phase_b_llm_ode_vllm.sh", "submit_phase_b_llm_sr_vllm.sh"],
+)
+def test_a_campaign_refuses_a_checkout_that_is_still_moving(
+    tmp_path: Path, script: str
+) -> None:
+    """A plan's identity covers every .py in the package.
+
+    Seventeen of eighteen LLM-ODE batches died on the stale-plan guard because
+    the campaign ran from the branch being edited, and commits landed while it
+    was queued. A campaign must run from a pinned checkout.
+    """
+    repo = tmp_path / "repo"
+    (repo / "scripts" / "hpc").mkdir(parents=True)
+    shutil.copy(REPO / "scripts" / "hpc" / script, repo / "scripts" / "hpc" / script)
+    run = lambda *a: subprocess.run(a, cwd=repo, check=True, capture_output=True)  # noqa: E731
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "t@example.com")
+    run("git", "config", "user.name", "t")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "pinned")
+
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    _fake(stubs, "sbatch", "echo 1\n")
+
+    environment = {
+        **os.environ,
+        "PATH": f"{stubs}:{os.environ['PATH']}",
+        "AF_REPO_ROOT": str(repo),
+        "AF_PROJECT": str(tmp_path / "p"),
+        "AF_WORK": str(tmp_path / "w"),
+    }
+    result = subprocess.run(
+        ["bash", str(repo / "scripts" / "hpc" / script)],
+        cwd=repo, env=environment, capture_output=True, text=True,
+        timeout=60, check=False,
+    )
+    # on a branch, so refused before anything is submitted
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "not a pinned checkout" in result.stderr
+    assert "worktree" in result.stderr

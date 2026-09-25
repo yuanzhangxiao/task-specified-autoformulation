@@ -488,6 +488,8 @@ def _call_function(name: str, arguments: list[float]) -> float:
         return min(arguments)
     if name == "max":
         return max(arguments)
+    if name == "sin":
+        return math.sin(argument)
     if name == "sigmoid":
         if argument >= 0.0:
             return 1.0 / (1.0 + math.exp(-argument))

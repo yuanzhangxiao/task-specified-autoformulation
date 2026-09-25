@@ -56,6 +56,22 @@ case "${AF_CLUSTER}" in
   *) echo "unknown AF_CLUSTER: ${AF_CLUSTER}" >&2; exit 2 ;;
 esac
 
+# A campaign's plan identity covers every .py in the package, so a campaign
+# run from a checkout that is still being edited dies the moment anything
+# lands. Refuse a repository with uncommitted changes or an unpinned branch.
+if git -C "${AF_REPO_ROOT}" symbolic-ref -q HEAD >/dev/null 2>&1; then
+  echo "AF_REPO_ROOT is on a branch, not a pinned checkout: ${AF_REPO_ROOT}" >&2
+  echo "  a later commit there will invalidate this campaign's frozen plan" >&2
+  echo "  create one with: git worktree add <path> <commit>" >&2
+  exit 2
+fi
+if ! git -C "${AF_REPO_ROOT}" diff --quiet HEAD 2>/dev/null; then
+  echo "AF_REPO_ROOT has uncommitted changes: ${AF_REPO_ROOT}" >&2
+  exit 2
+fi
+echo "repo_pinned_at=$(git -C "${AF_REPO_ROOT}" rev-parse --short HEAD)"
+
+
 # Fail here rather than in every batch job: a missing or wrong checkout makes
 # the whole campaign unfaithful, and the queue wait would be wasted.
 [[ -f "${AF_LLM_SR_ROOT}/llmsr/pipeline.py" ]] || {

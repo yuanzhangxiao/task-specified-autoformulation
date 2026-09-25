@@ -6,7 +6,7 @@
 #   AF_TASK_INDICES  explicit comma list, overrides AF_TIER (smoke: "0")
 #                    The list reaches the job as a file, never through
 #                    --export, which is itself comma separated.
-#   AF_BATCH_HOURS   walltime per batch  (default 12:00:00)
+#   AF_BATCH_HOURS   walltime per batch  (default 06:00:00)
 #   AF_LLM_ODE_ROOT  the pinned upstream checkout
 #
 # Each task is a full island search -- 200 iterations x 4 islands per target --
@@ -35,7 +35,10 @@ readonly af_user="${USER:?}"
 : "${AF_LOCAL_MODEL:=openai/gpt-oss-120b}"
 : "${AF_TIER:=easy}"
 : "${AF_BATCH_SIZE:=4}"
-: "${AF_BATCH_HOURS:=12:00:00}"
+# Measured: about 50 minutes per searched target at 200 iterations and four
+# concurrent tasks, so a three-target cell is roughly 2.5 hours. Six hours
+# leaves margin for the slowest cell plus the model load.
+: "${AF_BATCH_HOURS:=06:00:00}"
 : "${AF_CLUSTER:=delta}"
 case "${AF_CLUSTER}" in
   delta)
@@ -55,6 +58,22 @@ case "${AF_CLUSTER}" in
     ;;
   *) echo "unknown AF_CLUSTER: ${AF_CLUSTER}" >&2; exit 2 ;;
 esac
+
+# A campaign's plan identity covers every .py in the package, so a campaign
+# run from a checkout that is still being edited dies the moment anything
+# lands. Refuse a repository with uncommitted changes or an unpinned branch.
+if git -C "${AF_REPO_ROOT}" symbolic-ref -q HEAD >/dev/null 2>&1; then
+  echo "AF_REPO_ROOT is on a branch, not a pinned checkout: ${AF_REPO_ROOT}" >&2
+  echo "  a later commit there will invalidate this campaign's frozen plan" >&2
+  echo "  create one with: git worktree add <path> <commit>" >&2
+  exit 2
+fi
+if ! git -C "${AF_REPO_ROOT}" diff --quiet HEAD 2>/dev/null; then
+  echo "AF_REPO_ROOT has uncommitted changes: ${AF_REPO_ROOT}" >&2
+  exit 2
+fi
+echo "repo_pinned_at=$(git -C "${AF_REPO_ROOT}" rev-parse --short HEAD)"
+
 
 # Fail here rather than in every batch job: a missing or wrong checkout makes
 # the whole campaign unfaithful, and the queue wait would be wasted.

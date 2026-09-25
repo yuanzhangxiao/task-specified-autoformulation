@@ -46,6 +46,8 @@ class ShimAccounting:
     samples: int = 0
     failures: int = 0
     reasons: dict[str, int] = field(default_factory=dict)
+    #: Written so the shared accounting rule can read this campaign too.
+    log: object | None = None
 
     def record_failure(self, reason: str) -> None:
         """Count a failure by kind rather than only in total."""
@@ -113,8 +115,12 @@ def complete(
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         if accounting is not None:
             accounting.record_failure(type(exc).__name__)
+            if accounting.log is not None:
+                accounting.log.failure(f"{type(exc).__name__}: {exc}")
         raise UpstreamEndpointError(f"{type(exc).__name__}: {exc}") from exc
     texts = translate_response(answer)
     if accounting is not None:
         accounting.samples += len(texts)
+        if accounting.log is not None:
+            accounting.log.response(answer)
     return {"content": texts}

@@ -110,3 +110,45 @@ def test_parser_rejects_invalid_numeric_literals() -> None:
         )
 
     assert "INVALID_NUMERIC_LITERAL" in _codes(caught.value)
+
+
+def test_sine_is_approved_and_evaluates() -> None:
+    """Approved after more than half of LLM-ODE's frontier was discarded for it.
+
+    Their prompt invites the proposer to use `sin`, so refusing it measured our
+    grammar rather than their method. The benchmark's own mechanisms contain no
+    trigonometry -- every sine in the generator builds an exogenous driving
+    waveform, supplied to every method as an observed channel -- so admitting
+    it neither helps nor hinders a correct model.
+    """
+    import math
+
+    from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
+
+    assert APPROVED_FUNCTION_ARITY["sin"] == (1, 1)
+    parsed = RestrictedParser().parse("sin(G) + 2.0 * I", location="test")
+    assert parsed is not None
+
+    from autoformalism.expressions.compiler import _call_function
+
+    assert _call_function("sin", [math.pi / 2.0]) == pytest.approx(1.0)
+
+
+def test_the_sine_interval_accounts_for_extrema_inside_it() -> None:
+    """Sine is the only approved function that is not monotonic.
+
+    Bounding it by its endpoints would be unsound: sin over [0, pi] reaches 1
+    at pi/2, which neither endpoint shows.
+    """
+    import math
+
+    from autoformalism.expressions.intervals import Interval, _sine_interval
+
+    assert _sine_interval(Interval(0.0, math.pi)) == Interval(0.0, 1.0)
+    assert _sine_interval(Interval(0.0, 100.0)) == Interval(-1.0, 1.0)
+    # a monotone stretch keeps its endpoints
+    narrow = _sine_interval(Interval(0.0, math.pi / 4.0))
+    assert narrow.lower == pytest.approx(0.0)
+    assert narrow.upper == pytest.approx(math.sin(math.pi / 4.0))
+    # a minimum inside is found too
+    assert _sine_interval(Interval(math.pi, 2.0 * math.pi)).lower == -1.0

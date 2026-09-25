@@ -42,6 +42,7 @@ from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
+from autoformalism.rebuttal.llm_call_log import CallLog
 from autoformalism.rebuttal.llm_ode_campaign import (
     CellArrays,
     select_system,
@@ -53,6 +54,7 @@ from autoformalism.rebuttal.llm_ode_upstream import (
     specification_prompt,
     to_state_equations,
 )
+from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
 LOGGER = logging.getLogger(__name__)
 
@@ -128,6 +130,34 @@ def development_rollout_error(
 
 
 @contextmanager
+def _counted_requests(llm: Any, log: CallLog) -> Iterator[None]:
+    """Record every provider call, with the usage upstream discards.
+
+    Their client returns `response.output_text` and drops the usage object, so
+    a campaign otherwise reports request counts that cannot be compared with
+    the token accounting every other method reports.
+    """
+    original = llm.make_request
+
+    def make_request(prompt):
+        try:
+            response = llm.client.responses.create(
+                model=llm.model_name, input=prompt, **llm.request_kwargs
+            )
+        except Exception as exc:
+            log.failure(f"{type(exc).__name__}: {exc}")
+            raise
+        log.response(response)
+        return response.output_text
+
+    llm.make_request = make_request
+    try:
+        yield
+    finally:
+        llm.make_request = original
+
+
+@contextmanager
 def _specification_appended(module: Any, specification: str) -> Iterator[None]:
     """Append the declared specification to every prompt upstream builds.
 
@@ -188,6 +218,7 @@ def build_searcher(
         context: ValidationContext,
     ) -> dict:
         llm = modules.llm(api_key, base_url)
+        log = CallLog(directory / "llm_calls.jsonl")
         indices = [train.channels.index(name) for name in targets]
         searchers = [
             modules.equation_searcher(
@@ -217,7 +248,10 @@ def build_searcher(
                 for searcher, specification in zip(
                     searchers, specifications, strict=True
                 ):
-                    with _specification_appended(upstream_module, specification):
+                    with (
+                        _counted_requests(llm, log),
+                        _specification_appended(upstream_module, specification),
+                    ):
                         searcher.step()
                 # About ten progress lines whatever the budget, so a short
                 # probe reports timing instead of finishing silently.
@@ -278,6 +312,8 @@ def build_searcher(
 
         accounting = {
             "llm_queries": calls,
+            # The shared rule, so this campaign is comparable with D3's.
+            **d3_accounting(directory / "llm_calls.jsonl"),
             "search_seconds": round(monotonic() - started, 1),
             "frontier_sizes": [len(frontier) for frontier in frontiers],
             "search_error": error,

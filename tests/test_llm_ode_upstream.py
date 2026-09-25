@@ -30,10 +30,16 @@ def test_a_variable_beyond_the_channels_is_refused() -> None:
         substitute_channels("x_0 + x_5", ("G", "I"))
 
 
-def test_the_approved_functions_pass_and_sine_does_not() -> None:
+def test_every_operator_upstream_advertises_is_now_approved() -> None:
+    """More than half their frontier was discarded for using `sin`.
+
+    Their prompt invites the proposer to use it, so rejecting it measured our
+    grammar rather than the method. It is approved now; `cos` is not, because
+    nothing upstream offers it.
+    """
     assert unapproved_functions("exp(G) + log(I) + abs(G) + tanh(I)") == ()
-    assert unapproved_functions("sin(G) * 2.0") == ("sin",)
-    assert unapproved_functions("sin(G) + cos(I)") == ("cos", "sin")
+    assert unapproved_functions("sin(G) * 2.0") == ()
+    assert unapproved_functions("sin(G) + cos(I)") == ("cos",)
 
 
 def test_a_selected_system_is_expressed_per_target() -> None:
@@ -43,12 +49,17 @@ def test_a_selected_system_is_expressed_per_target() -> None:
     assert equations == {"G": "-0.5 * G + I", "I": "exp(G) - 2.0"}
 
 
-def test_an_inexpressible_equation_names_its_operator() -> None:
-    """So the cost of our grammar can be reported rather than estimated."""
+def test_a_sine_equation_is_now_expressed_rather_than_refused() -> None:
+    equations = to_state_equations(("sin(x_0) * x_1",), ("G", "I"), ("G",))
+    assert equations == {"G": "sin(G) * I"}
+
+
+def test_an_equation_outside_the_grammar_still_names_its_operator() -> None:
+    """The mechanism stays, so a future divergence is measured not assumed."""
     with pytest.raises(InexpressibleEquation) as caught:
-        to_state_equations(("sin(x_0) * x_1",), ("G", "I"), ("G",))
-    assert caught.value.functions == ("sin",)
-    assert "sin(G)" in caught.value.equation
+        to_state_equations(("cos(x_0) * x_1",), ("G", "I"), ("G",))
+    assert caught.value.functions == ("cos",)
+    assert "cos(G)" in caught.value.equation
 
 
 def test_one_equation_is_required_per_searched_target() -> None:
@@ -83,16 +94,15 @@ def test_sympy_printed_abs_is_not_reported_as_inexpressible() -> None:
     assert equations == {"G": "-c_0 * abs(I) + G"}
 
 
-def test_sin_remains_the_only_advertised_gap() -> None:
-    """The exclusion we report must be the one upstream can actually produce."""
+def test_nothing_upstream_advertises_is_now_a_gap() -> None:
+    """Their template offers +, -, *, **, /, sin, log, exp, abs -- all approved."""
     from autoformalism.rebuttal.llm_ode_upstream import (
         UNAPPROVED_UPSTREAM_FUNCTIONS,
         normalize_printed_functions,
     )
 
-    assert UNAPPROVED_UPSTREAM_FUNCTIONS == ("sin",)
-    # every other operator the upstream template advertises survives the round trip
-    for advertised in ("exp", "log", "abs"):
+    assert UNAPPROVED_UPSTREAM_FUNCTIONS == ()
+    for advertised in ("exp", "log", "abs", "sin"):
         rendered = normalize_printed_functions(f"{advertised.capitalize()}(G)")
         assert unapproved_functions(f"{advertised}(G)") == ()
         assert rendered.startswith(advertised) or rendered.startswith(
