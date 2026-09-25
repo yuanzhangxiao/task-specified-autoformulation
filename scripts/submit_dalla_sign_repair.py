@@ -2,6 +2,7 @@
 """Submit public-context sign review and paired rescue fits with durable receipts."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,8 +13,29 @@ from scripts.recover_review_continuation_submission import scheduler_record
 from scripts.submit_shared_process_pilot import source_commit, submit_job
 
 
+def delta_config(config: Path, root: Path, image: Path) -> Path:
+    """Freeze the Delta placement and actual image without changing review budgets."""
+    value = io.Config.model_validate(public._read(config)).model_dump(mode="json")
+    with image.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    value.update(platform="delta-a40x1", serving_image_sha256=digest)
+    target = root / "delta-config.json"
+    with public._lock(root / "platform-setup"):
+        if target.exists():
+            if public._read(target) != value:
+                raise ValueError("Delta configuration changed; use a fresh output root")
+        else:
+            public._write(target, value)
+    return target
+
+
 def submit(
-    source: Path, root: Path, adopt: dict | None = None, config: Path | None = None
+    source: Path,
+    root: Path,
+    adopt: dict | None = None,
+    config: Path | None = None,
+    *,
+    delta: bool = False,
 ) -> dict:
     """Prepare without fitting, then submit missing jobs without duplicating any."""
     source, root = source.resolve(), root.resolve()
@@ -22,12 +44,25 @@ def submit(
         raise ValueError("pinned commit differs")
     if not Path(os.environ["AF_PYTHON"]).is_file():
         raise ValueError("AF_PYTHON is missing")
-    group = Path("/scratch/group/p.nairr260351.000/u.yx126462")
-    os.environ.setdefault(
-        "AF_VLLM_IMAGE", "/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif"
-    )
     config = config or io.REPO / "configs/dalla_sign_repair_v1.json"
     settings = io.Config.model_validate(public._read(config))
+    delta = delta or settings.platform == "delta-a40x1"
+    group = Path(
+        "/work/hdd/bibo/yxiao2/phase_b"
+        if delta
+        else "/scratch/group/p.nairr260351.000/u.yx126462"
+    )
+    os.environ.setdefault(
+        "AF_VLLM_IMAGE",
+        "/projects/bibo/yxiao2/containers/vllm-openai-v0.27.1.sif"
+        if delta
+        else "/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif",
+    )
+    if delta:
+        os.environ.setdefault("AF_HF_HOME", "/projects/bibo/yxiao2/huggingface-cache")
+        Path(os.environ["AF_HF_HOME"]).mkdir(parents=True, exist_ok=True)
+        config = delta_config(config, root, Path(os.environ["AF_VLLM_IMAGE"]))
+        settings = io.Config.model_validate(public._read(config))
     revision = settings.model_settings.model_revision
     if not os.environ.get("AF_HF_HOME"):
         candidates = [
@@ -82,15 +117,25 @@ def submit(
         worker = io.REPO / "scripts/hpc/run_dalla_sign_repair_aces.sh"
 
         def queue(stage, options):
+            account = (
+                (
+                    os.environ.get("AF_GPU_ACCOUNT", "bibo-delta-gpu")
+                    if stage == "review"
+                    else os.environ.get("AF_CPU_ACCOUNT", "bibo-delta-cpu")
+                )
+                if delta
+                else os.environ.get("AF_ACCOUNT", "156264627414")
+            )
             opts = [
                 "--kill-on-invalid-dep=yes",
                 "--export=ALL",
-                "--account=" + os.environ.get("AF_ACCOUNT", "156264627414"),
+                "--account=" + account,
                 "--nodes=1",
                 "--ntasks=1",
                 f"--job-name=dalla-sign-{stage}",
                 f"--output={root}/logs/{stage}-%A_%a.out",
                 f"--error={root}/logs/{stage}-%A_%a.err",
+                *(["--constraint=projects&work"] if delta else []),
                 *options,
             ]
             argv = ["sbatch", "--parsable", *opts, str(worker), stage, "0"]
@@ -122,14 +167,19 @@ def submit(
 
         prepare = queue(
             "prepare",
-            ["--partition=cpu", "--cpus-per-task=1", "--mem=8G", "--time=00:30:00"],
+            [
+                "--partition=cpu",
+                "--cpus-per-task=1",
+                "--mem=8G",
+                "--time=01:00:00" if delta else "--time=00:30:00",
+            ],
         )
         review = queue(
             "review",
             [
                 f"--dependency=afterok:{prepare}",
-                "--partition=gpu",
-                "--gres=gpu:h100:1",
+                "--partition=gpuA40x4" if delta else "--partition=gpu",
+                "--gpus-per-node=1" if delta else "--gres=gpu:h100:1",
                 "--cpus-per-task=8",
                 "--mem=64G",
                 "--time=01:15:00",
@@ -159,6 +209,7 @@ def submit(
         )
         result = {
             "protocol": settings.protocol,
+            "platform": settings.platform,
             "identity": identity,
             "jobs": {
                 "prepare": prepare,
@@ -188,6 +239,11 @@ if __name__ == "__main__":
     parser.add_argument("--inputs", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--config", type=Path)
+    parser.add_argument(
+        "--delta",
+        action="store_true",
+        help="Use one Delta A40 and pin the existing local SIF in a fresh plan",
+    )
     parser.add_argument("--adopt", action="append", default=[])
     args = parser.parse_args()
     print(
@@ -197,6 +253,7 @@ if __name__ == "__main__":
                 args.root,
                 dict(x.split("=", 1) for x in args.adopt),
                 args.config,
+                delta=args.delta,
             ),
             indent=2,
         )

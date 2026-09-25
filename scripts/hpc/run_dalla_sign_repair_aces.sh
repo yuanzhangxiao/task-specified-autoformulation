@@ -1,7 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 : "${AF_REPO_ROOT:?}" "${AF_OUTPUT_ROOT:?}" "${AF_PYTHON:?}" "${AF_COMMIT:?}"
-module load GCCcore/13.2.0 Python/3.11.5
+platform="$(jq -er '.config.platform' "$AF_OUTPUT_ROOT/plan.json")"
+case "$platform" in
+ aces-h100x1) module load GCCcore/13.2.0 Python/3.11.5 ;;
+ delta-a40x1) ;;
+ *) echo 'Unsupported frozen sign-review platform' >&2; exit 2 ;;
+esac
 export PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT"
@@ -21,10 +26,17 @@ case "${1:?stage}" in
    runtime="$(command -v apptainer || command -v singularity)"
    model="$(jq -er '.config.model_settings.model' "$AF_OUTPUT_ROOT/plan.json")"
    revision="$(jq -er '.config.model_settings.model_revision' "$AF_OUTPUT_ROOT/plan.json")"
-   "$runtime" exec --bind "$AF_HF_HOME:$AF_HF_HOME" --env "HF_HOME=$AF_HF_HOME,HF_HUB_OFFLINE=1" \
-     "$AF_VLLM_IMAGE" python3 -c 'from huggingface_hub import snapshot_download; import sys; print(snapshot_download(sys.argv[1], revision=sys.argv[2], local_files_only=True))' "$model" "$revision"
+   offline=1
+   [[ "$platform" != delta-a40x1 ]] || offline=0
+   "$runtime" exec --bind "$AF_HF_HOME:$AF_HF_HOME" --env "HF_HOME=$AF_HF_HOME,HF_HUB_OFFLINE=$offline" \
+     "$AF_VLLM_IMAGE" python3 -c 'from importlib.metadata import version; assert version("vllm") == "0.27.1", "requires pinned vLLM 0.27.1"'
+   "$runtime" exec --bind "$AF_HF_HOME:$AF_HF_HOME" --env "HF_HOME=$AF_HF_HOME,HF_HUB_OFFLINE=$offline" \
+     "$AF_VLLM_IMAGE" python3 -c 'from huggingface_hub import snapshot_download; import sys; print(snapshot_download(sys.argv[1], revision=sys.argv[2], local_files_only=sys.argv[3] == "1"))' "$model" "$revision" "$offline"
    ;;
- review) module load WebProxy; exec bash scripts/hpc/run_staged_topology_server.sh ;;
+ review)
+   if [[ "$platform" == aces-h100x1 ]]; then module load WebProxy; fi
+   export HF_HUB_OFFLINE=1
+   exec bash scripts/hpc/run_staged_topology_server.sh ;;
  fit) exec "$AF_PYTHON" scripts/dalla_sign_repair.py fit --root "$AF_OUTPUT_ROOT" ;;
  report) exec "$AF_PYTHON" scripts/dalla_sign_repair.py report --root "$AF_OUTPUT_ROOT" ;;
  *) exit 2 ;;

@@ -36,7 +36,7 @@ class Config(StrictSchema):
     """Pinned local serving and per-model physical request allocation."""
 
     protocol: Literal["dalla-sign-repair-1", "dalla-sign-repair-2"] = PROTOCOL
-    platform: Literal["aces-h100x1"] = "aces-h100x1"
+    platform: Literal["aces-h100x1", "delta-a40x1"] = "aces-h100x1"
     serving_image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     model_settings: StagedModelSettings
     served_context_tokens: int = Field(default=32768, ge=8192)
@@ -51,6 +51,7 @@ def launcher_hash() -> str:
         "scripts/submit_dalla_sign_repair.py",
         "scripts/smoke_dalla_sign_repair.py",
         "scripts/hpc/run_dalla_sign_repair_aces.sh",
+        "scripts/hpc/launch_dalla_sign_delta.sh",
         "scripts/hpc/run_staged_topology_server.sh",
         "scripts/submit_shared_process_pilot.py",
         "scripts/submit_review_continuation.py",

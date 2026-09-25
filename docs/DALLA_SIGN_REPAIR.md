@@ -1,5 +1,9 @@
 # Public-context sign repair of the Dalla rescue models
 
+For a separate one-A40 Delta execution of the current R4 follow-up, see
+[DALLA_SIGN_REPAIR_DELTA.md](DALLA_SIGN_REPAIR_DELTA.md). It preserves review
+and fitting budgets and records a new platform/container identity.
+
 ## Current follow-up: directional review and advisory citations (v2)
 
 `configs/dalla_sign_repair_v2.json` selects only `full_perturbed_r4` from the
