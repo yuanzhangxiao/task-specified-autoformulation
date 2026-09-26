@@ -1,0 +1,363 @@
+\section{Benchmark Tasks, Data Access, and Reference Dynamics}
+\label{app:benchmark}
+
+The experiments use four modeling tasks from three system families: meal-response
+modeling (T1) and absorption--action disentanglement (T2) in a glucose--insulin
+system, a controlled chemical reactor, and an unfamiliar synthetic device.
+A task specifies the mechanisms a model must represent; an observability tier
+specifies which trajectories it may use. These are distinct from the private
+simulator's state dimension or a requirement to reproduce its exact equations.
+
+The main comparison contains nine cases: canonical and perturbed T1-easy, each
+in named and obfuscated form (four cases); canonical named T1-hard, T2-easy, and
+T2-hard (three cases); named CSTR-easy; and functional-description alien-device
+easy. Thus, the nine cases represent three physical or synthetic families,
+not nine independent systems. Only the tiers and variants used in these
+experiments are described below.
+
+\subsection{Shared data and evaluation contract}
+\label{app:benchmark_contract}
+
+Each numerical case has 16 training, four validation, and six test trajectories.
+Equations and fitted parameters are shared across trajectories. Training data
+support parameter estimation and proposal feedback; validation data support
+model selection. Test trajectories are reserved for evaluation after models
+are frozen. New initial conditions and input schedules define distinct
+trajectories, rather than splitting a single trajectory into adjacent windows.
+
+\paragraph{Targets, auxiliaries, and external inputs.}
+A \emph{target} is a quantity the model must generate. During held-out free
+rollout, its initial observation is available, but later target observations
+cannot be used to correct the simulated state. A \emph{supplied auxiliary} is
+an additional measured trajectory available throughout the prediction horizon
+under the public task contract. It may enter a model's equations directly
+without being assigned its own ODE. An \emph{external input} is an imposed
+command or event schedule. All methods receive the same channel permissions
+within a case. Latent initialization must use permitted initial information;
+latent initial values are not fitted to held-out target trajectories.
+
+Table~\ref{tab:benchmark_channels} lists the named channels. Obfuscated cases
+retain the numerical data and channel roles, but replace channel names with
+neutral symbols. The auxiliary contract makes the rollout \emph{conditional}
+on those supplied trajectories: it does not constitute autonomous recovery of
+every subsystem of the reference simulator.
+
+\begin{table}[htbp]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{Public channel roles in the six task--tier configurations used in the
+nine-case study. $m$ denotes the meal-event channel and $u_I$ the imposed insulin
+forcing. A supplied auxiliary is available throughout a rollout; a target is
+predicted without later observed-value resets.}
+\label{tab:benchmark_channels}
+\begin{tabular}{@{}p{0.16\linewidth}p{0.17\linewidth}p{0.31\linewidth}p{0.27\linewidth}@{}}
+\toprule
+Task/tier & Targets & Supplied auxiliaries & External inputs \\
+\midrule
+T1 easy & $G_p$ & $EGP,U_{ii},E,G_t$ & $m$ \\
+T1 hard & $G_p$ & $G_t$ & $m$ \\
+T2 easy & $G_p,I,U$ & $EGP,U_{ii},E,G_t$ & $m,u_I$ \\
+T2 hard & $G_p,I$ & $U_{ii}$ & $m,u_I$ \\
+CSTR easy & $T$ & $C,T_j$ & $C_f,T_f,T_{jf}$ \\
+Alien easy & $v_{01}$ & $v_{02},v_{03}$ & $u_{01}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Public prompt structure.}
+The prompts have six sections: task specification, available data, modeling
+requirements, constraints and plausibility, intended use, and required response.
+They ask for explicit analytic dynamics, a finite-dimensional causal
+representation of the required mechanisms, globally shared parameters, and
+causal initialization. Every modeled state needs a governing equation, every
+generated process an analytic definition, and every target an observation or
+governing equation. Free fitted time series, future-observation dependence,
+and unrestricted neural-network vector fields are disallowed. The prompts
+request coherent source/sink signs and declared state constraints, but allow
+signed deviations and net rates. They do not impose a particular latent-state
+count. The task-specific mechanism clauses are quoted below; the reference
+equations in this appendix are explanatory and are not supplied to discovery
+methods. Scientific critique and deterministic verification follow the common
+methodology, rather than benchmark-specific judge prompts.
+
+\subsection{Glucose--insulin system: T1 and T2}
+\label{app:benchmark_glucose}
+
+\paragraph{Reference system and notation.}
+We generate glucose--insulin responses using a trusted implementation based on
+\citet{dalla2007meal}. The reference has 12 dynamic states: plasma and tissue
+glucose masses $G_p,G_t$; three gastrointestinal compartments
+$Q_{\mathrm{sto1}},Q_{\mathrm{sto2}},Q_{\mathrm{gut}}$; plasma, liver, and portal
+insulin quantities $I_p,I_l,I_{po}$; a secretion-response state $Y$;
+two delayed insulin signals $I_1,I_d$; and a remote insulin-action state $X$.
+This dimension belongs to the simulator, not to the required discovered model.
+In particular, the public glucose target is mass $G_p$ in
+$\mathrm{mg}\,\mathrm{kg}^{-1}$, not concentration $G=G_p/V_G$.
+The insulin target is concentration $I=I_p/V_I$ in
+$\mathrm{pmol}\,\mathrm{L}^{-1}$.
+
+\paragraph{Relevant reference mechanisms.}
+The glucose balances separate production, meal appearance, utilization,
+excretion, and exchange:
+\begin{align}
+\dot G_p &= EGP + R_a - U_{ii} - E - J_{p\to t}+J_{t\to p}, \\
+\dot G_t &= -U_{id}+J_{p\to t}-J_{t\to p}.
+\label{eq:app_glucose_balance}
+\end{align}
+In the canonical system, $J_{p\to t}=k_1G_p$ and $J_{t\to p}=k_2G_t$.
+Meal absorption is generated by
+\begin{align}
+\dot Q_{\mathrm{sto1}} &= -k_{\mathrm{gri}}Q_{\mathrm{sto1}}, \\
+\dot Q_{\mathrm{sto2}} &= k_{\mathrm{gri}}Q_{\mathrm{sto1}}
+-k_{\mathrm{empt}}Q_{\mathrm{sto2}}, \\
+\dot Q_{\mathrm{gut}} &= k_{\mathrm{empt}}Q_{\mathrm{sto2}}
+-k_{\mathrm{abs}}Q_{\mathrm{gut}},
+& R_a &= \frac{f k_{\mathrm{abs}}Q_{\mathrm{gut}}}{BW}.
+\end{align}
+Here $k_{\mathrm{empt}}$ is the reference's stomach-content-dependent emptying
+rate. Each meal of $D_j$ grams at time $t_j$ produces the reference jump
+$Q_{\mathrm{sto1}}(t_j^+)=Q_{\mathrm{sto1}}(t_j^-)+1000D_j$.
+The public channel \texttt{meal\_event\_g} records event amounts in grams;
+it is not the unobserved appearance flux $R_a$.
+
+Insulin-dependent disposal has dynamic memory:
+\begin{align}
+\dot X &= -p_{2U}X+p_{2U}(I-I_b), \\
+U_{id} &= \left[\frac{(V_{m0}+V_{mx}X)G_t}{K_m+G_t}\right]_+,
+& U &= U_{ii}+U_{id}, \qquad U_{ii}=F_{cns},
+\end{align}
+where $[a]_+=\max(a,0)$. The remote action $X$ is a deviation signal;
+it is not constrained to be nonnegative merely because glucose and insulin
+masses are nonnegative. Other reference contributions include
+\begin{align}
+EGP &= [k_{p1}-k_{p2}G_p-k_{p3}I_d-k_{p4}I_{po}]_+, \\
+E &= k_{e1}[G_p-k_{e2}]_+.
+\end{align}
+The remaining insulin and secretion dynamics close the reference system.
+For example, its plasma-insulin balance is
+\begin{equation}
+\dot I_p=-(m_2+m_4)I_p+m_1I_l+u_I,
+\qquad I=I_p/V_I,
+\end{equation}
+where the imposed forcing $u_I$ has units
+$\mathrm{pmol}\,\mathrm{kg}^{-1}\,\mathrm{min}^{-1}$.
+These equations describe reference mechanisms, not a prescribed skeleton
+or an equation-by-equation recovery target for T1 or T2.
+
+\subsubsection{T1: meal-response modeling}
+\label{app:benchmark_t1}
+
+\paragraph{Task and use.}
+T1 asks how meal timing and amount influence plasma glucose. Its intended use
+is a reduced meal-response simulator: given an intake schedule and the permitted
+auxiliaries, it should predict the glucose response under a new schedule.
+The named public requirement is:
+\begin{quote}
+``a causal mechanism through which meal timing and meal amount contribute to
+the observed plasma-glucose mass.''
+\end{quote}
+The prompt does not prescribe the three gastrointestinal compartments,
+a variable named $R_a$, or any fixed number of latent states. Nor does it
+require hepatic regulation, insulin-action dynamics, or a separately generated
+$G_t$ state. Such mechanisms may be useful, but their absence alone is not a
+violation of the T1 task specification.
+
+\paragraph{Observability.}
+T1-easy predicts $G_p$ with $EGP,U_{ii},E,G_t$ supplied. T1-hard also predicts
+$G_p$, but only $G_t$ is supplied. Thus, hard means fewer auxiliaries, not
+complete absence of auxiliary measurements. A candidate may choose which
+auxiliaries to use, provided it explains their roles and respects the public
+availability contract. Both tiers receive the meal-event channel.
+
+\subsubsection{T2: absorption--action disentanglement}
+\label{app:benchmark_t2}
+
+\paragraph{Task and use.}
+T2 extends meal-response modeling to distinguish glucose entering circulation
+from glucose removal regulated by insulin. This supports interpretation of
+post-meal excursions: delayed absorption and delayed insulin action can produce
+different responses to a changed meal or imposed insulin input. The named
+public requirements are:
+\begin{quote}
+``a causal pathway through which meal timing and meal amount contribute to the
+observed plasma-glucose mass''; and
+
+``a delayed insulin-action pathway through which plasma insulin regulates the
+insulin-dependent contribution to total glucose disposal $U(t)$.''
+\end{quote}
+Unlike T1's meal clause, the second clause explicitly requires delayed action.
+An instantaneous insulin-dependent coefficient alone does not supply that
+memory. The task does not require the reference coordinate $X$ or its exact
+functional form, and a graph path alone does not establish the correct fitted
+response or a unique physical interpretation.
+
+\paragraph{Observability.}
+T2-easy must generate three targets, $G_p,I,U$, with $EGP,U_{ii},E,G_t$ supplied.
+T2-hard must generate $G_p,I$, with only $U_{ii}$ supplied; total disposal is
+then an internal mechanism rather than an observed target. In both tiers,
+the declared external inputs are the meal-event channel and the imposed
+insulin forcing. \emph{Plasma insulin $I$ is a prediction target, not a supplied
+future trajectory.} The model must therefore generate the insulin signal used
+by its delayed-action pathway. $U$ may be an analytic generated process rather
+than an additional dynamic state. The public task does not explicitly prescribe
+a meal-to-insulin or glucose-to-insulin edge; such dependencies must be proposed
+from the available evidence rather than imposed as hidden reference facts.
+
+\subsubsection{Dynamics and naming controls}
+\label{app:benchmark_controls}
+
+The T1-easy variants separate two changes. \emph{Obfuscation} replaces
+physiological names with neutral channel identifiers and removes informative
+units while preserving numerical trajectories, splits, and channel permissions.
+It tests dependence on semantic cues; it does not by itself establish whether
+an LLM memorized a model. The public task still describes the required causal
+input-to-output mechanism.
+
+The \emph{perturbed dynamics} change the two plasma--tissue exchange laws to
+\begin{align}
+J_{p\to t}
+&= k_1G_p\left[1+0.35\tanh\!\left(
+\frac{G_p-G_{p,b}}{0.20G_{p,b}}\right)\right], \\
+J_{t\to p}
+&= k_2G_t\left[1-0.25\tanh\!\left(
+\frac{G_t-G_{t,b}}{0.20G_{t,b}}\right)\right].
+\end{align}
+The basal masses are $G_{p,b}$ and $G_{t,b}$. Both multipliers remain positive
+and equal one at basal equilibrium, preserving exchange directions and the
+basal balance while introducing state dependence. This perturbation does not
+change the gastric-emptying or remote-insulin-action laws. The same exchange
+flux appears with opposite signs in the two balances. The study uses the four
+canonical/perturbed and named/obfuscated combinations for T1-easy; T1-hard and
+T2 use the canonical named condition.
+
+\paragraph{Trajectory schedules.}
+Dalla Man trajectories last 300 minutes with one-minute sampling. Training
+includes basal trajectories, single meals of 30--150\,g, delayed meals,
+two-meal schedules with 60--120-minute separation, and shifts in initial glucose
+or insulin. T1 adds three separated meals; T2 adds an imposed insulin pulse.
+The initial $G_p$ shifts in this protocol are paired with compensating $G_t$
+changes, rather than independent changes of both compartments.
+Validation uses intermediate meal amounts and timings, a new two-meal schedule,
+and a combined initial-state shift. Its T2 schedules contain no imposed insulin
+pulse. The six test protocols include smaller/larger meals, a later meal,
+a multi-meal schedule, a combined initial-state extrapolation, and an additional
+task-specific schedule: four meals for T1 or a stronger insulin pulse for T2.
+Post-hoc case-study interventions, such as shorter meal spacing or independently
+changing $G_t(0)$, are reported separately from this fixed test suite.
+
+\subsection{Controlled continuous stirred-tank reactor (CSTR)}
+\label{app:benchmark_cstr}
+
+\paragraph{Task and use.}
+A continuously stirred-tank reactor mixes an incoming reactant stream while
+a surrounding jacket exchanges heat with the reactor. Reactor temperature may
+change because the feed temperature changes, an exothermic reaction releases
+heat, or heat moves between the reactor and jacket. A useful model must
+distinguish these contributions to support prediction under changed operating
+conditions. The public task requires:
+\begin{quote}
+``a reactor-temperature balance that distinguishes feed transport, reaction
+heat generation, and heat exchange with the jacket.''
+\end{quote}
+The evaluated named easy case predicts reactor temperature $T$. Reactant
+concentration $C$ and jacket temperature $T_j$ are supplied auxiliaries;
+feed concentration $C_f$, feed temperature $T_f$, and jacket-feed temperature
+$T_{jf}$ are external inputs. Extra latent states are not compulsory when a
+candidate can express the required balance using the available channels.
+
+\paragraph{Reference dynamics.}
+The three-state reference is
+\begin{align}
+r(C,T) &= k_0 e^{-E_R/T}C, \\
+\dot C &= q(C_f-C)-r(C,T), \\
+\dot T &= q(T_f-T)+\beta_r r(C,T)-h(T-T_j), \\
+\dot T_j &= q_j(T_{jf}-T_j)+h_j(T-T_j).
+\end{align}
+Here $q,q_j$ are flow rates, $\beta_r$ converts reaction rate to heat generation,
+and $h,h_j$ govern heat exchange. These positive coefficients define the
+reference source/sink roles. The implemented reaction law uses
+$\max(C,0)$ and $\max(T,250)$ in place of $C$ and $T$ for numerical protection.
+Temperature is measured in kelvin and concentration in the supplied relative
+units. The reference parameters are
+$k_0=7.2\times10^{10}$, $E_R=8750$, $q=1$, $\beta_r=80$,
+$h=2.5$, $q_j=1.5$, and $h_j=1.5$.
+
+\paragraph{Trajectory schedules.}
+Trajectories span 30 time units at interval 0.1. Normalized input commands
+$(u_C,u_T,u_J)$ are mapped to physical inputs by
+\begin{equation}
+C_f=1+0.25u_C,\qquad T_f=350+10u_T,\qquad T_{jf}=330+12u_J.
+\end{equation}
+Training uses zero input, single-input steps and pulses, slow sinusoids,
+paired input changes, and an initial-state shift. Validation uses intermediate
+amplitudes and durations. The test design includes amplitude extrapolation,
+faster oscillations, a delayed pulse, opposing feed/jacket temperature changes,
+and initial-state extrapolation. In the easy tier, a changed physical input may
+also change the supplied auxiliary trajectories; these remain part of the
+conditional prediction contract.
+
+\paragraph{Reference-data qualification.}
+A diagnostic audit of a historical CSTR export found that its adaptive
+integrator skipped some finite-duration forcing windows. In particular, a
+350-to-345\,K feed-temperature pulse from time 10 to 15 was accompanied by an
+incorrectly flat saved temperature. Reference integrations split at the forcing
+boundaries instead produced a temperature decrease of approximately 4.36\,K.
+Consequently, scores against affected exports describe agreement with those
+stored arrays and cannot establish correct physical intervention behavior.
+Any corrected release and matched reruns must be identified separately;
+the task definition above does not certify the numerical integrity of a
+historical export.
+
+\subsection{Alien device: input-driven memory in an unfamiliar system}
+\label{app:benchmark_alien}
+
+\paragraph{Task and use.}
+The alien device is a procedurally generated nonlinear system without a named
+physical interpretation. It tests whether a model can explain a persistent
+response to an external command using measured telemetry, without relying on
+a familiar domain equation. The evaluated functional-description easy prompt
+requires:
+\begin{quote}
+``input-driven memory and its causal contribution to the observed output.''
+\end{quote}
+The public target is $v_{01}$, the command is $u_{01}$, and $v_{02},v_{03}$ are
+two supplied telemetry channels selected by a simulator-side training-design
+sensitivity analysis. The prompt states the required function of memory but
+withholds the reference graph, coefficients, state identities, and dimension.
+It does not explicitly require the complete nonlinear-feedback architecture
+of the private reference.
+
+\paragraph{Reference dynamics.}
+The selected reference has five internal coordinates $z\in\mathbb{R}^5$ and a
+dynamic output $y$. Its construction has the form
+\begin{align}
+\dot z_i &= -d_i z_i+\sum_j A_{ij}z_j
+ +\sum_{\ell}a_{i\ell}\tanh(s_{i\ell}z_{j_{i\ell}}+b_{i\ell})
+ \nonumber\\
+&\quad+\sum_{\ell}c_{i\ell}
+ \tanh(p_{i\ell}z_{r_{i\ell}})\tanh(q_{i\ell}z_{s_{i\ell}})
+ +B_i\tanh(s_u u), \\
+\dot y &= -d_y y+\sum_{\ell}a^y_{\ell}\tanh(s^y_{\ell}z_{j_{\ell}})
+ +\sum_{\ell}c^y_{\ell}
+ \tanh(p^y_{\ell}z_{r_{\ell}})\tanh(q^y_{\ell}z_{s_{\ell}}).
+\end{align}
+The coefficients and interaction indices are frozen in the selected generator;
+$A$ is skew-symmetric and the $d_i$ and $d_y$ are positive decay rates. The
+architecture combines relaxation, internal coupling, bounded nonlinear
+interactions, and command-driven forcing. Only two internal coordinates are
+exposed as telemetry in the easy tier; their public names do not disclose
+their private roles. Discovery is not required to reproduce all five internal
+coordinates. This benchmark supplies an unfamiliar task, but neither procedural
+generation nor neutral names prove that every constituent mathematical pattern
+is absent from an LLM's training data.
+
+\paragraph{Trajectory schedules.}
+Trajectories span 60 time units at interval 0.1. Training includes positive and
+negative pulses, steps, sinusoids, a chirp, separated pulse sequences, and
+initial-state shifts. Validation uses intermediate pulse amplitudes/durations
+and sinusoidal periods. Test protocols change amplitude, frequency, pulse
+timing, or initial conditions beyond the training design. The model uses one
+frozen parameter vector across these schedules. The relevant question is
+whether its input-driven memory continues to generate the output response,
+not whether it reproduces the simulator's private coordinate system.
