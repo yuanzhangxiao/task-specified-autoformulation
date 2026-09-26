@@ -1,0 +1,310 @@
+{
+  "protocol": "fitted-public-mechanism-tests-1",
+  "development_status": "post-hoc operational rubric; freeze before applying new tests; not preregistered",
+  "score": "Conjunctive per-public-mechanism confirmed passes; unresolved retained with lower/upper evidence bounds. Case medians, macro median, unscaled MAD.",
+  "numerical_settings": {
+    "maximum_training_trajectories": 3,
+    "operating_fractions": [
+      0.0,
+      0.5,
+      1.0
+    ],
+    "trajectory_seconds": 120.0,
+    "rtol": 1e-07,
+    "atol": 1e-09,
+    "state_agreement_tolerance": 0.0001,
+    "difference_step": 2e-05,
+    "difference_agreement_rtol": 0.001,
+    "detection_tolerance": 1e-08
+  },
+  "cells": {
+    "phase_b_dalla_man_t1_canonical_named_easy": {
+      "public_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4",
+      "requirements": [
+        {
+          "id": "meal_response",
+          "public_requirement": "a causal mechanism through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "input_path",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "meal_response",
+          "public_requirement": "a causal mechanism through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "causal_response",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "expected_sign": 1,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Operational interpretation of named meal source or insulin-dependent disposal, not a hidden-equation label."
+        }
+      ]
+    },
+    "phase_b_anonymous_system_t1_canonical_obfuscated_easy": {
+      "public_prompt_sha256": "a1e89f8846c33085730df3d67708aa45a8412554b3f85df0626e57bc32be36bb",
+      "requirements": [
+        {
+          "id": "input_response",
+          "public_requirement": "a causal mechanism through which input timing and magnitude contribute to the observed target",
+          "kind": "input_path",
+          "driver": "u01",
+          "target": "v01",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "input_response",
+          "public_requirement": "a causal mechanism through which input timing and magnitude contribute to the observed target",
+          "kind": "causal_response",
+          "driver": "u01",
+          "target": "v01",
+          "expected_sign": 0,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Public description leaves polarity unspecified."
+        }
+      ]
+    },
+    "phase_b_dalla_man_t1_perturbed_named_easy": {
+      "public_prompt_sha256": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4",
+      "requirements": [
+        {
+          "id": "meal_response",
+          "public_requirement": "a causal mechanism through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "input_path",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "meal_response",
+          "public_requirement": "a causal mechanism through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "causal_response",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "expected_sign": 1,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Operational interpretation of named meal source or insulin-dependent disposal, not a hidden-equation label."
+        }
+      ]
+    },
+    "phase_b_anonymous_system_t1_perturbed_obfuscated_easy": {
+      "public_prompt_sha256": "a1e89f8846c33085730df3d67708aa45a8412554b3f85df0626e57bc32be36bb",
+      "requirements": [
+        {
+          "id": "input_response",
+          "public_requirement": "a causal mechanism through which input timing and magnitude contribute to the observed target",
+          "kind": "input_path",
+          "driver": "u01",
+          "target": "v01",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "input_response",
+          "public_requirement": "a causal mechanism through which input timing and magnitude contribute to the observed target",
+          "kind": "causal_response",
+          "driver": "u01",
+          "target": "v01",
+          "expected_sign": 0,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Public description leaves polarity unspecified."
+        }
+      ]
+    },
+    "phase_b_cstr_controlled_reactor_mechanism_canonical_named_easy": {
+      "public_prompt_sha256": "0a3b4c055402ed26352363c4d367b791c41460ea21e8ca42043c495ea68eb99c",
+      "requirements": [
+        {
+          "id": "feed_transport",
+          "public_requirement": "a reactor-temperature balance that distinguishes feed transport, reaction heat generation, and heat exchange with the jacket",
+          "kind": "balance_channel",
+          "driver": "Tf",
+          "target": "T",
+          "interpretation": "Distinct additive contribution with this public channel dependency. Necessary channel-based witness for the supplied-channel representation, not certification of physical balance or required use of this auxiliary in every alternative representation."
+        },
+        {
+          "id": "reaction_heat",
+          "public_requirement": "a reactor-temperature balance that distinguishes feed transport, reaction heat generation, and heat exchange with the jacket",
+          "kind": "balance_channel",
+          "driver": "C",
+          "target": "T",
+          "interpretation": "Distinct additive contribution with this public channel dependency. Necessary channel-based witness for the supplied-channel representation, not certification of physical balance or required use of this auxiliary in every alternative representation."
+        },
+        {
+          "id": "jacket_exchange",
+          "public_requirement": "a reactor-temperature balance that distinguishes feed transport, reaction heat generation, and heat exchange with the jacket",
+          "kind": "balance_channel",
+          "driver": "Tj",
+          "target": "T",
+          "interpretation": "Distinct additive contribution with this public channel dependency. Necessary channel-based witness for the supplied-channel representation, not certification of physical balance or required use of this auxiliary in every alternative representation."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "controlled_balance",
+          "public_requirement": "a reactor-temperature balance that distinguishes feed transport, reaction heat generation, and heat exchange with the jacket",
+          "kind": "thermal_balance",
+          "target": "T",
+          "feed": "Tf",
+          "jacket": "Tj",
+          "reactant": "C",
+          "interpretation": "Direct public-coordinate temperature balance: positive heat transport, zero transport at equal temperatures, nonnegative reaction heat, and zero reactant boundary. Alternative internal concentration/energy coordinates remain unresolved."
+        }
+      ]
+    },
+    "phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy": {
+      "public_prompt_sha256": "7663bba9e84752550781f617b31f5f3391caf9967c77695fcfc5fff5423ab9a9",
+      "requirements": [
+        {
+          "id": "input_memory_output_pathway",
+          "public_requirement": "input-driven memory and its causal contribution to the observed output",
+          "kind": "input_path",
+          "driver": "u01",
+          "target": "v01",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "input_memory_output_pathway",
+          "public_requirement": "input-driven memory and its causal contribution to the observed output",
+          "kind": "memory",
+          "driver": "u01",
+          "target": "v01",
+          "expected_sign": 0,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Public description leaves polarity unspecified."
+        }
+      ]
+    },
+    "phase_b_dalla_man_t1_canonical_named_hard": {
+      "public_prompt_sha256": "ede5a1db0a828a8d6582bb80614d536897941b6e6164f59e2a426b0c905a2fe3",
+      "requirements": [
+        {
+          "id": "meal_response",
+          "public_requirement": "a causal mechanism through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "input_path",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "meal_response",
+          "public_requirement": "a causal mechanism through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "causal_response",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "expected_sign": 1,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Operational interpretation of named meal source or insulin-dependent disposal, not a hidden-equation label."
+        }
+      ]
+    },
+    "phase_b_dalla_man_t2_canonical_named_easy": {
+      "public_prompt_sha256": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd",
+      "requirements": [
+        {
+          "id": "meal_pathway",
+          "public_requirement": "a causal pathway through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "input_path",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "interpretation": "Necessary equation dependency only."
+        },
+        {
+          "id": "delayed_insulin_action",
+          "public_requirement": "a delayed insulin-action pathway through which plasma insulin regulates the insulin-dependent contribution to total glucose disposal U(t)",
+          "kind": "input_path",
+          "driver": "I",
+          "target": "U",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "meal_pathway",
+          "public_requirement": "a causal pathway through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "causal_response",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "expected_sign": 1,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Operational interpretation of named meal source or insulin-dependent disposal, not a hidden-equation label."
+        },
+        {
+          "id": "delayed_insulin_action",
+          "public_requirement": "a delayed insulin-action pathway through which plasma insulin regulates the insulin-dependent contribution to total glucose disposal U(t)",
+          "kind": "delayed_action",
+          "driver": "I",
+          "target": "U",
+          "expected_sign": 1,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Operational interpretation of named meal source or insulin-dependent disposal, not a hidden-equation label."
+        }
+      ]
+    },
+    "phase_b_dalla_man_t2_canonical_named_hard": {
+      "public_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210",
+      "requirements": [
+        {
+          "id": "meal_pathway",
+          "public_requirement": "a causal pathway through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "input_path",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "interpretation": "Necessary equation dependency only."
+        },
+        {
+          "id": "delayed_insulin_action",
+          "public_requirement": "a delayed insulin-action pathway through which plasma insulin regulates the insulin-dependent contribution to total glucose disposal U(t)",
+          "kind": "input_path",
+          "driver": "I",
+          "target": "Gp",
+          "interpretation": "Necessary equation dependency only."
+        }
+      ],
+      "mechanisms": [
+        {
+          "id": "meal_pathway",
+          "public_requirement": "a causal pathway through which meal timing and meal amount contribute to the observed plasma-glucose mass",
+          "kind": "causal_response",
+          "driver": "meal_event_g",
+          "target": "Gp",
+          "expected_sign": 1,
+          "readout": "output",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Operational interpretation of named meal source or insulin-dependent disposal, not a hidden-equation label."
+        },
+        {
+          "id": "delayed_insulin_action",
+          "public_requirement": "a delayed insulin-action pathway through which plasma insulin regulates the insulin-dependent contribution to total glucose disposal U(t)",
+          "kind": "delayed_action",
+          "driver": "I",
+          "target": "Gp",
+          "expected_sign": -1,
+          "readout": "balance_rate",
+          "interpretation": "Model-local causal response, with generated-driver clamping and output-storage clamping for balance-rate probes; not whole-system intervention truth.",
+          "sign_basis": "Operational interpretation of named meal source or insulin-dependent disposal, not a hidden-equation label.",
+          "identification_limit": "A delayed negative effect on glucose balance is a necessary proxy; disposal versus inhibition of a source is not identified. Public mechanism status remains unresolved unless a test fails."
+        }
+      ]
+    }
+  }
+}

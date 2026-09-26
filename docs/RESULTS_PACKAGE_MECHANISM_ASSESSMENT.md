@@ -20,6 +20,11 @@ and, for T2-hard, the unobserved disposal mechanism. Neither direct connectivity
 nor output integration alone establishes that mechanism. No nine-case stronger
 compliance score is emitted.
 
+For the subsequent nine-case functional rubric, including delayed-action tests,
+see [Stronger deterministic public-mechanism assessment](FUNCTIONAL_MECHANISM_ASSESSMENT.md).
+That protocol is a separate endpoint; it does not retroactively rename the
+necessary-equation scores below.
+
 ## Results on the supplied v2 archive
 
 Archive SHA-256:
