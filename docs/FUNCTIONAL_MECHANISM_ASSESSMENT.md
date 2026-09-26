@@ -127,13 +127,27 @@ ranked worst (zero), as in failure-aware NMSE aggregation. Missing provenance,
 unsupported coordinates, interrupted computations and inconclusive numerical
 evidence are kept unresolved, not silently deleted or called passes.
 
-Take the median over repetitions within each case, then the macro median over
-all nine case medians. Report the **unscaled MAD** of those nine values. The
-possible score is an evidence upper bound, **not a confidence interval**. MAD of
-the confirmed bound is a descriptive spread of that bound, not uncertainty about
-unresolved cases. Per-case values, pass/fail/unresolved counts and fully confirmed
-run counts accompany the macro score: a median of 100% can coexist with failures
-on several benchmarks.
+For compliance, the current reporting convention is **mean (sample SD)**:
+average repetitions within each benchmark, then equally weight benchmark means.
+The headline SD is the sample SD across benchmark means (`ddof=1`), not across
+all individual requirements and not a standard error. Per-case SD is across
+repetitions. The possible score is an evidence upper bound, **not a confidence
+interval**. Retain pass/fail/unresolved counts and the planned benchmark scope.
+Four-case ablations must not be presented as nine-case aggregates. NMSE retains
+its separate median/MAD convention.
+
+The immutable numerical v1 protocol and its original report retain their original
+median/MAD fields. `scripts/summarize_functional_mechanisms.py` produces a separate
+mean/SD report from the sealed plan and worker results, with no numerical rerun:
+
+```bash
+"$AF_PYTHON" "$AF_REPO_ROOT/scripts/summarize_functional_mechanisms.py" \
+  --root "$AF_ASSESSMENT" --output "$AF_ASSESSMENT/mean-sd"
+cat "$AF_ASSESSMENT/mean-sd/SUMMARY.md"
+```
+
+For ours and component ablations, see
+[Component-model mechanism assessment](COMPONENT_MECHANISM_ASSESSMENT.md).
 
 Do not label this endpoint "complete scientific correctness" or equate it with
 the older graph endpoint. Suggested paper label: **Public-mechanism tests (%)**,
