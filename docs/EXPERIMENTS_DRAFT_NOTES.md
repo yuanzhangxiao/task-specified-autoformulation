@@ -131,14 +131,29 @@ Do not use `pass/(pass+fail)` to hide unresolved evidence. Table 1 shows median
 pass and unresolved percentages; retain both MADs and underlying counts in the
 appendix. Complete workflow execution is not itself a scientific pass.
 
-If a required method/case has no evaluable run, its primary full-roster aggregate
-is unavailable; do not substitute a different set of cases for that method.
-Any secondary available-case comparison must name one common subset for every
-method. Within cases, mark summaries over finite successful runs as conditional
-on success and pair them with coverage/failure counts. Do not replace a failed
-rollout with zero or an arbitrary finite penalty. Include an explicit
-failure-aware success-rate comparison rather than implying conditional medians
-describe every planned run.
+For NMSE, retain confirmed failed runs at **worst rank**, represented internally
+as `+infinity`, **before** taking either median. This includes recorded model
+failures, exhaustion of the method's frozen search budget, and failed target
+rollouts. A complete missing case due to such failures is therefore included,
+not dropped. The exported indicators are `target_status=failed` or
+`terminal_status` in `{failed, timed_out}` when no NMSE was recorded. Keep the
+recorded reasons; this is an operational failure classification, not a diagnosis
+of its root cause. Large finite NMSEs remain finite observations.
+
+This reporting rule supersedes the earlier available-only policy at the user's
+request. A median of `+infinity` is displayed as **Failed** and its MAD is
+undefined; do not calculate `infinity-infinity` or report zero spread. With a
+finite median, include failures' infinite deviations in the ordinary unscaled
+MAD. Report evaluated/planned and failed counts alongside every summary.
+
+Unknown outcomes (e.g. an unexported result or interrupted worker) are not
+evidence of model failure. Any such unknown prediction in a planned repetition
+makes that primary case/macro statistic unavailable pending resolution. Do not
+silently shrink its repetition denominator. A finite recorded NMSE remains an
+observation even if a separate runtime contract check blocks graph assessment.
+Graph evidence and complexity retain their own availability; this NMSE ranking
+policy does not impute unmeasured predicate results or model size. Available-only
+secondary metrics must state their coverage and conditional interpretation.
 
 For paired ablations, first calculate per-block differences or ratios at the same
 case, seed, and prompt; then aggregate within cases and across cases. Report

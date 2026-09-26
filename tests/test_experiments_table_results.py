@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 from pathlib import Path
 
 SPEC = importlib.util.spec_from_file_location(
@@ -45,13 +46,25 @@ def test_case_medians_come_before_the_macro_summary() -> None:
 
 
 def test_a_method_missing_a_whole_case_has_no_headline_aggregate() -> None:
-    """Computing one over the cases it covered compares different rosters.
-
-    SINDy has no evaluable run for the named CSTR case, which is one of the
-    nine, so this is the real situation and not a hypothetical.
-    """
+    """Unknown outcomes stay distinct from confirmed failures ranked +inf."""
     assert table.macro([1.0, 2.0, None]) == (None, None)
     assert table.render(None, None) == r"\textbf{TBD}"
+
+
+def test_failures_rank_worst_before_each_median() -> None:
+    records = _rows("sindy", {case: [1, 2, None] for case in table.NINE_CASES})
+    for row in records:
+        if row["target_nmse"] is None:
+            row["terminal_status"] = "failed"
+    assert table.collect(records, "target_nmse")["sindy"] == [2] * 9
+    assert table.macro([1, 2, math.inf]) == (2, 1)
+    assert table.macro([1, math.inf, math.inf]) == (math.inf, None)
+    assert table.render(math.inf, None) == r"\text{Failed}"
+
+
+def test_unmeasured_prediction_does_not_shrink_seed_denominator() -> None:
+    records = _rows("sindy", {case: [1, 2, None] for case in table.NINE_CASES})
+    assert table.collect(records, "target_nmse")["sindy"] == [None] * 9
 
 
 def test_the_rendered_value_carries_its_spread() -> None:

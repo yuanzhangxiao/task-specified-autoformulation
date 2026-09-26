@@ -71,6 +71,8 @@ def test_a_model_is_packaged_with_its_own_metrics(tmp_path: Path) -> None:
     assert scored["mechanism_compliance"] == 0.75
     assert scored["complexity_terms"] == 3
     assert scored["runtime_valid"] is True
+    assert scored["public_mechanism"]["evaluation"]["mechanism_compliance"] == 0.75
+    assert scored["runtime_diagnostics"] == {"valid": True}
     assert provenance["planned"] == 2 and provenance["with_model"] == 1
 
 
@@ -150,6 +152,8 @@ def test_a_superseded_method_is_dropped_only_when_stated(tmp_path: Path) -> None
     assert early_entry["superseded_methods"] == ["d3_native_no_tools"]
     assert early_entry["rows_superseded"] == 2
     assert manifest["planned_total"] == 2
+    for name, digest in manifest["payload_sha256"].items():
+        assert package.sha256(tmp_path / "out" / name) == digest
 
 
 def _subject_with_parameters(root: Path) -> None:
@@ -216,3 +220,22 @@ def test_an_identity_without_a_model_carries_no_replay_payload(
     assert missing["model"] is None
     assert missing["fitted_parameter_count"] == 0
     assert missing["execution_semantics"] is None
+
+
+def test_per_requirement_evidence_and_runtime_errors_are_not_flattened_away(
+    tmp_path: Path,
+) -> None:
+    root = _evaluation(tmp_path / "eval")
+    path = root / "final-evaluation" / "final_evaluation_records.jsonl"
+    record = json.loads(path.read_text())
+    record["public_mechanism"]["evaluation"]["graph_mechanism_results"] = [
+        {"mechanism_id": "balance", "status": "ambiguous",
+         "predicates": [{"predicate": "graph_inference", "status": "ambiguous"}]}
+    ]
+    record["runtime"] = {"valid": False, "errors": ["unused declaration"]}
+    path.write_text(json.dumps(record) + "\n")
+    rows, _ = package.collect("sept", root)
+    assert rows[0]["public_mechanism"] == record["public_mechanism"]
+    assert rows[0]["runtime_diagnostics"] == record["runtime"]
+    assert rows[1]["public_mechanism"] is None
+    assert rows[1]["runtime_diagnostics"] is None

@@ -6,6 +6,7 @@ import csv
 import importlib.util
 import io
 import json
+import math
 import tarfile
 from pathlib import Path
 
@@ -72,6 +73,57 @@ def test_graph_availability_does_not_erase_a_recorded_prediction():
     assert result["mechanism_compliance"]["record_coverage"] == 2
     assert result["mechanism_compliance"]["median"] == 1.0
     # Annotation coverage is zero in all rows and must not replace graph scores.
+
+
+def test_confirmed_failed_case_stays_in_the_roster_at_worst_rank(tmp_path):
+    records = rows(("a", "b", "c"))
+    for row in records:
+        if row["method"] == "sindy" and row["benchmark_id"] == "b":
+            row.update(target_nmse=None, target_status=None, terminal_status="failed")
+    result = audit.summarize(records, ("a", "b", "c"))[0]
+    stat = result["macros"]["target_nmse"]
+    # The case values are 1, +inf, 3. Dropping failure would give 2, not 3.
+    assert stat["median"] == 3
+    assert stat["mad"] == 2
+    assert stat["record_coverage"] == 6
+    assert stat["failed_repetitions"] == 3
+    failed = result["cases"][1]["metrics"]["target_nmse"]
+    assert failed["median"] == math.inf and failed["mad"] is None
+    assert audit.display(failed) == "Failed"
+    encoded = json.dumps(audit.json_safe(result), allow_nan=False)
+    assert json.loads(encoded)["cases"][1]["metrics"]["target_nmse"]["median"] == "+inf"
+
+
+@pytest.mark.parametrize("status", [{"target_status": "failed"},
+                                    {"terminal_status": "timed_out"}])
+def test_failure_ranking_happens_before_within_case_median(status):
+    records = rows(("a",))
+    records[0]["target_nmse"] = 1.0
+    records[1]["target_nmse"] = 3.0
+    records[2].update(target_nmse=None, **status)
+    stat = audit.summarize(records, ("a",))[0]["cases"][0]["metrics"]["target_nmse"]
+    assert stat["median"] == 3 and stat["mad"] == 2
+    assert stat["observed_n"] == 2 and stat["failed_n"] == 1
+
+
+def test_unknown_partial_prediction_is_not_reclassified_as_failure():
+    records = rows(("a",))
+    records[0].update(target_nmse=None, target_status="missing",
+                      terminal_status="worker_interrupted")
+    stat = audit.summarize(records, ("a",))[0]["macros"]["target_nmse"]
+    assert stat["median"] is None
+    assert stat["failed_repetitions"] == 0
+    assert stat["unmeasured_repetitions"] == 1
+
+
+def test_infinite_deviations_and_large_finite_outliers_are_not_dropped():
+    stat = audit.statistics([1, 2, 3, math.inf])
+    assert stat["median"] == 2.5 and stat["mad"] == 1
+    stat = audit.statistics([1, 2, math.inf, math.inf, math.inf])
+    assert stat["median"] == math.inf and stat["mad"] is None
+    stat = audit.statistics([0, 0, 5, 10, 10, math.inf, math.inf, math.inf])
+    assert stat["median"] == 10 and stat["mad"] == 10
+    assert audit.statistics([1, 2, 1e178])["mad"] == 1
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, -1])

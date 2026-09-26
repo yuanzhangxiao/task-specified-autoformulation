@@ -161,6 +161,10 @@ def collect(label: str, root: Path) -> tuple[list[dict], dict]:
                 ),
                 "source_path": planned.get("source_path"),
                 "subject_id": subject_id,
+                # Preserve per-obligation evidence and runtime rejection reasons;
+                # a flattened graph fraction cannot establish fitted mechanisms.
+                "public_mechanism": (record or {}).get("public_mechanism"),
+                "runtime_diagnostics": (record or {}).get("runtime"),
                 **metrics_of(record),
             }
         )
@@ -253,7 +257,9 @@ def main() -> None:
         {
             key: value
             for key, value in row.items()
-            if key not in {"equations", "model"}
+            if key not in {
+                "equations", "model", "public_mechanism", "runtime_diagnostics"
+            }
         }
         | {"equations": json.dumps(row["equations"], sort_keys=True)}
         for row in rows
@@ -264,7 +270,7 @@ def main() -> None:
         writer.writerows(flat)
 
     manifest = {
-        "schema_version": "phase-b-results-package-1",
+        "schema_version": "phase-b-results-package-2",
         "test_data_opened": False,
         "evaluations": provenance,
         "planned_total": len(rows),
@@ -282,6 +288,10 @@ def main() -> None:
                 if row["execution_semantics"]
             }
         ),
+        "payload_sha256": {
+            name: sha256(out / name)
+            for name in ("models.jsonl", "models_and_metrics.csv")
+        },
     }
     (out / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

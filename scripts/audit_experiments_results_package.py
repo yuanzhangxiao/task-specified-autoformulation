@@ -62,15 +62,37 @@ def finite(value: Any) -> bool:
 
 
 def statistics(values: list[float]) -> dict[str, Any]:
-    """Return a median and unscaled MAD, retaining the observed denominator."""
+    """Include worst-ranked failures; MAD about an infinite centre is undefined."""
     if not values:
         return {"n": 0, "median": None, "mad": None}
     centre = median(values)
     return {
         "n": len(values),
         "median": centre,
-        "mad": median([abs(value - centre) for value in values]),
+        "mad": (
+            median([abs(value - centre) for value in values])
+            if math.isfinite(centre) else None
+        ),
     }
+
+
+def failed_prediction(row: dict) -> bool:
+    """Only explicit terminal/rollout failures justify a worst-rank sentinel."""
+    return row.get("target_nmse") is None and (
+        row.get("target_status") == "failed"
+        or row.get("terminal_status") in {"failed", "timed_out"}
+    )
+
+
+def json_safe(value: Any) -> Any:
+    """Encode the internal rank sentinel as a string, never nonstandard JSON."""
+    if isinstance(value, float) and value == math.inf:
+        return "+inf"
+    if isinstance(value, dict):
+        return {k: json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(v) for v in value]
+    return value
 
 
 def load_package(archive: Path) -> tuple[list[dict], dict, dict]:
@@ -128,6 +150,9 @@ def load_package(archive: Path) -> tuple[list[dict], dict, dict]:
     if any(manifest.get(key) != value for key, value in counts.items()):
         raise ValueError("manifest counts disagree with exported records")
     hashes = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
+    declared_payloads = manifest.get("payload_sha256", {})
+    if any(hashes.get(name) != digest for name, digest in declared_payloads.items()):
+        raise ValueError("manifest payload checksum differs")
     source_hashes = sum(len(e.get("files", {})) for e in manifest["evaluations"])
     audit = {
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
@@ -137,6 +162,7 @@ def load_package(archive: Path) -> tuple[list[dict], dict, dict]:
         "manifest_counts": counts,
         "upstream_hashes_listed": source_hashes,
         "upstream_hashes_verified": 0,
+        "payload_hashes_verified": len(declared_payloads),
         "hash_scope": (
             "Manifest hashes identify upstream files absent from this archive."
         ),
@@ -148,7 +174,7 @@ def load_package(archive: Path) -> tuple[list[dict], dict, dict]:
 
 
 def summarize(rows: list[dict], roster: tuple[str, ...]) -> list[dict]:
-    """Apply missing-case guards separately to each recorded endpoint."""
+    """Rank failed predictions worst; keep unmeasured evidence distinguishable."""
     result = []
     for method, label in METHODS.items():
         selected = [
@@ -171,9 +197,16 @@ def summarize(rows: list[dict], roster: tuple[str, ...]) -> list[dict]:
             metrics = {}
             for field in FIELDS:
                 samples = []
+                failures = 0
+                unknown = 0
                 for row in subset:
                     value = row.get(field)
                     if value is None:
+                        if field == "target_nmse" and failed_prediction(row):
+                            samples.append(math.inf)
+                            failures += 1
+                        else:
+                            unknown += 1
                         continue
                     if not finite(value) or value < 0:
                         raise ValueError(
@@ -188,7 +221,16 @@ def summarize(rows: list[dict], roster: tuple[str, ...]) -> list[dict]:
                     if field == "mechanism_compliance" and value > 1:
                         raise ValueError("graph compliance is not in [0, 1]")
                     samples.append(value)
-                metrics[field] = statistics(samples)
+                # An unknown NMSE is not evidence of model failure and must not
+                # silently shrink the planned repetition denominator.
+                metrics[field] = {
+                    **statistics(
+                        [] if field == "target_nmse" and unknown else samples
+                    ),
+                    "observed_n": len(samples) - failures,
+                    "failed_n": failures,
+                    "unmeasured_n": unknown,
+                }
             cases.append(
                 {
                     "benchmark_id": case,
@@ -226,7 +268,19 @@ def summarize(rows: list[dict], roster: tuple[str, ...]) -> list[dict]:
                 **(statistics(medians) if not missing else statistics([])),
                 "available_cases": len(roster) - len(missing),
                 "missing_cases": missing,
-                "record_coverage": sum(case["metrics"][field]["n"] for case in cases),
+                "worst_ranked_cases": [
+                    case["benchmark_id"] for case in cases
+                    if case["metrics"][field]["median"] == math.inf
+                ],
+                "record_coverage": sum(
+                    case["metrics"][field]["observed_n"] for case in cases
+                ),
+                "failed_repetitions": sum(
+                    case["metrics"][field]["failed_n"] for case in cases
+                ),
+                "unmeasured_repetitions": sum(
+                    case["metrics"][field]["unmeasured_n"] for case in cases
+                ),
             }
         result.append(
             {
@@ -241,6 +295,13 @@ def summarize(rows: list[dict], roster: tuple[str, ...]) -> list[dict]:
                 "graph_statuses": dict(
                     Counter(str(r.get("mechanism_status")) for r in selected)
                 ),
+                "graph_fully_passing_runs": sum(
+                    r.get("mechanism_compliance") == 1 for r in selected
+                ),
+                "graph_fully_passing_case_medians": sum(
+                    case["metrics"]["mechanism_compliance"]["median"] == 1
+                    for case in cases
+                ),
             }
         )
     return result
@@ -250,7 +311,11 @@ def display(stat: dict, *, scale: float = 1, digits: int = 3) -> str:
     """Format only at presentation time, keeping full precision in JSON."""
     if stat["median"] is None:
         return "Unavailable"
+    if stat["median"] == math.inf:
+        return "Failed"
     centre, spread = stat["median"] * scale, stat["mad"] * scale
+    if spread == math.inf:
+        return f"{centre:.{digits}f} [infinite MAD]"
     if abs(centre) >= 1e4 or 0 < abs(centre) < 1e-3:
         return f"{centre:.3g} [{spread:.3g}]"
     return f"{centre:.{digits}f} [{spread:.{digits}f}]"
@@ -259,18 +324,21 @@ def display(stat: dict, *, scale: float = 1, digits: int = 3) -> str:
 def write_report(output: Path, report: dict) -> None:
     """Write the headline table, case-level evidence, and a LaTeX table fragment."""
     output.mkdir(parents=True, exist_ok=True)
-    (output / "audit.json").write_text(json.dumps(report, indent=2) + "\n")
+    (output / "audit.json").write_text(
+        json.dumps(json_safe(report), indent=2, allow_nan=False) + "\n"
+    )
     lines = [
         "# External-baseline calculation cross-check",
         "",
         "Case median across repetitions, then median [unscaled MAD] "
         "across the same nine cases.",
-        "Statistics are conditional on recorded endpoints; "
-        "coverage is endpoint-specific.",
+        "NMSE includes confirmed failed runs as +infinity before either median. "
+        "Unknown/missing evaluations are not relabeled as failures. "
+        "Graph and complexity statistics remain conditional on recorded evidence.",
         "",
         "| Method | Test NMSE | Graph compliance (%) | Additive terms "
-        "| NMSE coverage | Graph coverage |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| NMSE coverage | Graph coverage | Failed NMSE runs |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     tex = [
         "% Independently aggregated from the supplied package; no model replay.",
@@ -281,14 +349,16 @@ def write_report(output: Path, report: dict) -> None:
         r"\caption{External baselines on the nine-case roster. Values are "
         r"median [unscaled MAD] of case medians. Graph compliance is the "
         r"recorded equation-graph endpoint, not annotation coverage or a "
-        r"general scientific-validity score. Statistics use available "
-        r"endpoints, with coverage shown separately. An aggregate is "
-        r"unavailable if an entire case has no scored repetition. Token "
+        r"general scientific-validity score. Failed predictions rank as "
+        r"$+\infty$ before computing NMSE medians; unknown evaluations remain "
+        r"unavailable. Graph and complexity use recorded endpoints, with "
+        r"coverage shown separately. Token "
         r"usage and unresolved-obligation counts are absent from this export.}",
         r"\label{tab:external_baseline_crosscheck}",
-        r"\begin{tabular}{lccccc}",
+        r"\begin{tabular}{lcccccc}",
         r"\toprule",
-        r"Method & Test NMSE & Graph (\%) & Terms & NMSE $n/N$ & Graph $n/N$ \\",
+        r"Method & Test NMSE & Graph (\%) & Terms & NMSE $n/N$ "
+        r"& Graph $n/N$ & Failed \\",
         r"\midrule",
     ]
     for method in report["methods"]:
@@ -300,6 +370,7 @@ def write_report(output: Path, report: dict) -> None:
             display(stats["complexity_terms"], digits=1),
             f"{stats['target_nmse']['record_coverage']}/{method['planned']}",
             f"{stats['mechanism_compliance']['record_coverage']}/{method['planned']}",
+            str(stats["target_nmse"]["failed_repetitions"]),
         ]
         lines.append("| " + " | ".join(cells) + " |")
         tex.append(" & ".join(cells) + r" \\")
@@ -307,7 +378,7 @@ def write_report(output: Path, report: dict) -> None:
     lines.append("")
     for method in report["methods"]:
         for case in method["macros"]["target_nmse"]["missing_cases"]:
-            lines.append(f"{method['label']}: no scored repetition for `{case}`.")
+            lines.append(f"{method['label']}: unknown NMSE outcome in `{case}`.")
     lines += [
         "A 100% macro median does not mean every benchmark passed. "
         "Read graph coverage separately from prediction coverage.",
@@ -322,12 +393,50 @@ def write_report(output: Path, report: dict) -> None:
         cells = [case.removeprefix("phase_b_")]
         for method in report["methods"]:
             stat = method["cases"][index]["metrics"]["target_nmse"]
-            cells.append(display(stat) + (f" ({stat['n']}/3)" if stat["n"] < 3 else ""))
+            suffix = (
+                f" ({stat['observed_n']}/3 scored, {stat['failed_n']} failed)"
+                if stat["observed_n"] < 3 else ""
+            )
+            cells.append(display(stat) + suffix)
         lines.append("| " + " | ".join(cells) + " |")
     lines += [
         "",
-        "Incomplete cells show (scored/3). A zero MAD from one observation "
-        "does not establish repeatability.",
+        "Failed case medians rank worst; their MAD is undefined. "
+        "An infinite MAD about a finite median is retained, not suppressed.",
+        "",
+        "## Graph-only evidence, separate from fitted mechanism assessment",
+        "",
+        "| Method | All graph requirements pass / assessed runs "
+        "| Case medians at 100% / 9 | Unassessed runs |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for method in report["methods"]:
+        n = method["macros"]["mechanism_compliance"]["record_coverage"]
+        lines.append(
+            f"| {method['label']} | {method['graph_fully_passing_runs']}/{n} "
+            f"| {method['graph_fully_passing_case_medians']}/9 "
+            f"| {method['planned'] - n} |"
+        )
+    lines += [
+        "",
+        "| Case | SINDy graph (%) | PySR graph (%) | D3 graph (%) "
+        "| GPT-5.6 Sol graph (%) |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for index, case in enumerate(report["roster"]):
+        cells = [case.removeprefix("phase_b_")]
+        for method in report["methods"]:
+            stat = method["cases"][index]["metrics"]["mechanism_compliance"]
+            cells.append(display(stat, scale=100, digits=1) + f" ({stat['n']}/3)")
+        lines.append("| " + " | ".join(cells) + " |")
+    lines += [
+        "",
+        "Graph cells show median [MAD] and assessed/3. A zero graph score "
+        "may include unresolved requirements; the flattened v1 export "
+        "cannot separate unresolved from failed predicates. A zero MAD "
+        "from a single assessed repetition does not establish repeatability.",
+    ]
+    lines += [
         "",
         "## Audit scope",
         "",
@@ -358,7 +467,15 @@ def main() -> None:
     )
     rows, _, integrity = load_package(args.package)
     report = {
-        "protocol": "independent-baseline-package-aggregate-audit-1",
+        "protocol": "independent-baseline-package-aggregate-audit-2",
+        "prediction_failure_policy": {
+            "rank": "+inf",
+            "terminal_statuses": ["failed", "timed_out"],
+            "target_statuses": ["failed"],
+            "apply_only_when_nmse_missing": True,
+            "unknown_outcome": "aggregate_unavailable",
+            "infinite_centre_mad": "undefined",
+        },
         "roster": roster,
         "integrity": integrity,
         "methods": summarize(rows, roster),
