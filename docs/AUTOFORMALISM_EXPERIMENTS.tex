@@ -1,0 +1,230 @@
+% Standalone section body. Requires amsmath, booktabs, graphicx, and natbib.
+% This is a prospective test-evaluation draft, not a report of completed tests.
+% Each AFResult key identifies an unmeasured result; see EXPERIMENTS_DRAFT_NOTES.md.
+% Override individual fields with \AFSetResult{key}{value} before this input.
+\providecommand{\AFSetResult}[2]{\expandafter\def\csname AFresult:#1\endcsname{#2}}
+\providecommand{\AFResult}[1]{\ifcsname AFresult:#1\endcsname\csname AFresult:#1\endcsname\else\textbf{TBD}\fi}
+
+\section{Experiments}
+\label{sec:experiments}
+
+We evaluate predictive accuracy, satisfaction of explicit mechanism requirements,
+and the contributions of scientific feedback and model simplification. We also
+test sensitivity to familiar terminology and canonical dynamics. Predictive
+accuracy and mechanism compliance are reported separately: a model can predict
+well while representing the wrong mechanism.
+
+\subsection{Experimental setup}
+\label{sec:exp_setup}
+
+\paragraph{Benchmarks.}
+We use nine benchmark cases from three families. The Dalla Man glucose--insulin
+system~\citep{dalla2007meal} supplies T1-easy, T1-hard, T2-easy, and T2-hard,
+which vary the requested mechanisms and available observations. T1-easy also
+includes obfuscated, perturbed, and jointly obfuscated--perturbed variants,
+giving seven Dalla Man cases. We add a named controlled stirred-tank reactor
+(CSTR) and a procedurally specified dynamical device. These are nine evaluation
+cases, not nine independent physical systems. The appendix specifies the public
+channels, outputs, and mechanism requirements of each case.
+
+\paragraph{Protocol.}
+Parameters are fitted on training trajectories; validation selects the retained
+model and pruning endpoint. Models, parameters, and causal initializers are
+frozen before test evaluation. Test trajectories are excluded from proposal,
+critique, fitting, pruning, and selection. We use GPT-OSS-20B as proposer and
+GPT-OSS-120B as advisory scientific critic. Each Autoformalism run has an initial
+construction and fourteen revision visits, with two seeds per case and prompt
+variant. We report both \emph{Full} and \emph{Brief-only}: the latter omits the
+trajectory summary from the initial construction prompt, while subsequent
+fitting and revision follow the same protocol. Neither variant is selected
+using test results.
+
+\paragraph{Metrics and aggregation.}
+Our primary predictive metric is test free-rollout NMSE, normalized by training
+output variances and averaged over target channels. Predicted targets are not
+reset to observations after initialization; permitted auxiliary channels remain
+available under the task's observation protocol. For \emph{formal mechanism
+compliance}, we evaluate explicit predicates on the assembled equations after
+substituting fitted parameters, independently of proposer annotations and LLM
+scores. Examples include a generated input-to-target path, an input-driven
+dynamic memory contributing to the target, and distinct required contributions
+to an output equation. Each obligation is pass, fail, or unresolved; unresolved
+obligations stay in the denominator. Passing these checks does not certify
+general scientific correctness. Fitted-activity probes and response-shape
+diagnostics are reported separately on their supported cases. Complexity counts
+additive terms, with states, parameters, and expression size in the appendix.
+Cost includes proposer and critic calls, including retries.
+
+We report medians and unscaled median absolute deviations (MAD),
+$\operatorname{MAD}(z)=\operatorname{median}_r
+|z_r-\operatorname{median}_{r'}z_{r'}|$.
+For each method and case we first summarize seeds; the overall result is the
+median and MAD of the nine case medians, giving each case equal weight.
+Full and Brief-only remain separate. Cross-case MAD describes benchmark
+heterogeneity, not a confidence interval. Completion coverage accompanies these summaries;
+failed and unavailable evaluations are identified rather than silently discarded.
+The appendix gives per-case results and a family-balanced sensitivity analysis.
+
+\subsection{Comparison with external baselines}
+\label{sec:exp_baselines}
+
+We compare with SINDy~\citep{brunton2016discovering},
+PySR~\citep{cranmer2023interpretable}, D3~\citep{holt2024data}, and an end-to-end
+GPT-5.6 Sol agent. All methods use the same permitted channels and data splits;
+methods supporting language additionally receive the public task specification.
+SINDy and PySR use their native numerical discovery procedures. The agent
+generates and fits its own executable model; we evaluate its submitted constants
+without an additional Autoformalism refit. D3 is evaluated through its native
+discrete increment rollout, whereas continuous-time candidates use ODE rollouts.
+Native training and validation-selection objectives, repetition counts, and
+budgets are disclosed in the appendix; a common evaluation protocol does not
+imply identical optimization budgets.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{External comparison on the frozen test split. NMSE, terms, and tokens
+are case-macro median [MAD]. P and U are case-macro median percentages of passed
+and unresolved formal obligations; their MADs and per-case counts appear in the
+appendix. Coverage is evaluated/planned runs, with failures itemized. D3 uses
+native discrete rollouts. Every \textbf{TBD} awaits a measured result.}
+\label{tab:exp_baselines}
+\begin{tabular}{lccccc}
+\toprule
+Method & NMSE $\downarrow$ & P $\uparrow$ / U & Terms $\downarrow$ &
+\shortstack{Tokens\\($10^3$)} & Coverage \\
+\midrule
+Ours (Full) & \AFResult{base.full.error} & \AFResult{base.full.mechanism} & \AFResult{base.full.terms} & \AFResult{base.full.tokens} & \AFResult{base.full.coverage} \\
+Ours (Brief-only) & \AFResult{base.brief.error} & \AFResult{base.brief.mechanism} & \AFResult{base.brief.terms} & \AFResult{base.brief.tokens} & \AFResult{base.brief.coverage} \\
+SINDy & \AFResult{base.sindy.error} & \AFResult{base.sindy.mechanism} & \AFResult{base.sindy.terms} & --- & \AFResult{base.sindy.coverage} \\
+PySR & \AFResult{base.pysr.error} & \AFResult{base.pysr.mechanism} & \AFResult{base.pysr.terms} & --- & \AFResult{base.pysr.coverage} \\
+D3 & \AFResult{base.d3.error} & \AFResult{base.d3.mechanism} & \AFResult{base.d3.terms} & \AFResult{base.d3.tokens} & \AFResult{base.d3.coverage} \\
+GPT-5.6 Sol agent & \AFResult{base.agent.error} & \AFResult{base.agent.mechanism} & \AFResult{base.agent.terms} & \AFResult{base.agent.tokens} & \AFResult{base.agent.coverage} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:exp_baselines} compares accuracy, formal compliance, complexity,
+and cost on a common benchmark roster. Across matched cases, the ratios of each
+baseline's median NMSE to ours and the number of cases favoring each method are
+\AFResult{base.paired_comparison_sentence}.
+The corresponding compliance--accuracy trade-off is
+\AFResult{base.mechanism_comparison_sentence}.
+These comparisons distinguish predictive success from satisfaction of the
+specified model requirements; no LLM preference score supplies the evaluation
+label.
+
+\subsection{Ablation study}
+\label{sec:exp_ablations}
+
+\paragraph{Scientific critic and deterministic verifier.}
+We run a $2\times2$ ablation on all nine cases: both components, verifier only,
+critic only, and neither. The critic supplies scientific revision advice but
+does not select or veto models. Removing the verifier disables scientific
+admission, repair-feedback, and pruning gates, while preserving executable-model
+checks such as grammar, defined targets, causal initialization, and absence of
+algebraic cycles. Every arm retains the same specification, fitting budget, and
+revision allowance; the same independent equation assessment is applied to all
+arms. Thus, this experiment separates the effect of scientific advice from
+enforcement of formal requirements.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\caption{Critic/verifier ablation on all nine cases. C: scientific critic;
+V: deterministic scientific verifier. Each entry gives case-macro median [MAD].
+Formal compliance counts unresolved obligations in its denominator; unresolved
+rates and completion coverage are reported alongside the per-case results.}
+\label{tab:exp_critic_verifier}
+\begin{tabular}{lccccc}
+\toprule
+Prompt & C & V & Test NMSE $\downarrow$ & Formal pass (\%) $\uparrow$ & Tokens ($10^3$) \\
+\midrule
+Full & On & On & \AFResult{cv.full.both.error} & \AFResult{cv.full.both.pass} & \AFResult{cv.full.both.tokens} \\
+Full & Off & On & \AFResult{cv.full.verifier.error} & \AFResult{cv.full.verifier.pass} & \AFResult{cv.full.verifier.tokens} \\
+Full & On & Off & \AFResult{cv.full.critic.error} & \AFResult{cv.full.critic.pass} & \AFResult{cv.full.critic.tokens} \\
+Full & Off & Off & \AFResult{cv.full.neither.error} & \AFResult{cv.full.neither.pass} & \AFResult{cv.full.neither.tokens} \\
+\midrule
+Brief-only & On & On & \AFResult{cv.brief.both.error} & \AFResult{cv.brief.both.pass} & \AFResult{cv.brief.both.tokens} \\
+Brief-only & Off & On & \AFResult{cv.brief.verifier.error} & \AFResult{cv.brief.verifier.pass} & \AFResult{cv.brief.verifier.tokens} \\
+Brief-only & On & Off & \AFResult{cv.brief.critic.error} & \AFResult{cv.brief.critic.pass} & \AFResult{cv.brief.critic.tokens} \\
+Brief-only & Off & Off & \AFResult{cv.brief.neither.error} & \AFResult{cv.brief.neither.pass} & \AFResult{cv.brief.neither.tokens} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:exp_critic_verifier} shows
+\AFResult{cv.interpretation_sentence}.
+We quantify each component by matched case/prompt/seed differences with the
+other component fixed, rather than by comparing unmatched pools of successful
+runs. Additional critic cost is reported explicitly.
+
+\paragraph{Shared processes and pruning.}
+We isolate these components on canonical named T1-easy, T1-hard, T2-easy, and
+T2-hard with both critic and verifier enabled. Disabling shared processes removes
+the dedicated proposal and assembly stage; ordinary algebraic reuse remains
+possible. Pruning is compared with the identical final search parent and with an
+unchanged-model refit using the same additional fitting budget. Deletion is
+ranked on training rollouts; validation chooses among the parent, control, and
+pruned candidate using the fixed tolerance described in the method.
+Relative to these matched controls, the test-error and complexity changes are
+\AFResult{secondary.interpretation_sentence}.
+This restricted comparison avoids a Cartesian sweep of all components. Detailed
+paired results, including skipped and rejected deletions, appear in the appendix.
+
+\subsection{How specifications guide discovery}
+\label{sec:exp_specification_case}
+% Insert Orion's case study here. No conclusions from that experiment are
+% assumed by the baseline, ablation, or memorization draft.
+\AFResult{specification.case_study_text}
+
+\subsection{Dependence on familiar models and terminology}
+\label{sec:exp_memorization}
+
+To investigate whether success depends on familiar equations or semantic cues,
+we use the T1-easy $2\times2$ design: canonical versus perturbed dynamics,
+crossed with named versus obfuscated presentation
+(Table~\ref{tab:exp_memorization}). Named and obfuscated versions share numerical
+data up to renaming and preserve the operational task requirements. Canonical
+and perturbed dynamics use matched experimental schedules but different
+generating dynamics. SINDy and PySR provide numerical controls because they do
+not consume the textual specification.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\caption{T1-easy controls for dependence on familiar cues. Test NMSE is median
+[MAD] across repetitions within each cell. Ratios are computed within matched
+repetitions before aggregation. Presentation changes preserve numerical data;
+changing dynamics also changes the numerical identification problem.}
+\label{tab:exp_memorization}
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{Canonical dynamics} & \multicolumn{2}{c}{Perturbed dynamics} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Method & Named & Obfuscated & Named & Obfuscated \\
+\midrule
+Ours (Full) & \AFResult{mem.full.cn} & \AFResult{mem.full.co} & \AFResult{mem.full.pn} & \AFResult{mem.full.po} \\
+Ours (Brief-only) & \AFResult{mem.brief.cn} & \AFResult{mem.brief.co} & \AFResult{mem.brief.pn} & \AFResult{mem.brief.po} \\
+SINDy & \AFResult{mem.sindy.cn} & \AFResult{mem.sindy.co} & \AFResult{mem.sindy.pn} & \AFResult{mem.sindy.po} \\
+PySR & \AFResult{mem.pysr.cn} & \AFResult{mem.pysr.co} & \AFResult{mem.pysr.pn} & \AFResult{mem.pysr.po} \\
+D3 & \AFResult{mem.d3.cn} & \AFResult{mem.d3.co} & \AFResult{mem.d3.pn} & \AFResult{mem.d3.po} \\
+GPT-5.6 Sol agent & \AFResult{mem.agent.cn} & \AFResult{mem.agent.co} & \AFResult{mem.agent.pn} & \AFResult{mem.agent.po} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For each method, we summarize the paired ratios
+$E_{\mathrm{obfuscated}}/E_{\mathrm{named}}$ within a dynamics condition and
+$E_{\mathrm{perturbed}}/E_{\mathrm{canonical}}$ within a presentation, where
+$E$ is test NMSE. The resulting sensitivity pattern is
+\AFResult{mem.interpretation_sentence}.
+A naming gap measures dependence on semantic cues; robustness to perturbed
+dynamics provides evidence against success through unchanged canonical-equation
+retrieval alone. Neither result identifies training-set memorization: semantic
+information, optimization difficulty, and model misspecification can also
+produce these gaps. We therefore interpret this experiment as a controlled
+test of reliance on familiar models, rather than proof of data contamination.

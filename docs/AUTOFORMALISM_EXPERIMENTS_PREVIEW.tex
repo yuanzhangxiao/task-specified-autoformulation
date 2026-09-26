@@ -1,0 +1,46 @@
+\documentclass[10pt]{article}
+\usepackage[letterpaper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage{amsmath,booktabs,graphicx}
+\usepackage[round,authoryear]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Autoformalism: experiment-section draft}
+\fancyhead[R]{25 September 2026}
+\fancyfoot[C]{\thepage}
+\setlength{\headheight}{14pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\setlength{\textfloatsep}{12pt plus 2pt minus 2pt}
+\setcounter{section}{4}
+\begin{document}
+\begingroup\small
+\textbf{Draft status.} The protocol is written for the intended frozen test
+evaluation. \textbf{TBD} fields are unmeasured results, not zeroes. No validation
+numbers have been relabeled as test results. The specification case study is
+reserved for Orion. This standalone preview does not replace the paper source.
+\par\endgroup
+\input{docs/AUTOFORMALISM_EXPERIMENTS.tex}
+\bibliographystyle{plainnat}
+\begin{thebibliography}{4}
+\bibitem[Brunton et~al.(2016)]{brunton2016discovering}
+Steven~L. Brunton, Joshua~L. Proctor, and J.~Nathan Kutz.
+Discovering governing equations from data by sparse identification of nonlinear
+dynamical systems. \emph{PNAS}, 113(15):3932--3937, 2016.
+\bibitem[Cranmer(2023)]{cranmer2023interpretable}
+Miles Cranmer. Interpretable machine learning for science with PySR and
+SymbolicRegression.jl. \emph{arXiv:2305.01582}, 2023.
+\bibitem[Dalla Man et~al.(2007)]{dalla2007meal}
+Chiara Dalla Man, Robert~A. Rizza, and Claudio Cobelli.
+Meal simulation model of the glucose-insulin system.
+\emph{IEEE Transactions on Biomedical Engineering}, 54(10):1740--1749, 2007.
+\bibitem[Holt et~al.(2024)]{holt2024data}
+Samuel Holt, Zhaozhi Qian, Tennison Liu, Jim Weatherall, and Mihaela van~der Schaar.
+Data-driven discovery of dynamical systems in pharmacology using large language
+models. \emph{Advances in Neural Information Processing Systems},
+37:96325--96366, 2024.
+\end{thebibliography}
+\end{document}
