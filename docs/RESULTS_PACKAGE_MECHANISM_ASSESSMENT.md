@@ -86,7 +86,7 @@ export AF_ASSESSMENT=/work/hdd/bibo/yxiao2/phase_b/package-mechanism-activity-v1
 export AF_PUBLIC_ROOT="$("$AF_PYTHON" - <<'PY'
 import json
 from pathlib import Path
-record = Path('/work/hdd/bibo/yxiao2/phase_b/external-baseline-evaluation-v1/execution_record.json')
+record = Path('/work/hdd/bibo/yxiao2/phase_b/external-baseline-evaluation-v1/frozen/execution_record.json')
 print(json.loads(record.read_text())['public_data_root'])
 PY
 )"

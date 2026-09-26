@@ -150,6 +150,8 @@ The development loader opens training and validation files to verify their
 identities; only training arrays define numerical probes. Test files are not
 opened. No fitting, LLM calls, model selection or promotion occurs.
 
+The v2 package manifest records the evaluation receipt under
+`external-baseline-evaluation-v1/frozen/execution_record.json`.
 Use a pinned source archive. Set `AF_REPO_ROOT` to that extracted repository, then:
 
 ```bash
@@ -165,7 +167,7 @@ Use a pinned source archive. Set `AF_REPO_ROOT` to that extracted repository, th
   AF_PUBLIC_ROOT=$("$AF_PYTHON" - <<'PY'
 import json
 from pathlib import Path
-p = Path('/work/hdd/bibo/yxiao2/phase_b/external-baseline-evaluation-v1/execution_record.json')
+p = Path('/work/hdd/bibo/yxiao2/phase_b/external-baseline-evaluation-v1/frozen/execution_record.json')
 print(json.loads(p.read_text())['public_data_root'])
 PY
 )
