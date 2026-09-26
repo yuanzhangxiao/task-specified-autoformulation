@@ -181,9 +181,9 @@ from nine independent-domain trials.
 
 Do not retrofit the historical no-specification, no-latent, or refit-only runs into
 the fresh component matrix. Those used different search protocols and coverage.
-If retained, label them development-only exploratory results. Orion's case study
-can address specification benefit without pretending those older runs are a
-matched fresh test ablation.
+If retained, label them development-only exploratory results. The R9 case study
+illustrates dependency-sensitive intervention responses; it does not establish
+a benefit of specification-guided discovery or a matched fresh test ablation.
 
 ## Interpreting familiar-model controls
 
@@ -237,7 +237,7 @@ cp tmp/pdfs/experiment-draft/autoformalism-experiments-draft.pdf output/pdf/
 Section 5.4 compares assisted Brief-only R9, the historical no-specification
 endpoint, and Sol repetition 0 on canonical-obfuscated T1-easy. Sol 0 is selected
 by its original validation NMSE, not by the new intervention results. All three
-Sol repetitions appear in the response-robustness table and supporting plots.
+Sol repetitions appear in the appendix's response-robustness table and supporting plots.
 R9 is explicitly assisted; seeds/search budgets differ and this is not the new
 matched component experiment. No new fit, rollout, provider call or test-data
 access is involved in producing the section.
@@ -249,6 +249,20 @@ no-specification model cannot respond to initial tissue-glucose changes because
 its equations and initializers omit every auxiliary channel. T1 does not
 explicitly require Gt, so this is not presented as a formal requirement failure
 or a causal estimate of the specification's benefit.
+
+The main-text version is now approximately 220 words, with no display equations,
+figure or table. It explains the task and the physical intuition: the same
+initial blood-glucose reading can coexist with different tissue-glucose amounts,
+which change subsequent glucose exchange. This is a synthetic initial-condition
+probe, not a specific therapy. In the paper's NeurIPS layout, the text occupies
+approximately one third of a page, including its subsection heading.
+
+The complete former Section 5.4 is preserved in
+`docs/AUTOFORMALISM_INTERVENTIONAL_CASE_APPENDIX.tex`, changing only the section
+heading/label and adding an independent figure-path default. Input that file
+after `\appendix`; the main text references `app:interventional_discrimination`.
+The standalone preview includes the appendix after the references. Its six-page
+PDF has resolved cross-references and no overfull/underfull box warnings.
 
 Generate figures and portable data from the existing saved artifacts:
 
