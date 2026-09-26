@@ -19,8 +19,44 @@ else:
 REPO = Path(__file__).resolve().parents[1]
 
 
-def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
-    """One snapshot, one model array, one report; never advance the search."""
+def rejected_array(root: Path, identity: dict) -> tuple[str, dict]:
+    """Reuse preparation only after an explicit, job-ID-free QoS rejection."""
+    directory = root / "submission-intent"
+    previous = public._read(directory / "identity.json")
+    for key in ("source", "root", "source_plan_sha256", "round", "python", "account"):
+        if previous[key] != identity[key]:
+            raise ValueError(f"recovery source identity differs: {key}")
+    reply = public._read(directory / "assess.reply.json")
+    error = reply.get("stderr", "")
+    if (
+        reply.get("status") == "uncertain_timeout"
+        or reply.get("stdout", "").strip()
+        or "QOSMaxSubmitJobPerUserLimit" not in error
+        or "Batch job submission failed" not in error
+        or (directory / "assess.id").exists()
+        or any(directory.glob("report.*"))
+    ):
+        raise ValueError("require explicit QoS rejection without an assessment job ID")
+    prepare = (directory / "prepare.id").read_text().strip()
+    receipt = public._read(directory / "prepare.reply.json")
+    if (
+        not prepare.isdecimal()
+        or receipt.get("returncode") != 0
+        or receipt.get("stdout", "").strip().split(";")[0] != prepare
+    ):
+        raise ValueError("preparation job receipt differs")
+    return prepare, previous
+
+
+def submit(
+    source: Path,
+    root: Path,
+    round_index: int | None = None,
+    *,
+    workers: int = 4,
+    resume_qos_rejection: bool = False,
+) -> dict:
+    """One snapshot, a small CPU worker pool, one report; never advance search."""
     source, root = source.resolve(), root.resolve()
     if root.is_relative_to(source) or source.is_relative_to(root):
         raise ValueError("source and assessment roots must be separate")
@@ -29,6 +65,9 @@ def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
         raise ValueError("unsupported source campaign")
     if round_index is not None and not 0 <= round_index < old["config"]["rounds"]:
         raise ValueError("round outside campaign")
+    if workers < 1 or not old["tasks"]:
+        raise ValueError("require positive workers and a nonempty campaign")
+    workers = min(workers, len(old["tasks"]))
     commit = source_commit(REPO)
     python = os.environ["AF_PYTHON"]
     if not Path(python).is_file():
@@ -43,6 +82,8 @@ def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
         "round": round_index,
         "python": python,
         "account": os.environ.get("AF_ACCOUNT", "156264627414"),
+        "workers": workers,
+        "scheduling_policy": "component-mechanism-cpu-pool-1",
     }
     os.environ.update(
         AF_REPO_ROOT=str(REPO),
@@ -51,6 +92,7 @@ def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
         AF_COMMIT=commit,
         AF_SNAPSHOT_ROUND="" if round_index is None else str(round_index),
         PYTHONDONTWRITEBYTECODE="1",
+        AF_MECHANISM_WORKERS=str(workers),
     )
     with public._lock(root / "scheduler"):
         manifest = root / "submission.json"
@@ -59,7 +101,12 @@ def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
             if saved["identity"] != identity:
                 raise ValueError("submission identity differs")
             return saved
-        intent = root / "submission-intent"
+        prepare, recovered = None, None
+        if resume_qos_rejection:
+            prepare, recovered = rejected_array(root, identity)
+        intent = root / (
+            "submission-pool-intent" if resume_qos_rejection else "submission-intent"
+        )
         if intent.exists():
             raise ValueError(
                 "partial submission: inspect saved receipts before retrying"
@@ -69,7 +116,7 @@ def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
         (root / "logs").mkdir(exist_ok=True)
         jobs = {}
 
-        def queue(stage, extra):
+        def queue(stage, extra, worker_stage=None):
             jobs[stage] = submit_job(
                 intent,
                 stage,
@@ -87,20 +134,31 @@ def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
                     *extra,
                 ],
                 REPO / "scripts/hpc/run_component_mechanisms_aces.sh",
-                stage,
+                worker_stage or stage,
                 0,
             )
             return jobs[stage]
 
-        prepare = queue("prepare", ["--mem=16G", "--time=00:30:00"])
+        if prepare is None:
+            prepare = queue("prepare", ["--mem=16G", "--time=00:30:00"])
+        else:
+            jobs["prepare"] = prepare
+            public._write(
+                intent / "reused-prepare.json",
+                {
+                    "job": prepare,
+                    "original_submission": recovered,
+                },
+            )
         array = queue(
             "assess",
             [
                 f"--dependency=afterok:{prepare}",
-                f"--array=0-{len(old['tasks']) - 1}%8",
+                f"--array=0-{workers - 1}",
                 "--mem=8G",
-                "--time=03:00:00",
+                "--time=06:00:00",
             ],
+            worker_stage="assess-pool",
         )
         queue(
             "report", [f"--dependency=afterany:{array}", "--mem=8G", "--time=00:15:00"]
@@ -109,6 +167,8 @@ def submit(source: Path, root: Path, round_index: int | None = None) -> dict:
             "identity": identity,
             "jobs": jobs,
             "models": len(old["tasks"]),
+            "workers": workers,
+            "reused_prepare_job": prepare if recovered else None,
             "llm_calls": 0,
             "optimizer_calls": 0,
             "gpus": 0,
@@ -126,5 +186,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--round", type=int, help="Default: latest retained at snapshot"
     )
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--resume-qos-rejection",
+        action="store_true",
+        help="Reuse a confirmed prepare job after the saved array QoS rejection",
+    )
     args = parser.parse_args()
-    print(json.dumps(submit(args.source, args.root, args.round), indent=2))
+    print(
+        json.dumps(
+            submit(
+                args.source,
+                args.root,
+                args.round,
+                workers=args.workers,
+                resume_qos_rejection=args.resume_qos_rejection,
+            ),
+            indent=2,
+        )
+    )

@@ -11,6 +11,7 @@ import pytest
 from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from scripts import export_component_mechanisms as export
+from scripts import run_component_mechanism_pool as pool
 from scripts import submit_component_mechanisms as submitter
 from scripts import summarize_functional_mechanisms as summary
 from scripts.smoke_public_fitting import control
@@ -262,6 +263,7 @@ def test_submit_cpu_only_idempotent_and_uncertain_receipts(tmp_path, monkeypatch
     value = submitter.submit(source, output)
     assert len(calls) == 3 and value["models"] == 1
     assert "--dependency=afterok:101" in calls[1][1]
+    assert "--array=0-0" in calls[1][1]
     assert "--dependency=afterany:102" in calls[2][1]
     assert submitter.submit(source, output) == value and len(calls) == 3
     with pytest.raises(ValueError, match="identity differs"):
@@ -270,3 +272,155 @@ def test_submit_cpu_only_idempotent_and_uncertain_receipts(tmp_path, monkeypatch
     (interrupted / "submission-intent").mkdir(parents=True)
     with pytest.raises(ValueError, match="partial submission"):
         submitter.submit(source, interrupted)
+
+
+def qos_receipts(source, output, monkeypatch):
+    """Build the exact legacy failure shape: wrapper exit zero, no array job ID."""
+    plan, _ = fixture(source)
+    monkeypatch.setattr(submitter.os, "environ", dict(submitter.os.environ))
+    monkeypatch.setenv("AF_PYTHON", sys.executable)
+    monkeypatch.setenv("AF_COMMIT", "b" * 40)
+    monkeypatch.setenv("AF_ACCOUNT", "156264627414")
+    monkeypatch.setattr(submitter, "source_commit", lambda *_: "b" * 40)
+    # Match the live 160-row roster without making numerical calls in this test.
+    plan = {k: v for k, v in plan.items() if k != "artifact_sha256"}
+    plan["tasks"] = [{**plan["tasks"][0], "task_id": f"toy-{i}"} for i in range(160)]
+    (source / "plan.json").unlink()
+    plan = sealed_write(source / "plan.json", plan)
+    directory = output / "submission-intent"
+    directory.mkdir(parents=True)
+    public._write(
+        directory / "identity.json",
+        {
+            "commit": "a" * 40,
+            "source": str(source.resolve()),
+            "root": str(output.resolve()),
+            "source_plan_sha256": plan["artifact_sha256"],
+            "round": None,
+            "python": sys.executable,
+            "account": "156264627414",
+        },
+    )
+    (directory / "prepare.id").write_text("2164259\n")
+    public._write(
+        directory / "prepare.reply.json",
+        {
+            "returncode": 0,
+            "stdout": "2164259\n",
+            "stderr": "",
+        },
+    )
+    public._write(
+        directory / "assess.reply.json",
+        {
+            "returncode": 0,
+            "stdout": "\n",
+            "stderr": "QOSMaxSubmitJobPerUserLimit\nBatch job submission failed\n",
+        },
+    )
+    return directory
+
+
+def test_recover_rejected_160_array_with_four_workers(tmp_path, monkeypatch):
+    source, output = tmp_path / "source", tmp_path / "assessment"
+    directory = qos_receipts(source, output, monkeypatch)
+    previous = {p.name: p.read_bytes() for p in directory.iterdir()}
+    calls = []
+
+    def queue(directory, key, options, worker, stage, index):
+        calls.append((key, options, stage))
+        return str(300 + len(calls))
+
+    monkeypatch.setattr(submitter, "submit_job", queue)
+    result = submitter.submit(source, output, resume_qos_rejection=True)
+    assert [c[0] for c in calls] == ["assess", "report"]
+    assert "--array=0-3" in calls[0][1]
+    assert "--dependency=afterok:2164259" in calls[0][1]
+    assert calls[0][2] == "assess-pool"
+    assert "--dependency=afterany:301" in calls[1][1]
+    assert result["reused_prepare_job"] == "2164259"
+    assert result["models"] == 160 and result["workers"] == 4
+    assert submitter.os.environ["AF_MECHANISM_WORKERS"] == "4"
+    assert {p.name: p.read_bytes() for p in directory.iterdir()} == previous
+    assert submitter.submit(source, output, resume_qos_rejection=True) == result
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "timeout",
+        "stdout",
+        "assess_id",
+        "report",
+        "prepare",
+        "source",
+    ],
+)
+def test_recovery_rejects_ambiguous_or_different_receipts(
+    tmp_path, monkeypatch, change
+):
+    source, output = tmp_path / "source", tmp_path / "assessment"
+    directory = qos_receipts(source, output, monkeypatch)
+    if change in {"timeout", "stdout"}:
+        path = directory / "assess.reply.json"
+        value = public._read(path)
+        value.update(
+            {"status": "uncertain_timeout"}
+            if change == "timeout"
+            else {"stdout": "12345\n"}
+        )
+        public._write(path, value)
+    elif change == "assess_id":
+        (directory / "assess.id").write_text("12345\n")
+    elif change == "report":
+        public._write(directory / "report.intent.json", {})
+    elif change == "prepare":
+        (directory / "prepare.id").write_text("99999\n")
+    else:
+        path = directory / "identity.json"
+        value = public._read(path)
+        value["source_plan_sha256"] = "different"
+        public._write(path, value)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("must not submit a job from ambiguous receipts")
+
+    monkeypatch.setattr(submitter, "submit_job", forbidden)
+    with pytest.raises(ValueError):
+        submitter.submit(source, output, resume_qos_rejection=True)
+    assert not (output / "submission-pool-intent").exists()
+
+
+def test_pool_exact_coverage_and_reuses_per_model_checkpoints(tmp_path, monkeypatch):
+    identity = {"runtime": "unchanged"}
+    sealed_write(
+        tmp_path / "plan.json",
+        {
+            "protocol": pool.campaign.PROTOCOL,
+            "rows": list(range(160)),
+            "code_identity": identity,
+        },
+    )
+    monkeypatch.setattr(pool.campaign, "code_identity", lambda: identity)
+    calls, evaluated = [], []
+
+    def existing_runner(root, index):
+        calls.append(index)
+        path = root / "results" / str(index) / "result.json"
+        if path.exists():
+            return sealed_read(path)
+        evaluated.append(index)
+        return sealed_write(path, {"status": "assessed", "index": index})
+
+    monkeypatch.setattr(pool.campaign, "run", existing_runner)
+    for worker in range(4):
+        assert pool.run(tmp_path, worker, 4)["indices"] == list(range(worker, 160, 4))
+    assert sorted(calls) == list(range(160))
+    pool.run(tmp_path, 2, 4)
+    assert len(evaluated) == 160  # Existing runner resumes each saved model.
+    monkeypatch.setattr(pool.campaign, "code_identity", lambda: {"runtime": "changed"})
+    with pytest.raises(ValueError, match="source changed"):
+        pool.run(tmp_path, 0, 4)
+    with pytest.raises(ValueError, match="positive workers"):
+        pool.run(tmp_path, 0, 0)

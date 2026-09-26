@@ -51,9 +51,17 @@ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
   --root /scratch/group/p.nairr260351.000/u.yx126462/component-mechanisms-v1
 ```
 
-The launcher submits a CPU preparation job, a one-CPU/8-GB/three-hour array with
-eight concurrent workers, and a reporting job. The array includes all 160 planned
-lineages. The source campaign's `public/` directory supplies public data; its
+The launcher submits a CPU preparation job, a **four-task worker array**, and a
+reporting job. Each worker requests one CPU, 8 GB and six hours and processes a
+deterministic shard of the 160 planned lineages sequentially. `--workers` changes
+the worker count. The previous one-task-per-model array could exceed the ACES
+per-user submission limit: `%8` constrained execution concurrency, but all 160
+array elements still counted toward that limit. The pool defaults to only six
+submitted tasks including preparation and reporting. Per-model numerical budgets,
+locks, checkpoints and scoring remain unchanged. If a worker reaches its wall
+limit, completed results remain available for explicit checkpointed recovery.
+
+The source campaign's `public/` directory supplies public data; its
 training/validation identities and prompt hashes are checked by the same adapter
 used for the baselines. Preparation needs 16 GB for the embedded campaign plan.
 Account defaults to `156264627414` and can be set with `AF_ACCOUNT`.
@@ -62,6 +70,29 @@ Submission receipts are durable. Repeating an identical successful submission
 returns its saved job IDs; partial scheduler submissions require inspection of
 the receipts, not silent resubmission. Worker results and numerical rollout
 checkpoints retain the original assessment's immutable resume rules.
+
+### Recover the rejected 160-task submission
+
+Use the updated source archive with the same Python environment and original
+source/output paths, then run:
+
+```bash
+"$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_component_mechanisms.py" \
+  --source /scratch/group/p.nairr260351.000/u.yx126462/final-components-v1 \
+  --root /scratch/group/p.nairr260351.000/u.yx126462/component-mechanisms-v1 \
+  --workers 4 --resume-qos-rejection
+```
+
+This requires the saved `QOSMaxSubmitJobPerUserLimit` rejection with empty stdout,
+no assessment job ID or report submission, and a matching preparation receipt.
+It handles the ACES wrapper returning exit code zero despite rejection. The
+existing preparation job (2164259 in the reported failure) is reused via an
+`afterok` dependency; no second export or preparation job is submitted. Original
+receipts are preserved in `submission-intent`; new receipts are written under
+`submission-pool-intent`, and success writes the usual `submission.json`.
+An ambiguous scheduler timeout or possible accepted array is not auto-resubmitted.
+Workers verify the prepared numerical code/environment identity before assessing
+models; changing only these orchestration scripts does not change that identity.
 
 ```bash
 AF_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/component-mechanisms-v1
@@ -112,9 +143,18 @@ result with the nine-case confirmed-certification figures.
 
 ## Verification
 
-The full test suite passed (3,528 passed, eight skipped), with nine focused
-export/report/submission tests passing after the final submission test was added.
+Initial exporter validation passed the full suite (3,528 passed, eight skipped),
+with nine focused export/report/submission tests passing after the final
+submission test was added.
 A read-only smoke check reproduced the lowered equations and fitted parameter
 names for all 78 available retained models in the Dalla inspection archive.
 CLI help, shell syntax and changed-file Ruff checks passed. Repository-wide Ruff
 reported 37 existing findings in unrelated `analysis/claude` files.
+
+The worker-pool recovery passed 17 focused tests and 48 related mechanism tests.
+A subprocess CLI smoke assessed five unavailable-model records in two shards and
+preserved all saved results on resume. A byte comparison against the preparation
+commit verified that all 316 numerical source, assessment CLI and rubric files
+were unchanged. The recovery tests cover the site's zero-exit-code rejection,
+reuse of preparation, exact 160-model coverage, duplicate submission prevention,
+and refusal of ambiguous job receipts or changed source identities.

@@ -31,6 +31,11 @@ case "${1:?stage required}" in
     "$python" "$repo/scripts/assess_functional_mechanisms.py" run \
       --root "$root" --index "${SLURM_ARRAY_TASK_ID:?array index required}"
     ;;
+  assess-pool)
+    "$python" "$repo/scripts/run_component_mechanism_pool.py" \
+      --root "$root" --worker "${SLURM_ARRAY_TASK_ID:?array index required}" \
+      --workers "${AF_MECHANISM_WORKERS:?worker count required}"
+    ;;
   report)
     "$python" "$repo/scripts/assess_functional_mechanisms.py" report --root "$root"
     "$python" "$repo/scripts/summarize_functional_mechanisms.py" \
