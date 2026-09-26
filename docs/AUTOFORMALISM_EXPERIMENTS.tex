@@ -1,9 +1,12 @@
 % Standalone section body. Requires amsmath, booktabs, graphicx, and natbib.
-% This is a prospective test-evaluation draft, not a report of completed tests.
+% Main tables are prospective test results; the labeled case study is measured
+% exploratory evidence from frozen historical models, not a new test estimate.
 % Each AFResult key identifies an unmeasured result; see EXPERIMENTS_DRAFT_NOTES.md.
 % Override individual fields with \AFSetResult{key}{value} before this input.
 \providecommand{\AFSetResult}[2]{\expandafter\def\csname AFresult:#1\endcsname{#2}}
 \providecommand{\AFResult}[1]{\ifcsname AFresult:#1\endcsname\csname AFresult:#1\endcsname\else\textbf{TBD}\fi}
+% Override this directory when moving the section into the paper source tree.
+\providecommand{\AFCaseStudyFigures}{output/pdf/assisted-r9-case-study}
 
 \section{Experiments}
 \label{sec:experiments}
@@ -174,11 +177,127 @@ Relative to these matched controls, the test-error and complexity changes are
 This restricted comparison avoids a Cartesian sweep of all components. Detailed
 paired results, including skipped and rejected deletions, appear in the appendix.
 
-\subsection{How specifications guide discovery}
+\subsection{Interventional discrimination}
 \label{sec:exp_specification_case}
-% Insert Orion's case study here. No conclusions from that experiment are
-% assumed by the baseline, ablation, or memorization draft.
-\AFResult{specification.case_study_text}
+
+Similar trajectory errors can conceal different responses to a changed
+physical condition. We illustrate this on canonical, obfuscated T1-easy using
+three historical models: an assisted Autoformalism Brief-only endpoint
+(\emph{R9}), a no-specification endpoint, and a GPT-5.6 Sol model. R9 underwent
+assisted sign repair, training-only refitting, and validation-selected pruning;
+it is not an unassisted Full run. We compare fixed endpoints from different
+seeds and search histories, separately from the matched ablation study above.
+Their pooled training NMSEs are similar: 0.0416, 0.0436, and 0.0368,
+respectively. Figure~\ref{fig:exp_interventional_case} shows single- and
+double-meal training examples; all three models have
+NMSE below 0.044 on both. The Sol endpoint is repetition 0, which has the
+lowest original validation NMSE among its three repetitions
+(0.0142 versus 0.0453 and 0.0310), rather than the best result on the new probes.
+
+\paragraph{An omitted dependency makes a response impossible.}
+We change initial tissue glucose $G_t(0)$ by $\pm20\%$, keeping initial plasma
+glucose $G_p(0)$, the meal schedule, and all other physical initial states fixed.
+This changes initial total glucose mass. The physical simulator regenerates
+the target and every permitted auxiliary trajectory together; learned models
+retain their fitted parameters and causal initializers. As required by T1-easy,
+prediction is conditional on the supplied auxiliary trajectories, not an
+autonomous simulation of all physiology. The no-specification model has three
+latent states but ignores all physiological auxiliary channels, so
+\begin{equation}
+  \widehat G_p(t)=F_\theta\bigl(t,u_{[0,t]},G_p(0)\bigr).
+  \label{eq:exp_missing_dependency}
+\end{equation}
+Its fitted latent initial values are constants. Consequently, changing $G_t(0)$
+while preserving the arguments of $F_\theta$ leaves its prediction unchanged.
+R9 instead retains an active tissue-return term,
+\begin{equation}
+  \dot G_p = h_\theta(B,H,U_{\rm ii},{\rm EGP},u)
+       +0.1377G_t-0.09523G_p,
+  \label{eq:exp_active_dependency}
+\end{equation}
+where $B,H$ are its evolving meal-related contributions. This has the positive
+direction of the canonical tissue-return flux $+0.079G_t$, although R9's
+coefficients and other fluxes remain approximate. Sol 0 has no additional
+latent state and compensating fitted auxiliary gains, including
+$+0.9735G_t-18.9703\,\mathrm{EGP}-0.5936G_p$ in its plasma equation.
+Its excessive response here follows from these fitted gains; absence of extra
+latent states alone does not establish the failure.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{\AFCaseStudyFigures/r9_case_study.pdf}
+  \caption{\textbf{Comparable training fit, different intervention responses.}
+  Canonical obfuscated T1-easy; symbols are decoded for interpretation.
+  (a,d) Original training trajectories: a 60 g meal at minute 0 and meals of
+  30/60 g at minutes 0/120. (b,c) Absolute fasting trajectories after changing
+  initial tissue glucose by $-20\%$ or $+20\%$, with the same initial plasma
+  glucose. (e,f) Each trajectory minus that model's own unperturbed fasting
+  control. No-specification cannot respond to the omitted tissue channel;
+  validation-selected Sol 0 overreacts; assisted R9 captures more of the
+  response but retains baseline error. Parameters and initializers are frozen.
+  Both intervention directions are shown; R9 does not uniformly win absolute
+  NMSE. Complete trajectory grids and all Sol repetitions accompany the figure.}
+  \label{fig:exp_interventional_case}
+\end{figure*}
+
+\paragraph{Response fidelity and absolute accuracy answer different questions.}
+For intervention $c$ and its matched control $c_0$, define
+$\Delta_c G_p=G_p^{(c)}-G_p^{(c_0)}$ and subtract each model's own control to
+obtain $\Delta_c\widehat G_p$. The response error is
+\begin{equation}
+  R_c=\frac{\sum_i[\Delta_c\widehat G_p(t_i)-\Delta_cG_p(t_i)]^2}
+                 {\sum_i[\Delta_cG_p(t_i)]^2}.
+  \label{eq:exp_response_error}
+\end{equation}
+All reported contrasts have nonzero denominators; predicting no effect gives
+$R_c=1$. For fasting $G_t(0)-20\%$, R9 and Sol 0 have absolute NMSE
+0.00932 and 0.01985, and response errors 0.126 and 0.901. No-specification's
+response error is exactly 1. The positive perturbation illustrates why both
+metrics matter: R9 has a smaller response error than Sol 0 (0.177 versus
+1.543), but a larger absolute NMSE (0.01944 versus 0.01178).
+
+We retain the entire five-contrast suite: both tissue perturbations under
+fasting and under a 60 g meal at minute 60, plus splitting that meal into
+30 g at minutes 60 and 90 versus the unsplit control. Table~\ref{tab:exp_response_robustness}
+reports the maximum error within this finite suite for every Sol repetition.
+R9's worst observed response error is lower than each Sol repetition's, while
+each Sol repetition has lower worst absolute trajectory NMSE. Thus the result
+concerns intervention-response fidelity, not uniform predictive superiority or
+a worst-case guarantee beyond these probes. On the meal/$G_t(0)-20\%$ probe,
+R9's absolute NMSE is 0.0566, versus 0.397--0.605 for D3,
+0.728--1.190 for PySR, and 1.190 for SINDy across their three repetitions;
+those baselines already have substantially worse training fits.
+
+\begin{table}[t]
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \caption{\textbf{All frozen Sol repetitions, without selecting on probe outcomes.}
+  Training NMSE uses all 16 trajectories. Maxima use the same five exploratory
+  interventions; response errors compare against the relevant matched control.
+  Absolute NMSE uses the original training variance. R9 is assisted and these
+  historical endpoints do not have matched discovery budgets.}
+  \label{tab:exp_response_robustness}
+  \begin{tabular}{lccc}
+    \toprule
+    Model & Train NMSE & Max. NMSE & Max. $R_c$ \\
+    \midrule
+    Assisted R9 & 0.0416 & 0.0693 & \textbf{0.217} \\
+    No specification & 0.0436 & 0.1220 & 1.135 \\
+    Sol 0 (validation-selected) & 0.0368 & 0.0345 & 1.594 \\
+    Sol 1 & 0.0412 & 0.0474 & 0.366 \\
+    Sol 2 & 0.1623 & \textbf{0.0186} & 0.536 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+This example motivates specifying relevant dependencies and evaluating their
+responses, rather than using trajectory fit alone to infer mechanistic validity.
+It does not show that removing the specification caused the omitted pathway:
+T1 does not explicitly mandate $G_t$, and the endpoints are not a matched
+causal comparison. Nor does it establish complete mechanism recovery by R9.
+The models and probes were chosen through exploratory equation inspection;
+these results are reported separately from frozen benchmark test estimates.
 
 \subsection{Dependence on familiar models and terminology}
 \label{sec:exp_memorization}

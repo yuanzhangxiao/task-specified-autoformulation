@@ -3,7 +3,9 @@
 Drafted 25 September 2026 against the attached ICLR 2027 PDF and the current
 implementation. This is a **prospective test-evaluation manuscript**, not evidence
 that evaluation has occurred. Protocol statements are written in paper style;
-all outcome-dependent numbers and conclusions remain keyed `TBD` fields.
+outcome-dependent benchmark test numbers and conclusions remain keyed `TBD`
+fields. Section 5.4 now contains a separately labeled, measured exploratory
+case study using assisted historical models.
 
 ## Files and integration
 
@@ -20,8 +22,8 @@ The source under `paper_to_revise/sections/experiment.tex` differs substantially
 from the attached PDF (older benchmark roster and one-step/mean-SD reporting).
 It and Orion's case-study files were left untouched. Replace the experiment
 section with the new section body only after reconciling the paper's active
-source and labels. Insert Orion's content in Section 5.4; it currently contains
-one explicit placeholder. Update appendix cross-references when integrated.
+source and labels. Section 5.4 now contains the R9/no-specification/Sol case
+study and its figure. Update appendix cross-references when integrated.
 
 To populate a measured result, place a definition before the section input:
 
@@ -194,7 +196,7 @@ optional follow-up, not an analysis already conducted or claimed in the draft.
 No fitting, LLM requests, scheduler submissions, benchmark edits, or test-data
 access are performed by this writing task.
 
-## Verification
+## Original draft verification
 
 The standalone section compiles to three pages with resolved citations and table
 references. All three pages were rendered and inspected for clipping and layout.
@@ -214,3 +216,59 @@ pdflatex -interaction=nonstopmode -halt-on-error \
   -jobname=autoformalism-experiments-draft docs/AUTOFORMALISM_EXPERIMENTS_PREVIEW.tex
 cp tmp/pdfs/experiment-draft/autoformalism-experiments-draft.pdf output/pdf/
 ```
+
+## Added interventional-discrimination case study
+
+Section 5.4 compares assisted Brief-only R9, the historical no-specification
+endpoint, and Sol repetition 0 on canonical-obfuscated T1-easy. Sol 0 is selected
+by its original validation NMSE, not by the new intervention results. All three
+Sol repetitions appear in the response-robustness table and supporting plots.
+R9 is explicitly assisted; seeds/search budgets differ and this is not the new
+matched component experiment. No new fit, rollout, provider call or test-data
+access is involved in producing the section.
+
+The section distinguishes absolute trajectory NMSE from error in the predicted
+intervention effect. R9 has smaller maximum response error on the five saved
+contrasts than each Sol repetition, but worse maximum absolute NMSE. The
+no-specification model cannot respond to initial tissue-glucose changes because
+its equations and initializers omit every auxiliary channel. T1 does not
+explicitly require Gt, so this is not presented as a formal requirement failure
+or a causal estimate of the specification's benefit.
+
+Generate figures and portable data from the existing saved artifacts:
+
+```bash
+PYTHONPATH=src:. MPLCONFIGDIR=tmp/matplotlib .venv/bin/python \
+  scripts/build_r9_paper_case_study.py \
+  --output output/pdf/assisted-r9-case-study
+```
+
+The builder verifies 135 sealed saved trajectories, recomputes every plotted
+NMSE/response score, checks reference/time-grid agreement, and selects Sol using
+original validation only. It produces five figures, each as PDF/SVG/PNG:
+
+- `r9_case_study`: main six panels (two training examples, both absolute
+  tissue-glucose interventions, both own-control response differences).
+- `r9_all_train`: all 16 training trajectories and all Sol repetitions.
+- `r9_all_validation`: all four original validation trajectories.
+- `r9_all_absolute`: all seven intervention/control trajectories.
+- `r9_all_responses`: all five intervention contrasts.
+
+`curves.csv`, `response_curves.csv`, `scores.csv`, `summary.csv` and
+`plot_data.json` retain full values. `manifest.json` records source hashes and
+selection rules. Override `\AFCaseStudyFigures` in LaTeX if figures are moved.
+The bundle includes the existing plotting helper needed by the builder; using
+`--replot` requires only its exported JSON, Python, NumPy and Matplotlib.
+
+The plots preserve original input semantics: the historical public training
+set includes meals at t=0, while the exploratory meal probes use pulses after
+t=0. No input interpolation, reference data or initial conditions were changed
+to improve the displayed fit. Main training examples are the same single- and
+double-meal schedules used in the previous figure; the entire training grid is
+provided to show the remaining errors.
+
+The updated five-page preview compiles with resolved references and no
+overfull/underfull box warnings. All pages and exported figure layouts were
+visually inspected. Fourteen relevant tests pass; the full test suite was not
+rerun. The added Python files pass Ruff; repository-wide Ruff still has 37
+pre-existing findings in `analysis/claude`.
