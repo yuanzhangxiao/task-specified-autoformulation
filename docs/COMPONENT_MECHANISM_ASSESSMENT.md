@@ -86,8 +86,11 @@ source/output paths, then run:
 This requires the saved `QOSMaxSubmitJobPerUserLimit` rejection with empty stdout,
 no assessment job ID or report submission, and a matching preparation receipt.
 It handles the ACES wrapper returning exit code zero despite rejection. The
-existing preparation job (2164259 in the reported failure) is reused via an
-`afterok` dependency; no second export or preparation job is submitted. Original
+existing preparation job (2164259 in the reported failure) is reused. If its
+sealed plan is already available, the launcher verifies the bundle, source,
+model count and numerical identity and needs no dependency on a possibly retired
+Slurm job ID. Otherwise it uses an `afterok` dependency. No second export or
+preparation job is submitted. Original
 receipts are preserved in `submission-intent`; new receipts are written under
 `submission-pool-intent`, and success writes the usual `submission.json`.
 An ambiguous scheduler timeout or possible accepted array is not auto-resubmitted.
@@ -151,10 +154,14 @@ names for all 78 available retained models in the Dalla inspection archive.
 CLI help, shell syntax and changed-file Ruff checks passed. Repository-wide Ruff
 reported 37 existing findings in unrelated `analysis/claude` files.
 
-The worker-pool recovery passed 17 focused tests and 48 related mechanism tests.
+The worker-pool recovery passed the full suite (3,537 passed, eight skipped).
+After the completed-preparation guard was added, all 20 focused tests and the
+51-test related mechanism suite passed.
 A subprocess CLI smoke assessed five unavailable-model records in two shards and
 preserved all saved results on resume. A byte comparison against the preparation
 commit verified that all 316 numerical source, assessment CLI and rubric files
 were unchanged. The recovery tests cover the site's zero-exit-code rejection,
 reuse of preparation, exact 160-model coverage, duplicate submission prevention,
-and refusal of ambiguous job receipts or changed source identities.
+and refusal of ambiguous job receipts or changed source identities. A completed
+sealed preparation is reused without depending on a retired scheduler job ID;
+corrupt bundle bindings or a changed numerical runtime prevent submission.

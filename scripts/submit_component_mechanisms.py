@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 
 from autoformalism.fitting import public_fitting as public
+from autoformalism.rebuttal import mechanism_functional_campaign as campaign
+from autoformalism.rebuttal.mechanism_audit_sources import BUNDLE_PROTOCOL
 from autoformalism.rebuttal.prefit_replay import sealed_read
 
 if __package__:
@@ -46,6 +48,31 @@ def rejected_array(root: Path, identity: dict) -> tuple[str, dict]:
     ):
         raise ValueError("preparation job receipt differs")
     return prepare, previous
+
+
+def prepared_snapshot(root: Path, identity: dict, models: int) -> str | None:
+    """A sealed matching snapshot can outlive Slurm's completed-job retention."""
+    if not (root / "plan.json").exists():
+        return None
+    plan = sealed_read(root / "plan.json")
+    bundle = sealed_read(root / "inputs/models.json")
+    if (
+        plan["protocol"] != campaign.PROTOCOL
+        or plan["code_identity"] != campaign.code_identity()
+        or bundle["protocol"] != BUNDLE_PROTOCOL
+        or plan["input_identity"] != {"bundle_sha256": bundle["artifact_sha256"]}
+        or bundle["source_plan_sha256"] != identity["source_plan_sha256"]
+        or bundle["source_root"] != identity["source"]
+        or bundle["snapshot_round"] != identity["round"]
+        or Path(plan["public_root"]).resolve()
+        != (Path(identity["source"]) / "public").resolve()
+        or len(plan["rows"]) != models
+        or len(bundle["rows"]) != models
+        or plan.get("test_data_opened") is not False
+        or bundle.get("test_data_opened") is not False
+    ):
+        raise ValueError("prepared assessment identity differs")
+    return plan["artifact_sha256"]
 
 
 def submit(
@@ -101,9 +128,10 @@ def submit(
             if saved["identity"] != identity:
                 raise ValueError("submission identity differs")
             return saved
-        prepare, recovered = None, None
+        prepare, recovered, prepared_sha256 = None, None, None
         if resume_qos_rejection:
             prepare, recovered = rejected_array(root, identity)
+            prepared_sha256 = prepared_snapshot(root, identity, len(old["tasks"]))
         intent = root / (
             "submission-pool-intent" if resume_qos_rejection else "submission-intent"
         )
@@ -153,7 +181,7 @@ def submit(
         array = queue(
             "assess",
             [
-                f"--dependency=afterok:{prepare}",
+                *([] if prepared_sha256 else [f"--dependency=afterok:{prepare}"]),
                 f"--array=0-{workers - 1}",
                 "--mem=8G",
                 "--time=06:00:00",
@@ -169,6 +197,7 @@ def submit(
             "models": len(old["tasks"]),
             "workers": workers,
             "reused_prepare_job": prepare if recovered else None,
+            "prepared_plan_sha256": prepared_sha256,
             "llm_calls": 0,
             "optimizer_calls": 0,
             "gpus": 0,

@@ -424,3 +424,56 @@ def test_pool_exact_coverage_and_reuses_per_model_checkpoints(tmp_path, monkeypa
         pool.run(tmp_path, 0, 4)
     with pytest.raises(ValueError, match="positive workers"):
         pool.run(tmp_path, 0, 0)
+
+
+@pytest.mark.parametrize("corrupt", [None, "bundle", "runtime"])
+def test_completed_prepare_can_outlive_scheduler_job(tmp_path, monkeypatch, corrupt):
+    source, output = tmp_path / "source", tmp_path / "assessment"
+    directory = qos_receipts(source, output, monkeypatch)
+    identity = public._read(directory / "identity.json")
+    monkeypatch.setattr(submitter.campaign, "code_identity", lambda: {"code": "v1"})
+    rows = list(range(160))
+    bundle = sealed_write(
+        output / "inputs/models.json",
+        {
+            "protocol": submitter.BUNDLE_PROTOCOL,
+            "rows": rows,
+            "source_plan_sha256": identity["source_plan_sha256"],
+            "source_root": str(source.resolve()),
+            "snapshot_round": None,
+            "test_data_opened": False,
+        },
+    )
+    plan = sealed_write(
+        output / "plan.json",
+        {
+            "protocol": pool.campaign.PROTOCOL,
+            "rows": rows,
+            "code_identity": {"code": "v2" if corrupt == "runtime" else "v1"},
+            "input_identity": {
+                "bundle_sha256": "bad"
+                if corrupt == "bundle"
+                else bundle["artifact_sha256"]
+            },
+            "public_root": str(source / "public"),
+            "test_data_opened": False,
+        },
+    )
+    calls = []
+
+    def queue(directory, key, options, *args):
+        calls.append((key, options))
+        assert not corrupt
+        return str(300 + len(calls))
+
+    monkeypatch.setattr(submitter, "submit_job", queue)
+    if corrupt:
+        with pytest.raises(ValueError, match="prepared assessment identity differs"):
+            submitter.submit(source, output, resume_qos_rejection=True)
+        assert calls == []
+    else:
+        result = submitter.submit(source, output, resume_qos_rejection=True)
+        assert [c[0] for c in calls] == ["assess", "report"]
+        assert not any(o.startswith("--dependency") for o in calls[0][1])
+        assert "--dependency=afterany:301" in calls[1][1]
+        assert result["prepared_plan_sha256"] == plan["artifact_sha256"]
