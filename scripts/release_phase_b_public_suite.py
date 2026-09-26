@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize all frozen Phase-B v1 public cells with sealed test splits."""
+"""Materialize corrected Phase-B references into a separate release directory."""
 
 from __future__ import annotations
 
@@ -29,7 +29,9 @@ def main() -> None:
     args = parser.parse_args()
 
     suite = load_suite_spec(args.suite)
-    release_root = args.public_data_root / "phase_b_v1"
+    release_root = args.public_data_root / "phase_b_reference_events_v2"
+    if release_root.exists() and any(release_root.iterdir()):
+        raise SystemExit("corrected release directory must be empty; preserve old data")
     records: list[dict[str, object]] = []
     for family in suite.families:
         for task in family.tasks:

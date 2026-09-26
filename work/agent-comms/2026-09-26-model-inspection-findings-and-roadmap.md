@@ -5,6 +5,9 @@ index and handoff, not a new fitting experiment or an assertion that remote
 campaigns have finished. The companion [CSTR note](2026-09-26-cstr-reference-defect-summary.md)
 documents the confirmed reference-data defect separately.
 
+Subsequent work: [the reference-integrity fix and audit](2026-09-26-reference-integrity-fix-and-audit.md)
+corrects the generators and reports the remaining release/input-contract work.
+
 ## Main conclusions
 
 We found useful demonstration candidates, especially reduced T1-hard models

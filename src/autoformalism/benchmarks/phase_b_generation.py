@@ -15,7 +15,6 @@ from typing import Any, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from scipy.integrate import solve_ivp
 
 from autoformalism.rebuttal.dalla_man import (
     STATE_INDEX,
@@ -23,6 +22,12 @@ from autoformalism.rebuttal.dalla_man import (
     DallaManParameters,
     compute_dalla_man_basal,
     simulate_dalla_man,
+)
+from autoformalism.reference_integration import (
+    REFERENCE_PROTOCOL,
+    ReferenceSolver,
+    integrate_reference,
+    reference_time_grid,
 )
 
 Family = Literal["dalla_man", "cstr", "alien_device"]
@@ -60,6 +65,8 @@ class PrivateTrajectory(BaseModel):
 
     protocol_id: str
     family: Family
+    reference_generation_protocol: Literal["reference-events-2"] = REFERENCE_PROTOCOL
+    reference_solver: ReferenceSolver = Field(default_factory=ReferenceSolver)
     time: NDArray[np.float64]
     state_names: tuple[str, ...]
     states: NDArray[np.float64]
@@ -76,6 +83,8 @@ class PrivateTrajectory(BaseModel):
             raise ValueError("state array does not match time/state names")
         if self.inputs.shape != (len(self.time), len(self.input_names)):
             raise ValueError("input array does not match time/input names")
+        if any(value.shape != self.time.shape for value in self.derived.values()):
+            raise ValueError("private derived array does not match time")
         arrays = [
             self.time,
             self.states,
@@ -134,6 +143,7 @@ def simulate_phase_b(
     data_root: Path = Path("data_raw"),
     private_mechanism_scales: Mapping[str, float] | None = None,
     private_initial_offsets: Mapping[str, float] | None = None,
+    solver: ReferenceSolver | None = None,
 ) -> PrivateTrajectory:
     """Execute one private Phase-B protocol without exposing private truth.
 
@@ -149,7 +159,7 @@ def simulate_phase_b(
         raise ValueError("private initial offsets must be finite")
 
     if protocol.family == "dalla_man":
-        return _simulate_dalla(protocol, dynamics, scales, offsets)
+        return _simulate_dalla(protocol, dynamics, scales, offsets, solver)
     if dynamics != "canonical":
         raise ValueError("only Dalla Man defines a perturbed dynamics condition")
     if protocol.family == "cstr":
@@ -157,11 +167,11 @@ def simulate_phase_b(
             data_root
             / "benchmark5_anonymous_nonlinear_process/private/system_specification.json"
         )
-        return _simulate_cstr(protocol, _scale_cstr_spec(spec, scales), offsets)
+        return _simulate_cstr(protocol, _scale_cstr_spec(spec, scales), offsets, solver)
     spec = _load_json(
         data_root / "benchmark6_alien_device/private/selected_system_spec.json"
     )
-    return _simulate_alien(protocol, _scale_alien_spec(spec, scales), offsets)
+    return _simulate_alien(protocol, _scale_alien_spec(spec, scales), offsets, solver)
 
 
 def audit_basic_gates(
@@ -214,12 +224,19 @@ def write_private_bundle(
         item.protocol_id for item in trajectories
     ):
         raise ValueError("protocol and trajectory order must match")
+    if output_root.exists() and any(output_root.iterdir()):
+        raise FileExistsError("refusing to overwrite a private reference bundle")
     output_root.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema_version": "phase_b_private_bundle_v1",
+        "reference_generation_protocol": REFERENCE_PROTOCOL,
         "private_reference": True,
         "available_to_discovery_methods": False,
         "protocols": [item.model_dump(mode="json") for item in protocols],
+        "solver_settings": {
+            item.protocol_id: item.reference_solver.model_dump(mode="json")
+            for item in trajectories
+        },
     }
     (output_root / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
@@ -529,6 +546,7 @@ def _simulate_dalla(
     dynamics: str,
     mechanism_scales: Mapping[str, float],
     initial_offsets: Mapping[str, float],
+    solver: ReferenceSolver | None = None,
 ) -> PrivateTrajectory:
     spec = protocol.specification
     basal = compute_dalla_man_basal(DallaManParameters())
@@ -567,6 +585,7 @@ def _simulate_dalla(
         external_forcing=forcing,
         parameter_multipliers=_dalla_parameter_multipliers(mechanism_scales),
         basal_reference=basal,
+        solver=solver,
     )
     available_inputs = {
         "meal_event_g": result.meal_event_g,
@@ -577,6 +596,7 @@ def _simulate_dalla(
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="dalla_man",
+        reference_solver=solver or ReferenceSolver(),
         time=result.time,
         state_names=tuple(STATE_INDEX),
         states=result.states,
@@ -591,6 +611,7 @@ def _simulate_cstr(
     protocol: PhaseBProtocol,
     spec: Mapping[str, Any],
     initial_offsets: Mapping[str, float],
+    solver: ReferenceSolver | None = None,
 ) -> PrivateTrajectory:
     p = {name: float(value) for name, value in spec["parameters"].items()}
     equilibrium = np.asarray(
@@ -632,7 +653,9 @@ def _simulate_cstr(
             ]
         )
 
-    states = _integrate(rhs, time, initial)
+    states = integrate_reference(
+        rhs, time, initial, boundaries=forcing_boundaries(protocol), solver=solver
+    )
     inputs = np.vstack([physical_inputs(float(value)) for value in time])
     derivatives = np.vstack(
         [rhs(float(value), state) for value, state in zip(time, states, strict=True)]
@@ -640,14 +663,14 @@ def _simulate_cstr(
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="cstr",
+        reference_solver=solver or ReferenceSolver(),
         time=time,
         state_names=("C", "T", "Tj"),
         states=states,
         input_names=protocol.input_names,
         inputs=inputs,
         derivatives={
-            name: derivatives[:, index]
-            for index, name in enumerate(("C", "T", "Tj"))
+            name: derivatives[:, index] for index, name in enumerate(("C", "T", "Tj"))
         },
     )
 
@@ -656,6 +679,7 @@ def _simulate_alien(
     protocol: PhaseBProtocol,
     spec: Mapping[str, Any],
     initial_offsets: Mapping[str, float],
+    solver: ReferenceSolver | None = None,
 ) -> PrivateTrajectory:
     count = int(spec["n_latent"])
     decay = np.asarray(spec["decay"], dtype=float)
@@ -707,7 +731,9 @@ def _simulate_alien(
             )
         return np.concatenate([derivative, [output]])
 
-    states = _integrate(rhs, time, initial, rtol=1e-6, atol=1e-8)
+    states = integrate_reference(
+        rhs, time, initial, boundaries=forcing_boundaries(protocol), solver=solver
+    )
     inputs = np.asarray(
         [[_scalar_input(float(value), protocol.specification)] for value in time]
     )
@@ -718,14 +744,14 @@ def _simulate_alien(
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="alien_device",
+        reference_solver=solver or ReferenceSolver(),
         time=time,
         state_names=state_names,
         states=states,
         input_names=protocol.input_names,
         inputs=inputs,
         derivatives={
-            name: derivatives[:, index]
-            for index, name in enumerate(state_names)
+            name: derivatives[:, index] for index, name in enumerate(state_names)
         },
     )
 
@@ -788,30 +814,28 @@ def _vector_input(
     raise ValueError(f"unsupported vector input kind {kind!r}")
 
 
-def _integrate(
-    rhs: Any,
-    time: NDArray[np.float64],
-    initial: NDArray[np.float64],
-    *,
-    rtol: float = 1e-8,
-    atol: float = 1e-10,
-) -> NDArray[np.float64]:
-    solution = solve_ivp(
-        rhs,
-        (float(time[0]), float(time[-1])),
-        initial,
-        method="LSODA",
-        t_eval=time,
-        rtol=rtol,
-        atol=atol,
-    )
-    if not solution.success or not np.all(np.isfinite(solution.y)):
-        raise RuntimeError(f"private reference simulation failed: {solution.message}")
-    return solution.y.T
+def forcing_boundaries(protocol: PhaseBProtocol) -> tuple[float, ...]:
+    """Extract all declared jumps; do not infer events from sampled inputs."""
+    spec = protocol.specification
+    if protocol.family == "dalla_man":
+        values = [time for time, _ in spec.get("meals", [])]
+        for name in ("insulin", "glucose"):
+            values.extend(
+                t for start, end, _ in spec.get(name, []) for t in (start, end)
+            )
+    elif spec["kind"] in {"step", "pulse"}:
+        values = [spec["start"], spec["end"]]
+    elif spec["kind"] == "pulses":
+        values = [t for start, end, _ in spec["pulses"] for t in (start, end)]
+    else:
+        values = []
+    if any(not np.isfinite(t) or t < 0 or t > protocol.duration for t in values):
+        raise ValueError("forcing boundary outside protocol horizon")
+    return tuple(sorted(set(map(float, values))))
 
 
 def _time_grid(protocol: PhaseBProtocol) -> NDArray[np.float64]:
-    return np.arange(0.0, protocol.duration + 0.5 * protocol.dt, protocol.dt)
+    return reference_time_grid(protocol.duration, protocol.dt)
 
 
 def _standardize_columns(values: NDArray[np.float64]) -> NDArray[np.float64]:

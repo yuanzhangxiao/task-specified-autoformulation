@@ -365,6 +365,8 @@ def write_public_staging_bundle(
         raise ValueError("at least one trajectory is required")
     if any(item.family != spec.family for item in selected):
         raise ValueError("trajectory family does not match public specification")
+    if output_root.exists() and any(output_root.iterdir()):
+        raise FileExistsError("refusing to overwrite a public benchmark bundle")
     output_root.mkdir(parents=True, exist_ok=True)
     proposer, judge = render_phase_b_prompts(spec)
     (output_root / "proposer_prompt.txt").write_text(proposer, encoding="utf-8")
@@ -389,9 +391,7 @@ def write_public_staging_bundle(
         ),
         "benchmark_id": spec.benchmark_id,
         "status": (
-            "production_registered"
-            if _production_release
-            else "staging_not_registered"
+            "production_registered" if _production_release else "staging_not_registered"
         ),
         "family": _public_family_label(spec),
         "task": _public_task_label(spec),
@@ -404,6 +404,13 @@ def write_public_staging_bundle(
         "numeric_payload_sha256": numeric_commitments,
         "test_sealed": "test" in split_fingerprints,
         "private_reference_available_to_methods": False,
+        "reference_generation_protocol": selected[0].reference_generation_protocol,
+        "reference_solver_settings": [
+            json.loads(value)
+            for value in sorted(
+                {item.reference_solver.model_dump_json() for item in selected}
+            )
+        ],
     }
     (output_root / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"

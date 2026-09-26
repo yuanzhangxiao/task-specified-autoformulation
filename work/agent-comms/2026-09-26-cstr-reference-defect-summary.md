@@ -5,6 +5,11 @@ benchmark integrity, model inspection and paper claims. It changes no code or
 data. The companion [inspection summary](2026-09-26-model-inspection-findings-and-roadmap.md)
 covers the Dalla Man findings and subsequent model repairs.
 
+Update: the subsequent [implementation and cross-benchmark audit](2026-09-26-reference-integrity-fix-and-audit.md)
+fixes the numerical generator and passes all 260 protocol/configuration checks.
+Historical datasets and scores remain unchanged; see that follow-up for current
+release limitations. The diagnosis below records the original finding.
+
 ## What happened
 
 While comparing Full and No latent on CSTR seed 0, Full appeared better on
@@ -91,10 +96,10 @@ independent actual-CSTR reference audit, and documentation of the limitation.
 The paper's benchmark appendix now flags the historical reference defect.
 
 **A corrected benchmark release and matched reruns are not established by the
-reviewed records.** At this writing,
-[`phase_b_generation.py`](../../src/autoformalism/benchmarks/phase_b_generation.py)
-still contains the single-horizon `_integrate` call described above. The
-diagnostic did not overwrite the benchmark or refit the models.
+reviewed records.** The original diagnostic did not modify the single-horizon
+helper, overwrite the benchmark or refit the models. The subsequent
+[generator correction](../../docs/REFERENCE_INTEGRITY_AUDIT.md) replaces that
+helper; it likewise preserves historical data and fitting results.
 
 The actual-reference audit was a user-authorized post-hoc investigation.
 Private reference information was not passed to proposal generation or model

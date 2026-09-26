@@ -11,8 +11,13 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 import numpy as np
-from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
+
+from autoformalism.reference_integration import (
+    ReferenceSolver,
+    integrate_reference,
+    reference_time_grid,
+)
 
 STATE_NAMES = (
     "Gp",
@@ -316,9 +321,18 @@ def simulate_dalla_man(
     initial_state: tuple[float, ...] | None = None,
     external_forcing: DallaManExternalForcing | None = None,
     basal_reference: DallaManBasal | None = None,
+    solver: ReferenceSolver | None = None,
 ) -> DallaManTrajectory:
-    """Simulate meals as exact stomach-state jumps on a fixed output grid."""
+    """Simulate exact meals with right-continuous event samples.
 
+    Derivatives at meal samples are post-jump ordinary derivatives, not the
+    distributional impulse. Off-grid meals cannot be encoded by the public
+    event channel and are rejected rather than silently omitted.
+    """
+
+    grid = reference_time_grid(duration, dt)
+    if variant not in {"original", "perturbed_b1"}:
+        raise ValueError("unknown Dalla Man dynamics variant")
     p = parameters or DallaManParameters()
     forcing = external_forcing or DallaManExternalForcing()
     _validate_external_forcing(forcing, duration)
@@ -339,10 +353,18 @@ def simulate_dalla_man(
     basal = basal_reference or compute_dalla_man_basal(p)
     events: dict[float, float] = {}
     for event_time, grams in meals:
-        if event_time < 0.0 or event_time > duration or grams <= 0.0:
+        if (
+            not np.isfinite([event_time, grams]).all()
+            or event_time < 0.0
+            or event_time > duration
+            or grams <= 0.0
+        ):
             raise ValueError("meal must have positive mass within the duration")
-        events[float(event_time)] = events.get(float(event_time), 0.0) + 1000.0 * grams
-    grid = np.arange(0.0, duration + 0.5 * dt, dt)
+        matches = np.flatnonzero(np.isclose(grid, event_time, rtol=0, atol=1e-10))
+        if len(matches) != 1:
+            raise ValueError("meal event must lie on the output grid")
+        event_time = float(grid[matches[0]])
+        events[event_time] = events.get(event_time, 0.0) + 1000.0 * grams
     state = (
         basal.initial_state.copy()
         if initial_state is None
@@ -354,8 +376,9 @@ def simulate_dalla_man(
     if 0.0 in events:
         meal_reference = events[0.0]
         state[STATE_INDEX["Qsto1"]] += meal_reference
-    output_time: list[np.ndarray] = []
-    output_states: list[np.ndarray] = []
+    states = np.empty((len(grid), len(state)))
+    references = np.empty(len(grid))
+    states[0], references[0] = state, meal_reference
     current = 0.0
     forcing_boundaries = {
         boundary
@@ -375,20 +398,17 @@ def simulate_dalla_man(
         }
     )
     for boundary in boundaries:
-        evaluation = grid[(grid >= current - 1e-12) & (grid <= boundary + 1e-12)]
-        if (
-            output_time
-            and len(evaluation)
-            and np.isclose(evaluation[0], output_time[-1][-1])
-        ):
-            evaluation = evaluation[1:]
+        indices = np.flatnonzero((grid > current) & (grid <= boundary))
+        evaluation = np.unique(np.r_[current, grid[indices], boundary])
         if boundary > current:
             interval_meal_reference = meal_reference
+            interval_forcing = forcing.values_at((current + boundary) / 2)
 
             def interval_rhs(
                 _time: float,
                 values: np.ndarray,
                 reference: float = interval_meal_reference,
+                forcing_values: tuple[float, float] = interval_forcing,
             ) -> np.ndarray:
                 return _rhs_and_derived(
                     values,
@@ -396,24 +416,15 @@ def simulate_dalla_man(
                     basal,
                     reference,
                     variant,
-                    forcing.values_at(_time),
+                    forcing_values,
                 )[0]
 
-            solution = solve_ivp(
-                interval_rhs,
-                (current, boundary),
-                state,
-                method="LSODA",
-                t_eval=evaluation if len(evaluation) else None,
-                rtol=1e-8,
-                atol=1e-10,
+            solution = integrate_reference(
+                interval_rhs, evaluation, state, solver=solver
             )
-            if not solution.success:
-                raise RuntimeError(solution.message)
-            if len(evaluation):
-                output_time.append(solution.t)
-                output_states.append(solution.y.T)
-            state = solution.y[:, -1]
+            states[indices] = solution[1 : len(indices) + 1]
+            references[indices] = meal_reference
+            state = solution[-1].copy()
         current = boundary
         if boundary in events and boundary < duration + 1e-12:
             amount = events[boundary]
@@ -425,11 +436,12 @@ def simulate_dalla_man(
                 + amount
             )
             state[STATE_INDEX["Qsto1"]] += amount
-    time = np.concatenate(output_time)
-    states = np.concatenate(output_states)
+            index = np.flatnonzero(grid == boundary)[0]
+            states[index], references[index] = state, meal_reference
+    time = grid
     meal_event = np.zeros_like(time)
     for event_time, amount in events.items():
-        matches = np.flatnonzero(np.isclose(time, event_time, atol=1e-9))
+        matches = np.flatnonzero(time == event_time)
         if len(matches):
             meal_event[matches[0]] += amount / 1000.0
     evaluated_rows = [
@@ -437,11 +449,11 @@ def simulate_dalla_man(
             row,
             p,
             basal,
-            _meal_reference_at(t, events),
+            reference,
             variant,
             forcing.values_at(float(t)),
         )
-        for t, row in zip(time, states, strict=True)
+        for t, row, reference in zip(time, states, references, strict=True)
     ]
     state_derivatives = np.vstack([item[0] for item in evaluated_rows])
     derived_rows = [item[1] for item in evaluated_rows]
@@ -450,12 +462,9 @@ def simulate_dalla_man(
         for name in derived_rows[0]
     }
     derivatives = {
-        name: state_derivatives[:, index]
-        for index, name in enumerate(STATE_NAMES)
+        name: state_derivatives[:, index] for index, name in enumerate(STATE_NAMES)
     }
-    derivatives.update(
-        _dalla_derived_derivatives(states, state_derivatives, p, basal)
-    )
+    derivatives.update(_dalla_derived_derivatives(states, state_derivatives, p, basal))
     return DallaManTrajectory(time, states, meal_event, derived, derivatives)
 
 
@@ -506,10 +515,7 @@ def _dalla_derived_derivatives(
     utilization_derivative = np.where(
         utilization_raw > 0.0,
         p.Vmx * daction * gt0 / denominator
-        + capacity
-        * p.Km0
-        * np.where(positive_gt, dgt, 0.0)
-        / denominator**2,
+        + capacity * p.Km0 * np.where(positive_gt, dgt, 0.0) / denominator**2,
         0.0,
     )
     excretion_derivative = np.where(gp0 > p.ke2, p.ke1 * dgp, 0.0)
@@ -585,13 +591,6 @@ def dalla_man_hidden_trajectory(
             plasma_to_tissue - tissue_to_plasma,
         ]
     )
-
-
-def _meal_reference_at(time: float, events: dict[float, float]) -> float:
-    """Return the most recent meal magnitude for derived gastric quantities."""
-
-    eligible = [event for event in events if event <= time + 1e-12]
-    return events[max(eligible)] if eligible else 0.0
 
 
 def _piecewise_forcing_value(

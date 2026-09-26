@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/REFERENCE_INTEGRITY_AUDIT.md` documents the `reference-events-2` numerical
+correction: CSTR/alien forcing-boundary integration and Dalla endpoint/derivative
+consistency. The private audit passes all 260 Phase-B protocol/configuration
+instances and 40 public projections; existing releases are unchanged. Exact
+meal events and sampled-input interpolation remain distinct public contracts.
+Do not treat numerical audit success as completion of a corrected release or
+silently replace historical benchmark data or scores.
+
 The opt-in `dalla-canonical-sign-rescue-1` diagnostic pairs explicit,
 reference-informed R9/R2 sign hypotheses with unchanged historical controls.
 It permits an identity-bound correction to an already constrained assembly sign

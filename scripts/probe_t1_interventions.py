@@ -8,15 +8,14 @@ import csv
 import hashlib
 from dataclasses import asdict
 from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
-from scipy.integrate import solve_ivp
 
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal import dalla_man as reference
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
+from autoformalism.reference_integration import ReferenceSolver
 from autoformalism.schemas.candidate import CandidateModel
 from autoformalism.schemas.public_fitting import PublicSplit
 from scripts.replay_t1_curves import replay_one
@@ -134,26 +133,21 @@ def generate_reference(case: dict, plan: dict, method: str) -> dict:
     initial = basal.initial_state.copy()
     initial[reference.STATE_INDEX["Gt"]] *= case["initial_gt_multiplier"]
 
-    def solve(*args, **kwargs):
-        kwargs.update(
+    result = reference.simulate_dalla_man(
+        meals=tuple(tuple(x) for x in case["meals"]),
+        duration=plan["duration"],
+        dt=plan["dt"],
+        variant="original",
+        parameters=parameters,
+        initial_state=tuple(initial),
+        basal_reference=basal,
+        solver=ReferenceSolver(
             method=method,
             rtol=plan["reference_rtol"],
             atol=plan["reference_atol"],
             max_step=plan["reference_max_step"],
-        )
-        return solve_ivp(*args, **kwargs)
-
-    # Local solver substitution only; the trusted physical equations stay intact.
-    with patch.object(reference, "solve_ivp", solve):
-        result = reference.simulate_dalla_man(
-            meals=tuple(tuple(x) for x in case["meals"]),
-            duration=plan["duration"],
-            dt=plan["dt"],
-            variant="original",
-            parameters=parameters,
-            initial_state=tuple(initial),
-            basal_reference=basal,
-        )
+        ),
+    )
     return {
         "trajectory_id": case["id"],
         "time": result.time.tolist(),
