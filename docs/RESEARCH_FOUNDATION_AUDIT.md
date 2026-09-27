@@ -1,5 +1,10 @@
 # First research-reset milestone: campaign and stage census
 
+For the current scheduler reconciliation, smaller portable tools bundle and
+metadata-only storage commands, use [RESEARCH_OPERATIONS.md](RESEARCH_OPERATIONS.md).
+The Phase C handoff and active component map are in
+[PHASE_C_START_HERE.md](PHASE_C_START_HERE.md).
+
 The objective is to establish what the historical campaign actually completed
 and where construction work was spent before choosing the next algorithmic
 change. Orion owns reference-generator corrections and benchmark qualification.
@@ -28,6 +33,8 @@ Outputs:
 | `STAGES.md` | Accepted/rejected/unrecorded validator events and diagnostic categories |
 | `issues.json` | Invalid seals/bindings, missing required receipts, symlinks, or observed concurrent changes |
 | `job_ids.txt` | Recorded submission/worker job IDs, for a separate read-only scheduler query |
+| `scheduler.psv` | Separately captured scheduler rows; optional input to `report --scheduler` |
+| `SCHEDULER.md`, `scheduler_summary.json` | Array-aware reconciliation, unresolved raw worker IDs, observed failures and remaining artifact work |
 
 The full matrix has 160 lineages, 2,400 search visits and 192 endpoints. Shards
 keep their own planned denominators. A completed scheduler allocation is not a
@@ -77,7 +84,9 @@ pinned commit. It does not replace the campaign's original runtime checkout.
     https://github.com/yuanzhangxiao/task-specified-autoformulation.git "$AF_COMMIT"
   git -C "$AF_GIT" archive "$AF_COMMIT" \
     scripts/audit_component_campaign.py scripts/component_audit_io.py \
-    scripts/component_stage_inventory.py docs/RESEARCH_FOUNDATION_AUDIT.md \
+    scripts/component_stage_inventory.py scripts/component_scheduler_audit.py \
+    scripts/inventory_research_storage.py docs/RESEARCH_FOUNDATION_AUDIT.md \
+    docs/PHASE_C_START_HERE.md docs/RESEARCH_OPERATIONS.md \
     docs/BOUNDED_RESEARCH_WORK_ORDERS.md | tar -x -C "$AF_CODE"
   printf '%s\n' "$AF_COMMIT" > "$AF_CODE/SOURCE_COMMIT"
   AF_OUT=$(mktemp -d "$AF_GROUP/foundation-audit.XXXXXX")
@@ -86,14 +95,17 @@ pinned commit. It does not replace the campaign's original runtime checkout.
   cat "$AF_OUT/SUMMARY.md"
   cat "$AF_OUT/STAGES.md"
   printf '\nAudit output: %s\nAudit code: %s\n' "$AF_OUT" "$AF_CODE"
-  tar -czf "$AF_OUT/portable-audit.tar.gz" \
-    -C "$AF_OUT" audit.json \
-    -C "$AF_CODE" scripts docs SOURCE_COMMIT
+  AF_FILES=(audit.json job_ids.txt)
   if [[ -s "$AF_OUT/job_ids.txt" ]]; then
     AF_JOBS=$(paste -sd, "$AF_OUT/job_ids.txt")
     sacct -j "$AF_JOBS" --parsable2 \
-      --format=JobID,JobName%30,State,ExitCode,Elapsed > "$AF_OUT/scheduler.psv"
+      --format=JobID%40,JobIDRaw%40,JobName%40,State%30,ExitCode,Elapsed,Submit,Start,End \
+      > "$AF_OUT/scheduler.psv"
+    AF_FILES+=(scheduler.psv)
   fi
+  tar -czf "$AF_OUT/portable-audit.tar.gz" \
+    -C "$AF_OUT" "${AF_FILES[@]}" \
+    -C "$AF_CODE" scripts docs SOURCE_COMMIT
 )
 ```
 
@@ -117,6 +129,12 @@ does not lock the entire campaign or guarantee a globally atomic snapshot.
 `issues.json` must be reviewed before acting on any suggested stage. Keep the
 scheduler snapshot alongside the audit: a start marker cannot establish whether
 its worker is still running. No commands here cancel, release or resubmit jobs.
+
+New collections also read sealed worker finish receipts and their completed
+operation counts. An absent finish receipt stays unknown: a deferred call, an
+early return or an exception need not write one. Successful allocations with zero
+operations are not completed campaign work. A saved `sacct` snapshot never proves
+that no new worker is active now.
 
 ## Delta and Jetstream2: inspect the portable bundle
 

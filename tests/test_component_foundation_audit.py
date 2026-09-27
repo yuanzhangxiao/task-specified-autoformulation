@@ -411,6 +411,41 @@ def test_submission_exit_zero_without_job_id_is_unconfirmed(tmp_path):
     assert "SECRET_SENTINEL" not in json.dumps(value)
 
 
+def test_worker_finish_is_operation_coverage_not_campaign_completion(tmp_path):
+    plan, _ = campaign(tmp_path)
+    started = {
+        "identity": plan["artifact_sha256"],
+        "worker": "abc",
+        "stage": "prune",
+        "job_id": "1234",
+    }
+    write(tmp_path / "workers/abc/started.json", started, sealed=True)
+    write(
+        tmp_path / "workers/abc/result.json",
+        {**started, "completed_operations": 0},
+        sealed=True,
+    )
+    value = audit.collect(tmp_path)
+    assert value["workers"][0]["finish_receipt"]
+    assert value["workers"][0]["completed_operations"] == 0
+    psv = "JobID|JobName|State|ExitCode|Elapsed\n1234|prune|COMPLETED|0:0|05:00:00\n"
+    report = audit.report(value, psv)
+    assert report["scheduler.psv"] == psv
+    assert json.loads(report["scheduler_summary.json"])["worker_match_counts"] == {
+        "exact": 1
+    }
+    assert json.loads(report["summary.json"])["round_status_counts"] == {"missing": 2}
+    write(
+        tmp_path / "workers/abc/result.json",
+        {**started, "job_id": "other", "completed_operations": 1},
+        sealed=True,
+    )
+    value = audit.collect(tmp_path)
+    assert not value["workers"][0]["finish_receipt"]
+    assert any(i["code"] == "artifact_binding_differs" for i in value["issues"])
+    assert "SECRET_SENTINEL" not in json.dumps(value)
+
+
 def test_invalid_authorization_and_review_only_process_checkpoint(tmp_path):
     plan, task = campaign(tmp_path, critic=True)
     write(

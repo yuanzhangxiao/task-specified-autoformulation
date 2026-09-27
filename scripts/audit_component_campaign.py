@@ -15,9 +15,11 @@ from collections import Counter
 from pathlib import Path
 
 if __package__:
+    from . import component_scheduler_audit as scheduler
     from .component_audit_io import Snapshot, diagnostic, digest, identifier, label
     from .component_stage_inventory import inventory
 else:
+    import component_scheduler_audit as scheduler
     from component_audit_io import Snapshot, diagnostic, digest, identifier, label
     from component_stage_inventory import inventory
 
@@ -338,11 +340,21 @@ def scheduler_inventory(reader: Snapshot, plan: dict) -> tuple[list[dict], list[
             {"identity": plan["artifact_sha256"]},
         )
         if value:
+            finished = bound(
+                reader,
+                f"workers/{name}/result.json",
+                {k: value.get(k) for k in ("identity", "worker", "stage", "job_id")},
+            )
+            operations = (finished or {}).get("completed_operations")
             workers.append(
                 {
                     "worker": name,
                     "stage": label(value.get("stage")),
                     "job_id": label(value.get("job_id")),
+                    "finish_receipt": finished is not None,
+                    "completed_operations": operations
+                    if type(operations) is int and operations >= 0
+                    else None,
                 }
             )
     for name in reader.children("submissions"):
@@ -479,7 +491,7 @@ def collect(root: Path) -> dict:
     return {**payload, "artifact_sha256": digest(payload)}
 
 
-def report(value: dict) -> dict[str, str]:
+def report(value: dict, scheduler_text: str | None = None) -> dict[str, str]:
     """Reproduce portable summary tables without source campaign or dependencies."""
     if value.get("protocol") != PROTOCOL or value.get("artifact_sha256") != digest(
         {k: v for k, v in value.items() if k != "artifact_sha256"}
@@ -507,7 +519,9 @@ def report(value: dict) -> dict[str, str]:
             for stage in sorted({s["stage"] for s in value["stages"]})
         },
         "integrity_review_required": bool(value["issues"]),
-        "scheduler_state": "not_collected",
+        "scheduler_state": "saved_observation_in_scheduler_summary"
+        if scheduler_text is not None
+        else "not_collected",
         "matrix_contract_revalidated": value["matrix_contract_revalidated"],
         "unconfirmed_submission_stages": sum(
             len(s["unconfirmed_stages"]) for s in value["submissions"]
@@ -578,13 +592,16 @@ def report(value: dict) -> dict[str, str]:
         {w["job_id"] for w in value["workers"] if w["job_id"]}
         | {j for s in value["submissions"] for j in s["jobs"].values() if j}
     )
-    return {
+    outputs = {
         "SUMMARY.md": "\n".join(text) + "\n",
         "STAGES.md": "\n".join(stage_text),
         "summary.json": json.dumps(summary, indent=2, sort_keys=True) + "\n",
         "job_ids.txt": "\n".join(jobs) + ("\n" if jobs else ""),
         "issues.json": json.dumps(value["issues"], indent=2) + "\n",
     }
+    if scheduler_text is not None:
+        outputs.update(scheduler.outputs(value, scheduler_text))
+    return outputs
 
 
 def write_outputs(directory: Path, outputs: dict[str, str]) -> None:
@@ -612,6 +629,7 @@ def main() -> None:
     report_parser = commands.add_parser("report")
     report_parser.add_argument("--input", type=Path, required=True)
     report_parser.add_argument("--output", type=Path, required=True)
+    report_parser.add_argument("--scheduler", type=Path)
     args = parser.parse_args()
     if args.command == "collect":
         if args.output.resolve().is_relative_to(args.root.resolve()):
@@ -619,7 +637,10 @@ def main() -> None:
         value = collect(args.root)
     else:
         value = json.loads(args.input.read_text())
-    outputs = report(value)
+    scheduler_path = getattr(args, "scheduler", None)
+    outputs = report(
+        value, scheduler_path.read_bytes().decode("utf-8") if scheduler_path else None
+    )
     outputs["audit.json"] = json.dumps(value, indent=2, sort_keys=True) + "\n"
     write_outputs(args.output, outputs)
     print(outputs["summary.json"], end="")

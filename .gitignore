@@ -11,3 +11,10 @@ outputs/
 /phase_b_*/
 /public_suite_audit.json
 /work/
+
+# Local generated reports, scratch checkouts, and transfer/archive staging.
+# Retention and backups are managed separately; ignoring does not delete files.
+/output/
+/tmp/
+/transfers/
+/backups/
