@@ -4,6 +4,11 @@ Owner: Orion. This implements the benchmark portion of milestone 1 in
 [PHASE_C_START_HERE.md](PHASE_C_START_HERE.md). Historical campaign reconciliation
 has a separate owner and is not changed here.
 
+The four ACES fits and their diagnostics have now been inspected. The coupled
+reference is attainable on development data, but only easy/reference-near met
+the low-error target. See [the bounded fitting follow-up](PHASE_C_CSTR_REFINEMENT.md)
+for the observed failure modes and the separately frozen numerical comparisons.
+
 ## What this milestone establishes
 
 The supplied ACES audit reported 260/260 numerical protocols and 40/40 public
@@ -203,6 +208,6 @@ release metadata, source, audit and submission receipts for interpretation.
 - Changed Python files pass Ruff; repository-wide Ruff still reports 37 existing
   issues in unrelated `analysis/claude` scripts. Shell syntax checks pass.
 
-The four production-size fitting attempts have intentionally not been run on
-the laptop. Their outcomes, and the remaining families' attainable reference
-contracts, remain open research work.
+The four production-size attempts were run on ACES, not on the laptop. Their
+diagnostics motivated the linked follow-up. The remaining families' attainable
+reference contracts remain open research work.

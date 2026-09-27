@@ -79,6 +79,7 @@ class CollocationSensitivityConfig(StrictSchema):
     collocation_diagnostics: bool = False
     recovery_max_starts: int = Field(default=10, ge=1, le=24)
     recovery_probe_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
+    poll_policy: Literal["wide", "local"] = "wide"
 
     def fit_config(self) -> FitConfig:
         """Build the common integration and runtime-domain policy."""
@@ -341,6 +342,7 @@ def fit_collocation_forward_sensitivity(
             seconds=config.refinement_seconds,
             checkpoint=directory / "poll_checkpoint.json",
             identity=identity,
+            policy=config.poll_policy,
         )
     else:
         refinement = instrumented_fit(

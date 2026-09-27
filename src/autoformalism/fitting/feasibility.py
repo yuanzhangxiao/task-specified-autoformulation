@@ -235,14 +235,16 @@ def recover_refinement(
     ):
         polling = oracle("poll_calls", False, max(30.0, config.recovery_probe_seconds))
         candidates = [point["parameters"] for point in feasible[:2]] or [start]
+        scale_point = candidates[0] if config.poll_policy == "local" else start
         report = poll_fit(
             polling,
             candidates,
-            scales=np.maximum(np.abs(polling.vector(start)), 1.0),
+            scales=np.maximum(np.abs(polling.vector(scale_point)), 1.0),
             max_calls=budget.maximum - budget.calls,
             seconds=max(0.001, budget.deadline - monotonic()),
             checkpoint=directory / "recovery_poll.json",
             identity=identity,
+            policy=config.poll_policy,
         )
         stages.append({"mode": "directional_poll", "result": report})
     best = min(

@@ -10,7 +10,7 @@ import pytest
 
 
 @pytest.mark.parametrize("confirmed", [True, False])
-@pytest.mark.parametrize("mode", ["audit", "qualify"])
+@pytest.mark.parametrize("mode", ["audit", "qualify", "refine"])
 def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed, mode):
     repo = tmp_path / "repo"
     script = repo / "scripts/hpc/submit_continuous_input_audit.sh"
@@ -37,6 +37,7 @@ def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed,
     audit = tmp_path / "audit"
     audit.mkdir()
     (audit / "summary.json").write_text("{}")
+    (audit / "tasks.json").write_text("{}")
     env = dict(
         os.environ,
         AF_PYTHON=sys.executable,
@@ -44,6 +45,7 @@ def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed,
         AF_TEST_CALLS=str(counter),
         AF_REFERENCE_MODE=mode,
         AF_AUDIT_ROOT=str(audit),
+        AF_QUALIFICATION_ROOT=str(audit),
         PATH=f"{binary}:{os.environ['PATH']}",
     )
     first = subprocess.run(["bash", str(script), "delta"], env=env, capture_output=True)
@@ -58,3 +60,4 @@ def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed,
     command = (output / "submission/command.txt").read_text()
     assert "--cpus-per-task=1" in command and "--partition=cpu" in command
     assert "--gres" not in command
+    assert ("--array=0-13%2" in command) is (mode == "refine")

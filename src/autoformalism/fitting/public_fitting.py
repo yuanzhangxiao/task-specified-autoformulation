@@ -144,6 +144,7 @@ def profile_settings(request: PublicFitRequest) -> dict:
         "node_warmup_seconds": 5.0,
         "piecewise_policy": "allow",
         "piecewise_refinement": "auto",
+        "poll_policy": "wide",
         "collocation_mesh_substeps": 1,
         "least_squares_ftol": None,
         "recovery_policy": "feasible",
@@ -158,6 +159,14 @@ def profile_settings(request: PublicFitRequest) -> dict:
             maximum_function_evaluations=1200,
             node_warmup_seconds=30.0,
             recovery_probe_seconds=60.0,
+        )
+    if request.profile == "collocation-local-poll-v1":
+        settings["poll_policy"] = "local"
+    if request.profile == "collocation-budget-control-v1":
+        settings.update(
+            initializer_seconds=300.0,
+            refinement_seconds=900.0,
+            maximum_function_evaluations=1200,
         )
     return settings
 
@@ -322,7 +331,12 @@ def _capability(request, model) -> str | None:
     ) != ("v01",):
         return "collocation-feasible-v1 currently requires the single target v01"
     if (
-        request.profile == "collocation-single-target-v2"
+        request.profile
+        in {
+            "collocation-single-target-v2",
+            "collocation-local-poll-v1",
+            "collocation-budget-control-v1",
+        }
         and len(request.context.targets) != 1
     ):
         return "collocation-single-target-v2 requires exactly one public target"

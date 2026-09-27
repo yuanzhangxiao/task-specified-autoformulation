@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 from time import monotonic
+from typing import Literal
 
 import numpy as np
 
@@ -26,6 +27,7 @@ def poll_fit(
     seconds: float,
     checkpoint: Path,
     identity: str,
+    policy: Literal["wide", "local"] = "wide",
 ) -> dict:
     """Resume exact point order and cumulative budgets from atomic checkpoints.
 
@@ -34,6 +36,8 @@ def poll_fit(
     optimality. The caller performs fresh independent production replay.
     """
     vectors = [oracle.vector(start).tolist() for start in starts]
+    if policy not in {"wide", "local"}:
+        raise ValueError("unknown poll policy")
     scales = np.asarray(scales, dtype=float)
     if (
         scales.shape != oracle.lower.shape
@@ -48,12 +52,13 @@ def poll_fit(
         if checkpoint.exists()
         else {
             "identity": identity,
+            "policy": policy,
             "history": [],
             "best": None,
             "elapsed": 0.0,
             "queue": [list(point) for point in vectors],
             "iteration": 0,
-            "radius": 1.0,
+            "radius": 0.1 if policy == "local" else 1.0,
             "anchor_cost": None,
             "finished": False,
             "message": None,
@@ -61,6 +66,8 @@ def poll_fit(
     )
     if state["identity"] != identity:
         raise ValueError("poll checkpoint identity differs")
+    if state.get("policy", "wide") != policy:
+        raise ValueError("poll checkpoint policy differs")
     started, previous_seconds = monotonic(), state["elapsed"]
     if hasattr(oracle, "deadline"):
         oracle.deadline = min(
@@ -100,8 +107,16 @@ def poll_fit(
             if n > 1:
                 # A fresh reproducible orthogonal basis also probes coupled moves.
                 rng = np.random.default_rng(72019 + state["iteration"])
-                directions.extend(np.linalg.qr(rng.normal(size=(n, n)))[0].T)
-            radii = (1.0, 4.0, 16.0) if state["iteration"] == 0 else (state["radius"],)
+                rotated = list(np.linalg.qr(rng.normal(size=(n, n)))[0].T)
+                if policy == "wide":
+                    directions.extend(rotated)
+                elif state["iteration"] % 2:
+                    directions = rotated
+            radii = (
+                (1.0, 4.0, 16.0)
+                if policy == "wide" and state["iteration"] == 0
+                else (state["radius"],)
+            )
             seen = {tuple(row["x"]) for row in state["history"]}
             queue = []
             for radius in radii:
@@ -152,6 +167,7 @@ def poll_fit(
     best = state["best"]
     return {
         "method": "directional_poll",
+        "policy": policy,
         "parameters": (
             dict(zip(oracle.names, best["x"], strict=True)) if best else None
         ),

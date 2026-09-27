@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
+from autoformalism.benchmarks import reference_followup as followup
 from autoformalism.benchmarks import reference_qualification as qualification
 
 
@@ -16,7 +17,9 @@ def main() -> None:
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--public-data-root", type=Path, required=True)
     prepare.add_argument("--private-data-root", type=Path, default=Path("data_raw"))
-    for name in ("run", "report"):
+    followup_prepare = commands.add_parser("followup-prepare")
+    followup_prepare.add_argument("--source-root", type=Path, required=True)
+    for name in ("run", "report", "followup-report"):
         subparser = commands.add_parser(name)
         if name == "run":
             subparser.add_argument("--index", type=int, required=True)
@@ -27,6 +30,10 @@ def main() -> None:
         result = qualification.prepare(
             args.root, args.public_data_root, args.private_data_root
         )
+    elif args.command == "followup-prepare":
+        result = followup.prepare(args.root, args.source_root)
+    elif args.command == "followup-report":
+        result = followup.report(args.root)
     elif args.command == "run":
         result = qualification.run_task(args.root, args.index)
         result = {
