@@ -84,6 +84,8 @@ class BenchmarkSpec(BaseModel):
     )
     split_filename_template: str | None = None
     sampling_interval: float = Field(gt=0.0)
+    sampling_policy: Literal["uniform", "explicit_times"] = "uniform"
+    input_contract: Literal["continuous-rates-1"] | None = None
     clean_observations_available: bool = True
     one_step_target_history: bool = True
 

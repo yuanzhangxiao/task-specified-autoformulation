@@ -26,17 +26,28 @@ def main() -> None:
     )
     parser.add_argument("--private-data-root", type=Path, default=Path("data_raw"))
     parser.add_argument("--public-data-root", type=Path, required=True)
+    parser.add_argument(
+        "--input-contract",
+        choices=("legacy-events-1", "continuous-rates-1"),
+        default="continuous-rates-1",
+    )
     args = parser.parse_args()
 
     suite = load_suite_spec(args.suite)
-    release_root = args.public_data_root / "phase_b_reference_events_v2"
+    release_root = args.public_data_root / (
+        "phase_b_continuous_inputs_v1"
+        if args.input_contract == "continuous-rates-1"
+        else "phase_b_reference_events_v2"
+    )
     if release_root.exists() and any(release_root.iterdir()):
         raise SystemExit("corrected release directory must be empty; preserve old data")
     records: list[dict[str, object]] = []
     for family in suite.families:
         for task in family.tasks:
             task_argument = task if family.family == "dalla_man" else None
-            protocols = phase_b_protocols(family.family, task=task_argument)
+            protocols = phase_b_protocols(
+                family.family, task=task_argument, input_contract=args.input_contract
+            )
             for condition in family.dynamics_conditions:
                 dynamics = "canonical" if condition == "not_applicable" else condition
                 trajectories = tuple(
@@ -57,6 +68,7 @@ def main() -> None:
                             task=task_argument,
                             dynamics=dynamics,
                             data_root=args.private_data_root,
+                            input_contract=args.input_contract,
                         )
                         cell_root = release_root / spec.benchmark_id
                         write_public_production_bundle(cell_root, spec, trajectories)
@@ -87,6 +99,7 @@ def main() -> None:
     )
     summary = {
         "schema_version": "phase_b_public_release_audit_v1",
+        "input_contract": args.input_contract,
         "expected_cells": suite.number_of_cells,
         "released_cells": len(records),
         "passed_cells": sum(bool(item["passed"]) for item in records),

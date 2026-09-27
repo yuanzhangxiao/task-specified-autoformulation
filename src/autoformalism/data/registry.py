@@ -309,6 +309,30 @@ def _phase_b_specs() -> tuple[BenchmarkSpec, ...]:
 _ALL_SPECS = (*_SPECS, *_phase_b_specs())
 
 
+def continuous_phase_b_specs() -> tuple[BenchmarkSpec, ...]:
+    """Opt-in registry for the new input contract; historical IDs stay unchanged."""
+    result = []
+    for spec in _phase_b_specs():
+        identifier = spec.benchmark_id + "_rates_v1"
+        root = Path("phase_b_continuous_inputs_v1") / identifier
+        result.append(
+            spec.model_copy(
+                update={
+                    "benchmark_id": identifier,
+                    "relative_root": root,
+                    "manifest_relative_path": root / "manifest.json",
+                    "external_inputs": tuple(
+                        "meal_rate_g_per_min" if n == "meal_event_g" else n
+                        for n in spec.external_inputs
+                    ),
+                    "sampling_policy": "explicit_times",
+                    "input_contract": "continuous-rates-1",
+                }
+            )
+        )
+    return tuple(result)
+
+
 class BenchmarkRegistry:
     """Read-only registry for explicitly supported public benchmarks."""
 

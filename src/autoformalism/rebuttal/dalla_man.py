@@ -13,6 +13,12 @@ from typing import Literal
 import numpy as np
 from scipy.optimize import brentq
 
+from autoformalism.input_schedule import (
+    DEFAULT_INGESTION_MINUTES,
+    LinearInputSchedule,
+    meal_rate_schedule,
+    merge_input_times,
+)
 from autoformalism.reference_integration import (
     ReferenceSolver,
     integrate_reference,
@@ -212,6 +218,7 @@ def _rhs_and_derived(
     meal_reference_mg: float,
     variant: Literal["original", "perturbed_b1"],
     external_forcing: tuple[float, float] = (0.0, 0.0),
+    meal_rate_g_per_min: float = 0.0,
 ) -> tuple[np.ndarray, dict[str, float]]:
     gp, gt, q1, q2, qgut, ip, il, ipo, y, i1, insulin_delay, action = state
     gp0, gt0 = max(gp, 0.0), max(gt, 0.0)
@@ -279,7 +286,7 @@ def _rhs_and_derived(
         [
             dgp,
             dgt,
-            -p.kgri * q1,
+            1000.0 * meal_rate_g_per_min - p.kgri * q1,
             -emptying * q2 + p.kgri * q1,
             -p.kabs * qgut + emptying * q2,
             -(p.m2 + p.m4) * ip0 + p.m1 * il + insulin_forcing,
@@ -322,6 +329,9 @@ def simulate_dalla_man(
     external_forcing: DallaManExternalForcing | None = None,
     basal_reference: DallaManBasal | None = None,
     solver: ReferenceSolver | None = None,
+    continuous_inputs: bool = False,
+    ingestion_minutes: float = DEFAULT_INGESTION_MINUTES,
+    input_dt: float | None = None,
 ) -> DallaManTrajectory:
     """Simulate exact meals with right-continuous event samples.
 
@@ -336,6 +346,30 @@ def simulate_dalla_man(
     p = parameters or DallaManParameters()
     forcing = external_forcing or DallaManExternalForcing()
     _validate_external_forcing(forcing, duration)
+    schedule = None
+    if continuous_inputs:
+        knots = [
+            t
+            for segments in (
+                forcing.glucose_mg_per_kg_min,
+                forcing.insulin_pmol_per_kg_min,
+            )
+            for start, end, _ in segments
+            for t in (start, end)
+        ]
+        meal_schedule = meal_rate_schedule(
+            meals, duration, input_dt or dt, ingestion_minutes, extra_knots=knots
+        )
+        schedule = LinearInputSchedule(
+            meal_schedule.time,
+            np.column_stack(
+                [
+                    meal_schedule.values,
+                    [forcing.values_at(t) for t in meal_schedule.time],
+                ]
+            ),
+        )
+        grid = merge_input_times(grid, schedule.time)
     multipliers = parameter_multipliers or {}
     unknown = set(multipliers).difference(p.__dataclass_fields__)
     if unknown:
@@ -375,7 +409,8 @@ def simulate_dalla_man(
     meal_reference = 0.0
     if 0.0 in events:
         meal_reference = events[0.0]
-        state[STATE_INDEX["Qsto1"]] += meal_reference
+        if not continuous_inputs:
+            state[STATE_INDEX["Qsto1"]] += meal_reference
     states = np.empty((len(grid), len(state)))
     references = np.empty(len(grid))
     states[0], references[0] = state, meal_reference
@@ -394,6 +429,7 @@ def simulate_dalla_man(
         {
             *(time for time in events if time > 0.0),
             *forcing_boundaries,
+            *(schedule.boundaries[1:] if schedule is not None else ()),
             duration,
         }
     )
@@ -410,13 +446,15 @@ def simulate_dalla_man(
                 reference: float = interval_meal_reference,
                 forcing_values: tuple[float, float] = interval_forcing,
             ) -> np.ndarray:
+                inputs = schedule.at(_time) if schedule is not None else None
                 return _rhs_and_derived(
                     values,
                     p,
                     basal,
                     reference,
                     variant,
-                    forcing_values,
+                    tuple(inputs[1:]) if inputs is not None else forcing_values,
+                    float(inputs[0]) if inputs is not None else 0.0,
                 )[0]
 
             solution = integrate_reference(
@@ -435,7 +473,8 @@ def simulate_dalla_man(
                 )
                 + amount
             )
-            state[STATE_INDEX["Qsto1"]] += amount
+            if not continuous_inputs:
+                state[STATE_INDEX["Qsto1"]] += amount
             index = np.flatnonzero(grid == boundary)[0]
             states[index], references[index] = state, meal_reference
     time = grid
@@ -451,7 +490,10 @@ def simulate_dalla_man(
             basal,
             reference,
             variant,
-            forcing.values_at(float(t)),
+            tuple(schedule.at(float(t))[1:])
+            if schedule is not None
+            else forcing.values_at(float(t)),
+            float(schedule.at(float(t))[0]) if schedule is not None else 0.0,
         )
         for t, row, reference in zip(time, states, references, strict=True)
     ]
@@ -461,6 +503,8 @@ def simulate_dalla_man(
         name: np.asarray([row[name] for row in derived_rows], dtype=float)
         for name in derived_rows[0]
     }
+    if schedule is not None:
+        derived["meal_rate_g_per_min"] = np.array([schedule.at(t)[0] for t in time])
     derivatives = {
         name: state_derivatives[:, index] for index, name in enumerate(STATE_NAMES)
     }

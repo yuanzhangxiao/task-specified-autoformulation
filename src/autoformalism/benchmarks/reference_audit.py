@@ -32,6 +32,7 @@ from autoformalism.benchmarks.phase_b_public import (
     write_public_staging_bundle,
 )
 from autoformalism.benchmarks.suite import load_suite_spec
+from autoformalism.input_schedule import InputContract
 from autoformalism.rebuttal.dalla_man import DallaManParameters
 from autoformalism.reference_integration import REFERENCE_PROTOCOL, ReferenceSolver
 
@@ -130,9 +131,30 @@ def check_identities(protocol: PhaseBProtocol, trajectory: PrivateTrajectory) ->
         residuals["exact_meal_jump_response"] = (states["Qsto1"] - exact_q1) / max(
             1.0, float(np.max(exact_q1))
         )
-        index = trajectory.input_names.index("meal_event_g")
-        residuals["exported_event_mass_g"] = np.array(
-            [trajectory.inputs[:, index].sum() - sum(grams for _, grams in meals)]
+        if trajectory.input_contract == "continuous-rates-1":
+            rate = trajectory.inputs[
+                :, trajectory.input_names.index("meal_rate_g_per_min")
+            ]
+            residuals.pop("exact_meal_jump_response")
+            residuals["gut_mass_between_jumps"] -= 1000 * rate
+            exact_q1 = np.zeros(len(rate))
+            for i, h in enumerate(np.diff(trajectory.time)):
+                k = p.kgri
+                a, b = 1000 * rate[i], 1000 * (rate[i + 1] - rate[i]) / h
+                exact_q1[i + 1] = (
+                    np.exp(-k * h) * exact_q1[i]
+                    - a * np.expm1(-k * h) / k
+                    + b * (h / k + np.expm1(-k * h) / k**2)
+                )
+            residuals["exact_continuous_ingestion_response"] = (
+                states["Qsto1"] - exact_q1
+            ) / max(1, float(np.max(exact_q1)))
+            mass = np.sum(np.diff(trajectory.time) * (rate[1:] + rate[:-1]) / 2)
+        else:
+            index = trajectory.input_names.index("meal_event_g")
+            mass = trajectory.inputs[:, index].sum()
+        residuals["exported_input_mass_g"] = np.array(
+            [mass - sum(grams for _, grams in meals)]
         )
     maxima = {key: float(np.max(np.abs(value))) for key, value in residuals.items()}
     return {
@@ -207,13 +229,14 @@ def audit_one(
         data_root=data_root,
         solver=PRIMARY,
     )
+    indices = np.searchsorted(refined.time, primary.time)
     sampled = refined.model_copy(
         update={
-            "time": refined.time[::2],
-            "states": refined.states[::2],
-            "inputs": refined.inputs[::2],
-            "derived": {k: v[::2] for k, v in refined.derived.items()},
-            "derivatives": {k: v[::2] for k, v in refined.derivatives.items()},
+            "time": refined.time[indices],
+            "states": refined.states[indices],
+            "inputs": refined.inputs[indices],
+            "derived": {k: v[indices] for k, v in refined.derived.items()},
+            "derivatives": {k: v[indices] for k, v in refined.derivatives.items()},
         }
     )
     comparison = compare_references(primary, independent)
@@ -271,6 +294,7 @@ def run_audit(
     suite_path: Path,
     *,
     include_test_protocols: bool = False,
+    input_contract: InputContract = "legacy-events-1",
 ) -> dict:
     """Audit unique numerical configurations, then all 40 public projections."""
     suite = load_suite_spec(suite_path)
@@ -279,13 +303,19 @@ def run_audit(
         str(p.relative_to(source_root)): _digest(p)
         for p in [
             source_root / "reference_integration.py",
+            source_root / "input_schedule.py",
             source_root / "rebuttal/dalla_man.py",
             *sorted((source_root / "benchmarks").glob("*.py")),
         ]
     }
     plan = {
         "protocol": "phase-b-reference-integrity-audit-1",
-        "reference_generation_protocol": REFERENCE_PROTOCOL,
+        "reference_generation_protocol": (
+            "reference-rates-1"
+            if input_contract == "continuous-rates-1"
+            else REFERENCE_PROTOCOL
+        ),
+        "input_contract": input_contract,
         "primary": PRIMARY.model_dump(),
         "independent": CHECK.model_dump(),
         "agreement_limit": AGREEMENT_LIMIT,
@@ -322,7 +352,9 @@ def run_audit(
             task_argument = task if family.family == "dalla_man" else None
             protocols = tuple(
                 p
-                for p in phase_b_protocols(family.family, task=task_argument)
+                for p in phase_b_protocols(
+                    family.family, task=task_argument, input_contract=input_contract
+                )
                 if include_test_protocols or p.split != "test"
             )
             for condition in family.dynamics_conditions:
@@ -349,6 +381,7 @@ def run_audit(
                             task=task_argument,
                             dynamics=dynamics,
                             data_root=data_root,
+                            input_contract=input_contract,
                         )
                         cell_root = root / "public-development" / spec.benchmark_id
                         if not (cell_root / "manifest.json").exists():
@@ -410,7 +443,8 @@ def run_audit(
     summary = {
         "protocol": plan["protocol"],
         "identity": identity,
-        "reference_generation_protocol": REFERENCE_PROTOCOL,
+        "reference_generation_protocol": plan["reference_generation_protocol"],
+        "input_contract": input_contract,
         "numerical_protocols": len(records),
         "numerical_passed": sum(r["passed"] for r in records),
         "public_cells": len(cells),
@@ -437,7 +471,13 @@ def run_audit(
             "Dalla exact meal jumps versus generic piecewise-linear interpolation, "
             "including half the area at time zero; a new public input/execution "
             "contract is required before claiming equivalence."
-        ),
+        )
+        if input_contract == "legacy-events-1"
+        else None,
+        "input_contract_verified": input_contract == "continuous-rates-1"
+        and all(r["passed"] for r in records)
+        and all(c["passed"] for c in cells),
+        "remaining_release_work": "Practical-identifiability gates and matched reruns.",
         "limitation": (
             "Numerical consistency of trusted generators and projections, not "
             "independent validation of every physical equation, remote datasets, "

@@ -1,5 +1,10 @@
 # Benchmark reference integration and integrity audit
 
+Follow-up: [the continuous-input contract](CONTINUOUS_INPUT_CONTRACT.md) resolves
+the representation mismatch below for a separately versioned dataset. This
+document records the preceding `reference-events-2` numerical correction and
+does not relabel historical event-based data.
+
 The corrected reference generator is identified by `reference-events-2`.
 This is a numerical-generator correction, not a change to discovered models,
 finalized prompts, the fitter, or previously released datasets.

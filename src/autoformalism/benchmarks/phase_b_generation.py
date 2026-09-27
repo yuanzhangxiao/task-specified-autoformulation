@@ -16,6 +16,13 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from autoformalism.input_schedule import (
+    DEFAULT_INGESTION_MINUTES,
+    InputContract,
+    LinearInputSchedule,
+    input_time_grid,
+    merge_input_times,
+)
 from autoformalism.rebuttal.dalla_man import (
     STATE_INDEX,
     DallaManExternalForcing,
@@ -46,6 +53,11 @@ class PhaseBProtocol(BaseModel):
     dt: float = Field(gt=0.0)
     input_names: tuple[str, ...] = Field(min_length=1)
     specification: dict[str, Any]
+    input_contract: InputContract = "legacy-events-1"
+    input_dt: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    ingestion_minutes: float = Field(
+        default=DEFAULT_INGESTION_MINUTES, gt=0, allow_inf_nan=False
+    )
 
     @model_validator(mode="after")
     def id_matches_split(self) -> PhaseBProtocol:
@@ -55,6 +67,8 @@ class PhaseBProtocol(BaseModel):
             raise ValueError("protocol ID must begin with its split")
         if self.dt > self.duration:
             raise ValueError("dt must not exceed duration")
+        if self.input_contract == "continuous-rates-1" and self.input_dt is None:
+            raise ValueError("continuous inputs require a frozen input_dt")
         return self
 
 
@@ -65,7 +79,11 @@ class PrivateTrajectory(BaseModel):
 
     protocol_id: str
     family: Family
-    reference_generation_protocol: Literal["reference-events-2"] = REFERENCE_PROTOCOL
+    reference_generation_protocol: Literal[
+        "reference-events-2", "reference-rates-1"
+    ] = REFERENCE_PROTOCOL
+    input_contract: InputContract = "legacy-events-1"
+    input_pulse_duration: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     reference_solver: ReferenceSolver = Field(default_factory=ReferenceSolver)
     time: NDArray[np.float64]
     state_names: tuple[str, ...]
@@ -123,17 +141,36 @@ class BasicGateReport(BaseModel):
 
 
 def phase_b_protocols(
-    family: Family, *, task: str | None = None
+    family: Family,
+    *,
+    task: str | None = None,
+    input_contract: InputContract = "legacy-events-1",
 ) -> tuple[PhaseBProtocol, ...]:
     """Construct the 16/4/6 frozen protocols for one family."""
 
     if family == "dalla_man":
-        return _dalla_protocols(task or "T1")
-    if task is not None:
-        raise ValueError("task is only used for Dalla Man protocols")
-    if family == "cstr":
-        return _cstr_protocols()
-    return _alien_protocols()
+        rows = _dalla_protocols(task or "T1")
+    else:
+        if task is not None:
+            raise ValueError("task is only used for Dalla Man protocols")
+        rows = _cstr_protocols() if family == "cstr" else _alien_protocols()
+    if input_contract == "legacy-events-1":
+        return rows
+    if input_contract != "continuous-rates-1":
+        raise ValueError("unknown input contract")
+    return tuple(
+        row.model_copy(
+            update={
+                "input_contract": input_contract,
+                "input_dt": row.dt,
+                "input_names": tuple(
+                    "meal_rate_g_per_min" if n == "meal_event_g" else n
+                    for n in row.input_names
+                ),
+            }
+        )
+        for row in rows
+    )
 
 
 def simulate_phase_b(
@@ -229,7 +266,8 @@ def write_private_bundle(
     output_root.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema_version": "phase_b_private_bundle_v1",
-        "reference_generation_protocol": REFERENCE_PROTOCOL,
+        "reference_generation_protocol": trajectories[0].reference_generation_protocol,
+        "input_contract": trajectories[0].input_contract,
         "private_reference": True,
         "available_to_discovery_methods": False,
         "protocols": [item.model_dump(mode="json") for item in protocols],
@@ -586,9 +624,17 @@ def _simulate_dalla(
         parameter_multipliers=_dalla_parameter_multipliers(mechanism_scales),
         basal_reference=basal,
         solver=solver,
+        continuous_inputs=protocol.input_contract == "continuous-rates-1",
+        ingestion_minutes=protocol.ingestion_minutes,
+        input_dt=protocol.input_dt,
     )
     available_inputs = {
         "meal_event_g": result.meal_event_g,
+        **(
+            {"meal_rate_g_per_min": result.derived["meal_rate_g_per_min"]}
+            if "meal_rate_g_per_min" in result.derived
+            else {}
+        ),
         "glucose_mg_per_kg_min": result.derived["glucose_forcing"],
         "insulin_pmol_per_kg_min": result.derived["insulin_forcing"],
     }
@@ -596,6 +642,7 @@ def _simulate_dalla(
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="dalla_man",
+        **_reference_metadata(protocol),
         reference_solver=solver or ReferenceSolver(),
         time=result.time,
         state_names=tuple(STATE_INDEX),
@@ -627,9 +674,25 @@ def _simulate_cstr(
     for name, offset in initial_offsets.items():
         initial[state_index[name]] += float(offset)
     time = _time_grid(protocol)
+    schedule = None
+    if protocol.input_contract == "continuous-rates-1":
+        knots = input_time_grid(
+            protocol.duration,
+            protocol.input_dt or protocol.dt,
+            forcing_boundaries(protocol),
+        )
+        schedule = LinearInputSchedule(
+            knots,
+            np.vstack([_vector_input(t, protocol.specification, 3) for t in knots]),
+        )
+        time = merge_input_times(time, knots)
 
     def physical_inputs(value: float) -> NDArray[np.float64]:
-        normalized = _vector_input(value, protocol.specification, 3)
+        normalized = (
+            schedule.at(value)
+            if schedule is not None
+            else _vector_input(value, protocol.specification, 3)
+        )
         return np.asarray(
             [p["C_feed_base"], p["T_feed_base"], p["T_secondary_feed_base"]]
         ) + normalized * np.asarray([0.25, 10.0, 12.0])
@@ -654,7 +717,13 @@ def _simulate_cstr(
         )
 
     states = integrate_reference(
-        rhs, time, initial, boundaries=forcing_boundaries(protocol), solver=solver
+        rhs,
+        time,
+        initial,
+        boundaries=schedule.boundaries
+        if schedule is not None
+        else forcing_boundaries(protocol),
+        solver=solver,
     )
     inputs = np.vstack([physical_inputs(float(value)) for value in time])
     derivatives = np.vstack(
@@ -663,6 +732,7 @@ def _simulate_cstr(
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="cstr",
+        **_reference_metadata(protocol),
         reference_solver=solver or ReferenceSolver(),
         time=time,
         state_names=("C", "T", "Tj"),
@@ -697,6 +767,24 @@ def _simulate_alien(
     for name, offset in initial_offsets.items():
         initial[state_index[name]] += float(offset)
     time = _time_grid(protocol)
+    schedule = None
+    if protocol.input_contract == "continuous-rates-1":
+        knots = input_time_grid(
+            protocol.duration,
+            protocol.input_dt or protocol.dt,
+            forcing_boundaries(protocol),
+        )
+        schedule = LinearInputSchedule(
+            knots, np.array([[_scalar_input(t, protocol.specification)] for t in knots])
+        )
+        time = merge_input_times(time, knots)
+
+    def forcing_value(value: float) -> float:
+        return (
+            float(schedule.at(value)[0])
+            if schedule is not None
+            else _scalar_input(value, protocol.specification)
+        )
 
     def rhs(value: float, state: NDArray[np.float64]) -> NDArray[np.float64]:
         latent = state[:count]
@@ -714,7 +802,7 @@ def _simulate_alien(
                     * np.tanh(float(term["scale_1"]) * latent[int(term["source_1"])])
                     * np.tanh(float(term["scale_2"]) * latent[int(term["source_2"])])
                 )
-        forcing = _scalar_input(value, protocol.specification)
+        forcing = forcing_value(value)
         derivative += np.asarray(spec["input_vector"]) * np.tanh(
             float(spec["input_scale"]) * forcing
         )
@@ -732,11 +820,15 @@ def _simulate_alien(
         return np.concatenate([derivative, [output]])
 
     states = integrate_reference(
-        rhs, time, initial, boundaries=forcing_boundaries(protocol), solver=solver
+        rhs,
+        time,
+        initial,
+        boundaries=schedule.boundaries
+        if schedule is not None
+        else forcing_boundaries(protocol),
+        solver=solver,
     )
-    inputs = np.asarray(
-        [[_scalar_input(float(value), protocol.specification)] for value in time]
-    )
+    inputs = np.asarray([[forcing_value(float(value))] for value in time])
     derivatives = np.vstack(
         [rhs(float(value), state) for value, state in zip(time, states, strict=True)]
     )
@@ -744,6 +836,7 @@ def _simulate_alien(
     return PrivateTrajectory(
         protocol_id=protocol.protocol_id,
         family="alien_device",
+        **_reference_metadata(protocol),
         reference_solver=solver or ReferenceSolver(),
         time=time,
         state_names=state_names,
@@ -812,6 +905,23 @@ def _vector_input(
             ]
         )
     raise ValueError(f"unsupported vector input kind {kind!r}")
+
+
+def _reference_metadata(protocol: PhaseBProtocol) -> dict[str, Any]:
+    return {
+        "input_contract": protocol.input_contract,
+        "input_pulse_duration": (
+            protocol.ingestion_minutes
+            if protocol.family == "dalla_man"
+            and protocol.input_contract == "continuous-rates-1"
+            else None
+        ),
+        "reference_generation_protocol": (
+            "reference-rates-1"
+            if protocol.input_contract == "continuous-rates-1"
+            else REFERENCE_PROTOCOL
+        ),
+    }
 
 
 def forcing_boundaries(protocol: PhaseBProtocol) -> tuple[float, ...]:

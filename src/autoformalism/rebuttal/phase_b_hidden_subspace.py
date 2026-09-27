@@ -520,8 +520,18 @@ def _validate_private_release_identity(
         )
 
     protocols = phase_b_protocols(contract.family)
+    if any(item.input_contract != "legacy-events-1" for item in protocols):
+        raise ValueError("frozen private protocol input contract differs")
+    # These commitments predate continuous inputs. Preserve the old payload,
+    # after explicitly rejecting a changed contract, rather than re-sealing it.
     protocol_payload = json.dumps(
-        [item.model_dump(mode="json") for item in protocols],
+        [
+            item.model_dump(
+                mode="json",
+                exclude={"input_contract", "input_dt", "ingestion_minutes"},
+            )
+            for item in protocols
+        ],
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")

@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/CONTINUOUS_INPUT_CONTRACT.md` defines opt-in `continuous-rates-1`:
+mass-preserving 10-minute triangular ingestion, mandatory input knots, and the
+same public table interpolant for reference generation and model execution.
+New `_rates_v1` cells have a separate registry and release directory. Historical
+event-based data and campaign settings remain frozen. The numerical audit and
+CPU launchers do not fit models or run LLMs; corrected comparisons need fresh
+matched experiments on the new input contract.
+
 `docs/REFERENCE_INTEGRITY_AUDIT.md` documents the `reference-events-2` numerical
 correction: CSTR/alien forcing-boundary integration and Dalla endpoint/derivative
 consistency. The private audit passes all 260 Phase-B protocol/configuration

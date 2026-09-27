@@ -25,6 +25,7 @@ from autoformalism.benchmarks.phase_b_generation import (
     Family,
     PrivateTrajectory,
 )
+from autoformalism.input_schedule import InputContract
 
 SemanticVariant = Literal["named", "obfuscated", "functional", "opaque"]
 
@@ -145,6 +146,8 @@ class PhaseBPublicSpec(BaseModel):
     semantic_variant: SemanticVariant
     channels: tuple[PublicChannel, ...] = Field(min_length=2)
     required_mechanisms: tuple[str, ...] = Field(min_length=1)
+    input_contract: InputContract = "legacy-events-1"
+    input_pulse_duration: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def contract_is_unambiguous(self) -> PhaseBPublicSpec:
@@ -182,6 +185,8 @@ def phase_b_public_spec(
     task: str | None = None,
     dynamics: Literal["canonical", "perturbed"] = "canonical",
     data_root: Path = Path("data_raw"),
+    input_contract: InputContract = "legacy-events-1",
+    ingestion_minutes: float = 10.0,
 ) -> PhaseBPublicSpec:
     """Build the frozen public projection for one Phase-B cell."""
 
@@ -202,6 +207,28 @@ def phase_b_public_spec(
         data_root=data_root,
     )
     channels = _channels(family, resolved_task, tier, semantic_variant, data_root)
+    if input_contract == "continuous-rates-1":
+        channels = tuple(
+            channel.model_copy(
+                update={
+                    "private_source": "meal_rate_g_per_min",
+                    "public_name": (
+                        "meal_rate_g_per_min"
+                        if semantic_variant == "named"
+                        else channel.public_name
+                    ),
+                    "description": (
+                        "declared carbohydrate ingestion rate"
+                        if semantic_variant == "named"
+                        else "declared finite-duration input rate"
+                    ),
+                    "unit": "g min^-1" if semantic_variant == "named" else "relative",
+                }
+            )
+            if channel.private_source == "meal_event_g"
+            else channel
+            for channel in channels
+        )
     public_family = (
         family if semantic_variant in {"named", "functional"} else "anonymous_system"
     )
@@ -213,6 +240,8 @@ def phase_b_public_spec(
     identifier = "_".join(
         ("phase_b", public_family, public_task, dynamics, semantic_variant, tier)
     )
+    if input_contract == "continuous-rates-1":
+        identifier += "_rates_v1"
     return PhaseBPublicSpec(
         benchmark_id=identifier,
         family=family,
@@ -222,6 +251,12 @@ def phase_b_public_spec(
         semantic_variant=semantic_variant,
         channels=channels,
         required_mechanisms=definition.mechanisms,
+        input_contract=input_contract,
+        input_pulse_duration=(
+            ingestion_minutes
+            if family == "dalla_man" and input_contract == "continuous-rates-1"
+            else None
+        ),
     )
 
 
@@ -269,6 +304,28 @@ def render_phase_b_prompts(spec: PhaseBPublicSpec) -> tuple[str, str]:
             "",
             "Declared external inputs:",
             *[_channel_line(item, spec) for item in inputs],
+            *(
+                [
+                    f"The first external input uses triangular rate pulses of duration "
+                    f"{spec.input_pulse_duration:g} time units: zero at onset, maximum "
+                    "halfway through, and zero at completion. A pulse's time integral "
+                    "is its supplied amount. Overlapping rates add. The first input "
+                    "is already a rate; do not divide it by the sampling interval."
+                ]
+                if spec.input_pulse_duration is not None
+                else []
+            ),
+            *(
+                [
+                    "All external inputs are continuous piecewise-linear functions "
+                    "through the supplied time/value knots. Every input corner is "
+                    "included; the table defines the full schedule between samples. "
+                    "Use these supplied inputs in continuous-time equations; do not "
+                    "apply state jumps or reinterpret rate samples as event amounts."
+                ]
+                if spec.input_contract == "continuous-rates-1"
+                else []
+            ),
             "",
             "All listed inputs and supplied auxiliary trajectories are available "
             "over each observation horizon. No unlisted observed trajectory may "
@@ -365,6 +422,14 @@ def write_public_staging_bundle(
         raise ValueError("at least one trajectory is required")
     if any(item.family != spec.family for item in selected):
         raise ValueError("trajectory family does not match public specification")
+    if any(item.input_contract != spec.input_contract for item in selected):
+        raise ValueError(
+            "trajectory input contract does not match public specification"
+        )
+    if any(item.input_pulse_duration != spec.input_pulse_duration for item in selected):
+        raise ValueError(
+            "trajectory pulse duration does not match public specification"
+        )
     if output_root.exists() and any(output_root.iterdir()):
         raise FileExistsError("refusing to overwrite a public benchmark bundle")
     output_root.mkdir(parents=True, exist_ok=True)
@@ -405,6 +470,20 @@ def write_public_staging_bundle(
         "test_sealed": "test" in split_fingerprints,
         "private_reference_available_to_methods": False,
         "reference_generation_protocol": selected[0].reference_generation_protocol,
+        "input_contract": spec.input_contract,
+        "input_encoding": (
+            {
+                "interpolation": "piecewise_linear",
+                "time_support": "explicit_table_knots",
+                "state_jumps": False,
+                "first_input_pulse_duration": spec.input_pulse_duration,
+                "first_input_pulse_shape": "triangle"
+                if spec.input_pulse_duration
+                else None,
+            }
+            if spec.input_contract == "continuous-rates-1"
+            else None
+        ),
         "reference_solver_settings": [
             json.loads(value)
             for value in sorted(

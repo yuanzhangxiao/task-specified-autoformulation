@@ -258,6 +258,11 @@ class BenchmarkLoader:
         selected_splits: tuple[SplitName, ...] = tuple(SplitName),
     ) -> None:
         manifest = load_json(self._resolve_under(root, spec.manifest_relative_path))
+        if (
+            spec.input_contract is not None
+            and manifest.get("input_contract") != spec.input_contract
+        ):
+            raise ChannelRoleError("manifest input contract differs from registry")
         if spec.data_layout == "tidy_split_file":
             if manifest.get("schema_version") != "phase_b_public_release_v1":
                 raise ChannelRoleError("Phase-B manifest is not a frozen release")
@@ -457,7 +462,7 @@ class BenchmarkLoader:
             raise DataAlignmentError(
                 f"time is not strictly increasing for {trajectory_id}"
             )
-        if not np.allclose(
+        if spec.sampling_policy == "uniform" and not np.allclose(
             differences,
             spec.sampling_interval,
             rtol=1e-7,

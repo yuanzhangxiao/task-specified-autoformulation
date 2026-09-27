@@ -155,6 +155,18 @@ def test_private_release_identity_accepts_frozen_sources(family: str) -> None:
     _validate_private_release_identity(contract, Path("data_raw"))
 
 
+def test_private_release_identity_rejects_new_input_contract(monkeypatch) -> None:
+    protocols = phase_b_protocols("cstr", input_contract="continuous-rates-1")
+    monkeypatch.setattr(
+        "autoformalism.rebuttal.phase_b_hidden_subspace.phase_b_protocols",
+        lambda *_args, **_kwargs: protocols,
+    )
+    with pytest.raises(ValueError, match="protocol input contract differs"):
+        _validate_private_release_identity(
+            _private_release_contract("cstr"), Path("data_raw")
+        )
+
+
 def test_private_release_identity_rejects_modified_source(tmp_path: Path) -> None:
     source = Path(
         "data_raw/benchmark6_alien_device/private/selected_system_spec.json"
