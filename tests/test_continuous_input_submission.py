@@ -10,7 +10,8 @@ import pytest
 
 
 @pytest.mark.parametrize("confirmed", [True, False])
-def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed):
+@pytest.mark.parametrize("mode", ["audit", "qualify"])
+def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed, mode):
     repo = tmp_path / "repo"
     script = repo / "scripts/hpc/submit_continuous_input_audit.sh"
     script.parent.mkdir(parents=True)
@@ -33,11 +34,16 @@ def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed)
     )
     scheduler.chmod(0o755)
     output = tmp_path / "results"
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    (audit / "summary.json").write_text("{}")
     env = dict(
         os.environ,
         AF_PYTHON=sys.executable,
         AF_OUTPUT_ROOT=str(output),
         AF_TEST_CALLS=str(counter),
+        AF_REFERENCE_MODE=mode,
+        AF_AUDIT_ROOT=str(audit),
         PATH=f"{binary}:{os.environ['PATH']}",
     )
     first = subprocess.run(["bash", str(script), "delta"], env=env, capture_output=True)

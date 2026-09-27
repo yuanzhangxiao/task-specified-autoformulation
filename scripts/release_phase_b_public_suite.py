@@ -27,11 +27,27 @@ def main() -> None:
     parser.add_argument("--private-data-root", type=Path, default=Path("data_raw"))
     parser.add_argument("--public-data-root", type=Path, required=True)
     parser.add_argument(
+        "--audit-root",
+        type=Path,
+        help="Reuse a complete continuous-input audit; verify/resume published cells.",
+    )
+    parser.add_argument(
         "--input-contract",
         choices=("legacy-events-1", "continuous-rates-1"),
         default="continuous-rates-1",
     )
     args = parser.parse_args()
+
+    if args.audit_root is not None:
+        from autoformalism.benchmarks.audited_release import publish_audited_release
+
+        if args.input_contract != "continuous-rates-1":
+            parser.error("--audit-root requires continuous-rates-1")
+        report = publish_audited_release(
+            args.audit_root, args.private_data_root, args.suite, args.public_data_root
+        )
+        print(json.dumps({k: v for k, v in report.items() if k != "cells"}, indent=2))
+        return
 
     suite = load_suite_spec(args.suite)
     release_root = args.public_data_root / (

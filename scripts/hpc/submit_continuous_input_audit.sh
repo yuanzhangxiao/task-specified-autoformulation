@@ -9,20 +9,30 @@ else
   AF_COMMIT=$(git -C "$AF_REPO_ROOT" rev-parse HEAD)
 fi
 export AF_COMMIT
+export AF_REFERENCE_MODE=${AF_REFERENCE_MODE:-audit}
+case "$AF_REFERENCE_MODE" in
+  audit) af_label=continuous-inputs; af_job=continuous-input-audit ;;
+  qualify)
+    : "${AF_AUDIT_ROOT:?Set AF_AUDIT_ROOT to the completed audit directory}"
+    [[ -f "$AF_AUDIT_ROOT/summary.json" ]] || { echo "Missing audit summary" >&2; exit 2; }
+    export AF_AUDIT_ROOT
+    af_label=phase-c-reference; af_job=reference-qualification ;;
+  *) echo "Unknown AF_REFERENCE_MODE" >&2; exit 2 ;;
+esac
 case "$AF_AUDIT_SITE" in
   aces)
     AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
-    AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-/scratch/group/p.nairr260351.000/u.yx126462/continuous-inputs-${AF_COMMIT:0:7}}
+    AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-/scratch/group/p.nairr260351.000/u.yx126462/${af_label}-${AF_COMMIT:0:7}}
     af_account=${AF_ACCOUNT:-156264627414}
     ;;
   delta)
     AF_PYTHON=${AF_PYTHON:-/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python}
-    AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-/work/hdd/bibo/yxiao2/phase_b/continuous-inputs-${AF_COMMIT:0:7}}
+    AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-/work/hdd/bibo/yxiao2/phase_b/${af_label}-${AF_COMMIT:0:7}}
     af_account=${AF_ACCOUNT:-bibo-delta-cpu}
     ;;
   jetstream2)
     AF_PYTHON=${AF_PYTHON:-$AF_REPO_ROOT/.venv/bin/python}
-    AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-$AF_REPO_ROOT/artifacts/continuous-inputs-${AF_COMMIT:0:7}}
+    AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-$AF_REPO_ROOT/artifacts/${af_label}-${AF_COMMIT:0:7}}
     ;;
   *) echo "Unknown site: $AF_AUDIT_SITE" >&2; exit 2 ;;
 esac
@@ -49,7 +59,7 @@ if ! mkdir "$af_receipts"; then
 fi
 af_command=(sbatch --parsable --account="$af_account" --partition=cpu
   --nodes=1 --ntasks=1 --cpus-per-task=1 --mem=8G --time=01:00:00
-  --job-name=continuous-input-audit --export=ALL
+  --job-name="$af_job" --export=ALL
   --output="$AF_OUTPUT_ROOT/logs/audit-%j.out"
   --error="$AF_OUTPUT_ROOT/logs/audit-%j.err"
   "$AF_REPO_ROOT/scripts/hpc/run_continuous_input_audit.sh")
