@@ -1,10 +1,11 @@
 # Research operations: observe, preserve, then retire
 
-These commands run metadata audits, not experiments. They do not submit jobs,
+The inventory commands run metadata audits, not experiments. They do not submit jobs,
 fit models, invoke an LLM, modify benchmark releases or open test payloads.
 Orion's corrected benchmarks remain separate from the historical campaign.
 Python 3.10+ and its standard library suffice; no scientific packages, GPU,
-module load or API credential is needed.
+module load or API credential is needed for inventory. The explicit recovery
+section below submits experimental workers using the original scientific runtime.
 
 ## Use one small portable tools bundle
 
@@ -198,3 +199,85 @@ offers a 30-day data-management grace period for expired projects, not permanent
 archival storage; [Jetstream Exosphere](https://docs.jetstream-cloud.org/ui/exo/manage/)
 deletes the root disk when deleting an instance, including volume-backed roots.
 Do not use any of these expiry windows as the sole backup plan.
+
+## ACES: bounded continuation after the confirmed critic lock collision
+
+The 2026-09-26 follow-up reconciled all 88 worker identities. All three failed
+recovery critics raised `RuntimeError: public fit directory is in use` at
+`component_critic.review_one`'s shared review-cache lock. This is a concurrency
+failure before that operation's provider request, not evidence of a Jetstream
+outage. Different lineage claims can reach the same cached review. Never remove
+`.lock` files to resolve this: a live process holds the OS lock, and unlinking
+the file can defeat exclusion. Closing the process's file descriptor releases it.
+
+The original source can resume with **one critic worker across the campaign**.
+This is an allocation workaround, not a fix for future parallel critics. Keep
+the original runtime because its source and launcher hashes are part of the
+frozen identity. There is no need to clone or fetch code, restage public inputs,
+reauthorize the critic, or restart completed models. Existing authorization,
+cache entries and consumed allowances remain in use.
+
+Run the following on ACES in a Bash terminal. It submits one bounded wave with
+four proposer GPUs, one CPU critic, 16 fit workers and eight pruning workers.
+The latter can work on the 72 pruning frontiers while the critic unblocks the
+88 other lineages. Subsequent fits and revisions require the other services,
+which is why resuming only the critic would not finish the campaign. Worker
+counts change concurrency, not the frozen model/fit/review allowances.
+
+```bash
+(
+  set -euo pipefail
+  export AF_REPO_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/repos/final-components-34378d1
+  export AF_OUTPUT_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/final-components-v1
+  export AF_COMMIT=34378d1f1da5eefb2c1f977b440346afab29a33f
+  [[ -f "$AF_REPO_ROOT/SOURCE_COMMIT" ]] || { echo 'Run on ACES with the original source archive.' >&2; exit 1; }
+  [[ "$(cat "$AF_REPO_ROOT/SOURCE_COMMIT")" == "$AF_COMMIT" ]] || { echo 'Source commit differs; stop.' >&2; exit 1; }
+
+  AF_QUEUE=$(squeue --noheader --user "$USER" --format='%j')
+  if printf '%s\n' "$AF_QUEUE" | awk '/^component-(propose|critic|fit|prune)$/ {found=1} END {exit !found}'; then
+    echo 'Component workers are still queued/running; inspect squeue before adding this wave.' >&2
+    exit 1
+  fi
+
+  module load GCCcore/13.2.0 Python/3.11.5
+  export AF_PYTHON=/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python
+  export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT" PYTHONDONTWRITEBYTECODE=1
+  export AF_VLLM_IMAGE=/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif
+  export AF_HF_HOME=/scratch/user/u.yx126462/huggingface-cache
+  export AF_COMPUTE_CACHE_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/component-runtime-cache
+  export AF_IPC_TMP_ROOT=/tmp/af-ipc-u.yx126462
+  [[ -f "$AF_VLLM_IMAGE" && -d "$AF_HF_HOME" ]] || { echo 'Original image or model cache is missing; stop.' >&2; exit 1; }
+  "$AF_PYTHON" "$AF_REPO_ROOT/scripts/component_campaign.py" verify --root "$AF_OUTPUT_ROOT"
+
+  if [[ -z "${AF_JETSTREAM_API_KEY:-}" ]]; then
+    read -r -s -p 'Jetstream API key (hidden): ' AF_JETSTREAM_API_KEY
+    printf '\n'
+    export AF_JETSTREAM_API_KEY
+  fi
+  "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_component_campaign.py" \
+    --root "$AF_OUTPUT_ROOT" --wave serial-critic-recovery-1 \
+    --proposers 4 --critics 1 --fits 16 --pruning 8
+)
+```
+
+The submitter verifies the complete frozen runtime and saved critic authorization
+before submitting. Repeating this wave name reuses its recorded job IDs; it does
+not request another allocation after they finish. An uncertain scheduler reply
+stops for inspection; preserve its intent and receipt. Do not start another
+critic manually or through a different wave while this one is active. The queue
+name check detects the known launcher jobs, not arbitrary shell/API clients.
+Do not send the API key or enable shell tracing.
+
+Each allocation lasts at most 6h30; workers stop before their next bounded unit
+would overrun the working window. Queue time and complete campaign convergence
+are not guaranteed. Refresh the existing report and operations audit after the
+wave; unfinished work remains explicit. This command does not export endpoints,
+open tests, change benchmark files or create a new campaign.
+
+The accompanying storage observation found 247,719 entries under personal
+scratch. The group scan stopped at its 250,000-entry scan budget with no recorded
+read errors, so its byte/file counts are lower bounds. Check `showquota` for
+actual byte and inode headroom before continuing. A zero generated-cache total
+does not establish that caches are absent: protected roots take precedence in
+classification. Use the full `operations-results.tar.gz` directory breakdown to
+prepare exact archive candidates; the pasted totals alone cannot justify deletion.

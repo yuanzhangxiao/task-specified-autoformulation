@@ -22,9 +22,9 @@ an appropriate claim only under adequate specification and identifiability.
   and supervisor. Bounded workers extract evidence or implement isolated fixes
   under [work orders](BOUNDED_RESEARCH_WORK_ORDERS.md).
 
-The agreed first maintenance milestone adds observation and a handoff, not
-another construction path. No automatic cleanup, test evaluation, provider
-calls, refitting or resubmission is part of it.
+The first maintenance milestone delivered observation and a handoff. The
+subsequent explicit recovery commands reuse the original construction path.
+No automatic cleanup, test evaluation or resubmission is enabled.
 
 ## Phase B remains a separate historical experiment
 
@@ -49,8 +49,22 @@ The supplied scheduler snapshot records these array tasks, excluding steps:
 | 2162104 | recovery fit | 32 | 0 |
 
 Recovery critic tasks `2162100_0`, `_1`, `_2` exited `1:0` after 3:00, 1:25 and
-1:33. This is not enough to attribute a cause to Jetstream. Successful worker
-allocations also do not mean their dependent work was ever ready. The worker
+1:33. The subsequent stderr inspection established the immediate cause in all
+three: `component_critic.review_one` could not acquire `public._lock(cache)`.
+The cache deduplicates reviews across lineages, but the lineage claims do not
+serialize this shared cache. Its nonblocking lock raises the misleading message
+`public fit directory is in use`. These failures occurred at cache acquisition;
+they do not establish an API failure. Earlier calls, if any, remain accounted for.
+The refreshed `JobIDRaw` snapshot reconciles all 88 recorded worker identities.
+All recorded allocations are terminal; check the live queue before new work.
+
+Resume the historical runtime with one critic worker across the campaign; see
+the bounded recovery command in the operations runbook. Do not delete lock files,
+reset attempts or patch the frozen source hash to permit a different runtime.
+Future parallel critics need a targeted contention/requeue fix and a concurrency
+test, separately from this historical continuation.
+
+Successful worker allocations do not mean their dependent work was ever ready. The worker
 loop deliberately exits after its allocation window, leaving time for bounded
 operations. Earlier pruning workers may have finished before final fits, but
 the original snapshot lacks timestamps and operation counts to establish that.
