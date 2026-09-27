@@ -268,6 +268,34 @@ critic manually or through a different wave while this one is active. The queue
 name check detects the known launcher jobs, not arbitrary shell/API clients.
 Do not send the API key or enable shell tracing.
 
+### After `serial-critic-recovery-1`
+
+The 2026-09-27 recovery snapshot verifies all 29 allocations completed normally.
+The critic-disabled endpoint backlog is cleared (71 complete, one skipped);
+all 88 critic-enabled lineages still require more rounds. For the next bounded
+wave, use the same original-source command block above with
+`--wave serial-critic-recovery-2 --proposers 4 --critics 1 --fits 16 --pruning 1`.
+One pruning service keeps the stage available without repeating eight workers
+against an empty current pruning frontier. The critic remains singular across
+the campaign. These are allocation choices, not changes to the frozen scientific
+budgets. Verify the live queue and source first, as in the command block.
+
+Do not rerun the old wave name expecting new allocations. Do not prequeue a
+sequence of overlapping critic waves. Inspect the new snapshot after the bounded
+wave ends. At the observed 146 critic operations per five-hour active window,
+595 remaining round rows plus up to 88 final reviews suggest roughly 24 further
+critic processing hours if throughput stays similar, before queue delays and
+final fitting/pruning dependencies. Cache reuse, request lengths and failures can
+change this substantially; it is a planning estimate, not a completion deadline.
+
+The same snapshot's actual quota meter reports personal scratch at
+247,723/250,000 files and 244.2 GiB/1 TiB: file count, not bytes, is the immediate
+constraint. The allocation-wide group meter is 411,299/500,000 files and
+239.6 GiB/5 TiB. Continue writing campaign artifacts and generated runtime caches
+under the existing group paths. Keep the referenced personal Python environment,
+model cache and container. Cleanup requires the reviewed path/dependency checks
+above; this checkpoint does not authorize deletion.
+
 Each allocation lasts at most 6h30; workers stop before their next bounded unit
 would overrun the working window. Queue time and complete campaign convergence
 are not guaranteed. Refresh the existing report and operations audit after the

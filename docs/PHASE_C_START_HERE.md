@@ -28,6 +28,40 @@ No automatic cleanup, test evaluation or resubmission is enabled.
 
 ## Phase B remains a separate historical experiment
 
+### Latest recovery checkpoint: 2026-09-27
+
+The snapshot captured at `2026-09-27T17:33:16Z` has audit seal
+`f35a5d0adaf0af6ed4fd28235c70adadb38546012244e4f00bfe58ed316611b2`.
+Its summary and scheduler reconciliation reproduce locally; previously saved
+round-result hashes are unchanged. The queue observation is empty, not a live
+guarantee. All 29 allocations in `serial-critic-recovery-1` completed with finish
+receipts: 146 proposer operations, 146 critic operations, 146 fit operations and
+72 pruning operations. Operation counts are not counts of unique models or API
+requests.
+
+There are now 1,762 complete round rows, 14 construction failures, 6 fit failures,
+23 interruptions and 595 missing rows. All 72 critic-disabled lineages reached
+their endpoints: 71 complete and one skipped without a finite parent. The 88
+critic-enabled lineages remain at zero-based round 7 (67 lineages) or 8 (21),
+each waiting for its next critic operation. Thus 120 of 192 endpoint rows remain
+missing, including the secondary pruning comparisons. Test data remain unopened.
+Do not compare completed critic-disabled endpoints to these unfinished arms as
+an equal-budget critic ablation.
+
+The single critic completed 146 operations in 5:01:53 without the former cache
+lock failure. Its normal six-hour worker window reserves an hour for an operation
+to finish. Another bounded wave is needed; more proposer GPUs alone will not
+remove the current critic bottleneck. The operations runbook describes continuing
+with one critic and the unchanged frozen runtime.
+
+Two new interruptions belong to `cell07_seed0_full_c1v1s1`, which still has no
+finite incumbent. Their diagnostic hashes match; the portable snapshot does
+not contain the raw exception. The other no-incumbent lineage,
+`cell07_seed0_brief_only_c0v1s1`, reached its skipped endpoint. Preserve these
+failures and audit any corrected-runtime recovery separately.
+
+### Earlier checkpoint and diagnosed concurrency failure
+
 The reviewed portable audit is identified by
 `93dc4d898f83f3bff23bff40cb75a3ecdaad0e37d25b9a308e114edad2ffd711`.
 Its ACES source is
