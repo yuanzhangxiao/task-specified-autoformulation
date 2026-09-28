@@ -57,9 +57,14 @@ Three fit allocations (`2166855_13`, `_14`, `_15`) failed after two seconds,
 before worker-start receipts. Supplied stderr identifies an import failure:
 `ModuleNotFoundError: No module named 'autoformalism.config'` in the original
 checkout. Thirteen other fit workers completed. Pruning allocation `2166856_0`
-failed after two seconds with exit 120:0, no worker receipt and empty stderr;
-its cause remains unresolved. Inspect source visibility and node/stdout evidence
-before another wave; these receipts do not establish an API problem.
+failed after two seconds with exit 120:0 and no worker receipt. Follow-up evidence
+places all four failures on `ac042`; the 13 successful fit allocations used other
+nodes. The login-side `config.py` SHA-256 matches the original commit exactly
+(`7f4bf1c5dba7a0687bddd57e26a6888fce150ba20db072bb607cff58937cf572`).
+Both pruning logs are empty. This supports avoiding `ac042` for the next wave,
+not claiming a proven filesystem root cause or replacing source/dependencies.
+Use a distinct wave-3 submission with two proposers and one critic; preserve
+all consumed attempts. These failures do not establish an API problem.
 
 The additional interrupted round belongs to `cell07_seed0_full_c1v1s1`, now
 with nine interruptions and no finite incumbent; its diagnostic hash is unchanged.

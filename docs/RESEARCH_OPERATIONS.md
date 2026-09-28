@@ -273,7 +273,20 @@ Do not send the API key or enable shell tracing.
 This section records the wave-2 command that was subsequently run. Before any
 further allocation, read the latest checkpoint in `PHASE_C_START_HERE.md`:
 wave 2 exposed three application-source import failures and an unexplained
-pruning startup failure. Repeating this wave name only returns its old job IDs.
+pruning startup failure. Follow-up placed all four on `ac042`, while the frozen
+config file's checksum still matched. Repeating this wave name only returns its
+old job IDs. A wave-3 continuation should exclude that node and use two proposers.
+
+The accompanying `resume-components-wave3-aces.sh` command copy submits
+`serial-critic-recovery-3` with 2 proposers, 1 critic, 16 fit workers and 1 pruning
+worker. It temporarily forwards `sbatch` through the original executable with
+[`--exclude=ac042`](https://slurm.schedmd.com/sbatch.html#OPT_exclude) added.
+The frozen submitter and worker files remain byte-identical. The extra scheduler
+option is recorded in the wave's `node-exclusion.txt`; Slurm's actual `SubmitLine`
+also includes it. The original intent records describe the original submitter
+arguments, so retain that supplementary exclusion record. The script removes
+only its own temporary forwarding file on exit. It does not submit a sequence
+of waves, reset attempts, or modify earlier jobs.
 
 The 2026-09-27 recovery snapshot verifies all 29 allocations completed normally.
 The critic-disabled endpoint backlog is cleared (71 complete, one skipped);
