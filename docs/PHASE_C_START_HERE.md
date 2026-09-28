@@ -28,37 +28,49 @@ No automatic cleanup, test evaluation or resubmission is enabled.
 
 ## Phase B remains a separate historical experiment
 
-### Latest recovery checkpoint: 2026-09-27
+### Latest recovery checkpoint: 2026-09-28
 
-The snapshot captured at `2026-09-27T17:33:16Z` has audit seal
-`f35a5d0adaf0af6ed4fd28235c70adadb38546012244e4f00bfe58ed316611b2`.
-Its summary and scheduler reconciliation reproduce locally; previously saved
-round-result hashes are unchanged. The queue observation is empty, not a live
-guarantee. All 29 allocations in `serial-critic-recovery-1` completed with finish
-receipts: 146 proposer operations, 146 critic operations, 146 fit operations and
-72 pruning operations. Operation counts are not counts of unique models or API
-requests.
+The snapshot captured at `2026-09-28T20:55:53Z` has audit seal
+`0c0606878336236360c822110b341d49d2e688d9886245e4210d9748e93b91f2`.
+Its summary and scheduler reconciliation reproduce locally. Prior round-result
+hashes and completed/skipped endpoints are unchanged. The queue observation is
+empty, not a live guarantee. The bundle's focused recovery manifest still names
+wave 1; the complete audit/scheduler roster identifies wave 2 correctly.
 
-There are now 1,762 complete round rows, 14 construction failures, 6 fit failures,
-23 interruptions and 595 missing rows. All 72 critic-disabled lineages reached
-their endpoints: 71 complete and one skipped without a finite parent. The 88
-critic-enabled lineages remain at zero-based round 7 (67 lineages) or 8 (21),
-each waiting for its next critic operation. Thus 120 of 192 endpoint rows remain
-missing, including the secondary pruning comparisons. Test data remain unopened.
-Do not compare completed critic-disabled endpoints to these unfinished arms as
-an equal-budget critic ablation.
+There are 1,884 complete round rows (+122 since the prior snapshot), 14
+construction failures, 6 fit failures, 24 interruptions and 472 missing rows.
+The 72 critic-disabled lineages have 71 complete endpoints and one skipped
+without a finite parent. The 88 critic-enabled lineages end at zero-based round
+8 (32 lineages) or 9 (56), each awaiting its next critic operation. Thus 120 of
+192 endpoint rows remain missing, including secondary pruning comparisons.
+Test data remain unopened. Interim comparisons can use the universally recorded
+round 8, before final pruning, but must retain failures and distinguish equal
+visit counts from equal compute costs or completed final ablations.
 
-The single critic completed 146 operations in 5:01:53 without the former cache
-lock failure. Its normal six-hour worker window reserves an hour for an operation
-to finish. Another bounded wave is needed; more proposer GPUs alone will not
-remove the current critic bottleneck. The operations runbook describes continuing
-with one critic and the unchanged frozen runtime.
+Wave 2 completed 123 proposer, critic and fit operations each. The single critic
+ran 5:01:16 without the former lock failure. Two proposers performed all 123
+operations; two others started after the CPU services ended and each spent
+5:58:00 with zero operations. Reduce the next proposal allocation to two workers;
+more GPUs alone will not remove the current critic bottleneck.
 
-Two new interruptions belong to `cell07_seed0_full_c1v1s1`, which still has no
-finite incumbent. Their diagnostic hashes match; the portable snapshot does
-not contain the raw exception. The other no-incumbent lineage,
-`cell07_seed0_brief_only_c0v1s1`, reached its skipped endpoint. Preserve these
-failures and audit any corrected-runtime recovery separately.
+Three fit allocations (`2166855_13`, `_14`, `_15`) failed after two seconds,
+before worker-start receipts. Supplied stderr identifies an import failure:
+`ModuleNotFoundError: No module named 'autoformalism.config'` in the original
+checkout. Thirteen other fit workers completed. Pruning allocation `2166856_0`
+failed after two seconds with exit 120:0, no worker receipt and empty stderr;
+its cause remains unresolved. Inspect source visibility and node/stdout evidence
+before another wave; these receipts do not establish an API problem.
+
+The additional interrupted round belongs to `cell07_seed0_full_c1v1s1`, now
+with nine interruptions and no finite incumbent; its diagnostic hash is unchanged.
+`cell07_seed0_brief_only_c0v1s1` remains the skipped no-incumbent endpoint.
+Keep any corrected-runtime recovery separate from these historical failures.
+
+Actual quota headroom is 2,267 personal-scratch files and 45,682 allocation-wide
+group-scratch files. Group file usage increased by 43,019, but this observation
+does not attribute that increase to a particular workload. Review generated
+cache paths and live dependencies before any cleanup; no deletion is authorized
+by directory names or this checkpoint alone.
 
 ### Earlier checkpoint and diagnosed concurrency failure
 

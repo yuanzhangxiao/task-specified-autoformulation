@@ -270,6 +270,11 @@ Do not send the API key or enable shell tracing.
 
 ### After `serial-critic-recovery-1`
 
+This section records the wave-2 command that was subsequently run. Before any
+further allocation, read the latest checkpoint in `PHASE_C_START_HERE.md`:
+wave 2 exposed three application-source import failures and an unexplained
+pruning startup failure. Repeating this wave name only returns its old job IDs.
+
 The 2026-09-27 recovery snapshot verifies all 29 allocations completed normally.
 The critic-disabled endpoint backlog is cleared (71 complete, one skipped);
 all 88 critic-enabled lineages still require more rounds. For the next bounded
