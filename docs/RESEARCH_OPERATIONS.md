@@ -288,6 +288,26 @@ arguments, so retain that supplementary exclusion record. The script removes
 only its own temporary forwarding file on exit. It does not submit a sequence
 of waves, reset attempts, or modify earlier jobs.
 
+The wave-3 snapshot of 2026-09-29 confirms all 20 allocations completed normally,
+with 147 proposer, critic and fit operations each. The campaign still has 325
+missing search rows and 120 missing endpoint rows. Repeating wave 3 will only
+return its recorded jobs. Before preparing wave 4, address file-count headroom:
+group scratch is at 476,355/500,000 files, up 22,037 since the preceding snapshot.
+This is an allocation-wide observation, not attribution to these workers.
+
+The accompanying `inspect-component-cache-aces.sh` command copy reuses the
+existing portable operations bundle to inventory only
+`/scratch/group/p.nairr260351.000/u.yx126462/component-runtime-cache`.
+It collects a queue snapshot, quota readings and scheduler records for numeric
+job-directory names. It reads metadata, writes working reports under `/tmp`,
+and saves one `cache-review.tar.gz` in a fresh home-directory folder. It does not
+delete, submit jobs, read model payloads or alter the campaign. Traversal is
+bounded at 250,000 entries and depth-two reporting; check its coverage flags.
+Matching a finished job and a cache-like name alone is not a complete dependency
+audit. Confirm exact contents, launcher's cache locations and lack of active
+users before recommending selective cleanup. Do not remove LLM call caches or
+fitting records as though they were generated compiler caches.
+
 The 2026-09-27 recovery snapshot verifies all 29 allocations completed normally.
 The critic-disabled endpoint backlog is cleared (71 complete, one skipped);
 all 88 critic-enabled lineages still require more rounds. For the next bounded

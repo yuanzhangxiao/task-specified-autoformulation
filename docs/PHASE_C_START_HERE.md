@@ -28,7 +28,51 @@ No automatic cleanup, test evaluation or resubmission is enabled.
 
 ## Phase B remains a separate historical experiment
 
-### Latest recovery checkpoint: 2026-09-28
+### Latest recovery checkpoint: 2026-09-29
+
+The snapshot captured at `2026-09-29T18:10:24Z` has audit seal
+`2358f5f652c1bb0fa00f2f333664edd2407c151592a14d652975b621c7a27cef`.
+Both summaries reproduce locally. All 1,928 earlier round-result hashes and
+previously recorded endpoints are unchanged. The focused manifest now correctly
+identifies `serial-critic-recovery-3`; its 20 allocations all completed with
+matching worker finish receipts. There were 147 proposer, critic and fit
+operations each, and zero pruning operations. Both proposer workers did useful
+work (66 and 81 operations). The wave-2 startup failures did not recur; this
+does not establish their underlying cause.
+
+The campaign has 2,029 complete round rows, 14 construction failures, 6 fit
+failures, 26 interruptions and 325 missing rows. The 88 critic-enabled lineages
+end at zero-based round 10 (61) or 11 (27), awaiting their next critic operation.
+The 72 critic-disabled lineages remain terminal: 71 complete endpoints and one
+skipped without a finite parent. Thus 120 endpoint rows still await completion.
+The two new interrupted rounds belong to the same `cell07_seed0_full_c1v1s1`
+lineage and retain its historical diagnostic hash; neither has a fit-start
+receipt. Keep these model-level failures distinct from allocation failures.
+
+Of 87 critic-enabled lineages with finite incumbents in both snapshots, 23
+improved validation NMSE and 64 were unchanged. The remaining lineage still has
+no finite incumbent. All lineages have a recorded round 10, allowing an interim
+comparison at initial construction plus ten revisions. This is before final
+pruning, on the original reference suite, with equal visits rather than equal
+compute. It does not establish equation recovery or fitted mechanism compliance.
+Test data remain unopened.
+
+The critic completed 147 operations in 5:02:53. At that rate, 325 remaining search
+operations represent about 11 critic processing hours; up to 88 final reviews
+would add roughly three hours if similarly expensive. Queues, allocation gaps,
+fitting and pruning are additional; this is not a completion guarantee.
+
+Storage is now the immediate operational concern. Personal scratch remains at
+247,733/250,000 files; allocation-wide group scratch is at 476,355/500,000, leaving
+23,645 file slots. The observed group increase of 22,037 is almost that entire
+headroom and cannot be attributed solely to this campaign. Inventory the exact
+`component-runtime-cache` tree and reconcile its numeric job directories with
+scheduler records before another wave. This is a metadata review, not deletion
+authorization. Preserve source archives, model weights, fit checkpoints and
+critic/proposer response caches. The queue was empty at capture, not necessarily
+now. No new wave was submitted by this review.
+
+### Previous checkpoint: 2026-09-28
 
 The snapshot captured at `2026-09-28T20:55:53Z` has audit seal
 `0c0606878336236360c822110b341d49d2e688d9886245e4210d9748e93b91f2`.
