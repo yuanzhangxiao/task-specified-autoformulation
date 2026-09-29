@@ -12,6 +12,12 @@ low-error witness using revised initializer domains and coordinates. See
 and limits. Further fitting improvements are deferred; dataset qualification
 is the current priority.
 
+The subsequent [Phase C development release](PHASE_C_DATASET_READINESS.md)
+addresses hidden preparation ambiguity in alien-device and CSTR, includes basin
+controls, and tests known equations through the production rollout interface.
+It is a distinct release; neither the `_rates_v1` data nor the fitting evidence
+below is rewritten. Dalla Man's gastric bookkeeping contract remains pending.
+
 ## What this milestone establishes
 
 The supplied ACES audit reported 260/260 numerical protocols and 40/40 public

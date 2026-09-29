@@ -132,11 +132,19 @@ CSTR reference. A corrected comparison requires a new, matched experiment.
 
 ## Active component map
 
+Benchmark preparation now has a separate development release described in
+[PHASE_C_DATASET_READINESS.md](PHASE_C_DATASET_READINESS.md): CSTR and
+alien-device preparation fixes and the detention-basin controls, with numerical
+and public-interface replay gates. This does not declare Dalla Man T1/T2 or
+the final held-out suite ready. Fitting ideas remain deferred in
+[PHASE_C_FITTING_FINDINGS_2026-09-28.md](PHASE_C_FITTING_FINDINGS_2026-09-28.md).
+
 These are navigation anchors, not an exhaustive dependency closure or permission
 to remove anything else. Several current entry points import historical modules.
 
 | Concern | Start here |
 |---|---|
+| Phase C development datasets | [PHASE_C_DATASET_READINESS.md](PHASE_C_DATASET_READINESS.md); `scripts/prepare_phase_c_benchmarks.py` |
 | Frozen campaign and workers | `scripts/component_campaign.py`; `src/autoformalism/rebuttal/component_campaign.py`, `component_workers.py` |
 | Campaign semantics and matrix | [FINAL_COMPONENT_CAMPAIGN.md](FINAL_COMPONENT_CAMPAIGN.md) |
 | Staged proposal | `src/autoformalism/search/staged_proposer.py`; `schemas/staged_topology.py`; `schemas/staged_functions.py` |

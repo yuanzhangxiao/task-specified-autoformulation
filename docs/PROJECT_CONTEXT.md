@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/PHASE_C_DATASET_READINESS.md` defines the isolated
+`phase-c-development-1` release: CSTR and alien-device with explicit common
+hidden preparation, plus coupled/independent detention-basin development
+controls. It checks reference numerics, permitted initial information and exact
+equation replay through the production interface without fitting or LLM calls.
+Only `public/<cell>` is a discovery input. Dalla Man T1/T2 remains pending its
+gastric bookkeeping contract; T3/T4 and final test publication are outside this
+milestone. Historical releases and fitter defaults remain unchanged.
+
 `docs/CONTINUOUS_INPUT_CONTRACT.md` defines opt-in `continuous-rates-1`:
 mass-preserving 10-minute triangular ingestion, mandatory input knots, and the
 same public table interpolant for reference generation and model execution.

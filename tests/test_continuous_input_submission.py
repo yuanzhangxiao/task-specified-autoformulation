@@ -10,7 +10,7 @@ import pytest
 
 
 @pytest.mark.parametrize("confirmed", [True, False])
-@pytest.mark.parametrize("mode", ["audit", "qualify", "refine"])
+@pytest.mark.parametrize("mode", ["audit", "qualify", "refine", "phase-c"])
 def test_launcher_records_reply_and_never_blindly_resubmits(tmp_path, confirmed, mode):
     repo = tmp_path / "repo"
     script = repo / "scripts/hpc/submit_continuous_input_audit.sh"

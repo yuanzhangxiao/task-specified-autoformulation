@@ -12,6 +12,7 @@ export AF_COMMIT
 export AF_REFERENCE_MODE=${AF_REFERENCE_MODE:-audit}
 case "$AF_REFERENCE_MODE" in
   audit) af_label=continuous-inputs; af_job=continuous-input-audit ;;
+  phase-c) af_label=phase-c-development; af_job=phase-c-data ;;
   qualify)
     : "${AF_AUDIT_ROOT:?Set AF_AUDIT_ROOT to the completed audit directory}"
     [[ -f "$AF_AUDIT_ROOT/summary.json" ]] || { echo "Missing audit summary" >&2; exit 2; }

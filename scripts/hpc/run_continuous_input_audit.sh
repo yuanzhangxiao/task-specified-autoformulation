@@ -14,6 +14,14 @@ fi
 export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT"
 export PYTHONDONTWRITEBYTECODE=1
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+if [[ "${AF_REFERENCE_MODE:-audit}" == phase-c ]]; then
+  "$AF_PYTHON" -m pytest -q -p no:cacheprovider \
+    tests/test_phase_c_benchmarks.py tests/test_continuous_input_submission.py
+  "$AF_PYTHON" scripts/prepare_phase_c_benchmarks.py build --root "$AF_OUTPUT_ROOT"
+  "$AF_PYTHON" scripts/prepare_phase_c_benchmarks.py verify --root "$AF_OUTPUT_ROOT"
+  echo "Completed: $AF_OUTPUT_ROOT/summary.json"
+  exit 0
+fi
 if [[ "${AF_REFERENCE_MODE:-audit}" == refine ]]; then
   "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_local_poll.py tests/test_reference_followup.py
   "$AF_PYTHON" scripts/qualify_reference_fitting.py followup-prepare \
