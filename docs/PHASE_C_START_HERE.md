@@ -72,6 +72,20 @@ authorization. Preserve source archives, model weights, fit checkpoints and
 critic/proposer response caches. The queue was empty at capture, not necessarily
 now. No new wave was submitted by this review.
 
+The subsequent cache inventory at `2026-09-29T21:04:51Z` is complete: 18
+job directories, 42,040 regular files and 5,867 directories, no symlinks or
+special entries. Exact scheduler raw IDs identify all 18 as successfully
+completed `component-propose` allocations. The pinned launcher's per-job
+compiler-cache bindings account for all five observed namespaces; scientific
+call records, fits, runtime logs and model weights live elsewhere. Group file
+usage is now 476,926/500,000. The prepared wave-4 command archives each of these
+explicit directories, verifies every archived file and rechecks live scheduler
+state before removing the loose copies. About 47,900 entries could be retired,
+leaving roughly 71,000 group file slots after small archive/receipt overhead;
+the actual quota must be checked after execution. No remote deletion is implied
+by this inventory. The archival helper is outside the frozen runtime.
+See the operations runbook for the bounded archive-and-resume command.
+
 ### Previous checkpoint: 2026-09-28
 
 The snapshot captured at `2026-09-28T20:55:53Z` has audit seal

@@ -165,7 +165,7 @@ zero usage; `--max-entries` can be increased for a deliberate second pass.
 `inventory.json` deliberately marks every bucket `deletion_eligible=false`.
 The metadata scan cannot establish which old-looking directories hold unique
 results or which environments running jobs require. Names and ages alone cannot
-certify safe deletion. There is no delete mode or automatically scheduled cleanup.
+certify safe deletion. The inventory has no delete mode or scheduled cleanup.
 
 The next cleanup deliverable is an explicit manifest of exact paths, measured
 size/file count, owner, dependency check, archive checksums, restore evidence and
@@ -174,6 +174,46 @@ contents before releasing originals. Archives reduce inode use but may not save
 many bytes for already compressed arrays or images. Never publish credentials
 with source, logs or scientific archives; preserve required configuration through
 a separate secret-management process.
+
+### Reviewed component compiler caches
+
+The 2026-09-29 cache review identifies 18 finished proposer jobs under the exact
+`component-runtime-cache` root: 42,040 files and 5,867 directories, with a complete
+metadata traversal and no symlinks/special entries. All raw job IDs match
+successful `component-propose` allocations. The frozen launcher binds per-job
+`triton`, `torchinductor`, `vllm`, `xdg` and `cuda` compiler caches there; scientific
+call caches, fitting artifacts, runtime logs, weights and source are outside it.
+The prepared command's reviewed manifest lists these exact job IDs and counts.
+
+`scripts/archive_finished_component_caches.py` is a separate maintenance tool.
+It defaults to a read-only plan and requires `--apply` to archive and remove
+loose caches. It accepts explicit numeric job IDs under a physical
+`component-runtime-cache` root, refuses other top-level namespaces, mounts,
+foreign owners, hard links, symlinks and special files, and checks live scheduler
+state by exact `JobIDRaw`. Each job gets an uncompressed tar and a per-file
+checksum receipt. Every archive member is read back and compared, originals
+are rechecked, archives/receipts are flushed, and all jobs are checked again
+before removal. A verified archive permits deterministic continuation after
+partial removal; incomplete archives remain for inspection. No archive or
+checksum receipt is overwritten. A round-trip restore test covers the format.
+
+The `component-wave4-tools.tar.gz` command copy uses this helper only for the
+reviewed 18 jobs, retaining archives at
+`/scratch/group/p.nairr260351.000/u.yx126462/component-cache-archive-20260929`.
+It verifies the frozen source/launcher, records quota before and after cleanup,
+and stops before submission unless at least 40,000 group file slots are reported
+free. That operational buffer exceeds the previous observed 22,037-entry growth;
+it is not a scientific setting or a guarantee against other allocation users.
+Quota reporting can lag; a quota refusal preserves the archives and completed
+cleanup, and the same command can be rerun after the meter updates.
+
+After successful cleanup it invokes the original frozen submitter once for
+`serial-critic-recovery-4`: 2 proposers, 1 critic, 16 fits, 1 pruning worker,
+with `ac042` excluded as before. It neither changes scientific budgets nor
+prequeues future waves. Repeating this wave name reuses its recorded jobs.
+The bundle also includes `inspect-components-wave4-aces.sh` to capture results
+after completion. Local checks establish command behavior, not remote cleanup
+or submission; confirm the resulting receipt, quota and job IDs on ACES.
 
 Repository-root `output/`, `tmp/`, `transfers/` and `backups/` are ignored as local
 generated/staging directories, alongside existing `artifacts/` and `work/` rules.
