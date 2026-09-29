@@ -6,6 +6,12 @@ audit and known-parameter training/validation replay. Generic fitting is not yet
 qualified. Dalla Man and alien-device public-interface qualification remain open;
 this experiment neither changes their data nor establishes whole-suite correctness.
 
+**2026-09-28 result:** all fourteen attempts are now recorded. The hard/generic
+combined initializer arm reached train/validation NMSE 0.00014821 / 0.00006713.
+See [the fitting findings and deferred integration note](PHASE_C_FITTING_FINDINGS_2026-09-28.md)
+for all endpoints, checkpoint attribution and hidden-state limitations. Further
+fitting development is deferred while the new dataset contracts are qualified.
+
 ## Evidence motivating the comparison
 
 The received `cstr-qualification-diagnostics.tar.gz` has SHA-256
@@ -178,5 +184,6 @@ or failed records rather than excluding them from the comparison.
   NMSE 1.99e-17 and validation NMSE 1.86e-17 across all development trajectories.
   Radau/DOP853 maximum scaled disagreement was 6.17e-7.
 
-These checks qualify the diagnostic machinery. The fourteen production-size
-fits remain to be run on the cluster.
+These checks qualified the diagnostic machinery before cluster execution. The
+fourteen production-size fits subsequently completed; their results and limits
+are recorded in the linked findings note.

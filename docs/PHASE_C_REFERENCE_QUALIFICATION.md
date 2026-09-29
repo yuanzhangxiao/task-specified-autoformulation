@@ -4,10 +4,13 @@ Owner: Orion. This implements the benchmark portion of milestone 1 in
 [PHASE_C_START_HERE.md](PHASE_C_START_HERE.md). Historical campaign reconciliation
 has a separate owner and is not changed here.
 
-The four ACES fits and their diagnostics have now been inspected. The coupled
-reference is attainable on development data, but only easy/reference-near met
-the low-error target. See [the bounded fitting follow-up](PHASE_C_CSTR_REFINEMENT.md)
-for the observed failure modes and the separately frozen numerical comparisons.
+The original four ACES fits established coupled-reference attainability; only
+easy/reference-near met their low-error target. The separately frozen fourteen-fit
+[follow-up](PHASE_C_CSTR_REFINEMENT.md) subsequently obtained a hard/generic
+low-error witness using revised initializer domains and coordinates. See
+[the recorded findings](PHASE_C_FITTING_FINDINGS_2026-09-28.md) for all endpoints
+and limits. Further fitting improvements are deferred; dataset qualification
+is the current priority.
 
 ## What this milestone establishes
 
@@ -140,6 +143,36 @@ design in a new version, or explicitly evaluate irreducible uncertainty before
 requiring near-zero reference recovery. Do not use trajectory IDs as hidden
 state labels. The inspected training CSV SHA-256 is
 `64db6d82a5626c54b9e16f7fd1fda52d7857eb917d74798e8cecf218a2bf70c6`.
+
+Reinspection on 2026-09-28 confirmed the exact public-data contradiction:
+each of the three runs has 601 samples, the maximum target difference is
+3.08837085834, and their unavoidable squared error around the common mean curve
+is 790.501167995. Dividing by all 9,616 training samples and the pooled training
+target variance gives the lower bound 0.005615626714. This bound allows arbitrary
+perfect predictions for the other training runs, so it is conservative, not an
+achievable optimum for the ODE class.
+
+The source of the discrepancy is explicit in `_alien_protocols()` in
+`src/autoformalism/benchmarks/phase_b_generation.py`: `zero` starts all states at
+zero; `initial_shift_a` changes hidden z1(0) to 0.5; `initial_shift_b` changes
+hidden z2(0) to 0.5. All three use zero command throughout and observed y(0)=0.
+The hard public prompt supplies only the command and primary output, requires
+globally shared equations/parameters, and requires causal initialization from
+available information. Neither a prehistory nor a measurement identifying the
+hidden preparation is supplied. Even the correct deterministic equations cannot
+choose the correct hidden initial state from this interface. Giving each training
+trajectory a free hidden initial value would not solve deployment initialization.
+
+For a new deterministic input-response release, a **common reproducible reset**
+is the simplest proposed repair: the hidden state remains latent and can store
+input history, but its starting preparation no longer varies secretly. If varied
+preparations are scientifically important, provide legitimate measured initial
+covariates or a declared warm-up history, and qualify whether those observations
+suffice. Another option is an explicit uncertain-initial-state prediction task,
+which requires a different evaluation contract. A trajectory ID must never serve
+as an encoded hidden-state label. These are proposed release choices, not changes
+to the current frozen dataset. Check both observation tiers and all split designs
+after choosing a contract; the demonstrated contradiction is in the hard tier.
 
 ## Run on ACES
 
