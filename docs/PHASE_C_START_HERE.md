@@ -5,6 +5,13 @@ AGENTS.md, change a frozen protocol, or announce a new production algorithm.
 Read this before the chronological campaign history in PROJECT_CONTEXT.md and
 PIPELINE_DESIGN.md. Implementation still follows their relevant contracts.
 
+The first executable step is the [construction baseline](PHASE_C_CONSTRUCTION_BASELINE.md):
+24 constructions on six corrected public cases, independently assessed for NMSE
+and mechanism compliance, with exact prompt/response and equation reports. It
+starts stage isolation; reviewed-predecessor experiments and known-structure fitting
+remain subsequent work. The same runbook supplies a separate CPU-only Phase B
+endpoint closeout without changing the historical runtime.
+
 ## Objective and ownership
 
 Build reliable scientific model construction before expanding search. Separate

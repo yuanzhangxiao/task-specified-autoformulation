@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Submit one bounded pilot wave with immutable scheduler receipts."""
+
+import argparse
+import json
+import os
+import re
+from pathlib import Path
+
+if __package__:
+    from .submit_component_campaign import support
+else:
+    from submit_component_campaign import support
+
+from autoformalism.fitting import public_fitting as public
+from autoformalism.research import construction_baseline as baseline
+
+
+def submit(root: Path, wave: str) -> dict:
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", wave):
+        raise ValueError("wave must be a simple identifier")
+    plan = baseline.verify(root)
+    for key in (
+        "AF_PYTHON",
+        "AF_VLLM_IMAGE",
+        "AF_HF_HOME",
+        "AF_COMPUTE_CACHE_ROOT",
+        "AF_IPC_TMP_ROOT",
+    ):
+        if not os.environ.get(key):
+            raise ValueError(f"set {key}")
+    source = support("submit_shared_process_pilot")
+    commit = source.source_commit(baseline.REPO)
+    os.environ.update(
+        AF_REPO_ROOT=str(baseline.REPO), AF_OUTPUT_ROOT=str(root), AF_COMMIT=commit
+    )
+    identity = {
+        "plan_sha256": plan["artifact_sha256"],
+        "commit": commit,
+        "wave": wave,
+        "resources": "aces-1h100-24-fit-assess-tasks-concurrency4-1",
+    }
+    directory = root / "submissions" / wave
+    worker = baseline.REPO / "scripts/hpc/run_phase_c_baseline.sh"
+    with public._lock(directory):
+        path = directory / "identity.json"
+        if path.exists() and public._read(path) != identity:
+            raise ValueError("submission identity differs")
+        public._write(path, identity)
+        (root / "logs").mkdir(exist_ok=True)
+        jobs = {}
+        for stage in ("propose", "fit-assess", "report"):
+            opts = [
+                "--kill-on-invalid-dep=yes",
+                "--account=156264627414",
+                "--nodes=1",
+                "--ntasks=1",
+                "--export=ALL",
+                "--exclude=ac042",
+                f"--job-name=phasec-{stage}",
+                f"--output={root}/logs/{wave}-{stage}-%A_%a.out",
+                f"--error={root}/logs/{wave}-{stage}-%A_%a.err",
+            ]
+            if stage == "propose":
+                opts += [
+                    "--partition=gpu",
+                    "--gres=gpu:h100:1",
+                    "--cpus-per-task=8",
+                    "--mem=64G",
+                    "--time=06:30:00",
+                    "--signal=B:TERM@300",
+                ]
+            else:
+                predecessor = {"fit-assess": "propose", "report": "fit-assess"}[stage]
+                opts += [
+                    "--partition=cpu",
+                    "--cpus-per-task=1",
+                    "--mem=16G",
+                    "--time=03:00:00",
+                    f"--dependency=afterany:{jobs[predecessor]}",
+                ]
+                if stage != "report":
+                    opts += [f"--array=0-{len(plan['tasks']) - 1}%4"]
+            # submit_job deliberately refuses unknown outcomes; never reset its intent.
+            intent = directory / f"{stage}.intent.json"
+            expected = {
+                "argv": ["sbatch", "--parsable", *opts, str(worker), stage, "0"]
+            }
+            if intent.exists():
+                job = directory / f"{stage}.id"
+                if public._read(intent) != expected or not job.exists():
+                    raise ValueError(
+                        f"uncertain/different submission; inspect {intent}"
+                    )
+                jobs[stage] = job.read_text().strip()
+                if not jobs[stage].isdecimal():
+                    raise ValueError("invalid saved job ID")
+            else:
+                jobs[stage] = source.submit_job(
+                    directory, stage, opts, worker, stage, 0
+                )
+        value = {
+            **identity,
+            "jobs": jobs,
+            "automatic_followup": False,
+            "test_data_opened": False,
+        }
+        public._write(directory / "manifest.json", value)
+        return value
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--wave", default="construction-1")
+    args = parser.parse_args()
+    print(json.dumps(submit(args.root.resolve(), args.wave), indent=2))
