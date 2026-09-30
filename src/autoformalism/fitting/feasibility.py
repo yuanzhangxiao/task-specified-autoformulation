@@ -9,6 +9,10 @@ from time import monotonic
 import numpy as np
 from scipy.optimize import least_squares
 
+from autoformalism.fitting.coordinates import (
+    NumericalCoordinates,
+    coordinate_least_squares,
+)
 from autoformalism.fitting.directional_poll import poll_fit
 from autoformalism.fitting.sensitivity_probe import SymbolicOracle
 from autoformalism.fitting.stagnation import instrumented_fit
@@ -133,6 +137,7 @@ def recover_refinement(
     design: list[dict],
     identity: str,
     use_poll: bool,
+    numerical_coordinates: NumericalCoordinates | None = None,
 ) -> dict:
     """Select on full training rollouts, then refine within the remaining budget."""
     started = monotonic()
@@ -201,6 +206,14 @@ def recover_refinement(
 
             def optimizer(fun, x, _augmented=augmented, **kwargs):
                 kwargs.update(jac=_augmented.jacobian, ftol=config.least_squares_ftol)
+                if numerical_coordinates is not None:
+                    return coordinate_least_squares(
+                        fun,
+                        x,
+                        coordinates=numerical_coordinates,
+                        names=system.names,
+                        **kwargs,
+                    )
                 return least_squares(fun, x, **kwargs)
 
             try:
@@ -239,7 +252,9 @@ def recover_refinement(
         report = poll_fit(
             polling,
             candidates,
-            scales=np.maximum(np.abs(polling.vector(scale_point)), 1.0),
+            scales=numerical_coordinates.arrays("parameters", system.names)[1]
+            if numerical_coordinates
+            else np.maximum(np.abs(polling.vector(scale_point)), 1.0),
             max_calls=budget.maximum - budget.calls,
             seconds=max(0.001, budget.deadline - monotonic()),
             checkpoint=directory / "recovery_poll.json",

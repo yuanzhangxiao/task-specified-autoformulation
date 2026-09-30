@@ -18,6 +18,7 @@ from scipy.signal import savgol_filter
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.expressions import compile_candidate
 from autoformalism.fitting.collocation_progress import CollocationProgress
+from autoformalism.fitting.coordinates import NumericalCoordinates
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.sensitivity_probe import (
     SymbolicODE,
@@ -387,6 +388,7 @@ def latent_start(
     mesh_substeps: int = 1,
     record_progress: bool = False,
     branch_node_target: tuple[int, int] | None = None,
+    numerical_coordinates: NumericalCoordinates | None = None,
 ) -> dict:
     """Estimate latent trajectories with continuity and the same physical boundary.
 
@@ -418,13 +420,44 @@ def latent_start(
     )
     directory.mkdir(parents=True, exist_ok=True)
     opti = ca.Opti()
-    theta = opti.variable(len(start))
-    opti.set_initial(theta, start)
+    parameter_center, parameter_scale = np.zeros(len(start)), np.ones(len(start))
+    state_center, state_scale = (
+        np.zeros(system.state_count),
+        np.ones(system.state_count),
+    )
+    if numerical_coordinates is not None:
+        parameter_center, parameter_scale = numerical_coordinates.arrays(
+            "parameters", system.names
+        )
+        state_center, state_scale = numerical_coordinates.arrays(
+            "states", system.model.state_names
+        )
+    parameter_node = opti.variable(len(start))
+    theta = (
+        parameter_node
+        if numerical_coordinates is None
+        else parameter_center + parameter_scale * parameter_node
+    )
+    opti.set_initial(parameter_node, (start - parameter_center) / parameter_scale)
     for i in range(len(start)):
         if np.isfinite(lower[i]):
-            opti.subject_to(theta[i] >= lower[i])
+            opti.subject_to(
+                parameter_node[i]
+                >= (lower[i] - parameter_center[i]) / parameter_scale[i]
+            )
         if np.isfinite(upper[i]):
-            opti.subject_to(theta[i] <= upper[i])
+            opti.subject_to(
+                parameter_node[i]
+                <= (upper[i] - parameter_center[i]) / parameter_scale[i]
+            )
+
+    def state_node(physical_guess):
+        node = opti.variable(system.state_count)
+        opti.set_initial(node, (physical_guess - state_center) / state_scale)
+        return (
+            node if numerical_coordinates is None else state_center + state_scale * node
+        )
+
     n = system.state_count
     integrator = None
     if method == "shooting_init":
@@ -519,24 +552,42 @@ def latent_start(
                     u1 = input_start + (input_end - input_start) * right_fraction
                     left_guess = guess[i] + (guess[i + 1] - guess[i]) * left_fraction
                     right_guess = guess[i] + (guess[i + 1] - guess[i]) * right_fraction
-                    end = opti.variable(n)
-                    opti.set_initial(end, right_guess)
+                    end = state_node(right_guess)
                     nodes += n
                     if method == "shooting_init":
                         propagated = integrator(
                             x0=current, p=ca.vertcat(theta, t0, dt, u0, u1)
                         )["xf"]
-                        opti.subject_to(end == propagated)
+                        opti.subject_to(
+                            end == propagated
+                            if numerical_coordinates is None
+                            else (end - propagated) / state_scale == 0
+                        )
                     else:
-                        inner = opti.variable(n)
-                        opti.set_initial(inner, (2 * left_guess + right_guess) / 3)
+                        inner = state_node((2 * left_guess + right_guess) / 3)
                         nodes += n
                         first = system.rhs(
                             t0 + dt / 3, inner, theta, u0 + (u1 - u0) / 3
                         )
                         last = system.rhs(t1, end, theta, u1)
-                        opti.subject_to(inner == current + dt * (5 * first - last) / 12)
-                        opti.subject_to(end == current + dt * (3 * first + last) / 4)
+                        if numerical_coordinates is None:
+                            opti.subject_to(
+                                inner == current + dt * (5 * first - last) / 12
+                            )
+                            opti.subject_to(
+                                end == current + dt * (3 * first + last) / 4
+                            )
+                        else:
+                            opti.subject_to(
+                                (inner - current - dt * (5 * first - last) / 12)
+                                / state_scale
+                                == 0
+                            )
+                            opti.subject_to(
+                                (end - current - dt * (3 * first + last) / 4)
+                                / state_scale
+                                == 0
+                            )
                     current = end
                 predicted = system.observe(t1, current, theta, u1)
                 for column, channel in enumerate(system.channels):
@@ -618,6 +669,7 @@ def latent_start(
             "hidden_labels_used": False,
             "initial_conditions_optimized": bool(system.initial_parameter_names)
             and optimizer_started,
+            "constraint_coordinates": "scaled" if numerical_coordinates else "physical",
             "initial_parameter_names": system.initial_parameter_names,
             "hessian_approximation": (
                 "limited-memory" if system.requires_first_order_solver else "exact"

@@ -21,6 +21,10 @@ from scipy.optimize import least_squares
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import CompiledModel
 from autoformalism.expressions.diagnostics import RuntimeExpressionError
+from autoformalism.fitting.coordinates import (
+    NumericalCoordinates,
+    coordinate_least_squares,
+)
 from autoformalism.fitting.directional_poll import poll_fit
 from autoformalism.fitting.feasibility import (
     EvaluationBudget,
@@ -106,6 +110,7 @@ def fit_collocation_forward_sensitivity(
     *,
     initial_parameters: Mapping[str, float] | None = None,
     initialization_plan: LatentInitializationPlan | None = None,
+    numerical_coordinates: NumericalCoordinates | None = None,
 ) -> dict[str, Any]:
     """Fit on training by collocation then sensitivity or exact-cost polling.
 
@@ -154,6 +159,16 @@ def fit_collocation_forward_sensitivity(
     )
     start = dict(initial_parameters or _role_start(model.validated.candidate, training))
     theta = layout.vector(start)
+    coordinate_options = {}
+    if numerical_coordinates is not None:
+        numerical_coordinates.arrays("parameters", system.names)
+        numerical_coordinates.arrays("states", model.state_names)
+        coordinate_options = {"numerical_coordinates": numerical_coordinates}
+        write_json(
+            directory / "coordinates.json",
+            numerical_coordinates.model_dump(mode="json"),
+            immutable=True,
+        )
     identity = content_hash(
         {
             "candidate": model.validated.candidate.model_dump(mode="json"),
@@ -166,6 +181,11 @@ def fit_collocation_forward_sensitivity(
             else None,
             "runtime": runtime_identity(),
             "casadi": version("casadi"),
+            **(
+                {"coordinates": numerical_coordinates.model_dump(mode="json")}
+                if numerical_coordinates
+                else {}
+            ),
         }
     )
     identity_file = directory / "fit_identity.json"
@@ -237,6 +257,7 @@ def fit_collocation_forward_sensitivity(
             warmup_seconds=config.node_warmup_seconds,
             mesh_substeps=config.collocation_mesh_substeps,
             record_progress=config.collocation_diagnostics,
+            **coordinate_options,
         )
         primary = dict(initializer)
         portfolio = [primary]
@@ -268,6 +289,7 @@ def fit_collocation_forward_sensitivity(
                     mesh_substeps=config.collocation_mesh_substeps,
                     record_progress=config.collocation_diagnostics,
                     branch_node_target=point.get("node_target"),
+                    **coordinate_options,
                 )
                 attempt["start_source"] = point["source"]
                 portfolio.append(attempt)
@@ -317,6 +339,10 @@ def fit_collocation_forward_sensitivity(
     def optimizer(fun: Any, x: np.ndarray, **kwargs: Any) -> Any:
         kwargs["jac"] = oracle.jacobian
         kwargs["ftol"] = config.least_squares_ftol
+        if numerical_coordinates is not None:
+            return coordinate_least_squares(
+                fun, x, coordinates=numerical_coordinates, names=system.names, **kwargs
+            )
         return least_squares(fun, x, **kwargs)
 
     if config.recovery_policy != "legacy":
@@ -332,12 +358,15 @@ def fit_collocation_forward_sensitivity(
             design,
             identity,
             use_poll,
+            **coordinate_options,
         )
     elif use_poll:
         refinement = poll_fit(
             oracle,
             [selected, start],
-            scales=np.maximum(np.abs(theta), 1.0),
+            scales=numerical_coordinates.arrays("parameters", system.names)[1]
+            if numerical_coordinates
+            else np.maximum(np.abs(theta), 1.0),
             max_calls=config.maximum_function_evaluations,
             seconds=config.refinement_seconds,
             checkpoint=directory / "poll_checkpoint.json",
@@ -359,6 +388,9 @@ def fit_collocation_forward_sensitivity(
             else "classical_sensitivity"
         )
     parameters = refinement.get("parameters")
+    if numerical_coordinates is not None:
+        refinement["native_optimality_coordinates"] = "scaled"
+        refinement["reported_parameters_and_jacobian_coordinates"] = "physical"
     if not isinstance(parameters, dict):
         return {
             "schema_version": "collocation-forward-sensitivity-fit-1",

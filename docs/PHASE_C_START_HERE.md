@@ -9,8 +9,11 @@ The first executable step is the [construction baseline](PHASE_C_CONSTRUCTION_BA
 32 constructions on eight corrected public cases, including coupled/independent
 noiseless basin controls, independently assessed for NMSE
 and mechanism compliance, with exact prompt/response and equation reports. It
-starts stage isolation; reviewed-predecessor experiments and known-structure fitting
-remain subsequent work. The same runbook supplies a separate CPU-only Phase B
+starts stage isolation; reviewed-predecessor experiments remain subsequent work.
+In parallel, the [fitting qualification plan](PHASE_C_FITTING_PLAN.md) starts a
+42-fit, CPU-only Delta study of coordinate scaling and shared initial values on
+fixed CSTR/basin equations. It changes no production defaults. The same
+construction runbook supplies a separate CPU-only Phase B
 endpoint closeout without changing the historical runtime.
 
 ## Objective and ownership
@@ -21,7 +24,8 @@ interface rejection, numerical fitting limits and selection effects. Good
 prediction need not imply a unique textbook realization; textbook recovery is
 an appropriate claim only under adequate specification and identifiability.
 
-- Orion owns benchmark correction, input semantics and reference qualification.
+- Orion owns benchmark correction, input semantics, reference qualification and
+  the Phase C fitting milestone; Astra owns Phase C construction.
   Do not edit his benchmark/data/loader files concurrently or mix corrected
   releases into historical campaign directories.
 - Codex owns Phase B artifact/scheduler reconciliation, operations tooling,

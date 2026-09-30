@@ -1,5 +1,10 @@
 # Fitting findings to revisit in Phase C
 
+**2026-09-30 update:** the development dataset milestone is complete and the user
+has opened the fitting stage. The five-direction plan and first controlled
+coordinate/domain study are in [PHASE_C_FITTING_PLAN.md](PHASE_C_FITTING_PLAN.md).
+The historical results and limitations below remain unchanged.
+
 Recorded 2026-09-28. **Decision: defer further fitting development and experiments
 until the Phase C fitting-improvement stage. The immediate priority is to qualify
 the new datasets and their public information contracts.** This note preserves

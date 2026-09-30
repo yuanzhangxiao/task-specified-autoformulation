@@ -1,0 +1,19 @@
+{
+  "protocol": "phase-c-fitting-qualification-1",
+  "starts": 3,
+  "fitter": {
+    "initializer_seconds": 120,
+    "refinement_seconds": 180,
+    "maximum_function_evaluations": 240,
+    "collocation_node_start": "rollout_or_observed",
+    "node_warmup_seconds": 5,
+    "recovery_policy": "feasible",
+    "collocation_diagnostics": true,
+    "least_squares_ftol": null,
+    "poll_policy": "local"
+  },
+  "replay_seconds": 240,
+  "fit_nmse_target": 0.01,
+  "reference_nmse_limit": 0.000001,
+  "solver_agreement_limit": 0.0001
+}
