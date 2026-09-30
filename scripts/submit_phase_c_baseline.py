@@ -38,7 +38,7 @@ def submit(root: Path, wave: str) -> dict:
         "plan_sha256": plan["artifact_sha256"],
         "commit": commit,
         "wave": wave,
-        "resources": "aces-1h100-24-fit-assess-tasks-concurrency4-1",
+        "resources": f"aces-1h100-{len(plan['tasks'])}-fit-assess-tasks-concurrency4-1",
     }
     directory = root / "submissions" / wave
     worker = baseline.REPO / "scripts/hpc/run_phase_c_baseline.sh"

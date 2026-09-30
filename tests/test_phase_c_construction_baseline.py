@@ -174,7 +174,7 @@ def test_case_balanced_statistics_and_unavailable_denominator():
     assert value["compliance_mean"] == 0.5 and value["compliance_sample_sd"] == 0
 
 
-def test_qualified_release_is_public_only_and_renames_rates(monkeypatch):
+def test_qualified_release_is_public_only_and_renames_rates(monkeypatch, tmp_path):
     release = b.REPO / "artifacts/phase-c-development-final-v2"
     if not release.exists():
         pytest.skip("local qualified release is not a committed fixture")
@@ -191,9 +191,25 @@ def test_qualified_release_is_public_only_and_renames_rates(monkeypatch):
     _, cells = phase_c_inputs.qualified_public_cells(
         release, cfg.model_dump(mode="json")
     )
-    assert len(cells) == 6
+    assert len(cells) == 8
     for name, cell in cells.items():
         if "dalla_man" in name:
             assert "meal_rate_g_per_min" in cell["context"]["external_inputs"]
             assert "meal_event_g" not in json.dumps(cell["independent_rules"])
     assert len(cells[next(iter(cells))]["independent_rules"]) > 0
+    plan = b.freeze(release, tmp_path, b.REPO / "configs/phase_c_construction_v1.json")
+    assert len(plan["tasks"]) == 32
+    assert len({t["task_id"] for t in plan["tasks"]}) == 32
+    assert {t["seed"] for t in plan["tasks"]} == {0, 1}
+    assert b.verify(tmp_path) == plan
+    assert (
+        b.freeze(release, tmp_path, b.REPO / "configs/phase_c_construction_v1.json")
+        == plan
+    )
+    for name in phase_c_inputs.basin.BASINS:
+        cell = cells[name]
+        assert (
+            cell["brief"]["scientific_context"]
+            == cell["public_specification"]["public_prompt"].rstrip()
+        )
+        assert len(cell["independent_rules"]) == (5 if "_coupled_" in name else 3)

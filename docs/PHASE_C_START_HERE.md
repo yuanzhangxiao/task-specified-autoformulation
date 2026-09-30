@@ -6,7 +6,8 @@ Read this before the chronological campaign history in PROJECT_CONTEXT.md and
 PIPELINE_DESIGN.md. Implementation still follows their relevant contracts.
 
 The first executable step is the [construction baseline](PHASE_C_CONSTRUCTION_BASELINE.md):
-24 constructions on six corrected public cases, independently assessed for NMSE
+32 constructions on eight corrected public cases, including coupled/independent
+noiseless basin controls, independently assessed for NMSE
 and mechanism compliance, with exact prompt/response and equation reports. It
 starts stage isolation; reviewed-predecessor experiments and known-structure fitting
 remain subsequent work. The same runbook supplies a separate CPU-only Phase B

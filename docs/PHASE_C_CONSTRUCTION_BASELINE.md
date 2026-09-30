@@ -10,15 +10,22 @@ Use the qualified `phase-c-development-2` release, separately from Phase B:
 corrected continuous input schedules and preparation contracts, including
 alien-device training data. Preparation verifies the 28-cell publication receipt
 and every selected public file. No private reference/diagnostic file is opened.
-The delivery bundle contains the receipt and six selected public cells; it is
+The expanded v2 delivery bundle contains the receipt and eight selected public cells; it is
 not a full reference archive.
 
 The roster is named canonical Dalla T1-easy, T1-hard, T2-easy, T2-hard; named
-CSTR-easy; functional alien-device-easy. Two seeds and Full/Brief-only give **24
-fresh constructions and at most 24 fits**. The existing optional shared-process
+CSTR-easy; functional alien-device-easy; coupled and independent noiseless
+detention basins. Two seeds and Full/Brief-only give **32 fresh constructions
+and at most 32 fits**. These are eight cases, not 32 distinct benchmarks. The
+independent basin is a negative control within the basin family. All eight cases
+are noiseless; noisy basin variants are deferred. The existing optional shared-process
 stage and same-inventory fallback are enabled. Compiler/causality, generated
 targets and public scientific admission rules precede fitting. Ambiguous
 admission predicates remain distinct from passes.
+
+Task prefixes are `cell00` T1-easy, `cell01` T1-hard, `cell02` T2-easy,
+`cell03` T2-hard, `cell04` CSTR, `cell05` alien-device, `cell06` coupled basin,
+and `cell07` independent basin. The first 24 task definitions retain their v1 order.
 
 Reuse the general shared constructor, reconstruction, causal initialization and
 `collocation-multi-target-v1` fitter. The original 20B model/revision, low reasoning,
@@ -40,6 +47,30 @@ proposer structure errors from optimizer limitations.
   fixed operating points, Radau/BDF agreement, and pass/fail/unresolved outcomes.
   Rebind only Dalla's declared `meal_event_g` to `meal_rate_g_per_min` channel rename.
   Public mechanism bullets must match exactly before preparation succeeds.
+
+The basin adapter preserves the full finalized public prompts. Their format has
+no legacy `F. Required response` boundary. General graph admission checks local
+input paths and, for the coupled case, upstream dynamic memory. It does not
+certify the rest of the physical specification. Fitting and construction use
+the same general implementations as the other six cases; no basin repair is added.
+
+Basin assessment reuses `basin_equation_checks` with saved fitted parameters and
+training survey geometry. It scores five fixed predicates for the coupled case:
+downstream inflow conversion, threshold outlet, upstream dynamic memory (the
+general Radau/BDF probe), upstream inflow conversion, and area-weighted transfer
+cancellation. The independent case scores downstream conversion, threshold
+outlet, and absence of upstream runoff/initial-gauge dependencies, including
+initial maps. A remaining dependency is unresolved, not proof of active coupling.
+Each predicate receives one vote; extra advisory checks cannot change the denominator.
+
+These basin scores are explicitly **finite-predicate coverage**, not a complete
+score for every clause of the public specification. In particular, nonnegative
+storage over all conditions, the full upstream threshold law and arbitrary
+coordinate transformations are not certified. Conservation witnesses in named
+physical depths retain their conditional coordinate assumptions. Unsupported
+coordinates or missing evidence are unresolved. Named shared laws and equivalent
+inlined equations use the same checks. Reports provide aggregates separately for
+the original six cases and the basin controls, alongside the eight-case summary.
 
 For K requirements, confirmed compliance is P/K; possible is (P+U)/K. Average over
 seeds then cases; sample SD is across case means. JSON values are fractions.
@@ -77,19 +108,26 @@ adding search. This pilot does not introduce another model-selection objective.
 
 ## ACES commands
 
-From the extracted pinned source bundle with `SOURCE_COMMIT` and `public-release/`:
+From the new extracted pinned source bundle with `SOURCE_COMMIT` and `public-release/`:
 
 ```bash
-bash scripts/hpc/start_foundation_aces.sh closeout
 bash scripts/hpc/start_foundation_aces.sh pilot
 ```
 
-Closeout imports the original Phase B checkout and authorization: four CPU pruning
+The expansion starts a fresh root at `phase-c-construction-v2`. Do not unpack over
+the v1 source bundle or update its frozen plan. If v1 has already launched, keep
+its source and results for resume/inspection; v2 does not import its calls or
+charge them to the new experiment. Avoid launching both just to get duplicate
+first-six results. A v1 resume requires its original source.
+
+Phase B closeout remains an independent `closeout` action; do not resubmit it
+merely to expand this pilot. Closeout imports the original Phase B checkout and
+authorization: four CPU pruning
 workers and one serialized CPU critic, with original six-hour budgets and `ac042`
 excluded. It requests no search/GPU workers. More final reviews become ready as
 pruning finishes. Successful allocations still require a completion audit.
 
-The pilot requests one H100, then 24 CPU tasks (concurrency four), and a report.
+The pilot requests one H100, then 32 CPU tasks (concurrency four), and a report.
 Each CPU task fits one model and then independently assesses it, avoiding a second
 queued array. `afterany` dependencies keep failures visible;
 they do not treat failed jobs as successful. Phase B's existing critic uses the

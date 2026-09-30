@@ -17,7 +17,7 @@ def setup(monkeypatch, tmp_path):
             "rounds": 15,
             "wall_seconds": 21600,
         },
-        "tasks": [{"task_id": f"task{i}"} for i in range(24)],
+        "tasks": [{"task_id": f"task{i}"} for i in range(32)],
     }
     python = tmp_path / "python"
     python.touch()
@@ -120,6 +120,7 @@ def test_pilot_dependencies_and_idempotence(monkeypatch, tmp_path):
     assert pilot.submit(root, "pilot") == result and len(calls) == 3
     assert [s for s, _ in calls] == ["propose", "fit-assess", "report"]
     assert "--gres=gpu:h100:1" in calls[0][1]
-    assert "--array=0-23%4" in calls[1][1]
+    assert "--array=0-31%4" in calls[1][1]
+    assert "32-fit-assess-tasks" in result["resources"]
     assert "--dependency=afterany:101" in calls[1][1]
     assert "--dependency=afterany:102" in calls[2][1]

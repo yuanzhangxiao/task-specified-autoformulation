@@ -21,6 +21,7 @@ from autoformalism.rebuttal.repair_comparison import (
     RepairBudgetExceeded,
 )
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
+from autoformalism.research import basin_construction_assessment as basin
 from autoformalism.research import construction_trace, phase_c_inputs
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicSplit
@@ -240,12 +241,14 @@ def assess(root: Path, plan: dict, task: dict) -> dict:
                 "initials": {},
                 "semantics": "continuous_time",
             }
-            findings = functional.assess(
-                row,
-                rules,
-                public.unpack_split(PublicSplit.model_validate(cell["training"])),
-                functional.Settings.model_validate(plan["config"]["assessment"]),
-                directory / "probes",
+            train = public.unpack_split(PublicSplit.model_validate(cell["training"]))
+            settings = functional.Settings.model_validate(plan["config"]["assessment"])
+            findings = (
+                basin.assess(row, cell, train, settings, directory / "probes")
+                if cell.get("assessment_policy") == basin.POLICY
+                else functional.assess(
+                    row, rules, train, settings, directory / "probes"
+                )
             )
             status = "assessed"
         else:
@@ -291,6 +294,9 @@ def report(root: Path, plan: dict) -> dict:
         metrics = (fitted or {}).get("fit", {})
         row = {
             **task,
+            "assessment_policy": plan["cells"][task["benchmark_id"]].get(
+                "assessment_policy", "fitted-public-mechanism-tests-1"
+            ),
             "status": (fitted or {}).get("status", "pending"),
             "proposal_status": (proposal or {}).get("status", "pending"),
             "assessment_status": (assessment or {}).get("status", "pending"),
@@ -340,6 +346,10 @@ def report(root: Path, plan: dict) -> dict:
         "status_counts": dict(Counter(r["status"] for r in rows)),
         "assessment_counts": dict(Counter(r["assessment_status"] for r in rows)),
         "aggregate": aggregate(rows),
+        "aggregate_by_assessment_policy": {
+            policy: aggregate([r for r in rows if r["assessment_policy"] == policy])
+            for policy in sorted({r["assessment_policy"] for r in rows})
+        },
         "test_data_opened": False,
     }
     atomic_json(root / "summary.json", value)
@@ -366,8 +376,13 @@ def report(root: Path, plan: dict) -> dict:
             "Aggregates: case medians then macro median/unscaled MAD for NMSE;",
             "case means then macro mean/sample SD for compliance. Pending tasks block",
             "aggregates; unavailable models get NMSE +infinity, unresolved predicates.",
+            "Basin scores cover fixed finite predicates, not every public requirement.",
+            "The independent basin is a negative control within the basin family.",
             "```json",
-            json.dumps(value["aggregate"], indent=2),
+            json.dumps(
+                {k: value[k] for k in ("aggregate", "aggregate_by_assessment_policy")},
+                indent=2,
+            ),
             "```",
         ]
     )

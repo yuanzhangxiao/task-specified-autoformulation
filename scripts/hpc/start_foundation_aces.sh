@@ -24,7 +24,7 @@ case "${1:?Use closeout, pilot, inspect-closeout, or inspect-pilot}" in
     ;;
   pilot)
     export AF_REPO_ROOT="$AF_TOOLS"
-    export AF_OUTPUT_ROOT="$AF_GROUP/phase-c-construction-v1"
+    export AF_OUTPUT_ROOT="$AF_GROUP/phase-c-construction-v2"
     export PYTHONPATH="$AF_REPO_ROOT/src"
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
     export AF_HF_HOME=${AF_HF_HOME:-/scratch/user/u.yx126462/huggingface-cache}
@@ -55,7 +55,7 @@ case "${1:?Use closeout, pilot, inspect-closeout, or inspect-pilot}" in
     ;;
   inspect-pilot)
     export PYTHONPATH="$AF_TOOLS/src"
-    AF_ROOT="$AF_GROUP/phase-c-construction-v1"
+    AF_ROOT="$AF_GROUP/phase-c-construction-v2"
     "$AF_PYTHON" "$AF_TOOLS/scripts/phase_c_baseline.py" report --root "$AF_ROOT"
     cat "$AF_ROOT/SUMMARY.md"
     tar -czf "$AF_ROOT/inspection.tar.gz" -C "$AF_ROOT" \
