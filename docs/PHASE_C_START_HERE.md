@@ -28,7 +28,76 @@ No automatic cleanup, test evaluation or resubmission is enabled.
 
 ## Phase B remains a separate historical experiment
 
-### Latest recovery checkpoint: 2026-09-29
+### Latest recovery checkpoint: wave 4, reviewed 2026-09-30
+
+The snapshot captured at `2026-09-30T09:59:02Z` has audit seal
+`34431cc024e2425f22d4a33e43c7485e41a97ae03bb689381bbacd4ad35b9c92`;
+the supplied archive SHA-256 is
+`8ead03126b6b24c3223077cf2ee7b863abc5c4eeea9f6ff140f640c3c58ea4a4`.
+Both archived audit summaries reproduce locally and agree with the freshly
+generated campaign report. All 2,075 previously recorded round-result hashes
+and all previously recorded endpoints are unchanged. No artifact issues were
+reported. Test data remain unopened and evaluation is not frozen.
+
+**Search is finished:** all 160 lineages have records through zero-based round
+14, accounting for all 2,400 planned visits. There are 2,350 complete visits,
+14 construction failures, 6 fit failures and 30 interruptions, with no missing
+visits. Since wave 3, 321 complete visits and four interruptions were added.
+The four interruptions belong to `cell07_seed0_full_c1v1s1`, retain its known
+diagnostic hash and have no fit-start receipt. Both this lineage and
+`cell07_seed0_brief_only_c0v1s1` have 15 interrupted visits and no finite incumbent;
+the other 158 lineages have finite retained models.
+
+**Endpoint processing is unfinished:** 111 endpoint rows are complete, 79 are
+missing, one is model-unavailable and one is skipped without a finite parent.
+The next actions are pruning for 66 lineages and final critic review for one.
+Of those 66 pruning lineages, 65 have finite incumbents and can subsequently
+require final critic reviews. Thus one currently ready final review is not the
+entire remaining critic workload. Search proposer and fit workers are no longer
+needed; paired pruning performs its own bounded refits. A CPU closeout should
+use parallel pruning and a single critic, preserving the frozen runtime,
+consumed budgets and the shared critic-cache serialization workaround.
+
+Wave 4 (`serial-critic-recovery-4`, jobs 2174079--2174082) has 20 successful
+allocations with exact scheduler matches and worker finish receipts. They
+record 237 proposal, 346 critic, 325 fit and 22 pruning operations. One proposer
+started after proposal work was exhausted and performed no operations. Among
+87 critic-enabled lineages with finite incumbents in both snapshots, 25 improved
+validation NMSE and 62 were unchanged; one further lineage remains unavailable.
+
+At round 14, before pruning, case medians over both planned seeds followed by
+the macro median and unscaled MAD over all nine cases are:
+
+| Critic | Verifier | Full NMSE [MAD] | Brief-only NMSE [MAD] |
+|---|---|---:|---:|
+| on | on | 0.248603 [0.178266] | 0.384436 [0.306497] |
+| off | on | 0.336642 [0.155912] | 0.474422 [0.230833] |
+| on | off | 0.386238 [0.138658] | 0.929019 [0.547110] |
+| off | off | 0.459450 [0.297354] | 0.618690 [0.296344] |
+
+These are the primary shared-process-enabled arms. Failures receive positive
+infinity before either median, rather than being omitted. Full with both
+components and Brief-only without the critic each have 17/18 finite repetitions;
+the other arms have 18/18. A median over two seeds is their midpoint and does
+not itself suppress one extreme seed. The nine-case median limits the influence
+of extreme cases but is not a confidence interval or evidence of equation
+recovery. These comparisons have equal search visits, not equal compute, and
+use the historical CSTR/alien reference versions. They cannot establish
+performance on the corrected Phase C release or replace fitted mechanism tests.
+
+Recorded critic usage rose by 979 HTTP attempts and 8,641,209 tokens, to 4,072
+attempts and 33,269,858 observed tokens. The same three usage events remain
+unmeasured. Group scratch has 467,122/500,000 file entries (32,878 headroom);
+personal scratch remains 247,733/250,000. The queue was empty at capture. The
+snapshot does not contain the cache archival receipts, so quota alone does not
+establish how many entries the archive operation retired.
+
+Phase C stage-isolation development can proceed independently of this historical
+CPU closeout, using the separately qualified development release. Do not import
+corrected data or fitting changes into the original campaign. Keep the proposed
+CSTR fitting improvements separately qualified before changing defaults.
+
+### Previous recovery checkpoint: 2026-09-29
 
 The snapshot captured at `2026-09-29T18:10:24Z` has audit seal
 `2358f5f652c1bb0fa00f2f333664edd2407c151592a14d652975b621c7a27cef`.
