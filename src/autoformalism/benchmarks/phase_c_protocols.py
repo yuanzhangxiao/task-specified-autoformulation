@@ -27,7 +27,9 @@ PREPARATION = {
 
 
 def phase_c_protocols(
-    family: Literal["alien_device", "cstr"],
+    family: Literal["alien_device", "cstr", "dalla_man"],
+    *,
+    task: str | None = None,
 ) -> tuple[PhaseBProtocol, ...]:
     """Keep input designs; vary only observed initial coordinates after reset.
 
@@ -36,7 +38,11 @@ def phase_c_protocols(
     concentration and jacket temperature share the same initial preparation.
     This is a new experiment, never a reinterpretation of historical data.
     """
-    if family not in PREPARATION:
+    if family == "dalla_man":
+        if task not in {"T1", "T2"}:
+            raise ValueError("Phase C includes only explicit Dalla T1/T2 tasks")
+        return phase_b_protocols(family, task=task, input_contract="continuous-rates-1")
+    if family not in PREPARATION or task is not None:
         raise ValueError("family has no qualified Phase C preparation contract")
     result = []
     for row in phase_b_protocols(family, input_contract="continuous-rates-1"):

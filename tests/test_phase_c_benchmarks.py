@@ -37,9 +37,22 @@ def test_cstr_hidden_preparation_shared_in_every_split():
     assert rows[-1].specification["initial_shift"][1] == -6
 
 
-def test_unqualified_dalla_is_not_silently_released():
-    with pytest.raises(ValueError, match="preparation contract"):
-        phase_c_protocols("dalla_man")
+@pytest.mark.parametrize("task", ["T1", "T2"])
+def test_dalla_keeps_existing_continuous_inputs_and_preparation(task):
+    before = phase_b_protocols(
+        "dalla_man", task=task, input_contract="continuous-rates-1"
+    )
+    assert phase_c_protocols("dalla_man", task=task) == before
+    assert sum(p.split == "train" for p in before) == 16
+    assert sum(p.split == "validation" for p in before) == 4
+    assert any(len(p.specification.get("meals", [])) > 1 for p in before)
+    assert all(p.input_names[0] == "meal_rate_g_per_min" for p in before)
+
+
+@pytest.mark.parametrize("task", [None, "T3", "T4"])
+def test_dalla_requires_an_explicit_in_scope_task(task):
+    with pytest.raises(ValueError, match="only explicit Dalla T1/T2"):
+        phase_c_protocols("dalla_man", task=task)
 
 
 def test_public_information_audit_detects_hidden_preparation_not_ids():
@@ -264,3 +277,161 @@ def test_basin_is_included_with_public_initials_and_noise_controls(tmp_path):
         assert "initial_up" in train.rows[0].fixed_covariates
         assert spec["negative_control"] == ("independent" in row["cell"])
         assert spec["noise_sd_fraction"] in (0, 0.01)
+
+
+@pytest.fixture
+def small_dalla_release(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from autoformalism.benchmarks import phase_c_release as release
+
+    def small_protocols(family, *, task):
+        base = phase_c_protocols(family, task=task)
+        # Retain a multiple-meal schedule and the validation initial shift.
+        # The reserved test protocol has out-of-horizon events after shortening;
+        # accidentally generating it must fail rather than go unnoticed.
+        short = [base[0], base[9], base[19], base[-1]]
+        short[1] = short[1].model_copy(
+            update={"specification": {"meals": [[0, 30], [10, 30]]}}
+        )
+        return tuple(p.model_copy(update={"duration": 20}) for p in short)
+
+    monkeypatch.setattr(release, "phase_c_protocols", small_protocols)
+    monkeypatch.setattr(
+        release,
+        "reference_request",
+        lambda *a: pytest.fail("Dalla exact private transcription is not a gate"),
+    )
+    monkeypatch.setattr(
+        release,
+        "replay",
+        lambda *a: pytest.fail("no exact Dalla replay claimed"),
+    )
+    root = tmp_path / "dalla"
+    report = release.build(root, Path("data_raw"), ("dalla_man",))
+    return root, report
+
+
+def test_dalla_scope_public_projection_and_immutable_resume(small_dalla_release):
+    from pathlib import Path
+
+    from autoformalism.benchmarks import phase_c_release as release
+    from autoformalism.benchmarks.audited_release import read_seal
+    from autoformalism.benchmarks.phase_b_public import (
+        phase_b_public_spec,
+        render_phase_b_prompts,
+    )
+
+    root, report = small_dalla_release
+    assert report["development_cells"] == report["ready_cells"] == 16
+    assert report["ready_for_development"]
+    assert not report["whole_phase_c_roster_ready"]
+    assert not report["test_generated"]
+    assert not report["parameter_fitting_performed"] and report["llm_calls"] == 0
+    assert not report["dalla_model_class_scope"][
+        "exact_reference_transcription_required"
+    ]
+    names = []
+    for row in report["cells"]:
+        directory = root / "public" / row["cell"]
+        spec, train, val = release.load_public_cell(directory)
+        names.append(row["cell"])
+        task = "T1" if "_t1_" in row["cell"] else "T2"
+        tier = "easy" if "_easy_" in row["cell"] else "hard"
+        variant = "obfuscated" if "_obfuscated_" in row["cell"] else "named"
+        dynamics = "perturbed" if "_perturbed_" in row["cell"] else "canonical"
+        original = phase_b_public_spec(
+            "dalla_man",
+            tier,
+            variant,
+            task=task,
+            dynamics=dynamics,
+            input_contract="continuous-rates-1",
+        )
+        assert spec["public_prompt"] == render_phase_b_prompts(original)[0]
+        assert len(train.rows) == 2 and len(val.rows) == 1
+        for forbidden in ("Qsto", "meal_reference", "D_ref", "private_initial"):
+            assert forbidden not in str(spec)
+        assert len(spec["targets"]) == (
+            1 if task == "T1" else 3 if tier == "easy" else 2
+        )
+        audit = read_seal(root / "diagnostic" / row["cell"] / "audit.json")
+        assert audit["passed"] and audit["initially_empty_gut_verified"]
+        assert audit["reference_numerics_passed"]
+        assert not audit["public_interface_replay"]["performed"]
+        assert not audit["shared_hidden_preparation_asserted"]
+        assert "Il" in audit["private_initial_coordinate_ranges"]
+    assert len(set(names)) == 16
+    for index in range(0, 16, 2):
+        assert (
+            report["cells"][index]["numeric_identity"]
+            == report["cells"][index + 1]["numeric_identity"]
+        )
+    references = list((root / "diagnostic" / "references").rglob("*.npz"))
+    assert len(references) == 12 and all("test_" not in p.name for p in references)
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert release.build(root, Path("data_raw"), ("dalla_man",)) == report
+    assert release.verify(root) == report
+    assert before == {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    (root / "summary.json").unlink()
+    assert release.build(root, Path("data_raw"), ("dalla_man",)) == report
+    (root / "summary.json").unlink()
+    references[0].write_bytes(references[0].read_bytes() + b"changed")
+    with pytest.raises(ValueError, match="release file changed"):
+        release.build(root, Path("data_raw"), ("dalla_man",))
+
+
+@pytest.mark.parametrize("defect", [None, "missing", "duplicate", "failed"])
+def test_whole_roster_readiness_requires_every_cell(tmp_path, monkeypatch, defect):
+    from pathlib import Path
+
+    from autoformalism.benchmarks import phase_c_release as release
+
+    def rows(family):
+        result = [
+            {"cell": f"{family}_{i}", "ready_for_development": True, "files": {}}
+            for i in range(release.CELL_COUNTS[family])
+        ]
+        if family == "dalla_man":
+            if defect == "missing":
+                result.pop()
+            elif defect == "duplicate":
+                result[-1] = result[0]
+            elif defect == "failed":
+                result[-1]["ready_for_development"] = False
+        return result
+
+    monkeypatch.setattr(release, "_detention_family", lambda _: rows("detention"))
+    monkeypatch.setattr(release, "_phase_b_family", lambda _, f, *a: rows(f))
+    monkeypatch.setattr(release, "_dalla_family", lambda *a: rows("dalla_man"))
+    report = release.build(tmp_path / "roster", Path("data_raw"))
+    assert report["expected_cells"] == 28
+    assert report["whole_phase_c_roster_ready"] is (defect is None)
+    assert report["ready_for_development"] is (defect is None)
+
+
+def test_legacy_phase_c_public_cells_remain_loadable(small_release):
+    from autoformalism.benchmarks import phase_c_release as release
+    from autoformalism.benchmarks.audited_release import read_seal, seal
+
+    root, _, _, report = small_release
+    directory = root / "public" / report["cells"][0]["cell"]
+    path = directory / "specification.json"
+    old = read_seal(path)
+    old["protocol"] = "phase-c-development-1"
+    path.unlink()
+    seal(path, old)
+    assert release.load_public_cell(directory)[0]["protocol"] == "phase-c-development-1"
+
+
+def test_dalla_numerical_failure_still_blocks_release(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from autoformalism.benchmarks import phase_c_release as release
+
+    monkeypatch.setattr(release, "audit_one", lambda *a: ({"passed": False}, None))
+    root = tmp_path / "failed-numerics"
+    with pytest.raises(ValueError, match="Dalla reference numerical audit failed"):
+        release.build(root, Path("data_raw"), ("dalla_man",))
+    assert not (root / "summary.json").exists()
+    assert not (root / "diagnostic/dalla_man_complete.json").exists()

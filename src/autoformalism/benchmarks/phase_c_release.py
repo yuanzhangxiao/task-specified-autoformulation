@@ -1,7 +1,7 @@
 """Checkpointed Phase C development release: public data and private witnesses.
 
-No fitting, LLM calls or test generation. Dalla Man is explicitly pending its
-public ODE contract; T3/T4 are outside the Phase C roster. Historical data stay
+No fitting, LLM calls or test generation. Dalla Man permits reduced ODE models;
+T3/T4 are outside the Phase C roster. Historical data stay
 unchanged. Only public/<cell> is an input to discovery or external baselines.
 """
 
@@ -27,16 +27,27 @@ from autoformalism.fitting import public_fitting as public
 from autoformalism.schemas.public_fitting import PublicSplit
 
 REPO = Path(__file__).resolve().parents[3]
-PROTOCOL = "phase-c-development-1"
+PROTOCOL = "phase-c-development-2"
 SPEC_PATHS = {
     "cstr": "benchmark5_anonymous_nonlinear_process/private/system_specification.json",
     "alien_device": "benchmark6_alien_device/private/selected_system_spec.json",
 }
-FAMILIES = ("cstr", "alien_device", "detention")
-PENDING = {
-    "dalla_man_T1_T2": (
-        "Gastric normalization at meal onset uses private stomach state; "
-        "exact public pure-ODE contract pending scientific decision."
+FAMILIES = ("cstr", "alien_device", "detention", "dalla_man")
+CELL_COUNTS = {"cstr": 4, "alien_device": 4, "detention": 4, "dalla_man": 16}
+DALLA_SCOPE = {
+    "policy": "dalla-reduced-ode-development-1",
+    "reference_dynamics_changed": False,
+    "public_channels_changed": False,
+    "exact_reference_transcription_required": False,
+    "exact_causal_initializer_certified": False,
+    "interpretation": (
+        "Continuous ODE candidates may approximate the private reference's gastric "
+        "bookkeeping and unobserved preparation. Evaluate the public task mechanisms "
+        "and free rollouts with shared training-fitted parameters and causal "
+        "initialization. No gastric compartments, normalization variable, or reset "
+        "law are added to the public requirements. Numerical qualification does "
+        "not establish exact representability, an irreducible prediction error, "
+        "or recovery of the private physiological system."
     ),
 }
 
@@ -269,6 +280,118 @@ def _phase_b_family(
     return cells
 
 
+def _dalla_family(root: Path, data_root: Path, identity: str) -> list[dict]:
+    """Qualify T1/T2 reference numerics without claiming exact ODE attainability.
+
+    The private generator and existing public prompts remain unchanged. In
+    particular, its gastric normalization is not exposed as an extra input.
+    """
+    cells = []
+    for task in ("T1", "T2"):
+        for dynamics in ("canonical", "perturbed"):
+            records, trajectories = [], []
+            for protocol in phase_c_protocols("dalla_man", task=task):
+                if protocol.split == "test":
+                    continue
+                record, trajectory = audit_one(
+                    root / "diagnostic" / "references" / "dalla_man" / task / dynamics,
+                    protocol,
+                    dynamics,
+                    data_root,
+                    identity,
+                )
+                if not record["passed"]:
+                    raise ValueError(
+                        f"Dalla reference numerical audit failed: "
+                        f"{task}/{dynamics}/{protocol.protocol_id}"
+                    )
+                records.append(record)
+                trajectories.append(trajectory)
+            initials = np.array([t.states[0] for t in trajectories])
+            variation = {
+                name: float(np.ptp(initials[:, i]))
+                for i, name in enumerate(trajectories[0].state_names)
+                if np.ptp(initials[:, i]) != 0
+            }
+            # The t=0 meal convention assumes an initially empty gut. Verify
+            # that assumption instead of silently extending it to other states.
+            gut_indices = [
+                trajectories[0].state_names.index(n) for n in ("Qsto1", "Qsto2", "Qgut")
+            ]
+            empty_gut = bool(np.all(initials[:, gut_indices] == 0))
+            for tier in ("easy", "hard"):
+                paired = []
+                for variant in ("named", "obfuscated"):
+                    spec = phase_b_public_spec(
+                        "dalla_man",
+                        tier,
+                        variant,
+                        task=task,
+                        dynamics=dynamics,
+                        input_contract="continuous-rates-1",
+                        data_root=data_root,
+                    )
+                    cell = spec.benchmark_id.replace("phase_b_", "phase_c_", 1)
+                    splits = tuple(
+                        project_split(spec, tuple(trajectories), name)
+                        for name in ("train", "val")
+                    )
+                    combined = PublicSplit.model_validate(
+                        {
+                            "name": "train",
+                            "fingerprint": "combined-development",
+                            "rows": [
+                                r.model_dump(mode="json")
+                                for s in splits
+                                for r in s.rows
+                            ],
+                        }
+                    )
+                    information = public_information_audit(combined)
+                    prompt, judge = render_phase_b_prompts(spec)
+                    specification = {
+                        "protocol": PROTOCOL,
+                        "benchmark_id": cell,
+                        "public_prompt": prompt,
+                        "judge_prompt": judge,
+                        "input_contract": "continuous-rates-1",
+                        "preparation_contract": (
+                            "Use initial target readings, supplied auxiliary readings "
+                            "and causal initialization with globally shared parameters "
+                            "estimated on training. No validation-specific latent "
+                            "initial fitting or unlisted observations are available."
+                        ),
+                        "targets": list(splits[0].rows[0].targets),
+                        "auxiliaries": list(splits[0].rows[0].auxiliaries),
+                        "external_inputs": list(splits[0].rows[0].external_inputs),
+                        "fixed_covariates": [],
+                        "test_released": False,
+                        "noise_sd_fraction": 0,
+                        "initial_observation_noise": 0,
+                    }
+                    audit = {
+                        "passed": information["passed"] and empty_gut,
+                        "numerical_protocols": len(records),
+                        "reference_numerics_passed": all(r["passed"] for r in records),
+                        "public_information": information,
+                        "initially_empty_gut_verified": empty_gut,
+                        "private_initial_coordinate_ranges": variation,
+                        "shared_hidden_preparation_asserted": False,
+                        "model_class_scope": DALLA_SCOPE,
+                        "public_interface_replay": {
+                            "status": "not_required_under_accepted_reduced_model_scope",
+                            "performed": False,
+                        },
+                        "mechanism_recovery_or_identifiability_certified": False,
+                    }
+                    row = _write_cell(root, cell, splits, specification, audit)
+                    cells.append(row)
+                    paired.append(row["numeric_identity"])
+                if len(set(paired)) != 1:
+                    raise ValueError("semantic variants changed numerical data")
+    return cells
+
+
 def _detention_family(root: Path) -> list[dict]:
     config = detention.DetentionConfig()
     cells = []
@@ -369,7 +492,9 @@ def _plan(data_root: Path, families: tuple[str, ...]) -> dict:
         "test_generation_enabled": False,
         "parameter_fitting_performed": False,
         "llm_calls": 0,
-        "pending_families": PENDING,
+        "dalla_model_class_scope": DALLA_SCOPE if "dalla_man" in families else None,
+        "expected_cells": sum(CELL_COUNTS[f] for f in families),
+        "pending_families": {},
         "excluded_tasks": ["T3", "T4"],
     }
 
@@ -408,11 +533,12 @@ def build(root: Path, data_root: Path, families: tuple[str, ...] = FAMILIES) -> 
                 _verify_files(root, rows)
                 _verify_files(root, [{"files": checkpoint["reference_files"]}])
             else:
-                rows = (
-                    _detention_family(root)
-                    if family == "detention"
-                    else _phase_b_family(root, family, data_root, identity)
-                )
+                if family == "detention":
+                    rows = _detention_family(root)
+                elif family == "dalla_man":
+                    rows = _dalla_family(root, data_root, identity)
+                else:
+                    rows = _phase_b_family(root, family, data_root, identity)
                 references = root / "diagnostic" / "references"
                 reference_paths = (
                     references.glob("detention_*.json")
@@ -441,15 +567,22 @@ def build(root: Path, data_root: Path, families: tuple[str, ...] = FAMILIES) -> 
                     "completed_cells": len(cells),
                 },
             )
+        complete_roster = len(cells) == plan["expected_cells"] and len(
+            {c["cell"] for c in cells}
+        ) == len(cells)
+        ready = complete_roster and all(c["ready_for_development"] for c in cells)
         report = {
             "protocol": PROTOCOL,
             "status": "complete",
             "plan_sha256": identity,
             "development_cells": len(cells),
+            "expected_cells": plan["expected_cells"],
             "ready_cells": sum(c["ready_for_development"] for c in cells),
-            "ready_for_development": all(c["ready_for_development"] for c in cells),
-            "whole_phase_c_roster_ready": False,
-            "pending_families": PENDING,
+            "ready_for_development": ready,
+            "whole_phase_c_roster_ready": ready and set(families) == set(FAMILIES),
+            "pending_families": {},
+            "families_not_requested": sorted(set(FAMILIES) - set(families)),
+            "dalla_model_class_scope": plan["dalla_model_class_scope"],
             "test_generated": False,
             "parameter_fitting_performed": False,
             "llm_calls": 0,
@@ -509,7 +642,10 @@ def load_public_cell(directory: Path) -> tuple[dict, PublicSplit, PublicSplit]:
     the legacy Phase-B registry is deliberately unchanged.
     """
     spec = read_seal(directory / "specification.json")
-    if spec["protocol"] != PROTOCOL or spec["benchmark_id"] != directory.name:
+    if (
+        spec["protocol"] not in {"phase-c-development-1", PROTOCOL}
+        or spec["benchmark_id"] != directory.name
+    ):
         raise ValueError("public cell identity differs")
     splits = tuple(
         PublicSplit.model_validate(read_seal(directory / f"{name}.json"))

@@ -192,9 +192,12 @@ CSTR reference. A corrected comparison requires a new, matched experiment.
 
 Benchmark preparation now has a separate development release described in
 [PHASE_C_DATASET_READINESS.md](PHASE_C_DATASET_READINESS.md): CSTR and
-alien-device preparation fixes and the detention-basin controls, with numerical
-and public-interface replay gates. This does not declare Dalla Man T1/T2 or
-the final held-out suite ready. Fitting ideas remain deferred in
+alien-device preparation fixes, detention-basin controls and Dalla Man T1/T2.
+The 28-cell development release retains exact-interface replay gates for the
+first three families. Dalla retains the existing multi-meal inputs and reference
+dynamics under an accepted reduced-ODE approximation scope; its numerical gates
+still apply. Final held-out publication remains a separate milestone. Fitting
+ideas remain deferred in
 [PHASE_C_FITTING_FINDINGS_2026-09-28.md](PHASE_C_FITTING_FINDINGS_2026-09-28.md).
 
 These are navigation anchors, not an exhaustive dependency closure or permission
