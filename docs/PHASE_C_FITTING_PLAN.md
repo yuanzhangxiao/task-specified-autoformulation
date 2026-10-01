@@ -395,3 +395,16 @@ without increasing recovery. The next proposed bridge is guarded CSTR
 sensitivity refinement from identical checkpoints; production defaults remain
 unchanged. The review also records initializer timeout overhead and the limits
 of these noiseless controls.
+
+## Milestone 3: keep competing trajectory formulations open
+
+The subsequent discussion broadens the proposed CSTR bridge into a
+[matched fitting-strategy experiment](PHASE_C_FITTING_STRATEGIES.md): rollout-only,
+adaptive direct collocation, adaptive multiple shooting and the existing hybrid.
+Each receives the same 180-second total fitting ceiling. Four identifiable
+synthetic controls (including a genuinely nonlinear shape parameter) precede
+CSTR easy/hard stress tests with global identifiability explicitly unproven.
+All original observations and input knots are retained. Native checkpoints may
+violate dynamical constraints, but only complete training free rollouts select
+parameters; independent development replay verifies endpoints. The planned
+72 CPU fits run on Delta without changing production defaults or benchmark data.
