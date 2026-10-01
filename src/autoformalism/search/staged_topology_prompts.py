@@ -114,6 +114,7 @@ def render_variable_identification_user_prompt(
     inventory_json: str,
     diagnostics_json: str | None = None,
     mechanism_binding_context: dict | None = None,
+    observation_choices: list[dict] | None = None,
 ) -> str:
     """Render one Level-1 request from runtime-owned JSON artifacts."""
     payload: dict[str, object] = {
@@ -132,6 +133,8 @@ def render_variable_identification_user_prompt(
         )
     if mechanism_binding_context is not None:
         payload["mechanism_binding_context"] = mechanism_binding_context
+    if observation_choices is not None:
+        payload["observation_choices"] = observation_choices
     return _request_text(stage="variable identification", payload=payload)
 
 

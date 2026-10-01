@@ -18,9 +18,14 @@ def main():
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source-plan", type=Path)
+    parser.add_argument("--review-inventory", action="store_true")
     parser.add_argument("--base-url")
     parser.add_argument("--wall-seconds", type=int, default=21600)
     args = parser.parse_args()
+    if args.review_inventory and args.command != "prepare":
+        parser.error(
+            "--review-inventory is frozen by prepare; later commands use the plan"
+        )
     root = args.root or (args.plan.parent if args.plan else None)
     if root is None:
         parser.error("require --root or --plan")
@@ -29,7 +34,9 @@ def main():
     if args.command == "prepare":
         if args.source_plan is None:
             parser.error("prepare requires --source-plan")
-        plan = baseline.freeze(args.source_plan, root)
+        plan = baseline.freeze(
+            args.source_plan, root, review_inventory=args.review_inventory
+        )
         print(
             json.dumps(
                 {"identity": plan["artifact_sha256"], "tasks": len(plan["tasks"])}

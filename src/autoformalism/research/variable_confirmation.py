@@ -22,6 +22,7 @@ from autoformalism.research import construction_trace
 from autoformalism.search.staged_topology_runner import run_staged_topology
 from autoformalism.search.training_evidence import TrainingEvidence
 from autoformalism.search.variable_bindings import POLICY as BINDING_POLICY
+from autoformalism.search.variable_inventory_review import POLICY as REVIEW_POLICY
 
 PROTOCOL = "phase-c-variable-confirmation-1"
 REPO = baseline.REPO
@@ -32,6 +33,7 @@ class Config(baseline.Config):
 
     protocol: Literal["phase-c-variable-confirmation-1"] = PROTOCOL
     served_context_tokens: Literal[32768] = 32768
+    review_inventory: bool = False
 
 
 def source_identity() -> dict:
@@ -46,12 +48,14 @@ def source_identity() -> dict:
     return value
 
 
-def freeze(source_plan: Path, root: Path) -> dict:
+def freeze(source_plan: Path, root: Path, *, review_inventory: bool = False) -> dict:
     """Project only public construction context from the original sealed plan."""
     source = sealed_read(source_plan)
     if source["protocol"] != baseline.PROTOCOL or source.get("test_data_opened"):
         raise ValueError("requires a development-only Phase C construction plan")
-    config = Config.model_validate({**source["config"], "protocol": PROTOCOL})
+    config = Config.model_validate(
+        {**source["config"], "protocol": PROTOCOL, "review_inventory": review_inventory}
+    )
     cells = {
         name: contract.correct_roles(
             {k: cell[k] for k in ("brief", "context", "target_contract", "evidence")}
@@ -69,6 +73,7 @@ def freeze(source_plan: Path, root: Path) -> dict:
                 "source_identity": source_identity(),
                 "source_plan_sha256": source["artifact_sha256"],
                 "binding_policy": BINDING_POLICY,
+                "inventory_review_policy": REVIEW_POLICY if review_inventory else None,
                 "test_data_opened": False,
                 "automatic_followup": False,
                 "scope": (
@@ -82,9 +87,13 @@ def verify(root: Path) -> dict:
     plan = sealed_read(root / "plan.json")
     if plan["protocol"] != PROTOCOL or plan["source_identity"] != source_identity():
         raise ValueError("variable confirmation source/protocol differs")
-    Config.model_validate(plan["config"])
+    config = Config.model_validate(plan["config"])
     if plan["binding_policy"] != BINDING_POLICY:
         raise ValueError("binding policy differs")
+    if plan.get("inventory_review_policy") != (
+        REVIEW_POLICY if config.review_inventory else None
+    ):
+        raise ValueError("inventory review policy differs")
     return plan
 
 
@@ -118,6 +127,7 @@ def propose(root, plan, task, base_url, **kwargs):
                 hybrid_variable_construction=True,
                 stop_after_inventory=True,
                 explicit_mechanism_bindings=True,
+                review_inventory=plan["config"].get("review_inventory", False),
                 target_definitions=contract.target_definitions(cell),
                 training_evidence=TrainingEvidence.model_validate(cell["evidence"])
                 if task["arm"] == "full"
@@ -157,7 +167,9 @@ def report(root: Path, plan: dict) -> dict:
         if directory.exists():
             construction_trace.render(directory, baseline.namespace(plan, task))
         events = [e for e in saved.get("events", []) if e.get("request_hash")]
-        first = [e for e in events if e["attempt"] == 0]
+        agenda_events = [e for e in events if e["step"].startswith("variables_")]
+        review_events = [e for e in events if e["step"] == "inventory_review"]
+        first = [e for e in agenda_events if e["attempt"] == 0]
         rows.append(
             {
                 "task": task["task_id"],
@@ -165,7 +177,12 @@ def report(root: Path, plan: dict) -> dict:
                 "status": outcome.get("status", "pending"),
                 "first_reply_accepted": sum(e["accepted"] for e in first),
                 "first_reply_total": len(first),
-                "repair_calls": sum(e["attempt"] > 0 for e in events),
+                "repair_calls": sum(e["attempt"] > 0 for e in agenda_events),
+                "inventory_review_calls": len(review_events),
+                "inventory_review_repairs": sum(
+                    e["attempt"] > 0 for e in review_events
+                ),
+                "inventory_review": saved.get("inventory_review"),
                 "inventory": saved.get("inventory", []),
                 "memory_bindings": saved.get("memory_candidates", {}),
                 "events": events,
@@ -184,6 +201,14 @@ def report(root: Path, plan: dict) -> dict:
         "first_reply_accepted": sum(r["first_reply_accepted"] for r in rows),
         "first_reply_total": sum(r["first_reply_total"] for r in rows),
         "repair_calls": sum(r["repair_calls"] for r in rows),
+        "inventory_review_calls": sum(r["inventory_review_calls"] for r in rows),
+        "inventory_review_repairs": sum(r["inventory_review_repairs"] for r in rows),
+        "inventory_review_status_counts": dict(
+            Counter(
+                (r["inventory_review"] or {}).get("status", "not_recorded")
+                for r in rows
+            )
+        ),
         "optimizer_calls": 0,
         "solver_rollouts": 0,
         "test_data_opened": False,
@@ -199,6 +224,9 @@ def report(root: Path, plan: dict) -> dict:
         "Mechanical acceptance is not scientific compliance. No equations or fits.",
         "",
         f"Status counts: {result['status_counts']}",
+        f"Final inventory reviews: {result['inventory_review_status_counts']}",
+        f"Review calls / repairs: {result['inventory_review_calls']} / "
+        f"{result['inventory_review_repairs']}",
         "",
         "| Task | Status | First accepted / called | Repairs | Memory bindings |",
         "| --- | --- | ---: | ---: | --- |",

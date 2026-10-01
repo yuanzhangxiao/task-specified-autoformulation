@@ -61,8 +61,9 @@ the previous assignment; independently valid variable declarations survive and
 are shown on retry. Public target roles are checked before committing variables
 using the same role projection as the final contract.
 
-This permits assignment repair, not unrestricted changes to accepted variable
-definitions. Once inventory construction finishes, later topology still has to
+Within agenda replies this permits assignment repair, not unrestricted changes
+to accepted variable definitions. The optional final inventory review described
+below supplies an explicit revision boundary. Later topology still has to
 establish the claimed paths. A mechanically valid binding is a scientific
 hypothesis, not evidence that the pathway is correct.
 
@@ -96,6 +97,62 @@ are absent from the new plan. Brief-only receives no training summaries.
 Settings and per-construction budgets are inherited; the plan and source identity
 are freshly sealed. This is a new confirmation, not replay or promotion of an
 old model. No topology/function/fitting/critic/pruning/test jobs are submitted.
+
+## Explicit observation choices and final review (v2)
+
+The v1 inspection had 32/32 mechanically complete inventories, with 33/35 first
+agenda replies accepted and all 16 required memory bindings explicit. This
+establishes reliable delivery and reference checks, not correct physical state
+selection. For example, one coupled-basin reply made the downstream level
+algebraic with only upstream storage. It treated `requires_dynamic_memory=false`
+as absence of local dynamics. Several CSTR replies discussed using measured C
+and Tj but omitted them from the variable list. That suggests a handoff ambiguity;
+the runtime cannot establish intent from that prose. No mechanism compliance
+score can be obtained from these inventories alone.
+
+`--review-inventory` enables `explicit-observation-inventory-review-1`. All
+measured channels are called observable variables in the explanation. The two
+public roles remain prediction targets and measured non-target observations.
+The legacy serialized label `auxiliary` stays compatible with earlier assets;
+benchmark prompts and data are unchanged. Every agenda/repair request shows
+the observed-channel choices and whether each has been declared. Available data
+does not imply inclusion in the candidate:
+
+- `supplied`: use the measured non-target trajectory as an input; no generated law.
+- `differential` or `algebraic`: generate the variable with a candidate equation.
+- `unused`: deliberately omit this non-target channel.
+
+Prediction targets must be generated. A false memory flag only removes the
+requirement for a distinct mediator on that pathway; it does not remove physical
+storage obligations. The proposer chooses the representation from the complete
+public task. The runtime does not infer scientific assignments from explanations.
+
+One final full-inventory review follows the agenda, before topology. It sees
+the same public brief, training summaries (Full only), complete current inventory,
+channel choices, memory bindings and fixed target definitions. Its complete
+replacement must explicitly declare all targets and measured non-target channels,
+including those already runtime-seeded. It may revise variable types and bindings,
+add states or drop internal variables; external inputs/covariates/time remain
+supplied unless explicitly marked unused. Omitted internal variables are removed,
+but omitted observed-channel decisions or required bindings are rejected.
+
+The existing role/reference/required-source checks validate a replacement
+atomically. A rejected review leaves the pre-review inventory intact and returns
+the full context plus the rejected reply/error on retry. It never becomes a
+successful variable construction merely because the agenda finished. The review
+uses the same per-step retry cap, total budget, token preflight and persistent
+call cache. Interrupted runs resume without resetting costs. `inventory_review`
+in progress/results/report records before/after variables and bindings; exact
+requests and replies appear in each `TRACE.html`. Agenda acceptance/repair counts
+are reported separately from final-review calls/repairs. Review acceptance remains
+a mechanical status, not a scientific certification.
+
+The follow-up retains all 32 cases/seeds/variants and starts fresh under the
+clarified context. It combines clarification with a final review, so it is a
+handoff confirmation, not an equal-cost causal ablation of those two changes.
+It does not change the full-pipeline default or launch fitting. Inspect whether
+observed-channel choices and physical storage declarations improve before
+proceeding to topology.
 
 The report distinguishes first replies, repairs and pending work. Progress
 records also preserve skipped agenda items. `VARIABLES.html` links each
@@ -138,3 +195,20 @@ bash scripts/hpc/start_phase_c_variables.sh inspect
 Download the printed `inspection.tar.gz`. It includes the plan, reports, exact
 calls, preflight records, inventories, bindings, runtime events and scheduler
 logs/receipts. No new results have been claimed before this confirmation runs.
+
+For the new v2 confirmation, use the new pinned source directory and these
+commands instead (same original source plan; fresh output root):
+
+```bash
+AF_REVIEW_INVENTORY=1 bash scripts/hpc/start_phase_c_variables.sh run
+```
+
+After its jobs finish:
+
+```bash
+AF_REVIEW_INVENTORY=1 bash scripts/hpc/start_phase_c_variables.sh inspect
+```
+
+These default to `phase-c-variables-v2`. Keep v1 intact. The report includes the
+review decisions and all provider traces; no new fitting or mechanism assessment
+is performed in this milestone.

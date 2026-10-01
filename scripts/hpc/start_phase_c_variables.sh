@@ -7,7 +7,13 @@ AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 module load GCCcore/13.2.0 Python/3.11.5
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export AF_REPO_ROOT="$AF_TOOLS"
-export AF_OUTPUT_ROOT=${AF_VARIABLE_ROOT:-$AF_GROUP/phase-c-variables-v1}
+AF_REVIEW_ARGS=()
+case "${AF_REVIEW_INVENTORY:-0}" in
+  0) AF_DEFAULT_ROOT="$AF_GROUP/phase-c-variables-v1" ;;
+  1) AF_DEFAULT_ROOT="$AF_GROUP/phase-c-variables-v2"; AF_REVIEW_ARGS=(--review-inventory) ;;
+  *) echo 'AF_REVIEW_INVENTORY must be 0 or 1.' >&2; exit 2 ;;
+esac
+export AF_OUTPUT_ROOT=${AF_VARIABLE_ROOT:-$AF_DEFAULT_ROOT}
 export PYTHONPATH="$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 case "${1:?Use run or inspect}" in
   run)
@@ -17,7 +23,7 @@ case "${1:?Use run or inspect}" in
     export AF_IPC_TMP_ROOT=/tmp/phase-c-ipc-u.yx126462
     AF_SOURCE=${AF_VARIABLE_SOURCE_PLAN:-$AF_GROUP/phase-c-construction-v2/plan.json}
     "$AF_PYTHON" "$AF_REPO_ROOT/scripts/phase_c_variables.py" prepare \
-      --source-plan "$AF_SOURCE" --root "$AF_OUTPUT_ROOT"
+      --source-plan "$AF_SOURCE" --root "$AF_OUTPUT_ROOT" "${AF_REVIEW_ARGS[@]}"
     exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_phase_c_baseline.py" \
       --root "$AF_OUTPUT_ROOT" --variables-only --wave "${AF_VARIABLE_WAVE:-variables-1}"
     ;;

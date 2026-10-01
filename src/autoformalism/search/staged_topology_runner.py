@@ -23,6 +23,7 @@ from autoformalism.schemas.staged_topology import (
     equation_reply_model,
 )
 from autoformalism.search import scientific_verification, variable_bindings
+from autoformalism.search import variable_inventory_review as inventory_review
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_topology_prompts import (
     render_equation_topology_system_prompt,
@@ -280,11 +281,18 @@ def run_staged_topology(
     explicit_mechanism_bindings: bool = False,
     target_definitions: dict[str, str] | None = None,
     complete_process_context: bool = False,
+    review_inventory: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     from autoformalism.search import shared_process_contract as shared
     from autoformalism.search import signed_processes as signed
 
+    if review_inventory and (
+        not explicit_mechanism_bindings or initial_inventory is not None
+    ):
+        raise ValueError(
+            "inventory review requires fresh explicit variable construction"
+        )
     if signed_shared_processes and not bind_shared_processes:
         raise ValueError("signed processes require binding")
     if bind_shared_processes and not optional_process_review:
@@ -315,6 +323,8 @@ def run_staged_topology(
         contract = {"brief": enriched, "context": context.model_dump(mode="json")}
         if explicit_mechanism_bindings:
             contract["variable_binding_policy"] = variable_bindings.POLICY
+        if review_inventory:
+            contract["inventory_review_policy"] = inventory_review.POLICY
         if target_definitions:
             contract["target_definitions"] = target_definitions
         if complete_process_context:
@@ -366,6 +376,7 @@ def run_staged_topology(
     polarity_policies: list[dict[str, Any]] = []
     polarity_audits: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
+    inventory_decision: dict | None = None
     brief_json = (
         _json(enriched) if training_evidence is not None else brief.model_dump_json()
     )
@@ -381,6 +392,9 @@ def run_staged_topology(
                     key: sorted(value) for key, value in memory_candidates.items()
                 },
                 "events": events,
+                **(
+                    {"inventory_review": inventory_decision} if review_inventory else {}
+                ),
             },
         )
 
@@ -469,6 +483,9 @@ def run_staged_topology(
                                 variable_bindings.INSTRUCTION
                                 if explicit_mechanism_bindings
                                 else ""
+                            )
+                            + (
+                                inventory_review.INSTRUCTION if review_inventory else ""
                             ),
                             "variables",
                             shared_process_guidance,
@@ -482,6 +499,11 @@ def run_staged_topology(
                                 brief, memory_candidates, target_definitions
                             )
                             if explicit_mechanism_bindings
+                            else None,
+                            observation_choices=inventory_review.observation_choices(
+                                brief, inventory
+                            )
+                            if review_inventory
                             else None,
                         ),
                         response_model=variable_model,
@@ -644,10 +666,50 @@ def run_staged_topology(
                     accept_variables,
                 )
             checkpoint()
+        if review_inventory:
+            inventory_decision = {
+                "policy": inventory_review.POLICY,
+                "status": "pending",
+            }
+            checkpoint()
+            candidate, bindings = request(
+                "inventory_review",
+                inventory_review.REVIEW_SYSTEM,
+                lambda diagnostic: _json(
+                    {
+                        "policy": inventory_review.POLICY,
+                        "public_brief": json.loads(brief_json),
+                        "current_inventory": json.loads(_variables(inventory)),
+                        "observation_choices": inventory_review.observation_choices(
+                            brief, inventory
+                        ),
+                        "mechanism_binding_context": (
+                            inventory_review.review_binding_context(
+                                brief, memory_candidates, target_definitions
+                            )
+                        ),
+                        "runtime_diagnostics": json.loads(diagnostic)
+                        if diagnostic
+                        else None,
+                    }
+                ),
+                variable_bindings.BoundVariableReply,
+                lambda reply: inventory_review.replace_inventory(
+                    brief, reply, target_definitions
+                ),
+            )
+            inventory_decision = inventory_review.decision_record(
+                inventory, candidate, memory_candidates, bindings
+            )
+            inventory, memory_candidates = candidate, bindings
+            checkpoint()
         inventory = freeze_inventory(brief, inventory)
         if stop_after_inventory:
             result = {
                 "status": "variables_complete",
+                **(
+                    {"inventory_review": inventory_decision} if review_inventory else {}
+                ),
                 "inventory": [v.model_dump(mode="json") for v in inventory],
                 "memory_candidates": {
                     k: sorted(v) for k, v in memory_candidates.items()
@@ -833,6 +895,13 @@ def run_staged_topology(
             status = "complete"
     except ValueError as exc:
         failure = str(exc)[:6000]
+        if (
+            review_inventory
+            and inventory_decision
+            and inventory_decision["status"] == "pending"
+        ):
+            inventory_decision["status"] = "failed"
+            checkpoint()
     checks = public_structure_checks(brief, equations)
     source_checks = [
         item for item in checks if item["kind"] in {"driver_path", "composition_path"}
@@ -846,6 +915,7 @@ def run_staged_topology(
     result = {
         "protocol": "scientific-staged-topology-1",
         "status": status,
+        **({"inventory_review": inventory_decision} if review_inventory else {}),
         "error": failure,
         "complete_topology": topology is not None,
         "public_structure_checks_passed": topology is not None

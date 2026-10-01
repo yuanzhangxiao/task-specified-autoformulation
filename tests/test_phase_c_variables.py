@@ -58,6 +58,49 @@ def fixture_brief():
     }
 
 
+def test_review_plan_reports_agenda_and_review_separately(tmp_path):
+    source = tmp_path / "old"
+    old = fixture(source)
+    root = tmp_path / "new"
+    plan = v.freeze(source / "plan.json", root, review_inventory=True)
+    assert plan == v.verify(root)
+    assert plan["config"]["model_settings"] == old["config"]["model_settings"]
+    assert plan["inventory_review_policy"] == v.REVIEW_POLICY
+    with pytest.raises(ValueError):
+        v.freeze(source / "plan.json", root, review_inventory=False)
+    calls = []
+    replies = []
+    agenda_transport = construction_transport(calls)
+
+    def transport(url, body, timeout):
+        if not replies:
+            result = agenda_transport(url, body, timeout)
+            replies.append(result)
+            return result
+        # The fixture has no optional observations. Repeat the complete draft.
+        assert json.loads(body["messages"][1]["content"])["policy"] == v.REVIEW_POLICY
+        calls.append(body)
+        return replies[0]
+
+    kwargs = {"transport": transport, "token_transport": tokenize}
+    task = plan["tasks"][0]
+    outcome = v.propose(root, plan, task, "http://offline", **kwargs)
+    assert outcome["status"] == "variables_complete"
+    assert outcome["inventory_review"]["status"] == "accepted"
+    assert v.propose(root, plan, task, "http://offline", **kwargs) == outcome
+    assert len(calls) == 2
+    report = v.report(root, plan)
+    assert report["first_reply_total"] == report["first_reply_accepted"] == 1
+    assert report["inventory_review_calls"] == 1
+    assert report["inventory_review_repairs"] == 0
+    assert report["inventory_review_status_counts"] == {"accepted": 1}
+    assert report["rows"][0]["cost"]["physical_requests"] == 2
+    assert report["optimizer_calls"] == report["solver_rollouts"] == 0
+    trace = json.loads(next(root.rglob("trace.json")).read_text())
+    assert {r["step"] for r in trace["calls"]} == {"variables_0", "inventory_review"}
+    assert all(r["runtime_events"] for r in trace["calls"])
+
+
 def test_freeze_run_resume_report_without_topology_or_data(tmp_path):
     source = tmp_path / "old"
     old = fixture(source)
