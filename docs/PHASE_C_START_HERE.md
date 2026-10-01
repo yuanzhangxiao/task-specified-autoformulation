@@ -10,6 +10,11 @@ The first executable step is the [construction baseline](PHASE_C_CONSTRUCTION_BA
 noiseless basin controls, independently assessed for NMSE
 and mechanism compliance, with exact prompt/response and equation reports. It
 starts stage isolation; reviewed-predecessor experiments remain subsequent work.
+The [first variable-stage audit](PHASE_C_VARIABLE_AUDIT.md) inspects all 32 saved
+constructions. It identifies an undisplayed target-role policy, omission of the
+Phase B construction wrappers, and mechanism-assignment/reuse problems. Its
+offline reports expose exact prompts and decisions; no construction fixes or
+new experiment are silently applied to the frozen pilot.
 In parallel, the [fitting qualification plan](PHASE_C_FITTING_PLAN.md) starts a
 42-fit, CPU-only Delta study of coordinate scaling and shared initial values on
 fixed CSTR/basin equations. It changes no production defaults. The same
