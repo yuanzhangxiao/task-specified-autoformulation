@@ -105,6 +105,9 @@ physical node guesses, forcing interpolation and original equations are unchange
 IPOPT uses its existing settings; constraint tolerance now refers to scaled
 defects. Thus even an invertible transform can change numerical stopping behavior.
 Checkpoint feasibility in these coordinates is not a physical accuracy certificate.
+The intended pairing of physical node guesses was not fully achieved in the first
+Delta run: the wall-clock warm-up produced different fallback patterns. See the
+completed-run review below before interpreting this as an isolated scaling test.
 
 Sensitivity refinement applies the chain rule to parameter gradients/Jacobians;
 polling uses the same frozen parameter scales. Callbacks, checkpoints, returned
@@ -167,8 +170,8 @@ The three reference witnesses passed independent replay on the exact bundled
 Phase C development arrays. CSTR easy/hard train/validation NMSE was
 2.01e-17/1.88e-17; coupled basins was 2.42e-17/3.68e-18. Maximum Radau/DOP853
 disagreement was 2.78e-6 training standard deviations. These are supplied-reference
-checks, **not newly fitted performance**. The 42 fitting outcomes remain pending
-Delta execution.
+checks, **not newly fitted performance**. The subsequent 42-fit Delta results are
+reviewed below.
 
 The focused tests exercise transformed bounds and Jacobians, a signed-latent
 native collocation/refinement fit, physical checkpoint values, data/source drift,
@@ -229,6 +232,139 @@ rows appear explicitly. For a failed preparation inspect its `.err` log and
 or a download archive, use `scripts/hpc/inspect_phase_c_fitting_delta.sh` from the
 same bundle. It reports the existing campaign and packages its diagnostics; it
 does not submit jobs or refit. Keep the original campaign for full call traces.
+
+## Milestone 1 results: first Delta run, reviewed 2026-09-30
+
+### Provenance and verification
+
+- Source commit: `57d3271b2b2f7a596209368f16bfd08244d303df`.
+- Plan SHA-256:
+  `f7e626a8a414787039ea7c4da93ca4d0972ffef3f10661b8e40211c9ce4d9de7`.
+- Supplied `review.tar.gz` SHA-256:
+  `6a9c2173cb0b129bc569798414f0279b23ea18d130abd29bafd94e4375a5de61`.
+- Delta prepare/fit/report jobs: `22583360`, `22583361`, `22583362`.
+- Campaign: `/work/hdd/bibo/yxiao2/phase_c/fitting-m1`.
+- Local review copy: `artifacts/phase-c-fitting-m1-review-6a9c2173cb`.
+
+All 42 attempts completed, with no missing or interrupted rows. The 132 sealed
+JSON records verify, the input artifact matches the original export, and the
+summary reproduces from the archived records. Paired physical parameter starting
+vectors are identical. All three reference witnesses pass on Delta. All fitted
+endpoints pass solver agreement; maximum disagreement is 3.56e-5 training standard
+deviations, below the 1e-4 limit. Thus inaccurate endpoints are not explained by
+disagreement between these two replay solvers. This is not a guarantee of exact
+integration for every possible parameter vector.
+
+The study produced **25/42 accuracy passes**, requiring train and validation NMSE
+at most 0.01. The aggregate is bookkeeping across deliberately different diagnostic
+problems, not a benchmark-wide success rate. No test data, validation-specific
+initial fitting or LLM calls were used. Review regenerated reports and inspected
+saved diagnostics; it did not refit the supplied models.
+
+### Results by fitted block
+
+Each row reports all three numerical starts. Medians are over starts; the pass
+count additionally requires both splits and independent solver agreement.
+
+| Case / fitted block | Arm | Median train NMSE | Median validation NMSE | Passes |
+|---|---|---:|---:|---:|
+| CSTR easy / dynamics | control | 0.699945 | 0.365591 | 0/3 |
+| CSTR easy / dynamics | scaled | 0.000563907 | 0.000345296 | 3/3 |
+| CSTR hard / dynamics, true initials fixed | control | 0.808673 | 0.346161 | 0/3 |
+| CSTR hard / dynamics, true initials fixed | scaled | 0.000671126 | 0.000272715 | 2/3 |
+| CSTR hard / initials, true dynamics fixed | control | 2.00e-11 | 1.51e-11 | 3/3 |
+| CSTR hard / initials, true dynamics fixed | scaled | 2.00e-11 | 1.51e-11 | 3/3 |
+| CSTR hard / initials, true dynamics fixed | domain | 2.00e-11 | 1.51e-11 | 3/3 |
+| CSTR hard / initials, true dynamics fixed | scaled+domain | 2.00e-11 | 1.51e-11 | 3/3 |
+| CSTR hard / joint | control | 0.210252 | 0.0761192 | 1/3 |
+| CSTR hard / joint | scaled | 0.962612 | 0.386155 | 0/3 |
+| CSTR hard / joint | domain | 0.882372 | 0.319751 | 0/3 |
+| CSTR hard / joint | scaled+domain | 0.210252 | 0.0761192 | 1/3 |
+| Coupled basins / dynamics | control | 8.76e-10 | 1.49e-9 | 3/3 |
+| Coupled basins / dynamics | scaled | 1.10e-9 | 1.86e-9 | 3/3 |
+
+Scaling lowers both split errors in all six paired CSTR dynamics-only cases:
+five passes versus zero. The basin problem was already solved accurately.
+However, scaling alone regresses on joint CSTR fitting. For seed 1, validation
+NMSE changes from 0.000230891 in control to 0.487214 with scaling, while
+scaled+domain reaches 0.00184400. All four seed-2 joint arms end at exactly the
+same parameter vector: collocation is worse than the common ordinary start, and
+polling makes the same single exchange-coefficient update. These duplicate
+endpoints are explained by fallback selection, not four independent confirmations.
+
+Estimating only the two hidden initial values succeeds in every arm when the
+dynamics are supplied. Estimating dynamics with supplied initials also can succeed.
+The joint problem is the remaining obstacle. This supports investigating parameter
+and initial-state coupling, nonlinear optimization basins and available excitation;
+it does not distinguish these explanations or prove structural nonidentifiability.
+
+Even a good joint fit need not recover the hidden preparation. Joint control seed 1
+has validation NMSE 0.000230891 but fitted `(C0,Tj0) = (0.400284,332.506)`, versus
+reference `(0.261932,347.566)`. The scaled+domain success estimates
+`(0.307846,341.325)`. Additional unseen-intervention accuracy and latent recovery
+remain separate questions. The initial-domain constraint alone gives no consistent
+accuracy advantage in this run; it remains scientifically justified where the
+public contract establishes a concentration.
+
+### Numerical interpretation and experimental limitations
+
+1. **The node-start comparison is incompletely controlled.** The five-second
+   warm-up deadline starts before construction of the optimization problem and
+   is shared across trajectories. Per-trajectory graph construction consumes
+   this time between rollout attempts. Depending on runtime, later trajectories
+   receive constant-hidden/observed-data guesses instead of rollout guesses.
+   Three of six CSTR dynamics-only pairs have different source patterns; all
+   three basin pairs also differ. The other three CSTR dynamics-only pairs still
+   improve under scaling, and joint seed 1 still regresses with matching source
+   patterns. This is encouraging evidence, but not a fully isolated numerical
+   ablation. Matching recorded source labels also is not a saved node-array hash.
+   Freeze and reuse physical node guesses across arms in the next comparison.
+2. **Checkpoints, not optimizer termination, explain the useful CSTR outcomes.**
+   Eighteen initializers converge (12 initials-only and six basin fits); 23 time
+   out and one returns an invalid parameter vector. All seven passing CSTR
+   dynamics/joint endpoints equal saved collocation parameter checkpoints exactly.
+   Their actual free rollouts validate them despite unfinished initialization.
+   Constraint residuals alone are not an endpoint selection rule.
+3. **The experiment does not demonstrate faster sensitivity refinement.** All 42
+   refinement stages use directional polling because the templates contain
+   guarded/piecewise expressions. Its physical step scales are themselves part
+   of the scaled-arm policy. These results cannot isolate a Hessian conditioning
+   effect or establish the benefit of gradient scaling; the relevant numerical
+   transform has separate implementation tests.
+4. **Budget exhaustion is not equivalent to poor fitting.** All 42 endpoints
+   exhaust the refinement allowance, including all 25 accuracy passes. In the
+   12 initials-only fits, refinement takes another 180.0--181.9 seconds without
+   changing the converged parameter vector. Polling also does not improve any
+   of the seven passing CSTR dynamics/joint checkpoints. This motivates a
+   training-only accuracy/progress stopping rule and reallocating effort; it
+   does not justify selecting or stopping on validation error.
+
+### Decision and proposed follow-up
+
+The campaign and its diagnostic review are complete, but the intended isolation
+of physical node starts needs a follow-up. Do not promote scaling as a universal
+default or call joint fitting solved. Preserve this run and its shortcomings.
+
+The recommended next bounded milestone combines the unfinished part of direction
+1 with direction 4: freeze common physical node arrays and hashes; retain the
+existing unscaled incumbent; compare strategies under an equal total budget; and
+allocate further effort based on training rollout accuracy and progress instead
+of always spending 180 seconds polling. Test this primarily on the difficult joint
+case, with dynamics-only and basin controls to detect regressions. Any portfolio
+must share its budget rather than granting every start a full extra allowance.
+Known-block controls remain evaluator diagnostics, not a way to supply true
+coefficients or hidden initial states to the deployed fitter.
+
+Blockwise initialization and continuation are subsequent hypotheses if the joint
+problem remains difficult. No follow-up implementation, production-default change
+or new remote submission is included in this review.
+
+Verification for this documentation update: report regeneration and all 132
+artifact seals checked; original input identity and paired parameter starts
+checked; all 14 focused fitting tests passed in 6.62 seconds. Repository-wide
+Ruff still reports the 37
+pre-existing findings in unrelated `analysis/claude` files. No implementation or
+benchmark files were changed.
 
 ## References for later milestones
 
