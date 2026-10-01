@@ -195,7 +195,26 @@ Local verification on 2026-10-01:
 
 ## Delta commands
 
-Upload the single portable archive `phase-c-fitting-m3.tar.gz` to Delta's home
+The first Delta submission stopped in preparation: job `22602109` had 17 passing
+tests and one failed assertion. The invalid-worker test expected `worker_failed`
+within five seconds, but the supervisor correctly reported `wall_budget_exhausted`.
+The worker did not reach a completed failure within that allowance. The review
+archive `review-20261001-212706.tar.gz` contains no qualification or fitted results:
+all 72 tasks are missing, not 72 unsuccessful fits.
+
+The correction tests invalid-arm rejection in the already loaded process, then
+tests real nonzero subprocess exit handling using an isolated Python child with
+no numerical imports. Startup deadline and checkpoint recovery retain their
+separate tests. This changes only tests and documentation; numerical source,
+starts, inputs and the 180-second experimental ceiling are unchanged. Preserve
+the initial campaign and submit the corrected bundle to the separate `-fix1`
+directory below. No completed fit is being repeated.
+
+The corrected preflight passes all 18 tests in both the project checkout and the
+portable bundle. The four-arm smoke also passes recovery and exact resume again;
+the numerical source hash matches the first Delta plan byte-for-byte.
+
+Upload the single portable archive `phase-c-fitting-m3-fix1.tar.gz` to Delta's home
 directory. It contains the sealed existing CSTR inputs, source, focused tests,
 configuration, `SOURCE_COMMIT`, and `SHA256SUMS`. No installation is required;
 reuse the existing fitter Python and CasADi dependency directory.
@@ -203,12 +222,12 @@ reuse the existing fitter Python and CasADi dependency directory.
 ```bash
 bash <<'BASH'
 set -euo pipefail
-AF_ARCHIVE="$HOME/phase-c-fitting-m3.tar.gz"
+AF_ARCHIVE="$HOME/phase-c-fitting-m3-fix1.tar.gz"
 AF_REV=$(tar -xOf "$AF_ARCHIVE" SOURCE_COMMIT)
 AF_CODE="/projects/bibo/yxiao2/repos/phase-c-fitting-strategies-${AF_REV:0:7}"
 mkdir -p "$AF_CODE"
 tar -xzf "$AF_ARCHIVE" -C "$AF_CODE"
-export AF_CAMPAIGN=/work/hdd/bibo/yxiao2/phase_c/fitting-strategies-v1
+export AF_CAMPAIGN=/work/hdd/bibo/yxiao2/phase_c/fitting-strategies-v1-fix1
 export AF_ACCOUNT=bibo-delta-cpu AF_CONCURRENCY=2
 bash "$AF_CODE/scripts/hpc/submit_phase_c_fitting_strategies_delta.sh"
 BASH
@@ -225,9 +244,9 @@ After completion (or to inspect partial progress):
 ```bash
 bash <<'BASH'
 set -euo pipefail
-AF_REV=$(tar -xOf "$HOME/phase-c-fitting-m3.tar.gz" SOURCE_COMMIT)
+AF_REV=$(tar -xOf "$HOME/phase-c-fitting-m3-fix1.tar.gz" SOURCE_COMMIT)
 AF_CODE="/projects/bibo/yxiao2/repos/phase-c-fitting-strategies-${AF_REV:0:7}"
-export AF_CAMPAIGN=/work/hdd/bibo/yxiao2/phase_c/fitting-strategies-v1
+export AF_CAMPAIGN=/work/hdd/bibo/yxiao2/phase_c/fitting-strategies-v1-fix1
 bash "$AF_CODE/scripts/hpc/inspect_phase_c_fitting_strategies_delta.sh"
 BASH
 ```

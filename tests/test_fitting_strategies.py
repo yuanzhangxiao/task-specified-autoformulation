@@ -228,13 +228,32 @@ def test_validation_and_bad_boundary_rejected_before_native_solver(inputs, tmp_p
         solver.solve(payload, tmp_path)
 
 
-def test_deadline_process_recovery_and_no_false_finite_endpoint(tmp_path):
-    # A nonexistent worker arm fails. An exit is not silently called convergence.
-    result = f.run({"policy": {"seconds": 5}, "arm": "invalid"}, tmp_path)
+def test_deadline_process_recovery_and_no_false_finite_endpoint(tmp_path, monkeypatch):
+    import sys
+
+    payload = {"policy": {"seconds": 60}, "arm": "invalid"}
+    # Check input rejection directly. Importing the numerical stack in a fresh
+    # process may exceed five seconds on an HPC filesystem before reaching it.
+    with pytest.raises(ValueError, match="unknown strategy"):
+        f.fit(payload, tmp_path)
+
+    # Exercise real subprocess exit handling independently of numerical imports.
+    # The generous allowance belongs to this test, not to an experiment arm.
+    popen = f.subprocess.Popen
+
+    def failed_worker(command, **kwargs):
+        assert command[1:3] == ["-m", "autoformalism.fitting.transcription_fit"]
+        return popen(
+            [sys.executable, "-I", "-S", "-c", "raise SystemExit(7)"], **kwargs
+        )
+
+    monkeypatch.setattr(f.subprocess, "Popen", failed_worker)
+    result = f.run(payload, tmp_path)
     assert result["parameters"] is None
     assert result["stop_reason"] == "worker_failed"
-    assert result["process"]["returncode"] != 0
-    assert result["total_seconds"] < 7
+    assert result["process"]["returncode"] == 7
+    assert not result["budget_exhausted"]
+    assert not result["process"]["wall_timeout"]
 
 
 def test_offnode_defect_detects_dynamics_even_when_observed_flat():
