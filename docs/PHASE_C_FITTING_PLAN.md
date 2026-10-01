@@ -385,4 +385,13 @@ training-based stopping and conditional checkpoint rescue, and scores latent and
 parameter recovery separately from observed error. It is 27 CPU endpoints with no
 production-default or benchmark-release changes. It also clarifies the historical
 alternating fitter: linear weights alternate with a joint trajectory/nonlinear
-block; its initial conditions were fixed. Live Delta comparison is pending.
+block; its initial conditions were fixed.
+
+The [2026-10-01 Delta review](PHASE_C_IDENTIFIABLE_FITTING_RESULTS_2026-10-01.md)
+closes this milestone: all 27 endpoints recover the supplied coefficients,
+latent initial and trajectories. Training-based stopping reduces residual calls
+from 74 to 60 across nine matched fits. Conditional-first rescue costs 331 calls
+without increasing recovery. The next proposed bridge is guarded CSTR
+sensitivity refinement from identical checkpoints; production defaults remain
+unchanged. The review also records initializer timeout overhead and the limits
+of these noiseless controls.

@@ -5,6 +5,12 @@ Agreed 2026-09-30. Protocol `phase-c-identifiable-fitting-1`; configuration
 construction remains separate. No benchmark releases, prompts, production
 fitting defaults, test payloads or LLM calls change.
 
+Completed Delta results are in the
+[2026-10-01 review](PHASE_C_IDENTIFIABLE_FITTING_RESULTS_2026-10-01.md): 27/27
+recovery passes; joint refinement with training-based stopping is the most
+efficient tested policy. Conditional-first rescue offers no recovery gain in
+this control set. The sections below describe the frozen experimental design.
+
 ## What the earlier alternating variant actually did
 
 There are distinct algorithms in the repository:
