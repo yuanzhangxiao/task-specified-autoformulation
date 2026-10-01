@@ -1,0 +1,19 @@
+{
+  "starts": 3,
+  "initializer_seconds": 60,
+  "refinement": {
+    "seconds": 120,
+    "maximum_calls": 180,
+    "training_nmse": 1e-10,
+    "trajectory_nmse": 1e-9,
+    "stall_steps": 4,
+    "relative_progress": 1e-7,
+    "scaled_step": 1e-5,
+    "conditional_candidates": 3,
+    "block_calls": 12
+  },
+  "replay_seconds": 120,
+  "output_nmse_limit": 1e-6,
+  "parameter_relative_limit": 0.01,
+  "latent_nmse_limit": 1e-4
+}

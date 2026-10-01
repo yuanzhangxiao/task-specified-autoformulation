@@ -389,6 +389,8 @@ def latent_start(
     record_progress: bool = False,
     branch_node_target: tuple[int, int] | None = None,
     numerical_coordinates: NumericalCoordinates | None = None,
+    frozen_nodes: dict[str, list[list[float]]] | None = None,
+    checkpoint_pool_capacity: int = 0,
 ) -> dict:
     """Estimate latent trajectories with continuity and the same physical boundary.
 
@@ -404,6 +406,22 @@ def latent_start(
         raise ValueError("mesh refinement is only supported for collocation")
     if training.name is not SplitName.TRAIN:
         raise ValueError("initializer requires training split")
+    if not 0 <= checkpoint_pool_capacity <= 32 or checkpoint_pool_capacity == 1:
+        raise ValueError("checkpoint pool capacity must be zero or 2..32")
+    if frozen_nodes is not None:
+        if set(frozen_nodes) != {row.trajectory_id for row in training.trajectories}:
+            raise ValueError("frozen node trajectory identities differ")
+        for row in training.trajectories:
+            values = np.asarray(frozen_nodes[row.trajectory_id], dtype=float)
+            if (
+                values.shape != (len(row.time), system.state_count)
+                or not np.isfinite(values).all()
+            ):
+                raise ValueError("frozen nodes have invalid shape or values")
+            if not np.allclose(
+                values[0], system.initial_for(row, start), rtol=0, atol=1e-12
+            ):
+                raise ValueError("frozen nodes differ from physical initial boundary")
     scales = observation_scales(system.channels, scale)
     if node_start not in {"rollout_required", "rollout_or_observed"}:
         raise ValueError("unknown collocation node initialization policy")
@@ -491,9 +509,20 @@ def latent_start(
     try:
         for data in training.trajectories:
             forcing = trajectory_forcing(system.model, data)
-            guess, guess_record = collocation_node_guess(
-                system, data, start, settings, node_start, warmup_deadline
-            )
+            if frozen_nodes is None:
+                guess, guess_record = collocation_node_guess(
+                    system, data, start, settings, node_start, warmup_deadline
+                )
+            else:
+                from autoformalism.staged_topology import content_hash
+
+                guess = np.asarray(frozen_nodes[data.trajectory_id], dtype=float)
+                guess_record = {
+                    "trajectory_id": data.trajectory_id,
+                    "policy": "frozen_physical_nodes",
+                    "source": "frozen",
+                    "nodes_sha256": content_hash(guess.tolist()),
+                }
             if branch_node_target is not None:
                 guess, branch_record = target_node_branch(
                     system, data, start, guess, branch_node_target
@@ -599,7 +628,14 @@ def latent_start(
         events = []
         progress = (
             CollocationProgress(
-                opti, theta, system.names, lower, upper, directory, started
+                opti,
+                theta,
+                system.names,
+                lower,
+                upper,
+                directory,
+                started,
+                pool_capacity=checkpoint_pool_capacity,
             )
             if record_progress
             else None

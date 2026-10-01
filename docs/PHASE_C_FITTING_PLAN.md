@@ -374,3 +374,15 @@ benchmark files were changed.
 - MAGI: https://doi.org/10.1073/pnas.2020397118
 - Diffusion tempering: https://proceedings.mlr.press/v235/beck24a.html
 - Observability/identifiability: https://doi.org/10.1007/s11538-025-01415-3
+
+## Milestone 2: identifiable joint fitting controls
+
+User-approved follow-up: establish coefficient **and latent-initial** recovery on
+identifiable cases before interpreting joint CSTR failure. The implemented
+[identifiable-control study](PHASE_C_IDENTIFIABLE_FITTING.md) freezes physical node
+starts, shares each collocation pool across three matched refinement arms, tests
+training-based stopping and conditional checkpoint rescue, and scores latent and
+parameter recovery separately from observed error. It is 27 CPU endpoints with no
+production-default or benchmark-release changes. It also clarifies the historical
+alternating fitter: linear weights alternate with a joint trajectory/nonlinear
+block; its initial conditions were fixed. Live Delta comparison is pending.

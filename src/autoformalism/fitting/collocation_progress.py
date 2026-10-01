@@ -18,12 +18,25 @@ from autoformalism.rebuttal.fitter_diagnostic import _finite_payload, write_json
 class CollocationProgress:
     """Preserve the latest, least-infeasible, and best feasible parameter points."""
 
-    def __init__(self, opti, theta, names, lower, upper, directory: Path, started):
+    def __init__(
+        self,
+        opti,
+        theta,
+        names,
+        lower,
+        upper,
+        directory: Path,
+        started,
+        *,
+        pool_capacity: int = 0,
+    ):
         self.opti, self.theta, self.names = opti, theta, names
         self.lower, self.upper = lower, upper
         self.path, self.started = directory / "progress.json", started
         self.history: list[dict] = []
         self.saved: dict[str, dict] = {}
+        self.pool_capacity = pool_capacity
+        self.pool: list[dict] = []
         self.dual = (
             ca.gradient(opti.f, opti.x) + ca.jacobian(opti.g, opti.x).T @ opti.lam_g
         )
@@ -46,6 +59,7 @@ class CollocationProgress:
                     "seconds": monotonic() - self.started,
                     "iterations": self.history,
                     "checkpoints": self.saved,
+                    **({"checkpoint_pool": self.pool} if self.pool_capacity else {}),
                 }
             ),
         )
@@ -96,6 +110,12 @@ class CollocationProgress:
                     best is None or objective < best["objective"]
                 ):
                     self.saved["best_feasible"] = point
+                if self.pool_capacity and iteration % 5 == 0:
+                    # Include early and recent points even if the collocation
+                    # objective is poor; bounded conditional replay can rescue them.
+                    self.pool.append(point)
+                    if len(self.pool) > self.pool_capacity:
+                        self.pool.pop(1)
         except (RuntimeError, ValueError, ArithmeticError) as error:
             row["diagnostic_error"] = str(error)[-400:]
         self.history.append(row)
