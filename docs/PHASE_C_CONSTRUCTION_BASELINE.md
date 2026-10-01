@@ -4,6 +4,12 @@ This starts stage isolation while Phase B finishes endpoint processing. It is
 a diagnostic baseline, not completion of the entire milestone or a final
 comparison campaign.
 
+The original frozen pilot remains a historical baseline. New source includes
+the [contract/binding correction](PHASE_C_VARIABLE_CONFIRMATION.md), including
+the restored bounded public-contract repair wrapper. Run its variable-only
+confirmation first. Do not use new code to resume the original pilot; its
+source-identity check intentionally rejects that combination.
+
 ## Scope
 
 Use the qualified `phase-c-development-2` release, separately from Phase B:

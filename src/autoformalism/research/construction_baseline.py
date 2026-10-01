@@ -11,22 +11,25 @@ from typing import Literal
 from pydantic import Field
 
 from autoformalism.fitting import public_fitting as public
+from autoformalism.llm.construction import ConstructionClient
 from autoformalism.llm.staged_topology import StagedModelSettings, atomic_json
 from autoformalism.rebuttal import mechanism_functional as functional
 from autoformalism.rebuttal import review_deadline_pipeline as pipeline
 from autoformalism.rebuttal.prefit_construction_campaign import _cache_records, _cost
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.repair_comparison import (
-    BudgetedRepairClient,
     RepairBudgetExceeded,
 )
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.research import basin_construction_assessment as basin
-from autoformalism.research import construction_trace, phase_c_inputs
+from autoformalism.research import (
+    construction_trace,
+    phase_c_construction,
+    phase_c_inputs,
+)
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicSplit
 from autoformalism.schemas.staged_topology import ModelingLimits
-from autoformalism.search.shared_construction import construct
 from autoformalism.search.training_evidence import EvidenceSettings
 from autoformalism.staged_topology import content_hash
 
@@ -35,7 +38,7 @@ REPO = Path(__file__).resolve().parents[3]
 
 
 class Config(StrictSchema):
-    """One construction per case, seed and prompt; no scientific revisions."""
+    """One construction episode per case, seed and prompt; no fitted revisions."""
 
     protocol: Literal["phase-c-construction-baseline-1"] = PROTOCOL
     platform: Literal["aces-h100x1"] = "aces-h100x1"
@@ -136,7 +139,7 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
             construction_trace.render(directory, identity)
             return previous
         _cache_records(directory / "calls", identity)
-        client = BudgetedRepairClient(
+        client = ConstructionClient(
             settings=StagedModelSettings.model_validate(
                 plan["config"]["model_settings"]
             ),
@@ -160,14 +163,8 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
             )
         }
         try:
-            result = construct(
-                view,
-                task,
-                client,
-                directory / "construction",
-                build_bundle=pipeline._bundle,
-                certificate_for=pipeline.certificates,
-                retain_failed_draft=True,
+            result = phase_c_construction.propose(
+                view, task, client, directory / "construction"
             )
             return sealed_write(
                 directory / "proposal.json",

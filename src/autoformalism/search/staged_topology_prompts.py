@@ -113,6 +113,7 @@ def render_variable_identification_user_prompt(
     agenda_json: str,
     inventory_json: str,
     diagnostics_json: str | None = None,
+    mechanism_binding_context: dict | None = None,
 ) -> str:
     """Render one Level-1 request from runtime-owned JSON artifacts."""
     payload: dict[str, object] = {
@@ -129,6 +130,8 @@ def render_variable_identification_user_prompt(
             diagnostics_json,
             label="diagnostics_json",
         )
+    if mechanism_binding_context is not None:
+        payload["mechanism_binding_context"] = mechanism_binding_context
     return _request_text(stage="variable identification", payload=payload)
 
 
@@ -161,6 +164,7 @@ def render_equation_topology_user_prompt(
     diagnostics_json: str | None = None,
     shared_process_terms: list[dict] | None = None,
     automatic_process_terms: bool = False,
+    committed_process_bindings: list[dict] | None = None,
 ) -> str:
     """Render one Level-2 request for an immutable selected left-hand side."""
     payload: dict[str, object] = {
@@ -206,6 +210,19 @@ def render_equation_topology_user_prompt(
             "The runtime inserts the displayed signed process contributions. "
             "Return ONLY other terms, or an empty terms list if none remain. "
             "Do not redefine or repeat a process, its consumers, or its signs."
+        )
+    if committed_process_bindings is not None:
+        payload["committed_process_bindings"] = committed_process_bindings
+        payload["process_repair_context"] = (
+            "These are the complete accepted process declarations, including all "
+            "drivers, consumers, signs, conversions and scientific meanings. "
+            "They are unchanged from the process proposal stage. The full public "
+            "brief, inventory and current equations above remain authoritative on "
+            "every retry. A process may appear only at its declared consumers with "
+            "its declared sign. A downstream equation may instead depend on a "
+            "generated consumer variable if scientifically appropriate. Changing "
+            "a process's consumers/signs is a coordinated model revision, not an "
+            "additional local term. Do not duplicate a committed contribution."
         )
     return _request_text(stage="equation topology", payload=payload)
 

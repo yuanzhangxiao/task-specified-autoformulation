@@ -39,13 +39,8 @@ def diagnostic_transport(url: str, body: dict, timeout: float) -> dict:
     return value
 
 
-class ResponseRevisionClient(RevisionClient):
-    """Tokenization is logged separately and never charged as model generation."""
-
-    def __init__(self, *, token_transport=None, **kwargs):
-        kwargs.setdefault("transport", diagnostic_transport)
-        super().__init__(**kwargs)
-        self.token_transport = token_transport or diagnostic_transport
+class ServingTokenCounter:
+    """Cached serving-tokenizer preflight shared by construction and revision."""
 
     def _count(self, messages: list[dict]) -> int:
         body = {
@@ -86,6 +81,15 @@ class ResponseRevisionClient(RevisionClient):
         if "error" in saved:
             raise PromptPreflightError(saved["error"])
         return saved["count"]
+
+
+class ResponseRevisionClient(ServingTokenCounter, RevisionClient):
+    """Tokenization is logged separately and never charged as model generation."""
+
+    def __init__(self, *, token_transport=None, **kwargs):
+        kwargs.setdefault("transport", diagnostic_transport)
+        super().__init__(**kwargs)
+        self.token_transport = token_transport or diagnostic_transport
 
     def call(self, *, system, user, response_model, step, attempt):
         """Keep all target overviews and contracts; reduce examples before failing."""

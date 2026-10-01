@@ -15,6 +15,10 @@ constructions. It identifies an undisplayed target-role policy, omission of the
 Phase B construction wrappers, and mechanism-assignment/reuse problems. Its
 offline reports expose exact prompts and decisions; no construction fixes or
 new experiment are silently applied to the frozen pilot.
+The next [variable-only confirmation](PHASE_C_VARIABLE_CONFIRMATION.md) restores
+the public-contract wrapper, corrects the reviewed mass/rate role inferences,
+and adds explicit proposer-owned memory bindings. It uses the same 32-task
+roster, preserves full repair context, and submits no fitting jobs.
 In parallel, the [fitting qualification plan](PHASE_C_FITTING_PLAN.md) starts a
 42-fit, CPU-only Delta study of coordinate scaling and shared initial values on
 fixed CSTR/basin equations. It changes no production defaults. The same

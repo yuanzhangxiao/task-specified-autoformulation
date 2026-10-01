@@ -14,12 +14,14 @@ else:
 
 from autoformalism.fitting import public_fitting as public
 from autoformalism.research import construction_baseline as baseline
+from autoformalism.research import variable_confirmation
 
 
-def submit(root: Path, wave: str) -> dict:
+def submit(root: Path, wave: str, *, variables_only: bool = False) -> dict:
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", wave):
         raise ValueError("wave must be a simple identifier")
-    plan = baseline.verify(root)
+    controller = variable_confirmation if variables_only else baseline
+    plan = controller.verify(root)
     for key in (
         "AF_PYTHON",
         "AF_VLLM_IMAGE",
@@ -30,18 +32,20 @@ def submit(root: Path, wave: str) -> dict:
         if not os.environ.get(key):
             raise ValueError(f"set {key}")
     source = support("submit_shared_process_pilot")
-    commit = source.source_commit(baseline.REPO)
+    commit = source.source_commit(controller.REPO)
     os.environ.update(
-        AF_REPO_ROOT=str(baseline.REPO), AF_OUTPUT_ROOT=str(root), AF_COMMIT=commit
+        AF_REPO_ROOT=str(controller.REPO), AF_OUTPUT_ROOT=str(root), AF_COMMIT=commit
     )
     identity = {
         "plan_sha256": plan["artifact_sha256"],
         "commit": commit,
         "wave": wave,
-        "resources": f"aces-1h100-{len(plan['tasks'])}-fit-assess-tasks-concurrency4-1",
+        "resources": "aces-1h100-variables-only-1"
+        if variables_only
+        else f"aces-1h100-{len(plan['tasks'])}-fit-assess-tasks-concurrency4-1",
     }
     directory = root / "submissions" / wave
-    worker = baseline.REPO / "scripts/hpc/run_phase_c_baseline.sh"
+    worker = controller.REPO / "scripts/hpc/run_phase_c_baseline.sh"
     with public._lock(directory):
         path = directory / "identity.json"
         if path.exists() and public._read(path) != identity:
@@ -49,7 +53,12 @@ def submit(root: Path, wave: str) -> dict:
         public._write(path, identity)
         (root / "logs").mkdir(exist_ok=True)
         jobs = {}
-        for stage in ("propose", "fit-assess", "report"):
+        stages = (
+            ("propose", "report")
+            if variables_only
+            else ("propose", "fit-assess", "report")
+        )
+        for stage in stages:
             opts = [
                 "--kill-on-invalid-dep=yes",
                 "--account=156264627414",
@@ -57,7 +66,7 @@ def submit(root: Path, wave: str) -> dict:
                 "--ntasks=1",
                 "--export=ALL",
                 "--exclude=ac042",
-                f"--job-name=phasec-{stage}",
+                f"--job-name=phasec-{'variables-' if variables_only else ''}{stage}",
                 f"--output={root}/logs/{wave}-{stage}-%A_%a.out",
                 f"--error={root}/logs/{wave}-{stage}-%A_%a.err",
             ]
@@ -71,7 +80,11 @@ def submit(root: Path, wave: str) -> dict:
                     "--signal=B:TERM@300",
                 ]
             else:
-                predecessor = {"fit-assess": "propose", "report": "fit-assess"}[stage]
+                predecessor = (
+                    "propose"
+                    if variables_only
+                    else {"fit-assess": "propose", "report": "fit-assess"}[stage]
+                )
                 opts += [
                     "--partition=cpu",
                     "--cpus-per-task=1",
@@ -113,5 +126,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--wave", default="construction-1")
+    parser.add_argument("--variables-only", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(submit(args.root.resolve(), args.wave), indent=2))
+    print(
+        json.dumps(
+            submit(args.root.resolve(), args.wave, variables_only=args.variables_only),
+            indent=2,
+        )
+    )

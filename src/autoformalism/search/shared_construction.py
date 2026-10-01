@@ -34,6 +34,9 @@ def construct(
     build_bundle,
     certificate_for,
     retain_failed_draft=False,
+    explicit_mechanism_bindings=False,
+    target_definitions=None,
+    complete_process_context=False,
 ):
     """Preserve one variable inventory and one budget across process fallback.
 
@@ -56,6 +59,12 @@ def construct(
         "training_evidence": evidence,
         "shared_process_guidance": sharing,
     }
+    if explicit_mechanism_bindings:
+        options["explicit_mechanism_bindings"] = True
+    if target_definitions:
+        options["target_definitions"] = target_definitions
+    if complete_process_context:
+        options["complete_process_context"] = True
     variables = _stage(
         directory / "variables.json",
         lambda: run_staged_topology(

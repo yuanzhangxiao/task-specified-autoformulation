@@ -22,7 +22,7 @@ from autoformalism.schemas.staged_topology import (
     VariableReply,
     equation_reply_model,
 )
-from autoformalism.search import scientific_verification
+from autoformalism.search import scientific_verification, variable_bindings
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_topology_prompts import (
     render_equation_topology_system_prompt,
@@ -277,6 +277,9 @@ def run_staged_topology(
     signed_shared_processes: bool = False,
     stop_after_inventory: bool = False,
     initial_memory_candidates: dict[str, list[str]] | None = None,
+    explicit_mechanism_bindings: bool = False,
+    target_definitions: dict[str, str] | None = None,
+    complete_process_context: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     from autoformalism.search import shared_process_contract as shared
@@ -286,10 +289,23 @@ def run_staged_topology(
         raise ValueError("signed processes require binding")
     if bind_shared_processes and not optional_process_review:
         raise ValueError("shared process binding requires the process proposal stage")
+    if (
+        explicit_mechanism_bindings or target_definitions
+    ) and not hybrid_variable_construction:
+        raise ValueError("explicit contracts require hybrid variable construction")
+    target_definitions = target_definitions or {}
+    public_targets = {v.name for v in brief.public_variables if v.data_role == "target"}
+    if set(target_definitions) - public_targets or any(
+        d not in {"differential", "algebraic"} for d in target_definitions.values()
+    ):
+        raise ValueError("target definition contract differs from public targets")
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     contract_path = output / "evidence_contract.json"
     if (
-        shared_process_guidance
+        explicit_mechanism_bindings
+        or target_definitions
+        or complete_process_context
+        or shared_process_guidance
         or stop_after_inventory
         or initial_memory_candidates is not None
         or optional_process_review
@@ -297,6 +313,12 @@ def run_staged_topology(
         or contract_path.exists()
     ):
         contract = {"brief": enriched, "context": context.model_dump(mode="json")}
+        if explicit_mechanism_bindings:
+            contract["variable_binding_policy"] = variable_bindings.POLICY
+        if target_definitions:
+            contract["target_definitions"] = target_definitions
+        if complete_process_context:
+            contract["complete_process_context"] = True
         if initial_memory_candidates is not None:
             contract["initial_memory_candidates"] = initial_memory_candidates
         if stop_after_inventory:
@@ -332,6 +354,15 @@ def run_staged_topology(
             not names <= dynamic for names in memory_candidates.values()
         ):
             raise ValueError("initial memory candidates differ from public inventory")
+    if initial_inventory is not None and any(
+        target_definitions.get(v.name, v.definition) != v.definition for v in inventory
+    ):
+        raise ValueError("initial inventory violates the public target definitions")
+    variable_model = (
+        variable_bindings.BoundVariableReply
+        if explicit_mechanism_bindings
+        else VariableReply
+    )
     polarity_policies: list[dict[str, Any]] = []
     polarity_audits: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
@@ -433,7 +464,12 @@ def run_staged_topology(
                     rejected: object = None
                     record = client.call(
                         system=system_prompt(
-                            render_variable_identification_system_prompt(),
+                            render_variable_identification_system_prompt()
+                            + (
+                                variable_bindings.INSTRUCTION
+                                if explicit_mechanism_bindings
+                                else ""
+                            ),
                             "variables",
                             shared_process_guidance,
                         ),
@@ -442,14 +478,19 @@ def run_staged_topology(
                             agenda_json=item.model_dump_json(),
                             inventory_json=_variables(inventory),
                             diagnostics_json=diagnostic,
+                            mechanism_binding_context=variable_bindings.binding_context(
+                                brief, memory_candidates, target_definitions
+                            )
+                            if explicit_mechanism_bindings
+                            else None,
                         ),
-                        response_model=VariableReply,
+                        response_model=variable_model,
                         step=f"variables_{index}",
                         attempt=attempt,
                     )
                     try:
                         rejected = visible_response(record)
-                        reply = VariableReply.model_validate(rejected)
+                        reply = variable_model.model_validate(rejected)
                     except (ValueError, TypeError, KeyError) as exc:
                         error = str(exc)[:6000]
                         diagnostic = _json(
@@ -472,17 +513,23 @@ def run_staged_topology(
                         )
                         checkpoint()
                         continue
-                    inventory, decisions = merge_variable_reply_partially(
-                        brief, inventory, reply
-                    )
-                    _record_memory_candidates(
-                        brief,
-                        item,
-                        reply,
-                        decisions,
-                        inventory,
-                        memory_candidates,
-                    )
+                    binding_errors = []
+                    if explicit_mechanism_bindings or target_definitions:
+                        inventory, decisions, binding_errors = variable_bindings.merge(
+                            brief,
+                            inventory,
+                            reply,
+                            memory_candidates,
+                            target_definitions,
+                        )
+                    else:
+                        inventory, decisions = merge_variable_reply_partially(
+                            brief, inventory, reply
+                        )
+                    if not explicit_mechanism_bindings:
+                        _record_memory_candidates(
+                            brief, item, reply, decisions, inventory, memory_candidates
+                        )
                     gaps = _agenda_gaps(brief, item, inventory, memory_candidates)
                     if not scientific_verification.enabled():
                         gaps = tuple(
@@ -496,7 +543,7 @@ def run_staged_topology(
                     rejected_decisions = [
                         decision for decision in decisions if not decision["accepted"]
                     ]
-                    complete = not gaps
+                    complete = not gaps and not binding_errors
                     events.append(
                         {
                             "step": f"variables_{index}",
@@ -506,11 +553,35 @@ def run_staged_topology(
                             "partial_acceptance": bool(accepted_names) and not complete,
                             "accepted_variable_names": accepted_names,
                             "rejected_variables": rejected_decisions,
+                            **(
+                                {
+                                    "binding_errors": binding_errors,
+                                    "explicit_bindings": [
+                                        b.model_dump(mode="json")
+                                        for b in getattr(
+                                            reply, "mechanism_bindings", ()
+                                        )
+                                    ],
+                                    "bindings_after": {
+                                        k: sorted(v)
+                                        for k, v in memory_candidates.items()
+                                    },
+                                }
+                                if explicit_mechanism_bindings
+                                else {}
+                            ),
                             "unresolved_obligations": list(gaps),
                             "request_hash": record["request_hash"],
                             "error": None
                             if complete
-                            else f"unresolved variable obligations: {list(gaps)}",
+                            else (
+                                f"unresolved variable obligations: {list(gaps)}"
+                                + (
+                                    f"; binding errors: {binding_errors}"
+                                    if explicit_mechanism_bindings
+                                    else ""
+                                )
+                            ),
                         }
                     )
                     checkpoint()
@@ -521,8 +592,19 @@ def run_staged_topology(
                             "retained_valid_variables": accepted_names,
                             "rejected_variables": rejected_decisions,
                             "unresolved_obligations": list(gaps),
+                            **(
+                                {"binding_errors": binding_errors}
+                                if explicit_mechanism_bindings
+                                else {}
+                            ),
                             "instruction": (
-                                "Return only variables needed to resolve these "
+                                "Return variables needed for unresolved obligations "
+                                "and explicit mechanism_bindings. Bind existing "
+                                "differential variables with variables=[]; do not "
+                                "add a redundant state. Invalid bindings were "
+                                "not applied; current bindings are displayed."
+                                if explicit_mechanism_bindings
+                                else "Return only variables needed to resolve these "
                                 "obligations; retained variables must not be repeated."
                             ),
                         }
@@ -706,7 +788,9 @@ def run_staged_topology(
                     ),
                     inventory_json=_variables(inventory),
                     selected_lhs_json=_json(
-                        {"name": selected.name, "definition": selected.definition}
+                        selected.model_dump(mode="json")
+                        if complete_process_context
+                        else {"name": selected.name, "definition": selected.definition}
                     ),
                     equation_sketch_json=_json(
                         [item.model_dump(mode="json") for item in equations]
@@ -724,6 +808,9 @@ def run_staged_topology(
                         else None
                     ),
                     automatic_process_terms=automatic_terms,
+                    committed_process_bindings=process_bindings
+                    if complete_process_context
+                    else None,
                 ),
                 model,
                 accept_equation,

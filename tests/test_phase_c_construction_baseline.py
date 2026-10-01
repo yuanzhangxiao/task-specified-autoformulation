@@ -60,11 +60,37 @@ def fixture(root):
     )
 
 
+def construction_transport(calls):
+    """Script the new binding decision explicitly; never infer it in production."""
+    legacy = smoke.transport_for(calls)
+
+    def transport(url, body, timeout):
+        response = legacy(url, body, timeout)
+        if body["response_format"]["json_schema"]["name"] == "BoundVariableReply":
+            raw = json.loads(response["choices"][0]["message"]["content"])
+            raw["mechanism_bindings"] = [
+                {"requirement_id": "memory", "memory_states": ["m"]}
+            ]
+            response["choices"][0]["message"]["content"] = json.dumps(raw)
+        return response
+
+    return transport
+
+
+def tokenize(*args):
+    return {"count": 1000, "max_model_len": 32768}
+
+
 def test_end_to_end_actual_constructor_fit_and_independent_assessment(tmp_path):
     plan = fixture(tmp_path)
     task, calls = plan["tasks"][0], []
     p = b.propose(
-        tmp_path, plan, task, "http://offline", transport=smoke.transport_for(calls)
+        tmp_path,
+        plan,
+        task,
+        "http://offline",
+        transport=construction_transport(calls),
+        token_transport=tokenize,
     )
     assert p["status"] == "constructed", p
     assert calls
@@ -73,7 +99,12 @@ def test_end_to_end_actual_constructor_fit_and_independent_assessment(tmp_path):
     n = len(calls)
     assert (
         b.propose(
-            tmp_path, plan, task, "http://offline", transport=smoke.transport_for(calls)
+            tmp_path,
+            plan,
+            task,
+            "http://offline",
+            transport=construction_transport(calls),
+            token_transport=tokenize,
         )
         == p
     )

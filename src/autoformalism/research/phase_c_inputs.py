@@ -14,6 +14,7 @@ from autoformalism.rebuttal.mechanism_audit import rubric
 from autoformalism.rebuttal.mechanism_functional import Rule
 from autoformalism.rebuttal.mechanisms import MechanismEvaluationSpec
 from autoformalism.research import basin_construction_assessment as basin
+from autoformalism.research.construction_contract import correct_roles
 from autoformalism.search.training_evidence import build_training_evidence
 from autoformalism.staged_topology import build_scientific_brief
 from autoformalism.targets import PublicTargetContract
@@ -123,24 +124,26 @@ def cell(directory: Path, config: dict) -> dict:
             limits=ModelingLimits.model_validate(config["limits"]),
         )
     )
-    return {
-        "public_specification": spec,
-        "brief": brief.model_dump(mode="json"),
-        "context": context.model_dump(mode="json"),
-        "target_contract": target.model_dump(mode="json"),
-        "mechanism_spec": mechanism.model_dump(mode="json"),
-        "independent_rules": rules,
-        "assessment_policy": basin.POLICY
-        if name in basin.BASINS
-        else "fitted-public-mechanism-tests-1",
-        "training": train.model_dump(mode="json"),
-        "validation": val.model_dump(mode="json"),
-        "evidence": build_training_evidence(
-            public.unpack_split(train),
-            context,
-            EvidenceSettings.model_validate(config["evidence"]),
-        ).model_dump(mode="json"),
-    }
+    return correct_roles(
+        {
+            "public_specification": spec,
+            "brief": brief.model_dump(mode="json"),
+            "context": context.model_dump(mode="json"),
+            "target_contract": target.model_dump(mode="json"),
+            "mechanism_spec": mechanism.model_dump(mode="json"),
+            "independent_rules": rules,
+            "assessment_policy": basin.POLICY
+            if name in basin.BASINS
+            else "fitted-public-mechanism-tests-1",
+            "training": train.model_dump(mode="json"),
+            "validation": val.model_dump(mode="json"),
+            "evidence": build_training_evidence(
+                public.unpack_split(train),
+                context,
+                EvidenceSettings.model_validate(config["evidence"]),
+            ).model_dump(mode="json"),
+        }
+    )
 
 
 def qualified_public_cells(release: Path, config: dict) -> tuple[str, dict]:
