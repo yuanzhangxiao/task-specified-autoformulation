@@ -431,3 +431,11 @@ independent prediction NMSE separately. Conditional affine-coefficient solves
 remain a recorded next method, since nonlinear dynamic constraints prevent the
 quadratic observation objective from making trajectory estimation a simple QP.
 No production default changes or construction integration occur in this step.
+
+The [2026-10-02 archive review](PHASE_C_FITTING_M4_RESULTS_2026-10-02.md)
+reconciles all 45 endpoints. Rollout-only, the hybrid and original collocation
+recover every CSTR coefficient within 1% in all six starts each. The new reuse
+variant fails two hard-CSTR starts, and shooting retains low prediction errors
+with inaccurate coefficients. The review records native restart, checkpoint
+freshness and screening-budget issues for an isolated follow-up. It also shows
+that useful nonconverged collocation checkpoints can seed successful refinement.
