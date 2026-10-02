@@ -23,6 +23,8 @@ from autoformalism.fitting.coordinates import training_coordinates
 from autoformalism.fitting.identifiable_campaign import sensitivity_audit
 from autoformalism.fitting.matching_probe import observed_node_guess
 from autoformalism.fitting.qualification import _report_lock, replay
+from autoformalism.fitting.reuse_diagnostic import ARMS as DIAGNOSTIC_ARMS
+from autoformalism.fitting.reuse_diagnostic import ReuseDiagnosticPolicy
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
 from autoformalism.fitting.transcription_fit import ARMS, REUSE_ARM, StrategyPolicy, run
 from autoformalism.schemas.base import StrictSchema
@@ -30,6 +32,7 @@ from autoformalism.schemas.public_fitting import PublicFitRequest, PublicSplit
 
 PROTOCOL = "phase-c-fitting-strategies-1"
 FOLLOWUP_PROTOCOL = "phase-c-fitting-budget-reuse-1"
+DIAGNOSTIC_PROTOCOL = "phase-c-fitting-reuse-diagnostic-1"
 
 
 class CampaignConfig(StrictSchema):
@@ -38,6 +41,7 @@ class CampaignConfig(StrictSchema):
     starts: int = Field(default=3, ge=1, le=8)
     include_cstr: bool = True
     include_reuse: bool = False
+    reuse_diagnostic: ReuseDiagnosticPolicy | None = None
     cases: (
         tuple[
             Literal[
@@ -57,6 +61,16 @@ class CampaignConfig(StrictSchema):
     @model_validator(mode="after")
     def validate_roster(self):
         """Reject empty/duplicate selections and unavailable CSTR inputs."""
+        if self.include_reuse and self.reuse_diagnostic is not None:
+            raise ValueError("historical reuse and isolated diagnostic are separate")
+        if self.reuse_diagnostic is not None and (
+            2 * self.reuse_diagnostic.native_seconds
+            + 7 * self.reuse_diagnostic.point_seconds
+            >= self.strategy.seconds
+        ):
+            raise ValueError(
+                "diagnostic requires time for two solves, screens and builds"
+            )
         if self.cases is not None:
             if not self.cases or len(set(self.cases)) != len(self.cases):
                 raise ValueError("cases must be nonempty and distinct")
@@ -83,11 +97,16 @@ def prepare(
     if matched_source is not None:
         predecessor, predecessor_inputs = verify(matched_source, runtime=False)
         if (
-            not config.include_reuse
-            or predecessor["protocol"] != PROTOCOL
+            not (config.include_reuse or config.reuse_diagnostic is not None)
+            or predecessor["protocol"]
+            not in (
+                {PROTOCOL, FOLLOWUP_PROTOCOL}
+                if config.reuse_diagnostic is not None
+                else {PROTOCOL}
+            )
             or predecessor.get("test_data_opened") is not False
         ):
-            raise ValueError("matched source must be the development M3 protocol")
+            raise ValueError("matched source must be a supported development protocol")
     elif config.include_cstr:
         if inputs_path is None:
             raise ValueError("CSTR requires sealed milestone-1 inputs")
@@ -170,10 +189,19 @@ def prepare(
                     # Preserve exact generic starts, observations and numerical
                     # coordinates across architectures. Never read fitted results.
                     commons[key] = deepcopy(predecessor["commons"][key])
-                for arm in (*ARMS, *((REUSE_ARM,) if config.include_reuse else ())):
+                arms = (
+                    DIAGNOSTIC_ARMS
+                    if config.reuse_diagnostic is not None
+                    else (*ARMS, *((REUSE_ARM,) if config.include_reuse else ()))
+                )
+                for arm in arms:
                     tasks.append({"task_id": f"{key}_{arm}", "common": key, "arm": arm})
         plan = {
-            "protocol": FOLLOWUP_PROTOCOL if config.include_reuse else PROTOCOL,
+            "protocol": DIAGNOSTIC_PROTOCOL
+            if config.reuse_diagnostic is not None
+            else FOLLOWUP_PROTOCOL
+            if config.include_reuse
+            else PROTOCOL,
             "source_sha256": public._source_identity(),
             "runtime": public._runtime(),
             "source_inputs_sha256": source_digest,
@@ -196,9 +224,11 @@ def prepare(
 def verify(root: Path, *, runtime: bool = True):
     """Verify all immutable assets before execution; reporting tolerates new code."""
     plan, inputs = read_seal(root / "plan.json"), read_seal(root / "inputs.json")
-    if plan["protocol"] not in {PROTOCOL, FOLLOWUP_PROTOCOL} or plan[
-        "inputs_sha256"
-    ] != public.content_sha256(inputs):
+    if plan["protocol"] not in {
+        PROTOCOL,
+        FOLLOWUP_PROTOCOL,
+        DIAGNOSTIC_PROTOCOL,
+    } or plan["inputs_sha256"] != public.content_sha256(inputs):
         raise ValueError("campaign identity differs")
     if runtime and (
         plan["source_sha256"] != public._source_identity()
@@ -269,11 +299,14 @@ def qualify(root: Path) -> dict:
 def worker_payload(plan, inputs, task):
     """Deliberately omit validation, private reference and excitation derivatives."""
     common = plan["commons"][task["common"]]
-    return {k: common[k] for k in ("request", "coordinates", "nodes")} | {
+    payload = {k: common[k] for k in ("request", "coordinates", "nodes")} | {
         "training": inputs["cases"][common["case"]]["training"],
         "arm": task["arm"],
         "policy": plan["config"]["strategy"],
     }
+    if plan["config"].get("reuse_diagnostic") is not None:
+        payload["reuse_diagnostic"] = plan["config"]["reuse_diagnostic"]
+    return payload
 
 
 def recovery_metrics(case, parameters, *, nonlinear_shape: bool):
@@ -452,7 +485,7 @@ def run_task(root: Path, index: int) -> dict:
             "validation_used_for_fitting": False,
             "global_identifiability_claimed": False,
         }
-        if plan["protocol"] == FOLLOWUP_PROTOCOL:
+        if plan["protocol"] in {FOLLOWUP_PROTOCOL, DIAGNOSTIC_PROTOCOL}:
             errors = coefficient_metrics(case, common["request"], parameters)
             coefficient_error = errors.get("maximum_coefficient_relative_error")
             result.update(
@@ -465,6 +498,13 @@ def run_task(root: Path, index: int) -> dict:
                     and coefficient_error <= config.parameter_relative
                 ),
             )
+        if plan["protocol"] == DIAGNOSTIC_PROTOCOL:
+            result["reuse_diagnostic"] = {
+                "graph_builds": backend.get("graph_builds"),
+                "attempts": backend.get("attempts", []),
+                "partial_metadata": backend.get("partial_metadata", False),
+                "screen_seconds": backend.get("screen_seconds"),
+            }
         seal(path, result)
     return result
 
@@ -520,7 +560,7 @@ def report(root: Path) -> dict:
                 "differ in discretization and solver; no production promotion."
             ),
         }
-        if plan["protocol"] == FOLLOWUP_PROTOCOL:
+        if plan["protocol"] in {FOLLOWUP_PROTOCOL, DIAGNOSTIC_PROTOCOL}:
             for group in summary["groups"]:
                 items = groups[(group["case"], group["arm"])]
                 errors = [
@@ -556,5 +596,31 @@ def report(root: Path) -> dict:
                 "are separate. Medians/worst use available finite vectors and their "
                 "counts are explicit. Pass denominators include all planned starts."
             )
+        if plan["protocol"] == DIAGNOSTIC_PROTOCOL:
+            summary["limitation"] = (
+                "Fixed-mesh, two-solve diagnostic on known equations. In-memory "
+                "graph reuse, primal starts only, explicit zero duals. Native solve "
+                "time includes lazy solver setup; formulation time is not all "
+                "compilation cost. No production promotion or global "
+                "identifiability claim."
+            )
+            for group in summary["groups"]:
+                items = groups[(group["case"], group["arm"])]
+                attempts = [
+                    a
+                    for r in items
+                    for a in r.get("reuse_diagnostic", {}).get("attempts", [])
+                ]
+                group.update(
+                    recorded_attempts=len(attempts),
+                    graph_seconds=sum(a.get("graph_seconds", 0) for a in attempts),
+                    native_seconds=sum(a.get("seconds", 0) for a in attempts),
+                    native_timings_available=sum("seconds" in a for a in attempts),
+                    second_start_sources=dict(
+                        Counter(
+                            a["start_source"] for a in attempts if a["attempt"] == 1
+                        )
+                    ),
+                )
         public._write(root / "summary.json", summary)
     return summary

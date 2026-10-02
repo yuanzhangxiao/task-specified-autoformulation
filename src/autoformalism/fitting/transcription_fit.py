@@ -114,6 +114,10 @@ def invoke(
 
 def fit(payload: dict, directory: Path) -> dict:
     """Compare four methods from identical physical starts and training nodes."""
+    if payload.get("reuse_diagnostic") is not None:
+        from autoformalism.fitting.reuse_diagnostic import fit as diagnostic_fit
+
+        return diagnostic_fit(payload, directory)
     begun = monotonic()
     policy = StrategyPolicy.model_validate(payload["policy"])
     # Parent includes process startup in its wall ceiling. This slightly shorter
@@ -421,6 +425,25 @@ def run(payload: dict, directory: Path) -> dict:
             "budget_exhausted": process["wall_timeout"],
             "partial_metadata": True,
         }
+        if payload.get("reuse_diagnostic") is not None:
+            # Recover metadata without retrying a consumed native/screen budget.
+            attempts = []
+            for attempt in range(2):
+                folder = directory / f"attempt-{attempt}"
+                if not (folder / "formulation.json").exists():
+                    continue
+                saved = public._read(folder / "formulation.json")
+                if (folder / "native.json").exists():
+                    native = public._read(folder / "native.json")
+                    native.pop("pool", None)
+                    saved.update(native)
+                else:
+                    saved["status"] = "interrupted"
+                attempts.append({"attempt": attempt, **saved})
+            result["attempts"] = attempts
+            result["graph_builds"] = (
+                max((a["graph_builds_so_far"] for a in attempts), default=0) or None
+            )
     result["worker_payload_sha256"] = public.content_sha256(payload)
     result["process"] = process
     result["total_seconds"] = process["elapsed_seconds"]

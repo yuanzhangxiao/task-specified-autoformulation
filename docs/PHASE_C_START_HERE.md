@@ -25,6 +25,12 @@ fixed CSTR/basin equations. It changes no production defaults. The same
 construction runbook supplies a separate CPU-only Phase B
 endpoint closeout without changing the historical runtime.
 
+Fitting has since completed the [M4 budget comparison](PHASE_C_FITTING_M4_RESULTS_2026-10-02.md).
+The next bounded step is the [M5 reuse diagnostic](PHASE_C_FITTING_REUSE_DIAGNOSTIC.md):
+24 CPU tasks separating formulation retention from primal warm-start selection.
+Existing methods remain available; harder fixed-equation qualification follows
+this diagnostic. There is no production fitter promotion.
+
 ## Objective and ownership
 
 Build reliable scientific model construction before expanding search. Separate

@@ -439,3 +439,14 @@ variant fails two hard-CSTR starts, and shooting retains low prediction errors
 with inaccurate coefficients. The review records native restart, checkpoint
 freshness and screening-budget issues for an isolated follow-up. It also shows
 that useful nonconverged collocation checkpoints can seed successful refinement.
+
+## Milestone 5: isolate formulation reuse from warm starts
+
+The [reuse diagnostic](PHASE_C_FITTING_REUSE_DIAGNOSTIC.md) separates rebuilding,
+cache-only cold solves, unconditional primal transfer and training-screened primal
+transfer. It uses two uninterrupted solves on one fixed mesh, zero imported duals,
+bounded rollout screens and retained ordinary-start fallbacks. Three matched
+starts on the nonlinear control and hard CSTR produce 24 CPU tasks. Historical
+arms and production defaults remain unchanged. The following harder-case milestone
+will qualify basin and alien-device coefficient/initial identifiability before
+extending the matched method comparison.

@@ -8,6 +8,7 @@ continuity. No node trajectory is ever deployed as a prediction.
 from __future__ import annotations
 
 from contextlib import suppress
+from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 from time import monotonic
@@ -53,8 +54,25 @@ def interval_integrator(system, tolerance: float):
     return integrator
 
 
-def solve(payload: dict, directory: Path) -> dict:
-    """Run one NLP; all input payload fields are training-only and frozen by caller."""
+@dataclass
+class TranscriptionProblem:
+    """One in-memory formulation; starting values are explicitly managed by callers."""
+
+    opti: ca.Opti
+    theta: ca.MX
+    objective: ca.MX
+    defects: ca.MX
+    expressions: dict
+    system: SymbolicODE
+    layout: SymbolicOracle
+    state_scales: np.ndarray
+    observation_count: int
+    begun: float
+    deadline: float
+
+
+def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
+    """Build the training-only NLP without running or warm-starting the optimizer."""
     begun = monotonic()
     deadline = begun + payload["seconds"]
     request = PublicFitRequest.model_validate(payload["request"])
@@ -213,6 +231,31 @@ def solve(payload: dict, directory: Path) -> dict:
     objective /= count
     opti.minimize(objective)
     all_defects = ca.vertcat(*defects)
+    return TranscriptionProblem(
+        opti,
+        theta,
+        objective,
+        all_defects,
+        expressions,
+        system,
+        layout,
+        ss,
+        count,
+        begun,
+        deadline,
+    )
+
+
+def solve(payload: dict, directory: Path) -> dict:
+    """Run the historical NLP policy; formulation reuse diagnostics are separate."""
+    problem = build_problem(payload, directory)
+    opti, theta = problem.opti, problem.theta
+    objective, all_defects = problem.objective, problem.defects
+    expressions, system, layout = problem.expressions, problem.system, problem.layout
+    training, ss = layout.training, problem.state_scales
+    begun, deadline = problem.begun, problem.deadline
+    count, method = problem.observation_count, payload["method"]
+    chunks = payload.get("reuse_chunks", 1)
     pool, seen, last_iteration = [], set(), -1
     last_checkpoint_time = monotonic()
     iteration_offset = 0

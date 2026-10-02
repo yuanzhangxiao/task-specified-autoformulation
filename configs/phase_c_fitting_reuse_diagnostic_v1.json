@@ -1,0 +1,22 @@
+{
+  "starts": 3,
+  "include_cstr": true,
+  "cases": ["shape", "cstr_hard"],
+  "strategy": {
+    "seconds": 600,
+    "maximum_rollout_calls": 30,
+    "mesh_passes": 1
+  },
+  "reuse_diagnostic": {
+    "native_seconds": 200,
+    "iterations": 200,
+    "point_seconds": 10,
+    "maximum_scaled_defect": 1e-6,
+    "minimum_relative_improvement": 0.001
+  },
+  "replay_seconds": 240,
+  "control_nmse": 1e-6,
+  "cstr_nmse": 0.01,
+  "parameter_relative": 0.01,
+  "latent_nmse": 1e-4
+}
