@@ -10,6 +10,9 @@ AF_WORKER=scripts/phase_c_baseline.py
 if [[ "$(jq -r .protocol "$AF_OUTPUT_ROOT/plan.json")" == phase-c-variable-confirmation-1 ]]; then
   AF_WORKER=scripts/phase_c_variables.py
 fi
+if [[ "$(jq -r .protocol "$AF_OUTPUT_ROOT/plan.json")" == phase-c-topology-confirmation-1 ]]; then
+  AF_WORKER=scripts/phase_c_topology.py
+fi
 "$AF_PYTHON" "$AF_WORKER" verify --root "$AF_OUTPUT_ROOT"
 case "${1:?stage}" in
   propose)

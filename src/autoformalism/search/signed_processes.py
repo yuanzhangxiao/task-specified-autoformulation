@@ -226,11 +226,12 @@ def admit(brief, inventory, raw):
     }
 
 
-def propose(brief, enriched, inventory, client, output):
+def propose(brief, enriched, inventory, client, output, *, inventory_context=None):
     """One cached call; empty/invalid proposals leave construction open."""
-    identity = content_hash(
-        [POLICY, enriched, [v.model_dump(mode="json") for v in inventory]]
-    )
+    identity_parts = [POLICY, enriched, [v.model_dump(mode="json") for v in inventory]]
+    if inventory_context is not None:
+        identity_parts.append(inventory_context)
+    identity = content_hash(identity_parts)
     path = output / "process_review.json"
     if path.exists():
         saved = json.loads(path.read_text())
@@ -266,6 +267,11 @@ def propose(brief, enriched, inventory, client, output):
                         for v in inventory
                         if v.definition in {"differential", "algebraic"}
                     ],
+                    **(
+                        {"variable_usage_context": inventory_context}
+                        if inventory_context is not None
+                        else {}
+                    ),
                 },
                 sort_keys=True,
             ),

@@ -284,11 +284,21 @@ def run_staged_topology(
     complete_process_context: bool = False,
     review_inventory: bool = False,
     clarify_equation_usage: bool = False,
+    topology_inventory_context: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     from autoformalism.search import shared_process_contract as shared
     from autoformalism.search import signed_processes as signed
 
+    if topology_inventory_context and (
+        initial_inventory is None
+        or not hybrid_variable_construction
+        or (optional_process_review and not signed_shared_processes)
+    ):
+        raise ValueError(
+            "topology inventory context requires saved hybrid inventory "
+            "and signed processes"
+        )
     if clarify_equation_usage and (
         review_inventory
         or not explicit_mechanism_bindings
@@ -323,6 +333,7 @@ def run_staged_topology(
         explicit_mechanism_bindings
         or target_definitions
         or complete_process_context
+        or topology_inventory_context
         or shared_process_guidance
         or stop_after_inventory
         or initial_memory_candidates is not None
@@ -341,6 +352,11 @@ def run_staged_topology(
             contract["target_definitions"] = target_definitions
         if complete_process_context:
             contract["complete_process_context"] = True
+        if topology_inventory_context:
+            contract["topology_inventory_context"] = equation_usage.TOPOLOGY_POLICY
+            contract["initial_inventory"] = [
+                v.model_dump(mode="json") for v in initial_inventory
+            ]
         if initial_memory_candidates is not None:
             contract["initial_memory_candidates"] = initial_memory_candidates
         if stop_after_inventory:
@@ -761,7 +777,20 @@ def run_staged_topology(
                 else review
             )
             inventory, process_review = process_proposer(
-                brief, enriched, inventory, client, output
+                brief,
+                enriched,
+                inventory,
+                client,
+                output,
+                **(
+                    {
+                        "inventory_context": equation_usage.topology_context(
+                            inventory, memory_candidates
+                        )
+                    }
+                    if topology_inventory_context
+                    else {}
+                ),
             )
             checkpoint()
         if bind_shared_processes:
@@ -905,6 +934,11 @@ def run_staged_topology(
                     automatic_process_terms=automatic_terms,
                     committed_process_bindings=process_bindings
                     if complete_process_context
+                    else None,
+                    variable_usage_context=equation_usage.topology_context(
+                        inventory, memory_candidates
+                    )
+                    if topology_inventory_context
                     else None,
                 ),
                 model,

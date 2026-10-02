@@ -178,6 +178,7 @@ def render_equation_topology_user_prompt(
     shared_process_terms: list[dict] | None = None,
     automatic_process_terms: bool = False,
     committed_process_bindings: list[dict] | None = None,
+    variable_usage_context: dict | None = None,
 ) -> str:
     """Render one Level-2 request for an immutable selected left-hand side."""
     payload: dict[str, object] = {
@@ -206,6 +207,8 @@ def render_equation_topology_user_prompt(
             polarity_policy_json,
             label="polarity_policy_json",
         )
+    if variable_usage_context is not None:
+        payload["variable_usage_context"] = variable_usage_context
     if diagnostics_json is not None:
         payload["runtime_diagnostics"] = _json_object(
             diagnostics_json,

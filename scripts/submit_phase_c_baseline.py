@@ -14,13 +14,25 @@ else:
 
 from autoformalism.fitting import public_fitting as public
 from autoformalism.research import construction_baseline as baseline
-from autoformalism.research import variable_confirmation
+from autoformalism.research import topology_confirmation, variable_confirmation
 
 
-def submit(root: Path, wave: str, *, variables_only: bool = False) -> dict:
+def submit(
+    root: Path, wave: str, *, variables_only: bool = False, topology_only: bool = False
+) -> dict:
+    if variables_only and topology_only:
+        raise ValueError("choose one stage-only continuation")
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", wave):
         raise ValueError("wave must be a simple identifier")
-    controller = variable_confirmation if variables_only else baseline
+    controller = (
+        topology_confirmation
+        if topology_only
+        else variable_confirmation
+        if variables_only
+        else baseline
+    )
+    stage_only = variables_only or topology_only
+    label = "topology" if topology_only else "variables"
     plan = controller.verify(root)
     for key in (
         "AF_PYTHON",
@@ -40,8 +52,8 @@ def submit(root: Path, wave: str, *, variables_only: bool = False) -> dict:
         "plan_sha256": plan["artifact_sha256"],
         "commit": commit,
         "wave": wave,
-        "resources": "aces-1h100-variables-only-1"
-        if variables_only
+        "resources": f"aces-1h100-{label}-only-1"
+        if stage_only
         else f"aces-1h100-{len(plan['tasks'])}-fit-assess-tasks-concurrency4-1",
     }
     directory = root / "submissions" / wave
@@ -54,9 +66,7 @@ def submit(root: Path, wave: str, *, variables_only: bool = False) -> dict:
         (root / "logs").mkdir(exist_ok=True)
         jobs = {}
         stages = (
-            ("propose", "report")
-            if variables_only
-            else ("propose", "fit-assess", "report")
+            ("propose", "report") if stage_only else ("propose", "fit-assess", "report")
         )
         for stage in stages:
             opts = [
@@ -66,7 +76,7 @@ def submit(root: Path, wave: str, *, variables_only: bool = False) -> dict:
                 "--ntasks=1",
                 "--export=ALL",
                 "--exclude=ac042",
-                f"--job-name=phasec-{'variables-' if variables_only else ''}{stage}",
+                f"--job-name=phasec-{label + '-' if stage_only else ''}{stage}",
                 f"--output={root}/logs/{wave}-{stage}-%A_%a.out",
                 f"--error={root}/logs/{wave}-{stage}-%A_%a.err",
             ]
@@ -82,7 +92,7 @@ def submit(root: Path, wave: str, *, variables_only: bool = False) -> dict:
             else:
                 predecessor = (
                     "propose"
-                    if variables_only
+                    if stage_only
                     else {"fit-assess": "propose", "report": "fit-assess"}[stage]
                 )
                 opts += [
@@ -126,11 +136,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--wave", default="construction-1")
-    parser.add_argument("--variables-only", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--variables-only", action="store_true")
+    mode.add_argument("--topology-only", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
-            submit(args.root.resolve(), args.wave, variables_only=args.variables_only),
+            submit(
+                args.root.resolve(),
+                args.wave,
+                variables_only=args.variables_only,
+                topology_only=args.topology_only,
+            ),
             indent=2,
         )
     )

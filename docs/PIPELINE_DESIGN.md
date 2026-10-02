@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+The opt-in `phase-c-topology-confirmation-1` imports sealed variable decisions
+and reuses the existing process/topology stages without regenerating variables.
+An explicit context packet distinguishes supplied/unused RHS permissions and
+shows all memory bindings in initial and repair prompts. Inventory revision
+requests remain explicit unresolved outcomes; no prose-based scientific gate is
+added. Source costs and new stage costs are separate. See
+`PHASE_C_TOPOLOGY_CONFIRMATION.md` for provenance, inspection and launch details.
+
 The opt-in `dalla-canonical-sign-rescue-1` diagnostic pairs explicit,
 reference-informed R9/R2 sign hypotheses with unchanged historical controls.
 It permits an identity-bound correction to an already constrained assembly sign

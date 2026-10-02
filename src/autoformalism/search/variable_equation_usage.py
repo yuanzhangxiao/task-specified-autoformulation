@@ -8,6 +8,34 @@ from autoformalism.schemas.staged_topology import (
 from autoformalism.search import variable_bindings
 
 POLICY = "explicit-variable-equation-usage-1"
+TOPOLOGY_POLICY = "explicit-topology-inventory-context-1"
+
+
+def topology_context(inventory, bindings) -> dict:
+    """Expose committed choices without interpreting their scientific prose."""
+    return {
+        "policy": TOPOLOGY_POLICY,
+        "variable_usage": usage_table([v.model_dump(mode="json") for v in inventory]),
+        "memory_bindings": {k: sorted(v) for k, v in bindings.items()},
+        "instruction": (
+            "supplied means no generated LHS but permitted RHS use. unused means "
+            "neither LHS nor RHS, not merely no differential equation. Public "
+            "availability does not override these selected definitions. Roles are "
+            "advisory explanations; the public task and structured definitions "
+            "control. Reconcile ambiguous wording through your scientific choices, "
+            "not a request to change wording alone. An equation reply can request "
+            "an explicit inventory_revision if a channel must be activated or a "
+            "state representation changed; the runtime records it for inspection, "
+            "not silent activation. The optional process reply cannot revise this "
+            "inventory: skip a process requiring unavailable variables. Bindings "
+            "are the proposer's prior assignments. Connect drivers through the "
+            "bound memory to targets; indirect paths through generated variables "
+            "are allowed. The complete public task, inventory and accepted terms "
+            "are repeated on repair. Functions and causal initialization come later."
+        ),
+    }
+
+
 INSTRUCTION = """
 Decide equation usage explicitly. LHS means the generated variable (or its time
 derivative) on the left of an equation; RHS means a source used to compute it.

@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/PHASE_C_TOPOLOGY_CONFIRMATION.md` defines the 32-construction continuation
+from inspected variable inventories: twelve targeted replacements plus twenty
+earlier inventories, including both basin cases. It reuses optional signed
+processes, bounded topology repair and same-inventory fallback, then stops before
+functions or fitting. Exact prompts, source usage, signs and selected-memory path
+witnesses are retained. Graph acceptance is not independent mechanism compliance.
+
 `docs/PHASE_C_DATASET_READINESS.md` defines the isolated 28-cell
 `phase-c-development-2` release: Dalla Man T1/T2, CSTR and alien-device with
 explicit common hidden preparation for the latter two families, plus
