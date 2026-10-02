@@ -87,6 +87,11 @@ def solve(payload: dict, directory: Path) -> dict:
     method = payload["method"]
     if method not in {"shooting", "collocation"}:
         raise ValueError("unknown transcription")
+    chunks = payload.get("reuse_chunks", 1)
+    if type(chunks) is not int or not 1 <= chunks <= 8:
+        raise ValueError("reuse_chunks must be an integer in 1..8")
+    if chunks != 1 and method != "collocation":
+        raise ValueError("graph reuse is qualified for collocation only")
     if set(payload["meshes"]) != {r.trajectory_id for r in training.trajectories}:
         raise ValueError("mesh identities differ")
     opti = ca.Opti()
@@ -210,6 +215,7 @@ def solve(payload: dict, directory: Path) -> dict:
     all_defects = ca.vertcat(*defects)
     pool, seen, last_iteration = [], set(), -1
     last_checkpoint_time = monotonic()
+    iteration_offset = 0
 
     def snapshot(iteration, value):
         nonlocal pool, last_iteration, last_checkpoint_time
@@ -281,23 +287,26 @@ def solve(payload: dict, directory: Path) -> dict:
             or iteration % 5 == 0
             or monotonic() - last_checkpoint_time >= 1
         ):
-            snapshot(iteration, opti.debug.value)
+            snapshot(iteration_offset + iteration, opti.debug.value)
         if monotonic() >= deadline:
             raise TimeoutError("native NLP deadline reached")
 
     opti.callback(callback)
+    # Repeated solves retain this Opti graph and its solver instance. Reuse is
+    # within one worker/mesh, not a serialized solver or cross-job state resume.
+    native_options = {
+        "print_level": 0,
+        "max_iter": 400 // chunks,
+        "tol": 1e-8,
+        "max_cpu_time": max(0.01, deadline - monotonic()),
+        "hessian_approximation": "limited-memory" if system.has_piecewise else "exact",
+    }
+    if chunks > 1:
+        native_options["warm_start_init_point"] = "yes"
     opti.solver(
         "ipopt",
         {"print_time": False},
-        {
-            "print_level": 0,
-            "max_iter": 400,
-            "tol": 1e-8,
-            "max_cpu_time": max(0.01, deadline - monotonic()),
-            "hessian_approximation": "limited-memory"
-            if system.has_piecewise
-            else "exact",
-        },
+        native_options,
     )
     public._write(
         directory / "layout.json",
@@ -307,27 +316,64 @@ def solve(payload: dict, directory: Path) -> dict:
             "observation_residuals": count,
             "graph_seconds": monotonic() - begun,
             "method": method,
+            "graph_builds": 1,
+            "maximum_solve_chunks": chunks,
+            "iterations_per_chunk": 400 // chunks,
         },
     )
-    success, message = False, ""
-    try:
-        solved = opti.solve()
-        success = True
-        snapshot(int(solved.stats()["iter_count"]), solved.value)
-        message = solved.stats()["return_status"]
-    except (RuntimeError, ValueError, TimeoutError) as error:
-        message = str(error)[-1200:]
-        with suppress(RuntimeError, ValueError):
-            snapshot(last_iteration, opti.debug.value)
-    stats = opti.stats()
+    success, message, chunk_records, evaluation_counts = False, "", [], {}
+    for chunk in range(chunks):
+        if monotonic() >= deadline:
+            break
+        chunk_start = monotonic()
+        try:
+            solved = opti.solve()
+            success = True
+            snapshot(iteration_offset + int(solved.stats()["iter_count"]), solved.value)
+            message = solved.stats()["return_status"]
+        except (RuntimeError, ValueError, TimeoutError) as error:
+            message = str(error)[-1200:]
+            with suppress(RuntimeError, ValueError):
+                snapshot(last_iteration, opti.debug.value)
+        stats = opti.stats()
+        for key, value in stats.items():
+            if key.startswith("n_call_"):
+                evaluation_counts[key] = evaluation_counts.get(key, 0) + value
+        chunk_records.append(
+            {
+                "chunk": chunk,
+                "graph_reused": chunk > 0,
+                "primal_dual_warm_start": chunk > 0,
+                "return_status": stats.get("return_status"),
+                "iterations": int(stats.get("iter_count", 0)),
+                "seconds": monotonic() - chunk_start,
+            }
+        )
+        public._write(directory / "solve_chunks.json", chunk_records)
+        if (
+            success
+            or stats.get("return_status") != "Maximum_Iterations_Exceeded"
+            or chunk + 1 == chunks
+            or monotonic() >= deadline
+        ):
+            break
+        # Transfer primal and constraint multipliers explicitly. This is a
+        # warm start, not restoration of all IPOPT internal state (e.g. L-BFGS).
+        primal = np.asarray(opti.debug.value(opti.x)).ravel()
+        dual = np.asarray(opti.debug.value(opti.lam_g)).ravel()
+        if not np.isfinite(primal).all() or not np.isfinite(dual).all():
+            break
+        opti.set_initial(opti.x, primal)
+        opti.set_initial(opti.lam_g, dual)
+        iteration_offset += int(stats.get("iter_count", 0))
     result = {
-        "native_evaluation_counts": {
-            k: v for k, v in stats.items() if k.startswith("n_call_")
-        },
+        "native_evaluation_counts": evaluation_counts,
         "native_success": success,
         "message": message,
         "seconds": monotonic() - begun,
         "iterations_at_last_checkpoint": last_iteration,
+        "graph_builds": 1,
+        "solve_chunks": chunk_records,
     }
     public._write(directory / "native.json", result)
     return result

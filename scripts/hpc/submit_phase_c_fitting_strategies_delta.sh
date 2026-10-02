@@ -11,5 +11,7 @@ AF_CAMPAIGN=${AF_CAMPAIGN:-/work/hdd/bibo/yxiao2/phase_c/fitting-strategies-v1}
 cd "$AF_CODE"
 [[ ! -f SHA256SUMS ]] || sha256sum -c SHA256SUMS --quiet
 "$AF_PYTHON" -c 'import casadi, scipy; from inspect import signature; from scipy.optimize import least_squares; assert "callback" in signature(least_squares).parameters; print("CasADi", casadi.__version__, "SciPy", scipy.__version__)'
-"$AF_PYTHON" scripts/submit_phase_c_fitting_strategies.py --root "$AF_CAMPAIGN" --inputs "${AF_FITTING_INPUTS:-$AF_CODE/fitting-inputs.json}" --account "${AF_ACCOUNT:-bibo-delta-cpu}" --concurrency "${AF_CONCURRENCY:-2}"
+AF_MATCHED_OPTIONS=()
+[[ -z "${AF_MATCHED_SOURCE:-}" ]] || AF_MATCHED_OPTIONS+=(--matched-source "$AF_MATCHED_SOURCE")
+"$AF_PYTHON" scripts/submit_phase_c_fitting_strategies.py --root "$AF_CAMPAIGN" --inputs "${AF_FITTING_INPUTS:-$AF_CODE/fitting-inputs.json}" --config "${AF_FITTING_CONFIG:-$AF_CODE/configs/phase_c_fitting_strategies_v1.json}" --account "${AF_ACCOUNT:-bibo-delta-cpu}" --concurrency "${AF_CONCURRENCY:-2}" "${AF_MATCHED_OPTIONS[@]}"
 printf '\nResults will be saved to: %s/summary.json\n' "$AF_CAMPAIGN"

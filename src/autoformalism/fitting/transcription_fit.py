@@ -33,6 +33,7 @@ from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicFitRequest, PublicSplit
 
 ARMS = ("rollout_only", "collocation_only", "adaptive_shooting", "collocation_rollout")
+REUSE_ARM = "collocation_reuse"
 
 
 class StrategyPolicy(StrictSchema):
@@ -119,7 +120,7 @@ def fit(payload: dict, directory: Path) -> dict:
     # internal deadline leaves time to flush final metadata on ordinary exits.
     deadline = begun + max(0.01, policy.seconds - 1)
     arm = payload["arm"]
-    if arm not in ARMS:
+    if arm not in (*ARMS, REUSE_ARM):
         raise ValueError("unknown strategy")
     public_train = PublicSplit.model_validate(payload["training"])
     if public_train.name != "train":
@@ -253,7 +254,8 @@ def fit(payload: dict, directory: Path) -> dict:
         if remaining() > 1:
             rollout(points)
     else:
-        method = "collocation" if arm == "collocation_only" else "shooting"
+        method = "shooting" if arm == "adaptive_shooting" else "collocation"
+        reuse = arm == REUSE_ARM
         grids = {
             r.trajectory_id: mesh.initial_mesh(r, method) for r in train.trajectories
         }
@@ -271,7 +273,12 @@ def fit(payload: dict, directory: Path) -> dict:
         for level in range(policy.mesh_passes):
             if remaining() <= 2 or accurate():
                 break
-            slice_seconds = remaining() / (policy.mesh_passes - level)
+            # The opt-in reuse arm solves the current mesh before spending time
+            # on a larger one. Reserve a quarter of the remaining budget for
+            # actual training screens; unused native time stays available.
+            slice_seconds = (
+                remaining() if reuse else remaining() / (policy.mesh_passes - level)
+            )
             allowance = 0.75 * slice_seconds
             tolerance = (1e-5, 1e-7, 1e-9)[min(level, 2)]
             stage_dir = directory / f"mesh-{level}"
@@ -286,6 +293,8 @@ def fit(payload: dict, directory: Path) -> dict:
                 "tolerance": tolerance,
                 "seconds": allowance,
             }
+            if reuse:
+                native_payload["reuse_chunks"] = 8
             process = invoke(native_payload, stage_dir, allowance, native=True)
             record = {
                 "method": method,
@@ -321,6 +330,14 @@ def fit(payload: dict, directory: Path) -> dict:
             )
             stages.append(record)
             public._write(directory / "stages.json", stages)
+            native_result = (
+                public._read(stage_dir / "native.json")
+                if (stage_dir / "native.json").exists()
+                else {}
+            )
+            if reuse and not native_result.get("native_success"):
+                stop = "coarse_solve_incomplete_pending_replay"
+                break
             threshold = (
                 policy.collocation_indicator
                 if method == "collocation"
@@ -350,11 +367,6 @@ def fit(payload: dict, directory: Path) -> dict:
             )
             # A converged mesh still gets tighter integration in the next shooting
             # pass. Collocation repeats for refinement or native solver failure.
-            native_result = (
-                public._read(stage_dir / "native.json")
-                if (stage_dir / "native.json").exists()
-                else {}
-            )
             if (
                 not changed
                 and method == "collocation"

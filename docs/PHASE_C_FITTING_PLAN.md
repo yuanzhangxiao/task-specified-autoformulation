@@ -415,5 +415,19 @@ case/start pairs, including all six CSTR fits; the hybrid passes 15, direct
 collocation 12 and multiple shooting 11. Rollout-only recovers all 12 synthetic
 controls and CSTR-easy coefficients closely, but hard CSTR retains coefficient
 errors up to 35.8% despite accurate output. Rollout-first is the leading next
-development candidate; detailed backend review is still required before choosing
-budget changes, robustness experiments or a production default.
+development candidate. The subsequent
+[backend review](PHASE_C_FITTING_M3_OPTIMIZATION_ANATOMY.md) verifies the archive,
+counts optimization dimensions and separates coefficient/initial recovery.
+
+## Milestone 4: additional budget and fixed-mesh reuse
+
+The [budget/reuse follow-up](PHASE_C_FITTING_BUDGET_REUSE.md) retains all four
+strategies with 600-second allowances and adds a fixed-mesh reuse variant of
+collocation. It compares three starts on the nonlinear-shape control and both
+CSTR tiers (45 CPU fits). Repeated solves reuse the same graph with primal/dual
+warm starts; unfinished coarse solves do not trigger larger meshes. Endpoint
+reports compare dynamic coefficient accuracy, initial absolute errors and
+independent prediction NMSE separately. Conditional affine-coefficient solves
+remain a recorded next method, since nonlinear dynamic constraints prevent the
+quadratic observation objective from making trajectory estimation a simple QP.
+No production default changes or construction integration occur in this step.

@@ -23,6 +23,7 @@ def submit(
     account: str,
     concurrency: int,
     inputs: Path | None = None,
+    matched_source: Path | None = None,
 ) -> dict:
     """Persist each intent/receipt; uncertain submissions cannot be repeated."""
     root = root.resolve()
@@ -30,6 +31,7 @@ def submit(
         root,
         q.CampaignConfig.model_validate_json(config.read_text()),
         inputs,
+        matched_source,
     )
     plan, _ = q.verify(root)
     python = os.environ["AF_PYTHON"]
@@ -142,6 +144,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--inputs", type=Path, default=REPO / "fitting-inputs.json")
+    parser.add_argument("--matched-source", type=Path)
     parser.add_argument(
         "--config",
         type=Path,
@@ -158,6 +161,7 @@ if __name__ == "__main__":
                 account=args.account,
                 concurrency=args.concurrency,
                 inputs=args.inputs,
+                matched_source=args.matched_source,
             ),
             indent=2,
         )

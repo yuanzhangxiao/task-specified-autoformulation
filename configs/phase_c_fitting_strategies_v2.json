@@ -1,0 +1,20 @@
+{
+  "starts": 3,
+  "include_cstr": true,
+  "include_reuse": true,
+  "cases": ["shape", "cstr_easy", "cstr_hard"],
+  "strategy": {
+    "seconds": 600,
+    "maximum_rollout_calls": 600,
+    "mesh_passes": 3,
+    "training_nmse": 1e-10,
+    "trajectory_nmse": 1e-9,
+    "collocation_indicator": 1e-6,
+    "shooting_indicator": 0.05
+  },
+  "replay_seconds": 240,
+  "control_nmse": 1e-6,
+  "cstr_nmse": 0.01,
+  "parameter_relative": 0.01,
+  "latent_nmse": 1e-4
+}

@@ -13,6 +13,7 @@ def main():
     parser.add_argument("command", choices=("prepare", "qualify", "run", "report"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--inputs", type=Path)
+    parser.add_argument("--matched-source", type=Path)
     parser.add_argument(
         "--config",
         type=Path,
@@ -26,6 +27,7 @@ def main():
             args.root,
             campaign.CampaignConfig.model_validate_json(args.config.read_text()),
             args.inputs,
+            args.matched_source,
         )
     elif args.command == "qualify":
         result = campaign.qualify(args.root)

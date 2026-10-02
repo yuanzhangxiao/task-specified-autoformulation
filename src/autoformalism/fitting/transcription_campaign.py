@@ -7,10 +7,12 @@ payloads contain the training split, generic starts and public model restriction
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from copy import deepcopy
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from autoformalism.benchmarks.audited_release import read_seal, seal
 from autoformalism.benchmarks.fitting_qualification_inputs import experiment_request
@@ -22,11 +24,12 @@ from autoformalism.fitting.identifiable_campaign import sensitivity_audit
 from autoformalism.fitting.matching_probe import observed_node_guess
 from autoformalism.fitting.qualification import _report_lock, replay
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
-from autoformalism.fitting.transcription_fit import ARMS, StrategyPolicy, run
+from autoformalism.fitting.transcription_fit import ARMS, REUSE_ARM, StrategyPolicy, run
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicFitRequest, PublicSplit
 
 PROTOCOL = "phase-c-fitting-strategies-1"
+FOLLOWUP_PROTOCOL = "phase-c-fitting-budget-reuse-1"
 
 
 class CampaignConfig(StrictSchema):
@@ -34,12 +37,32 @@ class CampaignConfig(StrictSchema):
 
     starts: int = Field(default=3, ge=1, le=8)
     include_cstr: bool = True
+    include_reuse: bool = False
+    cases: (
+        tuple[
+            Literal[
+                "linear", "nonlinear", "fast_slow", "shape", "cstr_easy", "cstr_hard"
+            ],
+            ...,
+        ]
+        | None
+    ) = None
     strategy: StrategyPolicy = StrategyPolicy()
     replay_seconds: float = Field(default=240, gt=0, le=1200)
     control_nmse: float = Field(default=1e-6, gt=0)
     cstr_nmse: float = Field(default=0.01, gt=0)
     parameter_relative: float = Field(default=0.01, gt=0)
     latent_nmse: float = Field(default=1e-4, gt=0)
+
+    @model_validator(mode="after")
+    def validate_roster(self):
+        """Reject empty/duplicate selections and unavailable CSTR inputs."""
+        if self.cases is not None:
+            if not self.cases or len(set(self.cases)) != len(self.cases):
+                raise ValueError("cases must be nonempty and distinct")
+            if not self.include_cstr and any(n.startswith("cstr") for n in self.cases):
+                raise ValueError("CSTR case selection requires include_cstr")
+        return self
 
 
 def case_request(name, case, seed):
@@ -50,11 +73,22 @@ def case_request(name, case, seed):
 
 
 def prepare(
-    root: Path, config: CampaignConfig, inputs_path: Path | None = None
+    root: Path,
+    config: CampaignConfig,
+    inputs_path: Path | None = None,
+    matched_source: Path | None = None,
 ) -> dict:
     """Freeze paired physical starts, immutable input bytes and numerical runtime."""
-    source = None
-    if config.include_cstr:
+    source, predecessor, predecessor_inputs = None, None, None
+    if matched_source is not None:
+        predecessor, predecessor_inputs = verify(matched_source, runtime=False)
+        if (
+            not config.include_reuse
+            or predecessor["protocol"] != PROTOCOL
+            or predecessor.get("test_data_opened") is not False
+        ):
+            raise ValueError("matched source must be the development M3 protocol")
+    elif config.include_cstr:
         if inputs_path is None:
             raise ValueError("CSTR requires sealed milestone-1 inputs")
         source = read_seal(inputs_path)
@@ -63,12 +97,14 @@ def prepare(
         ):
             raise ValueError("wrong input release/protocol")
     source_digest = public.content_sha256(source) if source else None
+    matched_digest = public.content_sha256(predecessor) if predecessor else None
     with public._lock(root):
         if (root / "plan.json").exists():
             plan, _ = verify(root)
             if (
                 plan["config"] != config.model_dump(mode="json")
                 or plan["source_inputs_sha256"] != source_digest
+                or plan.get("matched_source_plan_sha256") != matched_digest
             ):
                 raise ValueError("configuration/source inputs differ")
             return {
@@ -76,18 +112,36 @@ def prepare(
                 "tasks": len(plan["tasks"]),
                 "gpus": 0,
             }
-        inputs = controls.make_inputs()
-        inputs["protocol"] = "phase-c-fitting-strategy-inputs-1"
-        inputs["cases"]["shape"] = shape.make_case(inputs["cases"]["nonlinear"])
+        if predecessor_inputs is not None:
+            inputs = deepcopy(predecessor_inputs)
+            if not config.include_cstr:
+                inputs["cases"] = {
+                    n: c for n, c in inputs["cases"].items() if not n.startswith("cstr")
+                }
+        else:
+            inputs = controls.make_inputs()
+            inputs["protocol"] = "phase-c-fitting-strategy-inputs-1"
+            inputs["cases"]["shape"] = shape.make_case(inputs["cases"]["nonlinear"])
         if source:
             inputs["cases"].update(
                 {n: source["cases"][n] for n in ("cstr_easy", "cstr_hard")}
             )
+        if config.cases is not None:
+            inputs["cases"] = {n: inputs["cases"][n] for n in config.cases}
         commons, tasks = {}, []
         for name, case in inputs["cases"].items():
             train = public.unpack_split(PublicSplit.model_validate(case["training"]))
             for seed in range(config.starts):
-                req = case_request(name, case, seed)
+                key = f"{name}_s{seed}"
+                if predecessor and key not in predecessor["commons"]:
+                    raise ValueError(f"matched source lacks requested start: {key}")
+                req = (
+                    PublicFitRequest.model_validate(
+                        predecessor["commons"][key]["request"]
+                    )
+                    if predecessor
+                    else case_request(name, case, seed)
+                )
                 public._check_data(
                     req,
                     PublicSplit.model_validate(case["training"]),
@@ -96,7 +150,6 @@ def prepare(
                 model, start, _ = public._lower(req)
                 system = SymbolicODE(model, allow_piecewise=True)
                 vector = np.array([start[n] for n in system.names])
-                key = f"{name}_s{seed}"
                 commons[key] = {
                     "case": name,
                     "seed": seed,
@@ -113,10 +166,14 @@ def prepare(
                         for r in train.trajectories
                     },
                 }
-                for arm in ARMS:
+                if predecessor:
+                    # Preserve exact generic starts, observations and numerical
+                    # coordinates across architectures. Never read fitted results.
+                    commons[key] = deepcopy(predecessor["commons"][key])
+                for arm in (*ARMS, *((REUSE_ARM,) if config.include_reuse else ())):
                     tasks.append({"task_id": f"{key}_{arm}", "common": key, "arm": arm})
         plan = {
-            "protocol": PROTOCOL,
+            "protocol": FOLLOWUP_PROTOCOL if config.include_reuse else PROTOCOL,
             "source_sha256": public._source_identity(),
             "runtime": public._runtime(),
             "source_inputs_sha256": source_digest,
@@ -128,6 +185,8 @@ def prepare(
             "live_llm_calls": 0,
             "gpus": 0,
         }
+        if predecessor:
+            plan["matched_source_plan_sha256"] = matched_digest
         seal(root / "inputs.json", inputs)
         seal(root / "plan.json", plan)
     report(root)
@@ -137,9 +196,9 @@ def prepare(
 def verify(root: Path, *, runtime: bool = True):
     """Verify all immutable assets before execution; reporting tolerates new code."""
     plan, inputs = read_seal(root / "plan.json"), read_seal(root / "inputs.json")
-    if plan["protocol"] != PROTOCOL or plan["inputs_sha256"] != public.content_sha256(
-        inputs
-    ):
+    if plan["protocol"] not in {PROTOCOL, FOLLOWUP_PROTOCOL} or plan[
+        "inputs_sha256"
+    ] != public.content_sha256(inputs):
         raise ValueError("campaign identity differs")
     if runtime and (
         plan["source_sha256"] != public._source_identity()
@@ -256,6 +315,44 @@ def recovery_metrics(case, parameters, *, nonlinear_shape: bool):
     }
 
 
+def coefficient_metrics(case, request, parameters):
+    """Post-selection truth comparison; separate coefficients and hidden initials.
+
+    Relative error is undefined at a zero reference value. Keep absolute errors
+    in that case rather than inventing a favorable denominator. This evaluator
+    never supplies reference values to fitting or checkpoint selection.
+    """
+    if parameters is None:
+        return {"available": False}
+    system = SymbolicODE(
+        public._lower(PublicFitRequest.model_validate(request))[0], allow_piecewise=True
+    )
+    truth = case["reference_parameters"]
+    if set(parameters) != set(truth) or set(truth) != set(system.names):
+        raise ValueError("coefficient evaluation parameter identities differ")
+    if not all(np.isfinite(v) for v in [*parameters.values(), *truth.values()]):
+        raise ValueError("coefficient evaluation requires finite values")
+    initial = set(system.initial_parameter_names)
+    dynamic = [n for n in system.names if n not in initial]
+    absolute = {n: abs(parameters[n] - truth[n]) for n in system.names}
+    relative = {
+        n: absolute[n] / abs(truth[n]) if truth[n] != 0 else None for n in dynamic
+    }
+    finite_relative = [v for v in relative.values() if v is not None]
+    return {
+        "available": True,
+        "coefficient_absolute_errors": {n: absolute[n] for n in dynamic},
+        "coefficient_relative_errors": relative,
+        "maximum_coefficient_relative_error": max(finite_relative)
+        if finite_relative and len(finite_relative) == len(dynamic)
+        else None,
+        "initial_parameter_absolute_errors": {n: absolute[n] for n in sorted(initial)},
+        "scope": (
+            "post-selection dynamic coefficients; initials separate in physical units"
+        ),
+    }
+
+
 def run_task(root: Path, index: int) -> dict:
     """Reuse completed results; an interrupted native budget is never restarted."""
     plan, inputs = verify(root)
@@ -355,6 +452,19 @@ def run_task(root: Path, index: int) -> dict:
             "validation_used_for_fitting": False,
             "global_identifiability_claimed": False,
         }
+        if plan["protocol"] == FOLLOWUP_PROTOCOL:
+            errors = coefficient_metrics(case, common["request"], parameters)
+            coefficient_error = errors.get("maximum_coefficient_relative_error")
+            result.update(
+                coefficient_recovery=errors,
+                coefficients_recovered=bool(
+                    checked
+                    and checked["complete"]
+                    and checked["maximum_solver_difference"] <= 1e-4
+                    and coefficient_error is not None
+                    and coefficient_error <= config.parameter_relative
+                ),
+            )
         seal(path, result)
     return result
 
@@ -376,7 +486,7 @@ def report(root: Path) -> dict:
             rows.append(row)
             groups[(row["case"], row["arm"])].append(row)
         summary = {
-            "protocol": PROTOCOL,
+            "protocol": plan["protocol"],
             "plan_sha256": public.content_sha256(plan),
             "status": "complete"
             if all(r["status"] != "missing" for r in rows)
@@ -410,5 +520,41 @@ def report(root: Path) -> dict:
                 "differ in discretization and solver; no production promotion."
             ),
         }
+        if plan["protocol"] == FOLLOWUP_PROTOCOL:
+            for group in summary["groups"]:
+                items = groups[(group["case"], group["arm"])]
+                errors = [
+                    r.get("coefficient_recovery", {}).get(
+                        "maximum_coefficient_relative_error"
+                    )
+                    for r in items
+                ]
+                finite = [e for e in errors if e is not None and np.isfinite(e)]
+                group.update(
+                    coefficient_vectors_available=len(finite),
+                    coefficient_passes=sum(
+                        bool(r.get("coefficients_recovered")) for r in items
+                    ),
+                    median_maximum_coefficient_relative_error=float(np.median(finite))
+                    if finite
+                    else None,
+                    worst_maximum_coefficient_relative_error=max(finite)
+                    if finite
+                    else None,
+                )
+                for split in ("training", "validation"):
+                    values = [r.get(f"{split}_nmse") for r in items]
+                    finite_scores = [
+                        v for v in values if v is not None and np.isfinite(v)
+                    ]
+                    group[f"{split}_scores_available"] = len(finite_scores)
+                    group[f"median_{split}_nmse"] = (
+                        float(np.median(finite_scores)) if finite_scores else None
+                    )
+            summary["coefficient_reporting"] = (
+                "Dynamic coefficient relative errors only; initial absolute errors "
+                "are separate. Medians/worst use available finite vectors and their "
+                "counts are explicit. Pass denominators include all planned starts."
+            )
         public._write(root / "summary.json", summary)
     return summary
