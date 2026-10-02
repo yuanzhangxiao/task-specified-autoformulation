@@ -102,8 +102,18 @@ the bounded inventory-revision reason. Obey only limits included in the runtime
 request."""
 
 
-def render_variable_identification_system_prompt() -> str:
+def render_variable_identification_system_prompt(
+    *, allow_role_updates: bool = False
+) -> str:
     """Return the immutable Level-1 provider instruction."""
+    if allow_role_updates:
+        return VARIABLE_IDENTIFICATION_SYSTEM_PROMPT.replace(
+            "The runtime retains its first\n"
+            "accepted scientific role if later wording differs.",
+            "For an unchanged name and definition, the runtime accepts an updated\n"
+            "scientific_role as advisory wording without judging its "
+            "scientific meaning.",
+        )
     return VARIABLE_IDENTIFICATION_SYSTEM_PROMPT
 
 

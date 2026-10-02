@@ -19,12 +19,13 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source-plan", type=Path)
     parser.add_argument("--review-inventory", action="store_true")
+    parser.add_argument("--targeted-usage", action="store_true")
     parser.add_argument("--base-url")
     parser.add_argument("--wall-seconds", type=int, default=21600)
     args = parser.parse_args()
-    if args.review_inventory and args.command != "prepare":
+    if (args.review_inventory or args.targeted_usage) and args.command != "prepare":
         parser.error(
-            "--review-inventory is frozen by prepare; later commands use the plan"
+            "diagnostic options are frozen by prepare; later commands use the plan"
         )
     root = args.root or (args.plan.parent if args.plan else None)
     if root is None:
@@ -35,7 +36,10 @@ def main():
         if args.source_plan is None:
             parser.error("prepare requires --source-plan")
         plan = baseline.freeze(
-            args.source_plan, root, review_inventory=args.review_inventory
+            args.source_plan,
+            root,
+            review_inventory=args.review_inventory,
+            targeted_usage=args.targeted_usage,
         )
         print(
             json.dumps(

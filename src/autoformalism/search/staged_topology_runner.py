@@ -23,6 +23,7 @@ from autoformalism.schemas.staged_topology import (
     equation_reply_model,
 )
 from autoformalism.search import scientific_verification, variable_bindings
+from autoformalism.search import variable_equation_usage as equation_usage
 from autoformalism.search import variable_inventory_review as inventory_review
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_topology_prompts import (
@@ -282,11 +283,20 @@ def run_staged_topology(
     target_definitions: dict[str, str] | None = None,
     complete_process_context: bool = False,
     review_inventory: bool = False,
+    clarify_equation_usage: bool = False,
 ) -> dict[str, Any]:
     """Build one topology with optional descriptive training evidence."""
     from autoformalism.search import shared_process_contract as shared
     from autoformalism.search import signed_processes as signed
 
+    if clarify_equation_usage and (
+        review_inventory
+        or not explicit_mechanism_bindings
+        or initial_inventory is not None
+    ):
+        raise ValueError(
+            "equation usage requires fresh explicit agenda without self-review"
+        )
     if review_inventory and (
         not explicit_mechanism_bindings or initial_inventory is not None
     ):
@@ -325,6 +335,8 @@ def run_staged_topology(
             contract["variable_binding_policy"] = variable_bindings.POLICY
         if review_inventory:
             contract["inventory_review_policy"] = inventory_review.POLICY
+        if clarify_equation_usage:
+            contract["equation_usage_policy"] = equation_usage.POLICY
         if target_definitions:
             contract["target_definitions"] = target_definitions
         if complete_process_context:
@@ -462,6 +474,8 @@ def run_staged_topology(
         for index, item in enumerate(agenda):
             if hybrid_variable_construction:
                 gaps = _agenda_gaps(brief, item, inventory, memory_candidates)
+                if clarify_equation_usage:
+                    gaps += equation_usage.missing_choices(brief, inventory)
                 if not gaps:
                     events.append(
                         {
@@ -478,14 +492,20 @@ def run_staged_topology(
                     rejected: object = None
                     record = client.call(
                         system=system_prompt(
-                            render_variable_identification_system_prompt()
+                            render_variable_identification_system_prompt(
+                                allow_role_updates=clarify_equation_usage
+                            )
                             + (
                                 variable_bindings.INSTRUCTION
                                 if explicit_mechanism_bindings
                                 else ""
                             )
+                            + (inventory_review.INSTRUCTION if review_inventory else "")
                             + (
-                                inventory_review.INSTRUCTION if review_inventory else ""
+                                inventory_review.COMMON_INSTRUCTION
+                                + equation_usage.INSTRUCTION
+                                if clarify_equation_usage
+                                else ""
                             ),
                             "variables",
                             shared_process_guidance,
@@ -495,15 +515,17 @@ def run_staged_topology(
                             agenda_json=item.model_dump_json(),
                             inventory_json=_variables(inventory),
                             diagnostics_json=diagnostic,
-                            mechanism_binding_context=variable_bindings.binding_context(
-                                brief, memory_candidates, target_definitions
-                            )
+                            mechanism_binding_context=(
+                                equation_usage.binding_context
+                                if clarify_equation_usage
+                                else variable_bindings.binding_context
+                            )(brief, memory_candidates, target_definitions)
                             if explicit_mechanism_bindings
                             else None,
                             observation_choices=inventory_review.observation_choices(
                                 brief, inventory
                             )
-                            if review_inventory
+                            if review_inventory or clarify_equation_usage
                             else None,
                         ),
                         response_model=variable_model,
@@ -552,11 +574,15 @@ def run_staged_topology(
                         _record_memory_candidates(
                             brief, item, reply, decisions, inventory, memory_candidates
                         )
+                    if clarify_equation_usage:
+                        inventory = equation_usage.refresh_roles(inventory, reply)
                     gaps = _agenda_gaps(brief, item, inventory, memory_candidates)
                     if not scientific_verification.enabled():
                         gaps = tuple(
                             g for g in gaps if g.startswith("generated_target:")
                         )
+                    if clarify_equation_usage:
+                        gaps += equation_usage.missing_choices(brief, inventory)
                     accepted_names = [
                         str(decision["name"])
                         for decision in decisions
@@ -611,6 +637,11 @@ def run_staged_topology(
                         break
                     diagnostic = _json(
                         {
+                            **(
+                                {"rejected_response": rejected}
+                                if clarify_equation_usage
+                                else {}
+                            ),
                             "retained_valid_variables": accepted_names,
                             "rejected_variables": rejected_decisions,
                             "unresolved_obligations": list(gaps),
@@ -704,6 +735,8 @@ def run_staged_topology(
             inventory, memory_candidates = candidate, bindings
             checkpoint()
         inventory = freeze_inventory(brief, inventory)
+        if clarify_equation_usage and equation_usage.missing_choices(brief, inventory):
+            raise ValueError("explicit observation decisions missing")
         if stop_after_inventory:
             result = {
                 "status": "variables_complete",

@@ -212,3 +212,86 @@ AF_REVIEW_INVENTORY=1 bash scripts/hpc/start_phase_c_variables.sh inspect
 These default to `phase-c-variables-v2`. Keep v1 intact. The report includes the
 review decisions and all provider traces; no new fitting or mechanism assessment
 is performed in this milestone.
+
+## Targeted LHS/RHS diagnostic (v3)
+
+The saved v2 inventory run completed 31 of 32 tasks. It contained no topology
+or interaction equations. Consequently, neither the CSTR RHS usage of C/Tj nor
+the T2 RHS dependency of U on X can be inferred from that run. A stale role
+description is an advisory inconsistency, not an observed equation omission.
+Eight of ten final-review rejections were invalid memory-binding IDs; there
+was also one missing observation decision and one duplicate binding. In the
+31 accepted reviews, no generated variable name/type or memory binding changed.
+The second pass mainly completed supplied/unused declarations.
+
+That optional second pass was introduced to permit whole-inventory revisions
+after the incremental agenda, including correcting the earlier basin storage
+choice. It was not the calibrated scientific critic. The targeted diagnostic
+does not call it. Historical review runs remain reproducible in their original
+pinned checkouts; no existing results are rewritten.
+
+`--targeted-usage` freezes twelve fresh variable constructions: named T2-easy,
+named CSTR and the functional alien device, each with seeds 0/1 and Full/Brief-only.
+It copies only public briefs, target contracts and permitted training summaries
+from the original construction plan. The same model, generation settings and
+per-task budgets are retained. No previous replies, validation results, private
+reference states or independent assessment answers enter the prompts.
+
+`explicit-variable-equation-usage-1` reuses the original incremental agenda,
+typed reply, partial retention and cached bounded repairs. Its changes are:
+
+- Explicit LHS/RHS semantics: supplied has no generated LHS but is allowed on
+  the RHS; unused is excluded from both. Both avoid adding a candidate equation.
+  RHS permission is not evidence of actual RHS occurrence.
+- The first agenda call also requests a decision for each undeclared measured
+  non-target observation. Missing choices receive the existing local repair;
+  the runtime never guesses supplied versus unused. Already registered required
+  sources remain visible in the current inventory.
+- Binding context lists the exact eligible memory requirement IDs and explicitly
+  requests an empty binding list when there are none. A differential target
+  does not by itself require a distinct mediator binding.
+- General advisory questions ask about storage, delayed paths, output dynamics
+  and compatibility with public preparation/initial observations. They prescribe
+  no benchmark-specific variable set or equation skeleton.
+- Repairs receive the original full context, retained inventory, current bindings,
+  the rejected response and typed diagnostics. An explicitly returned role update
+  for an unchanged name/type is retained as wording, without semantic judgment.
+  The runtime neither parses that prose to infer dependencies nor rejects a
+  scientific description as incorrect. Existing name/type/reference checks remain.
+
+Topology must later establish actual dependencies: a required delayed output
+needs a path through its selected mediator, possibly through intermediate
+variables, not necessarily the mediator's literal name in its immediate RHS.
+Ordinary supplied channels can be RHS sources; unused sources are rejected unless
+explicitly reactivated. This diagnostic does not add topology, functions,
+initialization construction, fitting, a critic, or an automatic follow-up.
+
+The report includes `equation_usage` for each inventory, with
+`generated_lhs_required`, `rhs_allowed`, and `actual_rhs_occurrences: null`.
+`equations_available: false` prevents interpreting declarations as equations.
+Exact request/reply traces remain linked from `VARIABLES.html`. Inspect scientific
+roles and choices manually. Mechanical acceptance remains a separate statistic.
+Comparison with v2 is descriptive: clarification and removal of final self-review
+change together, so this is not an isolated causal ablation of either component.
+
+Upload the new pinned bundle to group scratch and use its extracted directory:
+
+```bash
+AF_REVIEW_INVENTORY=0 AF_VARIABLE_DIAGNOSTIC=usage \
+  bash scripts/hpc/start_phase_c_variables.sh run
+```
+
+After the proposer and report jobs finish:
+
+```bash
+AF_REVIEW_INVENTORY=0 AF_VARIABLE_DIAGNOSTIC=usage \
+  bash scripts/hpc/start_phase_c_variables.sh inspect
+```
+
+The default new root is
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-variable-usage-v1`.
+The source remains `phase-c-construction-v2/plan.json`. The existing launcher
+submits one H100 proposer job and one dependent report job. Repeating the same
+submission wave preserves receipts; a drained allocation requires explicit
+inspection before choosing a new wave. The old 32-task plans and the ordinary
+full-pipeline defaults are unchanged.

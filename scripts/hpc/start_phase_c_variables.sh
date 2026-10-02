@@ -13,6 +13,15 @@ case "${AF_REVIEW_INVENTORY:-0}" in
   1) AF_DEFAULT_ROOT="$AF_GROUP/phase-c-variables-v2"; AF_REVIEW_ARGS=(--review-inventory) ;;
   *) echo 'AF_REVIEW_INVENTORY must be 0 or 1.' >&2; exit 2 ;;
 esac
+case "${AF_VARIABLE_DIAGNOSTIC:-none}" in
+  none) ;;
+  usage)
+    [[ "${AF_REVIEW_INVENTORY:-0}" == 0 ]] || { echo 'Usage diagnostic has no self-review.' >&2; exit 2; }
+    AF_DEFAULT_ROOT="$AF_GROUP/phase-c-variable-usage-v1"
+    AF_REVIEW_ARGS=(--targeted-usage)
+    ;;
+  *) echo 'AF_VARIABLE_DIAGNOSTIC must be none or usage.' >&2; exit 2 ;;
+esac
 export AF_OUTPUT_ROOT=${AF_VARIABLE_ROOT:-$AF_DEFAULT_ROOT}
 export PYTHONPATH="$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 case "${1:?Use run or inspect}" in

@@ -19,6 +19,7 @@ from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.research import construction_baseline as baseline
 from autoformalism.research import construction_contract as contract
 from autoformalism.research import construction_trace
+from autoformalism.search import variable_equation_usage as equation_usage
 from autoformalism.search.staged_topology_runner import run_staged_topology
 from autoformalism.search.training_evidence import TrainingEvidence
 from autoformalism.search.variable_bindings import POLICY as BINDING_POLICY
@@ -26,6 +27,11 @@ from autoformalism.search.variable_inventory_review import POLICY as REVIEW_POLI
 
 PROTOCOL = "phase-c-variable-confirmation-1"
 REPO = baseline.REPO
+TARGETED_CASES = (
+    "phase_c_dalla_man_t2_canonical_named_easy_rates_v1",
+    "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1",
+    "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
+)
 
 
 class Config(baseline.Config):
@@ -34,6 +40,7 @@ class Config(baseline.Config):
     protocol: Literal["phase-c-variable-confirmation-1"] = PROTOCOL
     served_context_tokens: Literal[32768] = 32768
     review_inventory: bool = False
+    targeted_usage: bool = False
 
 
 def source_identity() -> dict:
@@ -48,19 +55,38 @@ def source_identity() -> dict:
     return value
 
 
-def freeze(source_plan: Path, root: Path, *, review_inventory: bool = False) -> dict:
+def freeze(
+    source_plan: Path,
+    root: Path,
+    *,
+    review_inventory: bool = False,
+    targeted_usage: bool = False,
+) -> dict:
     """Project only public construction context from the original sealed plan."""
     source = sealed_read(source_plan)
     if source["protocol"] != baseline.PROTOCOL or source.get("test_data_opened"):
         raise ValueError("requires a development-only Phase C construction plan")
+    if targeted_usage and review_inventory:
+        raise ValueError("targeted usage diagnostic has no final self-review")
     config = Config.model_validate(
-        {**source["config"], "protocol": PROTOCOL, "review_inventory": review_inventory}
+        {
+            **source["config"],
+            "protocol": PROTOCOL,
+            "review_inventory": review_inventory,
+            "targeted_usage": targeted_usage,
+        }
     )
+    tasks = source["tasks"]
+    if targeted_usage:
+        tasks = [t for t in tasks if t["benchmark_id"] in TARGETED_CASES]
+        _validate_targeted_tasks(tasks)
+    selected = {t["benchmark_id"] for t in tasks}
     cells = {
         name: contract.correct_roles(
             {k: cell[k] for k in ("brief", "context", "target_contract", "evidence")}
         )
         for name, cell in source["cells"].items()
+        if name in selected
     }
     with public._lock(root):
         return sealed_write(
@@ -68,12 +94,15 @@ def freeze(source_plan: Path, root: Path, *, review_inventory: bool = False) -> 
             {
                 "protocol": PROTOCOL,
                 "config": config.model_dump(mode="json"),
-                "tasks": source["tasks"],
+                "tasks": tasks,
                 "cells": cells,
                 "source_identity": source_identity(),
                 "source_plan_sha256": source["artifact_sha256"],
                 "binding_policy": BINDING_POLICY,
                 "inventory_review_policy": REVIEW_POLICY if review_inventory else None,
+                "equation_usage_policy": equation_usage.POLICY
+                if targeted_usage
+                else None,
                 "test_data_opened": False,
                 "automatic_followup": False,
                 "scope": (
@@ -81,6 +110,19 @@ def freeze(source_plan: Path, root: Path, *, review_inventory: bool = False) -> 
                 ),
             },
         )
+
+
+def _validate_targeted_tasks(tasks: list[dict]) -> None:
+    """Pin three public cases, both existing seeds and both prompt variants."""
+    expected = {
+        (name, seed, arm)
+        for name in TARGETED_CASES
+        for seed in (0, 1)
+        for arm in ("full", "brief_only")
+    }
+    actual = [(t["benchmark_id"], t["seed"], t["arm"]) for t in tasks]
+    if len(actual) != len(expected) or set(actual) != expected:
+        raise ValueError("targeted diagnostic requires all 12 case/seed/arm tasks")
 
 
 def verify(root: Path) -> dict:
@@ -94,6 +136,16 @@ def verify(root: Path) -> dict:
         REVIEW_POLICY if config.review_inventory else None
     ):
         raise ValueError("inventory review policy differs")
+    if plan.get("equation_usage_policy") != (
+        equation_usage.POLICY if config.targeted_usage else None
+    ):
+        raise ValueError("equation usage policy differs")
+    if config.targeted_usage:
+        if config.review_inventory:
+            raise ValueError("targeted usage diagnostic has no final self-review")
+        _validate_targeted_tasks(plan["tasks"])
+        if set(plan["cells"]) != set(TARGETED_CASES):
+            raise ValueError("targeted cell roster differs")
     return plan
 
 
@@ -128,6 +180,7 @@ def propose(root, plan, task, base_url, **kwargs):
                 stop_after_inventory=True,
                 explicit_mechanism_bindings=True,
                 review_inventory=plan["config"].get("review_inventory", False),
+                clarify_equation_usage=plan["config"].get("targeted_usage", False),
                 target_definitions=contract.target_definitions(cell),
                 training_evidence=TrainingEvidence.model_validate(cell["evidence"])
                 if task["arm"] == "full"
@@ -184,6 +237,10 @@ def report(root: Path, plan: dict) -> dict:
                 ),
                 "inventory_review": saved.get("inventory_review"),
                 "inventory": saved.get("inventory", []),
+                "equation_usage": equation_usage.usage_table(
+                    saved.get("inventory", [])
+                ),
+                "equations_available": False,
                 "memory_bindings": saved.get("memory_candidates", {}),
                 "events": events,
                 "cost": _cost(
@@ -197,6 +254,8 @@ def report(root: Path, plan: dict) -> dict:
         "identity": plan["artifact_sha256"],
         "rows": rows,
         "planned_constructions": len(rows),
+        "equation_usage_policy": plan.get("equation_usage_policy"),
+        "equations_available": False,
         "status_counts": dict(Counter(r["status"] for r in rows)),
         "first_reply_accepted": sum(r["first_reply_accepted"] for r in rows),
         "first_reply_total": sum(r["first_reply_total"] for r in rows),
@@ -222,6 +281,7 @@ def report(root: Path, plan: dict) -> dict:
         "# Variable-only confirmation",
         "",
         "Mechanical acceptance is not scientific compliance. No equations or fits.",
+        "LHS/RHS fields describe permissions, not actual equation occurrences.",
         "",
         f"Status counts: {result['status_counts']}",
         f"Final inventory reviews: {result['inventory_review_status_counts']}",
