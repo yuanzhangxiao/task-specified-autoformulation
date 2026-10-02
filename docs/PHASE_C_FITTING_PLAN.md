@@ -408,3 +408,12 @@ All original observations and input knots are retained. Native checkpoints may
 violate dynamical constraints, but only complete training free rollouts select
 parameters; independent development replay verifies endpoints. The planned
 72 CPU fits run on Delta without changing production defaults or benchmark data.
+
+The [Delta summary review](PHASE_C_FITTING_STRATEGIES_RESULTS_2026-10-01.md)
+accounts for all 72 endpoints. Rollout-only passes output accuracy on all 18
+case/start pairs, including all six CSTR fits; the hybrid passes 15, direct
+collocation 12 and multiple shooting 11. Rollout-only recovers all 12 synthetic
+controls and CSTR-easy coefficients closely, but hard CSTR retains coefficient
+errors up to 35.8% despite accurate output. Rollout-first is the leading next
+development candidate; detailed backend review is still required before choosing
+budget changes, robustness experiments or a production default.
