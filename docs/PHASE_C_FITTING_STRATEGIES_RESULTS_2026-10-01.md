@@ -5,6 +5,12 @@ This review covers the submitted 72-row summary for
 for objectives, starts, accuracy thresholds and numerical budgets. No fitting,
 model selection, test-data access or production-default change is performed here.
 
+The subsequently supplied completed archive is inspected in the
+[detailed optimization and coefficient review](PHASE_C_FITTING_M3_OPTIMIZATION_ANATOMY.md).
+It verifies backend seals, counts variables and constraints, and distinguishes
+coefficient recovery from prediction accuracy. The sections below preserve the
+initial summary-based assessment and its original scope.
+
 ## Provenance and scope of verification
 
 - Summary file SHA-256:
@@ -15,10 +21,10 @@ model selection, test-data access or production-default change is performed here
   archive exactly. Its plan/input seals and input-content binding were verified.
   All 72 task IDs and common-start hashes match that plan. Group counts, recovery
   counts and elapsed totals reproduce from the rows.
-- This attachment contains the summary only. The individual backend/replay seals,
-  mesh traces, process logs and qualification records for the completed run have
-  not yet been inspected. Conclusions about individual solver failures remain
-  provisional until that review.
+- The initial attachment contained the summary only. The individual backend/replay
+  seals, mesh traces, process logs and qualification records for the completed run
+  had not yet been inspected at that point. The detailed follow-up linked above
+  now covers those records; it verifies all 296 seals in the completed archive.
 
 All 72 tasks have terminal records: 71 complete independent replays and one
 `no_complete_replay` (CSTR hard, start 2, multiple shooting). Campaign completion
