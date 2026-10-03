@@ -307,3 +307,58 @@ def test_a_search_that_never_produces_a_candidate_stops_early(monkeypatch) -> No
     assert "not running" in outcome["error"]
     # stopped at the barren threshold rather than running all 200
     assert outcome["accounting"]["llm_queries"] == 7
+
+
+def test_a_fitted_exponent_is_named_by_the_real_grammar() -> None:
+    """Upstream fits exponents too; the evaluator accepts only integer ones."""
+    from autoformalism.data import SplitName
+    from autoformalism.expressions import ValidationContext
+
+    class _Split:
+        def __init__(self, name) -> None:
+            self.name = name
+
+    context = ValidationContext(
+        targets=("y",), auxiliaries=(), external_inputs=(), fixed_covariates=()
+    )
+    with pytest.raises(driver.InexpressibleEquation) as refused:
+        driver.development_rollout_error(
+            {"y": "-0.4*y**0.73"},
+            context,
+            _Split(SplitName.TRAIN),
+            _Split(SplitName.VALIDATION),
+        )
+    assert refused.value.functions == ("UNSUPPORTED_POWER",)
+
+
+def test_a_refused_system_is_counted_and_the_search_is_kept(monkeypatch) -> None:
+    """One unreadable frontier member used to discard all 18 paid-for searches."""
+    _install_fake_upstream(monkeypatch, {"y": ["x_0**0.73", "x_0"]})
+
+    def rollout(equations, *args, **kwargs):
+        if "**" in equations["y"]:
+            raise driver.InexpressibleEquation(equations["y"], ("UNSUPPORTED_POWER",))
+        return 0.3
+
+    monkeypatch.setattr(driver, "development_rollout_error", rollout)
+    search = driver.build_searcher(
+        upstream_root=Path("/nonexistent"),
+        base_url="http://127.0.0.1:1/v1",
+        iterations=1,
+        islands=1,
+    )
+    outcome = search(
+        train=_arrays(("y",)),
+        validation=_arrays(("y",)),
+        targets=("y",),
+        prompt="",
+        directory=Path("/tmp"),
+        development=(object(), object()),
+        context=object(),
+    )
+    assert outcome["status"] == "complete"
+    assert outcome["equations"] == {"y": "y"}
+    assert outcome["development_rollout_error"] == 0.3
+    assert outcome["accounting"]["inexpressible_systems"] == 1
+    assert outcome["accounting"]["inexpressible_operators"] == ["UNSUPPORTED_POWER"]
+    assert outcome["accounting"]["scored_systems"] == 1

@@ -29,6 +29,7 @@ import numpy as np
 from autoformalism.data import DatasetSplit
 from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal.llm_call_log import CallLog
+from autoformalism.rebuttal.llm_ode_upstream import InexpressibleEquation
 from autoformalism.rebuttal.llm_sr_shim import ShimAccounting, complete
 from autoformalism.rebuttal.llm_sr_upstream import (
     InexpressibleProgram,
@@ -193,8 +194,19 @@ def build_searcher(
                 "accounting": _accounting(accounting, started, inexpressible,
                                   directory / 'llm_calls.jsonl'),
             }
-        error = score_rollout(equations, context, *development,
-                              seconds=seconds_per_rollout)
+        try:
+            error = score_rollout(equations, context, *development,
+                                  seconds=seconds_per_rollout)
+        except InexpressibleEquation as exc:
+            # A refitted exponent such as `G ** 0.73` converts cleanly but the
+            # grammar accepts only integer powers; record it, do not crash.
+            inexpressible.append(str(exc))
+            return {
+                "status": "inexpressible",
+                "error": "; ".join(inexpressible),
+                "accounting": _accounting(accounting, started, inexpressible,
+                                  directory / 'llm_calls.jsonl'),
+            }
         if error is None:
             return {
                 "status": "rollout_failed",

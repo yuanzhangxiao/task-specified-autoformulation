@@ -182,6 +182,35 @@ def test_a_program_outside_the_grammar_is_reported_with_its_reason(
     assert outcome["accounting"]["inexpressible_targets"]
 
 
+def test_a_refitted_exponent_the_grammar_refuses_is_reported(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Conversion can succeed where the evaluator's grammar refuses.
+
+    A refitted exponent, `G ** 0.73`, is the case met in practice. The refusal
+    is stood in for here; the real grammar is exercised in the LLM-ODE tests.
+    """
+    from autoformalism.rebuttal.llm_ode_upstream import InexpressibleEquation
+
+    best = (
+        "def equation(G, I, params):\n"
+        "    return params[0] * G + params[1] * I\n"
+    )
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=best, score=-0.01)
+    monkeypatch.setattr(driver, "complete", lambda *a, **k: {"content": ["x"]})
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+
+    def refuse(equations, *args, **kwargs):
+        raise InexpressibleEquation(equations["G"], ("UNSUPPORTED_POWER",))
+
+    outcome = _run(search, directory=tmp_path / "power", score_rollout=refuse)
+    assert outcome["status"] == "inexpressible"
+    assert "UNSUPPORTED_POWER" in outcome["error"]
+    assert outcome["accounting"]["inexpressible_targets"]
+
+
 def test_a_missing_checkout_is_refused_before_anything_runs(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not an LLM-SR checkout"):
         driver.build_searcher(

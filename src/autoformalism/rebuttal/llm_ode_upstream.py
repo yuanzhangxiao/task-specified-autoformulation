@@ -23,10 +23,12 @@ from pathlib import Path
 from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
 
 #: Upstream's SYSTEM_TEMPLATE offers +, -, *, **, /, sin, log, exp and abs.
-#: All of them are now in our approved set, so nothing upstream advertises is
-#: inexpressible here. Detection is still computed from the parsed equation
-#: rather than from this tuple, so a future divergence is caught by measurement
-#: and not by this comment.
+#: Every function is in our approved set. The operator ``**`` is not, in
+#: full: upstream fits every constant, exponents included, while the grammar
+#: accepts only integer exponents, so ``x**0.73`` is refused when the system
+#: is compiled and counted under the refusal's diagnostic code. Detection is
+#: computed from the parsed equation rather than from this tuple, so a future
+#: divergence is caught by measurement and not by this comment.
 UNAPPROVED_UPSTREAM_FUNCTIONS: tuple[str, ...] = ()
 
 #: SymPy prints some approved operators with its own spelling: an equation

@@ -39,7 +39,11 @@ from typing import Any
 import numpy as np
 
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
-from autoformalism.expressions import ValidationContext, compile_candidate
+from autoformalism.expressions import (
+    ModelValidationError,
+    ValidationContext,
+    compile_candidate,
+)
 from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
 from autoformalism.rebuttal.llm_call_log import CallLog
@@ -88,16 +92,26 @@ def development_rollout_error(
     selection and for the development scores the sealed selection records.
     ``train`` always supplies the normalizing scales. Only TRAIN and VALIDATION
     are accepted, so a selection metric can never be computed against held-out
-    data.
+    data. A system the evaluator's grammar refuses raises
+    ``InexpressibleEquation`` naming the refusal, for the caller to count.
     """
     if train.name is not SplitName.TRAIN or evaluate.name not in {
         SplitName.TRAIN,
         SplitName.VALIDATION,
     }:
         raise ValueError("selection requires TRAIN and VALIDATION, never TEST")
-    compiled = compile_candidate(
-        equation_candidate("llm_ode", equations, context), context
-    )
+    try:
+        compiled = compile_candidate(
+            equation_candidate("llm_ode", equations, context), context
+        )
+    except ModelValidationError as exc:
+        # Upstream fits every constant, exponents included, so a frontier
+        # routinely holds `x**0.73`, which the grammar refuses. One such system
+        # used to end the task after the whole search had been paid for.
+        raise InexpressibleEquation(
+            "; ".join(f"{name} = {value}" for name, value in equations.items()),
+            tuple(sorted({item.code for item in exc.diagnostics})),
+        ) from exc
     scaling = TrainingScaler().fit(train).scales
     scales = {
         target: float(scaling[f"target:{target}"].standard_deviation)
@@ -298,14 +312,14 @@ def build_searcher(
             nonlocal inexpressible, scored
             try:
                 equations = to_state_equations(combination, train.channels, targets)
+                value = development_rollout_error(
+                    equations, context, *development, seconds=seconds_per_rollout
+                )
             except InexpressibleEquation as exc:
                 inexpressible += 1
                 operators.update(exc.functions)
                 return None
             scored += 1
-            value = development_rollout_error(
-                equations, context, *development, seconds=seconds_per_rollout
-            )
             if value is not None:
                 expressible[combination] = (equations, value)
             return value
