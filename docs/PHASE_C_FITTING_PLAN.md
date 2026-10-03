@@ -450,3 +450,12 @@ starts on the nonlinear control and hard CSTR produce 24 CPU tasks. Historical
 arms and production defaults remain unchanged. The following harder-case milestone
 will qualify basin and alien-device coefficient/initial identifiability before
 extending the matched method comparison.
+
+The [M5 archive review](PHASE_C_FITTING_M5_RESULTS_2026-10-02.md) verifies all 24
+endpoints and closes this comparison. All pass prediction and coefficient recovery.
+Cached and rebuilt cold solves produce identical parameters; caching removes a
+second formulation build. Good primal starts cut hard-CSTR second-solve iterations
+from 162/73/180 to 6/5/9. Screening selects the same latest checkpoint in every
+case, so protection against harmful warm starts remains untested. The next step
+is harder fixed-equation qualification, with screening stress cases and stopping
+after already-adequate solves, while retaining all original fitting strategies.
