@@ -14,6 +14,7 @@ from typing import Literal
 import numpy as np
 from pydantic import Field, model_validator
 
+from autoformalism.benchmarks import challenging_fitting_inputs as challenging
 from autoformalism.benchmarks.audited_release import read_seal, seal
 from autoformalism.benchmarks.fitting_qualification_inputs import experiment_request
 from autoformalism.fitting import identifiable_cases as controls
@@ -33,6 +34,7 @@ from autoformalism.schemas.public_fitting import PublicFitRequest, PublicSplit
 PROTOCOL = "phase-c-fitting-strategies-1"
 FOLLOWUP_PROTOCOL = "phase-c-fitting-budget-reuse-1"
 DIAGNOSTIC_PROTOCOL = "phase-c-fitting-reuse-diagnostic-1"
+CHALLENGING_PROTOCOL = "phase-c-fitting-challenging-1"
 
 
 class CampaignConfig(StrictSchema):
@@ -42,10 +44,19 @@ class CampaignConfig(StrictSchema):
     include_cstr: bool = True
     include_reuse: bool = False
     reuse_diagnostic: ReuseDiagnosticPolicy | None = None
+    include_challenging: bool = False
+    challenging_reuse: ReuseDiagnosticPolicy | None = None
     cases: (
         tuple[
             Literal[
-                "linear", "nonlinear", "fast_slow", "shape", "cstr_easy", "cstr_hard"
+                "linear",
+                "nonlinear",
+                "fast_slow",
+                "shape",
+                "cstr_easy",
+                "cstr_hard",
+                "basin_coupled",
+                "alien_hard",
             ],
             ...,
         ]
@@ -57,15 +68,22 @@ class CampaignConfig(StrictSchema):
     cstr_nmse: float = Field(default=0.01, gt=0)
     parameter_relative: float = Field(default=0.01, gt=0)
     latent_nmse: float = Field(default=1e-4, gt=0)
+    initial_absolute: float = Field(default=0.01, gt=0)
 
     @model_validator(mode="after")
     def validate_roster(self):
         """Reject empty/duplicate selections and unavailable CSTR inputs."""
         if self.include_reuse and self.reuse_diagnostic is not None:
             raise ValueError("historical reuse and isolated diagnostic are separate")
-        if self.reuse_diagnostic is not None and (
-            2 * self.reuse_diagnostic.native_seconds
-            + 7 * self.reuse_diagnostic.point_seconds
+        if self.include_challenging and (
+            self.include_cstr or self.include_reuse or self.reuse_diagnostic is not None
+        ):
+            raise ValueError("challenging campaign requires its separate input roster")
+        if self.challenging_reuse is not None and not self.include_challenging:
+            raise ValueError("challenging reuse requires challenging inputs")
+        diagnostic = self.reuse_diagnostic or self.challenging_reuse
+        if diagnostic is not None and (
+            2 * diagnostic.native_seconds + 7 * diagnostic.point_seconds
             >= self.strategy.seconds
         ):
             raise ValueError(
@@ -76,11 +94,17 @@ class CampaignConfig(StrictSchema):
                 raise ValueError("cases must be nonempty and distinct")
             if not self.include_cstr and any(n.startswith("cstr") for n in self.cases):
                 raise ValueError("CSTR case selection requires include_cstr")
+            if any(
+                (n in challenging.CELLS) != self.include_challenging for n in self.cases
+            ):
+                raise ValueError("case selection differs from challenging input mode")
         return self
 
 
 def case_request(name, case, seed):
     """Choose a correct equation template and generic starts without truth draws."""
+    if name in challenging.CELLS:
+        return challenging.request(case, seed)
     if name.startswith("cstr"):
         return experiment_request(case, "joint", seed, True)[0]
     return shape.request(seed) if name == "shape" else controls.request(name, seed)
@@ -94,6 +118,8 @@ def prepare(
 ) -> dict:
     """Freeze paired physical starts, immutable input bytes and numerical runtime."""
     source, predecessor, predecessor_inputs = None, None, None
+    if config.include_challenging and matched_source is not None:
+        raise ValueError("challenging campaign uses fresh generic starts")
     if matched_source is not None:
         predecessor, predecessor_inputs = verify(matched_source, runtime=False)
         if (
@@ -107,12 +133,22 @@ def prepare(
             or predecessor.get("test_data_opened") is not False
         ):
             raise ValueError("matched source must be a supported development protocol")
-    elif config.include_cstr:
+    elif config.include_cstr or config.include_challenging:
         if inputs_path is None:
             raise ValueError("CSTR requires sealed milestone-1 inputs")
         source = read_seal(inputs_path)
-        if source["protocol"] != "phase-c-fitting-inputs-1" or source.get(
-            "test_data_opened"
+        if (
+            source["protocol"]
+            != (
+                challenging.PROTOCOL
+                if config.include_challenging
+                else "phase-c-fitting-inputs-1"
+            )
+            or source.get("test_data_opened")
+            or (
+                config.include_challenging
+                and source.get("test_data_opened") is not False
+            )
         ):
             raise ValueError("wrong input release/protocol")
     source_digest = public.content_sha256(source) if source else None
@@ -137,11 +173,15 @@ def prepare(
                 inputs["cases"] = {
                     n: c for n, c in inputs["cases"].items() if not n.startswith("cstr")
                 }
+        elif config.include_challenging:
+            if set(source["cases"]) != set(challenging.CELLS):
+                raise ValueError("challenging source roster differs")
+            inputs = deepcopy(source)
         else:
             inputs = controls.make_inputs()
             inputs["protocol"] = "phase-c-fitting-strategy-inputs-1"
             inputs["cases"]["shape"] = shape.make_case(inputs["cases"]["nonlinear"])
-        if source:
+        if source and not config.include_challenging:
             inputs["cases"].update(
                 {n: source["cases"][n] for n in ("cstr_easy", "cstr_hard")}
             )
@@ -194,10 +234,14 @@ def prepare(
                     if config.reuse_diagnostic is not None
                     else (*ARMS, *((REUSE_ARM,) if config.include_reuse else ()))
                 )
+                if config.challenging_reuse is not None:
+                    arms = (*arms, "cache_last_primal", "cache_screened_primal")
                 for arm in arms:
                     tasks.append({"task_id": f"{key}_{arm}", "common": key, "arm": arm})
         plan = {
-            "protocol": DIAGNOSTIC_PROTOCOL
+            "protocol": CHALLENGING_PROTOCOL
+            if config.include_challenging
+            else DIAGNOSTIC_PROTOCOL
             if config.reuse_diagnostic is not None
             else FOLLOWUP_PROTOCOL
             if config.include_reuse
@@ -228,6 +272,7 @@ def verify(root: Path, *, runtime: bool = True):
         PROTOCOL,
         FOLLOWUP_PROTOCOL,
         DIAGNOSTIC_PROTOCOL,
+        CHALLENGING_PROTOCOL,
     } or plan["inputs_sha256"] != public.content_sha256(inputs):
         raise ValueError("campaign identity differs")
     if runtime and (
@@ -282,7 +327,11 @@ def qualify(root: Path) -> dict:
             and max(r["replay"]["metrics"].values()) <= 1e-6
             and r["replay"]["maximum_solver_difference"] <= 1e-4
             and r["sensitivity"].get("full_local_rank")
-            and (n.startswith("cstr") or r["identifiability"].get("passed"))
+            and (
+                n.startswith("cstr")
+                or n in challenging.CELLS
+                or r["identifiability"].get("passed")
+            )
             for n, r in records.items()
         )
         result = {
@@ -306,6 +355,8 @@ def worker_payload(plan, inputs, task):
     }
     if plan["config"].get("reuse_diagnostic") is not None:
         payload["reuse_diagnostic"] = plan["config"]["reuse_diagnostic"]
+    if task["arm"] in DIAGNOSTIC_ARMS and plan["config"].get("challenging_reuse"):
+        payload["reuse_diagnostic"] = plan["config"]["challenging_reuse"]
     return payload
 
 
@@ -423,7 +474,7 @@ def run_task(root: Path, index: int) -> dict:
         ):
             raise ValueError("backend worker payload differs")
         parameters, checked, recovery = backend.get("parameters"), None, None
-        is_control = not common["case"].startswith("cstr")
+        is_control = common["case"] in {"linear", "nonlinear", "fast_slow", "shape"}
         if parameters:
             replay_path = folder / "replay.json"
             if not replay_path.exists():
@@ -448,7 +499,11 @@ def run_task(root: Path, index: int) -> dict:
             and checked["complete"]
             and checked["maximum_solver_difference"] <= 1e-4
             and max(checked["metrics"].values())
-            <= (config.control_nmse if is_control else config.cstr_nmse)
+            <= (
+                config.control_nmse
+                if is_control or common["case"] == "basin_coupled"
+                else config.cstr_nmse
+            )
         )
         recovered = (
             bool(
@@ -485,7 +540,11 @@ def run_task(root: Path, index: int) -> dict:
             "validation_used_for_fitting": False,
             "global_identifiability_claimed": False,
         }
-        if plan["protocol"] in {FOLLOWUP_PROTOCOL, DIAGNOSTIC_PROTOCOL}:
+        if plan["protocol"] in {
+            FOLLOWUP_PROTOCOL,
+            DIAGNOSTIC_PROTOCOL,
+            CHALLENGING_PROTOCOL,
+        }:
             errors = coefficient_metrics(case, common["request"], parameters)
             coefficient_error = errors.get("maximum_coefficient_relative_error")
             result.update(
@@ -498,7 +557,14 @@ def run_task(root: Path, index: int) -> dict:
                     and coefficient_error <= config.parameter_relative
                 ),
             )
-        if plan["protocol"] == DIAGNOSTIC_PROTOCOL:
+            if plan["protocol"] == CHALLENGING_PROTOCOL:
+                initial_errors = errors.get("initial_parameter_absolute_errors", {})
+                result["initials_recovered"] = (
+                    max(initial_errors.values()) <= config.initial_absolute
+                    if initial_errors
+                    else None
+                )
+        if "reuse_diagnostic" in worker_payload(plan, inputs, task):
             result["reuse_diagnostic"] = {
                 "graph_builds": backend.get("graph_builds"),
                 "attempts": backend.get("attempts", []),
@@ -546,7 +612,7 @@ def report(root: Path) -> dict:
                     "recovery_passes": sum(
                         bool(r.get("recovery_passed")) for r in items
                     )
-                    if not name.startswith("cstr")
+                    if name in {"linear", "nonlinear", "fast_slow", "shape"}
                     else None,
                     "seconds": sum(r.get("seconds", 0) for r in items),
                 }
@@ -560,7 +626,11 @@ def report(root: Path) -> dict:
                 "differ in discretization and solver; no production promotion."
             ),
         }
-        if plan["protocol"] in {FOLLOWUP_PROTOCOL, DIAGNOSTIC_PROTOCOL}:
+        if plan["protocol"] in {
+            FOLLOWUP_PROTOCOL,
+            DIAGNOSTIC_PROTOCOL,
+            CHALLENGING_PROTOCOL,
+        }:
             for group in summary["groups"]:
                 items = groups[(group["case"], group["arm"])]
                 errors = [
@@ -596,7 +666,7 @@ def report(root: Path) -> dict:
                 "are separate. Medians/worst use available finite vectors and their "
                 "counts are explicit. Pass denominators include all planned starts."
             )
-        if plan["protocol"] == DIAGNOSTIC_PROTOCOL:
+        if plan["protocol"] in {DIAGNOSTIC_PROTOCOL, CHALLENGING_PROTOCOL}:
             summary["limitation"] = (
                 "Fixed-mesh, two-solve diagnostic on known equations. In-memory "
                 "graph reuse, primal starts only, explicit zero duals. Native solve "
@@ -621,6 +691,21 @@ def report(root: Path) -> dict:
                             a["start_source"] for a in attempts if a["attempt"] == 1
                         )
                     ),
+                )
+        if plan["protocol"] == CHALLENGING_PROTOCOL:
+            summary["limitation"] = (
+                "Known equations and fixed parameter blocks on unchanged development "
+                "arrays. Alien latent coordinates are anchored by supplied internal "
+                "couplings and nonlinear shapes; local rank is not global or practical "
+                "identifiability. Strategy bundles share starts and total ceilings, "
+                "but their native solve schedules differ. No production promotion."
+            )
+            for group in summary["groups"]:
+                items = groups[(group["case"], group["arm"])]
+                group["initial_recovery_passes"] = (
+                    sum(r.get("initials_recovered") is True for r in items)
+                    if group["case"] == "alien_hard"
+                    else None
                 )
         public._write(root / "summary.json", summary)
     return summary

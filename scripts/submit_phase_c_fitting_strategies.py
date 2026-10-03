@@ -34,6 +34,7 @@ def submit(
         matched_source,
     )
     plan, _ = q.verify(root)
+    challenging = plan.get("protocol") == q.CHALLENGING_PROTOCOL
     python = os.environ["AF_PYTHON"]
     if not Path(python).is_file() or not 1 <= concurrency <= 8:
         raise ValueError("require an existing Python and concurrency 1..8")
@@ -70,11 +71,13 @@ def submit(
                 "--nodes=1",
                 "--ntasks=1",
                 "--cpus-per-task=1",
-                "--mem=8G",
+                "--mem=16G" if challenging else "--mem=8G",
                 "--time="
-                + {"prepare": "00:45:00", "fit": "00:20:00", "report": "00:05:00"}[
-                    stage
-                ],
+                + {
+                    "prepare": "00:45:00",
+                    "fit": "00:25:00" if challenging else "00:20:00",
+                    "report": "00:05:00",
+                }[stage],
                 "--export=ALL",
                 "--kill-on-invalid-dep=yes",
                 f"--job-name=fitting-strategy-{stage}",

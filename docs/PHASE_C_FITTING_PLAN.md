@@ -459,3 +459,16 @@ from 162/73/180 to 6/5/9. Screening selects the same latest checkpoint in every
 case, so protection against harmful warm starts remains untested. The next step
 is harder fixed-equation qualification, with screening stress cases and stopping
 after already-adequate solves, while retaining all original fitting strategies.
+
+## Milestone 6: larger latent dynamics with qualified parameter blocks
+
+The approved [harder-case campaign](PHASE_C_FITTING_CHALLENGING.md) compares the
+four original methods and the two primal-transfer policies on coupled basins and
+alien-device hard. Three matched generic starts yield 36 CPU-only Delta tasks.
+Alien-device fits 13 dynamic factors and five shared latent initials, conditional
+on fixed internal couplings/nonlinear shapes that anchor its latent coordinates.
+Both cases passed the local training-sensitivity preflight. Reference replay and
+rank gates repeat on Delta before fitting. All original observations are retained;
+no benchmark or production fitting defaults change. Report coefficient recovery,
+initial recovery, actual rollouts and screening vetoes separately. Stopping after
+an already adequate first solve remains a later scheduling experiment.

@@ -30,8 +30,10 @@ and [M5 reuse review](PHASE_C_FITTING_M5_RESULTS_2026-10-02.md). All 24 M5 fits 
 prediction and coefficient recovery. Formulation reuse preserves the cold-solve
 results; good primal starts reduce repeated-solve iterations. Screening chose the
 same latest checkpoint in every case, so its protection against bad starts remains
-untested. Existing methods remain available; harder fixed-equation qualification
-is next. There is no production fitter promotion.
+untested. The approved [M6 harder-case campaign](PHASE_C_FITTING_CHALLENGING.md)
+uses coupled basins and alien-device hard, with 36 CPU tasks and a locally
+qualified, scale-anchored alien parameter block. Existing methods remain available.
+There is no production fitter promotion.
 
 ## Objective and ownership
 
