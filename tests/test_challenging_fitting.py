@@ -1,8 +1,11 @@
 """Known-equation assistance, local qualification, matched arms and safe resume."""
 
 import hashlib
+import os
+import subprocess
 import sys
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -311,3 +314,27 @@ def test_scheduler_resources_and_exact_receipt_resume(exported, tmp_path, monkey
     assert "--dependency=afterok:101" in calls[1]
     assert "--array=0-11%2" in calls[1]
     assert submit.submit(root, cfg, **args) == first and len(calls) == 3
+
+
+@pytest.mark.parametrize("matched", [None, "/tmp/a matched source"])
+def test_shell_launcher_optional_source_on_system_bash(tmp_path, matched):
+    """Exercise actual shell parsing, including macOS Bash's empty-array nounset."""
+    executable, log = tmp_path / "python-stub", tmp_path / "arguments.txt"
+    executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$AF_STUB_LOG"\n')
+    executable.chmod(0o755)
+    env = dict(os.environ)
+    env.update(AF_PYTHON=str(executable), AF_STUB_LOG=str(log))
+    env.pop("AF_MATCHED_SOURCE", None)
+    if matched:
+        env["AF_MATCHED_SOURCE"] = matched
+    path = Path(__file__).resolve().parents[1] / (
+        "scripts/hpc/submit_phase_c_fitting_strategies_delta.sh"
+    )
+    result = subprocess.run(
+        ["bash", str(path)], env=env, capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode == 0, result.stderr
+    arguments = log.read_text().splitlines()
+    assert ("--matched-source" in arguments) == bool(matched)
+    if matched:
+        assert arguments[arguments.index("--matched-source") + 1] == matched
