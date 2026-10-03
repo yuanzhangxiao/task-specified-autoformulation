@@ -472,3 +472,13 @@ rank gates repeat on Delta before fitting. All original observations are retaine
 no benchmark or production fitting defaults change. Report coefficient recovery,
 initial recovery, actual rollouts and screening vetoes separately. Stopping after
 an already adequate first solve remains a later scheduling experiment.
+
+The [M6 archive review](PHASE_C_FITTING_M6_RESULTS_2026-10-03.md) accounts for all
+36 endpoints. Basin passes all 18 fits. Alien rollout-only and hybrid each recover
+predictions, dynamic coefficients and initials for two of three starts; the other
+four strategies recover none. Hybrid successes use the original generic vectors
+after unhelpful collocation. The third rollout start stagnates near NMSE 0.124;
+shooting records almost no iterations before stage timeouts. Screening now
+exercises vetoes, with mixed accuracy outcomes. Next diagnose fixed-mesh numerical
+cost and training-based continuation/restart decisions on this same problem;
+retain every method and do not promote a production default yet.

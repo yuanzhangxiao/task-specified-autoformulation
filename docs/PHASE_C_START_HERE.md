@@ -28,12 +28,14 @@ endpoint closeout without changing the historical runtime.
 Fitting has since completed the [M4 budget comparison](PHASE_C_FITTING_M4_RESULTS_2026-10-02.md)
 and [M5 reuse review](PHASE_C_FITTING_M5_RESULTS_2026-10-02.md). All 24 M5 fits pass
 prediction and coefficient recovery. Formulation reuse preserves the cold-solve
-results; good primal starts reduce repeated-solve iterations. Screening chose the
-same latest checkpoint in every case, so its protection against bad starts remains
-untested. The approved [M6 harder-case campaign](PHASE_C_FITTING_CHALLENGING.md)
-uses coupled basins and alien-device hard, with 36 CPU tasks and a locally
-qualified, scale-anchored alien parameter block. Existing methods remain available.
-There is no production fitter promotion.
+results; good primal starts reduce repeated-solve iterations. M5 did not exercise
+screening vetoes. The [M6 harder-case results](PHASE_C_FITTING_M6_RESULTS_2026-10-03.md)
+now account for all 36 CPU fits: basin passes all 18; alien rollout-only and hybrid
+each recover two of three starts, while collocation/shooting and both reuse arms
+recover none. The hybrid falls back to original parameter guesses. Screening
+exercises vetoes but has mixed outcomes. Next isolate native numerical cost and
+stagnation/restart behavior on this qualified case. Existing methods remain
+available; there is no production fitter promotion.
 
 ## Objective and ownership
 
