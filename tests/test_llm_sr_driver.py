@@ -129,6 +129,8 @@ def test_an_unbounded_retry_loop_is_stopped(monkeypatch, tmp_path: Path) -> None
         "complete",
         lambda *a, **k: (_ for _ in ()).throw(UpstreamEndpointError("refused")),
     )
+    pauses: list[float] = []
+    monkeypatch.setattr(driver, "_pause", pauses.append)
     accounting = ShimAccounting()
     with driver._transport(sampler, "http://127.0.0.1:1", "m", accounting):
         llm = sampler.LocalLLM()
@@ -140,6 +142,34 @@ def test_an_unbounded_retry_loop_is_stopped(monkeypatch, tmp_path: Path) -> None
         with pytest.raises(driver.SamplerStalled):
             llm._do_request("p")
     assert not isinstance(driver.SamplerStalled("x"), Exception)
+    # Each retry waited, doubling to a minute: a quarter hour before giving up.
+    assert pauses[:7] == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
+    assert len(pauses) == driver.STALL_LIMIT - 1 and max(pauses) == 60.0
+    assert 12 * 60 < sum(pauses) < 20 * 60
+
+
+def test_a_success_resets_the_pause(monkeypatch, tmp_path: Path) -> None:
+    """A brief outage is waited out, and the next one starts short again."""
+    _, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    replies = iter(["fail", "fail", "ok", "fail"])
+
+    def complete(*args, **kwargs):
+        if next(replies) == "fail":
+            raise UpstreamEndpointError("offline")
+        return {"content": ["x"]}
+
+    monkeypatch.setattr(driver, "complete", complete)
+    pauses: list[float] = []
+    monkeypatch.setattr(driver, "_pause", pauses.append)
+    with driver._transport(sampler, "http://127.0.0.1:1", "m", ShimAccounting()):
+        llm = sampler.LocalLLM()
+        for _ in range(2):
+            with pytest.raises(UpstreamEndpointError):
+                llm._do_request("p")
+        assert llm._do_request("p") == ["x"]
+        with pytest.raises(UpstreamEndpointError):
+            llm._do_request("p")
+    assert pauses == [1.0, 2.0, 1.0]
 
 
 def test_the_transport_is_restored_afterwards(monkeypatch, tmp_path: Path) -> None:

@@ -48,6 +48,7 @@ from autoformalism.rebuttal.phase_c_baselines import load_cell
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     PhaseCVendoredCampaignPlan,
     endpoint_environment,
+    exclusive_attempt,
     load_development,
     load_phase_c_vendored_plan,
     require_endpoint,
@@ -517,11 +518,12 @@ def run_phase_c(
     if sealed["protocol"] != PHASE_C_PROTOCOL:
         raise ValueError(f"{root / 'plan.json'} is not a Phase C LLM-ODE plan")
     require_endpoint(sealed, root, endpoint)
-    row, directory, finished = _task(sealed, root, index)
-    if finished is not None:
-        return finished
-    development, context = load_development(sealed, row)
-    return _search_and_seal(sealed, row, directory, development, context, search)
+    with exclusive_attempt(root, index):
+        row, directory, finished = _task(sealed, root, index)
+        if finished is not None:
+            return finished
+        development, context = load_development(sealed, row)
+        return _search_and_seal(sealed, row, directory, development, context, search)
 
 
 def _task(sealed: dict, root: Path, index: int) -> tuple[dict, Path, dict | None]:

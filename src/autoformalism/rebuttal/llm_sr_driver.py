@@ -19,6 +19,7 @@ would otherwise spin until the job's walltime with nothing recorded.
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from time import monotonic
@@ -47,9 +48,20 @@ LOGGER = logging.getLogger(__name__)
 #: retry loop catches Exception, so escaping it needs BaseException.
 STALL_LIMIT = 20
 
+#: First and longest pause before their sampler retries a failed request. The
+#: pause doubles per consecutive failure, so the twenty failures that stop a
+#: search span about a quarter of an hour: a hosted service that goes offline
+#: for a few minutes is waited out, and a dead endpoint still ends the search.
+BACKOFF_SECONDS = (1.0, 60.0)
+
 
 class SamplerStalled(BaseException):
     """Raised through upstream's `except Exception` to end a wedged search."""
+
+
+def _pause(seconds: float) -> None:
+    """Wait before the next attempt; a seam so tests need not sleep."""
+    time.sleep(seconds)
 
 
 @contextmanager
@@ -81,6 +93,10 @@ def _transport(module: Any, base_url: str, model: str, accounting: ShimAccountin
                     f"{STALL_LIMIT} consecutive endpoint failures; their sampler "
                     "retries forever, so the search is stopped here"
                 ) from None
+            # Their loop retries at once; without a pause a brief outage would
+            # use up every allowed failure within seconds.
+            first, longest = BACKOFF_SECONDS
+            _pause(min(longest, first * 2 ** (state["consecutive"] - 1)))
             raise
         state["consecutive"] = 0
         return answer["content"]

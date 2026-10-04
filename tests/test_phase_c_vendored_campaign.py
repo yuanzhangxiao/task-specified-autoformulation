@@ -382,6 +382,80 @@ def test_llm_ode_runs_the_same_rows_through_its_own_search(tmp_path):
     assert (selection.method, selection.tier, selection.seed) == ("llm_ode", "fixed", 1)
 
 
+# --- interrupted and concurrent attempts ---------------------------------------
+
+
+@pytest.mark.parametrize("method", ["llm_sr", "llm_ode"])
+def test_an_interrupted_attempt_is_kept_aside_and_the_task_restarts_clean(
+    tmp_path, method
+):
+    _, root, _ = _frozen(tmp_path, method)
+    campaign = sr if method == "llm_sr" else ode
+    # What a search stopped part-way leaves: samples and calls, no result.
+    stale = root / "results" / "0" / "llmsr-h_down" / "samples"
+    stale.mkdir(parents=True)
+    (stale / "samples_9999.json").write_text('{"score": 0.0}', encoding="utf-8")
+    (root / "results" / "0" / "llm_calls.jsonl").write_text("{}\n", encoding="utf-8")
+
+    calls: list = []
+    result = campaign.run_phase_c(
+        root, 0, endpoint="vm_local_vllm", search=_complete(calls)
+    )
+    assert result["status"] == "complete" and len(calls) == 1
+    kept = root / "results" / "0.interrupted-1"
+    assert (kept / "llmsr-h_down" / "samples" / "samples_9999.json").exists()
+    assert (kept / "llm_calls.jsonl").exists()
+    # The restarted attempt sees none of the stopped attempt's files.
+    assert not (root / "results" / "0" / "llmsr-h_down").exists()
+    assert not (root / "results" / "0" / "llm_calls.jsonl").exists()
+
+    # A finished task is never set aside; resuming returns its seal.
+    again = campaign.run_phase_c(
+        root, 0, endpoint="vm_local_vllm", search=_complete(calls)
+    )
+    assert again == result and len(calls) == 1
+    assert sorted(path.name for path in (root / "results").iterdir()) == [
+        "0",
+        "0.interrupted-1",
+    ]
+
+
+def test_a_second_interruption_is_kept_beside_the_first(tmp_path):
+    _, root, _ = _frozen(tmp_path)
+    for number in (1, 2):
+        task = root / "results" / "0"
+        task.mkdir(parents=True)
+        (task / "llm_calls.jsonl").write_text(f"{number}\n", encoding="utf-8")
+        assert vendored.set_aside_unfinished(task) == root / "results" / (
+            f"0.interrupted-{number}"
+        )
+    assert (root / "results" / "0.interrupted-2" / "llm_calls.jsonl").read_text() == (
+        "2\n"
+    )
+    # Nothing to move: no attempt, or an empty one.
+    assert vendored.set_aside_unfinished(root / "results" / "0") is None
+    (root / "results" / "0").mkdir()
+    assert vendored.set_aside_unfinished(root / "results" / "0") is None
+
+
+def test_a_task_running_in_another_process_is_refused(tmp_path):
+    _, root, _ = _frozen(tmp_path)
+    calls: list = []
+    with (
+        vendored.exclusive_attempt(root, 0),
+        pytest.raises(ValueError, match="already running"),
+    ):
+        sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_complete(calls))
+    assert calls == []
+    # The lock is released with its holder; another task was never blocked.
+    assert sr.run_phase_c(
+        root, 1, endpoint="vm_local_vllm", search=_complete(calls)
+    )["status"] == "complete"
+    assert sr.run_phase_c(
+        root, 0, endpoint="vm_local_vllm", search=_complete(calls)
+    )["status"] == "complete"
+
+
 # --- endpoints ----------------------------------------------------------------
 
 

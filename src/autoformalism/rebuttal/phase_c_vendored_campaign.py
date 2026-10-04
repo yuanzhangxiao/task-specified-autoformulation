@@ -11,10 +11,13 @@ for. The plan names the model; nothing here chooses one.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, get_args
 from urllib.parse import urlsplit
@@ -251,3 +254,45 @@ def load_development(
     if cell.identity != row["public_identity"] or cell.dataset.tier != row["tier"]:
         raise ValueError("public development input drift")
     return cell.dataset, cell.context
+
+
+def set_aside_unfinished(directory: Path) -> Path | None:
+    """Move an attempt that stopped before sealing a result out of its task's way.
+
+    The attempt is kept beside the task, for its cost and its logs. Restarting
+    into the same directory would let the new search's model be chosen from
+    samples, or its usage counted from calls, that the stopped attempt wrote.
+    """
+    if not directory.is_dir() or (directory / "result.json").exists():
+        return None
+    if not any(directory.iterdir()):
+        return None
+    number = 1
+    while (
+        target := directory.with_name(f"{directory.name}.interrupted-{number}")
+    ).exists():
+        number += 1
+    directory.rename(target)
+    return target
+
+
+@contextmanager
+def exclusive_attempt(root: Path, index: int) -> Iterator[None]:
+    """Hold one task for this process, and start it clean after an interruption.
+
+    Neither upstream search can resume part-way, and on a VM no scheduler stops
+    the same task from being started twice. A second process for a task is
+    refused while the first holds its lock, which also makes it safe to set an
+    unfinished attempt aside: only a stopped attempt can be left unlocked.
+    """
+    locks = root / "locks"
+    locks.mkdir(parents=True, exist_ok=True)
+    with (locks / f"{index}.lock").open("w") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError(
+                f"task {index} under {root} is already running in another process"
+            ) from None
+        set_aside_unfinished(root / "results" / str(index))
+        yield
