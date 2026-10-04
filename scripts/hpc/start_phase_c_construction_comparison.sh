@@ -7,7 +7,7 @@ AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 module load GCCcore/13.2.0 Python/3.11.5
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export AF_REPO_ROOT="$AF_TOOLS"
-export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/phase-c-construction-comparison-v1}
+export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/phase-c-construction-comparison-v2}
 export PYTHONPATH="$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 case "${1:?Use run or inspect}" in
   run)

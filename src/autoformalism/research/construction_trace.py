@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from pathlib import Path
 
 from autoformalism.staged_topology import content_hash
 
 
-def render(directory: Path, namespace: str) -> dict:
+def render(directory: Path, namespace: str, *, compact: bool = False) -> dict:
     """Join raw requests with runtime events; unknown acceptance stays unknown."""
     events: dict[str, list] = {}
 
@@ -36,6 +37,20 @@ def render(directory: Path, namespace: str) -> dict:
             or r["request"]["namespace"] != namespace
         ):
             raise ValueError("trace request provenance differs")
+        if compact:
+            rows.append(
+                {
+                    "request_hash": path.stem,
+                    "step": r["step"],
+                    "attempt": r["attempt"],
+                    "status": r["status"],
+                    "call_file": str(path.relative_to(directory)),
+                    "event_files": sorted(
+                        {e["file"] for e in events.get(path.stem, [])}
+                    ),
+                }
+            )
+            continue
         rows.append(
             {
                 "request_hash": path.stem,
@@ -63,6 +78,28 @@ def render(directory: Path, namespace: str) -> dict:
         "ordering": "request_hash; step and attempt shown explicitly",
         "scientific_adequacy": "requires independent review",
     }
+    if compact:
+        parts = [
+            "<!doctype html><meta charset='utf-8'>"
+            "<title>Construction trace index</title>",
+            "<h1>Construction trace index</h1><p>Full prompts, schemas and responses "
+            "are in the original call files. Decisions and draft snapshots are in "
+            "the event files. Acceptance is not scientific approval.</p>",
+        ]
+        for row in rows:
+            label = html.escape(f"{row['step']} / {row['attempt']} / {row['status']}")
+            links = " ".join(
+                f'<a href="{html.escape(p, quote=True)}">{html.escape(p)}</a>'
+                for p in (row["call_file"], *row["event_files"])
+            )
+            parts.append(f"<p>{label}: {links}</p>")
+        temporary = directory / f".TRACE.html.{os.getpid()}.tmp"
+        try:
+            temporary.write_text("\n".join(parts), encoding="utf-8")
+            temporary.replace(directory / "TRACE.html")
+        finally:
+            temporary.unlink(missing_ok=True)
+        return {**result, "presentation": "linked-original-records-1"}
 
     def block(v):
         return (

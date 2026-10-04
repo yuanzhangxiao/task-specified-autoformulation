@@ -202,13 +202,21 @@ def _recover(root: Path, campaign, plan: dict, audit: dict) -> dict:
             "checkpoint_errors": audit["checkpoint_errors"],
         }
     original = campaign.construction_trace.render
+    presentation_errors = []
     try:
         # Scoped presentation adapter. Original source verification, record checks,
         # namespace and report calculations remain those of the frozen campaign.
-        campaign.construction_trace.render = lambda directory, identity: linked_trace(
-            directory, identity, campaign
-        )
+        def render(directory, identity, **_):
+            try:
+                return linked_trace(directory, identity, campaign)
+            except OSError as exc:
+                presentation_errors.append(exc)
+                raise
+
+        campaign.construction_trace.render = render
         result = campaign.report(root, plan)
+        if presentation_errors:
+            raise presentation_errors[0]
     finally:
         campaign.construction_trace.render = original
     return {

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import html
 import json
 import statistics
+import warnings
 from collections import Counter
 from pathlib import Path
 from typing import Literal
@@ -26,14 +28,14 @@ from autoformalism.search import construction_schedules as schedules
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-1"
+PROTOCOL = "phase-c-construction-comparison-2"
 REPO = baseline.REPO
 
 
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-1"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-2"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -209,7 +211,7 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
         if previous:
             if previous["cost"] != _cost(records):
                 raise ValueError("result cost differs from cached call records")
-            construction_trace.render(directory, identity)
+            render_trace(directory, identity)
             return previous
         config = Config.model_validate(plan["config"])
         client = ConstructionClient(
@@ -250,7 +252,19 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
                 },
             )
         finally:
-            construction_trace.render(directory, identity)
+            render_trace(directory, identity)
+
+
+def render_trace(directory: Path, identity: str) -> dict:
+    """A derived view cannot mask a saved result or a primary checkpoint error."""
+    try:
+        construction_trace.render(directory, identity, compact=True)
+    except OSError as exc:
+        if exc.errno not in {errno.EDQUOT, errno.ENOSPC}:
+            raise
+        warnings.warn(f"Trace unavailable due to storage limit: {exc}", stacklevel=2)
+        return {"status": "unavailable", "errno": exc.errno}
+    return {"status": "available", "presentation": "linked-original-records-1"}
 
 
 def spread(values: list[int]) -> dict:
@@ -341,6 +355,8 @@ def report(root: Path, plan: dict) -> dict:
             "status": value["status"] if value else "pending",
             "cost": _cost(records),
             "batch_history": batch_sizes,
+            "stage_outcomes": initial.get("stage_outcomes") if initial else None,
+            "equation_stage_reached": any(e["stage"] == "equations" for e in events),
             "initial_complete": bool(
                 initial["assessment"]["eligible"] and initial["ready_requested"]
             )
@@ -353,7 +369,7 @@ def report(root: Path, plan: dict) -> dict:
         }
         rows.append(row)
         if records:
-            construction_trace.render(directory, identity)
+            row["trace"] = render_trace(directory, identity)
         title = html.escape(task["task_id"])
         sections.append(
             f'<h2>{title}</h2><a href="results/{title}/TRACE.html">'
@@ -377,6 +393,9 @@ def report(root: Path, plan: dict) -> dict:
             groups[f"{policy}:{arm}"] = {
                 "planned": len(selected),
                 "finished": len(done),
+                "equation_stage_reached": sum(
+                    r["equation_stage_reached"] for r in done
+                ),
                 "initial_complete": sum(
                     r["initial_complete"] is True for r in selected
                 ),

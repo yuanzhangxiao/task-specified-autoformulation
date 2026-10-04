@@ -1,6 +1,13 @@
 # Phase 1 Pipeline Design
 
-The opt-in `phase-c-construction-comparison-1` uses one draft/edit schema across
+The version-2 construction comparison corrects idempotent declaration handling,
+permits optional memory bindings without inventing mandatory requirements, and
+continues ordinary equations after failed optional relationship delivery. Prompts
+distinguish accumulation from relaxation and show a complete response template.
+Compact linked traces preserve raw evidence without duplicating it. Historical
+version-1 plans remain frozen; live response-delivery improvement is unverified.
+
+The opt-in `phase-c-construction-comparison-2` uses one draft/edit schema across
 three proposer schedules. Public sources need no supplied/unused activation;
 generated variables, ordinary RHS replacements, shared processes and memory
 bindings are tracked explicitly. Pending references do not trigger premature

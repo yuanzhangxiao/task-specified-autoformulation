@@ -1,9 +1,67 @@
 # Phase C construction schedules
 
-`phase-c-construction-comparison-1` compares three ways to construct variables
+`phase-c-construction-comparison-2` compares three ways to construct variables
 and equation topology. It stops before interaction functions, initialization,
 fitting, numerical mechanism assessments and the scientific critic. Historical
 campaigns and finalized benchmark prompts/data are unchanged.
+
+## Contract corrections after the first inspection
+
+Version 1 is retained as diagnostic evidence, not a valid ranking of schedules.
+All 19 finished separate constructions exhausted relationship planning before
+reaching their scheduled equation stage. The scope check rejected any nonempty
+variable list, including exact repetition of the committed inventory. Version 2
+checks changes in names/types instead; unchanged declarations and rephrased roles
+are allowed. Fixed equation scheduling similarly tolerates exact repeated earlier
+equations. Genuine changes outside the selected scope still require repair.
+
+Failed delivery of optional relationships now records the failure and proceeds
+to ordinary equation construction with the accepted draft. It does not erase
+accepted processes or waive final checks. The initial checkpoint records the
+outcome of every attempted stage, including this continuation. This restores the
+principle that absent/invalid optional process suggestions must not by themselves
+prevent construction of ordinary equations.
+
+Memory bindings recognize every existing public requirement. Mandatory delayed
+memory still needs a distinct differential mediator on the required path.
+An optional binding can name a generated differential target itself; its type
+and available graph endpoints are checked. Missing public endpoints remain
+unresolved, and genuinely unknown requirement IDs remain errors. Optional memory
+is not silently converted into a mandatory benchmark mechanism.
+
+The prompt distinguishes an accumulator, `dX/dt=u`, from fading memory such as
+`dX/dt=a*u-b*X`. It asks the proposer to consider restoring dynamics, possibly
+through coupled states, when the public task calls for return toward baseline.
+There is no universal self-dependence gate or automatically inserted decay term.
+Both forms can be scientifically appropriate. Merely including X also would not
+prove stable relaxation.
+
+Every request shows a complete empty edit template, including all lists and the
+completion flag. Output-limit failures receive delivery feedback describing the
+trailing-whitespace count and reminding the proposer to finish the JSON object.
+Incomplete responses are still rejected, never repaired by inventing missing
+fields. This addresses the observed delivery pattern; a live serving probe is
+still needed to establish whether the new prompt prevents whitespace loops.
+
+The prompt and targeted diagnostics distinguish generated variables from later
+function parameters, and known covariate conversions from unknown fitted gains.
+They do not infer scientific intent from names or prose. Actual empty RHSs remain
+invalid; an explicit constant term has an empty source list, while an equation
+with only shared uses can have an empty ordinary-term list.
+
+New comparison workers and reports write one small linked trace per task. They
+retain all original call/event JSON and do not duplicate them into `trace.json`.
+A quota/space error writing this derived view cannot mask a saved proposal or
+the original checkpoint error; report rows expose an unavailable trace. This does
+not create disk space or make failed primary checkpoint writes safe to ignore.
+
+Version 2 refuses version-1 plans. Use a fresh root (the launcher defaults to
+`phase-c-construction-comparison-v2`) and confirm the fixes before a full new
+comparison. The earlier 32-task topology continuation imported already inspected
+inventories and used a different response/repair protocol; its completion rate
+is not an equal-budget baseline for these fresh constructions. Retain the
+established method as a reference for a later matched scientific comparison;
+none of the three alternatives is assumed to outperform it.
 
 ## Matched experiment
 
@@ -121,6 +179,10 @@ it is never silently truncated to make a request fit.
 - `results/<task>/construction/events/*.json`: every batch, its exact predecessor,
   resulting draft, selected LHS, acceptance/error and pending references.
 - `results/<task>/TRACE.html`: exact requests, schemas, raw responses and decisions.
+
+In version 2, the trace is an index linking those original JSON records rather
+than embedding duplicate copies. The legacy expanded renderer remains available
+for other protocols.
 
 Inspect the actual equations and compare public scientific adequacy independently
 of acceptance. In particular, inspect required memory, target composition,

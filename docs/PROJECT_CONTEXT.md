@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The version-2 construction comparison corrects idempotent declaration handling,
+permits optional memory bindings without inventing mandatory requirements, and
+continues ordinary equations after failed optional relationship delivery. Prompts
+distinguish accumulation from relaxation and show a complete response template.
+Compact linked traces preserve raw evidence without duplicating it. Historical
+version-1 plans remain frozen; live response-delivery improvement is unverified.
+
 `docs/PHASE_C_CONSTRUCTION_COMPARISON.md` defines the matched 96-construction
 experiment: separate variables/topology, joint construction on a fixed schedule,
 and adaptive order/grouping. All start fresh with a common public-source catalog

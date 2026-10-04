@@ -32,6 +32,11 @@ def prepared(tmp_path):
     )
     assert result["status"] == "topology_complete"
     directory = campaign.baseline.location(root, task)
+    # Recovery operates on the historical expanded views; new construction uses
+    # compact views by default. Recreate legacy presentation in this fixture.
+    campaign.construction_trace.render(
+        directory, campaign.baseline.namespace(plan, task)
+    )
     return root, plan, directory, calls
 
 

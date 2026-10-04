@@ -141,14 +141,20 @@ def apply_patch(brief: PublicScientificBrief, draft: Draft, patch: DraftPatch) -
             raise ValueError(f"{p.name}: duplicate process drivers")
         for use in p.uses:
             if use.conversion is not None:
-                signed_processes.conversion_value(
-                    use.conversion,
-                    {
-                        v.name: 1.0
-                        for v in brief.public_variables
-                        if v.data_role == "covariate"
-                    },
-                )
+                covariates = {
+                    v.name: 1.0
+                    for v in brief.public_variables
+                    if v.data_role == "covariate"
+                }
+                try:
+                    signed_processes.conversion_value(use.conversion, covariates)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{p.name} -> {use.target}: invalid fixed conversion "
+                        f"{use.conversion!r}: {exc}. Allowed covariates: "
+                        f"{sorted(covariates)}. Use null if unknown; kinetic/fitted "
+                        "coefficients belong to the later function stage."
+                    ) from exc
     if candidate == draft and not patch.stage_complete:
         raise ValueError("no draft change; make an explicit edit or finish this stage")
     return candidate
@@ -208,12 +214,19 @@ def assembled_equations(
     for e in draft.equations:
         if definitions.get(e.name) not in {"differential", "algebraic"}:
             raise ValueError(f"{e.name}: LHS needs a generated-variable declaration")
-        equations.append(
-            EquationDefinition(
-                name=e.name,
-                definition=definitions[e.name],
-                terms=signed_processes.assemble(bindings, e.name, e.terms),
+        try:
+            terms = signed_processes.assemble(bindings, e.name, e.terms)
+        except ValueError as exc:
+            raise ValueError(f"{e.name}: {exc}") from exc
+        if not terms:
+            raise ValueError(
+                f"{e.name}: empty assembled RHS. terms=[] is valid only when "
+                "declared process uses supply the equation. For an intended "
+                "constant law use a term with sources=[]; do not invent another "
+                "variable to represent its fitted coefficient."
             )
+        equations.append(
+            EquationDefinition(name=e.name, definition=definitions[e.name], terms=terms)
         )
     return tuple(equations)
 
@@ -293,20 +306,27 @@ def assess(
         if not audit["passed"]:
             fail("public_fixed_sign", equation=e.name, audit=audit)
     graph = {e.name: {s for t in e.terms for s in t.sources} for e in equations}
-    requirements = {r.id: r for r in brief.requirements if r.requires_dynamic_memory}
+    requirements = {r.id: r for r in brief.requirements}
+    memory_checks = []
     for binding in draft.mechanism_bindings:
         r = requirements.get(binding.requirement_id)
         if r is None:
-            fail("unknown_memory_requirement", requirement=binding.requirement_id)
+            fail(
+                "unknown_memory_requirement",
+                requirement=binding.requirement_id,
+                known_requirements=sorted(requirements),
+            )
             continue
+        prior_errors = len(errors)
         for state in binding.memory_states:
-            if definitions.get(state) != "differential" or state in {
-                *r.targets,
-                *r.drivers,
-            }:
+            if definitions.get(state) != "differential" or (
+                r.requires_dynamic_memory and state in {*r.targets, *r.drivers}
+            ):
                 fail("memory_type", requirement=r.id, state=state)
             for driver in r.drivers:
-                if driver not in _ancestors(state, graph):
+                if driver not in _ancestors(state, graph) and not (
+                    not r.requires_dynamic_memory and driver == state
+                ):
                     fail(
                         "memory_driver_path",
                         requirement=r.id,
@@ -314,13 +334,31 @@ def assess(
                         memory=state,
                     )
         for target in r.targets:
-            if not set(binding.memory_states) & _ancestors(target, graph):
+            ancestors = _ancestors(target, graph)
+            if not r.requires_dynamic_memory:
+                ancestors = ancestors | {target}
+            if not set(binding.memory_states) & ancestors:
                 fail(
                     "memory_target_path",
                     requirement=r.id,
                     target=target,
                     memories=list(binding.memory_states),
                 )
+        memory_checks.append(
+            {
+                "requirement": r.id,
+                "mandatory": r.requires_dynamic_memory,
+                "states": list(binding.memory_states),
+                "status": "failed"
+                if len(errors) > prior_errors
+                else "passed"
+                if r.drivers and r.targets
+                else "unresolved_public_endpoints",
+                "scope": (
+                    "Declared types and available graph endpoints, not memory decay."
+                ),
+            }
+        )
     return {
         "eligible": not errors,
         "errors": errors,
@@ -328,6 +366,7 @@ def assess(
             r.id for r in brief.requirements if not r.drivers or not r.targets
         ],
         "public_structure_checks": list(checks),
+        "memory_binding_checks": memory_checks,
         "topology": topology.model_dump(mode="json") if topology else None,
         "generated_auxiliary_aliases": aliases,
         "equations": [e.model_dump(mode="json") for e in equations],

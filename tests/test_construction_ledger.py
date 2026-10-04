@@ -217,3 +217,120 @@ def test_target_type_and_supplied_consumer_checked_at_completion():
         "public_target_type",
         "supplied_process_consumers",
     }
+
+
+def optional_memory_brief(*, drivers=("u",), targets=("y",)):
+    """A real named requirement may permit memory without mandating a mediator."""
+    b = brief(True)
+    return b.model_copy(
+        update={
+            "requirements": tuple(
+                r.model_copy(
+                    update={
+                        "requires_dynamic_memory": False,
+                        "drivers": drivers,
+                        "targets": targets,
+                    }
+                )
+                for r in b.requirements
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize("state", ["x", "y"])
+def test_optional_memory_allows_latent_or_target_accumulator(state):
+    b = optional_memory_brief()
+    d = apply(
+        public=b,
+        variables=[variable("y"), variable("x")],
+        equations=[equation("y", "x"), equation("x", "u")],
+        mechanism_bindings=[{"requirement_id": "memory", "memory_states": [state]}],
+    )
+    result = ledger.assess(b, context(), {}, d)
+    assert result["eligible"], result["errors"]
+    assert result["memory_binding_checks"][0]["status"] == "passed"
+    assert not result["memory_binding_checks"][0]["mandatory"]
+
+
+def test_optional_binding_with_underspecified_endpoints_is_unresolved():
+    b = optional_memory_brief(drivers=())
+    d = apply(
+        public=b,
+        variables=[variable("y")],
+        equations=[equation("y", "u")],
+        mechanism_bindings=[{"requirement_id": "memory", "memory_states": ["y"]}],
+    )
+    result = ledger.assess(b, context(), {}, d)
+    assert result["eligible"]
+    assert result["memory_binding_checks"][0]["status"] == "unresolved_public_endpoints"
+
+
+@pytest.mark.parametrize("bad", ["unknown_id", "algebraic", "disconnected"])
+def test_optional_memory_does_not_waive_id_type_or_path_errors(bad):
+    b = optional_memory_brief()
+    d = apply(
+        public=b,
+        variables=[
+            variable("y"),
+            variable("x", "algebraic" if bad == "algebraic" else "differential"),
+        ],
+        equations=[
+            equation("y", "u" if bad == "disconnected" else "x"),
+            equation("x", "u"),
+        ],
+        mechanism_bindings=[
+            {
+                "requirement_id": "oops" if bad == "unknown_id" else "memory",
+                "memory_states": ["x"],
+            }
+        ],
+    )
+    result = ledger.assess(b, context(), {}, d)
+    expected = {
+        "unknown_id": "unknown_memory_requirement",
+        "algebraic": "memory_type",
+        "disconnected": "memory_target_path",
+    }[bad]
+    assert expected in {e["code"] for e in result["errors"]}
+
+
+def test_mandatory_delayed_memory_still_requires_distinct_mediator():
+    b = brief(True)
+    d = apply(
+        public=b,
+        variables=[variable("y")],
+        equations=[equation("y", "u")],
+        mechanism_bindings=[{"requirement_id": "memory", "memory_states": ["y"]}],
+    )
+    assert "memory_type" in {
+        e["code"] for e in ledger.assess(b, context(), {}, d)["errors"]
+    }
+
+
+def test_conversion_feedback_names_use_and_does_not_guess_fitted_coefficient():
+    d = apply(variables=[variable("y"), variable("x")])
+    before = d.model_dump()
+    with pytest.raises(
+        ValueError, match=r"p -> y: invalid fixed conversion 'k'.*Use null"
+    ):
+        apply(
+            d,
+            processes=[
+                process(
+                    uses=[{"target": "y", "sign": "positive", "conversion": "k"}],
+                    kind="influence",
+                )
+            ],
+        )
+    assert d.model_dump() == before
+
+
+def test_constant_term_supported_but_empty_unassembled_rhs_explained():
+    d = apply(
+        variables=[variable("y", "algebraic"), variable("x")],
+        equations=[equation("y"), equation("x", "u")],
+    )
+    assert assess(d)["eligible"]
+    d = apply(d, equations=[{"name": "y", "terms": []}])
+    assert "empty assembled RHS" in str(assess(d)["errors"])

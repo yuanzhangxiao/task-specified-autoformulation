@@ -36,11 +36,26 @@ Choose differential (state with derivative equation) or algebraic (instantaneous
 readout/process) for each generated variable. Supplied observations can optionally
 be modeled; then RHS references denote your generated quantity, not the supplied
 trajectory. Do not invent observed channels. Fitted coefficients are not variables.
+For example, a later law k*x has sources=["x"], NOT ["k","x"]. Declare k in
+the later function stage, not as an algebraic variable needing its own equation.
+Do not create chains of parameter aliases or invent an observed constant channel.
+
+MEMORY AND RETURN TO BASELINE
+A differential state already carries history; self-dependence is NOT mandatory.
+dX/dt=u represents accumulated input, whereas dX/dt=a*u-b*X can represent fading
+memory. If a mechanism should relax after forcing ends, include the dependencies
+needed for its restoring dynamics, directly on X or through coupled states.
+Choose accumulation, relaxation or another memory mechanism from the public task;
+do not add a decay term mechanically. Explain the intended behavior. These are
+scientific choices, not a new runtime requirement that every state depends on itself.
 
 RELATIONSHIPS BEFORE INDIVIDUAL EQUATIONS
 Consider all targets together, their necessary states and shared mechanisms.
 Bind each displayed dynamic-memory requirement to your chosen differential
-mediator(s), distinct from that requirement's driver and target. Bindings express
+mediator(s), distinct from that requirement's driver and target. Optional memory
+bindings may also refer to other EXISTING public requirements: not requiring
+memory does not forbid it. Such a binding may include a target state itself.
+Do not invent requirement IDs. Bindings express
 your intended scientific assignment; complete equations must establish the paths.
 For each optional named process, choose its drivers, scientific meaning and signed
 consumers together. The runtime defines it once and inserts every declared use.
@@ -50,6 +65,8 @@ Never add a second consumer solely to satisfy the transfer format. An influence
 may be local or shared. Empty processes is legitimate. One process is one law,
 not a list of unrelated contributions. Conversion is null if unknown, or a positive
 fixed factor such as 1/area using public covariates and multiplication/division.
+Never put an unknown kinetic coefficient (k_abs, 1/tau, etc.) in conversion.
+Use null for an unknown conversion; the runtime handles fitted magnitudes later.
 The consumer sign, conversion and fitted magnitude are outside the one shared law.
 Opposite signs or shared syntax alone do not prove conservation.
 
@@ -82,15 +99,33 @@ are repeated on every request. A rejected_reply is a failed attempt, NOT a model
 to copy. Use its separately labeled error to correct the draft. Global structural
 feedback is supplied only after the initial construction ends. Do not claim
 scientific correctness merely because those finite structural checks pass.
+
+RESPONSE DELIVERY
+Return ONE complete JSON object matching response_template. Keep every listed key,
+using [] for lists with no edits and a boolean stage_complete. End the JSON object
+after stage_complete; do not stop after equations or emit trailing whitespace.
+Prefer omitting unchanged declarations by using empty edit lists. Exact repeats
+are harmless; actual edits outside this stage's scope are rejected explicitly.
 """
 
 
 def validate_scope(
-    policy: Policy, stage: str, focus: str | None, patch: ledger.DraftPatch
+    policy: Policy,
+    stage: str,
+    focus: str | None,
+    patch: ledger.DraftPatch,
+    draft: ledger.Draft | None = None,
 ) -> None:
-    """Make batching the experimental treatment, not a different validity rule."""
+    """Check effective scientific edits, not harmless repeated declarations."""
     if stage == "repair":
         return
+    current = draft or ledger.Draft()
+    variables = {v.name: v.definition for v in current.variables}
+    changed_variables = [
+        v.name for v in patch.variables if variables.get(v.name) != v.definition
+    ]
+    equations = {e.name: e for e in current.equations}
+    changed_equations = [e.name for e in patch.equations if equations.get(e.name) != e]
     if stage == "variables" and (
         patch.equations
         or patch.processes
@@ -105,17 +140,24 @@ def validate_scope(
     if (
         policy == "separate"
         and stage != "variables"
-        and (patch.variables or patch.remove_variables)
+        and (changed_variables or patch.remove_variables)
     ):
         raise ValueError(
-            "separate policy fixes the variable inventory until overall repair"
+            "separate policy fixes the variable inventory until overall repair; "
+            f"new/type-changed={changed_variables}, "
+            f"removed={list(patch.remove_variables)}. "
+            "Unchanged variables may be omitted or repeated."
         )
     if (
         stage == "equations"
         and policy != "joint_adaptive"
-        and (patch.remove_equations or any(e.name != focus for e in patch.equations))
+        and (patch.remove_equations or any(n != focus for n in changed_equations))
     ):
-        raise ValueError(f"fixed schedule requests only equation {focus}")
+        raise ValueError(
+            f"fixed schedule requests only equation {focus}; "
+            f"other changed equations={[n for n in changed_equations if n != focus]}. "
+            "Previously accepted unchanged equations may be omitted or repeated."
+        )
 
 
 def instructions(policy: Policy, stage: str, focus: str | None) -> str:
@@ -166,6 +208,34 @@ def instructions(policy: Policy, stage: str, focus: str | None) -> str:
     )
 
 
+def delivery_feedback(record: dict) -> dict | None:
+    """Describe truncated delivery without salvaging or inventing missing JSON."""
+    raw = record.get("raw_response")
+    choices = raw.get("choices") if isinstance(raw, dict) else None
+    if (
+        not isinstance(choices, list)
+        or len(choices) != 1
+        or not isinstance(choices[0], dict)
+        or choices[0].get("finish_reason") != "length"
+    ):
+        return None
+    message = choices[0].get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        return None
+    return {
+        "finish_reason": "length",
+        "visible_characters": len(content),
+        "trailing_whitespace_characters": len(content) - len(content.rstrip()),
+        "instruction": (
+            "The previous response did not finish. Return the entire response_template "
+            "with all keys, empty lists for no edits, stage_complete and a closing }. "
+            "Do not emit whitespace to fill the output allowance. No part of that "
+            "truncated reply was committed."
+        ),
+    }
+
+
 def run(
     brief: PublicScientificBrief,
     context: ValidationContext,
@@ -212,6 +282,9 @@ def run(
                 for r in brief.requirements
                 if r.requires_dynamic_memory
             ],
+            "response_template": ledger.DraftPatch(stage_complete=False).model_dump(
+                mode="json"
+            ),
             "current_draft": ledger.snapshot(brief, draft),
             "runtime_diagnostics": diagnostic,
         }
@@ -228,7 +301,7 @@ def run(
         try:
             raw = visible_response(record)
             patch = ledger.DraftPatch.model_validate(raw)
-            validate_scope(policy, stage, focus, patch)
+            validate_scope(policy, stage, focus, patch, draft)
             draft = ledger.apply_patch(brief, draft, patch)
             accepted, complete = True, patch.stage_complete
         except (ValueError, TypeError, KeyError) as exc:
@@ -249,7 +322,15 @@ def run(
         }
         sealed_write(directory / "events" / f"{len(events):03d}.json", event)
         events.append(event)
-        return accepted, complete, {"rejected_reply": raw, "error": error}
+        return (
+            accepted,
+            complete,
+            {
+                "rejected_reply": raw,
+                "error": error,
+                "delivery": delivery_feedback(record),
+            },
+        )
 
     def stage(name: str) -> tuple[bool, str | None]:
         while True:
@@ -273,6 +354,7 @@ def run(
 
     try:
         ready, stop_reason = False, None
+        stage_outcomes = []
         stages = (
             ("variables", "relationships", "equations")
             if policy == "separate"
@@ -281,6 +363,19 @@ def run(
         try:
             for name in stages:
                 ready, stop_reason = stage(name)
+                stage_outcomes.append(
+                    {
+                        "stage": name,
+                        "completed": ready,
+                        "error": stop_reason,
+                        "continued_to_equations": name == "relationships" and not ready,
+                    }
+                )
+                # Optional relationship delivery must not prevent construction of
+                # ordinary equations. Retain all accepted declarations; required
+                # bindings and unresolved references still face the final checks.
+                if name == "relationships" and not ready:
+                    continue
                 if not ready:
                     break
         except (RepairBudgetExceeded, PromptPreflightError) as exc:
@@ -295,6 +390,7 @@ def run(
                 "stop_reason": stop_reason,
                 "cost": _cost(sorted(records, key=lambda r: r["request_hash"])),
                 "event_count": len(events),
+                "stage_outcomes": stage_outcomes,
             },
         )
         # Reserve the SAME additional allowance for every arm. Unspent initial

@@ -347,11 +347,12 @@ def test_campaign_trace_cost_reporting_and_corrupt_cache_refusal(tmp_path):
     assert campaign.propose(root, plan, task, "http://offline", **args) == result
     summary = campaign.report(root, plan)
     assert summary["status_counts"] == {"topology_complete": 1, "pending": 95}
+    assert summary["rows"][0]["equation_stage_reached"]
+    assert summary["groups"]["separate:full"]["equation_stage_reached"] == 1
     assert "Before overall repair" in (root / "TOPOLOGY.html").read_text()
     directory = campaign.baseline.location(root, task)
-    assert len(json.loads((directory / "trace.json").read_text())["calls"]) == len(
-        calls
-    )
+    assert not (directory / "trace.json").exists()
+    assert "original call files" in (directory / "TRACE.html").read_text()
     assert sealed_read(directory / "construction/before_repair.json")["assessment"][
         "eligible"
     ]
@@ -446,3 +447,238 @@ def test_missing_transaction_rejected_even_when_all_calls_survive(tmp_path):
     sorted((directory / "construction/events").glob("*.json"))[-1].unlink()
     with pytest.raises(ValueError, match="transaction"):
         campaign.propose(root, plan, task, "http://offline")
+
+
+def test_repeated_inventory_and_equations_are_idempotent_effective_edits():
+    d = ledger.Draft(
+        variables=(ledger.GeneratedVariable(**variable("y")),),
+        equations=(ledger.EquationUpdate(**equation("y", "u")),),
+    )
+    p = patch(variables=[variable("y")], stage_complete=True)
+    schedules.validate_scope("separate", "relationships", None, p, d)
+    p = patch(variables=[{**variable("y"), "scientific_role": "rephrased"}])
+    schedules.validate_scope("separate", "equations", "x", p, d)
+    p = patch(equations=[equation("y", "u"), equation("x", "u")])
+    schedules.validate_scope("joint_fixed", "equations", "x", p, d)
+    with pytest.raises(ValueError, match="only equation"):
+        schedules.validate_scope(
+            "joint_fixed", "equations", "x", patch(equations=[equation("y", "x")]), d
+        )
+    with pytest.raises(ValueError, match="new/type-changed"):
+        schedules.validate_scope(
+            "separate",
+            "relationships",
+            None,
+            patch(variables=[variable("y", "algebraic")]),
+            d,
+        )
+    with pytest.raises(ValueError, match="removed"):
+        schedules.validate_scope(
+            "separate", "relationships", None, patch(remove_variables=["y"]), d
+        )
+
+
+def test_separate_repeated_inventory_reaches_equation_stage_without_global_repair(
+    tmp_path,
+):
+    calls = []
+    base = transport(calls)
+
+    def send(url, body, timeout):
+        result = base(url, body, timeout)
+        p = json.loads(body["messages"][1]["content"])
+        template = p["response_template"]
+        assert set(template) == set(ledger.DraftPatch.model_fields)
+        assert template["stage_complete"] is False
+        if p["stage"] == "relationships":
+            raw = json.loads(result["choices"][0]["message"]["content"])
+            raw["variables"] = p["current_draft"]["declarations"]["variables"]
+            result = response(raw)
+        return result
+
+    client = ConstructionClient(
+        settings=StagedModelSettings(),
+        directory=tmp_path / "calls",
+        namespace="idempotent",
+        seed=0,
+        base_url="http://offline",
+        transport=send,
+        token_transport=tokenize,
+    )
+    result = schedules.run(
+        brief(True),
+        context(),
+        {},
+        brief(True).model_dump(mode="json"),
+        client,
+        tmp_path / "construction",
+        "separate",
+    )
+    assert result["status"] == "topology_complete"
+    assert [p["stage"] for p in calls] == [
+        "variables",
+        "relationships",
+        "equations",
+        "equations",
+    ]
+    assert result["before_repair"]["assessment"]["eligible"]
+
+
+def test_compact_view_storage_failure_preserves_saved_proposal(tmp_path, monkeypatch):
+    import errno
+    from pathlib import Path
+
+    source_fixture(tmp_path)
+    root = tmp_path / "comparison"
+    plan = campaign.freeze(tmp_path / "new", root)
+    original = Path.write_text
+
+    def write(path, *args, **kwargs):
+        if path.name.startswith(".TRACE.html."):
+            raise OSError(errno.EDQUOT, "quota")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write)
+    task = plan["tasks"][0]
+    calls = []
+    with pytest.warns(UserWarning, match="Trace unavailable"):
+        result = campaign.propose(
+            root,
+            plan,
+            task,
+            "http://offline",
+            transport=transport(calls),
+            token_transport=tokenize,
+        )
+    assert result["status"] == "topology_complete"
+    d = campaign.baseline.location(root, task)
+    assert campaign.checked_records(d, campaign.baseline.namespace(plan, task))
+    assert sealed_read(d / "proposal.json") == result
+    assert not list(d.glob(".TRACE.html.*.tmp"))
+    n = len(calls)
+    with pytest.warns(UserWarning, match="Trace unavailable"):
+        assert (
+            campaign.propose(
+                root,
+                plan,
+                task,
+                "http://offline",
+                transport=transport(calls),
+                token_transport=tokenize,
+            )
+            == result
+        )
+    assert len(calls) == n
+
+
+def test_v1_plan_is_not_resumed_with_changed_acceptance_rules(tmp_path):
+    source_fixture(tmp_path)
+    root = tmp_path / "comparison"
+    plan = campaign.freeze(tmp_path / "new", root)
+    old = {k: v for k, v in plan.items() if k != "artifact_sha256"}
+    old["protocol"] = "phase-c-construction-comparison-1"
+    (root / "plan.json").unlink()
+    sealed_write(root / "plan.json", old)
+    with pytest.raises(ValueError, match="source/protocol"):
+        campaign.verify(root)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        [],
+        {"choices": None},
+        {"choices": [None]},
+        {"choices": [{"finish_reason": "length", "message": None}]},
+    ],
+)
+def test_delivery_hint_tolerates_malformed_provider_data(raw):
+    assert schedules.delivery_feedback({"raw_response": raw}) is None
+
+
+def test_truncated_whitespace_reply_is_not_committed_and_gets_delivery_feedback(
+    tmp_path,
+):
+    calls = []
+    base = transport(calls)
+    interrupted = False
+
+    def send(url, body, timeout):
+        nonlocal interrupted
+        result = base(url, body, timeout)
+        p = json.loads(body["messages"][1]["content"])
+        if p["stage"] == "equations" and not interrupted:
+            interrupted = True
+            result["choices"][0]["finish_reason"] = "length"
+            result["choices"][0]["message"]["content"] = '{"equations": []' + " " * 200
+        return result
+
+    client = ConstructionClient(
+        settings=StagedModelSettings(),
+        directory=tmp_path / "calls",
+        namespace="whitespace",
+        seed=0,
+        base_url="http://offline",
+        transport=send,
+        token_transport=tokenize,
+    )
+    result = schedules.run(
+        brief(True),
+        context(),
+        {},
+        brief(True).model_dump(mode="json"),
+        client,
+        tmp_path / "construction",
+        "joint_fixed",
+    )
+    assert result["status"] == "topology_complete"
+    retry = next(p for p in calls if (p["runtime_diagnostics"] or {}).get("delivery"))
+    hint = retry["runtime_diagnostics"]["delivery"]
+    assert hint["trailing_whitespace_characters"] == 200
+    assert retry["current_draft"]["declarations"]["equations"] == []
+    events = [
+        sealed_read(p)
+        for p in sorted((tmp_path / "construction/events").glob("*.json"))
+    ]
+    failed = next(e for e in events if not e["accepted"])
+    assert failed["before"] == failed["after"]
+    assert failed["error"] == "incomplete provider response: length"
+
+
+def test_optional_relationship_rejection_does_not_skip_equations(tmp_path):
+    calls = []
+    base = transport(calls)
+
+    def send(url, body, timeout):
+        result = base(url, body, timeout)
+        p = json.loads(body["messages"][1]["content"])
+        if p["stage"] == "relationships":
+            result = response({"unrecognized_field": True})
+        return result
+
+    client = ConstructionClient(
+        settings=StagedModelSettings(),
+        directory=tmp_path / "calls",
+        namespace="optional-relationships",
+        seed=0,
+        base_url="http://offline",
+        transport=send,
+        token_transport=tokenize,
+    )
+    result = schedules.run(
+        brief(True),
+        context(),
+        {},
+        brief(True).model_dump(mode="json"),
+        client,
+        tmp_path / "construction",
+        "separate",
+    )
+    assert result["status"] == "topology_complete"
+    assert [p["stage"] for p in calls] == ["variables"] + ["relationships"] * 3 + [
+        "equations"
+    ] * 2
+    stage = result["before_repair"]["stage_outcomes"][1]
+    assert not stage["completed"] and stage["continued_to_equations"]
+    assert result["before_repair"]["assessment"]["eligible"]
