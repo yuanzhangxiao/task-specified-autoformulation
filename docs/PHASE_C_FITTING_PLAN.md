@@ -505,3 +505,15 @@ counts without solving recovery. Dense-collocation checkpoint diagnostics consum
 55--59% of recorded native-worker time. Next make checkpoints cheaper and replay
 failures explicit, then revisit discretization/initialization with those costs
 controlled. No production default is promoted.
+
+## Milestone 8: checkpoint overhead and evaluation reliability
+
+The [M8 runbook](PHASE_C_FITTING_CHECKPOINT_DIAGNOSTIC.md) implements a matched
+legacy-versus-compact checkpoint comparison for three fixed-mesh native methods:
+36 CPU fits on the same two cases and three starts. Routine compact callbacks
+retain parameter/initial vectors and cheap feasibility/loss diagnostics; expensive
+node diagnostics move to native exit. Independent replay failures become explicit
+outcomes, with a journal that preserves partial evidence without granting another
+budget. Partial restart decisions and completed-history counts survive reporting.
+A separate M7 timeout closeout uses saved logs only. Historical results and fitter
+defaults remain unchanged. Delta numerical outcomes are pending.

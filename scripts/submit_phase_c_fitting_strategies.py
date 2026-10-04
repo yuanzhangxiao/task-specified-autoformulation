@@ -34,7 +34,11 @@ def submit(
         matched_source,
     )
     plan, _ = q.verify(root)
-    challenging = plan.get("protocol") in {q.CHALLENGING_PROTOCOL, q.numerical.PROTOCOL}
+    challenging = plan.get("protocol") in {
+        q.CHALLENGING_PROTOCOL,
+        q.numerical.PROTOCOL,
+        q.checkpoint.PROTOCOL,
+    }
     python = os.environ["AF_PYTHON"]
     if not Path(python).is_file() or not 1 <= concurrency <= 8:
         raise ValueError("require an existing Python and concurrency 1..8")

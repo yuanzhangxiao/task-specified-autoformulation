@@ -113,6 +113,11 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
     if method not in {"shooting", "collocation"}:
         raise ValueError("unknown transcription")
     chunks = payload.get("reuse_chunks", 1)
+    checkpoint_mode = payload.get("checkpoint_mode", "legacy")
+    if checkpoint_mode not in {"legacy", "compact"}:
+        raise ValueError("unknown checkpoint mode")
+    if checkpoint_mode == "compact" and chunks != 1:
+        raise ValueError("compact checkpoints require a fixed single solve")
     if type(chunks) is not int or not 1 <= chunks <= 8:
         raise ValueError("reuse_chunks must be an integer in 1..8")
     if chunks != 1 and method != "collocation":
@@ -285,7 +290,9 @@ def solve(payload: dict, directory: Path) -> dict:
     last_checkpoint_time = monotonic()
     iteration_offset = 0
 
-    def snapshot(iteration, value):
+    compact = payload.get("checkpoint_mode") == "compact"
+
+    def snapshot(iteration, value, *, detailed=False):
         nonlocal pool, last_iteration, last_checkpoint_time, checkpoint_seconds
         snapshot_started = monotonic()
         vector = np.asarray(value(theta)).ravel()
@@ -306,7 +313,10 @@ def solve(payload: dict, directory: Path) -> dict:
             "maximum_scaled_defect": defect,
             "trajectories": {},
         }
-        for row in training.trajectories:
+        # Fixed-mesh screening needs parameters/initials, loss and feasibility.
+        # Extracting all states and off-node indicators on every iteration was
+        # more expensive than much of the NLP. Keep that diagnostic once at exit.
+        for row in () if compact and not detailed else training.trajectories:
             key = row.trajectory_id
             states = np.asarray(value(expressions[key]["nodes"])).reshape(
                 -1, system.state_count
@@ -328,6 +338,10 @@ def solve(payload: dict, directory: Path) -> dict:
                 "nodes": states.tolist(),
                 "indicators": [v if np.isfinite(v) else 1e100 for v in indicators],
             }
+        if compact:
+            if detailed:
+                public._write(directory / "final_checkpoint_diagnostics.json", record)
+            record.pop("trajectories")
         digest = public.content_sha256(record["parameters"])
         if digest not in seen:
             seen.add(digest)
@@ -353,7 +367,8 @@ def solve(payload: dict, directory: Path) -> dict:
 
     def callback(iteration):
         if (
-            iteration <= 3
+            compact
+            or iteration <= 3
             or iteration % 5 == 0
             or monotonic() - last_checkpoint_time >= 1
         ):
@@ -404,6 +419,7 @@ def solve(payload: dict, directory: Path) -> dict:
             "hessian_approximation": hessian,
             "collocation_dense_output": payload.get("collocation_dense_output", False),
             "iterations_per_chunk": 400 // chunks,
+            "checkpoint_mode": payload.get("checkpoint_mode", "legacy"),
         },
     )
     if payload.get("profile_derivatives"):
@@ -427,12 +443,16 @@ def solve(payload: dict, directory: Path) -> dict:
         try:
             solved = opti.solve()
             success = True
-            snapshot(iteration_offset + int(solved.stats()["iter_count"]), solved.value)
+            snapshot(
+                iteration_offset + int(solved.stats()["iter_count"]),
+                solved.value,
+                detailed=compact,
+            )
             message = solved.stats()["return_status"]
         except (RuntimeError, ValueError, TimeoutError) as error:
             message = str(error)[-1200:]
             with suppress(RuntimeError, ValueError):
-                snapshot(last_iteration, opti.debug.value)
+                snapshot(last_iteration, opti.debug.value, detailed=compact)
         stats = opti.stats()
         for key, value in stats.items():
             if key.startswith("n_call_"):
@@ -478,6 +498,8 @@ def solve(payload: dict, directory: Path) -> dict:
         "iterations_at_last_checkpoint": last_iteration,
         "graph_builds": 1,
         "solve_chunks": chunk_records,
+        "checkpoint_seconds": checkpoint_seconds,
+        "checkpoint_mode": payload.get("checkpoint_mode", "legacy"),
     }
     public._write(directory / "native.json", result)
     return result

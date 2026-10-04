@@ -46,6 +46,13 @@ callbacks are measured bottlenecks. The next proposed fitting milestone reduces
 checkpoint overhead and handles replay failures explicitly. Existing methods
 remain available; there is no production fitter promotion.
 
+The implemented [M8 fitting diagnostic](PHASE_C_FITTING_CHECKPOINT_DIAGNOSTIC.md)
+pairs legacy and compact checkpoint policies across 36 CPU fits. It also journals
+independent replay, reports timeouts without partial-data accuracy, and preserves
+interrupted restart metadata. A separate log-based M7 closeout performs no new
+fitting/replay. The cases, starts, meshes and total budgets remain fixed; remote
+results are pending.
+
 ## Objective and ownership
 
 Build reliable scientific model construction before expanding search. Separate

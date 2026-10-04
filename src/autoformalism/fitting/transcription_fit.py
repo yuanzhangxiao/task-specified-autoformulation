@@ -334,6 +334,8 @@ def fit(payload: dict, directory: Path) -> dict:
                     collocation_dense_output=arm == "fixed_reduced_collocation",
                     profile_derivatives=True,
                 )
+                if "checkpoint_mode" in payload:
+                    native_payload["checkpoint_mode"] = payload["checkpoint_mode"]
             if reuse:
                 native_payload["reuse_chunks"] = 8
             process = invoke(native_payload, stage_dir, allowance, native=True)
@@ -488,10 +490,9 @@ def run(payload: dict, directory: Path) -> dict:
             "partial_metadata": True,
         }
         if payload.get("numerical_diagnostic") is not None:
-            for name in ("diagnostic", "stages", "mesh_audit"):
-                if (directory / f"{name}.json").exists():
-                    result[name] = public._read(directory / f"{name}.json")
-            result["actual_residual_calls"] = None  # in-flight work is not a zero
+            from autoformalism.fitting.checkpoint_diagnostic import recover_metadata
+
+            result.update(recover_metadata(directory))
         if payload.get("reuse_diagnostic") is not None:
             # Recover metadata without retrying a consumed native/screen budget.
             attempts = []

@@ -17,6 +17,7 @@ from pydantic import Field, model_validator
 from autoformalism.benchmarks import challenging_fitting_inputs as challenging
 from autoformalism.benchmarks.audited_release import read_seal, seal
 from autoformalism.benchmarks.fitting_qualification_inputs import experiment_request
+from autoformalism.fitting import checkpoint_diagnostic as checkpoint
 from autoformalism.fitting import identifiable_cases as controls
 from autoformalism.fitting import nonlinear_shape_case as shape
 from autoformalism.fitting import numerical_diagnostic as numerical
@@ -48,6 +49,7 @@ class CampaignConfig(StrictSchema):
     include_challenging: bool = False
     challenging_reuse: ReuseDiagnosticPolicy | None = None
     numerical_diagnostic: numerical.NumericalDiagnosticPolicy | None = None
+    checkpoint_diagnostic: bool = False
     cases: (
         tuple[
             Literal[
@@ -75,6 +77,8 @@ class CampaignConfig(StrictSchema):
     @model_validator(mode="after")
     def validate_roster(self):
         """Reject empty/duplicate selections and unavailable CSTR inputs."""
+        if self.checkpoint_diagnostic and self.numerical_diagnostic is None:
+            raise ValueError("checkpoint diagnostic requires fixed numerical arms")
         if self.include_reuse and self.reuse_diagnostic is not None:
             raise ValueError("historical reuse and isolated diagnostic are separate")
         if self.include_challenging and (
@@ -109,6 +113,13 @@ class CampaignConfig(StrictSchema):
             ):
                 raise ValueError("case selection differs from challenging input mode")
         return self
+
+
+def _config_exclusions(config):
+    """Omit new opt-in fields from historical plan serialization."""
+    return (
+        {"numerical_diagnostic"} if config.numerical_diagnostic is None else set()
+    ) | (set() if config.checkpoint_diagnostic else {"checkpoint_diagnostic"})
 
 
 def case_request(name, case, seed):
@@ -170,9 +181,7 @@ def prepare(
                 plan["config"]
                 != config.model_dump(
                     mode="json",
-                    exclude={"numerical_diagnostic"}
-                    if config.numerical_diagnostic is None
-                    else set(),
+                    exclude=_config_exclusions(config),
                 )
                 or plan["source_inputs_sha256"] != source_digest
                 or plan.get("matched_source_plan_sha256") != matched_digest
@@ -253,11 +262,17 @@ def prepare(
                 if config.challenging_reuse is not None:
                     arms = (*arms, "cache_last_primal", "cache_screened_primal")
                 if config.numerical_diagnostic is not None:
-                    arms = numerical.ARMS
+                    arms = (
+                        tuple(checkpoint.ARMS)
+                        if config.checkpoint_diagnostic
+                        else numerical.ARMS
+                    )
                 for arm in arms:
                     tasks.append({"task_id": f"{key}_{arm}", "common": key, "arm": arm})
         plan = {
-            "protocol": numerical.PROTOCOL
+            "protocol": checkpoint.PROTOCOL
+            if config.checkpoint_diagnostic
+            else numerical.PROTOCOL
             if config.numerical_diagnostic is not None
             else CHALLENGING_PROTOCOL
             if config.include_challenging
@@ -272,9 +287,7 @@ def prepare(
             "inputs_sha256": public.content_sha256(inputs),
             "config": config.model_dump(
                 mode="json",
-                exclude={"numerical_diagnostic"}
-                if config.numerical_diagnostic is None
-                else set(),
+                exclude=_config_exclusions(config),
             ),
             "commons": commons,
             "tasks": tasks,
@@ -299,6 +312,7 @@ def verify(root: Path, *, runtime: bool = True):
         DIAGNOSTIC_PROTOCOL,
         CHALLENGING_PROTOCOL,
         numerical.PROTOCOL,
+        checkpoint.PROTOCOL,
     } or plan["inputs_sha256"] != public.content_sha256(inputs):
         raise ValueError("campaign identity differs")
     if runtime and (
@@ -386,6 +400,8 @@ def worker_payload(plan, inputs, task):
     if plan["config"].get("numerical_diagnostic") is not None:
         payload["numerical_diagnostic"] = plan["config"]["numerical_diagnostic"]
         payload["seed"] = common["seed"]
+    if plan["config"].get("checkpoint_diagnostic"):
+        payload["arm"], payload["checkpoint_mode"] = checkpoint.ARMS[task["arm"]]
     return payload
 
 
@@ -513,6 +529,11 @@ def run_task(root: Path, index: int) -> dict:
                     PublicSplit.model_validate(case["training"]),
                     PublicSplit.model_validate(case["validation"]),
                     config.replay_seconds,
+                    **(
+                        {"journal": folder / "replay_progress.json"}
+                        if config.checkpoint_diagnostic
+                        else {}
+                    ),
                 )
                 seal(replay_path, checked)
             checked = read_seal(replay_path)
@@ -566,6 +587,7 @@ def run_task(root: Path, index: int) -> dict:
             "mesh_stage_timeouts": backend.get("mesh_stage_timeouts"),
             "common_sha256": public.content_sha256(common),
             "backend_sha256": public.content_sha256(backend),
+            "evaluation_stop_reason": checked.get("stop_reason") if checked else None,
             "validation_used_for_fitting": False,
             "global_identifiability_claimed": False,
         }
@@ -574,6 +596,7 @@ def run_task(root: Path, index: int) -> dict:
             DIAGNOSTIC_PROTOCOL,
             CHALLENGING_PROTOCOL,
             numerical.PROTOCOL,
+            checkpoint.PROTOCOL,
         }:
             errors = coefficient_metrics(case, common["request"], parameters)
             coefficient_error = errors.get("maximum_coefficient_relative_error")
@@ -587,7 +610,11 @@ def run_task(root: Path, index: int) -> dict:
                     and coefficient_error <= config.parameter_relative
                 ),
             )
-            if plan["protocol"] in {CHALLENGING_PROTOCOL, numerical.PROTOCOL}:
+            if plan["protocol"] in {
+                CHALLENGING_PROTOCOL,
+                numerical.PROTOCOL,
+                checkpoint.PROTOCOL,
+            }:
                 initial_errors = errors.get("initial_parameter_absolute_errors", {})
                 result["initials_recovered"] = (
                     max(initial_errors.values()) <= config.initial_absolute
@@ -604,6 +631,9 @@ def run_task(root: Path, index: int) -> dict:
         if "numerical_diagnostic" in worker_payload(plan, inputs, task):
             result["numerical_diagnostic"] = {
                 "decision": backend.get("decision"),
+                "completed_training_calls_by_phase": backend.get(
+                    "completed_training_calls_by_phase", {}
+                ),
                 "stages": backend.get("stages", []),
                 "partial_metadata": backend.get("partial_metadata", False),
             }
@@ -667,6 +697,7 @@ def report(root: Path) -> dict:
             DIAGNOSTIC_PROTOCOL,
             CHALLENGING_PROTOCOL,
             numerical.PROTOCOL,
+            checkpoint.PROTOCOL,
         }:
             for group in summary["groups"]:
                 items = groups[(group["case"], group["arm"])]
@@ -729,7 +760,11 @@ def report(root: Path) -> dict:
                         )
                     ),
                 )
-        if plan["protocol"] in {CHALLENGING_PROTOCOL, numerical.PROTOCOL}:
+        if plan["protocol"] in {
+            CHALLENGING_PROTOCOL,
+            numerical.PROTOCOL,
+            checkpoint.PROTOCOL,
+        }:
             summary["limitation"] = (
                 "Known equations and fixed parameter blocks on unchanged development "
                 "arrays. Alien latent coordinates are anchored by supplied internal "
@@ -744,6 +779,13 @@ def report(root: Path) -> dict:
                     if group["case"] == "alien_hard"
                     else None
                 )
+        if plan["protocol"] == checkpoint.PROTOCOL:
+            summary["limitation"] += (
+                " M8 checkpoint-policy comparison at fixed equations and meshes. "
+                "Compact records retain parameter/initial vectors each iteration; "
+                "detailed node diagnostics only at native exit. Timed-out replay "
+                "is unavailable evidence, not a partial-data score. No new optimizer."
+            )
         if plan["protocol"] == numerical.PROTOCOL:
             summary["limitation"] += (
                 " M7 fixed meshes: dense-output coarsening retains all observations "

@@ -152,69 +152,8 @@ def verify(root: Path, *, runtime: bool = True) -> tuple[dict, dict]:
     return plan, inputs
 
 
-def replay(request, parameters, train, val, seconds: float) -> dict:
-    """Score frozen parameters with independent solvers and training-only scales."""
-    model, _, _ = public._lower(request)
-    if set(parameters) != set(model.parameter_names):
-        raise ValueError("incomplete replay parameters")
-    public._check_data(request, train, val)
-    scales = {
-        c: max(float(np.std(np.concatenate([r.targets[c] for r in train.rows]))), 1e-12)
-        for c in request.context.targets
-    }
-    deadline, rows = monotonic() + seconds, []
-    for split in (train, val):
-        for trajectory in public.unpack_split(split).trajectories:
-            predictions, errors = [], []
-            for method in ("Radau", "DOP853"):
-                sim = simulate_trajectory(
-                    model,
-                    trajectory,
-                    parameters,
-                    {},
-                    FitConfig(
-                        integration_method=method,
-                        relative_tolerance=1e-9,
-                        absolute_tolerance=1e-11,
-                    ),
-                    reset_observed_states=False,
-                    deadline=deadline,
-                )
-                if sim.success:
-                    predictions.append(sim.predictions)
-                else:
-                    errors.append(f"{method}: {sim.message}")
-            complete = len(predictions) == 2
-            rows.append(
-                {
-                    "split": split.name,
-                    "trajectory": trajectory.trajectory_id,
-                    "samples": trajectory.number_of_rows,
-                    "complete": complete,
-                    "errors": errors,
-                    "nmse": {
-                        c: float(
-                            np.mean(
-                                (
-                                    (predictions[0][c] - trajectory.targets[c])
-                                    / scales[c]
-                                )
-                                ** 2
-                            )
-                        )
-                        for c in scales
-                    }
-                    if complete
-                    else {},
-                    "solver_difference": max(
-                        float(np.max(np.abs(predictions[0][c] - predictions[1][c])))
-                        / scales[c]
-                        for c in scales
-                    )
-                    if complete
-                    else None,
-                }
-            )
+def _replay_summary(rows: list[dict], channels: list[str]) -> dict:
+    """Never turn incomplete coverage into a partial-data accuracy score."""
     metrics = {}
     for name in ("train", "val"):
         selected = [r for r in rows if r["split"] == name]
@@ -224,7 +163,7 @@ def replay(request, parameters, train, val, seconds: float) -> dict:
                     [
                         sum(r["samples"] * r["nmse"][c] for r in selected)
                         / sum(r["samples"] for r in selected)
-                        for c in scales
+                        for c in channels
                     ]
                 )
             )
@@ -241,6 +180,148 @@ def replay(request, parameters, train, val, seconds: float) -> dict:
         "validation_initials_fitted": False,
         "test_data_opened": False,
     }
+
+
+def replay(request, parameters, train, val, seconds: float, *, journal=None) -> dict:
+    """Bounded independent scoring, optionally journaled without a resumed budget.
+
+    A terminal journal is reused. An interrupted journal is closed as unavailable;
+    previously completed rows survive but no additional integration is performed.
+    """
+    model, _, _ = public._lower(request)
+    if set(parameters) != set(model.parameter_names):
+        raise ValueError("incomplete replay parameters")
+    public._check_data(request, train, val)
+    scales = {
+        c: max(float(np.std(np.concatenate([r.targets[c] for r in train.rows]))), 1e-12)
+        for c in request.context.targets
+    }
+    trajectories = [
+        (split.name, trajectory)
+        for split in (train, val)
+        for trajectory in public.unpack_split(split).trajectories
+    ]
+    identity = public.content_sha256(
+        {
+            "request": request.model_dump(mode="json"),
+            "parameters": parameters,
+            "train": train.model_dump(mode="json"),
+            "val": val.model_dump(mode="json"),
+            "seconds": seconds,
+        }
+    )
+    rows = []
+
+    def empty(name, trajectory, reason=None):
+        return {
+            "split": name,
+            "trajectory": trajectory.trajectory_id,
+            "samples": trajectory.number_of_rows,
+            "complete": False,
+            "errors": [reason] if reason else [],
+            "nmse": {},
+            "solver_difference": None,
+            "solver_scores": {},
+        }
+
+    def persist(result=None):
+        if journal is not None:
+            public._write(
+                journal,
+                {
+                    "identity": identity,
+                    "rows": rows,
+                    "result": result,
+                    "budget_restarted": False,
+                },
+            )
+
+    if journal is not None and journal.exists():
+        saved = public._read(journal)
+        if saved["identity"] != identity:
+            raise ValueError("replay journal identity differs")
+        if saved.get("result") is not None:
+            return saved["result"]
+        prior = {(r["split"], r["trajectory"]): r for r in saved["rows"]}
+        for name, trajectory in trajectories:
+            row = prior.get((name, trajectory.trajectory_id))
+            if row is None:
+                row = empty(name, trajectory, "replay interrupted before this row")
+            elif not row["complete"]:
+                row["errors"].append("replay interrupted; budget not restarted")
+            rows.append(row)
+        result = _replay_summary(rows, list(scales))
+        result.update(stop_reason="replay_interrupted", budget_restarted=False)
+        persist(result)
+        return result
+    deadline = monotonic() + seconds
+    persist()
+    timed_out = False
+    for name, trajectory in trajectories:
+        row = empty(name, trajectory)
+        rows.append(row)
+        predictions = []
+        for method in ("Radau", "DOP853"):
+            row["pending_method"] = method
+            persist()
+            if timed_out or monotonic() >= deadline:
+                timed_out = True
+                row["errors"].append(f"{method}: replay wall-clock limit reached")
+                continue
+            try:
+                sim = simulate_trajectory(
+                    model,
+                    trajectory,
+                    parameters,
+                    {},
+                    FitConfig(
+                        integration_method=method,
+                        relative_tolerance=1e-9,
+                        absolute_tolerance=1e-11,
+                    ),
+                    reset_observed_states=False,
+                    deadline=deadline,
+                )
+            except (TimeoutError, RuntimeError, ValueError, ArithmeticError) as error:
+                timed_out |= isinstance(error, TimeoutError)
+                row["errors"].append(f"{method}: {type(error).__name__}: {error}")
+                continue
+            if sim.success:
+                predictions.append(sim.predictions)
+                row["solver_scores"][method] = {
+                    c: float(
+                        np.mean(
+                            ((sim.predictions[c] - trajectory.targets[c]) / scales[c])
+                            ** 2
+                        )
+                    )
+                    for c in scales
+                }
+            else:
+                row["errors"].append(f"{method}: {sim.message}")
+            row.pop("pending_method", None)
+            persist()
+        row.pop("pending_method", None)
+        row["complete"] = len(predictions) == 2
+        if row["complete"]:
+            row["nmse"] = row["solver_scores"]["Radau"]
+            row["solver_difference"] = max(
+                float(np.max(np.abs(predictions[0][c] - predictions[1][c]))) / scales[c]
+                for c in scales
+            )
+        persist()
+    result = _replay_summary(rows, list(scales))
+    result.update(
+        stop_reason="replay_wall_budget_exhausted"
+        if timed_out
+        else "complete"
+        if result["complete"]
+        else "replay_solver_failed",
+        budget_exhausted=timed_out,
+        budget_restarted=False,
+    )
+    persist(result)
+    return result
 
 
 def qualify(root: Path) -> dict:

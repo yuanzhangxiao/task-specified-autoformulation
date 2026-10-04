@@ -1,0 +1,29 @@
+{
+  "starts": 3,
+  "include_cstr": false,
+  "include_challenging": true,
+  "cases": [
+    "basin_coupled",
+    "alien_hard"
+  ],
+  "strategy": {
+    "seconds": 900,
+    "maximum_rollout_calls": 900,
+    "mesh_passes": 1
+  },
+  "numerical_diagnostic": {
+    "target_variables": 6000,
+    "minimum_intervals": 24,
+    "first_rollout_calls": 41,
+    "first_rollout_fraction": 0.6666666666666666,
+    "stagnation_window": 10,
+    "stagnation_relative": 0.005,
+    "restart_seed": 20261003
+  },
+  "replay_seconds": 300,
+  "control_nmse": 1e-06,
+  "cstr_nmse": 0.01,
+  "parameter_relative": 0.01,
+  "initial_absolute": 0.01,
+  "checkpoint_diagnostic": true
+}
