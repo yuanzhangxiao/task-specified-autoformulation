@@ -6,6 +6,8 @@ model beside its result so the frozen evaluator can adapt it.
 
 LLM-SR learns one function per run, so a cell with several targets runs their
 pipeline once per target, which is what their specification format requires.
+Phase C cells enter through ``prepare_phase_c`` and ``run_phase_c``, which read
+a verified release and resume only against the endpoint kind frozen in the plan.
 """
 
 from __future__ import annotations
@@ -20,19 +22,26 @@ from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
 from autoformalism.rebuttal.llm_ode_campaign import (
     cell_arrays,
     observed_channels,
+    phase_c_rows,
     public_prompt_text,
     public_task_specification,
 )
 from autoformalism.rebuttal.llm_sr_driver import build_searcher  # noqa: F401
+from autoformalism.rebuttal.phase_c_vendored_campaign import (
+    endpoint_environment,
+    load_development,
+    load_phase_c_vendored_plan,
+    require_endpoint,
+)
 from autoformalism.rebuttal.prefit_replay import (
     content_hash,
     sealed_read,
     sealed_write,
 )
-from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
 
 PROTOCOL = "phase-b-llm-sr-campaign-1"
+PHASE_C_PROTOCOL = "phase-c-llm-sr-campaign-1"
 
 
 class SearcherFactory(Protocol):
@@ -42,12 +51,11 @@ class SearcherFactory(Protocol):
 
 
 def environment_identity() -> dict:
-    """Bind resume to the code and endpoint kind, never to a per-job port."""
-    return {
-        "runtime_source_sha256": runtime_source_hash(),
-        "provider": "vllm",
-        "endpoint_kind": "job-local vllm endpoint",
-    }
+    """Bind resume to the code and endpoint kind, never to a per-job port.
+
+    Phase B campaigns always ran against a job-local vLLM.
+    """
+    return endpoint_environment("job_local_vllm")
 
 
 def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
@@ -102,6 +110,34 @@ def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
     )
 
 
+def prepare_phase_c(config_path: Path, release: Path, root: Path) -> dict:
+    """Freeze a Phase C campaign against one verified release, before any call."""
+    plan = load_phase_c_vendored_plan(config_path)
+    if plan.method != "llm_sr":
+        raise ValueError(f"expected an llm_sr plan, not {plan.method!r}")
+    release = release.expanduser().resolve()
+    receipt, rows = phase_c_rows(plan, release)
+    root.mkdir(parents=True, exist_ok=True)
+    return sealed_write(
+        root / "plan.json",
+        {
+            "protocol": PHASE_C_PROTOCOL,
+            "plan": plan.model_dump(mode="json"),
+            "release": str(release),
+            "release_summary_sha256": receipt,
+            "environment": endpoint_environment(plan.endpoint),
+            "reporting_qualifications": list(plan.reporting_qualifications()),
+            # One request per samples_per_prompt samples, per searched target.
+            "maximum_logical_samples": sum(
+                plan.budget.declared * len(row["searched_targets"]) for row in rows
+            ),
+            "rows": rows,
+            "test_data_opened": False,
+            "private_reference_opened": False,
+        },
+    )
+
+
 def run(root: Path, index: int, *, search: SearcherFactory | None = None) -> dict:
     """Resume one task; a completed result causes no call and no refitting."""
     sealed = sealed_read(root / "plan.json")
@@ -114,20 +150,57 @@ def run(root: Path, index: int, *, search: SearcherFactory | None = None) -> dic
             f"checkout that froze it, or delete {root / 'plan.json'} and its "
             "results to re-freeze at the current code."
         )
+    row, directory, finished = _task(sealed, root, index)
+    if finished is not None:
+        return finished
+    development, context, identity = load_public(
+        Path(sealed["public_root"]), row["benchmark_id"], row["tier"]
+    )
+    if identity != row["public_identity"]:
+        raise ValueError("public development input drift")
+    return _search_and_seal(sealed, row, directory, development, context, search)
+
+
+def run_phase_c(
+    root: Path,
+    index: int,
+    *,
+    endpoint: str,
+    search: SearcherFactory | None = None,
+) -> dict:
+    """Resume one Phase C task, only against the endpoint kind it was frozen for."""
+    sealed = sealed_read(root / "plan.json")
+    if sealed["protocol"] != PHASE_C_PROTOCOL:
+        raise ValueError(f"{root / 'plan.json'} is not a Phase C LLM-SR plan")
+    require_endpoint(sealed, root, endpoint)
+    row, directory, finished = _task(sealed, root, index)
+    if finished is not None:
+        return finished
+    development, context = load_development(sealed, row)
+    return _search_and_seal(sealed, row, directory, development, context, search)
+
+
+def _task(sealed: dict, root: Path, index: int) -> tuple[dict, Path, dict | None]:
+    """Locate one task, and its sealed result when it already finished."""
     if not 0 <= index < len(sealed["rows"]):
         raise ValueError("task index out of range")
     row = sealed["rows"][index]
     directory = root / "results" / str(index)
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / "result.json"
-    if result_path.exists():
-        return sealed_read(result_path)
+    return row, directory, sealed_read(result_path) if result_path.exists() else None
 
-    development, context, identity = load_public(
-        Path(sealed["public_root"]), row["benchmark_id"], row["tier"]
-    )
-    if identity != row["public_identity"]:
-        raise ValueError("public development input drift")
+
+def _search_and_seal(
+    sealed: dict,
+    row: dict,
+    directory: Path,
+    development,
+    context,
+    search: SearcherFactory | None,
+) -> dict:
+    """Run upstream's search on development data and seal what it selected."""
+    result_path = directory / "result.json"
     if search is None:  # pragma: no cover - requires the vendored checkout
         raise ValueError(
             "supply a searcher factory bound to the pinned LLM-SR checkout"
@@ -185,7 +258,7 @@ def run(root: Path, index: int, *, search: SearcherFactory | None = None) -> dic
                 key: row[key]
                 for key in ("index", "benchmark_id", "tier", "repetition")
             },
-            "protocol": PROTOCOL,
+            "protocol": sealed["protocol"],
             "plan_sha256": sealed["artifact_sha256"],
             "status": outcome["status"],
             "error": outcome.get("error"),
@@ -214,7 +287,8 @@ def report(root: Path) -> dict:
     expected = len(sealed["rows"])
     complete = counts.get("complete", 0)
     value = {
-        "protocol": PROTOCOL,
+        # The plan's own protocol, so one report serves Phase B and Phase C.
+        "protocol": sealed["protocol"],
         "status": "complete" if complete == expected else "pending",
         "expected": expected,
         "terminal_success": complete,

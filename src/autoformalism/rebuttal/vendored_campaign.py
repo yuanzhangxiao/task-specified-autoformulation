@@ -154,25 +154,43 @@ class VendoredCampaignPlan(BaseModel):
 
     def reporting_qualifications(self) -> tuple[str, ...]:
         """Statements any report of this campaign must carry."""
-        notes: list[str] = []
-        if self.budget.is_reduced:
-            notes.append(
-                f"budget-conditioned at {self.budget.declared} "
-                f"{self.budget.unit} against a published default of "
-                f"{self.budget.published_default}"
-            )
-        if len(self.cells) < self.full_design_conditions:
-            notes.append(
-                f"scope-limited: {len(self.cells)} of "
-                f"{self.full_design_conditions} conditions"
-                + (f" ({self.scope_note})" if self.scope_note else "")
-            )
-        if (
-            self.prompt_policy.supplies_public_task_specification
-            and self.prompt_policy.upstream_withholds_specification
-        ):
-            notes.append(
-                "prompt adapted: supplied the public task specification, which "
-                "the upstream protocol withholds"
-            )
-        return tuple(notes)
+        return campaign_qualifications(
+            budget=self.budget,
+            prompt_policy=self.prompt_policy,
+            cells=len(self.cells),
+            full_design_conditions=self.full_design_conditions,
+            scope_note=self.scope_note,
+        )
+
+
+def campaign_qualifications(
+    *,
+    budget: DeclaredBudget,
+    prompt_policy: PromptPolicy,
+    cells: int,
+    full_design_conditions: int,
+    scope_note: str,
+) -> tuple[str, ...]:
+    """The qualifications every vendored campaign states, whatever its phase."""
+    notes: list[str] = []
+    if budget.is_reduced:
+        notes.append(
+            f"budget-conditioned at {budget.declared} "
+            f"{budget.unit} against a published default of "
+            f"{budget.published_default}"
+        )
+    if cells < full_design_conditions:
+        notes.append(
+            f"scope-limited: {cells} of "
+            f"{full_design_conditions} conditions"
+            + (f" ({scope_note})" if scope_note else "")
+        )
+    if (
+        prompt_policy.supplies_public_task_specification
+        and prompt_policy.upstream_withholds_specification
+    ):
+        notes.append(
+            "prompt adapted: supplied the public task specification, which "
+            "the upstream protocol withholds"
+        )
+    return tuple(notes)

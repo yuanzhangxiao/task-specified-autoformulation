@@ -3,7 +3,9 @@
 The search is not reimplemented. Upstream's per-variable searcher receives our
 trajectories, and upstream's own `System` evaluates the assembled candidates.
 This module supplies data, applies the declared prompt adaptation, reproduces
-upstream's selection rule, and seals the result.
+upstream's selection rule, and seals the result. Phase C cells enter through
+``prepare_phase_c`` and ``run_phase_c``, which read a verified release rather
+than the registry and change nothing after the data are loaded.
 
 Four accommodations are forced by the benchmark and are declared in the plan
 rather than hidden here:
@@ -42,12 +44,20 @@ from autoformalism.data import BenchmarkRegistry, DatasetSplit, Trajectory
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.baseline_validation import load_public
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
+from autoformalism.rebuttal.phase_c_baselines import load_cell
+from autoformalism.rebuttal.phase_c_vendored_campaign import (
+    PhaseCVendoredCampaignPlan,
+    endpoint_environment,
+    load_development,
+    load_phase_c_vendored_plan,
+    require_endpoint,
+    verify_plan_release,
+)
 from autoformalism.rebuttal.prefit_replay import (
     content_hash,
     sealed_read,
     sealed_write,
 )
-from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
 
 #: Upstream differentiates with findiff at fourth order; keep that choice.
@@ -282,6 +292,41 @@ def public_task_specification(prompt: str) -> str:
     return prompt[: prompt.index(end)].strip()
 
 
+def phase_c_rows(
+    plan: PhaseCVendoredCampaignPlan, release: Path
+) -> tuple[str, list[dict]]:
+    """Check a Phase C release against the plan, then freeze one row per task.
+
+    Rows keep the Phase B shape, so the search, selection and sealed result
+    are unchanged. Each identity also names the release receipt, and the
+    specification is cut from the released prompt by the same rule.
+    """
+    receipt = verify_plan_release(plan, release)
+    rows: list[dict] = []
+    for cell in plan.cells:
+        loaded = load_cell(release, cell.benchmark_id)
+        channels = observed_channels(loaded.dataset.train)
+        specification = (
+            public_task_specification(loaded.prompt)
+            if plan.prompt_policy.supplies_public_task_specification
+            else ""
+        )
+        for repetition in plan.repetitions:
+            rows.append(
+                {
+                    "index": len(rows),
+                    "benchmark_id": cell.benchmark_id,
+                    "tier": cell.tier,
+                    "repetition": repetition,
+                    "public_identity": loaded.identity,
+                    "channels": list(channels),
+                    "searched_targets": list(loaded.context.targets),
+                    "prompt": specification,
+                }
+            )
+    return receipt, rows
+
+
 def select_system(
     frontiers: tuple[tuple[str, ...], ...],
     score: Callable[[tuple[str, ...]], float | None],
@@ -316,15 +361,15 @@ def select_system(
 
 
 PROTOCOL = "phase-b-llm-ode-campaign-1"
+PHASE_C_PROTOCOL = "phase-c-llm-ode-campaign-1"
 
 
 def environment_identity() -> dict:
-    """Bind resume to the code and endpoint kind, never to a per-job port."""
-    return {
-        "runtime_source_sha256": runtime_source_hash(),
-        "provider": "vllm",
-        "endpoint_kind": "job-local vllm endpoint",
-    }
+    """Bind resume to the code and endpoint kind, never to a per-job port.
+
+    Phase B campaigns always ran against a job-local vLLM.
+    """
+    return endpoint_environment("job_local_vllm")
 
 
 def target_indices(
@@ -402,6 +447,36 @@ def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
     )
 
 
+def prepare_phase_c(config_path: Path, release: Path, root: Path) -> dict:
+    """Freeze a Phase C campaign against one verified release, before any call."""
+    plan = load_phase_c_vendored_plan(config_path)
+    if plan.method != "llm_ode":
+        raise ValueError(f"expected an llm_ode plan, not {plan.method!r}")
+    release = release.expanduser().resolve()
+    receipt, rows = phase_c_rows(plan, release)
+    root.mkdir(parents=True, exist_ok=True)
+    return sealed_write(
+        root / "plan.json",
+        {
+            "protocol": PHASE_C_PROTOCOL,
+            "plan": plan.model_dump(mode="json"),
+            "release": str(release),
+            "release_summary_sha256": receipt,
+            "environment": endpoint_environment(plan.endpoint),
+            "reporting_qualifications": list(plan.reporting_qualifications()),
+            "search_config": {"n_islands": plan.islands},
+            "maximum_logical_calls": (
+                len(rows) * plan.budget.declared * plan.islands * max(
+                    len(row["searched_targets"]) for row in rows
+                )
+            ),
+            "rows": rows,
+            "test_data_opened": False,
+            "private_reference_opened": False,
+        },
+    )
+
+
 def run(
     root: Path,
     index: int,
@@ -419,20 +494,57 @@ def run(
             f"checkout that froze it, or delete {root / 'plan.json'} and its "
             "results to re-freeze at the current code."
         )
+    row, directory, finished = _task(sealed, root, index)
+    if finished is not None:
+        return finished
+    development, context, identity = load_public(
+        Path(sealed["public_root"]), row["benchmark_id"], row["tier"]
+    )
+    if identity != row["public_identity"]:
+        raise ValueError("public development input drift")
+    return _search_and_seal(sealed, row, directory, development, context, search)
+
+
+def run_phase_c(
+    root: Path,
+    index: int,
+    *,
+    endpoint: str,
+    search: SearcherFactory | None = None,
+) -> dict:
+    """Resume one Phase C task, only against the endpoint kind it was frozen for."""
+    sealed = sealed_read(root / "plan.json")
+    if sealed["protocol"] != PHASE_C_PROTOCOL:
+        raise ValueError(f"{root / 'plan.json'} is not a Phase C LLM-ODE plan")
+    require_endpoint(sealed, root, endpoint)
+    row, directory, finished = _task(sealed, root, index)
+    if finished is not None:
+        return finished
+    development, context = load_development(sealed, row)
+    return _search_and_seal(sealed, row, directory, development, context, search)
+
+
+def _task(sealed: dict, root: Path, index: int) -> tuple[dict, Path, dict | None]:
+    """Locate one task, and its sealed result when it already finished."""
     if not 0 <= index < len(sealed["rows"]):
         raise ValueError("task index out of range")
     row = sealed["rows"][index]
     directory = root / "results" / str(index)
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / "result.json"
-    if result_path.exists():
-        return sealed_read(result_path)
+    return row, directory, sealed_read(result_path) if result_path.exists() else None
 
-    development, context, identity = load_public(
-        Path(sealed["public_root"]), row["benchmark_id"], row["tier"]
-    )
-    if identity != row["public_identity"]:
-        raise ValueError("public development input drift")
+
+def _search_and_seal(
+    sealed: dict,
+    row: dict,
+    directory: Path,
+    development,
+    context,
+    search: SearcherFactory | None,
+) -> dict:
+    """Run upstream's search on development data and seal what it selected."""
+    result_path = directory / "result.json"
     if search is None:  # pragma: no cover - requires the vendored checkout
         raise ValueError(
             "supply a searcher factory bound to the pinned LLM-ODE checkout"
@@ -493,7 +605,7 @@ def run(
                 key: row[key]
                 for key in ("index", "benchmark_id", "tier", "repetition")
             },
-            "protocol": PROTOCOL,
+            "protocol": sealed["protocol"],
             "plan_sha256": sealed["artifact_sha256"],
             "status": outcome["status"],
             "error": outcome.get("error"),
@@ -526,7 +638,8 @@ def report(root: Path) -> dict:
     expected = len(sealed["rows"])
     complete = counts.get("complete", 0)
     value = {
-        "protocol": PROTOCOL,
+        # The plan's own protocol, so one report serves Phase B and Phase C.
+        "protocol": sealed["protocol"],
         "status": "complete" if complete == expected else "pending",
         "expected": expected,
         "terminal_success": complete,
