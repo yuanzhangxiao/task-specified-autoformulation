@@ -19,6 +19,7 @@ from autoformalism.benchmarks.audited_release import read_seal, seal
 from autoformalism.benchmarks.fitting_qualification_inputs import experiment_request
 from autoformalism.fitting import identifiable_cases as controls
 from autoformalism.fitting import nonlinear_shape_case as shape
+from autoformalism.fitting import numerical_diagnostic as numerical
 from autoformalism.fitting import public_fitting as public
 from autoformalism.fitting.coordinates import training_coordinates
 from autoformalism.fitting.identifiable_campaign import sensitivity_audit
@@ -46,6 +47,7 @@ class CampaignConfig(StrictSchema):
     reuse_diagnostic: ReuseDiagnosticPolicy | None = None
     include_challenging: bool = False
     challenging_reuse: ReuseDiagnosticPolicy | None = None
+    numerical_diagnostic: numerical.NumericalDiagnosticPolicy | None = None
     cases: (
         tuple[
             Literal[
@@ -81,6 +83,14 @@ class CampaignConfig(StrictSchema):
             raise ValueError("challenging campaign requires its separate input roster")
         if self.challenging_reuse is not None and not self.include_challenging:
             raise ValueError("challenging reuse requires challenging inputs")
+        if self.numerical_diagnostic is not None:
+            if self.include_reuse or self.reuse_diagnostic or self.challenging_reuse:
+                raise ValueError("numerical diagnostic is separate from reuse arms")
+            if (
+                self.numerical_diagnostic.first_rollout_calls + 5
+                > self.strategy.maximum_rollout_calls
+            ):
+                raise ValueError("reserve rollout calls for the second phase")
         diagnostic = self.reuse_diagnostic or self.challenging_reuse
         if diagnostic is not None and (
             2 * diagnostic.native_seconds + 7 * diagnostic.point_seconds
@@ -157,7 +167,13 @@ def prepare(
         if (root / "plan.json").exists():
             plan, _ = verify(root)
             if (
-                plan["config"] != config.model_dump(mode="json")
+                plan["config"]
+                != config.model_dump(
+                    mode="json",
+                    exclude={"numerical_diagnostic"}
+                    if config.numerical_diagnostic is None
+                    else set(),
+                )
                 or plan["source_inputs_sha256"] != source_digest
                 or plan.get("matched_source_plan_sha256") != matched_digest
             ):
@@ -236,10 +252,14 @@ def prepare(
                 )
                 if config.challenging_reuse is not None:
                     arms = (*arms, "cache_last_primal", "cache_screened_primal")
+                if config.numerical_diagnostic is not None:
+                    arms = numerical.ARMS
                 for arm in arms:
                     tasks.append({"task_id": f"{key}_{arm}", "common": key, "arm": arm})
         plan = {
-            "protocol": CHALLENGING_PROTOCOL
+            "protocol": numerical.PROTOCOL
+            if config.numerical_diagnostic is not None
+            else CHALLENGING_PROTOCOL
             if config.include_challenging
             else DIAGNOSTIC_PROTOCOL
             if config.reuse_diagnostic is not None
@@ -250,7 +270,12 @@ def prepare(
             "runtime": public._runtime(),
             "source_inputs_sha256": source_digest,
             "inputs_sha256": public.content_sha256(inputs),
-            "config": config.model_dump(mode="json"),
+            "config": config.model_dump(
+                mode="json",
+                exclude={"numerical_diagnostic"}
+                if config.numerical_diagnostic is None
+                else set(),
+            ),
             "commons": commons,
             "tasks": tasks,
             "test_data_opened": False,
@@ -273,6 +298,7 @@ def verify(root: Path, *, runtime: bool = True):
         FOLLOWUP_PROTOCOL,
         DIAGNOSTIC_PROTOCOL,
         CHALLENGING_PROTOCOL,
+        numerical.PROTOCOL,
     } or plan["inputs_sha256"] != public.content_sha256(inputs):
         raise ValueError("campaign identity differs")
     if runtime and (
@@ -357,6 +383,9 @@ def worker_payload(plan, inputs, task):
         payload["reuse_diagnostic"] = plan["config"]["reuse_diagnostic"]
     if task["arm"] in DIAGNOSTIC_ARMS and plan["config"].get("challenging_reuse"):
         payload["reuse_diagnostic"] = plan["config"]["challenging_reuse"]
+    if plan["config"].get("numerical_diagnostic") is not None:
+        payload["numerical_diagnostic"] = plan["config"]["numerical_diagnostic"]
+        payload["seed"] = common["seed"]
     return payload
 
 
@@ -544,6 +573,7 @@ def run_task(root: Path, index: int) -> dict:
             FOLLOWUP_PROTOCOL,
             DIAGNOSTIC_PROTOCOL,
             CHALLENGING_PROTOCOL,
+            numerical.PROTOCOL,
         }:
             errors = coefficient_metrics(case, common["request"], parameters)
             coefficient_error = errors.get("maximum_coefficient_relative_error")
@@ -557,7 +587,7 @@ def run_task(root: Path, index: int) -> dict:
                     and coefficient_error <= config.parameter_relative
                 ),
             )
-            if plan["protocol"] == CHALLENGING_PROTOCOL:
+            if plan["protocol"] in {CHALLENGING_PROTOCOL, numerical.PROTOCOL}:
                 initial_errors = errors.get("initial_parameter_absolute_errors", {})
                 result["initials_recovered"] = (
                     max(initial_errors.values()) <= config.initial_absolute
@@ -570,6 +600,12 @@ def run_task(root: Path, index: int) -> dict:
                 "attempts": backend.get("attempts", []),
                 "partial_metadata": backend.get("partial_metadata", False),
                 "screen_seconds": backend.get("screen_seconds"),
+            }
+        if "numerical_diagnostic" in worker_payload(plan, inputs, task):
+            result["numerical_diagnostic"] = {
+                "decision": backend.get("decision"),
+                "stages": backend.get("stages", []),
+                "partial_metadata": backend.get("partial_metadata", False),
             }
         seal(path, result)
     return result
@@ -630,6 +666,7 @@ def report(root: Path) -> dict:
             FOLLOWUP_PROTOCOL,
             DIAGNOSTIC_PROTOCOL,
             CHALLENGING_PROTOCOL,
+            numerical.PROTOCOL,
         }:
             for group in summary["groups"]:
                 items = groups[(group["case"], group["arm"])]
@@ -692,7 +729,7 @@ def report(root: Path) -> dict:
                         )
                     ),
                 )
-        if plan["protocol"] == CHALLENGING_PROTOCOL:
+        if plan["protocol"] in {CHALLENGING_PROTOCOL, numerical.PROTOCOL}:
             summary["limitation"] = (
                 "Known equations and fixed parameter blocks on unchanged development "
                 "arrays. Alien latent coordinates are anchored by supplied internal "
@@ -707,5 +744,13 @@ def report(root: Path) -> dict:
                     if group["case"] == "alien_hard"
                     else None
                 )
+        if plan["protocol"] == numerical.PROTOCOL:
+            summary["limitation"] += (
+                " M7 fixed meshes: dense-output coarsening retains all observations "
+                "and supplied forcing interpolation. Derivative profiles measure "
+                "one initial point and consume native budget; interrupted phases "
+                "have unknown final timing. Restart trigger uses training only. "
+                "Continuation transfers parameters, not native trust-region state."
+            )
         public._write(root / "summary.json", summary)
     return summary

@@ -86,6 +86,8 @@ def refine(
     policy: RefinementPolicy,
     arm: Literal["joint", "joint_stopping", "conditional_stopping"],
     directory: Path,
+    *,
+    record_history: bool = False,
 ) -> dict:
     """Fit a bounded portfolio and retain the best complete training evaluation."""
     if training.name.value != "train" or arm not in ARMS:
@@ -97,6 +99,7 @@ def refine(
     sizes = [len(row.time) * len(system.channels) for row in training.trajectories]
     stop_enabled = arm != "joint"
     best = None
+    history = []
 
     def make_oracle(name, sensitivities):
         result = GuardedOracle(
@@ -127,6 +130,15 @@ def refine(
                 "call": budget.calls,
             }
             _write(directory / "best.json", best)
+        if record_history:
+            history.append(
+                {
+                    "call": budget.calls,
+                    "nmse": float(np.mean(residual**2)),
+                    "best_nmse": best["training_nmse"],
+                }
+            )
+            _write(directory / "training_history.json", history)
         per_trajectory = [
             float(np.mean(v**2)) for v in np.split(residual, np.cumsum(sizes)[:-1])
         ]

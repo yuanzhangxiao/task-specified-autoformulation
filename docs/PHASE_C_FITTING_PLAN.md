@@ -482,3 +482,15 @@ shooting records almost no iterations before stage timeouts. Screening now
 exercises vetoes, with mixed accuracy outcomes. Next diagnose fixed-mesh numerical
 cost and training-based continuation/restart decisions on this same problem;
 retain every method and do not promote a production default yet.
+
+## Milestone 7: reduce mesh size and diagnose native cost/stagnation
+
+The [M7 runbook](PHASE_C_FITTING_NUMERICAL_DIAGNOSTIC.md) implements the bounded
+follow-up to M6: dense versus reduced collocation, exact versus limited-memory
+shooting Hessians, and rollout continuation versus a training-triggered generic
+restart. The same two qualified cases and three starts give 36 CPU fits under
+900-second total ceilings. All observations and input interpolation are retained;
+the conservative alien collocation mesh drops from 115,218 to 33,906 variables.
+No adaptive enlargement follows an unfinished solve. Timing profiles survive
+interruptions, and a worse restart cannot erase the verified incumbent. Earlier
+methods and production defaults remain available unchanged. Results are pending.

@@ -19,6 +19,9 @@ case "${1:?prepare, fit or report}" in
     if [[ -f tests/test_challenging_fitting.py ]]; then
       "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_challenging_fitting.py
     fi
+    if [[ -f tests/test_fitting_numerical_diagnostic.py ]]; then
+      "$AF_PYTHON" -m pytest -q -p no:cacheprovider tests/test_fitting_numerical_diagnostic.py
+    fi
     "$AF_PYTHON" scripts/phase_c_fitting_strategies.py qualify --root "$AF_OUTPUT_ROOT"
     ;;
   fit)

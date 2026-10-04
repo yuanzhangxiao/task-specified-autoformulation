@@ -34,8 +34,12 @@ now account for all 36 CPU fits: basin passes all 18; alien rollout-only and hyb
 each recover two of three starts, while collocation/shooting and both reuse arms
 recover none. The hybrid falls back to original parameter guesses. Screening
 exercises vetoes but has mixed outcomes. Next isolate native numerical cost and
-stagnation/restart behavior on this qualified case. Existing methods remain
-available; there is no production fitter promotion.
+stagnation/restart behavior on this qualified case. The implemented
+[M7 diagnostic](PHASE_C_FITTING_NUMERICAL_DIAGNOSTIC.md) adds an observation-preserving
+reduced collocation mesh, a fixed-mesh Hessian comparison, and a bounded
+continuation/restart comparison. It is ready for 36 CPU fits on Delta; results
+are pending. Existing methods remain available; there is no production fitter
+promotion.
 
 ## Objective and ownership
 

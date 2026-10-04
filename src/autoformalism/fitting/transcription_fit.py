@@ -19,6 +19,7 @@ from pydantic import Field
 
 from autoformalism.fitting import adaptive_mesh as mesh
 from autoformalism.fitting import public_fitting as public
+from autoformalism.fitting.collocation_mesh import plan_meshes
 from autoformalism.fitting.coordinates import NumericalCoordinates
 from autoformalism.fitting.feasibility import (
     EvaluationBudget,
@@ -28,6 +29,8 @@ from autoformalism.fitting.feasibility import (
 from autoformalism.fitting.identifiable_campaign import SETTINGS, scale_for
 from autoformalism.fitting.identifiable_refinement import RefinementPolicy, refine
 from autoformalism.fitting.matching_probe import bounded_latent_start
+from autoformalism.fitting.numerical_diagnostic import ARMS as NUMERICAL_ARMS
+from autoformalism.fitting.numerical_diagnostic import NumericalDiagnosticPolicy
 from autoformalism.fitting.sensitivity_probe import SymbolicODE, SymbolicOracle
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.public_fitting import PublicFitRequest, PublicSplit
@@ -118,13 +121,24 @@ def fit(payload: dict, directory: Path) -> dict:
         from autoformalism.fitting.reuse_diagnostic import fit as diagnostic_fit
 
         return diagnostic_fit(payload, directory)
+    diagnostic = (
+        NumericalDiagnosticPolicy.model_validate(payload["numerical_diagnostic"])
+        if payload.get("numerical_diagnostic") is not None
+        else None
+    )
+    if diagnostic and payload["arm"] in {"rollout_continue", "rollout_restart"}:
+        from autoformalism.fitting.numerical_diagnostic import (
+            rollout as diagnostic_rollout,
+        )
+
+        return diagnostic_rollout(payload, directory)
     begun = monotonic()
     policy = StrategyPolicy.model_validate(payload["policy"])
     # Parent includes process startup in its wall ceiling. This slightly shorter
     # internal deadline leaves time to flush final metadata on ordinary exits.
     deadline = begun + max(0.01, policy.seconds - 1)
     arm = payload["arm"]
-    if arm not in (*ARMS, REUSE_ARM):
+    if arm not in (NUMERICAL_ARMS if diagnostic else (*ARMS, REUSE_ARM)):
         raise ValueError("unknown strategy")
     public_train = PublicSplit.model_validate(payload["training"])
     if public_train.name != "train":
@@ -258,11 +272,27 @@ def fit(payload: dict, directory: Path) -> dict:
         if remaining() > 1:
             rollout(points)
     else:
-        method = "shooting" if arm == "adaptive_shooting" else "collocation"
+        method = (
+            "shooting"
+            if arm == "adaptive_shooting" or arm.startswith("fixed_shooting_")
+            else "collocation"
+        )
         reuse = arm == REUSE_ARM
         grids = {
             r.trajectory_id: mesh.initial_mesh(r, method) for r in train.trajectories
         }
+        if arm == "fixed_reduced_collocation":
+            planned, audit = plan_meshes(
+                system,
+                train,
+                diagnostic.target_variables,
+                minimum_intervals=diagnostic.minimum_intervals,
+            )
+            grids = {
+                r.trajectory_id: p.time.tolist()
+                for r, p in zip(train.trajectories, planned, strict=True)
+            }
+            public._write(directory / "mesh_audit.json", audit)
         guesses = {
             r.trajectory_id: mesh.interpolate_nodes(
                 r.time, payload["nodes"][r.trajectory_id], grids[r.trajectory_id]
@@ -274,17 +304,16 @@ def fit(payload: dict, directory: Path) -> dict:
         screen(
             [{"parameters": start, "source": "ordinary"}], min(15, policy.seconds * 0.1)
         )
-        for level in range(policy.mesh_passes):
+        passes = 1 if diagnostic else policy.mesh_passes
+        for level in range(passes):
             if remaining() <= 2 or accurate():
                 break
             # The opt-in reuse arm solves the current mesh before spending time
             # on a larger one. Reserve a quarter of the remaining budget for
             # actual training screens; unused native time stays available.
-            slice_seconds = (
-                remaining() if reuse else remaining() / (policy.mesh_passes - level)
-            )
+            slice_seconds = remaining() if reuse else remaining() / (passes - level)
             allowance = 0.75 * slice_seconds
-            tolerance = (1e-5, 1e-7, 1e-9)[min(level, 2)]
+            tolerance = 1e-7 if diagnostic else (1e-5, 1e-7, 1e-9)[min(level, 2)]
             stage_dir = directory / f"mesh-{level}"
             native_payload = {
                 "request": payload["request"],
@@ -297,6 +326,14 @@ def fit(payload: dict, directory: Path) -> dict:
                 "tolerance": tolerance,
                 "seconds": allowance,
             }
+            if diagnostic:
+                native_payload.update(
+                    hessian_approximation="limited-memory"
+                    if arm == "fixed_shooting_lbfgs"
+                    else "exact",
+                    collocation_dense_output=arm == "fixed_reduced_collocation",
+                    profile_derivatives=True,
+                )
             if reuse:
                 native_payload["reuse_chunks"] = 8
             process = invoke(native_payload, stage_dir, allowance, native=True)
@@ -307,9 +344,22 @@ def fit(payload: dict, directory: Path) -> dict:
                 "tolerance": tolerance,
                 "intervals": {k: len(v) - 1 for k, v in grids.items()},
             }
+            if diagnostic:
+                record["diagnostics"] = {
+                    name: public._read(stage_dir / f"{name}.json")
+                    if (stage_dir / f"{name}.json").exists()
+                    else None
+                    for name in (
+                        "layout",
+                        "derivative_profile",
+                        "solver_progress",
+                        "native",
+                    )
+                }
             checkpoint_file = stage_dir / "checkpoints.json"
             if not checkpoint_file.exists():
                 stages.append({**record, "checkpoint_available": False})
+                public._write(directory / "stages.json", stages)
                 stop = "native_stage_unavailable"
                 break
             checkpoints = public._read(checkpoint_file)
@@ -339,6 +389,13 @@ def fit(payload: dict, directory: Path) -> dict:
                 if (stage_dir / "native.json").exists()
                 else {}
             )
+            if diagnostic:
+                stop = (
+                    "fixed_mesh_solve_complete_pending_replay"
+                    if native_result.get("native_success")
+                    else "fixed_mesh_solve_incomplete_pending_replay"
+                )
+                break
             if reuse and not native_result.get("native_success"):
                 stop = "coarse_solve_incomplete_pending_replay"
                 break
@@ -409,7 +466,12 @@ def run(payload: dict, directory: Path) -> dict:
         # Both screening and rollout refinement atomically persist their verified
         # incumbent. Compare them if interruption preceded the outer final write.
         candidates = []
-        for path in (directory / "best.json", directory / "refinement/best.json"):
+        for path in (
+            directory / "best.json",
+            directory / "refinement/best.json",
+            directory / "refinement-0/best.json",
+            directory / "refinement-1/best.json",
+        ):
             if path.exists():
                 candidate = public._read(path)
                 if np.isfinite(candidate.get("training_nmse", float("nan"))):
@@ -425,6 +487,11 @@ def run(payload: dict, directory: Path) -> dict:
             "budget_exhausted": process["wall_timeout"],
             "partial_metadata": True,
         }
+        if payload.get("numerical_diagnostic") is not None:
+            for name in ("diagnostic", "stages", "mesh_audit"):
+                if (directory / f"{name}.json").exists():
+                    result[name] = public._read(directory / f"{name}.json")
+            result["actual_residual_calls"] = None  # in-flight work is not a zero
         if payload.get("reuse_diagnostic") is not None:
             # Recover metadata without retrying a consumed native/screen budget.
             attempts = []

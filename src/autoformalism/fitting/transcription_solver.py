@@ -18,6 +18,7 @@ import numpy as np
 
 from autoformalism.fitting import adaptive_mesh as mesh_tools
 from autoformalism.fitting import public_fitting as public
+from autoformalism.fitting.collocation_mesh import basis, forcing_values
 from autoformalism.fitting.coordinates import NumericalCoordinates
 from autoformalism.fitting.identifiable_campaign import SETTINGS, scale_for
 from autoformalism.fitting.sensitivity_probe import SymbolicODE, SymbolicOracle
@@ -103,6 +104,12 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
     ):
         raise ValueError("starting parameters violate bounds")
     method = payload["method"]
+    dense_output = payload.get("collocation_dense_output", False)
+    if type(dense_output) is not bool or (dense_output and method != "collocation"):
+        raise ValueError("dense output is an explicit collocation option")
+    hessian = payload.get("hessian_approximation")
+    if hessian not in {None, "exact", "limited-memory"}:
+        raise ValueError("unsupported Hessian approximation")
     if method not in {"shooting", "collocation"}:
         raise ValueError("unknown transcription")
     chunks = payload.get("reuse_chunks", 1)
@@ -147,10 +154,22 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
             guess[0], system.initial_for(row, start), rtol=0, atol=1e-10
         ):
             raise ValueError("node guess violates initial boundary")
-        if method == "collocation" and not set(row.time).issubset(set(mesh)):
+        if (
+            method == "collocation"
+            and not dense_output
+            and not set(row.time).issubset(set(mesh))
+        ):
             raise ValueError(
                 "collocation mesh must include all supplied sample/input knots"
             )
+        if dense_output:
+            values = forcing_values(system, row, row.time)
+            edges = forcing_values(system, row, np.asarray(mesh))
+            reconstructed = np.asarray([np.interp(row.time, mesh, v) for v in edges])
+            if values.size and np.max(abs(reconstructed - values)) > 1e-10 * max(
+                float(np.max(abs(values))), np.finfo(float).tiny
+            ):
+                raise ValueError("reduced mesh changes supplied input interpolation")
         forcing = trajectory_forcing(model, row)
 
         def inputs(t, forcing=forcing):
@@ -177,10 +196,16 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
                     (end - current - dt * (3 * f1 + f2) / 4) / ss,
                 ]
                 inner.append(middle)
-                # Every original sample occurs at a mesh boundary; added subnodes
-                # carry no additional observation weight.
-                if right in set(row.time):
-                    samples[float(right)] = end
+                # All supplied observations retain their original weight. With
+                # coarser state meshes, evaluate the same Radau polynomial inside
+                # an element; observations never become trajectory resets.
+                for t in row.time[
+                    np.searchsorted(row.time, left, side="right") : np.searchsorted(
+                        row.time, right, side="right"
+                    )
+                ]:
+                    a, b, c = basis((t - left) / dt)
+                    samples[float(t)] = a * current + b * middle + c * end
                 score = ca.mmax(ca.fabs(ca.vertcat(*local_defects)))
             else:
                 local = current
@@ -261,7 +286,8 @@ def solve(payload: dict, directory: Path) -> dict:
     iteration_offset = 0
 
     def snapshot(iteration, value):
-        nonlocal pool, last_iteration, last_checkpoint_time
+        nonlocal pool, last_iteration, last_checkpoint_time, checkpoint_seconds
+        snapshot_started = monotonic()
         vector = np.asarray(value(theta)).ravel()
         loss = float(value(objective))
         defect = float(np.max(abs(np.asarray(value(all_defects)))))
@@ -323,6 +349,7 @@ def solve(payload: dict, directory: Path) -> dict:
         public._write(directory / "checkpoints.json", {"pool": pool, "latest": record})
         last_iteration = iteration
         last_checkpoint_time = monotonic()
+        checkpoint_seconds += last_checkpoint_time - snapshot_started
 
     def callback(iteration):
         if (
@@ -331,10 +358,23 @@ def solve(payload: dict, directory: Path) -> dict:
             or monotonic() - last_checkpoint_time >= 1
         ):
             snapshot(iteration_offset + iteration, opti.debug.value)
+            if payload.get("profile_derivatives"):
+                public._write(
+                    directory / "solver_progress.json",
+                    {
+                        "status": "iterating",
+                        "iteration": int(iteration_offset + iteration),
+                        "elapsed_seconds": monotonic() - begun,
+                        "checkpoint_seconds": checkpoint_seconds,
+                    },
+                )
         if monotonic() >= deadline:
             raise TimeoutError("native NLP deadline reached")
 
     opti.callback(callback)
+    hessian = payload.get("hessian_approximation") or (
+        "limited-memory" if system.has_piecewise else "exact"
+    )
     # Repeated solves retain this Opti graph and its solver instance. Reuse is
     # within one worker/mesh, not a serialized solver or cross-job state resume.
     native_options = {
@@ -342,13 +382,13 @@ def solve(payload: dict, directory: Path) -> dict:
         "max_iter": 400 // chunks,
         "tol": 1e-8,
         "max_cpu_time": max(0.01, deadline - monotonic()),
-        "hessian_approximation": "limited-memory" if system.has_piecewise else "exact",
+        "hessian_approximation": hessian,
     }
     if chunks > 1:
         native_options["warm_start_init_point"] = "yes"
     opti.solver(
         "ipopt",
-        {"print_time": False},
+        {"print_time": False, "record_time": True},
         native_options,
     )
     public._write(
@@ -361,14 +401,29 @@ def solve(payload: dict, directory: Path) -> dict:
             "method": method,
             "graph_builds": 1,
             "maximum_solve_chunks": chunks,
+            "hessian_approximation": hessian,
+            "collocation_dense_output": payload.get("collocation_dense_output", False),
             "iterations_per_chunk": 400 // chunks,
         },
     )
+    if payload.get("profile_derivatives"):
+        from autoformalism.fitting.transcription_profile import profile
+
+        profile(problem, directory, hessian=hessian)
     success, message, chunk_records, evaluation_counts = False, "", [], {}
+    checkpoint_seconds = 0.0
     for chunk in range(chunks):
         if monotonic() >= deadline:
             break
         chunk_start = monotonic()
+        public._write(
+            directory / "solver_progress.json",
+            {
+                "status": "entering_solve",
+                "hessian_approximation": hessian,
+                "seconds_before_solve": monotonic() - begun,
+            },
+        )
         try:
             solved = opti.solve()
             success = True
@@ -390,6 +445,12 @@ def solve(payload: dict, directory: Path) -> dict:
                 "return_status": stats.get("return_status"),
                 "iterations": int(stats.get("iter_count", 0)),
                 "seconds": monotonic() - chunk_start,
+                "native_function_statistics": {
+                    k: v
+                    for k, v in stats.items()
+                    if k.startswith(("t_wall_", "t_proc_", "n_call_"))
+                },
+                "checkpoint_seconds_cumulative": checkpoint_seconds,
             }
         )
         public._write(directory / "solve_chunks.json", chunk_records)
