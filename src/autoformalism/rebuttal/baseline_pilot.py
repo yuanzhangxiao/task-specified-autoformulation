@@ -177,7 +177,8 @@ class BaselinePilotTask(BaseModel):
     comparison_role: str
     platform: Literal["aces_cpu", "delta_cpu", "aces_h100x2"]
     benchmark_id: str
-    tier: Literal["easy", "medium", "hard"]
+    # Phase B cells are easy, medium or hard; Phase C basins have one fixed design.
+    tier: Literal["easy", "medium", "hard", "fixed"]
     repetition: int = Field(ge=0)
     cpus_per_task: int = Field(ge=1)
     gpu_type: Literal["none", "h100"]

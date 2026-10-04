@@ -141,3 +141,112 @@ def test_receipt_never_lists_evaluator_files(tmp_path):
 )
 def test_tier_comes_from_the_cell_name(name, tier):
     assert pcb.tier_of(name) == tier
+
+
+# The frozen Phase C classical matrix.
+
+from pathlib import Path  # noqa: E402
+
+from autoformalism.rebuttal import phase_c_baseline_plan as plan_module  # noqa: E402
+from autoformalism.rebuttal.baseline_pilot import BaselinePilotTask  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[1]
+SHIPPED = REPO / "configs" / "phase_c_public_baseline_delta_cpu_v1.json"
+PHASE_B = REPO / "configs" / "phase_b_public_baseline_full_delta_cpu_v1.json"
+
+
+def _plan_payload(release, **overrides):
+    payload = json.loads(SHIPPED.read_text())
+    prompt = release / "public" / CELL / "proposer_prompt.txt"
+    payload["release_summary_sha256"] = hashlib.sha256(
+        (release / "summary.json").read_bytes()
+    ).hexdigest()
+    payload["cells"] = [
+        {
+            "benchmark_id": CELL,
+            "tier": "fixed",
+            "public_prompt_sha256": hashlib.sha256(prompt.read_bytes()).hexdigest(),
+        }
+    ]
+    return {**payload, **overrides}
+
+
+def _write_plan(path, payload):
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_shipped_plan_is_the_roster_with_phase_b_settings():
+    plan = plan_module.load_phase_c_baseline_plan(SHIPPED)
+    assert [cell.benchmark_id for cell in plan.cells] == list(pcb.ROSTER)
+    assert plan.repetitions == (0, 1)
+    phase_b = {
+        item["method"]: item for item in json.loads(PHASE_B.read_text())["methods"]
+    }
+    for method in plan.methods:
+        assert method.model_dump(mode="json") == phase_b[method.method]
+    tasks = plan_module.build_phase_c_baseline_tasks(plan)
+    assert len(tasks) == 2 * 8 * 2
+    assert [task.task_index for task in tasks] == list(range(len(tasks)))
+    assert {task.tier for task in tasks if "detention" in task.benchmark_id} == {
+        "fixed"
+    }
+
+
+def test_freeze_writes_a_task_ledger_the_summarizer_reads(tmp_path):
+    release = _release(tmp_path / "release")
+    config = _write_plan(tmp_path / "plan.json", _plan_payload(release))
+    manifest = plan_module.freeze_phase_c_baseline_plan(
+        config, tmp_path / "frozen", release
+    )
+    assert manifest["task_count"] == 4
+    assert manifest["tasks_by_method"] == {"sindy": 2, "pysr": 2}
+    lines = (tmp_path / "frozen" / "task_plan.jsonl").read_text().splitlines()
+    tasks = [BaselinePilotTask.model_validate_json(line) for line in lines]
+    assert {(task.method, task.tier, task.repetition) for task in tasks} == {
+        ("sindy", "fixed", 0), ("sindy", "fixed", 1),
+        ("pysr", "fixed", 0), ("pysr", "fixed", 1),
+    }
+    # Freezing again with the same inputs is a no-op, not a second plan.
+    assert plan_module.freeze_phase_c_baseline_plan(
+        config, tmp_path / "frozen", release
+    ) == manifest
+
+
+def test_freeze_refuses_a_different_release(tmp_path):
+    release = _release(tmp_path / "release")
+    payload = _plan_payload(release, release_summary_sha256="0" * 64)
+    config = _write_plan(tmp_path / "plan.json", payload)
+    with pytest.raises(ValueError, match="release receipt differs"):
+        plan_module.freeze_phase_c_baseline_plan(config, tmp_path / "frozen", release)
+    assert not (tmp_path / "frozen" / "task_plan.jsonl").exists()
+
+
+def test_freeze_refuses_a_different_prompt(tmp_path):
+    release = _release(tmp_path / "release")
+    payload = _plan_payload(release)
+    payload["cells"][0]["public_prompt_sha256"] = "0" * 64
+    config = _write_plan(tmp_path / "plan.json", payload)
+    with pytest.raises(ValueError, match="public prompt differs"):
+        plan_module.freeze_phase_c_baseline_plan(config, tmp_path / "frozen", release)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            lambda p: p["cells"][0].update(
+                benchmark_id="phase_c_detention_coupled_noise1_v1"
+            ),
+            "outside the Phase C roster",
+        ),
+        (lambda p: p["cells"][0].update(tier="hard"), "wrong tier"),
+        (lambda p: p["methods"][0].update(platform="aces_cpu"), "Delta CPUs only"),
+        (lambda p: p.update(repetitions=[0, 0]), "unique and nonnegative"),
+    ],
+)
+def test_plan_refuses_cells_tiers_and_methods_it_does_not_cover(change, message):
+    payload = json.loads(SHIPPED.read_text())
+    change(payload)
+    with pytest.raises(ValueError, match=message):
+        plan_module.PhaseCBaselinePlan.model_validate(payload)
