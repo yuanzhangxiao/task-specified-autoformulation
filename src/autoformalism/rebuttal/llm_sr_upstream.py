@@ -470,6 +470,13 @@ def build_specification(
     """
     if target not in channels:
         raise ValueError(f"target {target!r} is not among the channels")
+    if len(channels) + 1 > max_params:
+        # The starting skeleton spends one parameter per channel plus an
+        # intercept; past their cap it would index a parameter that is absent.
+        raise ValueError(
+            f"{len(channels)} channels need {len(channels) + 1} starting "
+            f"parameters, beyond LLM-SR's {max_params}"
+        )
     variables = [specification_variable(name, index)
                  for index, name in enumerate(channels)]
     if len(set(variables)) != len(variables):

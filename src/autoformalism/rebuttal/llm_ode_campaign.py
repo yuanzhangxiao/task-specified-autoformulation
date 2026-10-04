@@ -5,7 +5,7 @@ trajectories, and upstream's own `System` evaluates the assembled candidates.
 This module supplies data, applies the declared prompt adaptation, reproduces
 upstream's selection rule, and seals the result.
 
-Three accommodations are forced by the benchmark and are declared in the plan
+Four accommodations are forced by the benchmark and are declared in the plan
 rather than hidden here:
 
 * Upstream's driver builds its data by integrating a ground-truth equation it
@@ -18,6 +18,12 @@ rather than hidden here:
 * Upstream's selection hands its evaluator the sealed test trajectory. Ours
   cannot see it, so selection uses the same rule -- product of the per-variable
   Pareto frontiers, ranked by rolled-out error -- over development data only.
+* Upstream's systems are autonomous: every variable is a state and nothing
+  forces them. A cell supplies auxiliaries, measured inputs and fixed
+  covariates over the horizon, so all of them are variables to the search
+  and only the targets are searched. Withholding the inputs would make a meal
+  or an inflow unrepresentable, which would measure this adapter rather than
+  the method; every other baseline receives them.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from autoformalism.baselines.models import BaselineDevelopmentResult
-from autoformalism.data import BenchmarkRegistry, DatasetSplit
+from autoformalism.data import BenchmarkRegistry, DatasetSplit, Trajectory
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.baseline_validation import load_public
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
@@ -89,12 +95,24 @@ class CellArrays:
             raise ValueError("require at least one trajectory")
 
 
+def _channel_names(trajectory: Trajectory) -> tuple[str, ...]:
+    return (
+        *trajectory.targets,
+        *trajectory.auxiliaries,
+        *trajectory.external_inputs,
+        *trajectory.fixed_covariates,
+    )
+
+
 def observed_channels(split: DatasetSplit) -> tuple[str, ...]:
-    """Name the channels upstream will treat as system variables."""
-    first = split.trajectories[0]
-    channels = (*first.targets, *first.auxiliaries)
+    """Name the channels upstream will treat as system variables.
+
+    Targets first, then everything supplied over the horizon: auxiliaries,
+    measured inputs and fixed covariates, in the order the data declares them.
+    """
+    channels = _channel_names(split.trajectories[0])
     for trajectory in split.trajectories:
-        if (*trajectory.targets, *trajectory.auxiliaries) != channels:
+        if _channel_names(trajectory) != channels:
             raise ValueError("channel identities differ across trajectories")
     return channels
 
@@ -135,11 +153,20 @@ def cell_arrays(split: DatasetSplit) -> CellArrays:
     bounds: list[tuple[int, int]] = []
     start = 0
     for trajectory in split.trajectories:
-        measured = {**trajectory.targets, **trajectory.auxiliaries}
+        time = np.asarray(trajectory.time, dtype=float)
+        measured = {
+            **trajectory.targets,
+            **trajectory.auxiliaries,
+            **trajectory.external_inputs,
+            # A covariate is constant over its trajectory: a constant column.
+            **{
+                name: np.full(time.shape, float(value))
+                for name, value in trajectory.fixed_covariates.items()
+            },
+        }
         block = np.column_stack(
             [np.asarray(measured[name], float) for name in channels]
         )
-        time = np.asarray(trajectory.time, dtype=float)
         steps = np.diff(time)
         if not np.allclose(steps, steps[0]):
             raise ValueError("fourth-order differences require a uniform grid")
@@ -184,6 +211,32 @@ def specification_block(
 SPECIFICATION_SECTIONS = ("A. Task specification", "B. Available data")
 SPECIFICATION_END = "C. Modeling requirements"
 
+#: The detention-basin prompts are laid out differently, and every section
+#: before E is science: the task, the observations, the surveyed geometry and
+#: the required mechanisms. E is the evaluation protocol, which is withheld
+#: just as the other layout withholds its requirements.
+BASIN_SPECIFICATION_SECTIONS = (
+    "## A. Scientific task",
+    "## B. Observations and known forcing",
+    "## C. Surveyed geometry and preparation",
+    "## D. Required mechanisms",
+)
+BASIN_SPECIFICATION_END = "## E. Evaluation boundaries"
+
+#: The independent-basin negative control is unsectioned. Its paragraphs are
+#: the task, the required mechanisms and the observations, then a closing
+#: paragraph of evaluation protocol -- the same content as the basin section E,
+#: and withheld for the same reason.
+INDEPENDENT_BASIN_SECTIONS = ("# Independent stormwater basins",)
+INDEPENDENT_BASIN_END = "Fit using training only."
+
+#: Each released layout: the sections passed on, then the heading ending them.
+SPECIFICATION_LAYOUTS = (
+    (SPECIFICATION_SECTIONS, SPECIFICATION_END),
+    (BASIN_SPECIFICATION_SECTIONS, BASIN_SPECIFICATION_END),
+    (INDEPENDENT_BASIN_SECTIONS, INDEPENDENT_BASIN_END),
+)
+
 
 def public_prompt_text(root: Path, benchmark: str, tier: str) -> str:
     """Read the rendered public proposer prompt for one cell."""
@@ -200,15 +253,33 @@ def public_task_specification(prompt: str) -> str:
     Pasting the whole prompt would hand a vendored baseline our modelling
     requirements, our response format and our restrictions. Taking a prefix by
     position would silently pass everything if the prompt were ever reordered,
-    so each boundary is required to be present.
+    so each boundary is required to be present, once, and in order.
     """
-    for heading in (*SPECIFICATION_SECTIONS, SPECIFICATION_END):
-        if heading not in prompt:
+    layouts = [
+        layout for layout in SPECIFICATION_LAYOUTS if layout[0][0] in prompt
+    ]
+    if len(layouts) != 1:
+        raise ValueError(
+            "public prompt matches no single known section layout; the "
+            "specification boundary must be re-established before it can be "
+            "supplied"
+        )
+    sections, end = layouts[0]
+    positions = []
+    for heading in (*sections, end):
+        if prompt.count(heading) != 1:
             raise ValueError(
-                f"public prompt has no {heading!r} section; the specification "
-                "boundary must be re-established before it can be supplied"
+                f"public prompt has no single {heading!r} section; the "
+                "specification boundary must be re-established before it can "
+                "be supplied"
             )
-    return prompt[: prompt.index(SPECIFICATION_END)].strip()
+        positions.append(prompt.index(heading))
+    if positions != sorted(positions):
+        raise ValueError(
+            "public prompt sections are out of order; the specification "
+            "boundary must be re-established before it can be supplied"
+        )
+    return prompt[: prompt.index(end)].strip()
 
 
 def select_system(

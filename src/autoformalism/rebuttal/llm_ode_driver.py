@@ -15,10 +15,11 @@ development data only.
 
 Two departures from upstream are deliberate and declared in the campaign plan:
 
-* Upstream searches every state variable. Here the auxiliary channels are
-  supplied over the horizon and only the targets are predicted, so only the
-  targets are searched. Searching the rest would spend calls on equations the
-  evaluation never reads.
+* Upstream searches every state variable. Here the auxiliaries, measured
+  inputs and fixed covariates are supplied over the horizon and only the
+  targets are predicted, so only the targets are searched. The supplied
+  channels remain variables every equation may use; searching their own
+  equations would spend calls on equations the evaluation never reads.
 * Upstream selects by rolling out its own ``System`` and sorting on
   ``mse_train_val``. Its ``System`` integrates every variable as a state, which
   would reinterpret our supplied auxiliaries as free states. Selection here

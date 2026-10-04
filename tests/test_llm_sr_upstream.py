@@ -218,3 +218,15 @@ def test_channel_names_that_collide_as_identifiers_are_refused() -> None:
 
     with pytest.raises(ValueError, match="collide as identifiers"):
         build_specification("x", ("a b", "a-b"), "a b")
+
+
+def test_more_channels_than_the_starting_parameters_cover_is_refused() -> None:
+    """Supplied inputs widen the signature; the skeleton must still be valid."""
+    from autoformalism.rebuttal.llm_sr_upstream import build_specification
+
+    channels = tuple(f"c{index}" for index in range(10))
+    with pytest.raises(ValueError, match="starting parameters"):
+        build_specification("A task.", channels, "c0")
+    nine = channels[:9]
+    specification, _ = build_specification("A task.", nine, "c0")
+    assert "params[9]" in specification

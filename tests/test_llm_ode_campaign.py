@@ -334,3 +334,112 @@ def test_the_report_persists_a_summary_with_coverage_before_scores(
     assert value["not_started"] == 3
     assert value["terminal_success"] == 0
     assert value["frozen_models"] == 0
+
+
+def test_measured_inputs_and_covariates_are_variables_an_equation_can_use() -> None:
+    """A meal or an inflow must be usable, as it is by every other baseline.
+
+    Upstream's systems are autonomous, so the adapter once passed only targets
+    and auxiliaries and every forced mechanism was unrepresentable.
+    """
+    from autoformalism.baselines.core import baseline_validation_context
+    from autoformalism.data.models import DevelopmentDataset, TierRoles
+    from autoformalism.rebuttal.llm_ode_driver import development_rollout_error
+    from autoformalism.rebuttal.llm_ode_upstream import to_state_equations
+
+    def trajectory(identifier: str, start: float) -> Trajectory:
+        time = np.linspace(0.0, 3.0, 31)
+        return Trajectory(
+            trajectory_id=identifier,
+            time=time,
+            targets={"h": start * np.exp(-time)},
+            auxiliaries={},
+            external_inputs={"inflow": np.zeros_like(time)},
+            fixed_covariates={"area": 2.0},
+            derivatives={},
+        )
+
+    train = DatasetSplit(
+        SplitName.TRAIN, (trajectory("a", 1.0), trajectory("b", 2.0)), "train"
+    )
+    validation = DatasetSplit(SplitName.VALIDATION, (trajectory("c", 1.5),), "val")
+    arrays = cell_arrays(train)
+    assert arrays.channels == ("h", "inflow", "area")
+    assert np.all(arrays.states[:, 2] == 2.0)
+    context = baseline_validation_context(
+        DevelopmentDataset(
+            benchmark_id="toy",
+            tier="easy",
+            roles=TierRoles(targets=("h",), auxiliaries=()),
+            train=train,
+            validation=validation,
+        ),
+        SimpleNamespace(
+            external_inputs=("inflow",),
+            fixed_covariates=("area",),
+            one_step_target_history=False,
+        ),
+    )
+    equations = to_state_equations(("-x_0*x_2/2.0 + x_1",), arrays.channels, ("h",))
+    assert equations == {"h": "-h*area/2.0 + inflow"}
+    assert development_rollout_error(equations, context, train, validation) < 1e-4
+
+
+def test_basin_prompts_pass_the_science_and_withhold_the_protocol() -> None:
+    """Basin sections A-D are all science; E is the evaluation protocol."""
+    from autoformalism.rebuttal.llm_ode_campaign import public_task_specification
+
+    prompt = "\n".join(
+        [
+            "# Stormwater detention basins",
+            "## A. Scientific task",
+            "Model the downstream level.",
+            "## B. Observations and known forcing",
+            "Target h_down.",
+            "## C. Surveyed geometry and preparation",
+            "Covariates area_up and initial_up.",
+            "## D. Required mechanisms",
+            "- Represent threshold-dependent overflow.",
+            "## E. Evaluation boundaries",
+            "Fit parameters using training only.",
+        ]
+    )
+    specification = public_task_specification(prompt)
+    for passed in ("downstream level", "Target h_down", "initial_up", "overflow"):
+        assert passed in specification
+    assert "Evaluation boundaries" not in specification
+    assert "training only" not in specification
+
+
+def test_the_unsectioned_negative_control_withholds_its_protocol_paragraph() -> None:
+    from autoformalism.rebuttal.llm_ode_campaign import public_task_specification
+
+    prompt = "\n\n".join(
+        [
+            "# Independent stormwater basins - negative control v1",
+            "Predict downstream basin depth `h_down` from `inflow_down`.",
+            "Represent downstream accumulation and a threshold outlet.",
+            "Fixed covariates `area_up` and `initial_up` are surveyed geometry.",
+            "Fit using training only. Validation-specific fitting is forbidden.",
+        ]
+    )
+    specification = public_task_specification(prompt)
+    assert "threshold outlet" in specification
+    assert "initial_up" in specification
+    assert "training only" not in specification
+
+
+def test_a_basin_prompt_with_sections_out_of_order_is_refused() -> None:
+    from autoformalism.rebuttal.llm_ode_campaign import public_task_specification
+
+    prompt = "\n".join(
+        [
+            "## A. Scientific task",
+            "## B. Observations and known forcing",
+            "## E. Evaluation boundaries",
+            "## C. Surveyed geometry and preparation",
+            "## D. Required mechanisms",
+        ]
+    )
+    with pytest.raises(ValueError, match="out of order"):
+        public_task_specification(prompt)
