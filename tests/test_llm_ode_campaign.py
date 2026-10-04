@@ -443,3 +443,46 @@ def test_a_basin_prompt_with_sections_out_of_order_is_refused() -> None:
     )
     with pytest.raises(ValueError, match="out of order"):
         public_task_specification(prompt)
+
+
+def test_a_real_power_and_a_sympy_function_are_scored_not_refused() -> None:
+    """Upstream fits exponents and SymPy prints cos; both now roll out."""
+    from autoformalism.baselines.core import baseline_validation_context
+    from autoformalism.data.models import DevelopmentDataset, TierRoles
+    from autoformalism.rebuttal.llm_ode_driver import development_rollout_error
+    from autoformalism.rebuttal.llm_ode_upstream import to_state_equations
+
+    def trajectory(identifier: str, start: float) -> Trajectory:
+        time = np.linspace(0.0, 3.0, 31)
+        return Trajectory(
+            trajectory_id=identifier,
+            time=time,
+            targets={"h": start * np.exp(-time)},
+            auxiliaries={},
+            external_inputs={"inflow": np.zeros_like(time)},
+            fixed_covariates={},
+            derivatives={},
+        )
+
+    train = DatasetSplit(
+        SplitName.TRAIN, (trajectory("a", 1.0), trajectory("b", 2.0)), "train"
+    )
+    validation = DatasetSplit(SplitName.VALIDATION, (trajectory("c", 1.5),), "val")
+    context = baseline_validation_context(
+        DevelopmentDataset(
+            benchmark_id="toy",
+            tier="easy",
+            roles=TierRoles(targets=("h",), auxiliaries=()),
+            train=train,
+            validation=validation,
+        ),
+        SimpleNamespace(
+            external_inputs=("inflow",),
+            fixed_covariates=(),
+            one_step_target_history=False,
+        ),
+    )
+    equations = to_state_equations(
+        ("-(x_0**0.5)**2.0*cos(x_1) + x_1",), ("h", "inflow"), ("h",)
+    )
+    assert development_rollout_error(equations, context, train, validation) < 1e-4

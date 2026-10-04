@@ -8,28 +8,36 @@ selected system into the restricted grammar the frozen evaluator parses.
 Upstream offers `sin` to its proposer, and the evaluator now approves it: more
 than half the Pareto frontier was being discarded for using an operator the
 method was explicitly invited to use, which measured our grammar rather than
-the method. A selected equation can still fall outside the grammar for other
-reasons, and is then recorded with the offending operator named.
+the method. The same reasoning now covers everything SymPy can print: an
+external baseline is read with the baseline grammar, which admits real
+exponents and SymPy's and numpy's elementwise functions. A selected equation
+can still fall outside it -- a comparison, an undefined name -- and is then
+recorded with the offending construct named.
 """
 
 from __future__ import annotations
 
 import ast
+import math
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
+from autoformalism.expressions.parser import BASELINE_FUNCTION_ARITY
 
-#: Upstream's SYSTEM_TEMPLATE offers +, -, *, **, /, sin, log, exp and abs.
-#: Every function is in our approved set. The operator ``**`` is not, in
-#: full: upstream fits every constant, exponents included, while the grammar
-#: accepts only integer exponents, so ``x**0.73`` is refused when the system
-#: is compiled and counted under the refusal's diagnostic code. Detection is
-#: computed from the parsed equation rather than from this tuple, so a future
-#: divergence is caught by measurement and not by this comment.
+#: Upstream's SYSTEM_TEMPLATE offers +, -, *, **, /, sin, log, exp and abs,
+#: and fits every constant, exponents included. The baseline grammar admits all
+#: of it, real exponents too. Detection is computed from the parsed equation
+#: rather than from this tuple, so a future divergence is caught by measurement
+#: and not by this comment.
 UNAPPROVED_UPSTREAM_FUNCTIONS: tuple[str, ...] = ()
+
+#: SymPy prints these constants by name. In upstream's variable space every
+#: variable is ``x_<i>``, so a bare ``E`` or ``pi`` can only be the constant;
+#: it is written out before channels are renamed, since a channel may itself
+#: be called ``E``.
+SYMPY_CONSTANTS = {"E": math.e, "pi": math.pi}
 
 #: SymPy prints some approved operators with its own spelling: an equation
 #: containing ``abs`` comes back as ``Abs``. Renaming these before the grammar
@@ -107,7 +115,7 @@ def unapproved_functions(equation: str) -> tuple[str, ...]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
-    return tuple(sorted(called - set(APPROVED_FUNCTION_ARITY)))
+    return tuple(sorted(called - set(BASELINE_FUNCTION_ARITY)))
 
 
 def substitute_channels(equation: str, channels: tuple[str, ...]) -> str:
@@ -119,6 +127,27 @@ def substitute_channels(equation: str, channels: tuple[str, ...]) -> str:
         return channels[index]
 
     return re.sub(r"\bx_(\d+)\b", replace, equation)
+
+
+class _ConstantWriter(ast.NodeTransformer):
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        if node.id in SYMPY_CONSTANTS:
+            return ast.copy_location(ast.Constant(SYMPY_CONSTANTS[node.id]), node)
+        return node
+
+
+def write_out_constants(equation: str) -> str:
+    """Replace SymPy's named constants by their values; leave all else as is."""
+    try:
+        tree = ast.parse(equation, mode="eval")
+    except SyntaxError as exc:
+        raise InexpressibleEquation(equation, ("unparsable",)) from exc
+    if not any(
+        isinstance(node, ast.Name) and node.id in SYMPY_CONSTANTS
+        for node in ast.walk(tree)
+    ):
+        return equation
+    return ast.unparse(_ConstantWriter().visit(tree))
 
 
 def normalize_printed_functions(equation: str) -> str:
@@ -139,7 +168,7 @@ def to_state_equations(
     equations: dict[str, str] = {}
     for target, equation in zip(targets, selected, strict=True):
         renamed = normalize_printed_functions(
-            substitute_channels(str(equation), channels)
+            substitute_channels(write_out_constants(str(equation)), channels)
         )
         unapproved = unapproved_functions(renamed)
         if unapproved:

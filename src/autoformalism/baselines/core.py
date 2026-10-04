@@ -19,7 +19,11 @@ from autoformalism.execution import (
     _development_forcing_bounds,
     _numeric_declared_channels,
 )
-from autoformalism.expressions import ValidationContext, compile_candidate
+from autoformalism.expressions import (
+    ValidationContext,
+    baseline_validator,
+    compile_candidate,
+)
 from autoformalism.fitting import EvaluationMetrics, evaluate_fitted_candidate
 from autoformalism.schemas import CandidateModel
 
@@ -199,7 +203,7 @@ def evaluate_equations(
 ) -> EvaluationMetrics:
     """Compile untrusted equations and evaluate causal one-step rollouts."""
     candidate = candidate_from_equations(equations, context, identifier=identifier)
-    compiled = compile_candidate(candidate, context)
+    compiled = compile_candidate(candidate, context, validator=baseline_validator())
     _, metrics = evaluate_fitted_candidate(
         compiled,
         split,

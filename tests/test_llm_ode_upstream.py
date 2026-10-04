@@ -30,16 +30,27 @@ def test_a_variable_beyond_the_channels_is_refused() -> None:
         substitute_channels("x_0 + x_5", ("G", "I"))
 
 
-def test_every_operator_upstream_advertises_is_now_approved() -> None:
+def test_every_function_sympy_can_print_is_read() -> None:
     """More than half their frontier was discarded for using `sin`.
 
-    Their prompt invites the proposer to use it, so rejecting it measured our
-    grammar rather than the method. It is approved now; `cos` is not, because
-    nothing upstream offers it.
+    Rejecting what the method may write measured our grammar rather than the
+    method, so the baseline grammar reads every elementwise function SymPy and
+    numpy offer. A name nothing defines is still named.
     """
     assert unapproved_functions("exp(G) + log(I) + abs(G) + tanh(I)") == ()
-    assert unapproved_functions("sin(G) * 2.0") == ()
-    assert unapproved_functions("sin(G) + cos(I)") == ("cos",)
+    assert unapproved_functions("sin(G) + cos(I) + atan(G) + Heaviside(I)") == ()
+    assert unapproved_functions("sin(G) + besselj(I)") == ("besselj",)
+
+
+def test_sympy_constants_are_written_out_before_channels_are_named() -> None:
+    """A Dalla Man channel is called E; SymPy's E is Euler's number."""
+    equations = to_state_equations(
+        ("-x_0*E + pi*x_1**0.5",), ("G", "E"), ("G",)
+    )
+    expression = equations["G"]
+    assert "2.718281828459045" in expression
+    assert "3.141592653589793" in expression
+    assert "E ** 0.5" in expression
 
 
 def test_a_selected_system_is_expressed_per_target() -> None:
@@ -57,9 +68,9 @@ def test_a_sine_equation_is_now_expressed_rather_than_refused() -> None:
 def test_an_equation_outside_the_grammar_still_names_its_operator() -> None:
     """The mechanism stays, so a future divergence is measured not assumed."""
     with pytest.raises(InexpressibleEquation) as caught:
-        to_state_equations(("cos(x_0) * x_1",), ("G", "I"), ("G",))
-    assert caught.value.functions == ("cos",)
-    assert "cos(G)" in caught.value.equation
+        to_state_equations(("besselj(x_0) * x_1",), ("G", "I"), ("G",))
+    assert caught.value.functions == ("besselj",)
+    assert "besselj(G)" in caught.value.equation
 
 
 def test_one_equation_is_required_per_searched_target() -> None:

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import ast
 import copy
+import math
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from autoformalism.data import DatasetSplit, Trajectory
-from autoformalism.expressions import RestrictedParser
+from autoformalism.expressions.parser import baseline_parser
 from autoformalism.schemas import CandidateModel, ParameterScope, StateKind
 
 
@@ -64,7 +65,7 @@ def validate_native_candidate(
         *process_names,
         "t",
     }
-    parser = RestrictedParser()
+    parser = baseline_parser()
     available = declared - set(process_names)
     for process in _ordered_processes(candidate, available):
         available.add(process.name)
@@ -287,7 +288,7 @@ def _predict_trajectory(candidate, trajectory: Trajectory, parameters, torch):
             for name, value in parameters.items()
         }
     )
-    parser = RestrictedParser()
+    parser = baseline_parser()
     for process in _ordered_processes(candidate, set(environment)):
         tree = parser.parse(
             process.expression, location=f"process:{process.name}"
@@ -320,7 +321,7 @@ def _predict_trajectory(candidate, trajectory: Trajectory, parameters, torch):
 
 def _ordered_processes(candidate: CandidateModel, available: set[str]):
     """Topologically order algebraics without executing proposer-generated text."""
-    parser = RestrictedParser()
+    parser = baseline_parser()
     remaining = list(candidate.processes)
     ordered = []
     while remaining:
@@ -374,23 +375,128 @@ def _evaluate(node: ast.AST, environment: dict[str, Any], torch):
             return left**right
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         values = [_evaluate(argument, environment, torch) for argument in node.args]
-        functions = {
-            "abs": torch.abs,
-            "exp": torch.exp,
-            "log": torch.log,
-            "sigmoid": torch.sigmoid,
-            "softplus": torch.nn.functional.softplus,
-            "sqrt": torch.sqrt,
-            "tanh": torch.tanh,
-        }
-        if node.func.id in functions:
-            return functions[node.func.id](values[0])
-        reducer = torch.minimum if node.func.id == "min" else torch.maximum
-        result = values[0]
-        for value in values[1:]:
-            result = reducer(result, value)
-        return result
+        function = _functions(torch).get(node.func.id)
+        if function is None:
+            # An unlisted name used to fall through to the max reduction, so
+            # sin(x) evaluated as x. A name with no definition is an error.
+            raise NativeD3Error(f"unsupported function: {node.func.id}")
+        return function(*values)
     raise NativeD3Error(f"unsupported expression node: {type(node).__name__}")
+
+
+def _reduced(pairwise):
+    def reduced(first, *rest):
+        result = first
+        for value in rest:
+            result = pairwise(result, value)
+        return result
+
+    return reduced
+
+
+_TORCH_FUNCTIONS: dict[int, dict[str, Any]] = {}
+
+
+def _functions(backend) -> dict[str, Any]:
+    """The function table for a backend: a numpy namespace carries its own."""
+    table = getattr(backend, "array_functions", None)
+    if table is not None:
+        return table
+    if id(backend) not in _TORCH_FUNCTIONS:
+        _TORCH_FUNCTIONS[id(backend)] = _torch_functions(backend)
+    return _TORCH_FUNCTIONS[id(backend)]
+
+
+def _torch_functions(torch) -> dict[str, Any]:
+    """The baseline grammar's vocabulary as differentiable torch operations.
+
+    The approved entries are exactly the ones D3 always used. Piecewise
+    functions are written with ``where`` so that fitting can differentiate
+    through them; their gradient is zero almost everywhere, as it should be.
+    """
+    maximum, minimum = _reduced(torch.maximum), _reduced(torch.minimum)
+
+    def heaviside(value, at_zero=0.5):
+        at_zero = torch.as_tensor(at_zero, dtype=value.dtype)
+        one, zero = torch.ones_like(value), torch.zeros_like(value)
+        return torch.where(value > 0, one, torch.where(value < 0, zero, at_zero))
+
+    def gamma(value):
+        # torch has log|Gamma| only; restore the sign by reflection below zero.
+        reflected = math.pi / (
+            torch.sin(math.pi * value) * torch.exp(torch.lgamma(1.0 - value))
+        )
+        return torch.where(value > 0, torch.exp(torch.lgamma(value)), reflected)
+
+    def clip(value, low, high):
+        return torch.minimum(torch.maximum(value, low), high)
+
+    def cbrt(value):
+        return torch.sign(value) * torch.abs(value) ** (1.0 / 3.0)
+
+    table = {
+        "abs": torch.abs,
+        "exp": torch.exp,
+        "log": torch.log,
+        "sigmoid": torch.sigmoid,
+        "softplus": torch.nn.functional.softplus,
+        "sqrt": torch.sqrt,
+        "tanh": torch.tanh,
+        "sin": torch.sin,
+        "max": maximum,
+        "min": minimum,
+        "cos": torch.cos,
+        "tan": torch.tan,
+        "asin": torch.asin,
+        "acos": torch.acos,
+        "atan": torch.atan,
+        "atan2": torch.atan2,
+        "sinh": torch.sinh,
+        "cosh": torch.cosh,
+        "asinh": torch.asinh,
+        "acosh": torch.acosh,
+        "atanh": torch.atanh,
+        "exp2": torch.exp2,
+        "expm1": torch.expm1,
+        "log10": torch.log10,
+        "log2": torch.log2,
+        "log1p": torch.log1p,
+        "cbrt": cbrt,
+        "square": torch.square,
+        "reciprocal": torch.reciprocal,
+        "hypot": _reduced(torch.hypot),
+        "pow": torch.pow,
+        "power": torch.pow,
+        "sign": torch.sign,
+        "floor": torch.floor,
+        "ceil": torch.ceil,
+        "ceiling": torch.ceil,
+        "heaviside": heaviside,
+        "Heaviside": heaviside,
+        "clip": clip,
+        "mod": torch.remainder,
+        "Mod": torch.remainder,
+        "fmod": torch.fmod,
+        "erf": torch.erf,
+        "erfc": torch.erfc,
+        "gamma": gamma,
+        "lgamma": torch.lgamma,
+        "loggamma": torch.lgamma,
+        "Abs": torch.abs,
+        "absolute": torch.abs,
+        "fabs": torch.abs,
+        "Max": maximum,
+        "Min": minimum,
+        "maximum": torch.maximum,
+        "minimum": torch.minimum,
+    }
+    for alias, name in (
+        ("arcsin", "asin"), ("arccos", "acos"), ("arctan", "atan"),
+        ("arctan2", "atan2"), ("arcsinh", "asinh"), ("arccosh", "acosh"),
+        ("arctanh", "atanh"),
+    ):
+        table[alias] = table[name]
+    return table
 
 
 def _import_torch():

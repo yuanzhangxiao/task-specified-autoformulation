@@ -465,7 +465,7 @@ def test_fitted_model_evaluation_does_not_optimize_parameters(
     )
     monkeypatch.setattr(
         "autoformalism.baselines.raw_data_agent.compile_candidate",
-        lambda value, context: compiled,
+        lambda value, context, **kwargs: compiled,
     )
 
     class _Scaler:

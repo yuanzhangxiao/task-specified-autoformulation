@@ -43,6 +43,7 @@ from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import (
     ModelValidationError,
     ValidationContext,
+    baseline_validator,
     compile_candidate,
 )
 from autoformalism.fitting import FitConfig, simulate_trajectory
@@ -103,12 +104,14 @@ def development_rollout_error(
         raise ValueError("selection requires TRAIN and VALIDATION, never TEST")
     try:
         compiled = compile_candidate(
-            equation_candidate("llm_ode", equations, context), context
+            equation_candidate("llm_ode", equations, context),
+            context,
+            validator=baseline_validator(),
         )
     except ModelValidationError as exc:
-        # Upstream fits every constant, exponents included, so a frontier
-        # routinely holds `x**0.73`, which the grammar refuses. One such system
-        # used to end the task after the whole search had been paid for.
+        # The baseline grammar admits real exponents and the method's whole
+        # vocabulary; what it still refuses (a comparison, an undefined name)
+        # is counted rather than allowed to end a search already paid for.
         raise InexpressibleEquation(
             "; ".join(f"{name} = {value}" for name, value in equations.items()),
             tuple(sorted({item.code for item in exc.diagnostics})),

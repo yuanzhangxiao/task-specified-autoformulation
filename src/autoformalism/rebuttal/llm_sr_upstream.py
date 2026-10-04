@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +28,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 
-from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY
+from autoformalism.expressions.baseline_functions import NUMPY_BASELINE_FUNCTIONS
+from autoformalism.expressions.parser import BASELINE_FUNCTION_ARITY
 
 #: numpy spellings that have an approved counterpart in our grammar.
 NUMPY_EQUIVALENTS = {
@@ -41,6 +43,10 @@ NUMPY_EQUIVALENTS = {
     "maximum": "max",
     "minimum": "min",
 }
+
+#: Named constants a program may read as ``np.pi`` or ``math.e``; they are
+#: written out as numbers, which is what they are.
+NAMED_CONSTANTS = {"pi": math.pi, "e": math.e}
 
 #: Python operators the grammar accepts, mirroring the restricted parser.
 _BINARY = {
@@ -128,14 +134,21 @@ class _Inliner(ast.NodeTransformer):
                                               ctx=ast.Load()), node)
         raise InexpressibleProgram("unknown name", node.id)
 
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        """``np.pi`` becomes its value; any other attribute was refused earlier."""
+        value = _named_constant(node)
+        if value is None:
+            raise InexpressibleProgram("an attribute access", ast.unparse(node))
+        return ast.copy_location(ast.Constant(value=value), node)
+
     def visit_Call(self, node: ast.Call) -> ast.AST:
-        """Keep only calls with an approved counterpart."""
+        """Keep only calls the baseline grammar reads."""
         name = _called_name(node.func)
         if name is None:
             raise InexpressibleProgram("call is not a plain function",
                                        ast.unparse(node))
         approved = NUMPY_EQUIVALENTS.get(name, name)
-        if approved not in APPROVED_FUNCTION_ARITY:
+        if approved not in BASELINE_FUNCTION_ARITY:
             raise InexpressibleProgram("function is not approved", name)
         if node.keywords:
             raise InexpressibleProgram("call uses keyword arguments", name)
@@ -160,6 +173,17 @@ def _called_name(func: ast.expr) -> str | None:
     return None
 
 
+def _named_constant(node: ast.AST) -> float | None:
+    """The value of ``np.pi``, ``numpy.e`` or ``math.pi``; otherwise ``None``."""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in {"np", "numpy", "math"}
+    ):
+        return NAMED_CONSTANTS.get(node.attr)
+    return None
+
+
 def _check_supported(tree: ast.AST) -> None:
     """Refuse constructs with no expression equivalent, naming the construct."""
     unsupported = {
@@ -177,7 +201,9 @@ def _check_supported(tree: ast.AST) -> None:
         if isinstance(node, ast.Call) and _called_name(node.func) is not None
     }
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and id(node) in resolved_call_targets:
+        if isinstance(node, ast.Attribute) and (
+            id(node) in resolved_call_targets or _named_constant(node) is not None
+        ):
             continue
         for kind, description in unsupported.items():
             if isinstance(node, kind):
@@ -253,10 +279,17 @@ _NUMPY_FUNCTIONS = {
     "sin": np.sin,
     "sqrt": np.sqrt,
     "tanh": np.tanh,
-    "max": np.maximum,
-    "min": np.minimum,
+    # Reduced pairwise: np.maximum(a, b, c) would treat c as the output array.
+    "max": NUMPY_BASELINE_FUNCTIONS["Max"],
+    "min": NUMPY_BASELINE_FUNCTIONS["Min"],
     "sigmoid": lambda value: 1.0 / (1.0 + np.exp(-value)),
     "softplus": lambda value: np.log1p(np.exp(-np.abs(value))) + np.maximum(value, 0.0),
+    # The baseline grammar's wider vocabulary; the entries above are unchanged.
+    **{
+        name: function
+        for name, function in NUMPY_BASELINE_FUNCTIONS.items()
+        if name not in {"abs", "exp", "log", "sin", "sqrt", "tanh", "max", "min"}
+    },
 }
 
 

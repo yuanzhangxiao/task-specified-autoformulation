@@ -11,6 +11,7 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from autoformalism.expressions.baseline_functions import BASELINE_FUNCTIONS
 from autoformalism.expressions.diagnostics import RuntimeExpressionError
 from autoformalism.expressions.observability import infer_effective_observability
 from autoformalism.expressions.parser import ParsedExpression
@@ -455,14 +456,26 @@ def _walk(node: ast.AST, environment: Mapping[str, float]) -> float:
         if isinstance(node.op, ast.Div):
             return left / _guard_denominator(right)
         if isinstance(node.op, ast.Pow):
-            exponent = int(right)
-            base = _guard_denominator(left) if exponent < 0 else left
-            return base**exponent
+            return _power(left, right)
         raise AssertionError("parser admitted an unsupported binary operator")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         arguments = [_walk(argument, environment) for argument in node.args]
         return _call_function(node.func.id, arguments)
     raise AssertionError(f"parser admitted unsupported node {type(node).__name__}")
+
+
+def _power(base: float, exponent: float) -> float:
+    """Integer powers as before; real powers only where they are real.
+
+    The default grammar admits integer literal exponents alone, so it always
+    takes the first branch. Only the external-baseline grammar reaches the
+    second, where ``math.pow`` raises for a negative base, exactly where the
+    method's own numpy evaluation would have produced a NaN.
+    """
+    if float(exponent).is_integer():
+        whole = int(exponent)
+        return (_guard_denominator(base) if whole < 0 else base) ** whole
+    return math.pow(_guard_denominator(base) if exponent < 0 else base, exponent)
 
 
 def _guard_denominator(value: float) -> float:
@@ -497,6 +510,11 @@ def _call_function(name: str, arguments: list[float]) -> float:
         return exp_value / (1.0 + exp_value)
     if name == "softplus":
         return max(argument, 0.0) + math.log1p(math.exp(-abs(argument)))
+    if name in BASELINE_FUNCTIONS:  # reachable only from the baseline grammar
+        implementation = BASELINE_FUNCTIONS[name][1]
+        if implementation is None:
+            return _power(*arguments)
+        return float(implementation(*arguments))
     raise AssertionError(f"parser admitted unsupported function {name}")
 
 

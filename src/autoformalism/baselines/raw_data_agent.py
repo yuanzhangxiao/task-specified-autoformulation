@@ -19,6 +19,7 @@ from pydantic import Field, ValidationError, model_validator
 from autoformalism.data import BenchmarkSpec, DevelopmentDataset, TrainingScaler
 from autoformalism.expressions import (
     ValidationContext,
+    baseline_validator,
     compile_candidate,
     repair_protected_declarations,
 )
@@ -887,7 +888,7 @@ def evaluate_raw_agent_candidate(
 ) -> tuple[CandidateModel, tuple[str, ...], FitResult, tuple[dict[str, str], ...]]:
     """Compile and refit an agent structure without pruning or test access."""
     candidate, repairs = repair_protected_declarations(artifact.candidate, context)
-    compiled = compile_candidate(candidate, context)
+    compiled = compile_candidate(candidate, context, validator=baseline_validator())
     fit = fit_candidate(compiled, dataset.train, dataset.validation, fit_config)
     warnings = tuple(
         {
@@ -919,7 +920,7 @@ def evaluate_raw_agent_fitted_model(
     if artifact.fitted_parameter_values is None:  # defensive model invariant.
         raise ValueError("fitted model has no parameter values")
     candidate, repairs = repair_protected_declarations(artifact.candidate, context)
-    compiled = compile_candidate(candidate, context)
+    compiled = compile_candidate(candidate, context, validator=baseline_validator())
     expected = {item.name for item in compiled.validated.candidate.parameters}
     actual = set(artifact.fitted_parameter_values)
     if not expected.issubset(actual):

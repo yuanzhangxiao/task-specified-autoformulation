@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from autoformalism.expressions.parser import RestrictedParser
+from autoformalism.expressions import ModelValidationError
+from autoformalism.expressions.parser import RestrictedParser, baseline_parser
 from autoformalism.rebuttal.llm_sr_upstream import (
     InexpressibleProgram,
     convert_program,
@@ -66,7 +67,7 @@ def test_which_parameters_and_channels_were_used_is_reported() -> None:
         ("out = 0\nfor i in range(2):\n    out = out + x\nreturn out",
          "no expression equivalent"),
         ("if x > 0:\n    return x\nreturn v", "no expression equivalent"),
-        ("return np.arctan(params[0] * x)", "not approved"),
+        ("return np.besselj(params[0] * x)", "not approved"),
         ("return params[0] * z", "unknown name"),
         ("return x.T * params[0]", "attribute access"),
         ("return x.mean() * params[0]", "attribute access"),
@@ -230,3 +231,24 @@ def test_more_channels_than_the_starting_parameters_cover_is_refused() -> None:
     nine = channels[:9]
     specification, _ = build_specification("A task.", nine, "c0")
     assert "params[9]" in specification
+
+
+def test_a_real_power_law_with_named_constants_is_recovered() -> None:
+    """`params[0] * G ** params[1]` is a power law; its exponent is refitted."""
+    import numpy as np
+
+    from autoformalism.rebuttal.llm_sr_upstream import refit_parameters
+
+    body = "return params[0] * x ** params[1] + np.cos(np.pi * v) + np.arctan(v)"
+    symbolic = convert_program(body, INPUTS)
+    assert "3.141592653589793" in symbolic.expression
+    x, v = np.linspace(1.0, 3.0, 60), np.linspace(0.0, 1.0, 60)
+    target = -0.5 * x**0.7 + np.cos(np.pi * v) + np.arctan(v)
+    fitted = refit_parameters(
+        symbolic.expression, {"G": x, "I": v}, target, symbolic.used_parameters
+    )
+    assert fitted[1] == pytest.approx(0.7, abs=1e-4)
+    expression = convert_program(body, INPUTS, fitted).expression
+    baseline_parser().parse(expression, location="test")
+    with pytest.raises(ModelValidationError):
+        RestrictedParser().parse(expression, location="ours")

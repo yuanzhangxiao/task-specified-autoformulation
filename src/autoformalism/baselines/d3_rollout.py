@@ -16,7 +16,8 @@ from autoformalism.baselines.d3_native import (
     validate_native_candidate,
 )
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler, Trajectory
-from autoformalism.expressions import RestrictedParser
+from autoformalism.expressions.baseline_functions import NUMPY_BASELINE_FUNCTIONS
+from autoformalism.expressions.parser import baseline_parser
 from autoformalism.schemas import CandidateModel
 
 PROTOCOL = "d3-native-phase-b-rollout-1"
@@ -43,6 +44,21 @@ _NUMPY = SimpleNamespace(
         )
     ),
 )
+# The function table the interpreter reads. The approved entries are the ones
+# above, unchanged; `sin` and the baseline grammar's vocabulary are added.
+_NUMPY.array_functions = {
+    **NUMPY_BASELINE_FUNCTIONS,
+    "abs": _NUMPY.abs,
+    "exp": _NUMPY.exp,
+    "log": _NUMPY.log,
+    "sigmoid": _NUMPY.sigmoid,
+    "softplus": _NUMPY.nn.functional.softplus,
+    "sqrt": _NUMPY.sqrt,
+    "tanh": _NUMPY.tanh,
+    "sin": np.sin,
+    "max": NUMPY_BASELINE_FUNCTIONS["Max"],
+    "min": NUMPY_BASELINE_FUNCTIONS["Min"],
+}
 
 
 @dataclass(frozen=True)
@@ -75,7 +91,7 @@ class NativeMap:
             for value in parameters.values()
         ):
             raise ValueError("saved parameters must be finite")
-        parser = RestrictedParser()
+        parser = baseline_parser()
         available = {*observed, *inputs, *names, "t"}
         processes = tuple(
             (item.name, parser.parse(item.expression, location=item.name).tree.body)

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import ast
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 
+from autoformalism.expressions.baseline_functions import BASELINE_FUNCTIONS
 from autoformalism.expressions.diagnostics import (
     ModelValidationError,
     ValidationDiagnostic,
@@ -22,6 +24,13 @@ APPROVED_FUNCTION_ARITY: dict[str, tuple[int, int]] = {
     "softplus": (1, 1),
     "sqrt": (1, 1),
     "tanh": (1, 1),
+}
+
+#: Our approved functions plus the external baselines' wider vocabulary. Only
+#: ``baseline_parser`` admits it; the default grammar is unchanged.
+BASELINE_FUNCTION_ARITY: dict[str, tuple[int, int]] = {
+    **APPROVED_FUNCTION_ARITY,
+    **{name: arity for name, (arity, _) in BASELINE_FUNCTIONS.items()},
 }
 
 _ALLOWED_BINARY_OPERATORS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)
@@ -59,12 +68,20 @@ class RestrictedParser:
         max_depth: int = 64,
         max_literal_magnitude: float = 1e12,
         max_integer_power: int = 16,
+        functions: Mapping[str, tuple[int, int]] | None = None,
+        real_powers: bool = False,
     ) -> None:
         self.max_length = max_length
         self.max_nodes = max_nodes
         self.max_depth = max_depth
         self.max_literal_magnitude = max_literal_magnitude
         self.max_integer_power = max_integer_power
+        self.functions = dict(
+            APPROVED_FUNCTION_ARITY if functions is None else functions
+        )
+        # Any exponent expression, evaluated over the reals. Off by default:
+        # only the external-baseline grammar enables it.
+        self.real_powers = real_powers
 
     def parse(self, source: str, *, location: str) -> ParsedExpression:
         """Return a validated expression or stable diagnostics."""
@@ -91,7 +108,7 @@ class RestrictedParser:
             raise ModelValidationError(tuple(diagnostics)) from exc
         if not isinstance(parsed, ast.Expression):  # pragma: no cover
             raise AssertionError("expression parser returned an unexpected root")
-        parsed = _TimeIndexedSymbolNormalizer().visit(parsed)
+        parsed = _TimeIndexedSymbolNormalizer(self.functions).visit(parsed)
         ast.fix_missing_locations(parsed)
 
         nodes = list(ast.walk(parsed))
@@ -140,16 +157,19 @@ class RestrictedParser:
                             "only symbol reads are allowed",
                         )
                     )
+                elif node.id in self.functions and id(node) in called_function_nodes:
+                    continue
                 elif node.id in APPROVED_FUNCTION_ARITY:
-                    if id(node) not in called_function_nodes:
-                        diagnostics.append(
-                            ValidationDiagnostic(
-                                "FUNCTION_AS_VALUE",
-                                location,
-                                f"function {node.id!r} must be called",
-                            )
+                    diagnostics.append(
+                        ValidationDiagnostic(
+                            "FUNCTION_AS_VALUE",
+                            location,
+                            f"function {node.id!r} must be called",
                         )
+                    )
                 else:
+                    # The baseline vocabulary names a function only where it is
+                    # called: `gamma` is also a common rate parameter.
                     symbols.add(node.id)
             elif isinstance(node, ast.BinOp):
                 if not isinstance(node.op, _ALLOWED_BINARY_OPERATORS):
@@ -160,7 +180,7 @@ class RestrictedParser:
                             f"operator {type(node.op).__name__} is not allowed",
                         )
                     )
-                if isinstance(node.op, ast.Pow):
+                if isinstance(node.op, ast.Pow) and not self.real_powers:
                     self._validate_power(node, location, diagnostics)
             elif isinstance(node, ast.UnaryOp) and not isinstance(
                 node.op, _ALLOWED_UNARY_OPERATORS
@@ -221,7 +241,7 @@ class RestrictedParser:
             )
             return
         function_name = node.func.id
-        if function_name not in APPROVED_FUNCTION_ARITY:
+        if function_name not in self.functions:
             diagnostics.append(
                 ValidationDiagnostic(
                     "UNSUPPORTED_FUNCTION",
@@ -238,7 +258,7 @@ class RestrictedParser:
                     "keyword arguments are not allowed",
                 )
             )
-        minimum, maximum = APPROVED_FUNCTION_ARITY[function_name]
+        minimum, maximum = self.functions[function_name]
         if not minimum <= len(node.args) <= maximum:
             diagnostics.append(
                 ValidationDiagnostic(
@@ -303,13 +323,16 @@ class RestrictedParser:
 class _TimeIndexedSymbolNormalizer(ast.NodeTransformer):
     """Normalize conventional ``symbol(t)`` notation into a symbol read."""
 
+    def __init__(self, functions: Mapping[str, tuple[int, int]]) -> None:
+        self.functions = functions
+
     def visit_Call(self, node: ast.Call) -> ast.AST:
         """Rewrite only a direct non-function name called with exactly ``t``."""
         node = self.generic_visit(node)
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id not in APPROVED_FUNCTION_ARITY
+            and node.func.id not in self.functions
             and not node.keywords
             and len(node.args) == 1
             and isinstance(node.args[0], ast.Name)
@@ -317,3 +340,22 @@ class _TimeIndexedSymbolNormalizer(ast.NodeTransformer):
         ):
             return ast.copy_location(ast.Name(id=node.func.id, ctx=ast.Load()), node)
         return node
+
+
+def baseline_parser() -> RestrictedParser:
+    """The grammar an external baseline's model is read with.
+
+    Wider than ours in vocabulary, exponents and size, never in kind: still
+    a closed set of named functions over a fixed node set, with no execution.
+    Fitted constants of any finite magnitude are accepted -- an Arrhenius
+    prefactor is routinely beyond our own 1e12 bound -- and the size limits
+    are raised so that a long regression model is not refused for length.
+    """
+    return RestrictedParser(
+        max_length=65536,
+        max_nodes=8192,
+        max_depth=256,
+        max_literal_magnitude=math.inf,
+        functions=BASELINE_FUNCTION_ARITY,
+        real_powers=True,
+    )
