@@ -37,9 +37,14 @@ exercises vetoes but has mixed outcomes. Next isolate native numerical cost and
 stagnation/restart behavior on this qualified case. The implemented
 [M7 diagnostic](PHASE_C_FITTING_NUMERICAL_DIAGNOSTIC.md) adds an observation-preserving
 reduced collocation mesh, a fixed-mesh Hessian comparison, and a bounded
-continuation/restart comparison. It is ready for 36 CPU fits on Delta; results
-are pending. Existing methods remain available; there is no production fitter
-promotion.
+continuation/restart comparison. The [M7 review](PHASE_C_FITTING_M7_RESULTS_2026-10-04.md)
+verifies 36 backends and 35 finalized evaluations; one independent replay times
+out without saving a terminal record. Basin passes all 18 fits; alien rollout
+recovery remains two of three starts. Mesh reduction enables native convergence
+without accurate recovery; exact shooting Hessians and detailed checkpoint
+callbacks are measured bottlenecks. The next proposed fitting milestone reduces
+checkpoint overhead and handles replay failures explicitly. Existing methods
+remain available; there is no production fitter promotion.
 
 ## Objective and ownership
 

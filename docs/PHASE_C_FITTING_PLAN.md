@@ -493,4 +493,15 @@ restart. The same two qualified cases and three starts give 36 CPU fits under
 the conservative alien collocation mesh drops from 115,218 to 33,906 variables.
 No adaptive enlargement follows an unfinished solve. Timing profiles survive
 interruptions, and a worse restart cannot erase the verified incumbent. Earlier
-methods and production defaults remain available unchanged. Results are pending.
+methods and production defaults remain available unchanged.
+
+The [M7 results review](PHASE_C_FITTING_M7_RESULTS_2026-10-04.md) verifies all 36
+backends and 35 finalized evaluations; reduced-collocation start 2 has an uncaught
+independent-replay timeout. Basin passes all 18 fits. Alien rollout arms still
+recover two of three starts, with no recovery from the exercised restart.
+Coarsening enables three native convergences but poor recovery. Exact shooting
+Hessian evaluations cost 100--111 seconds; limited-memory increases iteration
+counts without solving recovery. Dense-collocation checkpoint diagnostics consume
+55--59% of recorded native-worker time. Next make checkpoints cheaper and replay
+failures explicit, then revisit discretization/initialization with those costs
+controlled. No production default is promoted.
