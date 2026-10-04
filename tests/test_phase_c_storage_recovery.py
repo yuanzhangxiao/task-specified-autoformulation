@@ -3,7 +3,6 @@
 import errno
 import fcntl
 import hashlib
-import json
 import tarfile
 from pathlib import Path
 
@@ -64,7 +63,10 @@ def test_recovery_reclaims_only_views_preserves_results_and_uses_no_llm(tmp_path
     assert campaign.verify(root) == plan
     now = storage.inventory(root, campaign, plan)
     assert now["derived_bytes"] < audit["derived_bytes"] / 5
-    index = json.loads((directory / "trace.json").read_text())
+    assert not (directory / "trace.json").exists()
+    index = storage.linked_trace(
+        directory, campaign.baseline.namespace(plan, plan["tasks"][0]), campaign
+    )
     assert index["policy"] == storage.POLICY
     assert len(index["calls"]) == n
     for row in index["calls"]:

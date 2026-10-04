@@ -135,6 +135,7 @@ def linked_trace(directory: Path, identity: str, campaign) -> dict:
     rows, parts = (
         [],
         [
+            f"<!-- {POLICY} -->",
             "<!doctype html><meta charset='utf-8'>"
             "<title>Construction trace index</title>",
             "<h1>Construction trace index</h1>"
@@ -166,18 +167,15 @@ def linked_trace(directory: Path, identity: str, campaign) -> dict:
         "ordering": "request_hash; step shown explicitly",
         "calls": rows,
     }
-    # Write small derived views atomically; an exhausted quota leaves no half-view.
-    for name, text in (
-        ("TRACE.html", "\n".join(parts)),
-        ("trace.json", json.dumps(value, separators=(",", ":")) + "\n"),
-    ):
-        path = directory / name
-        temporary = directory / f".{name}.recovery-{os.getpid()}.tmp"
-        try:
-            temporary.write_text(text, encoding="utf-8")
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
+    # Keep only one small index per task: quota may limit file count as well as
+    # bytes. Every exact JSON request/response remains in the original call file.
+    path = directory / "TRACE.html"
+    temporary = directory / f".TRACE.html.recovery-{os.getpid()}.tmp"
+    try:
+        temporary.write_text("\n".join(parts), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return value
 
 
@@ -246,11 +244,15 @@ def export(root: Path, destination: Path) -> dict:
     try:
         with tarfile.open(temporary, "w:gz") as archive:
             for path in names:
-                if path in (destination, temporary) or path.name == ".lock":
+                if path in (destination, temporary) or path.name in (
+                    ".lock",
+                    "trace.json",
+                ):
                     continue
-                if path.name in DERIVED:
-                    index = json.loads((path.parent / "trace.json").read_text())
-                    if index.get("policy") != POLICY:
+                if path.name == "TRACE.html":
+                    with path.open() as stream:
+                        marker = stream.readline().strip()
+                    if marker != f"<!-- {POLICY} -->":
                         raise ValueError("recover linked traces before exporting")
                 if safe_file(path, root):
                     archive.add(

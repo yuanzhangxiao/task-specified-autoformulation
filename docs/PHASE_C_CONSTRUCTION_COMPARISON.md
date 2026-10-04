@@ -192,8 +192,9 @@ It refuses an existing active construction lock.
 `inspect` prints saved completion/partial/unstarted counts, checkpoint errors and
 the space occupied by reproducible views. `recover` rechecks the records, deletes
 only `results/<task>/TRACE.html` and `trace.json` for valid tasks, and regenerates
-the original report with small indexes linking to the authoritative call/event
-JSON files. It leaves derived evidence for invalid tasks intact and stops for
+the original report with one small HTML index per task linking to authoritative
+call/event JSON files. It does not recreate `trace.json`, reducing both bytes and
+file count. It leaves derived evidence for invalid tasks intact and stops for
 inspection instead of discarding or repairing their checkpoints. The scoped
 renderer substitution affects presentation only; original source verification,
 namespaces, report calculations and accounting remain enforced.
