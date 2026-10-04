@@ -14,25 +14,42 @@ else:
 
 from autoformalism.fitting import public_fitting as public
 from autoformalism.research import construction_baseline as baseline
-from autoformalism.research import topology_confirmation, variable_confirmation
+from autoformalism.research import (
+    construction_comparison,
+    topology_confirmation,
+    variable_confirmation,
+)
 
 
 def submit(
-    root: Path, wave: str, *, variables_only: bool = False, topology_only: bool = False
+    root: Path,
+    wave: str,
+    *,
+    variables_only: bool = False,
+    topology_only: bool = False,
+    compare_construction: bool = False,
 ) -> dict:
-    if variables_only and topology_only:
+    if sum((variables_only, topology_only, compare_construction)) > 1:
         raise ValueError("choose one stage-only continuation")
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", wave):
         raise ValueError("wave must be a simple identifier")
     controller = (
-        topology_confirmation
+        construction_comparison
+        if compare_construction
+        else topology_confirmation
         if topology_only
         else variable_confirmation
         if variables_only
         else baseline
     )
-    stage_only = variables_only or topology_only
-    label = "topology" if topology_only else "variables"
+    stage_only = variables_only or topology_only or compare_construction
+    label = (
+        "comparison"
+        if compare_construction
+        else "topology"
+        if topology_only
+        else "variables"
+    )
     plan = controller.verify(root)
     for key in (
         "AF_PYTHON",
@@ -139,6 +156,7 @@ if __name__ == "__main__":
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--variables-only", action="store_true")
     mode.add_argument("--topology-only", action="store_true")
+    mode.add_argument("--construction-comparison", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
@@ -147,6 +165,7 @@ if __name__ == "__main__":
                 args.wave,
                 variables_only=args.variables_only,
                 topology_only=args.topology_only,
+                compare_construction=args.construction_comparison,
             ),
             indent=2,
         )

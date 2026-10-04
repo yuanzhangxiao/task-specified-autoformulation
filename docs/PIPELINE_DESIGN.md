@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+The opt-in `phase-c-construction-comparison-1` uses one draft/edit schema across
+three proposer schedules. Public sources need no supplied/unused activation;
+generated variables, ordinary RHS replacements, shared processes and memory
+bindings are tracked explicitly. Pending references do not trigger premature
+pathway rejection. Whole-draft compiler/public checks and coordinated repair
+share the same implementation and budget policy across arms. All transactions
+retain their exact displayed predecessor and provider response. See
+`PHASE_C_CONSTRUCTION_COMPARISON.md`; no interaction or fitting stage is launched.
+
 The opt-in `phase-c-topology-confirmation-1` imports sealed variable decisions
 and reuses the existing process/topology stages without regenerating variables.
 An explicit context packet distinguishes supplied/unused RHS permissions and

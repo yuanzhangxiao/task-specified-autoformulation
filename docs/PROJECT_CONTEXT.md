@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`docs/PHASE_C_CONSTRUCTION_COMPARISON.md` defines the matched 96-construction
+experiment: separate variables/topology, joint construction on a fixed schedule,
+and adaptive order/grouping. All start fresh with a common public-source catalog
+and transactional draft, retain forward references until whole-topology checks,
+and save exact pre-repair drafts before a common bounded repair allowance.
+It stops before functions/fitting; structural completion is not scientific
+adequacy. Historical campaigns, benchmark prompts and fitter defaults are unchanged.
+
 `docs/PHASE_C_TOPOLOGY_CONFIRMATION.md` defines the 32-construction continuation
 from inspected variable inventories: twelve targeted replacements plus twenty
 earlier inventories, including both basin cases. It reuses optional signed

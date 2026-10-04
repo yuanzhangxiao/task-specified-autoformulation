@@ -1,0 +1,343 @@
+"""Compare construction schedules on one ledger, public context and budget policy."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Literal
+
+from autoformalism.expressions import ValidationContext
+from autoformalism.llm.construction import ConstructionClient
+from autoformalism.llm.response_revision import PromptPreflightError
+from autoformalism.llm.staged_topology import visible_response
+from autoformalism.rebuttal.prefit_construction_campaign import _cost
+from autoformalism.rebuttal.prefit_replay import sealed_write
+from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
+from autoformalism.schemas.staged_topology import PublicScientificBrief
+from autoformalism.search import construction_ledger as ledger
+from autoformalism.staged_topology import content_hash
+
+Policy = Literal["separate", "joint_fixed", "joint_adaptive"]
+POLICIES = ("separate", "joint_fixed", "joint_adaptive")
+
+SYSTEM = """Construct a scientific model's VARIABLES AND TOPOLOGY, not functions.
+The unchanged public scientific task is authoritative. Work on the displayed
+stage using the structured edit schema. The runtime maintains the current draft.
+
+PUBLIC SOURCES AND GENERATED VARIABLES
+Public non-target input/observation channels, covariates and time are available
+RHS sources; no supplied/unused declarations are needed. Actual use is determined
+by your equation skeletons. Their physical meanings and permitted availability
+remain those in the public task. Initial readings are boundary information, not
+ongoing inputs; diagnostic thresholds are not physical forcing merely because
+they are in the catalog. Covariates can parameterize ongoing laws when justified.
+Every public target must be generated, never read from its future measurements.
+Choose differential (state with derivative equation) or algebraic (instantaneous
+readout/process) for each generated variable. Supplied observations can optionally
+be modeled; then RHS references denote your generated quantity, not the supplied
+trajectory. Do not invent observed channels. Fitted coefficients are not variables.
+
+RELATIONSHIPS BEFORE INDIVIDUAL EQUATIONS
+Consider all targets together, their necessary states and shared mechanisms.
+Bind each displayed dynamic-memory requirement to your chosen differential
+mediator(s), distinct from that requirement's driver and target. Bindings express
+your intended scientific assignment; complete equations must establish the paths.
+For each optional named process, choose its drivers, scientific meaning and signed
+consumers together. The runtime defines it once and inserts every declared use.
+An INTERNAL pairwise transfer uses kind=transfer with two opposite signed consumers.
+An EXTERNAL source or sink has only its modeled consumer; use kind=influence.
+Never add a second consumer solely to satisfy the transfer format. An influence
+may be local or shared. Empty processes is legitimate. One process is one law,
+not a list of unrelated contributions. Conversion is null if unknown, or a positive
+fixed factor such as 1/area using public covariates and multiplication/division.
+The consumer sign, conversion and fitted magnitude are outside the one shared law.
+Opposite signs or shared syntax alone do not prove conservation.
+
+EQUATION SKELETONS
+Group jointly interacting variables in each term's sources. Select the outer
+weight sign: positive, negative or unrestricted. A fixed outer sign does not
+assert global monotonicity/nonnegativity of the later function. Self-dependence
+can represent decay, relaxation or feedback when scientifically justified.
+Return only ordinary contributions in equations. The displayed process uses are
+ALREADY INCLUDED; do not repeat them or expand their drivers into another term
+for the same effect. Return terms=[] when shared uses provide the whole equation.
+Do not emit functions, coefficients, initializers or fitted values at this stage.
+
+EDITS AND PENDING WORK
+Each variables/processes/bindings entry replaces that named declaration; omitted
+entries survive. Each equations entry REPLACES the complete ordinary RHS of its
+named LHS, not an addition to its old terms. Remove entries only with explicit
+remove_* lists. Changes to a process propagate automatically to all its uses;
+the next request displays the rebuilt draft. You need not repeat unchanged items.
+Forward references are allowed: an undeclared generated RHS name or an undefined
+equation is pending work, not an instruction for the runtime to guess its meaning.
+Resolve all such names and equations before finishing. All generated variables
+need equations; algebraic loops are unsupported, differential feedback is allowed.
+Explanations help communicate scientific meaning; they are not machine proofs.
+
+The schedule shown in stage_instructions controls the current editing scope.
+stage_complete=true ends the CURRENT STAGE, not merely the selected equation.
+The full brief, current declarations, assembled contributions and pending work
+are repeated on every request. A rejected_reply is a failed attempt, NOT a model
+to copy. Use its separately labeled error to correct the draft. Global structural
+feedback is supplied only after the initial construction ends. Do not claim
+scientific correctness merely because those finite structural checks pass.
+"""
+
+
+def validate_scope(
+    policy: Policy, stage: str, focus: str | None, patch: ledger.DraftPatch
+) -> None:
+    """Make batching the experimental treatment, not a different validity rule."""
+    if stage == "repair":
+        return
+    if stage == "variables" and (
+        patch.equations
+        or patch.processes
+        or patch.remove_equations
+        or patch.remove_processes
+    ):
+        raise ValueError(
+            "variable stage permits variable and memory-binding edits only"
+        )
+    if stage == "relationships" and (patch.equations or patch.remove_equations):
+        raise ValueError("relationship planning precedes equation skeletons")
+    if (
+        policy == "separate"
+        and stage != "variables"
+        and (patch.variables or patch.remove_variables)
+    ):
+        raise ValueError(
+            "separate policy fixes the variable inventory until overall repair"
+        )
+    if (
+        stage == "equations"
+        and policy != "joint_adaptive"
+        and (patch.remove_equations or any(e.name != focus for e in patch.equations))
+    ):
+        raise ValueError(f"fixed schedule requests only equation {focus}")
+
+
+def instructions(policy: Policy, stage: str, focus: str | None) -> str:
+    """State the selected work unit while preserving the same scientific context."""
+    if stage == "variables":
+        return (
+            "Declare necessary generated variables, public targets first, and memory "
+            "bindings. You may declare several variables per reply. No topology yet. "
+            "Finish this stage with stage_complete=true when the inventory is ready."
+        )
+    if stage == "relationships":
+        return (
+            "Plan relationships across all targets: memory bindings and optional "
+            "shared processes. Do not define ordinary equations yet. "
+            + (
+                "The generated-variable inventory is fixed. "
+                if policy == "separate"
+                else "Declare the preliminary generated variables needed by this plan. "
+            )
+            + "Finish relationship planning with stage_complete=true."
+        )
+    if stage == "repair":
+        return (
+            "Repair the displayed structural failures with explicit coordinated edits. "
+            "All variable, equation, process and binding edits are allowed. Preserve "
+            "unaffected declarations. Inspect the rebuilt model before further edits. "
+            "Set stage_complete=true when the whole topology is ready for checking."
+        )
+    if policy == "joint_adaptive":
+        return (
+            "Choose the order and number of related variables/equations to address "
+            "in this reply. Add or amend declarations together as scientifically "
+            "useful. Use pending work to finish all targets and dependencies. "
+            "stage_complete=true means the WHOLE topology draft is ready."
+        )
+    return (
+        f"Construct the ordinary RHS for selected LHS {focus}; only this equation "
+        "may be defined/replaced in this response. Shared-process and binding edits "
+        "remain possible. "
+        + (
+            "You may declare its newly needed variables alongside it. "
+            if policy == "joint_fixed"
+            else "Use the previously selected generated-variable inventory. "
+        )
+        + "The runtime then visits remaining targets/dependencies. Do not set "
+        "stage_complete=true just because this ONE equation is finished. It ends "
+        "the WHOLE topology stage, including any still-pending work."
+    )
+
+
+def run(
+    brief: PublicScientificBrief,
+    context: ValidationContext,
+    target_definitions: dict[str, str],
+    enriched_brief: dict,
+    client: ConstructionClient,
+    directory: Path,
+    policy: Policy,
+    *,
+    repair_requests: int = 3,
+    repair_tokens: int = 131072,
+) -> dict:
+    """Replay cached transactions, then spend only remaining budget."""
+    draft, events, records = ledger.Draft(), [], []
+    original = client.settings
+    if policy not in POLICIES:
+        raise ValueError("unknown construction policy")
+    if (
+        original.maximum_requests <= repair_requests
+        or original.maximum_total_tokens <= repair_tokens + 256
+    ):
+        raise ValueError("construction and repair both need a positive frozen budget")
+    client.settings = original.model_copy(
+        update={
+            "maximum_requests": original.maximum_requests - repair_requests,
+            "maximum_total_tokens": original.maximum_total_tokens - repair_tokens,
+        }
+    )
+
+    def request(stage: str, focus: str | None, diagnostic: dict | None, attempt: int):
+        nonlocal draft
+        payload = {
+            "policy": policy,
+            "stage": stage,
+            "stage_instructions": instructions(policy, stage, focus),
+            "selected_lhs": focus,
+            "public_brief": enriched_brief,
+            "public_source_catalog": [
+                p.model_dump(mode="json") for p in brief.public_variables
+            ],
+            "required_target_definitions": target_definitions,
+            "memory_requirements": [
+                r.model_dump(mode="json")
+                for r in brief.requirements
+                if r.requires_dynamic_memory
+            ],
+            "current_draft": ledger.snapshot(brief, draft),
+            "runtime_diagnostics": diagnostic,
+        }
+        record = client.call(
+            system=SYSTEM,
+            user=json.dumps(payload, sort_keys=True),
+            response_model=ledger.DraftPatch,
+            step=f"{stage}_{len(events):03d}",
+            attempt=attempt,
+        )
+        records.append(record)
+        before = draft
+        raw, accepted, complete, error = None, False, False, None
+        try:
+            raw = visible_response(record)
+            patch = ledger.DraftPatch.model_validate(raw)
+            validate_scope(policy, stage, focus, patch)
+            draft = ledger.apply_patch(brief, draft, patch)
+            accepted, complete = True, patch.stage_complete
+        except (ValueError, TypeError, KeyError) as exc:
+            error = str(exc)[:6000]
+        event = {
+            "index": len(events),
+            "stage": stage,
+            "selected_lhs": focus,
+            "attempt": attempt,
+            "request_hash": record["request_hash"],
+            "record_sha256": content_hash(record),
+            "accepted": accepted,
+            "error": error,
+            "stage_complete": complete,
+            "before": before.model_dump(mode="json"),
+            "after": draft.model_dump(mode="json"),
+            "pending_after": ledger.pending(brief, draft),
+        }
+        sealed_write(directory / "events" / f"{len(events):03d}.json", event)
+        events.append(event)
+        return accepted, complete, {"rejected_reply": raw, "error": error}
+
+    def stage(name: str) -> tuple[bool, str | None]:
+        while True:
+            work = ledger.pending(brief, draft)
+            focus = None
+            if name == "equations" and policy != "joint_adaptive":
+                if not work["equations_to_define"]:
+                    return True, None
+                focus = work["equations_to_define"][0]
+            diagnostic = None
+            for attempt in range(original.attempts_per_step):
+                accepted, complete, diagnostic = request(
+                    name, focus, diagnostic, attempt
+                )
+                if accepted:
+                    if complete:
+                        return True, None
+                    break
+            else:
+                return False, f"local response repair exhausted in {name}"
+
+    try:
+        ready, stop_reason = False, None
+        stages = (
+            ("variables", "relationships", "equations")
+            if policy == "separate"
+            else ("relationships", "equations")
+        )
+        try:
+            for name in stages:
+                ready, stop_reason = stage(name)
+                if not ready:
+                    break
+        except (RepairBudgetExceeded, PromptPreflightError) as exc:
+            ready, stop_reason = False, str(exc)
+        initial_check = ledger.assess(brief, context, target_definitions, draft)
+        initial = sealed_write(
+            directory / "before_repair.json",
+            {
+                "draft": draft.model_dump(mode="json"),
+                "assessment": initial_check,
+                "ready_requested": ready,
+                "stop_reason": stop_reason,
+                "cost": _cost(sorted(records, key=lambda r: r["request_hash"])),
+                "event_count": len(events),
+            },
+        )
+        # Reserve the SAME additional allowance for every arm. Unspent initial
+        # allowance is not silently converted into more scientific repair calls.
+        client.settings = original.model_copy(
+            update={
+                "maximum_requests": len(records) + repair_requests,
+                "maximum_total_tokens": sum(r["budget_charge"] for r in records)
+                + repair_tokens,
+            }
+        )
+        check = initial_check
+        diagnostic = None
+        for attempt in range(repair_requests):
+            if check["eligible"] and ready:
+                break
+            feedback = {
+                "structural_failures": check["errors"],
+                "ready_requested": ready,
+                "last_local_error": diagnostic,
+            }
+            try:
+                accepted, complete, diagnostic = request(
+                    "repair", None, feedback, attempt
+                )
+            except (RepairBudgetExceeded, PromptPreflightError) as exc:
+                stop_reason = str(exc)
+                break
+            if accepted:
+                check = ledger.assess(brief, context, target_definitions, draft)
+                ready = complete
+        return {
+            "status": "topology_complete"
+            if check["eligible"] and ready
+            else "topology_incomplete",
+            "policy": policy,
+            "draft": draft.model_dump(mode="json"),
+            "assessment": check,
+            "ready_requested": ready,
+            "before_repair": initial,
+            "stop_reason": stop_reason,
+            "event_count": len(events),
+            "cost": _cost(sorted(records, key=lambda r: r["request_hash"])),
+        }
+    finally:
+        client.settings = original

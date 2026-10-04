@@ -13,6 +13,10 @@ fi
 if [[ "$(jq -r .protocol "$AF_OUTPUT_ROOT/plan.json")" == phase-c-topology-confirmation-1 ]]; then
   AF_WORKER=scripts/phase_c_topology.py
 fi
+if [[ "$(jq -r .protocol "$AF_OUTPUT_ROOT/plan.json")" == phase-c-construction-comparison-1 ]]; then
+  AF_WORKER=scripts/phase_c_construction_comparison.py
+  [[ "${1:?stage}" == propose || "$1" == report ]] || exit 2
+fi
 "$AF_PYTHON" "$AF_WORKER" verify --root "$AF_OUTPUT_ROOT"
 case "${1:?stage}" in
   propose)
