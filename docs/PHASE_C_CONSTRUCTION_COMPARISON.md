@@ -174,6 +174,64 @@ There is no automatic follow-up or test-data access. This launcher uses ACES;
 switching model, provider or serving platform would require a separate matched
 experiment rather than mixing backends inside this comparison.
 
+## Recovering a quota-failed report
+
+An `EDQUOT` while writing `TRACE.html` is a storage failure, not a scientific
+rejection. The original renderer duplicates requests, responses and transaction
+snapshots into both HTML and JSON views. A failure in that renderer can also
+interrupt the worker after its proposal was already saved. A failed write of
+`runtime/finished-<job>.txt` alone does not establish construction completion.
+
+`scripts/recover_phase_c_storage.py` is a standalone operational tool. Run it with
+the original pinned source directory and the existing campaign, after its jobs
+have stopped. It verifies that source against the frozen plan, then validates
+saved calls, transaction chains and proposal accounting. It never changes the
+source, plan, prompts, model decisions, caches or budgets, and makes no LLM calls.
+It refuses an existing active construction lock.
+
+`inspect` prints saved completion/partial/unstarted counts, checkpoint errors and
+the space occupied by reproducible views. `recover` rechecks the records, deletes
+only `results/<task>/TRACE.html` and `trace.json` for valid tasks, and regenerates
+the original report with small indexes linking to the authoritative call/event
+JSON files. It leaves derived evidence for invalid tasks intact and stops for
+inspection instead of discarding or repairing their checkpoints. The scoped
+renderer substitution affects presentation only; original source verification,
+namespaces, report calculations and accounting remain enforced.
+
+Upload just the recovery script to group scratch; no new source checkout is
+needed. If quota prevents even that small upload, removing only generated HTML
+views frees some space while keeping `trace.json` and all original records:
+
+```bash
+AF_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v1
+find "$AF_ROOT/results" -mindepth 2 -maxdepth 2 -type f -name TRACE.html -delete
+```
+
+Then, after uploading `recover_phase_c_storage.py`:
+
+```bash
+(
+  set -euo pipefail
+  module load GCCcore/13.2.0 Python/3.11.5
+  export PYTHONDONTWRITEBYTECODE=1
+  AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
+  /scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python \
+    "$AF_GROUP/recover_phase_c_storage.py" recover \
+    --repo "$AF_GROUP/phase-c-construction-111ab14" \
+    --root "$AF_GROUP/phase-c-construction-comparison-v1" \
+    --archive "$AF_GROUP/phase-c-construction-comparison-v1/inspection-compact.tar.gz"
+)
+```
+
+The optional archive retains original requests/responses, transactions, temporary
+checkpoints, logs, receipts and compact reports. It excludes lock files; an
+interrupted archive write removes only its own temporary archive and preserves
+any previous finished archive. The views and archive still require some space.
+This reclaims duplicated reports, not unrelated runtime caches or allocation
+storage. Use the recovered counts and worker logs to decide what needs resuming;
+the original `inspect`/worker renderer would recreate the large views. This tool
+does not submit jobs or extend an interrupted construction budget.
+
 Local public-plan smoke (no LLM calls):
 
 ```bash
