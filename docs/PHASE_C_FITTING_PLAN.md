@@ -548,3 +548,14 @@ experiments never start. RK45 yields eight complete alien endpoints but no
 recovery. Next calibrate screening time and replay saved pools, then rerun only
 the four blocked assisted tests. These are proposed diagnostics; no production
 fitter or screening policy is promoted.
+
+## M10 — calibrated screening, saved-pool replay and assisted reruns
+
+The [M10 runbook](PHASE_C_FITTING_SCREENING_REPLAY.md) implements this follow-up
+on alien-device only. Two method-specific timing pilots precede four assisted
+reruns and 18 saved-pool replays. Complete historical training scores are reused;
+uncached vectors receive calibrated allowances, and useful incumbents survive
+timeouts. Point telemetry distinguishes setup from trajectory integration. The
+released assisted stage reserves time to screen its final vector. Training-only
+selection and independent post-selection evaluation remain separate. No generic
+optimizer rerun, new benchmark data, provider call or production promotion.

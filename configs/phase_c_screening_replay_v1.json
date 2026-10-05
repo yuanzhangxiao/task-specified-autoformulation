@@ -1,0 +1,12 @@
+{
+  "calibration_seconds": 120,
+  "minimum_point_seconds": 60,
+  "maximum_point_seconds": 300,
+  "time_multiplier": 2,
+  "margin_seconds": 10,
+  "pool_seconds": 900,
+  "assisted_seconds": 900,
+  "node_seconds": 180,
+  "fixed_seconds": 250,
+  "replay_seconds": 300
+}

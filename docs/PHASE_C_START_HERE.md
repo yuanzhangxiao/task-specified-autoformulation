@@ -59,9 +59,10 @@ screening and fixed-then-free collocation from explicitly training-fitted starts
 Its [M9 results](PHASE_C_FITTING_M9_RESULTS_2026-10-05.md) account for all 48
 entries. Basin still passes, but the 20-second cap times out every alien Radau
 screen, including all four eligible assisted rechecks before collocation starts.
-Next calibrate screening on saved models and replay the saved pools, then rerun
-the four blocked assisted tests. Existing rollout success remains unchanged;
-no production fitting default is promoted.
+The implemented [M10 diagnostic](PHASE_C_FITTING_SCREENING_REPLAY.md) calibrates
+screening on saved models, replays 18 saved pools, and retries the four blocked
+assisted tests with final-screen headroom and trajectory timing logs. Existing
+rollout success remains unchanged; no production fitting default is promoted.
 
 ## Objective and ownership
 

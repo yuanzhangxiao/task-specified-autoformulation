@@ -7,7 +7,7 @@ It never evaluates proposer text as Python or changes production fitter defaults
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -442,6 +442,7 @@ class SymbolicOracle(RolloutOracle):
         deadline: float,
         *,
         sensitivities: bool,
+        progress: Callable[[dict], None] | None = None,
     ):
         self.target_scales = observation_scales(system.channels, scale)
         super().__init__(
@@ -452,6 +453,7 @@ class SymbolicOracle(RolloutOracle):
         self.system, self.training, self.scale = system, training, scale
         self.settings, self.deadline = settings, deadline
         self.with_sensitivities = sensitivities
+        self.progress = progress
         self.last_x = self.last_jac = None
         self.solver_counts = {"nfev": 0, "njev": 0, "nlu": 0, "segments": 0}
         self.failure_evidence: list[dict] = []
@@ -467,8 +469,19 @@ class SymbolicOracle(RolloutOracle):
         try:
             self.vector(record["parameters"])
             residuals, matrices = [], []
-            for trajectory in self.training.trajectories:
+            for index, trajectory in enumerate(self.training.trajectories):
                 record["trajectory_id"] = trajectory.trajectory_id
+                trajectory_started = monotonic()
+                if self.progress:
+                    self.progress(
+                        {
+                            "status": "trajectory_started",
+                            "index": index,
+                            "trajectory": trajectory.trajectory_id,
+                            "completed_trajectories": index,
+                            "expected_trajectories": len(self.training.trajectories),
+                        }
+                    )
                 predictions, jac, _, counts = symbolic_rollout(
                     self.system,
                     trajectory,
@@ -487,6 +500,18 @@ class SymbolicOracle(RolloutOracle):
                         matrices.append(jac[:, column, :] / scale)
                 for key, value in counts.items():
                     self.solver_counts[key] += value
+                if self.progress:
+                    self.progress(
+                        {
+                            "status": "trajectory_complete",
+                            "index": index,
+                            "trajectory": trajectory.trajectory_id,
+                            "completed_trajectories": index + 1,
+                            "expected_trajectories": len(self.training.trajectories),
+                            "seconds": monotonic() - trajectory_started,
+                            "solver_counts": counts,
+                        }
+                    )
             residual = np.concatenate(residuals)
             if np.max(np.abs(residual)) >= self.settings.failure_penalty:
                 raise ValueError("probe residual reaches production clipping threshold")

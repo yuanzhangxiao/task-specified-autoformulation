@@ -29,11 +29,30 @@ class ScreeningPolicy(StrictSchema):
     """A point ceiling includes Python startup, integration and output writes."""
 
     method: Literal["RK45", "Radau"] = "RK45"
-    point_seconds: float = Field(default=20, ge=1, le=120)
+    point_seconds: float = Field(default=20, ge=1, le=300)
 
 
 def evaluate(payload: dict, directory: Path) -> dict:
     """One entire training rollout; a failure penalty never becomes a score."""
+    begun = monotonic()
+    launch_path = directory / "launch.json"
+    launched = public._read(launch_path)["monotonic"] if launch_path.exists() else begun
+    telemetry = {
+        "status": "setup",
+        "startup_seconds": begun - launched,
+        "completed_trajectories": 0,
+        "trajectories": [],
+        "payload_sha256": public.content_sha256(payload),
+    }
+
+    def progress(event: dict) -> None:
+        telemetry.update({k: v for k, v in event.items() if k != "seconds"})
+        if event["status"] == "trajectory_complete":
+            telemetry["trajectories"].append(dict(event))
+        telemetry["elapsed_seconds"] = monotonic() - launched
+        public._write(directory / "progress.json", telemetry)
+
+    public._write(directory / "progress.json", telemetry)
     policy = ScreeningPolicy.model_validate(payload["screening"])
     data = TrainingOnlySplit.model_validate(payload["training"])
     request = PublicFitRequest.model_validate(payload["request"])
@@ -46,9 +65,11 @@ def evaluate(payload: dict, directory: Path) -> dict:
         scale_for(train),
         settings,
         directory / "oracle",
-        monotonic() + payload["seconds"],
+        launched + payload["seconds"],
         sensitivities=False,
+        progress=progress,
     )
+    telemetry["setup_seconds"] = monotonic() - begun
     try:
         values = oracle(oracle.vector(payload["parameters"]))
         if not oracle.valid_calls:
@@ -65,6 +86,8 @@ def evaluate(payload: dict, directory: Path) -> dict:
     except (ValueError, RuntimeError, ArithmeticError, TimeoutError) as error:
         result = {"status": "unavailable", "error": str(error)[-1000:]}
     result["payload_sha256"] = public.content_sha256(payload)
+    progress({"status": result["status"]})
+    result["timing"] = telemetry
     public._write(directory / "result.json", result)
     return result
 
@@ -74,6 +97,7 @@ def invoke_point(payload: dict, folder: Path, seconds: float) -> dict:
     begun = monotonic()
     folder.mkdir(parents=True, exist_ok=True)
     public._write(folder / "payload.json", payload)
+    public._write(folder / "launch.json", {"monotonic": begun})
     with (folder / "worker.log").open("w") as log:
         process = subprocess.Popen(
             [sys.executable, "-m", __name__, str(folder)], stdout=log, stderr=log
@@ -116,6 +140,7 @@ def screen(
     policy = ScreeningPolicy.model_validate(payload["screening"])
     if not phase or not all(c.isalnum() or c in "-_" for c in phase):
         raise ValueError("invalid screening phase")
+    folder.mkdir(parents=True, exist_ok=True)
     identity = public.content_sha256(
         {k: payload[k] for k in ("request", "training", "screening")}
     )
@@ -132,6 +157,12 @@ def screen(
     )
     if journal["identity"] != identity:
         raise ValueError("screening identity differs")
+    if best and (
+        journal["best"] is None
+        or best["training_nmse"] < journal["best"]["training_nmse"]
+    ):
+        journal["best"] = best
+        public._write(folder / "best.json", best)
     digest = public.content_sha256(points)
     if phase in journal["phases"]:
         if journal["phases"][phase]["points_sha256"] != digest:

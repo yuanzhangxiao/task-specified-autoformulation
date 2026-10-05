@@ -37,7 +37,7 @@ ARMS = {
 class DiagnosticPolicy(StrictSchema):
     """Explicit training-only eligibility and nested wall ceilings."""
 
-    point_seconds: float = Field(default=20, ge=1, le=120)
+    point_seconds: float = Field(default=20, ge=1, le=300)
     node_seconds: float = Field(default=120, ge=1, le=180)
     fixed_seconds: float = Field(default=250, ge=1, le=400)
     eligible_training_nmse: float = Field(default=1e-8, gt=0, le=1e-3)
@@ -273,7 +273,10 @@ def assisted_fit(payload: dict, directory: Path) -> dict:
         allowance = (
             min(policy.fixed_seconds, deadline - monotonic() - 5)
             if fixed
-            else 0.75 * (deadline - monotonic())
+            else min(
+                0.75 * (deadline - monotonic()),
+                deadline - monotonic() - payload.get("final_screen_reserve_seconds", 0),
+            )
         )
         if allowance <= 1:
             return finish("assisted_phase_budget_exhausted")
