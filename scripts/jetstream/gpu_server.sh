@@ -30,8 +30,9 @@ readonly record="${AF_HOME}/server.json"
 readonly container=af-vllm
 readonly port=8000
 # The vLLM release our method's model is served with
-# (src/autoformalism/rebuttal/vllm_image_bootstrap.py), pinned to the image the
-# v0.27.1 tag named on 2026-10-04. It is built on CUDA 13.0.
+# (src/autoformalism/rebuttal/vllm_image_bootstrap.py), pinned to the source
+# the project's v0.27.1 SIF was built from (docs/JUDGE_SIGN_DELTA.md), which
+# the tag still named on 2026-10-04. It is built on CUDA 13.0.
 readonly image="vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967"
 readonly vllm_version=0.27.1
 # The context our method's server allows (configs/phase_c_construction_v1.json).
