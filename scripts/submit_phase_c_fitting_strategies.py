@@ -38,6 +38,7 @@ def submit(
         q.CHALLENGING_PROTOCOL,
         q.numerical.PROTOCOL,
         q.checkpoint.PROTOCOL,
+        q.screening.PROTOCOL,
     }
     python = os.environ["AF_PYTHON"]
     if not Path(python).is_file() or not 1 <= concurrency <= 8:

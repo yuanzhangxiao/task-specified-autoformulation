@@ -22,6 +22,7 @@ from autoformalism.fitting import identifiable_cases as controls
 from autoformalism.fitting import nonlinear_shape_case as shape
 from autoformalism.fitting import numerical_diagnostic as numerical
 from autoformalism.fitting import public_fitting as public
+from autoformalism.fitting import screening_diagnostic as screening
 from autoformalism.fitting.coordinates import training_coordinates
 from autoformalism.fitting.identifiable_campaign import sensitivity_audit
 from autoformalism.fitting.matching_probe import observed_node_guess
@@ -50,6 +51,7 @@ class CampaignConfig(StrictSchema):
     challenging_reuse: ReuseDiagnosticPolicy | None = None
     numerical_diagnostic: numerical.NumericalDiagnosticPolicy | None = None
     checkpoint_diagnostic: bool = False
+    screening_diagnostic: screening.DiagnosticPolicy | None = None
     cases: (
         tuple[
             Literal[
@@ -77,6 +79,10 @@ class CampaignConfig(StrictSchema):
     @model_validator(mode="after")
     def validate_roster(self):
         """Reject empty/duplicate selections and unavailable CSTR inputs."""
+        if self.screening_diagnostic is not None and (
+            self.numerical_diagnostic is None or self.checkpoint_diagnostic
+        ):
+            raise ValueError("screening diagnostic requires separate numerical arms")
         if self.checkpoint_diagnostic and self.numerical_diagnostic is None:
             raise ValueError("checkpoint diagnostic requires fixed numerical arms")
         if self.include_reuse and self.reuse_diagnostic is not None:
@@ -118,8 +124,10 @@ class CampaignConfig(StrictSchema):
 def _config_exclusions(config):
     """Omit new opt-in fields from historical plan serialization."""
     return (
-        {"numerical_diagnostic"} if config.numerical_diagnostic is None else set()
-    ) | (set() if config.checkpoint_diagnostic else {"checkpoint_diagnostic"})
+        ({"numerical_diagnostic"} if config.numerical_diagnostic is None else set())
+        | (set() if config.checkpoint_diagnostic else {"checkpoint_diagnostic"})
+        | ({"screening_diagnostic"} if config.screening_diagnostic is None else set())
+    )
 
 
 def case_request(name, case, seed):
@@ -154,7 +162,11 @@ def prepare(
             or predecessor.get("test_data_opened") is not False
         ):
             raise ValueError("matched source must be a supported development protocol")
-    elif config.include_cstr or config.include_challenging:
+    elif (
+        config.include_cstr
+        or config.include_challenging
+        or (config.screening_diagnostic is not None and inputs_path is not None)
+    ):
         if inputs_path is None:
             raise ValueError("CSTR requires sealed milestone-1 inputs")
         source = read_seal(inputs_path)
@@ -163,6 +175,8 @@ def prepare(
             != (
                 challenging.PROTOCOL
                 if config.include_challenging
+                else "phase-c-fitting-strategy-inputs-1"
+                if config.screening_diagnostic is not None and not config.include_cstr
                 else "phase-c-fitting-inputs-1"
             )
             or source.get("test_data_opened")
@@ -198,15 +212,19 @@ def prepare(
                 inputs["cases"] = {
                     n: c for n, c in inputs["cases"].items() if not n.startswith("cstr")
                 }
-        elif config.include_challenging:
-            if set(source["cases"]) != set(challenging.CELLS):
+        elif config.include_challenging or (
+            config.screening_diagnostic is not None and source is not None
+        ):
+            if config.include_challenging and set(source["cases"]) != set(
+                challenging.CELLS
+            ):
                 raise ValueError("challenging source roster differs")
             inputs = deepcopy(source)
         else:
             inputs = controls.make_inputs()
             inputs["protocol"] = "phase-c-fitting-strategy-inputs-1"
             inputs["cases"]["shape"] = shape.make_case(inputs["cases"]["nonlinear"])
-        if source and not config.include_challenging:
+        if source and config.include_cstr:
             inputs["cases"].update(
                 {n: source["cases"][n] for n in ("cstr_easy", "cstr_hard")}
             )
@@ -226,6 +244,15 @@ def prepare(
                     if predecessor
                     else case_request(name, case, seed)
                 )
+                frozen_common = (
+                    inputs.get("frozen_start_commons", {}).get(key)
+                    if config.screening_diagnostic is not None
+                    else None
+                )
+                if frozen_common is not None:
+                    if frozen_common["case"] != name or frozen_common["seed"] != seed:
+                        raise ValueError("frozen ordinary start identity differs")
+                    req = PublicFitRequest.model_validate(frozen_common["request"])
                 public._check_data(
                     req,
                     PublicSplit.model_validate(case["training"]),
@@ -254,6 +281,8 @@ def prepare(
                     # Preserve exact generic starts, observations and numerical
                     # coordinates across architectures. Never read fitted results.
                     commons[key] = deepcopy(predecessor["commons"][key])
+                if frozen_common is not None:
+                    commons[key] = deepcopy(frozen_common)
                 arms = (
                     DIAGNOSTIC_ARMS
                     if config.reuse_diagnostic is not None
@@ -267,10 +296,17 @@ def prepare(
                         if config.checkpoint_diagnostic
                         else numerical.ARMS
                     )
+                if config.screening_diagnostic is not None:
+                    commons[key]["assisted_start"] = screening.bind_start(
+                        commons[key], inputs, config.screening_diagnostic
+                    )
+                    arms = tuple(screening.ARMS)
                 for arm in arms:
                     tasks.append({"task_id": f"{key}_{arm}", "common": key, "arm": arm})
         plan = {
-            "protocol": checkpoint.PROTOCOL
+            "protocol": screening.PROTOCOL
+            if config.screening_diagnostic is not None
+            else checkpoint.PROTOCOL
             if config.checkpoint_diagnostic
             else numerical.PROTOCOL
             if config.numerical_diagnostic is not None
@@ -313,6 +349,7 @@ def verify(root: Path, *, runtime: bool = True):
         CHALLENGING_PROTOCOL,
         numerical.PROTOCOL,
         checkpoint.PROTOCOL,
+        screening.PROTOCOL,
     } or plan["inputs_sha256"] != public.content_sha256(inputs):
         raise ValueError("campaign identity differs")
     if runtime and (
@@ -402,6 +439,20 @@ def worker_payload(plan, inputs, task):
         payload["seed"] = common["seed"]
     if plan["config"].get("checkpoint_diagnostic"):
         payload["arm"], payload["checkpoint_mode"] = checkpoint.ARMS[task["arm"]]
+    if plan["config"].get("screening_diagnostic") is not None:
+        base, method, assisted = screening.ARMS[task["arm"]]
+        options = plan["config"]["screening_diagnostic"]
+        payload.update(
+            arm=base,
+            checkpoint_mode="compact",
+            screening={
+                "method": method,
+                "point_seconds": options["point_seconds"],
+            },
+        )
+        if assisted:
+            payload["assisted_start"] = common["assisted_start"]
+            payload["screening_diagnostic"] = options
     return payload
 
 
@@ -499,6 +550,19 @@ def run_task(root: Path, index: int) -> dict:
         path, backend_path = folder / "result.json", folder / "backend.json"
         if path.exists():
             return read_seal(path)
+        if (
+            plan["config"].get("screening_diagnostic") is not None
+            and screening.ARMS[task["arm"]][2]
+            and not common["assisted_start"]["eligible"]
+        ):
+            result = {
+                **task,
+                "status": "assisted_source_ineligible",
+                "assistance": common["assisted_start"],
+                "seconds": 0,
+            }
+            seal(path, result)
+            return result
         if not backend_path.exists():
             if (folder / "started.json").exists():
                 result = {**task, "status": "interrupted", "budget_restarted": False}
@@ -532,6 +596,7 @@ def run_task(root: Path, index: int) -> dict:
                     **(
                         {"journal": folder / "replay_progress.json"}
                         if config.checkpoint_diagnostic
+                        or config.screening_diagnostic is not None
                         else {}
                     ),
                 )
@@ -597,6 +662,7 @@ def run_task(root: Path, index: int) -> dict:
             CHALLENGING_PROTOCOL,
             numerical.PROTOCOL,
             checkpoint.PROTOCOL,
+            screening.PROTOCOL,
         }:
             errors = coefficient_metrics(case, common["request"], parameters)
             coefficient_error = errors.get("maximum_coefficient_relative_error")
@@ -614,6 +680,7 @@ def run_task(root: Path, index: int) -> dict:
                 CHALLENGING_PROTOCOL,
                 numerical.PROTOCOL,
                 checkpoint.PROTOCOL,
+                screening.PROTOCOL,
             }:
                 initial_errors = errors.get("initial_parameter_absolute_errors", {})
                 result["initials_recovered"] = (
@@ -637,6 +704,25 @@ def run_task(root: Path, index: int) -> dict:
                 "stages": backend.get("stages", []),
                 "partial_metadata": backend.get("partial_metadata", False),
             }
+        if config.screening_diagnostic is not None:
+            result["screening"] = backend.get("screening")
+            result["assisted"] = backend.get("assisted")
+            result["selected_source"] = backend.get("selected_source")
+            assisted = backend.get("assisted") or {}
+            phases = {p["phase"]: p for p in assisted.get("phases", [])}
+            final = (phases.get("released") or {}).get("final")
+            if final:
+                result["released_final_coefficient_recovery"] = coefficient_metrics(
+                    case, common["request"], final["parameters"]
+                )
+                attempts = (backend.get("screening") or {}).get("attempts", [])
+                screened = next(
+                    (a for a in attempts if a.get("source") == "released_final"), {}
+                )
+                result["released_final_training_nmse"] = screened.get("training_nmse")
+                result["released_final_screen_status"] = screened.get(
+                    "status", "not_started"
+                )
         seal(path, result)
     return result
 
@@ -698,6 +784,7 @@ def report(root: Path) -> dict:
             CHALLENGING_PROTOCOL,
             numerical.PROTOCOL,
             checkpoint.PROTOCOL,
+            screening.PROTOCOL,
         }:
             for group in summary["groups"]:
                 items = groups[(group["case"], group["arm"])]
@@ -764,6 +851,7 @@ def report(root: Path) -> dict:
             CHALLENGING_PROTOCOL,
             numerical.PROTOCOL,
             checkpoint.PROTOCOL,
+            screening.PROTOCOL,
         }:
             summary["limitation"] = (
                 "Known equations and fixed parameter blocks on unchanged development "
@@ -778,6 +866,32 @@ def report(root: Path) -> dict:
                     sum(r.get("initials_recovered") is True for r in items)
                     if group["case"] == "alien_hard"
                     else None
+                )
+        if plan["protocol"] == screening.PROTOCOL:
+            summary["limitation"] += (
+                " M9 generic-start arms compare bounded RK45/Radau screening. "
+                "Assisted arms start from earlier training-fitted endpoints, with "
+                "upstream cost recorded separately. Retaining that input is not "
+                "generic-start recovery or evidence of collocation improvement."
+            )
+            for group in summary["groups"]:
+                items = groups[(group["case"], group["arm"])]
+                attempts = [
+                    a
+                    for r in items
+                    for a in (r.get("screening") or {}).get("attempts", [])
+                ]
+                group["screen_statuses"] = dict(Counter(a["status"] for a in attempts))
+                group["assisted_input_retained"] = sum(
+                    bool((r.get("assisted") or {}).get("retained_assisted_input"))
+                    for r in items
+                )
+                group["source_ineligible"] = sum(
+                    r["status"] == "assisted_source_ineligible" for r in items
+                )
+                group["upstream_fit_seconds"] = sum(
+                    (r.get("assisted") or {}).get("source", {}).get("source_seconds", 0)
+                    for r in items
                 )
         if plan["protocol"] == checkpoint.PROTOCOL:
             summary["limitation"] += (

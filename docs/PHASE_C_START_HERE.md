@@ -53,11 +53,12 @@ interrupted restart metadata. A separate log-based M7 closeout performs no new
 fitting/replay. The [M8 results](PHASE_C_FITTING_M8_RESULTS_2026-10-04.md) account
 for all 36 endpoints, including two explicit replay timeouts. Compact checkpoints
 substantially reduce overhead, but alien recovery remains unsuccessful in these
-native arms; basin still passes all 18. The next proposed diagnostic bounds
-checkpoint screening and tests collocation near existing accurate training-fitted
-rollout solutions, separating poor-start optimization from transcription/mesh
-limitations. Existing rollout success remains unchanged; no production default
-is promoted.
+native arms; basin still passes all 18. The implemented
+[M9 diagnostic](PHASE_C_FITTING_SCREENING_ASSISTANCE.md) adds bounded RK45/Radau
+screening and fixed-then-free collocation from explicitly training-fitted starts.
+Its 48-entry Delta CPU roster keeps generic and assisted outcomes separate;
+results are pending. Existing rollout success remains unchanged; no production
+fitting default is promoted.
 
 ## Objective and ownership
 

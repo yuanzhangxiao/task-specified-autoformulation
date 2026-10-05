@@ -52,7 +52,12 @@ class StrategyPolicy(StrictSchema):
 
 
 def invoke(
-    payload: dict, directory: Path, seconds: float, *, native: bool = False
+    payload: dict,
+    directory: Path,
+    seconds: float,
+    *,
+    native: bool = False,
+    worker_mode: str | None = None,
 ) -> dict:
     """Bound process startup, numerical work and checkpoint recovery separately.
 
@@ -66,7 +71,7 @@ def invoke(
         sys.executable,
         "-m",
         "autoformalism.fitting.transcription_fit",
-        "native" if native else "fit",
+        worker_mode or ("native" if native else "fit"),
         str(directory),
     ]
     with (directory / "worker.log").open("w") as log:
@@ -117,6 +122,10 @@ def invoke(
 
 def fit(payload: dict, directory: Path) -> dict:
     """Compare four methods from identical physical starts and training nodes."""
+    if payload.get("assisted_start") is not None:
+        from autoformalism.fitting.screening_diagnostic import assisted_fit
+
+        return assisted_fit(payload, directory)
     if payload.get("reuse_diagnostic") is not None:
         from autoformalism.fitting.reuse_diagnostic import fit as diagnostic_fit
 
@@ -160,8 +169,24 @@ def fit(payload: dict, directory: Path) -> dict:
     def remaining():
         return max(0.001, deadline - monotonic())
 
+    screen_phase = 0
+
     def screen(points, seconds):
-        nonlocal best
+        nonlocal best, screen_phase
+        if payload.get("screening") is not None:
+            from autoformalism.fitting.bounded_screening import screen as bounded_screen
+
+            best, budget.calls = bounded_screen(
+                payload,
+                directory,
+                f"phase-{screen_phase}",
+                points,
+                deadline=min(deadline, monotonic() + seconds),
+                maximum=budget.maximum,
+                best=best,
+            )
+            screen_phase += 1
+            return
         end = min(deadline, monotonic() + seconds)
         oracle = GuardedOracle(
             system,
@@ -512,6 +537,10 @@ def run(payload: dict, directory: Path) -> dict:
             result["graph_builds"] = (
                 max((a["graph_builds_so_far"] for a in attempts), default=0) or None
             )
+    if payload.get("screening") is not None:
+        for name in ("screening", "assisted"):
+            if (directory / f"{name}.json").exists():
+                result[name] = public._read(directory / f"{name}.json")
     result["worker_payload_sha256"] = public.content_sha256(payload)
     result["process"] = process
     result["total_seconds"] = process["elapsed_seconds"]
@@ -526,6 +555,10 @@ if __name__ == "__main__":
         from autoformalism.fitting.transcription_solver import solve
 
         solve(payload, directory)
+    elif mode == "nodes":
+        from autoformalism.fitting.screening_diagnostic import node_worker
+
+        node_worker(payload, directory)
     elif mode == "fit":
         fit(payload, directory)
     else:

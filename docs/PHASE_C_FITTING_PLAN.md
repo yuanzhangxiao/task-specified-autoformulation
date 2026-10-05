@@ -527,3 +527,15 @@ checkpoint can consume the remaining screening budget. Next test bounded,
 journaled screening and collocation initialized from already accurate
 training-fitted rollout solutions, before adding benchmarks or more blanket
 budget. These are proposed diagnostics; no production fitter is promoted.
+
+## M9 — bounded screening and explicitly assisted collocation
+
+The next implemented diagnostic is described in
+[PHASE_C_FITTING_SCREENING_ASSISTANCE.md](PHASE_C_FITTING_SCREENING_ASSISTANCE.md).
+It follows the two recommendations in the M8 review: bounded per-point RK45/Radau
+screening with durable phase journals, and dense/reduced collocation initialized
+from verified M7 training-fitted endpoints, first with coefficients/initials fixed
+and then released. No hidden trajectory starts or production default changes.
+The 48-entry Delta CPU roster separates 36 generic fits from 12 assisted entries
+(two explicitly ineligible); upstream assisted cost is disclosed. Scientific
+interpretation awaits the new results.

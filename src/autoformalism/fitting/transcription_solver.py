@@ -125,14 +125,20 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
     if set(payload["meshes"]) != {r.trajectory_id for r in training.trajectories}:
         raise ValueError("mesh identities differ")
     opti = ca.Opti()
-    q = opti.variable(len(start))
+    fixed = payload.get("fixed_parameters", False)
+    if type(fixed) is not bool or (fixed and method != "collocation"):
+        raise ValueError("fixed parameters requires collocation")
+    q = opti.parameter(len(start)) if fixed else opti.variable(len(start))
     theta = pc + ps * q
-    opti.set_initial(q, (start - pc) / ps)
-    for i in range(len(start)):
-        if np.isfinite(layout.lower[i]):
-            opti.subject_to(q[i] >= (layout.lower[i] - pc[i]) / ps[i])
-        if np.isfinite(layout.upper[i]):
-            opti.subject_to(q[i] <= (layout.upper[i] - pc[i]) / ps[i])
+    if fixed:
+        opti.set_value(q, (start - pc) / ps)
+    else:
+        opti.set_initial(q, (start - pc) / ps)
+        for i in range(len(start)):
+            if np.isfinite(layout.lower[i]):
+                opti.subject_to(q[i] >= (layout.lower[i] - pc[i]) / ps[i])
+            if np.isfinite(layout.upper[i]):
+                opti.subject_to(q[i] <= (layout.upper[i] - pc[i]) / ps[i])
 
     def state_node(guess):
         node = opti.variable(system.state_count)
@@ -175,6 +181,14 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
                 float(np.max(abs(values))), np.finfo(float).tiny
             ):
                 raise ValueError("reduced mesh changes supplied input interpolation")
+        inner_guess = payload.get("inner_nodes", {}).get(key)
+        if inner_guess is not None:
+            inner_guess = np.asarray(inner_guess, float)
+            if (
+                inner_guess.shape != (len(mesh) - 1, system.state_count)
+                or not np.isfinite(inner_guess).all()
+            ):
+                raise ValueError("inner node shape/values differ")
         forcing = trajectory_forcing(model, row)
 
         def inputs(t, forcing=forcing):
@@ -193,7 +207,11 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
             end = state_node(guess[i + 1])
             dt = float(right - left)
             if method == "collocation":
-                middle = state_node((2 * guess[i] + guess[i + 1]) / 3)
+                middle = state_node(
+                    inner_guess[i]
+                    if inner_guess is not None
+                    else (2 * guess[i] + guess[i + 1]) / 3
+                )
                 f1 = system.rhs(left + dt / 3, middle, theta, inputs(left + dt / 3))
                 f2 = system.rhs(right, end, theta, inputs(right))
                 local_defects = [
@@ -338,6 +356,8 @@ def solve(payload: dict, directory: Path) -> dict:
                 "nodes": states.tolist(),
                 "indicators": [v if np.isfinite(v) else 1e100 for v in indicators],
             }
+            if payload.get("retain_inner_nodes"):
+                record["trajectories"][key]["inner_nodes"] = stages.tolist()
         if compact:
             if detailed:
                 public._write(directory / "final_checkpoint_diagnostics.json", record)
@@ -410,6 +430,7 @@ def solve(payload: dict, directory: Path) -> dict:
         directory / "layout.json",
         {
             "decision_variables": int(opti.nx),
+            "fixed_parameters": payload.get("fixed_parameters", False),
             "constraints": int(opti.ng),
             "observation_residuals": count,
             "graph_seconds": monotonic() - begun,
@@ -422,6 +443,19 @@ def solve(payload: dict, directory: Path) -> dict:
             "checkpoint_mode": payload.get("checkpoint_mode", "legacy"),
         },
     )
+    if payload.get("retain_inner_nodes"):
+        public._write(
+            directory / "initial_node_diagnostics.json",
+            {
+                "collocation_nmse": float(opti.debug.value(objective, opti.initial())),
+                "maximum_scaled_defect": float(
+                    np.max(
+                        abs(np.asarray(opti.debug.value(all_defects, opti.initial())))
+                    )
+                ),
+                "scope": "supplied primal nodes before this native solve",
+            },
+        )
     if payload.get("profile_derivatives"):
         from autoformalism.fitting.transcription_profile import profile
 
