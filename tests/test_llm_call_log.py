@@ -74,3 +74,26 @@ def test_a_failed_call_is_still_counted(tmp_path: Path) -> None:
     counted = accounting(tmp_path / "llm_calls.jsonl")
     assert counted["physical_requests"] == 3
     assert counted["unknown_usage_requests"] == 3
+
+
+def test_why_a_reply_stopped_and_a_replayed_answer_are_recorded(
+    tmp_path: Path,
+) -> None:
+    """A cut-off reply and a cached answer are both countable afterwards."""
+    import json
+
+    log = CallLog(tmp_path / "llm_calls.jsonl")
+    log.response({"usage": {"total_tokens": 10}}, finish_reasons=["stop", "length"])
+    log.response({"usage": {"total_tokens": 10}}, cache_hit=True)
+    log.response({"usage": {"total_tokens": 10}})
+    first, replayed, plain = (
+        json.loads(line)
+        for line in (tmp_path / "llm_calls.jsonl").read_text().splitlines()
+    )
+    assert first["finish_reasons"] == ["stop", "length"]
+    assert first["cache_hit"] is False and replayed["cache_hit"] is True
+    assert "finish_reasons" not in plain
+    assert accounting(tmp_path / "llm_calls.jsonl") == {
+        "physical_requests": 2, "observed_tokens": 20,
+        "unknown_usage_requests": 0, "cache_hits": 1,
+    }

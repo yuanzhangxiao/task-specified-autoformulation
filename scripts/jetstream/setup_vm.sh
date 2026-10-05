@@ -25,7 +25,7 @@ readonly venv="${AF_HOME}/venv"
 readonly py="${venv}/bin/python"
 readonly vendor="${AF_HOME}/vendor"
 readonly release="${AF_HOME}/release/phase-c-public-v2"
-readonly pilot_config="${repo}/configs/phase_c_llm_sr_budget_pilot_v1.json"
+readonly pilot_config="${repo}/configs/phase_c_llm_sr_budget_pilot_v2.json"
 readonly ode_config="${repo}/configs/phase_b_llm_ode_campaign_v1.json"
 
 step() { printf '\n== %s\n' "$*"; }

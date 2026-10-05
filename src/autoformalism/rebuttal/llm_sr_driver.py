@@ -5,6 +5,13 @@ specification file their runner is always pointed at, and a transport: their
 sampler posts a bespoke payload to a hardcoded local URL, and this answers it
 from the vLLM endpoint the other methods use.
 
+A plan may declare an adaptation to a reasoning model: a longer generation
+limit than their engine's 512 tokens, and a function header the model split
+over several lines read as one (`llm_sr_shim.join_split_header`). Both act in
+the transport; without a declaration the transport behaves as their engine.
+Against an endpoint that replays stored answers, every request asks it to
+generate afresh, as their engine always does.
+
 Their evaluator executes each synthesized program to score it. That is what
 program synthesis is, and it cannot be removed without removing the method, so
 the job confines it rather than preventing it. Nothing in the recovery path
@@ -33,7 +40,11 @@ from autoformalism.data import DatasetSplit
 from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal.llm_call_log import CallLog
 from autoformalism.rebuttal.llm_ode_upstream import InexpressibleEquation
-from autoformalism.rebuttal.llm_sr_shim import ShimAccounting, complete
+from autoformalism.rebuttal.llm_sr_shim import (
+    DEFAULT_MAX_TOKENS,
+    ShimAccounting,
+    complete,
+)
 from autoformalism.rebuttal.llm_sr_upstream import (
     InexpressibleProgram,
     best_sample,
@@ -41,6 +52,7 @@ from autoformalism.rebuttal.llm_sr_upstream import (
     convert_program,
     equation_body,
     refit_parameters,
+    sample_yield,
 )
 from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
@@ -81,11 +93,17 @@ def _transport(
     accounting: ShimAccounting,
     *,
     patience: float = DEFAULT_PATIENCE_SECONDS,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    join_headers: bool = False,
+    bypass_cache: bool = False,
 ):
     """Answer their sampler's requests from the OpenAI-compatible endpoint.
 
     Replaces the request method rather than the URL, which avoids running a
     second server inside the job; the payload and reply are theirs unchanged.
+    `max_tokens` and `join_headers` are what a plan declares for a reasoning
+    model; their defaults are their engine's behaviour. `bypass_cache` follows
+    the endpoint kind.
     """
     original = module.LocalLLM._do_request
     first, longest = BACKOFF_SECONDS
@@ -101,7 +119,13 @@ def _transport(
         }
         try:
             answer = complete(
-                payload, base_url=base_url, model=model, accounting=accounting
+                payload,
+                base_url=base_url,
+                model=model,
+                max_tokens=max_tokens,
+                join_headers=join_headers,
+                bypass_cache=bypass_cache,
+                accounting=accounting,
             )
         except Exception:
             now = _clock()
@@ -137,8 +161,16 @@ def build_searcher(
     samples: int,
     seconds_per_rollout: float = 60.0,
     patience_seconds: float = DEFAULT_PATIENCE_SECONDS,
+    max_new_tokens: int = DEFAULT_MAX_TOKENS,
+    join_split_headers: bool = False,
+    bypass_cache: bool = False,
 ):
-    """Bind the pinned checkout to our data; returns a campaign searcher."""
+    """Bind the pinned checkout to our data; returns a campaign searcher.
+
+    `max_new_tokens` and `join_split_headers` come from a plan's declared
+    reasoning-model adaptation; the defaults are upstream's own behaviour.
+    `bypass_cache` is for an endpoint that replays stored answers.
+    """
     import sys
 
     resolved = upstream_root.expanduser().resolve()
@@ -166,6 +198,10 @@ def build_searcher(
         equations: dict[str, str] = {}
         inexpressible: list[str] = []
         started = monotonic()
+
+        def spent() -> dict:
+            return _accounting(accounting, started, inexpressible, directory)
+
         for target in targets:
             specification, mapping = build_specification(
                 description, channels, target
@@ -186,7 +222,14 @@ def build_searcher(
             )
             try:
                 with _transport(
-                    sampler, base_url, model, accounting, patience=patience_seconds
+                    sampler,
+                    base_url,
+                    model,
+                    accounting,
+                    patience=patience_seconds,
+                    max_tokens=max_new_tokens,
+                    join_headers=join_split_headers,
+                    bypass_cache=bypass_cache,
                 ):
                     pipeline.main(
                         specification=specification,
@@ -200,8 +243,7 @@ def build_searcher(
                 return {
                     "status": "endpoint_unavailable",
                     "error": str(exc),
-                    "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                    "accounting": spent(),
                 }
 
             best = best_sample(log_dir)
@@ -209,8 +251,7 @@ def build_searcher(
                 return {
                     "status": "no_candidates",
                     "error": f"no sample scored for target {target}",
-                    "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                    "accounting": spent(),
                 }
             try:
                 body = equation_body(best["function"])
@@ -231,8 +272,7 @@ def build_searcher(
             return {
                 "status": "inexpressible",
                 "error": "; ".join(inexpressible),
-                "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                "accounting": spent(),
             }
         try:
             error = score_rollout(equations, context, *development,
@@ -244,16 +284,14 @@ def build_searcher(
             return {
                 "status": "inexpressible",
                 "error": "; ".join(inexpressible),
-                "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                "accounting": spent(),
             }
         if error is None:
             return {
                 "status": "rollout_failed",
                 "error": "the selected system did not complete a development rollout",
                 "equations": equations,
-                "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                "accounting": spent(),
             }
         return {
             "status": "complete",
@@ -264,8 +302,7 @@ def build_searcher(
                 equations, context, development[0], development[0],
                 seconds=seconds_per_rollout,
             ),
-            "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+            "accounting": spent(),
         }
 
     return search
@@ -275,13 +312,22 @@ def _accounting(
     accounting: ShimAccounting,
     started: float,
     inexpressible: list[str],
-    log_path: Path,
+    directory: Path,
 ) -> dict:
-    """What the run cost, and what our grammar could not read."""
+    """What the run cost, how many samples scored, what our grammar refused."""
+    written = scored = 0
+    for log_dir in sorted(directory.glob("llmsr-*")):
+        counts = sample_yield(log_dir)
+        written += counts["model_samples"]
+        scored += counts["model_samples_scored"]
     return {
-        **d3_accounting(log_path),
+        **d3_accounting(directory / "llm_calls.jsonl"),
         "llm_requests": accounting.requests,
         "llm_samples": accounting.samples,
+        # Samples the model wrote that LLM-SR's evaluator could score; one
+        # that is empty or does not parse never scores.
+        "model_samples": written,
+        "model_samples_scored": scored,
         "transport_failures": accounting.failures,
         "transport_failure_reasons": accounting.reasons,
         "search_seconds": round(monotonic() - started, 1),

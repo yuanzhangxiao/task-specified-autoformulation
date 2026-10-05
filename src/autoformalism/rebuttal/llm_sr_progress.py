@@ -27,8 +27,18 @@ def _finite_score(path: Path) -> float | None:
 
 
 def _calls(log: Path) -> dict[str, int]:
-    """Requests answered, requests failed and tokens reported so far."""
-    counts = {"requests": 0, "failed_requests": 0, "tokens": 0}
+    """Requests answered and failed, tokens, replies cut off, answers replayed.
+
+    A reply cut off stopped at the token limit, before the model finished it.
+    A cache hit is an answer a gateway replayed instead of generating.
+    """
+    counts = {
+        "requests": 0,
+        "failed_requests": 0,
+        "tokens": 0,
+        "replies_cut_off": 0,
+        "cache_hits": 0,
+    }
     if not log.exists():
         return counts
     for line in log.read_text(encoding="utf-8").splitlines():
@@ -39,6 +49,9 @@ def _calls(log: Path) -> dict[str, int]:
         if event.get("event") == "llm_response":
             counts["requests"] += 1
             counts["tokens"] += int((event.get("usage") or {}).get("total_tokens") or 0)
+            reasons = event.get("finish_reasons") or []
+            counts["replies_cut_off"] += sum(reason == "length" for reason in reasons)
+            counts["cache_hits"] += bool(event.get("cache_hit"))
         elif event.get("event") == "llm_failure":
             counts["failed_requests"] += 1
     return counts

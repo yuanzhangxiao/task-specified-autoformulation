@@ -19,8 +19,10 @@ from pathlib import Path
 from autoformalism.rebuttal.llm_sr_campaign import prepare_phase_c, report, run_phase_c
 from autoformalism.rebuttal.llm_sr_driver import build_searcher
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
+    CACHING_ENDPOINTS,
     OUTAGE_PATIENCE_SECONDS,
     check_served_model,
+    llm_sr_transport_settings,
     resolve_endpoint,
     served_model_ids,
 )
@@ -34,11 +36,19 @@ def _endpoint() -> tuple[str, str]:
     )
 
 
-def _searcher(root: Path, base_url: str, *, patience_seconds: float):
+def _searcher(
+    root: Path,
+    base_url: str,
+    *,
+    patience_seconds: float,
+    bypass_cache: bool = False,
+):
     """Bind the pinned checkout; confirm the served model only before a search.
 
     `patience_seconds` is how long a search waits out an endpoint that keeps
-    failing; it follows the endpoint kind, not the plan.
+    failing, and `bypass_cache` whether it replays stored answers; both follow
+    the endpoint kind, not the plan. The generation limit and header reading
+    follow the plan's declared adaptation, if any.
     """
     checkout = os.environ.get("AF_LLM_SR_ROOT")
     if not checkout:
@@ -54,6 +64,8 @@ def _searcher(root: Path, base_url: str, *, patience_seconds: float):
         model=model,
         samples=int(budget["declared"]),
         patience_seconds=patience_seconds,
+        bypass_cache=bypass_cache,
+        **llm_sr_transport_settings(sealed["plan"]),
     )
 
     def checked(**kwargs) -> dict:
@@ -99,6 +111,7 @@ def main() -> None:
                 args.root,
                 base_url,
                 patience_seconds=OUTAGE_PATIENCE_SECONDS[endpoint],
+                bypass_cache=endpoint in CACHING_ENDPOINTS,
             ),
         )
         value = {key: item for key, item in result.items() if key != "rows"}

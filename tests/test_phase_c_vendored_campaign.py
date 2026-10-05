@@ -30,6 +30,8 @@ from autoformalism.rebuttal.phase_c_vendored_campaign import (
     PhaseCVendoredCampaignPlan,
     check_served_model,
     endpoint_environment,
+    llm_sr_transport_settings,
+    load_phase_c_vendored_plan,
     resolve_endpoint,
 )
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
@@ -288,6 +290,92 @@ def test_a_hosted_plan_states_what_the_service_cannot_prove(tmp_path):
     )
     assert sealed["environment"] == endpoint_environment("jetstream2_hosted")
     assert any("not verifiable" in note for note in sealed["reporting_qualifications"])
+
+
+ADAPTATION = {
+    "max_new_tokens": 4096,
+    "join_split_headers": True,
+    "rationale": "gpt-oss reasons before it answers and splits its headers.",
+}
+
+
+def test_a_reasoning_model_adaptation_is_frozen_and_reported(tmp_path):
+    """What changes is sealed with the plan and stated beside every result."""
+    _, _, sealed = _frozen(tmp_path, reasoning_model_adaptation=ADAPTATION)
+    assert sealed["plan"]["reasoning_model_adaptation"] == ADAPTATION
+    notes = [
+        note
+        for note in sealed["reporting_qualifications"]
+        if note.startswith("adapted to a reasoning model")
+    ]
+    assert notes == [
+        "adapted to a reasoning model: up to 4096 new tokens per sample against "
+        "upstream's 512; a function header the model split over several lines "
+        "is read as one line; the search itself is upstream's"
+    ]
+    assert llm_sr_transport_settings(sealed["plan"]) == {
+        "max_new_tokens": 4096,
+        "join_split_headers": True,
+    }
+
+
+def test_without_an_adaptation_llm_sr_runs_as_upstreams_engine(tmp_path):
+    _, _, sealed = _frozen(tmp_path)
+    assert sealed["plan"]["reasoning_model_adaptation"] is None
+    assert not any(
+        "reasoning model" in note for note in sealed["reporting_qualifications"]
+    )
+    assert llm_sr_transport_settings(sealed["plan"]) == {
+        "max_new_tokens": 512,
+        "join_split_headers": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "adaptation", "message"),
+    [
+        ("llm_ode", ADAPTATION, "LLM-SR only"),
+        (
+            "llm_sr",
+            {**ADAPTATION, "max_new_tokens": 512, "join_split_headers": False},
+            "omit it",
+        ),
+        ("llm_sr", {**ADAPTATION, "reasoning_effort": "low"}, "Extra inputs"),
+        ("llm_sr", {**ADAPTATION, "rationale": ""}, "at least 1 character"),
+    ],
+)
+def test_an_adaptation_must_be_real_and_llm_srs(tmp_path, method, adaptation, message):
+    payload = _payload(
+        _release(tmp_path / "release"), method, reasoning_model_adaptation=adaptation
+    )
+    with pytest.raises(ValueError, match=message):
+        PhaseCVendoredCampaignPlan.model_validate(payload)
+
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def test_the_v2_pilot_and_smoke_differ_from_v1_only_where_declared():
+    """v1 sent raw text; v2 declares the adaptation and keeps everything else."""
+    configs = REPO / "configs"
+
+    def load(name: str) -> dict:
+        return load_phase_c_vendored_plan(configs / name).model_dump(mode="json")
+
+    for kind in ("budget_pilot", "smoke"):
+        old = load(f"phase_c_llm_sr_{kind}_v1.json")
+        new = load(f"phase_c_llm_sr_{kind}_v2.json")
+        assert old["reasoning_model_adaptation"] is None
+        assert new["reasoning_model_adaptation"]["max_new_tokens"] == 4096
+        assert new["reasoning_model_adaptation"]["join_split_headers"] is True
+        assert new["status"] == "frozen_before_calls"
+        changed = {key for key in new if new[key] != old[key]}
+        assert changed == {"budget", "reasoning_model_adaptation"}
+        assert new["budget"]["declared"] == old["budget"]["declared"]
+    pilot = load("phase_c_llm_sr_budget_pilot_v2.json")
+    smoke = load("phase_c_llm_sr_smoke_v2.json")
+    assert pilot["reasoning_model_adaptation"] == smoke["reasoning_model_adaptation"]
+    assert (pilot["budget"]["declared"], smoke["budget"]["declared"]) == (10000, 8)
 
 
 # --- running and resuming ----------------------------------------------------
@@ -619,6 +707,31 @@ def test_the_cli_gives_a_search_the_patience_of_its_endpoint(
     assert seen["patience_seconds"] == vendored.OUTAGE_PATIENCE_SECONDS[
         "jetstream2_hosted"
     ]
+    if method == "llm_sr":
+        # The hosted gateway replays stored answers unless asked not to.
+        assert seen["bypass_cache"] is True
+        assert (seen["max_new_tokens"], seen["join_split_headers"]) == (512, False)
+
+
+def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):
+    """The adaptation is read from the sealed plan, never from the environment."""
+    import sys
+
+    from scripts import phase_c_llm_sr as cli
+
+    _, root, _ = _frozen(tmp_path, reasoning_model_adaptation=ADAPTATION)
+    seen: dict = {}
+    monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
+    monkeypatch.setenv("AF_ENDPOINT_KIND", "vm_local_vllm")
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:8000")
+    monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr(cli, "run_phase_c", lambda *a, **k: {"status": "complete"})
+    monkeypatch.setattr(
+        sys, "argv", ["cli.py", "run", "--root", str(root), "--index", "0"]
+    )
+    cli.main()
+    assert (seen["max_new_tokens"], seen["join_split_headers"]) == (4096, True)
+    assert seen["bypass_cache"] is False  # a vLLM we serve replays nothing
 
 
 def test_the_cli_takes_the_endpoint_from_the_environment(monkeypatch):

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Measure how fast this VM's model server generates for the baselines' requests.
 
-LLM-SR asks /v1/completions for four programs of up to 512 tokens per
-request; LLM-ODE asks /v1/responses for up to 1024 tokens. This sends requests
-of those two shapes from several concurrent clients and reports generated
-tokens per second, then projects the GPU hours and SUs one model's Phase C
-matrix needs at that rate. The prompts are synthetic, of about the length the
-methods send; no benchmark data are read.
+LLM-SR asks /v1/chat/completions for four programs of up to 4096 tokens per
+request (the limit its Phase C plans declare for gpt-oss, which reasons before
+it answers); LLM-ODE asks /v1/responses for up to 1024 tokens. This sends
+requests of those two shapes from several concurrent clients and reports
+generated tokens per second, then projects the GPU hours and SUs one model's
+Phase C matrix needs at that rate. The prompts are synthetic, of about the
+length the methods send; no benchmark data are read.
 
 The projection counts generation only. LLM-SR and LLM-ODE also spend CPU time
 scoring each candidate, during which the server idles for that task, so treat
@@ -28,6 +29,10 @@ from collections.abc import Callable
 #: One model's Phase C matrix: 22 LLM-SR searches of 10,000 samples at four
 #: samples per request, and LLM-ODE's 200 iterations x 4 islands per target.
 WORKLOAD_REQUESTS = {"llm_sr": 22 * 10_000 // 4, "llm_ode": 17_600}
+
+#: LLM-SR's generation limit per sample in its Phase C plans
+#: (configs/phase_c_llm_sr_budget_pilot_v2.json, reasoning_model_adaptation).
+SR_MAX_TOKENS = 4096
 
 SR_PROMPT = '''"""
 Find the mathematical function skeleton that represents the acceleration of a
@@ -96,8 +101,17 @@ ODE_PROMPT = (
 def _shape(name: str, model: str) -> tuple[str, dict, Callable[[dict], int]]:
     """The endpoint, body and generated-token count for one request shape."""
     if name == "llm_sr":
-        body = {"model": model, "prompt": SR_PROMPT, "n": 4, "max_tokens": 512}
-        return "/v1/completions", body, lambda usage: int(usage["completion_tokens"])
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": SR_PROMPT}],
+            "n": 4,
+            "max_tokens": SR_MAX_TOKENS,
+        }
+        return (
+            "/v1/chat/completions",
+            body,
+            lambda usage: int(usage["completion_tokens"]),
+        )
     if name == "llm_ode":
         body = {"model": model, "input": ODE_PROMPT, "max_output_tokens": 1024}
         return "/v1/responses", body, lambda usage: int(usage["output_tokens"])

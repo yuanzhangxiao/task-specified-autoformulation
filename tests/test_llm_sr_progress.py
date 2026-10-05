@@ -34,9 +34,10 @@ def _running_task(root: Path) -> None:
         stamp = START + order * 400.0
         os.utime(path, (stamp, stamp))
     calls = [
-        {"event": "llm_response", "usage": {"total_tokens": 100}},
+        {"event": "llm_response", "usage": {"total_tokens": 100},
+         "finish_reasons": ["stop", "length", "stop", "stop"]},
         {"event": "llm_failure", "usage": {}, "reason": "URLError"},
-        {"event": "llm_response", "usage": {"total_tokens": 200}},
+        {"event": "llm_response", "usage": {"total_tokens": 200}, "cache_hit": True},
     ]
     log = root / "results" / "0" / "llm_calls.jsonl"
     log.write_text("".join(json.dumps(c) + "\n" for c in calls) + "{trunc", "utf-8")
@@ -60,6 +61,8 @@ def test_progress_reports_pace_and_status_without_a_model(tmp_path):
     assert running["best_llm_sr_score"] == -0.5
     assert (running["requests"], running["failed_requests"]) == (2, 1)
     assert running["tokens"] == 300  # a torn final line is skipped
+    assert running["replies_cut_off"] == 1  # stopped at the token limit
+    assert running["cache_hits"] == 1  # replayed by a gateway, not generated
     assert running["samples_per_hour"] == 10.0
     assert running["hours_to_finish_at_this_pace"] == 9.0
     assert running["minutes_since_last_sample"] == 2.0

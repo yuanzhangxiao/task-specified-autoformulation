@@ -399,6 +399,31 @@ def best_sample(log_dir: Path) -> dict | None:
     return best
 
 
+def sample_yield(log_dir: Path) -> dict[str, int]:
+    """How many samples the model wrote, and how many of those scored.
+
+    The profiler records the specification's own program as sample 0; every
+    later sample is one the model wrote. A sample without a finite score never
+    evaluated, which is what an empty or unreadable reply comes to.
+    """
+    written = scored = 0
+    directory = log_dir / "samples"
+    paths = directory.glob("samples_*.json") if directory.is_dir() else ()
+    for path in paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        order = payload.get("sample_order")
+        if not isinstance(order, int) or order < 1:
+            continue
+        written += 1
+        score = payload.get("score")
+        if isinstance(score, (int, float)) and np.isfinite(score):
+            scored += 1
+    return {"model_samples": written, "model_samples_scored": scored}
+
+
 def equation_body(function_source: str) -> str:
     """The body of the evolved function, without its signature or docstring."""
     try:

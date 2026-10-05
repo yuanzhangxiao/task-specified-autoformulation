@@ -119,6 +119,20 @@ def test_the_projection_uses_the_best_rate_for_each_shape() -> None:
     assert "llm_ode" not in projection  # nothing was measured for it
 
 
+def test_the_llm_sr_shape_is_the_request_its_plans_send() -> None:
+    """A chat request at the declared limit; raw text at 512 was a bug."""
+    import json
+
+    path, body, generated = throughput._shape("llm_sr", "m")
+    plan = json.loads(
+        (REPO / "configs" / "phase_c_llm_sr_budget_pilot_v2.json").read_text()
+    )
+    assert path == "/v1/chat/completions"
+    assert body["messages"][0]["role"] == "user" and body["n"] == 4
+    assert body["max_tokens"] == plan["reasoning_model_adaptation"]["max_new_tokens"]
+    assert generated({"completion_tokens": 9000}) == 9000
+
+
 def test_an_unknown_request_shape_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown request shape"):
         throughput.measure("http://127.0.0.1:1", "m", "llm_d3", 1, 0.0)

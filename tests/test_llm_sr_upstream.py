@@ -18,6 +18,7 @@ from autoformalism.expressions.parser import RestrictedParser, baseline_parser
 from autoformalism.rebuttal.llm_sr_upstream import (
     InexpressibleProgram,
     convert_program,
+    sample_yield,
 )
 
 PARAMS = {index: float(index + 1) / 2 for index in range(10)}
@@ -252,3 +253,28 @@ def test_a_real_power_law_with_named_constants_is_recovered() -> None:
     baseline_parser().parse(expression, location="test")
     with pytest.raises(ModelValidationError):
         RestrictedParser().parse(expression, location="ours")
+
+
+def test_the_yield_counts_only_samples_the_model_wrote(tmp_path: Path) -> None:
+    """Sample 0 is the specification's own program, which always scores.
+
+    Counting it would let a search whose every reply was unreadable look as if
+    something had scored, which is how the first budget pilot looked complete.
+    """
+    import json
+
+    samples = tmp_path / "llmsr-G" / "samples"
+    samples.mkdir(parents=True)
+    for order, score in ((0, -1.2), (2, -0.5), (3, None), (4, float("nan"))):
+        (samples / f"samples_{order}.json").write_text(
+            json.dumps({"sample_order": order, "function": "f", "score": score})
+        )
+    (samples / "samples_5.json").write_text("{torn")
+    assert sample_yield(tmp_path / "llmsr-G") == {
+        "model_samples": 3,
+        "model_samples_scored": 1,
+    }
+    assert sample_yield(tmp_path / "absent") == {
+        "model_samples": 0,
+        "model_samples_scored": 0,
+    }

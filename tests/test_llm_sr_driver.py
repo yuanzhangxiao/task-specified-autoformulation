@@ -115,6 +115,55 @@ def test_a_recovered_model_carries_refitted_coefficients(
     expression = outcome["equations"]["G"]
     assert "-0.7" in expression or "-0.69" in expression
     assert outcome["accounting"]["llm_requests"] == 0  # complete() was stubbed
+    # the profiler's one sample was the model's, and it scored
+    assert outcome["accounting"]["model_samples"] == 1
+    assert outcome["accounting"]["model_samples_scored"] == 1
+
+
+def _capturing(monkeypatch) -> list[dict]:
+    """Replace the endpoint call with one that records how it was asked."""
+    seen: list[dict] = []
+
+    def complete(payload, **kwargs):
+        seen.append(kwargs)
+        return {"content": ["x"] * 4}
+
+    monkeypatch.setattr(driver, "complete", complete)
+    return seen
+
+
+def test_the_declared_adaptation_reaches_every_request(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A plan's limit, header reading and cache bypass are what is sent."""
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    seen = _capturing(monkeypatch)
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m",
+        samples=20, max_new_tokens=4096, join_split_headers=True,
+        bypass_cache=True,
+    )
+    _run(search, directory=tmp_path / "adapted")
+    assert seen and all(
+        (call["max_tokens"], call["join_headers"], call["bypass_cache"])
+        == (4096, True, True)
+        for call in seen
+    )
+
+
+def test_without_a_declaration_the_transport_is_upstreams(
+    monkeypatch, tmp_path: Path
+) -> None:
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    seen = _capturing(monkeypatch)
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    _run(search, directory=tmp_path / "plain")
+    assert [
+        (call["max_tokens"], call["join_headers"], call["bypass_cache"])
+        for call in seen
+    ] == [(512, False, False)]
 
 
 class _Clock:

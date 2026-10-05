@@ -6,7 +6,9 @@ from a verified Phase C release instead of the legacy registry, and a plan
 declares where its model is served, because the same campaign can run against
 a vLLM started inside a cluster job, a vLLM on a Jetstream2 VM, or the
 Jetstream2 hosted service. A task resumes only against the kind it was frozen
-for. The plan names the model; nothing here chooses one.
+for. The plan names the model; nothing here chooses one. An LLM-SR plan may
+also declare how LLM-SR is adapted to a reasoning model, which a report must
+then state.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from autoformalism.data.models import DevelopmentDataset
 from autoformalism.expressions import ValidationContext
-from autoformalism.rebuttal.llm_sr_shim import http_error_detail
+from autoformalism.rebuttal.llm_sr_shim import DEFAULT_MAX_TOKENS, http_error_detail
 from autoformalism.rebuttal.phase_c_baseline_plan import PhaseCBaselineCell
 from autoformalism.rebuttal.phase_c_baselines import load_cell, tier_of, verify_release
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
@@ -69,6 +71,14 @@ OUTAGE_PATIENCE_SECONDS: dict[str, float] = {
     "vm_local_vllm": 15 * 60.0,
     "jetstream2_hosted": 6 * 60 * 60.0,
 }
+
+#: Endpoint kinds that replay a stored answer to a repeated request unless a
+#: request says otherwise. The hosted service is a LiteLLM gateway (1.98.0 on
+#: 2026-10-05): an identical request came back in under a millisecond with
+#: the first answer's id. Upstream LLM-SR samples afresh for every request and
+#: its islands begin from the same prompt, so its requests ask the gateway to
+#: generate anew. LLM-ODE's requests do not ask yet.
+CACHING_ENDPOINTS = frozenset({"jetstream2_hosted"})
 
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -145,6 +155,75 @@ def check_served_model(served: tuple[str, ...], model: str, *, first: bool) -> N
         )
 
 
+class ReasoningModelAdaptation(BaseModel):
+    """What LLM-SR needs to read a reasoning model's replies, declared.
+
+    LLM-SR was published with models that answer at once. A reasoning model
+    such as gpt-oss reasons before it answers, within the same token limit,
+    and writes its function header over several lines. Upstream's 512-token
+    default and its one-line reading of a header then leave almost every
+    sample empty, so the comparison would measure the mismatch rather than
+    the method.
+
+    Both changes act in the transport, before upstream reads a reply. The
+    search is upstream's: prompts, islands, sampling controls, evaluator,
+    scoring and selection, which is why ``upstream.search_modified`` stays
+    false while this block is reported beside it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: Generation limit per sample, in place of their engine's 512.
+    max_new_tokens: int = Field(ge=1, le=32768)
+    #: Read a header the model split over several lines as one line
+    #: (``llm_sr_shim.join_split_header``).
+    join_split_headers: bool
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def departs_from_upstream(self) -> ReasoningModelAdaptation:
+        """An adaptation that changes nothing is not declared at all."""
+        if self.max_new_tokens == DEFAULT_MAX_TOKENS and not self.join_split_headers:
+            raise ValueError(
+                "this adaptation keeps upstream's behaviour; omit it instead"
+            )
+        return self
+
+    def qualification(self) -> str:
+        """The statement a report of an adapted campaign carries."""
+        changes = []
+        if self.max_new_tokens != DEFAULT_MAX_TOKENS:
+            changes.append(
+                f"up to {self.max_new_tokens} new tokens per sample against "
+                f"upstream's {DEFAULT_MAX_TOKENS}"
+            )
+        if self.join_split_headers:
+            changes.append(
+                "a function header the model split over several lines is read "
+                "as one line"
+            )
+        return (
+            "adapted to a reasoning model: "
+            + "; ".join(changes)
+            + "; the search itself is upstream's"
+        )
+
+
+def llm_sr_transport_settings(plan: dict) -> dict[str, int | bool]:
+    """The generation limit and header reading a sealed LLM-SR plan declares.
+
+    A plan without an adaptation runs as upstream's engine would.
+    """
+    declared = plan.get("reasoning_model_adaptation")
+    if declared is None:
+        return {"max_new_tokens": DEFAULT_MAX_TOKENS, "join_split_headers": False}
+    adaptation = ReasoningModelAdaptation.model_validate(declared)
+    return {
+        "max_new_tokens": adaptation.max_new_tokens,
+        "join_split_headers": adaptation.join_split_headers,
+    }
+
+
 class PhaseCVendoredCampaignPlan(BaseModel):
     """Everything that fixes a Phase C vendored campaign before its first call."""
 
@@ -167,6 +246,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
     full_design_conditions: int = Field(default=len(ROSTER), gt=0)
     endpoint: EndpointKind = "job_local_vllm"
     model: str = Field(min_length=1)
+    #: LLM-SR only; absent means upstream's own generation limit and reading.
+    reasoning_model_adaptation: ReasoningModelAdaptation | None = None
     cells: tuple[PhaseCBaselineCell, ...] = Field(min_length=1)
     repetitions: tuple[int, ...] = Field(min_length=1)
     execution_semantics: Literal["continuous_ode_free_rollout"]
@@ -200,6 +281,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             raise ValueError(
                 f"the Jetstream2 hosted endpoint serves only {JETSTREAM2_HOSTED_MODEL}"
             )
+        if self.reasoning_model_adaptation is not None and self.method != "llm_sr":
+            raise ValueError("a reasoning-model adaptation is declared for LLM-SR only")
         return self
 
     @property
@@ -223,6 +306,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
                 "served by the Jetstream2 hosted endpoint, whose model revision "
                 "and serving software are not verifiable"
             )
+        if self.reasoning_model_adaptation is not None:
+            notes.append(self.reasoning_model_adaptation.qualification())
         return tuple(notes)
 
 
