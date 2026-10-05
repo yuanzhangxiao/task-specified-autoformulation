@@ -583,12 +583,13 @@ def test_compact_view_storage_failure_preserves_saved_proposal(tmp_path, monkeyp
     assert len(calls) == n
 
 
-def test_v1_plan_is_not_resumed_with_changed_acceptance_rules(tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_old_plan_is_not_resumed_with_changed_acceptance_rules(tmp_path, version):
     source_fixture(tmp_path)
     root = tmp_path / "comparison"
     plan = campaign.freeze(tmp_path / "new", root)
     old = {k: v for k, v in plan.items() if k != "artifact_sha256"}
-    old["protocol"] = "phase-c-construction-comparison-1"
+    old["protocol"] = f"phase-c-construction-comparison-{version}"
     (root / "plan.json").unlink()
     sealed_write(root / "plan.json", old)
     with pytest.raises(ValueError, match="source/protocol"):
@@ -694,3 +695,60 @@ def test_optional_relationship_rejection_does_not_skip_equations(tmp_path):
     stage = result["before_repair"]["stage_outcomes"][1]
     assert not stage["completed"] and stage["continued_to_equations"]
     assert result["before_repair"]["assessment"]["eligible"]
+
+
+def test_conversion_normalization_preserves_raw_cache_and_replays_journal(tmp_path):
+    calls = []
+    base = transport(calls)
+
+    def send(url, body, timeout):
+        result = base(url, body, timeout)
+        p = json.loads(body["messages"][1]["content"])
+        if p["stage"] == "relationships":
+            raw = json.loads(result["choices"][0]["message"]["content"])
+            raw["processes"] = [
+                {
+                    "name": "local_input",
+                    "depends_on": ["u"],
+                    "kind": "influence",
+                    "scientific_meaning": "local input",
+                    "uses": [{"target": "y", "sign": "positive", "conversion": "null"}],
+                }
+            ]
+            return response(raw)
+        return result
+
+    def attempt():
+        client = ConstructionClient(
+            settings=StagedModelSettings(),
+            directory=tmp_path / "calls",
+            namespace="quoted-null",
+            seed=0,
+            base_url="http://offline",
+            transport=send,
+            token_transport=tokenize,
+        )
+        return schedules.run(
+            brief(True),
+            context(),
+            {},
+            brief(True).model_dump(mode="json"),
+            client,
+            tmp_path / "construction",
+            "joint_fixed",
+        )
+
+    result = attempt()
+    assert result["status"] == "topology_complete"
+    event = sealed_read(tmp_path / "construction/events/000.json")
+    assert event["accepted"] and len(event["normalizations"]) == 1
+    assert event["after"]["processes"][0]["uses"][0]["conversion"] is None
+    record = json.loads(
+        (tmp_path / "calls" / f"{event['request_hash']}.json").read_text()
+    )
+    raw = json.loads(record["raw_response"]["choices"][0]["message"]["content"])
+    assert raw["processes"][0]["uses"][0]["conversion"] == "null"
+    assert result["assessment"]["process_usage"][0]["scope"] == "local"
+    n = len(calls)
+    assert attempt() == result and len(calls) == n
+    assert sealed_read(tmp_path / "construction/events/000.json") == event

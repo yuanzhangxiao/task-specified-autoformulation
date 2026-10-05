@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+Construction comparison version 3 fixes misleading source/type and transactional
+repair feedback, logs narrow quoted-null conversion normalization, and marks graph
+checks unavailable after compilation failure. Local named laws and genuinely shared
+multi-consumer laws are reported separately. An offline 114-reply audit retained
+all 100 accepted replies and admitted four format-rejected replies; it recovered
+no additional final models. Public contracts, fitter and scientific criteria are
+unchanged. Historical plans require their pinned code; see
+`PHASE_C_CONSTRUCTION_COMPARISON.md` for fresh roots and remaining scientific gaps.
+
 The construction comparison has an explicit 24-task live confirmation: all eight
 cases x three schedules, Full/seed 0, with a three-hour worker window. It reuses
 the corrected constructor and stops before functions/fitting. The frozen roster,
@@ -10,7 +19,9 @@ permits optional memory bindings without inventing mandatory requirements, and
 continues ordinary equations after failed optional relationship delivery. Prompts
 distinguish accumulation from relaxation and show a complete response template.
 Compact linked traces preserve raw evidence without duplicating it. Historical
-version-1 plans remain frozen; live response-delivery improvement is unverified.
+version-1 plans remain frozen. The 24-task version-2 live confirmation finished
+without output truncation; 17 drafts passed structural checks, with scientific
+deficiencies still present. These counts do not rank construction strategies.
 
 `docs/PHASE_C_CONSTRUCTION_COMPARISON.md` defines the matched 96-construction
 experiment: separate variables/topology, joint construction on a fixed schedule,

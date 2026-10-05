@@ -334,3 +334,160 @@ def test_constant_term_supported_but_empty_unassembled_rhs_explained():
     assert assess(d)["eligible"]
     d = apply(d, equations=[{"name": "y", "terms": []}])
     assert "empty assembled RHS" in str(assess(d)["errors"])
+
+
+def test_source_feedback_uses_the_current_interface_and_keeps_observation_choice():
+    for name in ("u", "area"):
+        with pytest.raises(ValueError, match="already available public") as exc:
+            apply(variables=[variable(name)])
+        assert "supplied or unused" not in str(exc.value)
+        assert "keep scientifically intended RHS references" in str(exc.value)
+    # A generated observation is a genuine scientific option, unlike an input.
+    d = apply(
+        variables=[variable("y"), variable("a", "algebraic")],
+        equations=[equation("y", "a"), equation("a", "u")],
+    )
+    assert assess(d)["eligible"]
+    assert assess(d)["generated_auxiliary_aliases"]["a"]
+
+
+def test_conflicting_edit_feedback_names_entries_and_no_edit_is_committed():
+    d = apply(variables=[variable("y")], equations=[equation("y", "u")])
+    before = d.model_dump()
+    with pytest.raises(ValueError, match=r"variables: \['y'\]") as exc:
+        apply(d, variables=[variable("y", "algebraic")], remove_variables=["y"])
+    assert "To keep or revise" in str(exc.value)
+    assert "To delete" in str(exc.value)
+    assert d.model_dump() == before
+
+
+def test_quoted_null_normalization_is_narrow_nonmutating_and_name_safe():
+    raw = {
+        "processes": [
+            process(uses=[{"target": "y", "sign": "positive", "conversion": "null"}])
+        ]
+    }
+    normalized, log = ledger.normalize_reply(brief(), raw)
+    assert raw["processes"][0]["uses"][0]["conversion"] == "null"
+    assert normalized["processes"][0]["uses"][0]["conversion"] is None
+    assert log == [
+        {
+            "code": "quoted_null_conversion",
+            "path": "processes[0].uses[0].conversion",
+            "before": "null",
+            "after": None,
+        }
+    ]
+    for spelling in (None, "None", "NULL", "0", "k", "null/area", "__import__('os')"):
+        raw["processes"][0]["uses"][0]["conversion"] = spelling
+        assert ledger.normalize_reply(brief(), raw) == (raw, [])
+    raw["processes"][0]["uses"][0]["conversion"] = "null"
+    b = brief().model_copy(
+        update={
+            "public_variables": (
+                *brief().public_variables,
+                brief().public_variables[-1].model_copy(update={"name": "null"}),
+            )
+        }
+    )
+    assert ledger.normalize_reply(b, raw) == (raw, [])
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        [],
+        {"processes": None},
+        {"processes": [None, {"uses": None}, {"uses": [0]}]},
+    ],
+)
+def test_normalization_does_not_invent_a_schema_valid_reply(raw):
+    assert ledger.normalize_reply(brief(), raw) == (raw, [])
+
+
+@pytest.mark.parametrize("failure", ["empty_rhs", "missing_equation", "cycle"])
+def test_compiler_failure_is_not_misreported_as_a_missing_path(failure):
+    variables = [variable("y"), variable("x"), variable("k", "algebraic")]
+    eqs = [equation("y", "x"), equation("x", "u", "x")]
+    if failure == "empty_rhs":
+        eqs.append({"name": "k", "terms": []})
+    elif failure == "cycle":
+        eqs.append(equation("k", "k"))
+    d = apply(
+        public=brief(True),
+        variables=variables,
+        equations=eqs,
+        mechanism_bindings=[{"requirement_id": "memory", "memory_states": ["x"]}],
+    )
+    result = assess(d, True)
+    assert not result["eligible"]
+    assert result["graph_check_status"] == "unavailable"
+    assert {e["code"] for e in result["errors"]} >= {"compiler"}
+    assert not {e["code"] for e in result["errors"]} & {
+        "public_path",
+        "memory_driver_path",
+        "memory_target_path",
+    }
+    assert result["public_structure_checks"] == []
+    assert result["memory_binding_checks"][0]["status"] == "unavailable_graph"
+    d = apply(
+        d,
+        public=brief(True),
+        remove_variables=["k"],
+        remove_equations=[] if failure == "missing_equation" else ["k"],
+    )
+    assert assess(d, True)["eligible"]
+    assert assess(d, True)["graph_check_status"] == "assessed"
+
+
+def test_missing_graph_does_not_suppress_known_type_or_binding_id_errors():
+    d = apply(
+        public=brief(True),
+        variables=[variable("y"), variable("x", "algebraic")],
+        mechanism_bindings=[
+            {"requirement_id": "memory", "memory_states": ["x"]},
+            {"requirement_id": "unknown", "memory_states": ["y"]},
+        ],
+    )
+    result = assess(d, True)
+    assert {e["code"] for e in result["errors"]} >= {
+        "memory_type",
+        "unknown_memory_requirement",
+    }
+    assert result["memory_binding_checks"][0]["status"] == "failed"
+
+
+def test_explicit_feedback_dependency_is_checked_at_topology_without_forcing_decay():
+    d = apply(variables=[variable("y")], equations=[equation("y", "u")])
+    assert assess(d)[
+        "eligible"
+    ]  # Accumulation remains permitted without an obligation.
+    b = optional_memory_brief(drivers=("y",))
+    result = ledger.assess(b, context(), {}, d)
+    assert result["graph_check_status"] == "assessed"
+    assert any(e["code"] == "public_path" for e in result["errors"])
+    d = apply(
+        d,
+        public=b,
+        variables=[variable("x", "algebraic")],
+        equations=[equation("y", "u", "x"), equation("x", "y")],
+    )
+    assert ledger.assess(b, context(), {}, d)[
+        "eligible"
+    ]  # Indirect feedback is allowed.
+
+
+def test_process_reporting_counts_distinct_consumers_not_names_or_repeated_uses():
+    use = {"target": "y", "sign": "positive", "conversion": None}
+    local = ledger.ProcessDeclaration(**process(kind="influence", uses=[use]))
+    assert ledger.process_usage(ledger.Draft(processes=(local,)))[0]["scope"] == "local"
+    duplicate = local.model_copy(update={"uses": (local.uses[0], local.uses[0])})
+    assert (
+        ledger.process_usage(ledger.Draft(processes=(duplicate,)))[0]["consumer_count"]
+        == 1
+    )
+    shared = ledger.ProcessDeclaration(**process())
+    assert (
+        ledger.process_usage(ledger.Draft(processes=(shared,)))[0]["scope"] == "shared"
+    )

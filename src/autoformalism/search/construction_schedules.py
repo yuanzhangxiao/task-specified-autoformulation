@@ -59,12 +59,19 @@ Do not invent requirement IDs. Bindings express
 your intended scientific assignment; complete equations must establish the paths.
 For each optional named process, choose its drivers, scientific meaning and signed
 consumers together. The runtime defines it once and inserts every declared use.
+A SHARED process has at least two DISTINCT generated-equation consumers. A process
+with one consumer is LOCAL, even if its name or formula resembles another process.
+Prefer an ordinary equation term for a local contribution. An explicitly named
+local law remains allowed, but is not counted as shared. Do not invent consumers
+to make a process shared, and do not duplicate one consumer with multiple signs.
 An INTERNAL pairwise transfer uses kind=transfer with two opposite signed consumers.
 An EXTERNAL source or sink has only its modeled consumer; use kind=influence.
 Never add a second consumer solely to satisfy the transfer format. An influence
 may be local or shared. Empty processes is legitimate. One process is one law,
 not a list of unrelated contributions. Conversion is null if unknown, or a positive
 fixed factor such as 1/area using public covariates and multiplication/division.
+For example: {"target":"x","sign":"positive","conversion":null}; null is
+the unquoted JSON value, not a string and not an unknown coefficient name.
 Never put an unknown kinetic coefficient (k_abs, 1/tau, etc.) in conversion.
 Use null for an unknown conversion; the runtime handles fitted magnitudes later.
 The consumer sign, conversion and fitted magnitude are outside the one shared law.
@@ -86,6 +93,9 @@ entries survive. Each equations entry REPLACES the complete ordinary RHS of its
 named LHS, not an addition to its old terms. Remove entries only with explicit
 remove_* lists. Changes to a process propagate automatically to all its uses;
 the next request displays the rebuilt draft. You need not repeat unchanged items.
+Never put the same entry in both a replacement list and its remove_* list. To
+revise x, supply its replacement and omit x from remove_*; to delete x, list its
+name in remove_* and omit its replacement. Coordinate affected equation edits.
 Forward references are allowed: an undeclared generated RHS name or an undefined
 equation is pending work, not an instruction for the runtime to guess its meaning.
 Resolve all such names and equations before finishing. All generated variables
@@ -99,6 +109,9 @@ are repeated on every request. A rejected_reply is a failed attempt, NOT a model
 to copy. Use its separately labeled error to correct the draft. Global structural
 feedback is supplied only after the initial construction ends. Do not claim
 scientific correctness merely because those finite structural checks pass.
+An unavailable graph check requires fixing compilation first; it is not a missing
+path verdict. Unresolved public predicates are not scientific passes. Topology
+specifies dependencies; do not defer a known missing dependency to function writing.
 
 RESPONSE DELIVERY
 Return ONE complete JSON object matching response_template. Keep every listed key,
@@ -298,9 +311,11 @@ def run(
         records.append(record)
         before = draft
         raw, accepted, complete, error = None, False, False, None
+        normalizations = []
         try:
             raw = visible_response(record)
-            patch = ledger.DraftPatch.model_validate(raw)
+            normalized, normalizations = ledger.normalize_reply(brief, raw)
+            patch = ledger.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
             draft = ledger.apply_patch(brief, draft, patch)
             accepted, complete = True, patch.stage_complete
@@ -315,6 +330,7 @@ def run(
             "record_sha256": content_hash(record),
             "accepted": accepted,
             "error": error,
+            "normalizations": normalizations,
             "stage_complete": complete,
             "before": before.model_dump(mode="json"),
             "after": draft.model_dump(mode="json"),
@@ -409,6 +425,9 @@ def run(
                 break
             feedback = {
                 "structural_failures": check["errors"],
+                "graph_check_status": check["graph_check_status"],
+                "graph_check_reason": check["graph_check_reason"],
+                "unresolved_public_predicates": check["unresolved_public_predicates"],
                 "ready_requested": ready,
                 "last_local_error": diagnostic,
             }

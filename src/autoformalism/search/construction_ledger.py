@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -43,7 +44,7 @@ class EquationUpdate(StrictSchema):
 
 
 class ProcessDeclaration(StrictSchema):
-    """A provisional shared law; consumer/path checks wait for the whole draft."""
+    """A named law, local or shared; use checks wait for the whole draft."""
 
     name: Identifier
     depends_on: tuple[Identifier, ...] = Field(min_length=1, max_length=64)
@@ -78,6 +79,52 @@ class DraftPatch(Draft):
     remove_processes: tuple[Identifier, ...] = ()
     remove_bindings: tuple[Identifier, ...] = ()
     stage_complete: bool
+
+
+def normalize_reply(
+    brief: PublicScientificBrief, raw: object
+) -> tuple[object, list[dict]]:
+    """Canonicalize only quoted JSON null conversions; retain auditable raw replies."""
+    value = deepcopy(raw)
+    changes = []
+    # A legal public covariate named null would make this spelling ambiguous.
+    if any(
+        v.name == "null" and v.data_role == "covariate" for v in brief.public_variables
+    ):
+        return value, changes
+    processes = value.get("processes") if isinstance(value, dict) else None
+    if not isinstance(processes, list):
+        return value, changes
+    for i, process in enumerate(processes):
+        uses = process.get("uses") if isinstance(process, dict) else None
+        if not isinstance(uses, list):
+            continue
+        for j, use in enumerate(uses):
+            if isinstance(use, dict) and use.get("conversion") == "null":
+                use["conversion"] = None
+                changes.append(
+                    {
+                        "code": "quoted_null_conversion",
+                        "path": f"processes[{i}].uses[{j}].conversion",
+                        "before": "null",
+                        "after": None,
+                    }
+                )
+    return value, changes
+
+
+def process_usage(draft: Draft) -> list[dict]:
+    """Count distinct consumers, independently of process naming or prose."""
+    return [
+        {
+            "name": p.name,
+            "kind": p.kind,
+            "consumers": sorted({u.target for u in p.uses}),
+            "consumer_count": len({u.target for u in p.uses}),
+            "scope": "shared" if len({u.target for u in p.uses}) >= 2 else "local",
+        }
+        for p in draft.processes
+    ]
 
 
 def inventory(
@@ -117,8 +164,17 @@ def apply_patch(brief: PublicScientificBrief, draft: Draft, patch: DraftPatch) -
         values = {getattr(v, key): v for v in getattr(draft, field)}
         remove = getattr(patch, removal)
         replacements = {getattr(v, key): v for v in getattr(patch, field)}
-        if len(remove) != len(set(remove)) or set(remove) & replacements.keys():
-            raise ValueError(f"ambiguous replace/remove operations in {field}")
+        if len(remove) != len(set(remove)):
+            raise ValueError(f"duplicate names in {removal}; include each name once")
+        conflicts = sorted(set(remove) & replacements.keys())
+        if conflicts:
+            raise ValueError(
+                f"ambiguous replace/remove operations in {field}: {conflicts}. "
+                f"To keep or revise an entry, include it in {field} and omit it "
+                f"from {removal}. To delete it, include its name only in {removal} "
+                f"and omit its declaration from {field}. Coordinate any affected "
+                "equation/reference edits. No part of this reply was committed."
+            )
         if set(remove) - values.keys():
             raise ValueError(
                 f"cannot remove unknown {field}: {sorted(set(remove) - values.keys())}"
@@ -129,9 +185,22 @@ def apply_patch(brief: PublicScientificBrief, draft: Draft, patch: DraftPatch) -
         updated[field] = tuple(values.values())
     candidate = Draft(**updated)
     # Types and public availability are not inferred from names or explanatory prose.
-    merge_variable_reply(
-        brief, (), VariableReply(variables=inventory(brief, candidate))
-    )
+    inv = inventory(brief, candidate)
+    public_roles = {v.name: v.data_role for v in brief.public_variables}
+    for v in inv:
+        role = public_roles.get(v.name)
+        if role in {"external_input", "covariate", "time"} and v.definition in {
+            "differential",
+            "algebraic",
+        }:
+            raise ValueError(
+                f"{v.name} is an already available public {role}, not a generated "
+                "LHS. Omit its declaration from this reply's variables/processes "
+                "and omit its equation; keep scientifically intended RHS references. "
+                "It requires no activation or type declaration. "
+                "No part of this reply was committed."
+            )
+    merge_variable_reply(brief, (), VariableReply(variables=inv))
     if {e.name for e in candidate.equations} & {p.name for p in candidate.processes}:
         raise ValueError(
             "a shared process already has one runtime-generated definition"
@@ -245,6 +314,7 @@ def snapshot(brief: PublicScientificBrief, draft: Draft) -> dict:
         "assembled_equations": equations,
         "assembly_pending_reason": assembly_error,
         "pending": pending(brief, draft),
+        "process_usage": process_usage(draft),
         "already_included_process_uses": [
             {
                 "process": p.name,
@@ -294,7 +364,10 @@ def assess(
         topology, aliases = lower_topology(brief, inv, equations, context)
     except (ValueError, ModelValidationError) as exc:
         fail("compiler", reason=str(exc))
-    checks = public_structure_checks(brief, equations)
+    # Failed compilation is not evidence of a missing scientific pathway.
+    # A partial/unassembled graph must never generate a false path verdict.
+    graph_available = topology is not None
+    checks = public_structure_checks(brief, equations) if graph_available else ()
     errors.extend({"code": "public_path", **v} for v in checks if not v["passed"])
     for e in equations:
         audit = audit_explicit_equation_polarity(
@@ -323,7 +396,7 @@ def assess(
                 r.requires_dynamic_memory and state in {*r.targets, *r.drivers}
             ):
                 fail("memory_type", requirement=r.id, state=state)
-            for driver in r.drivers:
+            for driver in r.drivers if graph_available else ():
                 if driver not in _ancestors(state, graph) and not (
                     not r.requires_dynamic_memory and driver == state
                 ):
@@ -333,7 +406,7 @@ def assess(
                         driver=driver,
                         memory=state,
                     )
-        for target in r.targets:
+        for target in r.targets if graph_available else ():
             ancestors = _ancestors(target, graph)
             if not r.requires_dynamic_memory:
                 ancestors = ancestors | {target}
@@ -351,6 +424,8 @@ def assess(
                 "states": list(binding.memory_states),
                 "status": "failed"
                 if len(errors) > prior_errors
+                else "unavailable_graph"
+                if not graph_available
                 else "passed"
                 if r.drivers and r.targets
                 else "unresolved_public_endpoints",
@@ -362,6 +437,10 @@ def assess(
     return {
         "eligible": not errors,
         "errors": errors,
+        "graph_check_status": "assessed" if graph_available else "unavailable",
+        "graph_check_reason": None
+        if graph_available
+        else "Compile the complete draft before assessing public or memory pathways.",
         "unresolved_public_predicates": [
             r.id for r in brief.requirements if not r.drivers or not r.targets
         ],
@@ -373,6 +452,7 @@ def assess(
         "shared_process_bindings": [
             signed_processes.binding_for(p) for p in draft.processes
         ],
+        "process_usage": process_usage(draft),
         "scientific_adequacy": "not_assessed",
         "scope": (
             "Declared structural predicates only; functions, initialization and "

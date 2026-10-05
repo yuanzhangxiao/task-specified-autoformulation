@@ -30,7 +30,7 @@ from autoformalism.search import construction_schedules as schedules
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-2"
+PROTOCOL = "phase-c-construction-comparison-3"
 REPO = baseline.REPO
 Study = Literal["comparison", "live_confirmation"]
 STUDIES = ("comparison", "live_confirmation")
@@ -39,7 +39,7 @@ STUDIES = ("comparison", "live_confirmation")
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-2"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-3"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -462,6 +462,18 @@ def report(root: Path, plan: dict) -> dict:
             else None,
             "initial_errors": initial["assessment"]["errors"] if initial else None,
             "final_errors": value["assessment"]["errors"] if value else None,
+            "graph_check_status": value["assessment"]["graph_check_status"]
+            if value
+            else None,
+            "unresolved_public_predicates": value["assessment"][
+                "unresolved_public_predicates"
+            ]
+            if value
+            else None,
+            "process_usage": value["assessment"]["process_usage"] if value else None,
+            "accepted_reply_normalizations": sum(
+                len(e["normalizations"]) for e in events if e["accepted"]
+            ),
             "repair_calls": sum(e["stage"] == "repair" for e in events),
             "scientific_adequacy": "requires independent equation inspection",
         }

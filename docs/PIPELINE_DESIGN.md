@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+Construction comparison version 3 keeps raw responses immutable while recording
+narrow conversion-delivery normalizations in sealed transactions. Repair feedback
+uses the actual generated-variable edit vocabulary and names conflicting operations.
+Scientific path checks wait for successful whole-graph compilation; unavailable
+graphs and unresolved public predicates are explicit, never missing-path verdicts
+or scientific passes. Distinct consumer counts separate local laws from shared
+ones without forcing extra consumers. Existing acceptance rules and budgets are
+retained; the corrected response protocol requires a fresh plan and output root.
+
 The same construction-comparison controller supports a sealed 24-task live
 confirmation roster (eight cases, Full/seed 0, three policies). It interleaves
 cases, retains provider settings/budgets, records delivery failures, and uses
@@ -11,7 +20,9 @@ permits optional memory bindings without inventing mandatory requirements, and
 continues ordinary equations after failed optional relationship delivery. Prompts
 distinguish accumulation from relaxation and show a complete response template.
 Compact linked traces preserve raw evidence without duplicating it. Historical
-version-1 plans remain frozen; live response-delivery improvement is unverified.
+version-1 plans remain frozen. The 24-task version-2 live confirmation finished
+without output truncation; 17 drafts passed structural checks, with scientific
+deficiencies still present. These counts do not rank construction strategies.
 
 The opt-in `phase-c-construction-comparison-2` uses one draft/edit schema across
 three proposer schedules. Public sources need no supplied/unused activation;

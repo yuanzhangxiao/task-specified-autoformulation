@@ -1,11 +1,58 @@
 # Phase C construction schedules
 
-`phase-c-construction-comparison-2` compares three ways to construct variables
+`phase-c-construction-comparison-3` compares three ways to construct variables
 and equation topology. It stops before interaction functions, initialization,
 fitting, numerical mechanism assessments and the scientific critic. Historical
 campaigns and finalized benchmark prompts/data are unchanged.
 
-## Contract corrections after the first inspection
+## Feedback corrections after the live confirmation
+
+Version 3 retains the scientific acceptance rules and budgets, with one narrow
+delivery normalization: an exact string `"null"` in a process-use conversion is
+converted to JSON `null`. It is not normalized if `null` names an available fixed
+covariate. Arbitrary expressions, fitted coefficients, other spellings and
+scientific assignments are not repaired by this rule. Original provider records
+remain unchanged; each transaction logs the normalization, including when another
+error subsequently rejects the transaction. Cached replay reproduces that log.
+
+Protected public inputs, covariates and time receive feedback in the actual edit
+vocabulary: omit their generated declarations/equations and keep intended RHS
+references. They are already available. Supplied observations remain optionally
+modelable. A conflicting replace/remove transaction names the entries and explains
+the two valid alternatives; it never chooses a scientific intent or partially
+commits the reply.
+
+Public and memory pathway checks now require a successfully compiled whole graph.
+Compilation failure reports `graph_check_status=unavailable`; it does not create
+missing-path verdicts from an empty or partial graph. Known declaration/type/ID
+errors are still checked. Once compilation succeeds, the existing pathway checks
+run before functions, including indirect feedback paths when explicitly required.
+Unresolved public predicates are exposed alongside the status in the report and
+repair context. For example, the current CSTR `controlled_balance` requirement
+has no declared drivers: its scientific prose does not supply an executable
+temperature-feedback predicate. A structural pass does not certify that balance.
+This change does not alter benchmark contracts or add a universal decay condition.
+
+A named law with one distinct declared consumer is **local**. A **shared** law has
+at least two distinct consumers. Reports expose consumer names/counts and this
+classification separately from validity; a repeated consumer does not count twice.
+The prompt prefers ordinary terms for local effects and never asks for invented
+consumers. Explicit local laws remain valid representations. Internal pairwise
+transfers still require two opposite-signed consumers; shared influences need not
+have opposite signs. Naming and assembly syntax do not certify conservation.
+
+An offline audit of all 114 replies from the first 24-task live confirmation,
+against each reply's actual historical predecessor, retained all 100 accepted
+replies and newly admitted four quoted-null replies. Ten remained rejected.
+Five final drafts now report unavailable graphs; final eligibility is unchanged.
+These are delivery/feedback findings, not recovered models or fresh live evidence.
+The audit used no LLM calls, optimization or test data.
+
+Version 3 refuses version-1/version-2 plans. Preserve their original source and
+reports. New defaults are `phase-c-construction-comparison-v3` and
+`phase-c-construction-live-v2`. No fresh campaign is automatically submitted.
+
+## Earlier contract corrections after the first inspection
 
 Version 1 is retained as diagnostic evidence, not a valid ranking of schedules.
 All 19 finished separate constructions exhausted relationship planning before
@@ -55,8 +102,8 @@ A quota/space error writing this derived view cannot mask a saved proposal or
 the original checkpoint error; report rows expose an unavailable trace. This does
 not create disk space or make failed primary checkpoint writes safe to ignore.
 
-Version 2 refuses version-1 plans. Use a fresh root (the launcher defaults to
-`phase-c-construction-comparison-v2`) and confirm the fixes before a full new
+Version 2 refused version-1 plans and used
+`phase-c-construction-comparison-v2`. Confirm the fixes before a full new
 comparison. The earlier 32-task topology continuation imported already inspected
 inventories and used a different response/repair protocol; its completion rate
 is not an equal-budget baseline for these fresh constructions. Retain the
@@ -101,7 +148,7 @@ bash scripts/hpc/start_phase_c_construction_live.sh inspect
 ```
 
 The default output is
-`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-live-v1`.
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-live-v2`.
 The wrapper fixes the study to `live_confirmation` and uses wave `live-1`;
 repeating the command returns existing submission receipts. If the allocation
 finishes with pending tasks, use the same code/root with an explicit new wave:
@@ -257,7 +304,7 @@ bash scripts/hpc/start_phase_c_construction_comparison.sh run
 Defaults:
 
 - Source: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-topology-v1`.
-- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v2`.
+- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v3`.
 - One existing 1×H100 server, followed by a CPU report job; no fitting jobs.
 
 Override these with `AF_COMPARISON_SOURCE` and `AF_COMPARISON_ROOT` if necessary.
