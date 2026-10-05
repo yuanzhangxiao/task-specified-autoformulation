@@ -7,7 +7,13 @@ AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 module load GCCcore/13.2.0 Python/3.11.5
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export AF_REPO_ROOT="$AF_TOOLS"
-export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/phase-c-construction-comparison-v2}
+AF_STUDY=${AF_COMPARISON_STUDY:-comparison}
+case "$AF_STUDY" in
+  comparison) AF_DEFAULT_ROOT=phase-c-construction-comparison-v2 ;;
+  live_confirmation) AF_DEFAULT_ROOT=phase-c-construction-live-v1 ;;
+  *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
+esac
+export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/$AF_DEFAULT_ROOT}
 export PYTHONPATH="$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 case "${1:?Use run or inspect}" in
   run)
@@ -18,10 +24,13 @@ case "${1:?Use run or inspect}" in
     if [[ ! -f "$AF_OUTPUT_ROOT/plan.json" ]]; then
       "$AF_PYTHON" "$AF_REPO_ROOT/scripts/phase_c_construction_comparison.py" prepare \
         --source "${AF_COMPARISON_SOURCE:-$AF_GROUP/phase-c-topology-v1}" \
-        --root "$AF_OUTPUT_ROOT"
+        --root "$AF_OUTPUT_ROOT" --study "$AF_STUDY"
     else
       "$AF_PYTHON" "$AF_REPO_ROOT/scripts/phase_c_construction_comparison.py" verify --root "$AF_OUTPUT_ROOT"
     fi
+    [[ "$(jq -r '.study // "comparison"' "$AF_OUTPUT_ROOT/plan.json")" == "$AF_STUDY" ]] || {
+      echo 'Study differs from saved plan; use its original study/root.' >&2; exit 2;
+    }
     exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_phase_c_baseline.py" \
       --root "$AF_OUTPUT_ROOT" --construction-comparison --wave "${AF_COMPARISON_WAVE:-comparison-1}"
     ;;

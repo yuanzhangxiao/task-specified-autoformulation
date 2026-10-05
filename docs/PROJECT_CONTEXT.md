@@ -1,5 +1,10 @@
 # Autoformalism Phase 1 Implementation Context
 
+The construction comparison has an explicit 24-task live confirmation: all eight
+cases x three schedules, Full/seed 0, with a three-hour worker window. It reuses
+the corrected constructor and stops before functions/fitting. The frozen roster,
+delivery diagnostics and ACES commands are in `PHASE_C_CONSTRUCTION_COMPARISON.md`.
+
 The version-2 construction comparison corrects idempotent declaration handling,
 permits optional memory bindings without inventing mandatory requirements, and
 continues ordinary equations after failed optional relationship delivery. Prompts

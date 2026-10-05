@@ -65,6 +65,53 @@ none of the three alternatives is assumed to outperform it.
 
 ## Matched experiment
 
+### Bounded live confirmation
+
+`prepare --study live_confirmation` freezes a separate 24-task plan: all eight
+cases, seed 0, Full only, and all three construction policies. Both basin cases
+are included. Public inputs, model revision, serving image, generation settings,
+construction/repair budgets and scientific checks are unchanged. Only the roster
+and worker window differ. No old inventories or models are imported.
+
+The worker visits every case within its first eight tasks, rotating policies
+within each case. It stops after the frozen 24 tasks or the three-hour window,
+whichever comes first. Pending tasks retain their caches for explicit resume;
+there is no automatic extension to the 96-task comparison. A 3.5-hour 1xH100
+allocation accommodates server startup/draining, followed by a CPU report job.
+
+The report labels this study as a delivery/bookkeeping confirmation, not a
+strategy ranking. Inspect `all_tasks_terminal`, each separate construction's
+`equation_stage_reached`, initial/final errors, and `delivery` counters. The latter
+count output-limit responses and the subset with at least 97% trailing whitespace
+(a diagnostic threshold matching the observed failure pattern). Zero observed
+delivery failures with pending work does not establish completion. Inspect actual
+skeletons and responses before considering interaction generation or larger runs.
+
+Submission and worker startup test a real 128 MiB write in the output directory,
+flush it, and remove only that temporary probe. This catches an already exhausted
+quota; it neither reserves space nor guarantees later writes. A failed probe
+prevents submission or new provider calls. Historical results are never deleted.
+
+From a pinned code bundle on ACES:
+
+```bash
+bash scripts/hpc/start_phase_c_construction_live.sh run
+# After the jobs finish:
+bash scripts/hpc/start_phase_c_construction_live.sh inspect
+```
+
+The default output is
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-live-v1`.
+The wrapper fixes the study to `live_confirmation` and uses wave `live-1`;
+repeating the command returns existing submission receipts. If the allocation
+finishes with pending tasks, use the same code/root with an explicit new wave:
+
+```bash
+AF_COMPARISON_WAVE=live-2 bash scripts/hpc/start_phase_c_construction_live.sh run
+```
+
+### Full comparison
+
 The experiment contains 96 fresh constructions: three policies × eight cases ×
 two seeds × Full/Brief-only. Cases are Dalla Man T1-easy/hard and T2-easy/hard,
 CSTR, alien device, and coupled/independent detention basins. Both basin cases
@@ -210,7 +257,7 @@ bash scripts/hpc/start_phase_c_construction_comparison.sh run
 Defaults:
 
 - Source: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-topology-v1`.
-- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v1`.
+- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v2`.
 - One existing 1×H100 server, followed by a CPU report job; no fitting jobs.
 
 Override these with `AF_COMPARISON_SOURCE` and `AF_COMPARISON_ROOT` if necessary.

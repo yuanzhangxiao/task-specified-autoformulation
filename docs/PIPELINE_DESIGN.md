@@ -1,5 +1,11 @@
 # Phase 1 Pipeline Design
 
+The same construction-comparison controller supports a sealed 24-task live
+confirmation roster (eight cases, Full/seed 0, three policies). It interleaves
+cases, retains provider settings/budgets, records delivery failures, and uses
+existing cache/resume and scheduler receipts. No new construction algorithm,
+fitting stage or automatic scientific acceptance gate is introduced.
+
 The version-2 construction comparison corrects idempotent declaration handling,
 permits optional memory bindings without inventing mandatory requirements, and
 continues ordinary equations after failed optional relationship delivery. Prompts

@@ -51,6 +51,12 @@ def submit(
         else "variables"
     )
     plan = controller.verify(root)
+    live_confirmation = (
+        compare_construction and plan.get("study") == "live_confirmation"
+    )
+    if live_confirmation:
+        construction_comparison.check_storage(root)
+        label = "confirmation"
     for key in (
         "AF_PYTHON",
         "AF_VLLM_IMAGE",
@@ -103,7 +109,7 @@ def submit(
                     "--gres=gpu:h100:1",
                     "--cpus-per-task=8",
                     "--mem=64G",
-                    "--time=06:30:00",
+                    "--time=03:30:00" if live_confirmation else "--time=06:30:00",
                     "--signal=B:TERM@300",
                 ]
             else:

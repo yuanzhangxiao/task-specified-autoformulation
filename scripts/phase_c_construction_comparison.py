@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare, run and inspect the matched 96-construction topology experiment."""
+"""Prepare, run and inspect the 96-task comparison or 24-task live confirmation."""
 
 import argparse
 import json
@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source", type=Path)
+    parser.add_argument("--study", choices=campaign.STUDIES)
     parser.add_argument("--base-url")
     parser.add_argument("--wall-seconds", type=int, default=21600)
     args = parser.parse_args()
@@ -29,14 +30,18 @@ def main():
     if args.command == "prepare":
         if args.source is None:
             parser.error("prepare requires --source (the previous topology campaign)")
-        plan = campaign.freeze(args.source, root)
+        plan = campaign.freeze(args.source, root, study=args.study or "comparison")
     else:
-        if args.source:
-            parser.error("public inputs are frozen by prepare")
+        if args.source or args.study:
+            parser.error("public inputs and study are frozen by prepare")
         plan = campaign.verify(root)
     if args.command == "run":
         if not args.base_url:
             parser.error("run requires --base-url")
+        if plan.get("study") == "live_confirmation":
+            print(
+                json.dumps({"storage_check": campaign.check_storage(root)}), flush=True
+            )
         stopping = False
         deadline = (
             monotonic() + min(args.wall_seconds, plan["config"]["wall_seconds"]) - 300

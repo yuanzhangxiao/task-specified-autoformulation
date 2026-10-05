@@ -29,10 +29,17 @@ def source_fixture(tmp_path):
     return sealed_write(path, plan)
 
 
-def test_comparison_submission_has_no_fit_and_resumes_receipts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("study", campaign.STUDIES)
+def test_comparison_submission_has_no_fit_and_resumes_receipts(
+    tmp_path, monkeypatch, study
+):
     source_fixture(tmp_path)
     root = tmp_path / "comparison"
-    campaign.freeze(tmp_path / "new", root)
+    campaign.freeze(tmp_path / "new", root, study=study)
+    storage_checks = []
+    monkeypatch.setattr(
+        campaign, "check_storage", lambda path: storage_checks.append(path)
+    )
     calls = []
 
     def submit_job(directory, stage, opts, worker, action, index):
@@ -72,10 +79,15 @@ def test_comparison_submission_has_no_fit_and_resumes_receipts(tmp_path, monkeyp
         monkeypatch.setenv(key, "/test")
     result = submitter.submit(root, "comparison-1", compare_construction=True)
     assert set(result["jobs"]) == {"propose", "report"}
-    assert result["resources"] == "aces-1h100-comparison-only-1"
+    label = "confirmation" if study == "live_confirmation" else "comparison"
+    assert result["resources"] == f"aces-1h100-{label}-only-1"
+    assert (
+        "--time=03:30:00" if study == "live_confirmation" else "--time=06:30:00"
+    ) in calls[0][1]
     assert "--dependency=afterany:101" in calls[1][1]
     assert submitter.submit(root, "comparison-1", compare_construction=True) == result
     assert len(calls) == 2
+    assert len(storage_checks) == (2 if study == "live_confirmation" else 0)
     with pytest.raises(ValueError, match="choose one"):
         submitter.submit(root, "bad", topology_only=True, compare_construction=True)
     (root / "submissions/comparison-1/report.id").unlink()

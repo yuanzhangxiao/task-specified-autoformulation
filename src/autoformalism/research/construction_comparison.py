@@ -6,7 +6,9 @@ import errno
 import hashlib
 import html
 import json
+import os
 import statistics
+import tempfile
 import warnings
 from collections import Counter
 from pathlib import Path
@@ -30,6 +32,8 @@ from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "phase-c-construction-comparison-2"
 REPO = baseline.REPO
+Study = Literal["comparison", "live_confirmation"]
+STUDIES = ("comparison", "live_confirmation")
 
 
 class Config(baseline.Config):
@@ -58,13 +62,16 @@ def source_identity() -> dict:
             for name in (
                 "scripts/phase_c_construction_comparison.py",
                 "scripts/hpc/start_phase_c_construction_comparison.sh",
+                "scripts/hpc/start_phase_c_construction_live.sh",
             )
         },
     }
 
 
-def freeze(source: Path, root: Path) -> dict:
+def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
     """Reuse public contexts/settings only; all three arms start from empty drafts."""
+    if study not in STUDIES:
+        raise ValueError("unknown construction study")
     old = sealed_read(source / "plan.json")
     if (
         old["protocol"] != topology_confirmation.PROTOCOL
@@ -82,6 +89,7 @@ def freeze(source: Path, root: Path) -> dict:
                 if k != "protocol"
             },
             "protocol": PROTOCOL,
+            **({"wall_seconds": 10800} if study == "live_confirmation" else {}),
         }
     )
     cells = {}
@@ -102,25 +110,48 @@ def freeze(source: Path, root: Path) -> dict:
             TrainingEvidence.model_validate(cell["evidence"]),
         )
         cells[name] = cell
-    tasks = []
-    for i, task in enumerate(old["tasks"]):
+    source_tasks = old["tasks"]
+    if study == "live_confirmation":
+        by_case = {
+            t["benchmark_id"]: t
+            for t in source_tasks
+            if t["seed"] == 0 and t["arm"] == "full"
+        }
+        source_tasks = [
+            by_case[name] for name in topology_confirmation.phase_c_inputs.ROSTER
+        ]
+    blocks = []
+    for i, task in enumerate(source_tasks):
         # Rotate policies within matched blocks so draining does not always omit
         # the same arm. This is scheduling, never score-based task selection.
         policies = schedules.POLICIES[i % 3 :] + schedules.POLICIES[: i % 3]
-        tasks.extend(
-            {
-                **task,
-                "task_id": f"{task['task_id']}_{policy}",
-                "policy": policy,
-                "matched_task_id": task["task_id"],
-            }
-            for policy in policies
+        blocks.append(
+            [
+                {
+                    **task,
+                    "task_id": f"{task['task_id']}_{policy}",
+                    "policy": policy,
+                    "matched_task_id": task["task_id"],
+                }
+                for policy in policies
+            ]
         )
+    # Expose every case in the first eight tasks of the small confirmation.
+    # Every case receives every policy; rotation is independent of results.
+    tasks = (
+        [block[j] for j in range(3) for block in blocks]
+        if study == "live_confirmation"
+        else [task for block in blocks for task in block]
+    )
     with public._lock(root):
         return sealed_write(
             root / "plan.json",
             {
                 "protocol": PROTOCOL,
+                "study": study,
+                "selection_rule": "all-eight-cases-seed0-full-three-policies-1"
+                if study == "live_confirmation"
+                else "full-case-seed-prompt-roster-1",
                 "config": config.model_dump(mode="json"),
                 "cells": cells,
                 "tasks": tasks,
@@ -137,23 +168,83 @@ def freeze(source: Path, root: Path) -> dict:
 
 
 def verify(root: Path) -> dict:
-    """Resume only the same code and complete matched 96-task matrix."""
+    """Resume only the frozen source and the exact declared 96- or 24-task roster."""
     plan = sealed_read(root / "plan.json")
     if plan["protocol"] != PROTOCOL or plan["source_identity"] != source_identity():
         raise ValueError("construction comparison source/protocol differs")
     Config.model_validate(plan["config"])
-    if len(plan["tasks"]) != 96 or {t["policy"] for t in plan["tasks"]} != set(
-        schedules.POLICIES
-    ):
-        raise ValueError("requires three policies and 96 tasks")
-    for policy in schedules.POLICIES:
-        topology_confirmation._roster(
-            [t for t in plan["tasks"] if t["policy"] == policy],
-            topology_confirmation.phase_c_inputs.ROSTER,
+    study = plan.get("study", "comparison")
+    if study not in STUDIES:
+        raise ValueError("unknown construction study")
+    if study == "live_confirmation" and plan["config"]["wall_seconds"] != 10800:
+        raise ValueError("live confirmation uses a three-hour worker window")
+    expected = {
+        (case, seed, arm, policy)
+        for case in topology_confirmation.phase_c_inputs.ROSTER
+        for seed in ((0,) if study == "live_confirmation" else (0, 1))
+        for arm in (
+            ("full",) if study == "live_confirmation" else ("full", "brief_only")
         )
-    if len({t["task_id"] for t in plan["tasks"]}) != 96:
-        raise ValueError("duplicate task IDs")
+        for policy in schedules.POLICIES
+    }
+    actual = [
+        (t["benchmark_id"], t["seed"], t["arm"], t["policy"]) for t in plan["tasks"]
+    ]
+    if len(actual) != len(expected) or set(actual) != expected:
+        raise ValueError(f"requires the exact {len(expected)}-task {study} roster")
+    ids = [t["task_id"] for t in plan["tasks"]]
+    if len(set(ids)) != len(ids) or any(
+        Path(n).name != n or n in {".", ".."} for n in ids
+    ):
+        raise ValueError("task IDs must be unique simple names")
+    if any(
+        not t.get("shared_processes") or not t.get("scientific_verifier")
+        for t in plan["tasks"]
+    ):
+        raise ValueError("construction study retains shared processes and verifier")
     return plan
+
+
+def check_storage(root: Path, *, probe_bytes: int = 128 * 1024 * 1024) -> dict:
+    """Test actual quota-limited writes, without reserving space or deleting records."""
+    if probe_bytes <= 0:
+        raise ValueError("probe_bytes must be positive")
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryFile(dir=root, prefix=".storage-probe-") as stream:
+        chunk = bytes(min(probe_bytes, 1024 * 1024))
+        remaining = probe_bytes
+        while remaining > 0:
+            remaining -= stream.write(chunk[:remaining])
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {"write_probe_bytes": probe_bytes, "space_reserved": False}
+
+
+def delivery_counts(records: list[dict]) -> dict:
+    """Count observed delivery outcomes, without a scientific interpretation."""
+    finish = Counter()
+    whitespace = 0
+    for record in records:
+        raw = record.get("raw_response")
+        choices = raw.get("choices") if isinstance(raw, dict) else None
+        if (
+            not isinstance(choices, list)
+            or len(choices) != 1
+            or not isinstance(choices[0], dict)
+        ):
+            finish["unavailable"] += 1
+            continue
+        reason = choices[0].get("finish_reason")
+        finish[reason if isinstance(reason, str) else "unavailable"] += 1
+        message = choices[0].get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if reason == "length" and isinstance(content, str) and content:
+            whitespace += (len(content) - len(content.rstrip())) / len(content) >= 0.97
+    return {
+        "finish_reason_counts": dict(finish),
+        "length_limited_responses": finish["length"],
+        "whitespace_heavy_length_responses": whitespace,
+    }
 
 
 def checked_records(directory: Path, identity: str) -> list[dict]:
@@ -311,6 +402,7 @@ def _skeleton(assessment: dict) -> str:
 def report(root: Path, plan: dict) -> dict:
     """Show before/after skeletons and every trace; never label syntax as science."""
     rows, sections = [], []
+    deliveries = []
 
     def block(value):
         return (
@@ -325,6 +417,8 @@ def report(root: Path, plan: dict) -> dict:
             baseline.namespace(plan, task),
         )
         records = checked_records(directory, identity)
+        delivery = delivery_counts(records)
+        deliveries.append(delivery)
         value = baseline.read_outcome(directory / "proposal.json", plan, task)
         if value and value["cost"] != _cost(records):
             raise ValueError("result accounting differs from retained calls")
@@ -354,6 +448,10 @@ def report(root: Path, plan: dict) -> dict:
             **task,
             "status": value["status"] if value else "pending",
             "cost": _cost(records),
+            "delivery": delivery,
+            "rejections_by_stage": dict(
+                Counter(e["stage"] for e in events if not e["accepted"])
+            ),
             "batch_history": batch_sizes,
             "stage_outcomes": initial.get("stage_outcomes") if initial else None,
             "equation_stage_reached": any(e["stage"] == "equations" for e in events),
@@ -389,6 +487,8 @@ def report(root: Path, plan: dict) -> dict:
     for policy in schedules.POLICIES:
         for arm in ("full", "brief_only"):
             selected = [r for r in rows if r["policy"] == policy and r["arm"] == arm]
+            if not selected:
+                continue
             done = [r for r in selected if r["status"] != "pending"]
             groups[f"{policy}:{arm}"] = {
                 "planned": len(selected),
@@ -407,7 +507,18 @@ def report(root: Path, plan: dict) -> dict:
             }
     result = {
         "protocol": PROTOCOL,
+        "study": plan.get("study", "comparison"),
         "identity": plan["artifact_sha256"],
+        "planned_tasks": len(rows),
+        "all_tasks_terminal": all(r["status"] != "pending" for r in rows),
+        "delivery": {
+            "length_limited_responses": sum(
+                d["length_limited_responses"] for d in deliveries
+            ),
+            "whitespace_heavy_length_responses": sum(
+                d["whitespace_heavy_length_responses"] for d in deliveries
+            ),
+        },
         "status_counts": dict(Counter(r["status"] for r in rows)),
         "groups": groups,
         "observed_total_tokens": sum(r["cost"]["observed_tokens"] for r in rows),
@@ -426,7 +537,14 @@ def report(root: Path, plan: dict) -> dict:
         "# Phase C construction schedules",
         "",
         "Fresh variables and topology; no functions or fitting.",
+        "Live confirmation: all eight cases, seed 0, Full only; not a strategy ranking."
+        if plan.get("study") == "live_confirmation"
+        else "Full matched construction comparison.",
         "Completion means declared structural checks passed, not scientific adequacy.",
+        f"All tasks terminal: {result['all_tasks_terminal']}. "
+        f"Length-limited responses: {result['delivery']['length_limited_responses']}; "
+        "with at least 97% trailing whitespace: "
+        f"{result['delivery']['whitespace_heavy_length_responses']}.",
         "Costs include variable construction and repairs. Brackets show unscaled "
         "MAD over finished tasks; pending tasks are not zeros.",
         "",
