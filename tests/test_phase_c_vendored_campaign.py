@@ -386,6 +386,32 @@ def test_llm_ode_runs_the_same_rows_through_its_own_search(tmp_path):
 
 
 @pytest.mark.parametrize("method", ["llm_sr", "llm_ode"])
+def test_an_endpoint_outage_is_reported_as_an_infrastructure_failure(
+    tmp_path, method
+):
+    """A search the endpoint stopped is neither a result nor a method failure."""
+    _, root, _ = _frozen(tmp_path, method)
+    campaign = sr if method == "llm_sr" else ode
+
+    def unavailable(**kwargs) -> dict:
+        return {
+            "status": "endpoint_unavailable",
+            "error": "the endpoint failed for 360 minutes",
+            "accounting": {"search_seconds": 21600.0},
+        }
+
+    result = campaign.run_phase_c(
+        root, 0, endpoint="vm_local_vllm", search=unavailable
+    )
+    assert result["status"] == "endpoint_unavailable"
+    summary = campaign.report(root)
+    assert summary["infrastructure_failure"] == 1
+    assert summary["terminal_success"] == 0
+    assert summary["terminal_scientific_failure"] == 0
+    assert summary["status"] == "pending"
+
+
+@pytest.mark.parametrize("method", ["llm_sr", "llm_ode"])
 def test_an_interrupted_attempt_is_kept_aside_and_the_task_restarts_clean(
     tmp_path, method
 ):
@@ -555,7 +581,7 @@ def test_the_cli_checks_the_served_model_before_any_search(
     monkeypatch.setenv("AF_LLM_ODE_ROOT", str(tmp_path))
     monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: _complete(calls))
     monkeypatch.setattr(cli, "served_model_ids", lambda base_url: served)
-    patience = {"patience_seconds": 60.0} if method == "llm_sr" else {}
+    patience = {"patience_seconds": 60.0}
     search = cli._searcher(root, "http://127.0.0.1:8000", **patience)
     with pytest.raises(ValueError, match=message):
         campaign.run_phase_c(root, 0, endpoint="vm_local_vllm", search=search)
@@ -568,25 +594,28 @@ def test_the_cli_checks_the_served_model_before_any_search(
     assert result["status"] == "complete" and len(calls) == 1
 
 
-def test_the_llm_sr_cli_gives_a_search_the_patience_of_its_endpoint(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("method", ["llm_sr", "llm_ode"])
+def test_the_cli_gives_a_search_the_patience_of_its_endpoint(
+    tmp_path, monkeypatch, method
 ):
     import sys
 
-    from scripts import phase_c_llm_sr as cli
+    from scripts import phase_c_llm_ode, phase_c_llm_sr
 
-    _, root, _ = _frozen(tmp_path, "llm_sr")
+    cli = phase_c_llm_sr if method == "llm_sr" else phase_c_llm_ode
+    _, root, _ = _frozen(tmp_path, method)
     seen: dict = {}
     monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
+    monkeypatch.setenv("AF_LLM_ODE_ROOT", str(tmp_path))
     monkeypatch.setenv("AF_ENDPOINT_KIND", "jetstream2_hosted")
     monkeypatch.delenv("AF_VLLM_BASE_URL", raising=False)
     monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: seen.update(kwargs))
     monkeypatch.setattr(cli, "run_phase_c", lambda *a, **k: {"status": "complete"})
     monkeypatch.setattr(
-        sys, "argv", ["phase_c_llm_sr.py", "run", "--root", str(root), "--index", "0"]
+        sys, "argv", ["cli.py", "run", "--root", str(root), "--index", "0"]
     )
     cli.main()
-    assert seen["base_url"] == JETSTREAM2_HOSTED_BASE_URL
+    assert seen["base_url"].startswith(JETSTREAM2_HOSTED_BASE_URL)
     assert seen["patience_seconds"] == vendored.OUTAGE_PATIENCE_SECONDS[
         "jetstream2_hosted"
     ]

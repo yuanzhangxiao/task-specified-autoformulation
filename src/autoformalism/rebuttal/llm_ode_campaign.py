@@ -651,7 +651,8 @@ def report(root: Path) -> dict:
             for status, count in counts.items()
             if status in {"inexpressible", "rollout_failed", "no_candidates"}
         ),
-        "infrastructure_failure": counts.get("product_too_large", 0),
+        "infrastructure_failure": counts.get("product_too_large", 0)
+        + counts.get("endpoint_unavailable", 0),
         "frozen_models": sum(
             1
             for task in sealed["rows"]

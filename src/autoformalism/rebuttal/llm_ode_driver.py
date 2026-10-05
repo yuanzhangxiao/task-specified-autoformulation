@@ -31,6 +31,7 @@ Two departures from upstream are deliberate and declared in the campaign plan:
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,6 +39,7 @@ from time import monotonic
 from typing import Any
 
 import numpy as np
+import openai
 
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
 from autoformalism.expressions import (
@@ -72,6 +74,48 @@ BARREN_ITERATIONS = 5
 
 class BarrenSearch(RuntimeError):
     """The search produced no candidate at all, well past the point it should."""
+
+
+#: How long a request may go on failing, from its first failure, before the
+#: search is stopped as an infrastructure failure. Upstream's client retries
+#: twice within seconds and then raises, which ends the search with whatever
+#: it had found; a campaign against a service that comes back passes longer.
+DEFAULT_PATIENCE_SECONDS = 15 * 60.0
+
+#: First and longest pause between attempts at a failed request; the pause
+#: doubles per attempt, so an outage is retried about once a minute.
+BACKOFF_SECONDS = (1.0, 60.0)
+
+#: Refusals that describe the request rather than the server. Retrying cannot
+#: change them, so they end the search at once, as upstream would.
+REQUEST_ERRORS = frozenset({400, 404, 413, 422})
+
+
+class EndpointUnavailable(RuntimeError):
+    """The endpoint kept failing for longer than the campaign's patience."""
+
+
+def _pause(seconds: float) -> None:
+    """Wait before the next attempt; a seam so tests need not sleep."""
+    time.sleep(seconds)
+
+
+def _clock() -> float:
+    """Seconds on a monotonic clock; a seam so tests can move time on."""
+    return monotonic()
+
+
+def _server_failure(exc: Exception) -> bool:
+    """Whether a failed call is the server's doing rather than the request's.
+
+    The Jetstream2 service answered 401 and then 503 while it was offline, so
+    only the statuses that describe the request itself are excluded.
+    """
+    if isinstance(exc, openai.APIConnectionError):  # timeouts included
+        return True
+    if isinstance(exc, openai.APIStatusError):
+        return exc.status_code not in REQUEST_ERRORS
+    return False
 
 
 #: Upstream assembles systems from the full Cartesian product of the
@@ -148,25 +192,44 @@ def development_rollout_error(
 
 
 @contextmanager
-def _counted_requests(llm: Any, log: CallLog) -> Iterator[None]:
+def _counted_requests(
+    llm: Any, log: CallLog, *, patience: float = DEFAULT_PATIENCE_SECONDS
+) -> Iterator[None]:
     """Record every provider call, with the usage upstream discards.
 
     Their client returns `response.output_text` and drops the usage object, so
     a campaign otherwise reports request counts that cannot be compared with
-    the token accounting every other method reports.
+    the token accounting every other method reports. A request the server
+    fails is retried until `patience` runs out; the prompt and the reply are
+    upstream's own either way.
     """
     original = llm.make_request
+    first, longest = BACKOFF_SECONDS
 
     def make_request(prompt):
-        try:
-            response = llm.client.responses.create(
-                model=llm.model_name, input=prompt, **llm.request_kwargs
-            )
-        except Exception as exc:
-            log.failure(f"{type(exc).__name__}: {exc}")
-            raise
-        log.response(response)
-        return response.output_text
+        failing_since: float | None = None
+        pause = first
+        while True:
+            try:
+                response = llm.client.responses.create(
+                    model=llm.model_name, input=prompt, **llm.request_kwargs
+                )
+            except Exception as exc:
+                log.failure(f"{type(exc).__name__}: {exc}")
+                if not _server_failure(exc):
+                    raise
+                now = _clock()
+                failing_since = now if failing_since is None else failing_since
+                if now - failing_since >= patience:
+                    raise EndpointUnavailable(
+                        f"the endpoint failed for {(now - failing_since) / 60:.0f} "
+                        f"minutes; last: {type(exc).__name__}: {exc}"
+                    ) from exc
+                _pause(pause)
+                pause = min(longest, 2 * pause)
+                continue
+            log.response(response)
+            return response.output_text
 
     llm.make_request = make_request
     try:
@@ -218,6 +281,7 @@ def build_searcher(
     islands: int,
     config: dict | None = None,
     seconds_per_rollout: float = 60.0,
+    patience_seconds: float = DEFAULT_PATIENCE_SECONDS,
 ):
     """Bind the pinned checkout to our data; returns a campaign searcher."""
     modules = load_upstream(upstream_root)
@@ -267,7 +331,7 @@ def build_searcher(
                     searchers, specifications, strict=True
                 ):
                     with (
-                        _counted_requests(llm, log),
+                        _counted_requests(llm, log, patience=patience_seconds),
                         _specification_appended(upstream_module, specification),
                     ):
                         searcher.step()
@@ -293,6 +357,18 @@ def build_searcher(
                         iterations,
                         monotonic() - started,
                     )
+        except EndpointUnavailable as exc:
+            # The search did not run to its budget, so whatever it had found is
+            # not this method's result; the task is an infrastructure failure.
+            return {
+                "status": "endpoint_unavailable",
+                "error": str(exc),
+                "accounting": {
+                    "llm_queries": int(getattr(llm, "n_queries", 0)),
+                    **d3_accounting(directory / "llm_calls.jsonl"),
+                    "search_seconds": round(monotonic() - started, 1),
+                },
+            }
         except Exception as exc:  # upstream raised; keep whatever it found
             error = f"{type(exc).__name__}: {exc}"
             LOGGER.warning("search stopped early: %s", error)

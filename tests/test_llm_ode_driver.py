@@ -364,3 +364,153 @@ def test_a_refused_system_is_counted_and_the_search_is_kept(monkeypatch) -> None
     assert outcome["accounting"]["inexpressible_systems"] == 1
     assert outcome["accounting"]["inexpressible_operators"] == ["UNSUPPORTED_SYNTAX"]
     assert outcome["accounting"]["scored_systems"] == 1
+
+
+# --- a failing endpoint --------------------------------------------------------
+
+
+class _Clock:
+    """Time that passes only when the driver pauses."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def pause(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
+def _openai_error(kind: str) -> Exception:
+    import httpx
+    import openai
+
+    request = httpx.Request("POST", "http://127.0.0.1:1/v1/responses")
+    if kind == "offline":
+        return openai.APIConnectionError(request=request)
+    status, cls = {
+        "503": (503, openai.InternalServerError),
+        "401": (401, openai.AuthenticationError),
+        "400": (400, openai.BadRequestError),
+    }[kind]
+    return cls(kind, response=httpx.Response(status, request=request), body=None)
+
+
+def _install_endpoint(monkeypatch, replies) -> _Clock:
+    """A one-target upstream whose every step asks the endpoint once."""
+    _install_fake_upstream(monkeypatch, {"y": ["x_0"]})
+    modules = driver.load_upstream(Path("/nonexistent"))
+    answers = iter(replies)
+
+    class _Llm(_FakeLlm):
+        def __init__(self, api_key: str, base_url: str) -> None:
+            super().__init__(api_key, base_url)
+
+            def create(**kwargs):
+                reply = next(answers)
+                if isinstance(reply, Exception):
+                    raise reply
+                return types.SimpleNamespace(output_text="x_0", usage={})
+
+            self.client = types.SimpleNamespace(
+                responses=types.SimpleNamespace(create=create)
+            )
+
+    class _Asking(_FakeSearcher):
+        def step(self) -> None:
+            super().step()
+            self.kwargs["llm"].make_request("propose")
+
+    monkeypatch.setattr(
+        driver,
+        "load_upstream",
+        lambda root: types.SimpleNamespace(
+            **{
+                **vars(modules),
+                "llm": _Llm,
+                "equation_searcher": lambda **kwargs: _Asking(["x_0"], **kwargs),
+            }
+        ),
+    )
+    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 0.5)
+    clock = _Clock()
+    monkeypatch.setattr(driver, "_clock", clock)
+    monkeypatch.setattr(driver, "_pause", clock.pause)
+    return clock
+
+
+def _search(tmp_path: Path, **options) -> dict:
+    search = driver.build_searcher(
+        upstream_root=Path("/nonexistent"),
+        base_url="http://127.0.0.1:1/v1",
+        iterations=2,
+        islands=1,
+        **options,
+    )
+    return search(
+        train=_arrays(("y",)),
+        validation=_arrays(("y",)),
+        targets=("y",),
+        prompt="",
+        directory=tmp_path,
+        development=(object(), object()),
+        context=object(),
+    )
+
+
+def test_a_brief_outage_is_waited_out(monkeypatch, tmp_path: Path) -> None:
+    """Upstream's client gives up within seconds; the search should not."""
+    clock = _install_endpoint(
+        monkeypatch,
+        [
+            _openai_error("503"),
+            _openai_error("offline"),
+            _openai_error("401"),
+            "ok",
+            "ok",
+        ],
+    )
+    outcome = _search(tmp_path)
+    assert outcome["status"] == "complete"
+    assert outcome["accounting"]["search_error"] is None
+    assert clock.pauses == [1.0, 2.0, 4.0]
+    failures = (tmp_path / "llm_calls.jsonl").read_text().count("llm_failure")
+    assert failures == 3
+
+
+def test_an_outage_beyond_patience_is_an_infrastructure_failure(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """What the search had found before the outage is not the method's result."""
+    import itertools
+
+    clock = _install_endpoint(monkeypatch, itertools.repeat(_openai_error("offline")))
+    outcome = _search(tmp_path)
+    assert outcome["status"] == "endpoint_unavailable"
+    assert "failed for 15 minutes" in outcome["error"]
+    assert "equations" not in outcome
+    assert max(clock.pauses) == 60.0
+    patience = driver.DEFAULT_PATIENCE_SECONDS
+    assert patience <= clock.now < patience + 60
+
+
+def test_a_longer_patience_outlasts_a_longer_outage(
+    monkeypatch, tmp_path: Path
+) -> None:
+    outage = [_openai_error("503")] * 40  # about 35 minutes at a minute a try
+    clock = _install_endpoint(monkeypatch, [*outage, "ok", "ok"])
+    outcome = _search(tmp_path, patience_seconds=6 * 3600.0)
+    assert outcome["status"] == "complete"
+    assert 30 * 60 < clock.now < 40 * 60
+
+
+def test_a_refused_request_is_not_retried(monkeypatch, tmp_path: Path) -> None:
+    """A malformed request fails the same way each time; upstream's handling stands."""
+    clock = _install_endpoint(monkeypatch, [_openai_error("400")])
+    outcome = _search(tmp_path)
+    assert clock.pauses == []
+    assert outcome["status"] == "complete"  # upstream keeps what it had found
+    assert outcome["accounting"]["search_error"].startswith("BadRequestError")
