@@ -92,6 +92,31 @@ def translate_response(payload: dict) -> list[str]:
     return texts
 
 
+def http_error_detail(exc: urllib.error.HTTPError) -> str:
+    """The server's own explanation of a refusal, on one short line.
+
+    The status line alone can mislead. On 2026-10-04 the Jetstream2 service
+    refused with 401 Unauthorized, then with a 503 whose body alone said that
+    its authentication database was unreachable.
+    """
+    try:
+        body = exc.read(4096).decode("utf-8", errors="replace")
+    except (OSError, ValueError):
+        return ""
+    message = body
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error", payload.get("detail"))
+        if isinstance(error, dict):
+            error = error.get("message")
+        if isinstance(error, str):
+            message = error
+    return " ".join(message.split())[:300]
+
+
 def complete(
     payload: dict,
     *,
@@ -113,11 +138,16 @@ def complete(
         with urllib.request.urlopen(http, timeout=timeout) as response:
             answer = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        kind, message = type(exc).__name__, f"{type(exc).__name__}: {exc}"
+        if isinstance(exc, urllib.error.HTTPError):
+            kind = f"HTTPError {exc.code}"
+            if detail := http_error_detail(exc):
+                message = f"{message} ({detail})"
         if accounting is not None:
-            accounting.record_failure(type(exc).__name__)
+            accounting.record_failure(kind)
             if accounting.log is not None:
-                accounting.log.failure(f"{type(exc).__name__}: {exc}")
-        raise UpstreamEndpointError(f"{type(exc).__name__}: {exc}") from exc
+                accounting.log.failure(message)
+        raise UpstreamEndpointError(message) from exc
     texts = translate_response(answer)
     if accounting is not None:
         accounting.samples += len(texts)

@@ -124,3 +124,41 @@ def test_an_unreachable_endpoint_is_reported_with_its_reason(monkeypatch) -> Non
                  accounting=accounting)
     assert accounting.failures == 1
     assert accounting.reasons == {"URLError": 1}
+
+
+def test_a_refusal_carries_the_servers_explanation(monkeypatch) -> None:
+    """A bare status line cannot tell an outage from a wrong address."""
+    import io
+
+    def _refuse(request, *args, **kwargs):
+        raise urllib.error.HTTPError(
+            request.full_url, 503, "Service Unavailable", {},
+            io.BytesIO(b'{"error": {"message": "the authentication database '
+                       b'is temporarily unreachable"}}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _refuse)
+    accounting = ShimAccounting()
+    with pytest.raises(UpstreamEndpointError, match="authentication database"):
+        complete(UPSTREAM_PAYLOAD, base_url="http://127.0.0.1:1", model="m",
+                 accounting=accounting)
+    assert accounting.reasons == {"HTTPError 503": 1}
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (b'{"detail": "Access restricted"}', "Access restricted"),
+        (b"<html>\n  gateway   down\n</html>", "<html> gateway down </html>"),
+        (b"", ""),
+    ],
+)
+def test_an_explanation_is_read_from_any_body_shape(body: bytes, expected: str) -> None:
+    import io
+
+    from autoformalism.rebuttal.llm_sr_shim import http_error_detail
+
+    error = urllib.error.HTTPError(
+        "http://x", 401, "Unauthorized", {}, io.BytesIO(body)
+    )
+    assert http_error_detail(error) == expected

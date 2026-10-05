@@ -110,7 +110,9 @@ if [[ ! -f "${release}/summary.json" ]]; then
     exit 2
   }
   mkdir -p "${release}"
-  tar -xzf "${AF_RELEASE_BUNDLE}" -C "${release}"
+  # The bundle was made by macOS tar, whose extended attributes GNU tar
+  # reports once per file; they carry nothing the release needs.
+  tar --warning=no-unknown-keyword -xzf "${AF_RELEASE_BUNDLE}" -C "${release}"
 fi
 receipt="$(sha256sum "${release}/summary.json" | cut -d' ' -f1)"
 [[ "${receipt}" == "$(config_value "${pilot_config}" release_summary_sha256)" ]] || {
@@ -120,17 +122,28 @@ receipt="$(sha256sum "${release}/summary.json" | cut -d' ' -f1)"
 echo "receipt ${receipt}"
 
 step "hosted endpoint"
-PYTHONPATH="${repo}/src" "${py}" - <<'EOF'
+if ! PYTHONPATH="${repo}/src" "${py}" - <<'EOF'
+import sys
+
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     JETSTREAM2_HOSTED_BASE_URL,
     JETSTREAM2_HOSTED_MODEL,
     served_model_ids,
 )
 
-served = served_model_ids(JETSTREAM2_HOSTED_BASE_URL)
-assert JETSTREAM2_HOSTED_MODEL in served, served
+try:
+    served = served_model_ids(JETSTREAM2_HOSTED_BASE_URL)
+except ValueError as exc:
+    sys.exit(str(exc))
+if JETSTREAM2_HOSTED_MODEL not in served:
+    sys.exit(f"{JETSTREAM2_HOSTED_MODEL} is not among the served models {served}")
 print(f"{JETSTREAM2_HOSTED_MODEL} is served ({len(served)} models listed)")
 EOF
+then
+  echo "the hosted endpoint did not answer as expected. Everything above is in" >&2
+  echo "place, so rerun this script once the service is back." >&2
+  exit 3
+fi
 
 step "record"
 uv pip freeze --python "${py}" >"${AF_HOME}/setup_freeze.txt"

@@ -19,6 +19,7 @@ from pathlib import Path
 from autoformalism.rebuttal.llm_sr_campaign import prepare_phase_c, report, run_phase_c
 from autoformalism.rebuttal.llm_sr_driver import build_searcher
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
+    OUTAGE_PATIENCE_SECONDS,
     check_served_model,
     resolve_endpoint,
     served_model_ids,
@@ -33,8 +34,12 @@ def _endpoint() -> tuple[str, str]:
     )
 
 
-def _searcher(root: Path, base_url: str):
-    """Bind the pinned checkout; confirm the served model only before a search."""
+def _searcher(root: Path, base_url: str, *, patience_seconds: float):
+    """Bind the pinned checkout; confirm the served model only before a search.
+
+    `patience_seconds` is how long a search waits out an endpoint that keeps
+    failing; it follows the endpoint kind, not the plan.
+    """
     checkout = os.environ.get("AF_LLM_SR_ROOT")
     if not checkout:
         raise ValueError("AF_LLM_SR_ROOT must point at the pinned LLM-SR checkout")
@@ -48,6 +53,7 @@ def _searcher(root: Path, base_url: str):
         base_url=base_url,
         model=model,
         samples=int(budget["declared"]),
+        patience_seconds=patience_seconds,
     )
 
     def checked(**kwargs) -> dict:
@@ -89,7 +95,11 @@ def main() -> None:
             args.root,
             args.index,
             endpoint=endpoint,
-            search=_searcher(args.root, base_url),
+            search=_searcher(
+                args.root,
+                base_url,
+                patience_seconds=OUTAGE_PATIENCE_SECONDS[endpoint],
+            ),
         )
         value = {key: item for key, item in result.items() if key != "rows"}
     else:

@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from autoformalism.data.models import DevelopmentDataset
 from autoformalism.expressions import ValidationContext
+from autoformalism.rebuttal.llm_sr_shim import http_error_detail
 from autoformalism.rebuttal.phase_c_baseline_plan import PhaseCBaselineCell
 from autoformalism.rebuttal.phase_c_baselines import load_cell, tier_of, verify_release
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
@@ -57,6 +58,17 @@ ENDPOINT_IDENTITIES: dict[str, dict[str, str]] = {
 JETSTREAM2_HOSTED_BASE_URL = "https://llm.jetstream-cloud.org/gpt-oss-120b"
 #: The one model that route serves, under the alias the service lists.
 JETSTREAM2_HOSTED_MODEL = "gpt-oss-120b"
+
+#: How long a search waits out an endpoint that keeps failing before the task
+#: is recorded as an infrastructure failure. A vLLM we started does not come
+#: back once it has died. The hosted service does: it went offline for a while
+#: on 2026-10-04 (its authentication database was unreachable), and LLM-SR
+#: cannot resume a stopped search, so the hosted kind is given hours.
+OUTAGE_PATIENCE_SECONDS: dict[str, float] = {
+    "job_local_vllm": 15 * 60.0,
+    "vm_local_vllm": 15 * 60.0,
+    "jetstream2_hosted": 6 * 60 * 60.0,
+}
 
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -105,6 +117,12 @@ def served_model_ids(base_url: str, *, timeout: float = 30.0) -> tuple[str, ...]
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             value = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = http_error_detail(exc)
+        raise ValueError(
+            f"cannot list the models served at {base_url}: {exc}"
+            + (f" ({detail})" if detail else "")
+        ) from exc
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise ValueError(f"cannot list the models served at {base_url}: {exc}") from exc
     data = value.get("data") if isinstance(value, dict) else None

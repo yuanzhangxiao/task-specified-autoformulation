@@ -510,6 +510,31 @@ def test_the_model_list_is_read_and_a_web_page_is_refused(monkeypatch):
         vendored.served_model_ids(JETSTREAM2_HOSTED_BASE_URL)
 
 
+def test_a_refused_model_list_says_why_in_the_servers_words(monkeypatch):
+    """The status line alone read "401 Unauthorized" during a service outage."""
+    body = (
+        b'{"error": {"message": "Service Unavailable, the authentication '
+        b'database is temporarily unreachable. Please retry shortly.", '
+        b'"code": "503"}}'
+    )
+
+    def refuse(request, timeout):
+        raise vendored.urllib.error.HTTPError(
+            request.full_url, 503, "Service Unavailable", {}, io.BytesIO(body)
+        )
+
+    monkeypatch.setattr(vendored.urllib.request, "urlopen", refuse)
+    with pytest.raises(ValueError, match="authentication database is temporarily"):
+        vendored.served_model_ids(JETSTREAM2_HOSTED_BASE_URL)
+
+
+def test_the_hosted_service_is_waited_out_for_hours_and_a_local_one_is_not():
+    patience = vendored.OUTAGE_PATIENCE_SECONDS
+    assert set(patience) == set(vendored.ENDPOINT_IDENTITIES)
+    assert patience["jetstream2_hosted"] >= 6 * 60 * 60
+    assert patience["job_local_vllm"] == patience["vm_local_vllm"] <= 15 * 60
+
+
 @pytest.mark.parametrize(
     ("method", "served", "message"),
     [
@@ -530,16 +555,41 @@ def test_the_cli_checks_the_served_model_before_any_search(
     monkeypatch.setenv("AF_LLM_ODE_ROOT", str(tmp_path))
     monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: _complete(calls))
     monkeypatch.setattr(cli, "served_model_ids", lambda base_url: served)
-    search = cli._searcher(root, "http://127.0.0.1:8000")
+    patience = {"patience_seconds": 60.0} if method == "llm_sr" else {}
+    search = cli._searcher(root, "http://127.0.0.1:8000", **patience)
     with pytest.raises(ValueError, match=message):
         campaign.run_phase_c(root, 0, endpoint="vm_local_vllm", search=search)
     assert calls == []
     assert not (root / "results" / "0" / "result.json").exists()
 
     monkeypatch.setattr(cli, "served_model_ids", lambda base_url: ("served-model",))
-    search = cli._searcher(root, "http://127.0.0.1:8000")
+    search = cli._searcher(root, "http://127.0.0.1:8000", **patience)
     result = campaign.run_phase_c(root, 0, endpoint="vm_local_vllm", search=search)
     assert result["status"] == "complete" and len(calls) == 1
+
+
+def test_the_llm_sr_cli_gives_a_search_the_patience_of_its_endpoint(
+    tmp_path, monkeypatch
+):
+    import sys
+
+    from scripts import phase_c_llm_sr as cli
+
+    _, root, _ = _frozen(tmp_path, "llm_sr")
+    seen: dict = {}
+    monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
+    monkeypatch.setenv("AF_ENDPOINT_KIND", "jetstream2_hosted")
+    monkeypatch.delenv("AF_VLLM_BASE_URL", raising=False)
+    monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr(cli, "run_phase_c", lambda *a, **k: {"status": "complete"})
+    monkeypatch.setattr(
+        sys, "argv", ["phase_c_llm_sr.py", "run", "--root", str(root), "--index", "0"]
+    )
+    cli.main()
+    assert seen["base_url"] == JETSTREAM2_HOSTED_BASE_URL
+    assert seen["patience_seconds"] == vendored.OUTAGE_PATIENCE_SECONDS[
+        "jetstream2_hosted"
+    ]
 
 
 def test_the_cli_takes_the_endpoint_from_the_environment(monkeypatch):

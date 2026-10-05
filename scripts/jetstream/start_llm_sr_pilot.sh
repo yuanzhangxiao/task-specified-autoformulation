@@ -46,8 +46,10 @@ status_of() {  # root
 
 echo "== smoke test: two requests through the whole path"
 freeze configs/phase_c_llm_sr_smoke_v1.json "${smoke}"
-if ! "${py}" scripts/phase_c_llm_sr.py run --root "${smoke}" --index 0 \
-  >"${smoke}/run.log" 2>&1; then
+# A search waits out a hosted-service outage for hours; this one runs in the
+# foreground and normally takes a minute, so it is not allowed to.
+if ! timeout 30m "${py}" scripts/phase_c_llm_sr.py run --root "${smoke}" \
+  --index 0 >"${smoke}/run.log" 2>&1; then
   tail -n 40 "${smoke}/run.log"
   echo "the smoke test failed (log: ${smoke}/run.log); the pilot was not started" >&2
   exit 1

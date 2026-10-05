@@ -13,7 +13,9 @@ refitted over a numeric evaluator, and the result is scored by our own rollout.
 
 The one behaviour that must be guarded is `_draw_samples_local`, which wraps
 its request loop in `while True: except Exception: continue`. An endpoint fault
-would otherwise spin until the job's walltime with nothing recorded.
+would otherwise spin until the job's walltime with nothing recorded, so the
+search is stopped once the endpoint has failed for longer than the campaign's
+patience.
 """
 
 from __future__ import annotations
@@ -44,14 +46,16 @@ from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
 LOGGER = logging.getLogger(__name__)
 
-#: Consecutive transport failures after which the sampler is stopped. Their
-#: retry loop catches Exception, so escaping it needs BaseException.
-STALL_LIMIT = 20
+#: How long the endpoint may go on failing, from the first failure in a row,
+#: before the search is stopped. A vLLM started inside the job does not come
+#: back once it has died; a campaign against a service that does come back
+#: passes a longer patience. Their retry loop catches Exception, so escaping it
+#: needs BaseException.
+DEFAULT_PATIENCE_SECONDS = 15 * 60.0
 
 #: First and longest pause before their sampler retries a failed request. The
-#: pause doubles per consecutive failure, so the twenty failures that stop a
-#: search span about a quarter of an hour: a hosted service that goes offline
-#: for a few minutes is waited out, and a dead endpoint still ends the search.
+#: pause doubles per consecutive failure: a blip costs seconds, and a long
+#: outage is retried about once a minute until it ends or patience runs out.
 BACKOFF_SECONDS = (1.0, 60.0)
 
 
@@ -64,15 +68,28 @@ def _pause(seconds: float) -> None:
     time.sleep(seconds)
 
 
+def _clock() -> float:
+    """Seconds on a monotonic clock; a seam so tests can move time on."""
+    return monotonic()
+
+
 @contextmanager
-def _transport(module: Any, base_url: str, model: str, accounting: ShimAccounting):
+def _transport(
+    module: Any,
+    base_url: str,
+    model: str,
+    accounting: ShimAccounting,
+    *,
+    patience: float = DEFAULT_PATIENCE_SECONDS,
+):
     """Answer their sampler's requests from the OpenAI-compatible endpoint.
 
     Replaces the request method rather than the URL, which avoids running a
     second server inside the job; the payload and reply are theirs unchanged.
     """
     original = module.LocalLLM._do_request
-    state = {"consecutive": 0}
+    first, longest = BACKOFF_SECONDS
+    state = {"consecutive": 0, "since": 0.0, "pause": first}
 
     def _do_request(self, content: str) -> list[str]:
         payload = {
@@ -87,16 +104,20 @@ def _transport(module: Any, base_url: str, model: str, accounting: ShimAccountin
                 payload, base_url=base_url, model=model, accounting=accounting
             )
         except Exception:
+            now = _clock()
+            if state["consecutive"] == 0:
+                state["since"], state["pause"] = now, first
             state["consecutive"] += 1
-            if state["consecutive"] >= STALL_LIMIT:
+            if now - state["since"] >= patience:
                 raise SamplerStalled(
-                    f"{STALL_LIMIT} consecutive endpoint failures; their sampler "
-                    "retries forever, so the search is stopped here"
+                    f"the endpoint failed {state['consecutive']} times in a row "
+                    f"over {(now - state['since']) / 60:.0f} minutes; their "
+                    "sampler retries forever, so the search is stopped here"
                 ) from None
-            # Their loop retries at once; without a pause a brief outage would
-            # use up every allowed failure within seconds.
-            first, longest = BACKOFF_SECONDS
-            _pause(min(longest, first * 2 ** (state["consecutive"] - 1)))
+            # Their loop retries at once; without a pause an outage would be
+            # met with a stream of requests.
+            _pause(state["pause"])
+            state["pause"] = min(longest, 2 * state["pause"])
             raise
         state["consecutive"] = 0
         return answer["content"]
@@ -115,6 +136,7 @@ def build_searcher(
     model: str,
     samples: int,
     seconds_per_rollout: float = 60.0,
+    patience_seconds: float = DEFAULT_PATIENCE_SECONDS,
 ):
     """Bind the pinned checkout to our data; returns a campaign searcher."""
     import sys
@@ -163,7 +185,9 @@ def build_searcher(
                 llm_class=sampler.LocalLLM, sandbox_class=evaluator.LocalSandbox
             )
             try:
-                with _transport(sampler, base_url, model, accounting):
+                with _transport(
+                    sampler, base_url, model, accounting, patience=patience_seconds
+                ):
                     pipeline.main(
                         specification=specification,
                         inputs=dataset,

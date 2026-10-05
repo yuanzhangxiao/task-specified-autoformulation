@@ -117,41 +117,24 @@ def test_a_recovered_model_carries_refitted_coefficients(
     assert outcome["accounting"]["llm_requests"] == 0  # complete() was stubbed
 
 
-def test_an_unbounded_retry_loop_is_stopped(monkeypatch, tmp_path: Path) -> None:
-    """Their sampler catches Exception and retries forever.
+class _Clock:
+    """Time that passes only when the transport pauses."""
 
-    A wedged endpoint would otherwise consume the whole walltime with nothing
-    recorded, which is how the first LLM-ODE probe was lost.
-    """
-    _, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
-    monkeypatch.setattr(
-        driver,
-        "complete",
-        lambda *a, **k: (_ for _ in ()).throw(UpstreamEndpointError("refused")),
-    )
-    pauses: list[float] = []
-    monkeypatch.setattr(driver, "_pause", pauses.append)
-    accounting = ShimAccounting()
-    with driver._transport(sampler, "http://127.0.0.1:1", "m", accounting):
-        llm = sampler.LocalLLM()
-        # their loop swallows ordinary failures
-        for _ in range(driver.STALL_LIMIT - 1):
-            with pytest.raises(UpstreamEndpointError):
-                llm._do_request("p")
-        # and this one escapes it, because Exception does not catch BaseException
-        with pytest.raises(driver.SamplerStalled):
-            llm._do_request("p")
-    assert not isinstance(driver.SamplerStalled("x"), Exception)
-    # Each retry waited, doubling to a minute: a quarter hour before giving up.
-    assert pauses[:7] == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
-    assert len(pauses) == driver.STALL_LIMIT - 1 and max(pauses) == 60.0
-    assert 12 * 60 < sum(pauses) < 20 * 60
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def pause(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.now += seconds
 
 
-def test_a_success_resets_the_pause(monkeypatch, tmp_path: Path) -> None:
-    """A brief outage is waited out, and the next one starts short again."""
-    _, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
-    replies = iter(["fail", "fail", "ok", "fail"])
+def _failing(monkeypatch, outcomes):
+    """Replace the endpoint with one that answers "ok" or fails, in turn."""
+    replies = iter(outcomes)
 
     def complete(*args, **kwargs):
         if next(replies) == "fail":
@@ -159,8 +142,77 @@ def test_a_success_resets_the_pause(monkeypatch, tmp_path: Path) -> None:
         return {"content": ["x"]}
 
     monkeypatch.setattr(driver, "complete", complete)
-    pauses: list[float] = []
-    monkeypatch.setattr(driver, "_pause", pauses.append)
+    clock = _Clock()
+    monkeypatch.setattr(driver, "_clock", clock)
+    monkeypatch.setattr(driver, "_pause", clock.pause)
+    return clock
+
+
+def test_an_unbounded_retry_loop_is_stopped(monkeypatch, tmp_path: Path) -> None:
+    """Their sampler catches Exception and retries forever.
+
+    A wedged endpoint would otherwise consume the whole walltime with nothing
+    recorded, which is how the first LLM-ODE probe was lost.
+    """
+    _, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    clock = _failing(monkeypatch, ["fail"] * 1000)
+    accounting = ShimAccounting()
+    with driver._transport(sampler, "http://127.0.0.1:1", "m", accounting):
+        llm = sampler.LocalLLM()
+        # their loop swallows ordinary failures, until patience runs out
+        with pytest.raises(driver.SamplerStalled, match="15 minutes"):
+            while True:
+                with pytest.raises(UpstreamEndpointError):
+                    llm._do_request("p")
+    assert not isinstance(driver.SamplerStalled("x"), Exception)
+    # Each retry waited, doubling to a minute, and the search gave up once the
+    # endpoint had been failing for the default patience of a quarter hour.
+    assert clock.pauses[:7] == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
+    assert max(clock.pauses) == 60.0
+    patience = driver.DEFAULT_PATIENCE_SECONDS
+    assert patience <= clock.now < patience + 60.0
+
+
+def test_a_long_outage_is_waited_out_when_patience_allows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A hosted service that is down for two hours does not end the search."""
+    _, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    failures = 130  # about two hours at one retry a minute
+    clock = _failing(monkeypatch, ["fail"] * failures + ["ok"])
+    with driver._transport(
+        sampler, "http://127.0.0.1:1", "m", ShimAccounting(), patience=6 * 3600.0
+    ):
+        llm = sampler.LocalLLM()
+        for _ in range(failures):
+            with pytest.raises(UpstreamEndpointError):
+                llm._do_request("p")
+        assert llm._do_request("p") == ["x"]
+    assert 2 * 3600 - 300 < clock.now < 6 * 3600
+    assert max(clock.pauses) == 60.0
+
+
+def test_patience_counts_one_outage_not_the_sum_of_several(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Two nine-minute outages a success apart are each within a quarter hour."""
+    _, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    outage = ["fail"] * 14  # 1+2+...+32 seconds, then a minute each: 9 minutes
+    clock = _failing(monkeypatch, [*outage, "ok", *outage, "ok"])
+    with driver._transport(sampler, "http://127.0.0.1:1", "m", ShimAccounting()):
+        llm = sampler.LocalLLM()
+        for _ in range(2):
+            for _ in outage:
+                with pytest.raises(UpstreamEndpointError):
+                    llm._do_request("p")
+            assert llm._do_request("p") == ["x"]
+    assert clock.now > driver.DEFAULT_PATIENCE_SECONDS
+
+
+def test_a_success_resets_the_pause(monkeypatch, tmp_path: Path) -> None:
+    """A brief outage is waited out, and the next one starts short again."""
+    _, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    clock = _failing(monkeypatch, ["fail", "fail", "ok", "fail"])
     with driver._transport(sampler, "http://127.0.0.1:1", "m", ShimAccounting()):
         llm = sampler.LocalLLM()
         for _ in range(2):
@@ -169,7 +221,7 @@ def test_a_success_resets_the_pause(monkeypatch, tmp_path: Path) -> None:
         assert llm._do_request("p") == ["x"]
         with pytest.raises(UpstreamEndpointError):
             llm._do_request("p")
-    assert pauses == [1.0, 2.0, 1.0]
+    assert clock.pauses == [1.0, 2.0, 1.0]
 
 
 def test_the_transport_is_restored_afterwards(monkeypatch, tmp_path: Path) -> None:
