@@ -73,6 +73,7 @@ set -euo pipefail
 AF_BASE=/work/hdd/bibo/yxiao2/phase_c
 mkdir -p "$AF_BASE/code/fitting-m10"
 tar -xzf "$AF_BASE/phase-c-fitting-m10.tar.gz" -C "$AF_BASE/code/fitting-m10"
+export AF_CAMPAIGN="$AF_BASE/fitting-screening-replay-v1"
 bash "$AF_BASE/code/fitting-m10/scripts/hpc/submit_phase_c_screening_replay_delta.sh"
 BASH
 ```
@@ -105,3 +106,23 @@ PYTHONPATH=src python scripts/smoke_screening_replay.py \
 ```
 
 Hard alien fits are reserved for Delta. No local hard-case refitting is required.
+
+Verification completed on 2026-10-05 for implementation `fcb505e`:
+
+- Focused M9/M10 tests: 18 passed, both in the checkout and portable release.
+- Small linear end-to-end smoke: all eight entries passed prediction and
+  coefficient gates; both assisted tests completed fixed and released phases,
+  screened their released endpoints, and resumed exactly without new computation.
+- Frozen-source full pytest run: 3,899 passed, 35 skipped; 62 initially lacked
+  local fixture/environment paths in the snapshot. All 62 passed after making
+  those existing paths available, for 3,961 passing tests overall.
+- Changed Python files pass Ruff; shell scripts pass `bash -n` and the diff
+  passes whitespace checks. Repository-wide `ruff check .` still reports 37
+  pre-existing findings in unrelated `analysis/claude` files, left unchanged.
+- The sealed production export contains 18 pools, 149 distinct vectors within
+  those pools (35 cached scores), four assisted tasks and five calibration points.
+  All three ordinary vectors equal the original M9 start payloads exactly; all
+  four assisted payloads reproduce their source identities before budget changes.
+
+The portable archive contains no hard-case rerun results. Submit it on Delta to
+obtain the new calibration and fitting evidence.
