@@ -104,14 +104,21 @@ server_tasks="$("${py}" -c 'import json, sys; print(json.load(open(sys.argv[1]))
 ((tasks <= server_tasks)) ||
   echo "note: the server was started for ${server_tasks} tasks; ${tasks} will queue"
 
+logged=0
+[[ ! -f "${root}/runner.log" ]] || logged="$(wc -l <"${root}/runner.log")"
 nohup setsid bash "${self}" --worker "${root}" "${method}" "${count}" "${tasks}" \
   >>"${root}/runner.log" 2>&1 </dev/null &
 echo "$!" >"${root}/pid"
 sleep 5
-kill -0 "$(cat "${root}/pid")" 2>/dev/null || {
+if ! kill -0 "$(cat "${root}/pid")" 2>/dev/null; then
+  # Finished tasks return at once, so a run with nothing left ends quickly.
+  if tail -n +"$((logged + 1))" "${root}/runner.log" | grep -q '^finished'; then
+    echo "every task of ${name} has ended; report: ${root}/report.json"
+    exit 0
+  fi
   tail -n 40 "${root}/runner.log"
   echo "the run stopped at once (log: ${root}/runner.log)" >&2
   exit 1
-}
+fi
 echo "running ${count} tasks of ${name}, ${tasks} at a time, as process $(cat "${root}/pid")"
 echo "log ${root}/runner.log; one log per task in ${root}/logs"
