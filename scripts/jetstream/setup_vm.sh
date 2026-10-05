@@ -1,6 +1,7 @@
 #!/bin/bash
 # Prepare a Jetstream2 Ubuntu VM to run the vendored LLM baselines (LLM-SR,
-# LLM-ODE) against the Jetstream2 hosted GPT-OSS endpoint.
+# LLM-ODE) against the Jetstream2 hosted GPT-OSS endpoint, or against a model
+# this VM serves itself (scripts/jetstream/gpu_server.sh).
 #
 # Run it from the pinned checkout. Rerunning is safe: each step keeps what is
 # already in place and checks it. Nothing here needs a key or a password; the
@@ -10,11 +11,14 @@
 #   AF_HOME            everything this installs (default ~/af)
 #   AF_RELEASE_BUNDLE  the public Phase C release tarball copied from the Mac
 #                      (default ~/phase-c-release-public-v2.tar.gz)
+#   AF_CHECK_HOSTED    1 (default) to confirm the hosted endpoint at the end; 0
+#                      on a GPU VM that serves its own model
 
 set -euo pipefail
 
 : "${AF_HOME:=${HOME}/af}"
 : "${AF_RELEASE_BUNDLE:=${HOME}/phase-c-release-public-v2.tar.gz}"
+: "${AF_CHECK_HOSTED:=1}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly repo
 readonly venv="${AF_HOME}/venv"
@@ -121,6 +125,7 @@ receipt="$(sha256sum "${release}/summary.json" | cut -d' ' -f1)"
 }
 echo "receipt ${receipt}"
 
+if [[ "${AF_CHECK_HOSTED}" == 1 ]]; then
 step "hosted endpoint"
 if ! PYTHONPATH="${repo}/src" "${py}" - <<'EOF'
 import sys
@@ -143,6 +148,7 @@ then
   echo "the hosted endpoint did not answer as expected. Everything above is in" >&2
   echo "place, so rerun this script once the service is back." >&2
   exit 3
+fi
 fi
 
 step "record"
