@@ -64,6 +64,14 @@ screening on saved models, replays 18 saved pools, and retries the four blocked
 assisted tests with final-screen headroom and trajectory timing logs. Existing
 rollout success remains unchanged; no production fitting default is promoted.
 
+The [M10 results](PHASE_C_FITTING_M10_RESULTS_2026-10-05.md) show that calibrated
+screens unblock all four assisted fits. Dense collocation stays accurate from
+good fitted starts, while reduced grids introduce coefficient/initial bias. The
+four selected models remain the supplied M7 incumbents, and generic saved pools
+still show no recovery. Next investigate mesh convergence and initialization
+robustness separately; a cleanup exception and two replay timeouts also need
+explicit closeout. This remains a diagnostic, not a production promotion.
+
 ## Objective and ownership
 
 Build reliable scientific model construction before expanding search. Separate

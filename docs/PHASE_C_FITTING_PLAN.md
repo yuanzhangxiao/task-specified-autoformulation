@@ -559,3 +559,14 @@ timeouts. Point telemetry distinguishes setup from trajectory integration. The
 released assisted stage reserves time to screen its final vector. Training-only
 selection and independent post-selection evaluation remain separate. No generic
 optimizer rerun, new benchmark data, provider call or production promotion.
+
+The [M10 review](PHASE_C_FITTING_M10_RESULTS_2026-10-05.md) verifies successful
+calibration and all four assisted fixed/released solves. Dense released endpoints
+retain excellent training/coefficient accuracy in six iterations despite 115,218
+variables. Reduced endpoints converge but shift one coefficient by 9.68% and a
+latent initial by 0.219; mesh convergence and initialization robustness are now
+separate targets. All four select their better supplied M7 incumbent. No generic
+pool recovers an accurate model. Two independent replays time out and one cleanup
+exception leaves a missing record; no full assisted rerun is needed. Next qualify
+mesh refinement and perturbed training-fitted starts, with explicit assisted cost
+and independent post-selection evaluation. No production policy is promoted.
