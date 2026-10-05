@@ -537,5 +537,14 @@ screening with durable phase journals, and dense/reduced collocation initialized
 from verified M7 training-fitted endpoints, first with coefficients/initials fixed
 and then released. No hidden trajectory starts or production default changes.
 The 48-entry Delta CPU roster separates 36 generic fits from 12 assisted entries
-(two explicitly ineligible); upstream assisted cost is disclosed. Scientific
-interpretation awaits the new results.
+(two explicitly ineligible); upstream assisted cost is disclosed.
+
+The [M9 review](PHASE_C_FITTING_M9_RESULTS_2026-10-05.md) accounts for all 48
+entries: 32 complete evaluations, 14 without a selected vector, and two ineligible
+sources. Basin passes all 24 selected endpoints, including six that retain the
+supplied assisted fit. Alien's 20-second screen cap causes all 79 Radau screens
+to time out, including the four eligible assisted rechecks; those collocation
+experiments never start. RK45 yields eight complete alien endpoints but no
+recovery. Next calibrate screening time and replay saved pools, then rerun only
+the four blocked assisted tests. These are proposed diagnostics; no production
+fitter or screening policy is promoted.

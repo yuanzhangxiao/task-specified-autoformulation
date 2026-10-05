@@ -56,9 +56,12 @@ substantially reduce overhead, but alien recovery remains unsuccessful in these
 native arms; basin still passes all 18. The implemented
 [M9 diagnostic](PHASE_C_FITTING_SCREENING_ASSISTANCE.md) adds bounded RK45/Radau
 screening and fixed-then-free collocation from explicitly training-fitted starts.
-Its 48-entry Delta CPU roster keeps generic and assisted outcomes separate;
-results are pending. Existing rollout success remains unchanged; no production
-fitting default is promoted.
+Its [M9 results](PHASE_C_FITTING_M9_RESULTS_2026-10-05.md) account for all 48
+entries. Basin still passes, but the 20-second cap times out every alien Radau
+screen, including all four eligible assisted rechecks before collocation starts.
+Next calibrate screening on saved models and replay the saved pools, then rerun
+the four blocked assisted tests. Existing rollout success remains unchanged;
+no production fitting default is promoted.
 
 ## Objective and ownership
 
