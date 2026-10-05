@@ -50,8 +50,14 @@ The implemented [M8 fitting diagnostic](PHASE_C_FITTING_CHECKPOINT_DIAGNOSTIC.md
 pairs legacy and compact checkpoint policies across 36 CPU fits. It also journals
 independent replay, reports timeouts without partial-data accuracy, and preserves
 interrupted restart metadata. A separate log-based M7 closeout performs no new
-fitting/replay. The cases, starts, meshes and total budgets remain fixed; remote
-results are pending.
+fitting/replay. The [M8 results](PHASE_C_FITTING_M8_RESULTS_2026-10-04.md) account
+for all 36 endpoints, including two explicit replay timeouts. Compact checkpoints
+substantially reduce overhead, but alien recovery remains unsuccessful in these
+native arms; basin still passes all 18. The next proposed diagnostic bounds
+checkpoint screening and tests collocation near existing accurate training-fitted
+rollout solutions, separating poor-start optimization from transcription/mesh
+limitations. Existing rollout success remains unchanged; no production default
+is promoted.
 
 ## Objective and ownership
 

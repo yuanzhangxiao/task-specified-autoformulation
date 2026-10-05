@@ -516,4 +516,14 @@ node diagnostics move to native exit. Independent replay failures become explici
 outcomes, with a journal that preserves partial evidence without granting another
 budget. Partial restart decisions and completed-history counts survive reporting.
 A separate M7 timeout closeout uses saved logs only. Historical results and fitter
-defaults remain unchanged. Delta numerical outcomes are pending.
+defaults remain unchanged.
+
+The [M8 review](PHASE_C_FITTING_M8_RESULTS_2026-10-04.md) accounts for all 36 fits:
+34 complete replays and two explicit timeouts. Basin passes all 18; alien native
+arms recover none. Compact dense checkpoint time falls from 363--391 to 15--40
+seconds, with two newly completed native solves. Reduced collocation reaches the
+same iteration totals faster but still produces inaccurate models. One expensive
+checkpoint can consume the remaining screening budget. Next test bounded,
+journaled screening and collocation initialized from already accurate
+training-fitted rollout solutions, before adding benchmarks or more blanket
+budget. These are proposed diagnostics; no production fitter is promoted.
