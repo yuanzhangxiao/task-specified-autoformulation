@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+Construction comparison version 4 separates a reviewed public-obligation catalog
+from a generic graph checker. Optional typed contracts are frozen per public
+cell, shown on every construction/repair request, and checked after compilation.
+Feedback witnesses allow algebraic readouts of dynamic coordinates; forbidden
+paths include intermediates. Uncompiled graphs remain unavailable. The same
+ledger and bounded repair are reused; public prose is not interpreted by the
+runtime. Historical/counterfactual assessments are separate. See
+`PHASE_C_PUBLIC_GRAPH_AUDIT.md` for exact predicates, scope and offline results.
+
 Construction comparison version 3 keeps raw responses immutable while recording
 narrow conversion-delivery normalizations in sealed transactions. Repair feedback
 uses the actual generated-variable edit vocabulary and names conflicting operations.

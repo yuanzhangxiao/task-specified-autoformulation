@@ -15,6 +15,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_ledger as ledger
+from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.staged_topology import content_hash
 
 Policy = Literal["separate", "joint_fixed", "joint_adaptive"]
@@ -112,6 +113,15 @@ scientific correctness merely because those finite structural checks pass.
 An unavailable graph check requires fixing compilation first; it is not a missing
 path verdict. Unresolved public predicates are not scientific passes. Topology
 specifies dependencies; do not defer a known missing dependency to function writing.
+When public_graph_contract is supplied, its reviewed public interpretations are
+part of this prospective construction contract and appear on EVERY request.
+dynamic_feedback means a genuine dependency cycle through a differential state
+that affects the target, directly or through generated readouts. It does NOT
+require the target's literal name on a RHS, nor a self-loop on every memory state.
+forbidden_path excludes indirect as well as direct influence. These checks run
+after the whole graph compiles, before functions. Resolve their concrete failures
+within overall repair; do not invent scientific bindings merely to satisfy a check.
+Deferred scientific checks are not passes and do not ask you to claim proof.
 
 RESPONSE DELIVERY
 Return ONE complete JSON object matching response_template. Keep every listed key,
@@ -260,12 +270,15 @@ def run(
     *,
     repair_requests: int = 3,
     repair_tokens: int = 131072,
+    graph_contract: PublicGraphContract | None = None,
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
     draft, events, records = ledger.Draft(), [], []
     original = client.settings
     if policy not in POLICIES:
         raise ValueError("unknown construction policy")
+    if graph_contract is not None:
+        graph_contract.validate_public(brief)
     if (
         original.maximum_requests <= repair_requests
         or original.maximum_total_tokens <= repair_tokens + 256
@@ -290,6 +303,9 @@ def run(
                 p.model_dump(mode="json") for p in brief.public_variables
             ],
             "required_target_definitions": target_definitions,
+            "public_graph_contract": graph_contract.model_dump(mode="json")
+            if graph_contract is not None
+            else None,
             "memory_requirements": [
                 r.model_dump(mode="json")
                 for r in brief.requirements
@@ -396,7 +412,9 @@ def run(
                     break
         except (RepairBudgetExceeded, PromptPreflightError) as exc:
             ready, stop_reason = False, str(exc)
-        initial_check = ledger.assess(brief, context, target_definitions, draft)
+        initial_check = ledger.assess(
+            brief, context, target_definitions, draft, graph_contract=graph_contract
+        )
         initial = sealed_write(
             directory / "before_repair.json",
             {
@@ -428,6 +446,8 @@ def run(
                 "graph_check_status": check["graph_check_status"],
                 "graph_check_reason": check["graph_check_reason"],
                 "unresolved_public_predicates": check["unresolved_public_predicates"],
+                "reviewed_public_graph_checks": check["reviewed_public_graph_checks"],
+                "deferred_scientific_checks": check["deferred_scientific_checks"],
                 "ready_requested": ready,
                 "last_local_error": diagnostic,
             }
@@ -439,7 +459,13 @@ def run(
                 stop_reason = str(exc)
                 break
             if accepted:
-                check = ledger.assess(brief, context, target_definitions, draft)
+                check = ledger.assess(
+                    brief,
+                    context,
+                    target_definitions,
+                    draft,
+                    graph_contract=graph_contract,
+                )
                 ready = complete
         return {
             "status": "topology_complete"

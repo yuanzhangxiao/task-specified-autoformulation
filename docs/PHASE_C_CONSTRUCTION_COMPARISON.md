@@ -1,6 +1,12 @@
 # Phase C construction schedules
 
-`phase-c-construction-comparison-3` compares three ways to construct variables
+Version 4 adds the explicit reviewed public dependency contract described in
+`PHASE_C_PUBLIC_GRAPH_AUDIT.md`. It is shown before generation, checked before
+functions, and retained throughout bounded repair. New output defaults are
+`phase-c-construction-comparison-v4` and `phase-c-construction-live-v3`.
+Historical version-3 behavior below remains documented for provenance.
+
+`phase-c-construction-comparison-4` compares three ways to construct variables
 and equation topology. It stops before interaction functions, initialization,
 fitting, numerical mechanism assessments and the scientific critic. Historical
 campaigns and finalized benchmark prompts/data are unchanged.
@@ -116,9 +122,10 @@ none of the three alternatives is assumed to outperform it.
 
 `prepare --study live_confirmation` freezes a separate 24-task plan: all eight
 cases, seed 0, Full only, and all three construction policies. Both basin cases
-are included. Public inputs, model revision, serving image, generation settings,
-construction/repair budgets and scientific checks are unchanged. Only the roster
-and worker window differ. No old inventories or models are imported.
+are included. Within this protocol, the live confirmation and full comparison
+share public inputs, reviewed graph contracts, model revision, serving image,
+generation settings and construction/repair budgets. Only the roster and worker
+window differ. No old inventories or models are imported.
 
 The worker visits every case within its first eight tasks, rotating policies
 within each case. It stops after the frozen 24 tasks or the three-hour window,
@@ -148,7 +155,7 @@ bash scripts/hpc/start_phase_c_construction_live.sh inspect
 ```
 
 The default output is
-`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-live-v2`.
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-live-v3`.
 The wrapper fixes the study to `live_confirmation` and uses wave `live-1`;
 repeating the command returns existing submission receipts. If the allocation
 finishes with pending tasks, use the same code/root with an explicit new wave:
@@ -304,7 +311,7 @@ bash scripts/hpc/start_phase_c_construction_comparison.sh run
 Defaults:
 
 - Source: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-topology-v1`.
-- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v3`.
+- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v4`.
 - One existing 1×H100 server, followed by a CPU report job; no fitting jobs.
 
 Override these with `AF_COMPARISON_SOURCE` and `AF_COMPARISON_ROOT` if necessary.

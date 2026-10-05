@@ -16,6 +16,7 @@ from autoformalism.schemas.staged_topology import (
     ScientificVariable,
     VariableReply,
 )
+from autoformalism.search import public_graph_obligations as graph_obligations
 from autoformalism.search import shared_process_contract, signed_processes
 from autoformalism.search.variable_bindings import MechanismBinding
 from autoformalism.staged_topology import (
@@ -332,9 +333,13 @@ def assess(
     context: ValidationContext,
     target_definitions: dict[str, str],
     draft: Draft,
+    *,
+    graph_contract: graph_obligations.PublicGraphContract | None = None,
 ) -> dict:
     """Check a finished draft; no reference equations, semantic LLM or fitted data."""
     errors: list[dict] = []
+    if graph_contract is not None:
+        graph_contract.validate_public(brief)
 
     def fail(code: str, **details) -> None:
         errors.append({"code": code, **details})
@@ -369,6 +374,16 @@ def assess(
     graph_available = topology is not None
     checks = public_structure_checks(brief, equations) if graph_available else ()
     errors.extend({"code": "public_path", **v} for v in checks if not v["passed"])
+    reviewed_checks = (
+        graph_obligations.check(graph_contract, equations if graph_available else None)
+        if graph_contract is not None
+        else []
+    )
+    errors.extend(
+        {"code": "reviewed_public_graph", **v}
+        for v in reviewed_checks
+        if v["passed"] is False
+    )
     for e in equations:
         audit = audit_explicit_equation_polarity(
             e,
@@ -445,6 +460,10 @@ def assess(
             r.id for r in brief.requirements if not r.drivers or not r.targets
         ],
         "public_structure_checks": list(checks),
+        "reviewed_public_graph_checks": reviewed_checks,
+        "deferred_scientific_checks": list(graph_contract.deferred_scientific_checks)
+        if graph_contract is not None
+        else [],
         "memory_binding_checks": memory_checks,
         "topology": topology.model_dump(mode="json") if topology else None,
         "generated_auxiliary_aliases": aliases,

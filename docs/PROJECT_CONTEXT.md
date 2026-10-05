@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+Construction comparison version 4 freezes explicit reviewed public graph
+obligations and repeats them in initial/repair prompts. General feedback-cycle
+and forbidden-path predicates check CSTR/basin structural capabilities before
+functions, allowing alternative dynamic coordinates. Other science remains
+explicitly deferred; no universal memory decay rule is added. A read-only audit
+of 24 saved drafts flags one additional CSTR draft (17 to 16 structurally eligible),
+without changing historical results. See `PHASE_C_PUBLIC_GRAPH_AUDIT.md`.
+
 Construction comparison version 3 fixes misleading source/type and transactional
 repair feedback, logs narrow quoted-null conversion normalization, and marks graph
 checks unavailable after compilation failure. Local named laws and genuinely shared

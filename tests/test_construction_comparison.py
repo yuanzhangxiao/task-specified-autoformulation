@@ -11,22 +11,166 @@ from autoformalism.llm.construction import ConstructionClient
 from autoformalism.llm.staged_topology import DeferredCall, StagedModelSettings
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import construction_comparison as campaign
+from autoformalism.research import construction_obligations as public_profiles
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_schedules as schedules
+from autoformalism.staged_topology import content_hash
 from scripts import submit_phase_c_baseline as submitter
 from tests.test_construction_ledger import brief, context, equation, patch, variable
 from tests.test_explicit_variable_bindings import response
 from tests.test_phase_c_construction_baseline import tokenize
 from tests.test_phase_c_topology import sources
+from tests.test_public_graph_obligations import contract as graph_contract
 
 
 def source_fixture(tmp_path):
+    """Toy dynamics with the explicit public endpoints/quotes used by the policy."""
     plan = sources(tmp_path)
     plan.pop("artifact_sha256")
+    for case, cell in plan["cells"].items():
+        target, quotes = None, []
+        if case == public_profiles.CSTR:
+            target = "T"
+            quotes = [
+                "a reactor-temperature balance that distinguishes feed transport, "
+                "reaction heat generation, and heat exchange with the jacket"
+            ]
+        elif case == public_profiles.COUPLED:
+            target = "h_down"
+            quotes = [
+                "Represent threshold-dependent overflow and the downstream discharge."
+            ]
+        elif case == public_profiles.INDEPENDENT:
+            target = "h_down"
+            quotes = [
+                "Represent downstream accumulation, a threshold-dependent outlet, "
+                "nonnegative storage and its local water balance.",
+                "There is no pipe, spillway, overflow route, or common unmeasured "
+                "inflow linking these two basins.",
+            ]
+            cell["brief"]["public_variables"].append(
+                {"name": "inflow_up", "data_role": "external_input"}
+            )
+            cell["context"]["external_inputs"].append("inflow_up")
+        if target:
+            cell["brief"]["public_variables"].append(
+                {"name": target, "data_role": "target"}
+            )
+            cell["context"]["targets"].append(target)
+            cell["brief"]["scientific_context"] += "\n" + "\n".join(quotes)
+            cell["evidence"]["context"] = cell["context"]
+            cell["evidence"].pop("packet_sha256")
+            cell["evidence"]["packet_sha256"] = content_hash(cell["evidence"])
     plan["config"]["limits"] = next(iter(plan["cells"].values()))["brief"]["limits"]
     path = tmp_path / "new/plan.json"
     path.unlink()  # Normalize limits in the synthetic fixture only.
     return sealed_write(path, plan)
+
+
+def test_public_graph_contract_repeated_through_targeted_repair_and_resume(tmp_path):
+    calls = []
+
+    def send(url, body, timeout):
+        p = json.loads(body["messages"][1]["content"])
+        calls.append(p)
+        edits = patch(variables=[variable("y")], stage_complete=True)
+        if p["stage"] != "relationships":
+            edits = patch(
+                equations=[
+                    equation("y", "u", *(["y"] if p["stage"] == "repair" else []))
+                ],
+                stage_complete=True,
+            )
+        return response(edits.model_dump(mode="json"))
+
+    client = ConstructionClient(
+        settings=StagedModelSettings(maximum_requests=128, maximum_total_tokens=524288),
+        directory=tmp_path / "calls",
+        namespace="graph-contract",
+        seed=0,
+        base_url="http://offline",
+        transport=send,
+        token_transport=tokenize,
+    )
+
+    def run():
+        return schedules.run(
+            brief(),
+            context(),
+            {},
+            brief().model_dump(mode="json"),
+            client,
+            tmp_path / "construction",
+            "joint_adaptive",
+            graph_contract=graph_contract(),
+        )
+
+    result = run()
+    assert result["status"] == "topology_complete"
+    assert not result["before_repair"]["assessment"]["eligible"]
+    assert [p["stage"] for p in calls] == ["relationships", "equations", "repair"]
+    assert all(
+        p["public_graph_contract"] == graph_contract().model_dump(mode="json")
+        for p in calls
+    )
+    assert (
+        calls[-1]["runtime_diagnostics"]["reviewed_public_graph_checks"][0]["status"]
+        == "fail"
+    )
+    assert (
+        calls[-1]["current_draft"]["declarations"] == result["before_repair"]["draft"]
+    )
+    assert run() == result
+    assert len(calls) == 3
+
+
+def test_saved_graph_audit_is_read_only_repeatable_and_marks_missing(
+    tmp_path, monkeypatch
+):
+    from autoformalism.research import construction_graph_audit as audit
+
+    monkeypatch.setattr(audit, "reviewed_contract", campaign.reviewed_contract)
+    source_fixture(tmp_path)
+    root = tmp_path / "comparison"
+    plan = campaign.freeze(tmp_path / "new", root, study="live_confirmation")
+    campaign.propose(
+        root,
+        plan,
+        plan["tasks"][0],
+        "http://offline",
+        transport=transport([]),
+        token_transport=tokenize,
+    )
+    files_before = {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    output = tmp_path / "audit.json"
+    result = audit.audit(root, output)
+    assert result["final_drafts_available"] == 1
+    assert result["planned_tasks"] == 24
+    assert sum(r["final"]["status"] == "missing" for r in result["rows"]) == 23
+    assert result["llm_calls"] == result["optimizer_calls"] == 0
+    assert audit.audit(root, output) == result
+    assert {
+        str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()
+    } == files_before
+    with pytest.raises(ValueError, match="separate"):
+        audit.audit(root, root / "new.json")
+    call = next((root / "results").glob("*/calls/*.json"))
+    call.unlink()
+    with pytest.raises(ValueError):
+        audit.audit(root, tmp_path / "bad.json")
+
+
+def test_resume_refuses_changed_reviewed_contract(tmp_path):
+    source_fixture(tmp_path)
+    root = tmp_path / "comparison"
+    plan = campaign.freeze(tmp_path / "new", root)
+    cell = next(iter(plan["cells"].values()))
+    cell["public_graph_contract"]["source_brief_sha256"] = "0" * 64
+    plan.pop("artifact_sha256")
+    (root / "plan.json").unlink()
+    sealed_write(root / "plan.json", plan)
+    with pytest.raises(ValueError, match="contract differs"):
+        campaign.verify(root)
 
 
 @pytest.mark.parametrize("study", campaign.STUDIES)
@@ -321,6 +465,7 @@ def test_freeze_has_96_fresh_matched_tasks_and_no_old_models(tmp_path):
             "target_contract",
             "evidence",
             "construction_contract_policy",
+            "public_graph_contract",
         }
         for c in plan["cells"].values()
     )

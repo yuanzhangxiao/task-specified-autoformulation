@@ -25,12 +25,15 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import construction_baseline as baseline
 from autoformalism.research import construction_contract as contract
 from autoformalism.research import construction_trace, topology_confirmation
+from autoformalism.research.construction_obligations import reviewed_contract
+from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_schedules as schedules
+from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-3"
+PROTOCOL = "phase-c-construction-comparison-4"
 REPO = baseline.REPO
 Study = Literal["comparison", "live_confirmation"]
 STUDIES = ("comparison", "live_confirmation")
@@ -39,7 +42,7 @@ STUDIES = ("comparison", "live_confirmation")
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-3"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-4"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -102,6 +105,9 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
         )
         if cell["brief"]["limits"] != config.limits.model_dump(mode="json"):
             raise ValueError("public construction limits differ from frozen settings")
+        cell["public_graph_contract"] = reviewed_contract(
+            name, PublicScientificBrief.model_validate(cell["brief"])
+        ).model_dump(mode="json")
         # Validate the exact public context/packet without opening trajectory files.
         brief = contract.visible_brief(cell, {"arm": "full"})
         evidence_brief(
@@ -173,6 +179,12 @@ def verify(root: Path) -> dict:
     if plan["protocol"] != PROTOCOL or plan["source_identity"] != source_identity():
         raise ValueError("construction comparison source/protocol differs")
     Config.model_validate(plan["config"])
+    for name, cell in plan["cells"].items():
+        expected = reviewed_contract(
+            name, PublicScientificBrief.model_validate(cell["brief"])
+        ).model_dump(mode="json")
+        if cell.get("public_graph_contract") != expected:
+            raise ValueError("reviewed public graph contract differs")
     study = plan.get("study", "comparison")
     if study not in STUDIES:
         raise ValueError("unknown construction study")
@@ -332,6 +344,9 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
                 task["policy"],
                 repair_requests=config.repair_requests,
                 repair_tokens=config.repair_tokens,
+                graph_contract=PublicGraphContract.model_validate(
+                    cell["public_graph_contract"]
+                ),
             )
             return sealed_write(
                 directory / "proposal.json",
@@ -471,6 +486,14 @@ def report(root: Path, plan: dict) -> dict:
             if value
             else None,
             "process_usage": value["assessment"]["process_usage"] if value else None,
+            "reviewed_public_graph_checks": value["assessment"][
+                "reviewed_public_graph_checks"
+            ]
+            if value
+            else None,
+            "deferred_scientific_checks": plan["cells"][task["benchmark_id"]][
+                "public_graph_contract"
+            ]["deferred_scientific_checks"],
             "accepted_reply_normalizations": sum(
                 len(e["normalizations"]) for e in events if e["accepted"]
             ),
