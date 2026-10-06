@@ -114,6 +114,8 @@ def build_problem(payload: dict, directory: Path) -> TranscriptionProblem:
         raise ValueError("unknown transcription")
     chunks = payload.get("reuse_chunks", 1)
     checkpoint_mode = payload.get("checkpoint_mode", "legacy")
+    if type(payload.get("strict_parameter_bounds", False)) is not bool:
+        raise ValueError("strict bounds must be an explicit boolean")
     if checkpoint_mode not in {"legacy", "compact"}:
         raise ValueError("unknown checkpoint mode")
     if checkpoint_mode == "compact" and chunks != 1:
@@ -309,6 +311,18 @@ def solve(payload: dict, directory: Path) -> dict:
     iteration_offset = 0
 
     compact = payload.get("checkpoint_mode") == "compact"
+    final_checkpoint = {"status": "not_attempted", "published": False}
+    rejections = {"count": 0}
+
+    def disposition(record, *, detailed):
+        """Keep optimizer termination distinct from publication of usable evidence."""
+        nonlocal final_checkpoint
+        if not record["published"]:
+            rejections.update(count=rejections["count"] + 1, latest=record)
+            public._write(directory / "checkpoint_rejections.json", rejections)
+        if detailed:
+            final_checkpoint = record
+            public._write(directory / "final_checkpoint_status.json", record)
 
     def snapshot(iteration, value, *, detailed=False):
         nonlocal pool, last_iteration, last_checkpoint_time, checkpoint_seconds
@@ -316,11 +330,35 @@ def solve(payload: dict, directory: Path) -> dict:
         vector = np.asarray(value(theta)).ravel()
         loss = float(value(objective))
         defect = float(np.max(abs(np.asarray(value(all_defects)))))
+        audit = {
+            "iteration": int(iteration),
+            "published": False,
+            "raw_parameters": {
+                n: float(v) if np.isfinite(v) else None
+                for n, v in zip(system.names, vector, strict=True)
+            },
+            "collocation_nmse": loss if np.isfinite(loss) else None,
+            "maximum_scaled_defect": defect if np.isfinite(defect) else None,
+            "parameter_bound_tolerance": 1e-10,
+        }
         if not np.isfinite(vector).all() or not np.isfinite(loss + defect):
+            disposition(
+                {**audit, "status": "nonfinite_parameter_or_objective"},
+                detailed=detailed,
+            )
             return
+        audit["lower_bound_violation"] = float(
+            np.max(np.maximum(layout.lower - vector, 0))
+        )
+        audit["upper_bound_violation"] = float(
+            np.max(np.maximum(vector - layout.upper, 0))
+        )
         if np.any(vector < layout.lower - 1e-10) or np.any(
             vector > layout.upper + 1e-10
         ):
+            disposition(
+                {**audit, "status": "parameter_bounds_violated"}, detailed=detailed
+            )
             return
         vector = np.clip(vector, layout.lower, layout.upper)
         record = {
@@ -343,6 +381,10 @@ def solve(payload: dict, directory: Path) -> dict:
                 -1, system.state_count
             )
             if not np.isfinite(states).all() or not np.isfinite(stages).all():
+                disposition(
+                    {**audit, "status": "nonfinite_nodes", "trajectory": key},
+                    detailed=detailed,
+                )
                 return
             indicators = (
                 mesh_tools.collocation_indicators(
@@ -361,6 +403,9 @@ def solve(payload: dict, directory: Path) -> dict:
         if compact:
             if detailed:
                 public._write(directory / "final_checkpoint_diagnostics.json", record)
+                disposition(
+                    {**audit, "status": "published", "published": True}, detailed=True
+                )
             record.pop("trajectories")
         digest = public.content_sha256(record["parameters"])
         if digest not in seen:
@@ -419,6 +464,10 @@ def solve(payload: dict, directory: Path) -> dict:
         "max_cpu_time": max(0.01, deadline - monotonic()),
         "hessian_approximation": hessian,
     }
+    if payload.get("strict_parameter_bounds", False):
+        # Opt-in M13: avoid solving a relaxed domain then losing the final point
+        # at the stricter physical checkpoint gate. Historical options stay intact.
+        native_options.update(bound_relax_factor=0.0, honor_original_bounds="yes")
     if chunks > 1:
         native_options["warm_start_init_point"] = "yes"
     opti.solver(
@@ -487,6 +536,15 @@ def solve(payload: dict, directory: Path) -> dict:
             message = str(error)[-1200:]
             with suppress(RuntimeError, ValueError):
                 snapshot(last_iteration, opti.debug.value, detailed=compact)
+        if compact and final_checkpoint["status"] == "not_attempted":
+            disposition(
+                {
+                    "status": "capture_unavailable",
+                    "published": False,
+                    "message": message[-1200:],
+                },
+                detailed=True,
+            )
         stats = opti.stats()
         for key, value in stats.items():
             if key.startswith("n_call_"):
@@ -534,6 +592,8 @@ def solve(payload: dict, directory: Path) -> dict:
         "solve_chunks": chunk_records,
         "checkpoint_seconds": checkpoint_seconds,
         "checkpoint_mode": payload.get("checkpoint_mode", "legacy"),
+        "final_checkpoint": final_checkpoint,
+        "strict_parameter_bounds": payload.get("strict_parameter_bounds", False),
     }
     public._write(directory / "native.json", result)
     return result

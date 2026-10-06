@@ -602,4 +602,17 @@ coarse solve lacks its final node checkpoint, and a medium checkpoint's first
 sensitivity evaluation hits a local time cap. Lower current training NMSE does
 not reliably identify the best start for further fitting. Next make endpoint
 rejection explicit and compare bounded optimization trials from several retained
-starts under one budget. This follow-up is recommended, not yet implemented.
+starts under one budget. The approved follow-up is implemented as M13 below.
+
+## M13 — rollout fitting from a preserved start portfolio
+
+The [M13 runbook](PHASE_C_FITTING_START_PORTFOLIO.md) implements that follow-up:
+rollout-only control, three generic starting pairs, and a portfolio that also
+includes a screened medium-collocation checkpoint. All nine tasks share the
+M12 per-task ceiling and original three generic seeds. Bounded fitting trials
+precede further allocation; a low current score cannot delete the original pair.
+Local derivative failures switch candidates, while complete incumbents remain.
+Final checkpoint publication now has explicit success/rejection diagnostics;
+M13's native arm also disables bound relaxation without loosening physical gates.
+No reference/validation values guide start generation or allocation. Delta
+qualification is pending; this is not a production fitter promotion.

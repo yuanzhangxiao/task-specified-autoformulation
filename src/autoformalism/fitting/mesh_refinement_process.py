@@ -106,6 +106,9 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
             "nodes.json",
             "native.json",
             "final_checkpoint_diagnostics.json",
+            "final_checkpoint_status.json",
+            "checkpoint_rejections.json",
+            "checkpoints.json",
             *(("refinement/best.json",) if mode == "recovery_rollout" else ()),
         )
         if result["termination_confirmed"] and (folder / name).exists()

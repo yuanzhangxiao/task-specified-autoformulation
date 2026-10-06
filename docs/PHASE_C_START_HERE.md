@@ -93,7 +93,15 @@ and none with medium collocation. No run advances to a finer mesh. A missing
 final checkpoint and a local sensitivity timeout require explicit handling;
 lower present NMSE also fails to identify good optimization starts. The proposed
 next milestone fixes endpoint recording and tests several starting pairs with
-bounded optimization trials under one budget. It is not yet implemented.
+bounded optimization trials under one budget, implemented as M13 below.
+
+The [M13 fitting portfolio](PHASE_C_FITTING_START_PORTFOLIO.md) now implements the
+approved follow-up with nine CPU-only Delta tasks. It preserves original starts,
+compares short rollout optimization trials and switches away from failed or
+stagnating candidates while retaining the best complete model. Native checkpoint
+rejection is explicit and the new native arm disables bound relaxation. The
+rollout-only control, data and post-fit evaluation gates remain unchanged.
+Large-case results are pending; construction remains a separate workstream.
 
 ## Objective and ownership
 

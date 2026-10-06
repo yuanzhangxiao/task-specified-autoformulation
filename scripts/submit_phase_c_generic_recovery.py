@@ -23,17 +23,21 @@ def submit(
     account: str,
     concurrency: int,
     inputs: Path | None = None,
+    campaign=q,
+    policy_type=q.RecoveryPolicy,
+    worker_name="run_phase_c_generic_recovery_delta.sh",
+    job_prefix="generic-fit",
 ) -> dict:
     """Persist each intent/receipt; uncertain submissions cannot be repeated."""
     root = root.resolve()
     if inputs is None:
         raise ValueError("a sealed development screening export is required")
-    q.prepare(root, inputs, q.RecoveryPolicy.model_validate_json(config.read_text()))
-    plan, _ = q.verify(root)
+    campaign.prepare(root, inputs, policy_type.model_validate_json(config.read_text()))
+    plan, _ = campaign.verify(root)
     python = os.environ["AF_PYTHON"]
     if not Path(python).is_file() or not 1 <= concurrency <= 8:
         raise ValueError("require an existing Python and concurrency 1..8")
-    worker = REPO / "scripts/hpc/run_phase_c_generic_recovery_delta.sh"
+    worker = REPO / "scripts/hpc" / worker_name
     commit = (
         (REPO / "SOURCE_COMMIT").read_text().strip()
         if (REPO / "SOURCE_COMMIT").exists()
@@ -75,7 +79,7 @@ def submit(
                 }[stage],
                 "--export=ALL",
                 "--kill-on-invalid-dep=yes",
-                f"--job-name=generic-fit-{stage}",
+                f"--job-name={job_prefix}-{stage}",
                 f"--output={root}/logs/{stage}-%A_%a.out",
                 f"--error={root}/logs/{stage}-%A_%a.err",
             ]

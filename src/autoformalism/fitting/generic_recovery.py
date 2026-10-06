@@ -117,16 +117,23 @@ def bases(data: dict) -> dict:
     return result
 
 
-def prepare(root: Path, inputs: Path, policy: RecoveryPolicy) -> dict:
+def prepare(
+    root: Path,
+    inputs: Path,
+    policy: RecoveryPolicy,
+    *,
+    protocol: str = PROTOCOL,
+    arms: tuple[str, ...] = ARMS,
+) -> dict:
     """Freeze the complete roster and budgets; no optimizer or regeneration."""
     data = read_seal(inputs)
     tasks = [
         {"task_id": f"{common}_{arm}", "common": common, "arm": arm}
         for common in sorted(bases(data))
-        for arm in ARMS
+        for arm in arms
     ]
     plan = {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
         "inputs_sha256": public.content_sha256(data),
         "source_sha256": public._source_identity(),
         "runtime": public._runtime(),
@@ -141,9 +148,9 @@ def prepare(root: Path, inputs: Path, policy: RecoveryPolicy) -> dict:
     return {"identity": public.content_sha256(plan), "tasks": len(tasks)}
 
 
-def verify(root: Path, *, runtime=True):
+def verify(root: Path, *, runtime=True, protocol=PROTOCOL):
     plan, data = read_seal(root / "plan.json"), read_seal(root / "inputs.json")
-    if plan["protocol"] != PROTOCOL or plan["inputs_sha256"] != public.content_sha256(
+    if plan["protocol"] != protocol or plan["inputs_sha256"] != public.content_sha256(
         data
     ):
         raise ValueError(f"not a matching generic recovery campaign: {root}")
@@ -155,9 +162,10 @@ def verify(root: Path, *, runtime=True):
     return plan, data
 
 
-def run_task(root: Path, index: int) -> dict:
+def run_task(root: Path, index: int, *, protocol=PROTOCOL, fitter=None) -> dict:
     """Seal all training decisions before scoring validation or coefficients."""
-    plan, data = verify(root)
+    plan, data = verify(root, protocol=protocol)
+    fitter = fitter or fitting.fit
     if not 0 <= index < len(plan["tasks"]):
         raise ValueError("invalid task index")
     task = plan["tasks"][index]
@@ -174,7 +182,7 @@ def run_task(root: Path, index: int) -> dict:
             return saved
         path = folder / "backend.json"
         if not path.exists():
-            backend = fitting.fit(
+            backend = fitter(
                 bases(data)[task["common"]], task["arm"], plan["policy"], folder / "fit"
             )
             seal(path, {"identity": identity, **backend})
@@ -224,13 +232,16 @@ def run_task(root: Path, index: int) -> dict:
             "cost_complete": all("elapsed_seconds" in p for p in processes)
             and len(processes) == len(operations),
         }
+        for key in ("portfolio", "rollout_call_accounting"):
+            if key in backend:
+                result[key] = backend[key]
         seal(output, result)
     return result
 
 
-def report(root: Path) -> dict:
+def report(root: Path, *, protocol=PROTOCOL, arms=ARMS) -> dict:
     """All starts remain in denominators, including failed fits/evaluations."""
-    plan, _ = verify(root, runtime=False)
+    plan, _ = verify(root, runtime=False, protocol=protocol)
     rows = []
     for task in plan["tasks"]:
         path = root / "results" / task["task_id"] / "result.json"
@@ -244,7 +255,7 @@ def report(root: Path) -> dict:
             raise ValueError("reported recovery identity differs")
         rows.append(row)
     groups = {}
-    for arm in ARMS:
+    for arm in arms:
         selected = [r for r in rows if r["arm"] == arm]
         groups[arm] = {
             "expected": len(selected),
@@ -258,7 +269,7 @@ def report(root: Path) -> dict:
             },
         }
     result = {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
         "plan_sha256": public.content_sha256(plan),
         "status": "complete"
         if all(r["status"] != "missing" for r in rows)

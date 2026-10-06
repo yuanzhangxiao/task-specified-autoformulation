@@ -1,0 +1,23 @@
+{
+  "seconds": 1200,
+  "targets": [6000, 60000, 90000, null],
+  "medium_target": 60000,
+  "minimum_intervals": 24,
+  "observation_anchors": 8,
+  "collocation_fraction": 0.75,
+  "native_seconds": 250,
+  "point_seconds": 90,
+  "certificate_seconds": 180,
+  "maximum_rollout_calls": 900,
+  "training_nmse": 0.000001,
+  "trajectory_nmse": 0.00001,
+  "solver_agreement": 0.00001,
+  "replay_seconds": 300,
+  "probe_seconds": 120,
+  "continuation_seconds": 240,
+  "probe_calls": 60,
+  "continuation_calls": 120,
+  "perturbation_spread": 0.7,
+  "progress_floor": 0.01,
+  "stagnant_visits": 2
+}
