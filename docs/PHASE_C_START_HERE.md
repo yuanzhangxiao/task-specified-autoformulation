@@ -86,7 +86,14 @@ three fitting strategies on all three original generic starts, including the
 previous failure. Input-preserving meshes add training-response anchors; complete
 training-only independent rollout checks can stop fitting before denser meshes.
 Validation and coefficient/initial recovery remain post-fit diagnostics. Nine
-matched-ceiling CPU tasks are ready for Delta; production defaults stay unchanged.
+matched-ceiling CPU tasks have completed on Delta; production defaults stay unchanged.
+The [M12 review](PHASE_C_FITTING_M12_RESULTS_2026-10-06.md) finds recovery on two
+of three starts with rollout-only, the same two through progressive-arm fallback,
+and none with medium collocation. No run advances to a finer mesh. A missing
+final checkpoint and a local sensitivity timeout require explicit handling;
+lower present NMSE also fails to identify good optimization starts. The proposed
+next milestone fixes endpoint recording and tests several starting pairs with
+bounded optimization trials under one budget. It is not yet implemented.
 
 ## Objective and ownership
 

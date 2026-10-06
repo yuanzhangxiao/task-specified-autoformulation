@@ -593,3 +593,13 @@ corners and add bounded training-observation anchors. Complete independent
 training rollouts can stop refinement early; validation and coefficient/initial
 errors are evaluated only after training selection freezes. Nine CPU tasks run
 on Delta. No production default or benchmark changes.
+
+The [M12 results](PHASE_C_FITTING_M12_RESULTS_2026-10-06.md) account for all nine
+tasks and complete independent replay. Rollout-only recovers two of three starts;
+progressive meshes recover the same two by falling back to the original starts;
+medium collocation recovers none. No run reaches a finer mesh. One converged
+coarse solve lacks its final node checkpoint, and a medium checkpoint's first
+sensitivity evaluation hits a local time cap. Lower current training NMSE does
+not reliably identify the best start for further fitting. Next make endpoint
+rejection explicit and compare bounded optimization trials from several retained
+starts under one budget. This follow-up is recommended, not yet implemented.
