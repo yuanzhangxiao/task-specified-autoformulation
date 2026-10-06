@@ -614,5 +614,14 @@ precede further allocation; a low current score cannot delete the original pair.
 Local derivative failures switch candidates, while complete incumbents remain.
 Final checkpoint publication now has explicit success/rejection diagnostics;
 M13's native arm also disables bound relaxation without loosening physical gates.
-No reference/validation values guide start generation or allocation. Delta
-qualification is pending; this is not a production fitter promotion.
+No reference/validation values guide start generation or allocation. This remains
+an experimental comparison, not a production fitter promotion.
+
+The [M13 results](PHASE_C_FITTING_M13_RESULTS_2026-10-06.md) now show two of three
+recoveries for both rollout-only and the rollout portfolio, with additional cost
+for the latter. The checkpoint portfolio has one recovery, one poor fit and one
+cleanup-blocked evaluation. The difficult start still suppresses an output gain
+at its zero boundary. A stiff checkpoint also exposes a Radau-screen/RK45-refinement
+compatibility gap. The proposed next experiment profiles the conditionally linear
+output gains during rollout fitting, preserving all original starts and budgets.
+It is not yet implemented; generic-start robustness remains unresolved.

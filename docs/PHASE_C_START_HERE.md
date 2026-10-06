@@ -101,7 +101,15 @@ compares short rollout optimization trials and switches away from failed or
 stagnating candidates while retaining the best complete model. Native checkpoint
 rejection is explicit and the new native arm disables bound relaxation. The
 rollout-only control, data and post-fit evaluation gates remain unchanged.
-Large-case results are pending; construction remains a separate workstream.
+Construction remains a separate workstream; the results are reviewed below.
+
+The [M13 review](PHASE_C_FITTING_M13_RESULTS_2026-10-06.md) reports that the extra
+starts do not improve recovery: rollout-only and the rollout portfolio both solve
+two of three starts, while the portfolio costs more. The checkpoint arm has one
+success, one inaccurate result and one evaluation blocked by unconfirmed cleanup.
+Next proposed: exploit conditional linearity of output gains within rollout
+fitting; keep validation/reference values outside optimization. No production
+fitter promotion follows from these results.
 
 ## Objective and ownership
 
