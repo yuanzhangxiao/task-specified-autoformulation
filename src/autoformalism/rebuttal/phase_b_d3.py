@@ -8,8 +8,9 @@ import importlib.metadata
 import json
 import os
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -20,7 +21,8 @@ from autoformalism.baselines.d3 import (
 )
 from autoformalism.baselines.d3_rollout import evaluate_validation
 from autoformalism.baselines.models import BaselineConfig, BaselineDevelopmentResult
-from autoformalism.data import BenchmarkRegistry
+from autoformalism.data import BenchmarkRegistry, DevelopmentDataset
+from autoformalism.expressions import ValidationContext
 from autoformalism.llm.config import LLMConfig, LLMProvider, create_llm_client
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.baseline_validation import file_hash, load_public, read_json
@@ -201,8 +203,19 @@ class _NativeClient:
         )
 
 
+def _replayed_by_gateway(event: dict) -> bool:
+    """Whether a caching gateway answered from its store, as a transport marks it."""
+    raw = event.get("raw_response")
+    gateway = raw.get("_autoformalism_gateway") if isinstance(raw, dict) else None
+    return isinstance(gateway, dict) and bool(gateway.get("cache_hit"))
+
+
 def accounting(path: Path) -> dict:
-    """Count logged physical calls, including failures, without pricing tokens."""
+    """Count logged physical calls, including failures, without pricing tokens.
+
+    An answer replayed from a cache, ours or a gateway's, cost no generation
+    and is counted apart from the requests that did.
+    """
     counts = Counter(
         physical_requests=0, observed_tokens=0, unknown_usage_requests=0, cache_hits=0
     )
@@ -211,7 +224,7 @@ def accounting(path: Path) -> dict:
             event = json.loads(line)
             if event.get("event") not in {"llm_response", "llm_failure"}:
                 continue
-            if event.get("cache_hit"):
+            if event.get("cache_hit") or _replayed_by_gateway(event):
                 counts["cache_hits"] += 1
                 continue
             # max_attempts=1: a failed outer attempt cannot also be included in
@@ -250,7 +263,74 @@ def run(root: Path, index: int, *, client=None) -> dict:
         or context.model_dump(mode="json") != row["validation_context"]
     ):
         raise ValueError("public development input drift")
+    config = Campaign.model_validate(plan["config"])
     directory = root / "results" / str(index)
+
+    def native_client():
+        if client is not None:
+            return client
+        return create_llm_client(
+            LLMConfig(
+                provider=LLMProvider(provider),
+                model=plan["model"],
+                max_attempts=1,
+                max_output_tokens=config.max_output_tokens,
+                cache_directory=directory / "llm_cache",
+                log_path=directory / "llm_calls.jsonl",
+                proposal_target_channels=context.targets,
+                # The served port is job-local, so the client must
+                # use the same endpoint the plan identity records.
+                **(
+                    {"vllm_base_url": _vllm_base_url()}
+                    if provider == "vllm"
+                    else {}
+                ),
+            )
+        )
+
+    return discover_and_seal(
+        plan,
+        index,
+        data,
+        context,
+        directory=directory,
+        generations=config.generations,
+        patience=config.patience,
+        trajectory_seconds=config.trajectory_seconds,
+        llm_model=f"{provider}:{plan['model']}",
+        task_prompt=lambda: _prompt_path(
+            public_root, row["benchmark_id"], row["tier"]
+        ).read_text(),
+        native_client=native_client,
+        protocol=PROTOCOL,
+    )
+
+
+def discover_and_seal(
+    plan: dict,
+    index: int,
+    data: DevelopmentDataset,
+    context: ValidationContext,
+    *,
+    directory: Path,
+    generations: int,
+    patience: int,
+    trajectory_seconds: float,
+    llm_model: str,
+    task_prompt: Callable[[], str],
+    native_client: Callable[[], Any],
+    protocol: str,
+) -> dict:
+    """Discover, check and seal one D3 task, resuming whatever it finished.
+
+    Shared by the Phase B and Phase C campaigns, so both run D3 the same way:
+    the native prompt with the declared clarification and the task identity,
+    native fitting and validation selection, the recursive rollout check and
+    one sealed result. A sealed result is verified and returned without a call,
+    and a saved native selection is evaluated without one; the client and the
+    prompt are asked for only when generations remain to run.
+    """
+    row = plan["rows"][index]
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / "result.json"
     with (directory / "task.lock").open("a") as lock:
@@ -263,7 +343,6 @@ def run(root: Path, index: int, *, client=None) -> dict:
                 if file_hash(directory / name) != digest:
                     raise ValueError("completed native source changed")
             return result
-        config = Campaign.model_validate(plan["config"])
         native_path = directory / "native-selection.json"
         saved = sealed_read(native_path) if native_path.exists() else None
         if saved is not None and saved["plan_sha256"] != plan["artifact_sha256"]:
@@ -272,41 +351,18 @@ def run(root: Path, index: int, *, client=None) -> dict:
             if saved is not None:
                 selected = BaselineDevelopmentResult.model_validate(saved["selection"])
             else:
-                actual_client = (
-                    client
-                    if client is not None
-                    else create_llm_client(
-                        LLMConfig(
-                            provider=LLMProvider(provider),
-                            model=plan["model"],
-                            max_attempts=1,
-                            max_output_tokens=config.max_output_tokens,
-                            cache_directory=directory / "llm_cache",
-                            log_path=directory / "llm_calls.jsonl",
-                            proposal_target_channels=context.targets,
-                            # The served port is job-local, so the client must
-                            # use the same endpoint the plan identity records.
-                            **(
-                                {"vllm_base_url": _vllm_base_url()}
-                                if provider == "vllm"
-                                else {}
-                            ),
-                        )
-                    )
-                )
+                actual_client = native_client()
                 selected = run_d3_native_no_tools_development(
                     BaselineConfig(
                         method="d3_native_no_tools",
                         seed=row["repetition"],
-                        llm_model=f"{provider}:{plan['model']}",
-                        d3_generations=config.generations,
-                        d3_patience=config.patience,
+                        llm_model=llm_model,
+                        d3_generations=generations,
+                        d3_patience=patience,
                     ),
                     data,
                     context,
-                    task_prompt=_prompt_path(
-                        public_root, row["benchmark_id"], row["tier"]
-                    ).read_text(),
+                    task_prompt=task_prompt(),
                     work_directory=directory,
                     llm_client=_NativeClient(
                         actual_client,
@@ -330,7 +386,7 @@ def run(root: Path, index: int, *, client=None) -> dict:
                 payload["parameters"],
                 data.train,
                 data.validation,
-                seconds=config.trajectory_seconds,
+                seconds=trajectory_seconds,
                 saved_one_step_nmse=selected.validation_normalized_mse,
             )
             status = (
@@ -353,7 +409,7 @@ def run(root: Path, index: int, *, client=None) -> dict:
             {
                 **row,
                 **outcome,
-                "protocol": PROTOCOL,
+                "protocol": protocol,
                 "plan_sha256": plan["artifact_sha256"],
                 "source_files": {
                     name: file_hash(directory / name)
@@ -373,8 +429,24 @@ def run(root: Path, index: int, *, client=None) -> dict:
         )
 
 
+#: What a Phase B D3 summary states about every number in it.
+LIMITATION = (
+    "Fresh Phase-B D3-native-no-tools; validation-selected discrete models. "
+    "Native one-step uses measured target histories; Phase-B rollout resets "
+    "only supplied auxiliaries. No dt multiplier or ODE reinterpretation. "
+    "Declared parameter bounds are audited, not imposed retroactively. "
+    "No latent states or scientific/continuous-time certification. "
+    "Validation is not an independent test estimate; failures remain visible."
+)
+
+
 def report(root: Path) -> dict:
     """Keep missing/failed cells visible; report separate native/rollout scores."""
+    return summarize(root, protocol=PROTOCOL, limitation=LIMITATION)
+
+
+def summarize(root: Path, *, protocol: str, limitation: str) -> dict:
+    """Summarize a D3 campaign root under its protocol, stating its limitation."""
     plan = sealed_read(root / "plan.json")
     rows = []
     for task in plan["rows"]:
@@ -415,7 +487,7 @@ def report(root: Path) -> dict:
     for row in rows:
         totals.update(row.get("accounting", {}))
     value = {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
         "plan_sha256": plan["artifact_sha256"],
         "status": "pending" if counts.get("pending") else "complete",
         "model": plan["model"],
@@ -426,14 +498,7 @@ def report(root: Path) -> dict:
         "rows": rows,
         "test_data_opened": False,
         "private_reference_opened": False,
-        "limitation": (
-            "Fresh Phase-B D3-native-no-tools; validation-selected discrete models. "
-            "Native one-step uses measured target histories; Phase-B rollout resets "
-            "only supplied auxiliaries. No dt multiplier or ODE reinterpretation. "
-            "Declared parameter bounds are audited, not imposed retroactively. "
-            "No latent states or scientific/continuous-time certification. "
-            "Validation is not an independent test estimate; failures remain visible."
-        ),
+        "limitation": limitation,
     }
     value["artifact_sha256"] = content_hash(value)
     atomic_json(root / "summary.json", value)

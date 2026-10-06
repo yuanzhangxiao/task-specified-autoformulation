@@ -153,6 +153,17 @@ def test_every_vm_script_parses(script: Path) -> None:
         ("gpu_server.sh", ["start", "20b", "zero"], "usage: gpu_server.sh start"),
         ("run_phase_c_tasks.sh", ["d3", "configs/x.json", "run", "4"], "METHOD"),
         ("run_phase_c_tasks.sh", ["llm_sr", "configs/no.json", "run", "4"], "METHOD"),
+        (
+            "run_phase_c_hosted.sh",
+            ["llm_sr", "configs/phase_c_d3_smoke_v1.json", "run"],
+            "METHOD",
+        ),
+        ("run_phase_c_hosted.sh", ["d3", "configs/no.json", "run"], "METHOD"),
+        (
+            "run_phase_c_hosted.sh",
+            ["d3", "configs/phase_c_d3_smoke_v1.json", "run", "0"],
+            "METHOD",
+        ),
     ],
 )
 def test_bad_arguments_are_refused_before_anything_runs(
