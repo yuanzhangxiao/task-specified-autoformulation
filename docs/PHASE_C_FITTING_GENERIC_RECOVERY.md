@@ -125,6 +125,10 @@ read by the separate evaluator. Post-fit reports retain prediction accuracy,
 coefficient error and shared-initial error as separate outcomes. None controls
 the fit. All starts remain in the denominator; no best-seed selection is reported
 as initialization robustness. The inherited evaluation gates remain unchanged.
+For alien hard these gates are train/validation NMSE at most `0.01`, maximum
+coefficient relative error at most `1%`, and maximum shared-initial absolute error
+at most `0.01`. Thus post-fit `accuracy_passed` is deliberately weaker than the
+new training early-stop certificate. Read both fields and the actual errors.
 
 ## Checkpointing, failure and interpretation
 
@@ -198,6 +202,8 @@ medium and progressive meshes. These are small-control checks, not new alien
 recovery results. All 48 focused tests pass in the portable tree; changed Python
 passes Ruff, shell entry points pass syntax checks, and repository-wide Ruff
 still reports 37 unrelated pre-existing findings under `analysis/claude`.
+The full repository regression run passes: **4,063 passed, eight skipped**
+(Torch unavailable locally), with eight warnings, in 28 minutes 11 seconds.
 
 The generic-only input body hash is
 `ed71b7ee77608f94b66e7c16a91c0a0c29f9c05ec7b25bc594694ba079d42d09`.
