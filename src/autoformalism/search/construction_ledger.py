@@ -16,8 +16,12 @@ from autoformalism.schemas.staged_topology import (
     ScientificVariable,
     VariableReply,
 )
+from autoformalism.search import (
+    construction_handoff,
+    shared_process_contract,
+    signed_processes,
+)
 from autoformalism.search import public_graph_obligations as graph_obligations
-from autoformalism.search import shared_process_contract, signed_processes
 from autoformalism.search.variable_bindings import MechanismBinding
 from autoformalism.staged_topology import (
     _ancestors,
@@ -164,6 +168,44 @@ def normalize_reply(
                     )
             if removed != value.get("remove_bindings", []):
                 value["remove_bindings"] = removed
+        # Out-of-scope readout annotations are not scientific requirements.
+        # Discard only exact public target names, never map them to memory IDs.
+        targets = {v.name for v in brief.public_variables if v.data_role == "target"}
+        applicable = {
+            r.target for r in graph_contract.obligations if r.kind == "target_feedback"
+        }
+        bindings = value.get("feedback_bindings", [])
+        removed = value.get("remove_feedback_bindings", [])
+        if isinstance(bindings, list) and isinstance(removed, list):
+            kept = []
+            for binding in bindings:
+                name = binding.get("target") if isinstance(binding, dict) else None
+                if isinstance(name, str) and name in targets - applicable:
+                    changes.append(
+                        {
+                            "code": "inapplicable_feedback_binding",
+                            "removed_binding": binding,
+                            "replacement_assignment": None,
+                        }
+                    )
+                else:
+                    kept.append(binding)
+            value["feedback_bindings"] = kept
+            for binding in draft.feedback_bindings if draft is not None else ():
+                if (
+                    binding.target in targets - applicable
+                    and binding.target not in removed
+                ):
+                    removed = [*removed, binding.target]
+                    changes.append(
+                        {
+                            "code": "remove_stale_inapplicable_feedback_binding",
+                            "removed_binding": binding.model_dump(mode="json"),
+                            "replacement_assignment": None,
+                        }
+                    )
+            if removed != value.get("remove_feedback_bindings", []):
+                value["remove_feedback_bindings"] = removed
     # A legal public covariate named null would make this spelling ambiguous.
     if any(
         v.name == "null" and v.data_role == "covariate" for v in brief.public_variables
@@ -253,7 +295,10 @@ def apply_patch(brief: PublicScientificBrief, draft: Draft, patch: DraftPatch) -
             )
         if set(remove) - values.keys():
             raise ValueError(
-                f"cannot remove unknown {field}: {sorted(set(remove) - values.keys())}"
+                f"cannot remove unknown {field}: "
+                f"{sorted(set(remove) - values.keys())}. "
+                f"{removal} uses {key} keys; available keys={sorted(values)}. "
+                "Empty replacement lists preserve existing entries."
             )
         for name in remove:
             del values[name]
@@ -544,6 +589,7 @@ def assess(
                     "to satisfy the schema."
                 ),
             )
+    errors.extend(construction_handoff.process_reference_issues(draft))
     equations, topology, aliases = (), None, {}
     try:
         equations = assembled_equations(brief, draft)
@@ -566,6 +612,11 @@ def assess(
                 "unknown_feedback_target",
                 target=binding.target,
                 allowed_targets=sorted(feedback_targets),
+                repair={"remove_feedback_bindings": [binding.target]},
+                explanation=(
+                    "This field applies only to listed target-feedback "
+                    "checks, not memory assignments."
+                ),
             )
         if definitions.get(binding.target) == "differential" and binding.states != (
             binding.target,
@@ -573,9 +624,10 @@ def assess(
             fail(
                 "differential_target_is_own_coordinate",
                 target=binding.target,
-                repair=(
-                    "Remove this feedback binding; the target state itself "
-                    "must have feedback."
+                repair={"remove_feedback_bindings": [binding.target]},
+                explanation=(
+                    "Remove this annotation; the differential target "
+                    "itself must have feedback."
                 ),
             )
     reviewed_checks = (

@@ -33,7 +33,7 @@ from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-5"
+PROTOCOL = "phase-c-construction-comparison-6"
 REPO = baseline.REPO
 Study = Literal["comparison", "live_confirmation"]
 STUDIES = ("comparison", "live_confirmation")
@@ -42,7 +42,7 @@ STUDIES = ("comparison", "live_confirmation")
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-5"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-6"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -509,6 +509,14 @@ def report(root: Path, plan: dict) -> dict:
             "accepted_reply_normalizations": sum(
                 len(e["normalizations"]) for e in events if e["accepted"]
             ),
+            "normalizations_by_code": dict(
+                Counter(
+                    n["code"]
+                    for e in events
+                    if e["accepted"]
+                    for n in e["normalizations"]
+                )
+            ),
             "repair_calls": sum(e["stage"] == "repair" for e in events),
             "scientific_adequacy": "requires independent equation inspection",
         }
@@ -573,6 +581,9 @@ def report(root: Path, plan: dict) -> dict:
         "physical_requests": sum(r["cost"]["physical_requests"] for r in rows),
         "unmeasured_requests": sum(
             r["cost"]["requests_with_unknown_usage"] for r in rows
+        ),
+        "normalizations_by_code": dict(
+            sum((Counter(r["normalizations_by_code"]) for r in rows), Counter())
         ),
         "rows": rows,
         "test_data_opened": False,

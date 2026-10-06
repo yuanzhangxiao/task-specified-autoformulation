@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+Construction comparison version 6 makes binding formats and removal keys explicit,
+logs irrelevant readout-annotation cleanup without assigning scientific mediators,
+and records unambiguous signed references to named laws as shared consumer uses.
+Conflicts retain proposer ownership. The saved 133-reply audit preserves all 119
+accepted transactions. The fresh 24-task confirmation remains topology-only;
+see `PHASE_C_CONSTRUCTION_COMPARISON.md` for scope and scientific limitations.
+
 Construction comparison version 5 adds target-local feedback witnesses, explicit
 proposer storage/readout bindings, logged removal of automatic-check IDs from the
 memory-binding namespace, complete per-LHS process previews, and bounded

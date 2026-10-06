@@ -1,5 +1,66 @@
 # Phase C construction schedules
 
+Version 6 clarifies the binding and named-process handoff. The protocol is
+`phase-c-construction-comparison-6`; fresh defaults are
+`phase-c-construction-comparison-v6` and `phase-c-construction-live-v5`.
+The confirmation stays at eight cases x three schedules, Full/seed 0 (24 tasks),
+with the same model, generation settings and three-request overall repair budget.
+It stops before interaction functions, initialization or fitting. This is a
+bookkeeping confirmation, not a strategy ranking or a scientific success rate.
+
+## Binding and consumer handoff
+
+Every request now includes `binding_context`: concrete field examples, exact
+public requirement IDs, type-eligible state choices (without a preselection),
+applicable feedback targets, and exact removal edits for existing bindings.
+`mechanism_bindings` assigns differential mediators to public requirements;
+`feedback_bindings` assigns physical coordinates to an algebraic readout only
+when a reviewed target-feedback predicate requires that assignment. These fields
+are not interchangeable. Required mediator assignments remain proposer decisions.
+An annotation for an exact public target outside the applicable feedback set is
+removed and logged, including a stale saved entry. It creates no mechanism
+assignment and does not waive any actual pathway or target-feedback requirement.
+Unknown target names remain errors. Empty edit lists preserve prior entries;
+removal feedback explicitly names the target/requirement key to delete.
+
+A singleton equation source `P` with an explicit positive/negative outer sign
+means use of the existing named law P. The runtime records an unambiguous new
+consumer and removes the ordinary reference so assembly includes it exactly once.
+A new conversion remains `null` (unknown); a matching existing use retains its
+known conversion. Process drivers, scientific kind and existing consumer signs
+are unchanged. This applies only to equations explicitly supplied in the reply
+and declared generated consumers. Multiple references, composite sources,
+unrestricted signs, conflicts with an existing sign, or a use simultaneously
+withdrawn by a process replacement require an explicit proposer decision. The
+feedback shows the conflicting term and current consumer declaration, and offers
+coordinated edits rather than simply ordering the physical contribution removed.
+The underlying process validator still checks distinct consumers and transfer
+signs. No conservation claim is inferred from assembly syntax.
+
+All edits remain atomic. Normalizations, original replies and before/after drafts
+are retained. Subsequent accepted-edit feedback includes equation/process/binding
+changes; the full rebuilt model remains in every request and the final report.
+Reports count normalizations by code, separately from structural completion.
+No benchmark-specific sign, threshold or water-balance rule is added.
+
+## Saved-response regression check
+
+`python scripts/audit_construction_handoff.py --source OLD_ROOT --output AUDIT.json`
+is a read-only audit of version-5/6 recorded responses. It verifies sealed events
+and calls, then applies each reply to its actual historical predecessor. It never
+chains hypothetical corrected drafts, regenerates responses, promotes a model or
+opens trajectory data. The output must be outside the historical campaign.
+
+On the inspected live-v4 package, all 133 attempts were audited: all 119 historically
+accepted transactions remain accepted. There are six explicit new-consumer
+normalizations, eleven matching identity repetitions, nine inapplicable incoming
+readout bindings and eleven stale binding removals. Counts may overlap and refer
+to saved replies, not recovered models. In particular, missing alien-device memory
+assignments still require a fresh proposer answer. This audit cannot establish that
+the revised prompts will improve live scientific construction.
+
+Historical implementation changes follow for provenance.
+
 Version 5 narrows local-feedback witnesses and clarifies ambiguous contributions.
 The protocol is `phase-c-construction-comparison-5`; fresh defaults are
 `phase-c-construction-comparison-v5` and `phase-c-construction-live-v4`.
@@ -363,7 +424,7 @@ bash scripts/hpc/start_phase_c_construction_comparison.sh run
 Defaults:
 
 - Source: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-topology-v1`.
-- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v4`.
+- Output: `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-comparison-v6`.
 - One existing 1×H100 server, followed by a CPU report job; no fitting jobs.
 
 Override these with `AF_COMPARISON_SOURCE` and `AF_COMPARISON_ROOT` if necessary.

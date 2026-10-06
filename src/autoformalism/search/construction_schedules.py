@@ -14,6 +14,7 @@ from autoformalism.rebuttal.prefit_construction_campaign import _cost
 from autoformalism.rebuttal.prefit_replay import sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.schemas.staged_topology import PublicScientificBrief
+from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.staged_topology import content_hash
@@ -56,10 +57,16 @@ Bind each displayed dynamic-memory requirement to your chosen differential
 mediator(s), distinct from that requirement's driver and target. Optional memory
 bindings may also refer to other EXISTING public requirements: not requiring
 memory does not forbid it. Such a binding may include a target state itself.
+Use mechanism_bindings=[
+  {"requirement_id":"<listed ID>","memory_states":["<chosen state>"]}].
+The structured binding_context gives exact IDs, formats and type-eligible choices
+on every request. Choose the scientific assignment; the runtime never chooses it.
 Use only allowed_memory_bindings IDs, never public graph check IDs. The runtime
 logs and discards memory entries that name automatic graph checks; it does not
 choose a replacement requirement or state. feedback_bindings is a separate
-field for an algebraic public target: {"target":"y","states":["volume"]}.
+field ONLY for targets listed in binding_context.feedback_bindings.applicable_targets:
+{"target":"y","states":["volume"]}. If that list is empty, leave this field empty.
+It is NOT a substitute for mechanism_bindings, even when the same state is involved.
 It declares the actual storage/energy realization of that readout, not an arbitrary
 upstream cause. Differential targets are already their own coordinate and need
 no such binding. Bindings express
@@ -92,7 +99,14 @@ Group jointly interacting variables in each term's sources. Select the outer
 weight sign: positive, negative or unrestricted. A fixed outer sign does not
 assert global monotonicity/nonnegativity of the later function. Self-dependence
 can represent decay, relaxation or feedback when scientifically justified.
-Return only ordinary contributions in equations. The displayed process uses are
+Prefer ordinary contributions in equations. A singleton sources=["P"] with an
+explicit positive/negative outer sign declares use of that SAME named law. Runtime
+records a new consumer with conversion=null (unknown), or includes an existing
+matching use exactly once, preserving its conversion. Do not delete a physical
+effect to fix a representation error. For changed signs/conversions, mixed sources,
+or conflicting declarations, explicitly revise the process and affected equations.
+Runtime never infers a conversion, changes kind, or chooses a sign.
+The displayed process uses are
 ALREADY INCLUDED; do not repeat them or expand their drivers into another term
 for the same effect. Return terms=[] when process uses provide the whole equation.
 equation_views
@@ -110,7 +124,10 @@ EDITS AND PENDING WORK
 Each variables/processes/bindings entry replaces that named declaration; omitted
 entries survive. Each equations entry REPLACES the complete ordinary RHS of its
 named LHS, not an addition to its old terms. Remove entries only with explicit
-remove_* lists. Changes to a process propagate automatically to all its uses;
+remove_* lists. Empty lists do not clear prior declarations. Binding removal uses
+requirement_id for remove_bindings and target for remove_feedback_bindings;
+binding_context.existing_binding_removals shows exact edits. Changes to a process
+propagate automatically to all its uses;
 the next request displays the rebuilt draft. You need not repeat unchanged items.
 Never put the same entry in both a replacement list and its remove_* list. To
 revise x, supply its replacement and omit x from remove_*; to delete x, list its
@@ -344,6 +361,7 @@ def run(
                 for r in brief.requirements
                 if r.requires_dynamic_memory
             ],
+            "binding_context": handoff.binding_context(brief, draft, graph_contract),
             "response_template": ledger.DraftPatch(stage_complete=False).model_dump(
                 mode="json"
             ),
@@ -368,7 +386,12 @@ def run(
             )
             patch = ledger.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
-            draft = ledger.apply_patch(brief, draft, patch)
+            candidate = ledger.apply_patch(brief, draft, patch)
+            candidate, consumer_log = handoff.normalize_consumers(
+                candidate, patch, draft
+            )
+            normalizations.extend(consumer_log)
+            draft = candidate
             accepted, complete = True, patch.stage_complete
         except (ValueError, TypeError, KeyError) as exc:
             error = str(exc)[:6000]
@@ -397,6 +420,9 @@ def run(
                 "rejected_reply": None if accepted else raw,
                 "normalizations": normalizations,
                 "error": error,
+                "edit_effects": handoff.edit_effects(before, draft)
+                if accepted
+                else None,
                 "delivery": delivery_feedback(record),
             },
         )
