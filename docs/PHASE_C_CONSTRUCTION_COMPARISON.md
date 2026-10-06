@@ -1,15 +1,67 @@
 # Phase C construction schedules
 
-Version 4 adds the explicit reviewed public dependency contract described in
-`PHASE_C_PUBLIC_GRAPH_AUDIT.md`. It is shown before generation, checked before
-functions, and retained throughout bounded repair. New output defaults are
-`phase-c-construction-comparison-v4` and `phase-c-construction-live-v3`.
-Historical version-3 behavior below remains documented for provenance.
+Version 5 narrows local-feedback witnesses and clarifies ambiguous contributions.
+The protocol is `phase-c-construction-comparison-5`; fresh defaults are
+`phase-c-construction-comparison-v5` and `phase-c-construction-live-v4`.
+The next live confirmation retains eight cases x three policies, Full/seed 0,
+24 fresh constructions, and the same three-request overall-repair allowance.
+It stops before functions, fitting or a scientific critic. Old campaigns require
+their pinned source; no finalized benchmark prompt/data is changed.
 
-`phase-c-construction-comparison-4` compares three ways to construct variables
-and equation topology. It stops before interaction functions, initialization,
-fitting, numerical mechanism assessments and the scientific critic. Historical
-campaigns and finalized benchmark prompts/data are unchanged.
+## Narrow topology feedback milestone
+
+The public basin task explicitly requires downstream discharge/local water balance.
+The version-4 predicate was too weak: an upstream feedback cycle with a path to
+h_down could pass despite missing downstream feedback. Version 5 uses
+`target_feedback`: a differential target must itself lie on a nonempty cycle.
+For an algebraic target, the proposer declares `feedback_bindings` with its actual
+storage/energy coordinates. Each coordinate must be differential, have feedback,
+and reach the target through algebraic readouts only. This permits alternative
+coordinates and coupled feedback, without guessing scientific roles from names.
+The CSTR thermal balance uses the same generic predicate. These are necessary
+topological conditions, not evidence of restoring signs or a correct release law.
+
+Memory bindings and feedback coordinates have separate namespaces. Every request
+lists all allowed public memory-requirement IDs, including optional ones. If a
+memory entry names an exact automatic graph-check ID that is not also a genuine
+public requirement, the runtime drops it and logs the original entry. A stale such
+entry is explicitly removed during a later transaction. It never maps that entry
+to another requirement or chooses memory states. Unknown unrelated IDs still
+receive an error with an exact removal action. Raw responses remain immutable.
+
+Per-LHS views display inserted process uses before ordinary RHS declaration.
+`ordinary_rhs_declared=false` means additional terms have not been specified; it
+no longer visually implies an empty equation. The proposer can acknowledge a
+complete process-supplied RHS with `terms=[]`.
+
+An ordinary term with the same drivers as a named process used in that equation
+raises a **clarification**, not a scientific duplication verdict. During the same
+bounded overall repair the proposer either removes the repetition by explicit
+edits, removes/restructures the process and its consumers, or confirms distinct
+scientific effects. Confirmation uses a runtime-issued hash of the exact term,
+process and variable declarations plus a scientific distinction. Changed declarations
+invalidate it. The runtime does not interpret the explanation. Unanswered questions
+remain unresolved and prevent a topology-complete label; they are reported separately
+from structural errors. Explicit references to the process itself still assemble
+once and do not trigger the expanded-driver question. This detector does not find
+all possible physical duplications or general symbolic equivalences.
+
+Same-sign transfer feedback offers three choices: correct the signs for a real
+internal transfer, reclassify as influence while preserving intended signs, or
+replace the named process with ordinary contributions. Runtime never flips signs
+or changes scientific type automatically. Accepted edits are labeled separately
+from rejected replies in subsequent repair context.
+
+The offline audit of the 24 saved version-4 drafts preserves all historical
+records: 23 were historically eligible; the new checks leave 15 ready as written.
+One coupled-basin draft lacks target-local feedback; two algebraic basin readouts
+need explicit coordinate bindings that the old schema could not provide. Eight
+ordinary/process overlaps in five other drafts require proposer clarification.
+The remaining historical failure is the invalid binding namespace. These are
+requirements for fresh responses, not eight newly disproved scientific models or
+a ranking of construction schedules. No LLM calls, fits or test data were used.
+
+Historical implementation changes follow for provenance.
 
 ## Feedback corrections after the live confirmation
 
@@ -155,7 +207,7 @@ bash scripts/hpc/start_phase_c_construction_live.sh inspect
 ```
 
 The default output is
-`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-live-v3`.
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-live-v4`.
 The wrapper fixes the study to `live_confirmation` and uses wave `live-1`;
 repeating the command returns existing submission receipts. If the allocation
 finishes with pending tasks, use the same code/root with an explicit new wave:

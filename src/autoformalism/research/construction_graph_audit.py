@@ -23,7 +23,7 @@ def audit(source: Path, output: Path) -> dict:
     plan = sealed_read(source / "plan.json")
     if (
         plan.get("protocol")
-        not in {f"phase-c-construction-comparison-{n}" for n in (1, 2, 3, 4)}
+        not in {f"phase-c-construction-comparison-{n}" for n in (1, 2, 3, 4, 5)}
         or plan.get("test_data_opened") is not False
     ):
         raise ValueError("requires a saved public construction-comparison plan")
@@ -65,6 +65,7 @@ def audit(source: Path, output: Path) -> dict:
                 contracts.target_definitions(cell),
                 draft,
                 graph_contract=public_contracts[task["benchmark_id"]],
+                clarify_overlaps=True,
             )
             stages[stage] = {
                 "status": "audited",
@@ -75,6 +76,7 @@ def audit(source: Path, output: Path) -> dict:
                 "graph_check_status": new["graph_check_status"],
                 "checks": new["reviewed_public_graph_checks"],
                 "base_errors": base["errors"],
+                "clarification_requests": new["clarification_requests"],
                 "new_errors": [
                     e for e in new["errors"] if e["code"] == "reviewed_public_graph"
                 ],
@@ -86,6 +88,11 @@ def audit(source: Path, output: Path) -> dict:
         "source_plan_sha256": plan["artifact_sha256"],
         "audit_runtime": baseline.source_identity(),
         "inputs": inputs,
+        "contract_matches_source": all(
+            plan["cells"][name].get("public_graph_contract")
+            == c.model_dump(mode="json")
+            for name, c in public_contracts.items()
+        ),
         "public_contracts": {
             k: v.model_dump(mode="json") for k, v in public_contracts.items()
         },
@@ -106,9 +113,9 @@ def audit(source: Path, output: Path) -> dict:
         ),
         "rows": rows,
         "scope": (
-            "Counterfactual predicates on actual saved drafts. The added contract was "
-            "not displayed historically; this is not new live evidence or a "
-            "science score."
+            "Current predicates on actual saved drafts; missing new declarations are "
+            "not evidence of scientific incapability. Inspect contract_matches_source "
+            "before treating a rule as shown historically. No new replies or models."
         ),
         "llm_calls": 0,
         "optimizer_calls": 0,

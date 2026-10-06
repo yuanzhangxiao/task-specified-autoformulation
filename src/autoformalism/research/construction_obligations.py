@@ -28,7 +28,7 @@ def reviewed_contract(case: str, brief: PublicScientificBrief) -> PublicGraphCon
         rules.append(
             {
                 "id": "temperature_balance_feedback",
-                "kind": "dynamic_feedback",
+                "kind": "target_feedback",
                 "target": "T",
                 "public_quote": (
                     "a reactor-temperature balance that distinguishes feed "
@@ -37,9 +37,10 @@ def reviewed_contract(case: str, brief: PublicScientificBrief) -> PublicGraphCon
                 ),
                 "interpretation": (
                     "The temperature balance needs current thermal-state feedback. "
-                    "Declare a feedback cycle through a differential state "
-                    "affecting T: "
-                    "T itself, an energy coordinate, or coupled states. A feed-driven "
+                    "Declare a feedback cycle through T when T is a state. "
+                    "For an algebraic T readout, explicitly bind its thermal/energy "
+                    "coordinates in feedback_bindings; each needs feedback and an "
+                    "algebraic path to T. A feed-driven "
                     "accumulator with no such cycle cannot express this balance. "
                     "This is a reviewed operationalization, not an exact kinetic law."
                 ),
@@ -66,7 +67,7 @@ def reviewed_contract(case: str, brief: PublicScientificBrief) -> PublicGraphCon
         rules.append(
             {
                 "id": "storage_release_feedback",
-                "kind": "dynamic_feedback",
+                "kind": "target_feedback",
                 "target": "h_down",
                 "public_quote": (
                     (
@@ -81,10 +82,12 @@ def reviewed_contract(case: str, brief: PublicScientificBrief) -> PublicGraphCon
                     )
                 ),
                 "interpretation": (
-                    "Storage-dependent release needs dynamic feedback affecting "
-                    "the depth target. A cycle through a depth, volume, or coupled "
-                    "dynamic coordinate is allowed. Passing does not identify "
-                    "which basin a latent state represents."
+                    "Downstream storage-dependent discharge requires feedback through "
+                    "h_down when it is a state. For an algebraic h_down readout, "
+                    "declare its downstream storage coordinates in feedback_bindings; "
+                    "each needs feedback and an algebraic path to h_down. An upstream "
+                    "loop alone is insufficient. Coordinate meaning is your scientific "
+                    "assignment, not inferred from names by the runtime."
                 ),
             }
         )
@@ -160,6 +163,7 @@ def reviewed_contract(case: str, brief: PublicScientificBrief) -> PublicGraphCon
     else:
         raise ValueError(f"no reviewed public graph profile for {case}")
     contract = PublicGraphContract(
+        policy="reviewed-public-graph-2",
         source_brief_sha256=content_hash(brief.model_dump(mode="json")),
         obligations=rules,
         deferred_scientific_checks=deferred,

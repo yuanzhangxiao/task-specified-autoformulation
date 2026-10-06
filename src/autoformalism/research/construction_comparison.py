@@ -33,7 +33,7 @@ from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-4"
+PROTOCOL = "phase-c-construction-comparison-5"
 REPO = baseline.REPO
 Study = Literal["comparison", "live_confirmation"]
 STUDIES = ("comparison", "live_confirmation")
@@ -42,7 +42,7 @@ STUDIES = ("comparison", "live_confirmation")
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-4"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-5"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -275,7 +275,8 @@ def checked_records(directory: Path, identity: str) -> list[dict]:
         if (
             path.name != f"{index:03d}.json"
             or event["index"] != index
-            or event["before"] != drafts[-1]
+            or ledger.Draft.model_validate(event["before"])
+            != ledger.Draft.model_validate(drafts[-1])
             or displayed["current_draft"]["declarations"] != event["before"]
             or event["request_hash"] in used
         ):
@@ -477,6 +478,17 @@ def report(root: Path, plan: dict) -> dict:
             else None,
             "initial_errors": initial["assessment"]["errors"] if initial else None,
             "final_errors": value["assessment"]["errors"] if value else None,
+            "initial_clarifications": initial["assessment"].get(
+                "clarification_requests"
+            )
+            if initial
+            else None,
+            "final_clarifications": value["assessment"].get("clarification_requests")
+            if value
+            else None,
+            "contribution_overlaps": value["assessment"].get("contribution_overlaps")
+            if value
+            else None,
             "graph_check_status": value["assessment"]["graph_check_status"]
             if value
             else None,
@@ -517,6 +529,7 @@ def report(root: Path, plan: dict) -> dict:
                     f"<h3>{label}</h3><pre>{html.escape(_skeleton(saved['assessment']))}</pre>"
                     + block(saved["draft"])
                     + block(saved["assessment"]["errors"])
+                    + block(saved["assessment"].get("clarification_requests", []))
                 )
     groups = {}
     for policy in schedules.POLICIES:

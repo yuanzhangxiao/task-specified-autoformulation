@@ -18,7 +18,7 @@ class GraphObligation(StrictSchema):
     """A reviewed public interpretation, not a proposer-created scientific rule."""
 
     id: Identifier
-    kind: Literal["dynamic_feedback", "forbidden_path"]
+    kind: Literal["dynamic_feedback", "target_feedback", "forbidden_path"]
     target: Identifier
     source: Identifier | None = None
     public_quote: NonEmptyText
@@ -37,7 +37,9 @@ class GraphObligation(StrictSchema):
 class PublicGraphContract(StrictSchema):
     """Versioned, public-only contract frozen separately from historical briefs."""
 
-    policy: Literal["reviewed-public-graph-1"] = "reviewed-public-graph-1"
+    policy: Literal["reviewed-public-graph-1", "reviewed-public-graph-2"] = (
+        "reviewed-public-graph-1"
+    )
     source_brief_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     obligations: tuple[GraphObligation, ...] = ()
     deferred_scientific_checks: tuple[NonEmptyText, ...]
@@ -84,6 +86,8 @@ def _path(graph: dict[str, set[str]], start: str, end: str) -> list[str] | None:
 def check(
     contract: PublicGraphContract,
     equations: tuple[EquationDefinition, ...] | None,
+    *,
+    feedback_coordinates: dict[str, tuple[str, ...]] | None = None,
 ) -> list[dict]:
     """Assess a compiled topology; None means unavailable, never a failed path."""
     graph: dict[str, set[str]] = {}
@@ -96,10 +100,51 @@ def check(
     for rule in contract.obligations:
         witness = None
         passed = None
+        reason = None
         if equations is not None:
             if rule.kind == "forbidden_path":
                 witness = _path(graph, rule.source, rule.target)
                 passed = witness is None
+            elif rule.kind == "target_feedback":
+                # A differential target is already its own dynamic coordinate.
+                # For an algebraic readout the proposer owns that assignment;
+                # an arbitrary upstream ancestor is not a storage realization.
+                coordinates = (
+                    (rule.target,)
+                    if rule.target in states
+                    else (feedback_coordinates or {}).get(rule.target, ())
+                )
+                witnesses = []
+                readout_graph = {
+                    source: {end for end in ends if end not in states}
+                    for source, ends in graph.items()
+                }
+                for state in coordinates:
+                    cycle = _path(graph, state, state) if state in states else None
+                    readout = (
+                        [state]
+                        if state == rule.target
+                        else _path(readout_graph, state, rule.target)
+                    )
+                    if cycle and readout:
+                        witnesses.append(
+                            {"state": state, "cycle": cycle, "target_path": readout}
+                        )
+                passed = bool(coordinates) and len(witnesses) == len(coordinates)
+                witness = witnesses if passed else None
+                reason = (
+                    None
+                    if passed
+                    else (
+                        "For a differential target, include a feedback cycle through "
+                        "that target. For an algebraic target, declare "
+                        "feedback_bindings "
+                        "with its actual dynamic storage/energy coordinates: each must "
+                        "be differential, have feedback, and reach the target through "
+                        "algebraic readouts only. An upstream cycle alone "
+                        "is insufficient."
+                    )
+                )
             else:
                 for state in states:
                     cycle = _path(graph, state, state)
@@ -126,6 +171,7 @@ def check(
                 else "fail",
                 "passed": passed,
                 "witness": witness,
+                "reason": reason,
                 "scope": (
                     "Declared dependencies only; physical identity, signs, "
                     "stability and laws are unverified."

@@ -728,7 +728,7 @@ def test_compact_view_storage_failure_preserves_saved_proposal(tmp_path, monkeyp
     assert len(calls) == n
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_old_plan_is_not_resumed_with_changed_acceptance_rules(tmp_path, version):
     source_fixture(tmp_path)
     root = tmp_path / "comparison"

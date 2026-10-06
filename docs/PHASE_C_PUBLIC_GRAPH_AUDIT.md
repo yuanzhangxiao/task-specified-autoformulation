@@ -1,6 +1,13 @@
 # Public dependency audit before functions
 
-Construction comparison version 4 adds a reviewed public graph contract, shown
+The historical version-4 implementation below is retained for provenance.
+Version 5 replaces its permissive ancestor-cycle predicate with target-local
+feedback and explicit proposer readout coordinates; see
+`PHASE_C_CONSTRUCTION_COMPARISON.md`. The audit now reports whether its exact
+reviewed contract matches the source plan, and keeps overlap clarifications
+separate from graph errors. Use the original commit to reproduce old audit values.
+
+Construction comparison version 4 added a reviewed public graph contract, shown
 from the first request and repeated during repair. This is a prospective
 operationalization of the public task, not a claim that these predicates were
 already stated explicitly in historical prompts. Finalized benchmark prompts,

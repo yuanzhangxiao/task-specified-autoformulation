@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+Construction comparison version 5 adds target-local feedback witnesses, explicit
+proposer storage/readout bindings, logged removal of automatic-check IDs from the
+memory-binding namespace, complete per-LHS process previews, and bounded
+clarification of potential repeated contributions. Transfer repair presents sign,
+type and representation alternatives without runtime scientific reassignment.
+No functions or fitting are launched. The 24-task fresh confirmation and offline
+audit limits are documented in `PHASE_C_CONSTRUCTION_COMPARISON.md`.
+
 Construction comparison version 4 freezes explicit reviewed public graph
 obligations and repeats them in initial/repair prompts. General feedback-cycle
 and forbidden-path predicates check CSTR/basin structural capabilities before

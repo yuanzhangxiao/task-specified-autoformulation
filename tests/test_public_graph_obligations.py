@@ -141,7 +141,7 @@ def test_reviewed_profiles_are_explicit_and_do_not_add_universal_decay():
     )
     c = profiles.reviewed_contract(profiles.CSTR, cstr)
     assert len(c.obligations) == 1
-    assert c.obligations[0].kind == "dynamic_feedback"
+    assert c.obligations[0].kind == "target_feedback"
     for name in (*profiles.DALLA, profiles.ALIEN):
         assert profiles.reviewed_contract(name, brief()).obligations == ()
     with pytest.raises(ValueError, match="quote differs"):

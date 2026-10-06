@@ -23,6 +23,7 @@ from autoformalism.staged_topology import (
     _ancestors,
     audit_explicit_equation_polarity,
     compile_equation_polarity_policy,
+    content_hash,
     lower_topology,
     merge_variable_reply,
     public_structure_checks,
@@ -54,6 +55,36 @@ class ProcessDeclaration(StrictSchema):
     scientific_meaning: str = Field(min_length=1, max_length=650)
 
 
+class FeedbackBinding(StrictSchema):
+    """Proposer-declared dynamic realization of an algebraic public target."""
+
+    target: Identifier
+    states: tuple[Identifier, ...] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def unique_states(self):
+        if len(set(self.states)) != len(self.states):
+            raise ValueError("feedback coordinates must be distinct")
+        return self
+
+
+class OverlapConfirmation(StrictSchema):
+    """A scientific distinction, bound to the exact contributions being retained."""
+
+    overlap_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scientific_distinction: str = Field(min_length=1, max_length=1000)
+
+
+_KEYS = {
+    "variables": "name",
+    "equations": "name",
+    "processes": "name",
+    "mechanism_bindings": "requirement_id",
+    "feedback_bindings": "target",
+    "overlap_confirmations": "overlap_id",
+}
+
+
 class Draft(StrictSchema):
     """Scientific declarations, without inferred roles or executable functions."""
 
@@ -61,11 +92,12 @@ class Draft(StrictSchema):
     equations: tuple[EquationUpdate, ...] = ()
     processes: tuple[ProcessDeclaration, ...] = ()
     mechanism_bindings: tuple[MechanismBinding, ...] = ()
+    feedback_bindings: tuple[FeedbackBinding, ...] = ()
+    overlap_confirmations: tuple[OverlapConfirmation, ...] = ()
 
     @model_validator(mode="after")
     def unique_keys(self):
-        for field in ("variables", "equations", "processes", "mechanism_bindings"):
-            key = "requirement_id" if field == "mechanism_bindings" else "name"
+        for field, key in _KEYS.items():
             names = [getattr(v, key) for v in getattr(self, field)]
             if len(names) != len(set(names)):
                 raise ValueError(f"duplicate keys in {field}")
@@ -79,15 +111,59 @@ class DraftPatch(Draft):
     remove_equations: tuple[Identifier, ...] = ()
     remove_processes: tuple[Identifier, ...] = ()
     remove_bindings: tuple[Identifier, ...] = ()
+    remove_feedback_bindings: tuple[Identifier, ...] = ()
+    remove_overlap_confirmations: tuple[str, ...] = ()
     stage_complete: bool
 
 
 def normalize_reply(
-    brief: PublicScientificBrief, raw: object
+    brief: PublicScientificBrief,
+    raw: object,
+    *,
+    graph_contract: graph_obligations.PublicGraphContract | None = None,
+    draft: Draft | None = None,
 ) -> tuple[object, list[dict]]:
-    """Canonicalize only quoted JSON null conversions; retain auditable raw replies."""
+    """Normalize delivery/namespace mistakes, without assigning scientific roles."""
     value = deepcopy(raw)
     changes = []
+    if graph_contract is not None and isinstance(value, dict):
+        graph_ids = {r.id for r in graph_contract.obligations}
+        real_ids = {r.id for r in brief.requirements}
+        bindings = value.get("mechanism_bindings")
+        if isinstance(bindings, list):
+            kept = []
+            for binding in bindings:
+                name = (
+                    binding.get("requirement_id") if isinstance(binding, dict) else None
+                )
+                if isinstance(name, str) and name in graph_ids - real_ids:
+                    changes.append(
+                        {
+                            "code": "automatic_check_is_not_memory_requirement",
+                            "removed_binding": binding,
+                            "replacement_assignment": None,
+                        }
+                    )
+                else:
+                    kept.append(binding)
+            value["mechanism_bindings"] = kept
+        # A repair may add the right binding while omitting the stale wrong one.
+        # Remove only exact automatic-check IDs; do not map them to requirements.
+        removed = value.get("remove_bindings", [])
+        if isinstance(removed, list) and draft is not None:
+            for binding in draft.mechanism_bindings:
+                name = binding.requirement_id
+                if name in graph_ids - real_ids and name not in removed:
+                    removed = [*removed, name]
+                    changes.append(
+                        {
+                            "code": "remove_stale_automatic_check_binding",
+                            "removed_binding": binding.model_dump(mode="json"),
+                            "replacement_assignment": None,
+                        }
+                    )
+            if removed != value.get("remove_bindings", []):
+                value["remove_bindings"] = removed
     # A legal public covariate named null would make this spelling ambiguous.
     if any(
         v.name == "null" and v.data_role == "covariate" for v in brief.public_variables
@@ -157,8 +233,7 @@ def inventory(
 def apply_patch(brief: PublicScientificBrief, draft: Draft, patch: DraftPatch) -> Draft:
     """Apply an unambiguous batch atomically; keep scientific incompleteness pending."""
     updated = {}
-    for field in ("variables", "equations", "processes", "mechanism_bindings"):
-        key = "requirement_id" if field == "mechanism_bindings" else "name"
+    for field, key in _KEYS.items():
         removal = (
             "remove_bindings" if field == "mechanism_bindings" else f"remove_{field}"
         )
@@ -240,6 +315,7 @@ def pending(brief: PublicScientificBrief, draft: Draft) -> dict:
     references.update(s for p in draft.processes for s in p.depends_on)
     references.update(u.target for p in draft.processes for u in p.uses)
     references.update(s for b in draft.mechanism_bindings for s in b.memory_states)
+    references.update(s for b in draft.feedback_bindings for s in b.states)
     unknown = references - public - generated
     undeclared = (defined | set(targets)) - public - generated
     undeclared |= set(targets) - generated
@@ -301,6 +377,92 @@ def assembled_equations(
     return tuple(equations)
 
 
+def contribution_overlaps(draft: Draft) -> list[dict]:
+    """Identify ambiguous repeated source sets, never infer physical duplication."""
+    confirmations = {c.overlap_id: c for c in draft.overlap_confirmations}
+    rows = []
+    for equation in draft.equations:
+        for index, term in enumerate(equation.terms):
+            for process in draft.processes:
+                for use in process.uses:
+                    if use.target != equation.name or set(term.sources) != set(
+                        process.depends_on
+                    ):
+                        continue
+                    evidence = {
+                        "target": equation.name,
+                        "ordinary_term_index": index,
+                        "ordinary_term": term.model_dump(mode="json"),
+                        "process": process.model_dump(mode="json"),
+                        "variable_declarations": [
+                            v.model_dump(mode="json") for v in draft.variables
+                        ],
+                    }
+                    identity = content_hash(evidence)
+                    confirmation = confirmations.get(identity)
+                    rows.append(
+                        {
+                            "overlap_id": identity,
+                            **evidence,
+                            "status": "proposer_confirmed_distinct"
+                            if confirmation
+                            else "clarification_required",
+                            "scientific_distinction": (
+                                confirmation.scientific_distinction
+                                if confirmation
+                                else None
+                            ),
+                            "question": (
+                                "Do the ordinary term and the inserted process use "
+                                "represent the same effect? If yes, replace the "
+                                "ordinary terms to omit repetition, or remove the "
+                                "process and coordinate its consumers. If different, "
+                                "retain both via overlap_confirmations with this "
+                                "overlap_id and a scientific_distinction. "
+                                "Matching drivers alone do not prove duplication."
+                            ),
+                        }
+                    )
+    return rows
+
+
+def equation_views(draft: Draft) -> list[dict]:
+    """Show automatic contributions even before an ordinary-RHS declaration."""
+    ordinary = {e.name: e for e in draft.equations}
+    bindings = [signed_processes.binding_for(p) for p in draft.processes]
+    views = []
+    for variable in draft.variables:
+        if variable.name in {p.name for p in draft.processes}:
+            continue
+        equation = ordinary.get(variable.name)
+        terms = equation.terms if equation else ()
+        try:
+            assembled = [
+                t.model_dump(mode="json")
+                for t in signed_processes.assemble(bindings, variable.name, terms)
+            ]
+            error = None
+        except ValueError as exc:
+            assembled, error = None, str(exc)
+        views.append(
+            {
+                **variable.model_dump(mode="json"),
+                "ordinary_rhs_declared": equation is not None,
+                "ordinary_terms": [t.model_dump(mode="json") for t in terms],
+                "assembled_terms_including_process_uses": assembled,
+                "assembly_error": error,
+                "next_action": None
+                if equation
+                else (
+                    "Declare only additional ordinary contributions; use terms=[] if "
+                    "the displayed process uses already supply the whole equation. "
+                    "An absent ordinary declaration does not mean the RHS is empty."
+                ),
+            }
+        )
+    return views
+
+
 def snapshot(brief: PublicScientificBrief, draft: Draft) -> dict:
     """Render current truth, including unresolved work, on every initial/repair call."""
     try:
@@ -316,6 +478,8 @@ def snapshot(brief: PublicScientificBrief, draft: Draft) -> dict:
         "assembly_pending_reason": assembly_error,
         "pending": pending(brief, draft),
         "process_usage": process_usage(draft),
+        "equation_views": equation_views(draft),
+        "potential_contribution_overlaps": contribution_overlaps(draft),
         "already_included_process_uses": [
             {
                 "process": p.name,
@@ -335,6 +499,7 @@ def assess(
     draft: Draft,
     *,
     graph_contract: graph_obligations.PublicGraphContract | None = None,
+    clarify_overlaps: bool = False,
 ) -> dict:
     """Check a finished draft; no reference equations, semantic LLM or fitted data."""
     errors: list[dict] = []
@@ -362,7 +527,23 @@ def assess(
         try:
             signed_processes.SignedProcess.model_validate(p.model_dump())
         except ValueError as exc:
-            fail("process_uses", process=p.name, reason=str(exc))
+            fail(
+                "process_uses",
+                process=p.name,
+                reason=str(exc),
+                repair_options=[
+                    "If this is truly an internal pairwise transfer, choose two "
+                    "scientifically appropriate opposite signs.",
+                    "If it is an influence rather than an internal transfer, "
+                    "replace kind with influence and retain appropriate signs.",
+                    "If no common law is intended, remove the process and "
+                    "declare ordinary contributions in its consumers.",
+                ],
+                warning=(
+                    "Do not flip a sign or invent a consumer solely "
+                    "to satisfy the schema."
+                ),
+            )
     equations, topology, aliases = (), None, {}
     try:
         equations = assembled_equations(brief, draft)
@@ -374,8 +555,35 @@ def assess(
     graph_available = topology is not None
     checks = public_structure_checks(brief, equations) if graph_available else ()
     errors.extend({"code": "public_path", **v} for v in checks if not v["passed"])
+    feedback_targets = (
+        {r.target for r in graph_contract.obligations if r.kind == "target_feedback"}
+        if graph_contract is not None
+        else set()
+    )
+    for binding in draft.feedback_bindings:
+        if binding.target not in feedback_targets:
+            fail(
+                "unknown_feedback_target",
+                target=binding.target,
+                allowed_targets=sorted(feedback_targets),
+            )
+        if definitions.get(binding.target) == "differential" and binding.states != (
+            binding.target,
+        ):
+            fail(
+                "differential_target_is_own_coordinate",
+                target=binding.target,
+                repair=(
+                    "Remove this feedback binding; the target state itself "
+                    "must have feedback."
+                ),
+            )
     reviewed_checks = (
-        graph_obligations.check(graph_contract, equations if graph_available else None)
+        graph_obligations.check(
+            graph_contract,
+            equations if graph_available else None,
+            feedback_coordinates={b.target: b.states for b in draft.feedback_bindings},
+        )
         if graph_contract is not None
         else []
     )
@@ -403,6 +611,11 @@ def assess(
                 "unknown_memory_requirement",
                 requirement=binding.requirement_id,
                 known_requirements=sorted(requirements),
+                repair={"remove_bindings": [binding.requirement_id]},
+                explanation=(
+                    "This ID is not a public mechanism requirement. "
+                    "Removing it does not assign a replacement memory state."
+                ),
             )
             continue
         prior_errors = len(errors)
@@ -449,9 +662,17 @@ def assess(
                 ),
             }
         )
+    overlaps = contribution_overlaps(draft)
+    clarifications = (
+        [r for r in overlaps if r["status"] == "clarification_required"]
+        if clarify_overlaps
+        else []
+    )
     return {
-        "eligible": not errors,
+        "eligible": not errors and not clarifications,
         "errors": errors,
+        "clarification_requests": clarifications,
+        "contribution_overlaps": overlaps,
         "graph_check_status": "assessed" if graph_available else "unavailable",
         "graph_check_reason": None
         if graph_available

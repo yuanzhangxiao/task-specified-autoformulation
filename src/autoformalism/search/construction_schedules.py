@@ -56,7 +56,13 @@ Bind each displayed dynamic-memory requirement to your chosen differential
 mediator(s), distinct from that requirement's driver and target. Optional memory
 bindings may also refer to other EXISTING public requirements: not requiring
 memory does not forbid it. Such a binding may include a target state itself.
-Do not invent requirement IDs. Bindings express
+Use only allowed_memory_bindings IDs, never public graph check IDs. The runtime
+logs and discards memory entries that name automatic graph checks; it does not
+choose a replacement requirement or state. feedback_bindings is a separate
+field for an algebraic public target: {"target":"y","states":["volume"]}.
+It declares the actual storage/energy realization of that readout, not an arbitrary
+upstream cause. Differential targets are already their own coordinate and need
+no such binding. Bindings express
 your intended scientific assignment; complete equations must establish the paths.
 For each optional named process, choose its drivers, scientific meaning and signed
 consumers together. The runtime defines it once and inserts every declared use.
@@ -68,7 +74,10 @@ to make a process shared, and do not duplicate one consumer with multiple signs.
 An INTERNAL pairwise transfer uses kind=transfer with two opposite signed consumers.
 An EXTERNAL source or sink has only its modeled consumer; use kind=influence.
 Never add a second consumer solely to satisfy the transfer format. An influence
-may be local or shared. Empty processes is legitimate. One process is one law,
+may be local or shared. When repairing same-sign transfer consumers, consider
+whether the kind should be influence; do not change scientifically intended signs
+merely to keep the transfer label. Empty processes is legitimate.
+One process is one law,
 not a list of unrelated contributions. Conversion is null if unknown, or a positive
 fixed factor such as 1/area using public covariates and multiplication/division.
 For example: {"target":"x","sign":"positive","conversion":null}; null is
@@ -85,7 +94,16 @@ assert global monotonicity/nonnegativity of the later function. Self-dependence
 can represent decay, relaxation or feedback when scientifically justified.
 Return only ordinary contributions in equations. The displayed process uses are
 ALREADY INCLUDED; do not repeat them or expand their drivers into another term
-for the same effect. Return terms=[] when shared uses provide the whole equation.
+for the same effect. Return terms=[] when process uses provide the whole equation.
+equation_views
+shows those uses even when ordinary_rhs_declared=false. A missing ordinary-RHS
+declaration is NOT an empty equation. If runtime flags possible overlapping
+contributions, clarify whether they are the same physical effect. Remove the
+ordinary repetition with an equation replacement if appropriate. If they are
+distinct effects, give overlap_confirmations=[{"overlap_id":"<displayed hash>",
+"scientific_distinction":"<why both effects are needed>"}]. This is your scientific
+decision; identical drivers do not prove duplication. Confirmation applies only
+to the displayed declarations; edits can require a new clarification.
 Do not emit functions, coefficients, initializers or fitted values at this stage.
 
 EDITS AND PENDING WORK
@@ -106,7 +124,8 @@ Explanations help communicate scientific meaning; they are not machine proofs.
 The schedule shown in stage_instructions controls the current editing scope.
 stage_complete=true ends the CURRENT STAGE, not merely the selected equation.
 The full brief, current declarations, assembled contributions and pending work
-are repeated on every request. A rejected_reply is a failed attempt, NOT a model
+are repeated on every request. last_edit_result labels accepted edits separately.
+A rejected_reply is a failed attempt, NOT a model
 to copy. Use its separately labeled error to correct the draft. Global structural
 feedback is supplied only after the initial construction ends. Do not claim
 scientific correctness merely because those finite structural checks pass.
@@ -115,7 +134,12 @@ path verdict. Unresolved public predicates are not scientific passes. Topology
 specifies dependencies; do not defer a known missing dependency to function writing.
 When public_graph_contract is supplied, its reviewed public interpretations are
 part of this prospective construction contract and appear on EVERY request.
-dynamic_feedback means a genuine dependency cycle through a differential state
+target_feedback requires a cycle through the differential target itself, or
+through EACH explicitly declared dynamic coordinate of its algebraic readout.
+The readout path cannot pass through another differential state. This stops an
+unrelated upstream loop from standing in for local storage feedback. Physical
+identity still rests on your declaration, not name matching.
+Legacy dynamic_feedback means a genuine dependency cycle through a differential state
 that affects the target, directly or through generated readouts. It does NOT
 require the target's literal name on a RHS, nor a self-loop on every memory state.
 forbidden_path excludes indirect as well as direct influence. These checks run
@@ -204,7 +228,8 @@ def instructions(policy: Policy, stage: str, focus: str | None) -> str:
         )
     if stage == "repair":
         return (
-            "Repair the displayed structural failures with explicit coordinated edits. "
+            "Repair structural failures and answer contribution clarification requests "
+            "with explicit coordinated edits. "
             "All variable, equation, process and binding edits are allowed. Preserve "
             "unaffected declarations. Inspect the rebuilt model before further edits. "
             "Set stage_complete=true when the whole topology is ready for checking."
@@ -306,6 +331,14 @@ def run(
             "public_graph_contract": graph_contract.model_dump(mode="json")
             if graph_contract is not None
             else None,
+            "allowed_memory_bindings": [
+                {
+                    "requirement_id": r.id,
+                    "required": r.requires_dynamic_memory,
+                    "public_requirement": r.public_requirement,
+                }
+                for r in brief.requirements
+            ],
             "memory_requirements": [
                 r.model_dump(mode="json")
                 for r in brief.requirements
@@ -330,7 +363,9 @@ def run(
         normalizations = []
         try:
             raw = visible_response(record)
-            normalized, normalizations = ledger.normalize_reply(brief, raw)
+            normalized, normalizations = ledger.normalize_reply(
+                brief, raw, graph_contract=graph_contract, draft=draft
+            )
             patch = ledger.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
             draft = ledger.apply_patch(brief, draft, patch)
@@ -358,7 +393,9 @@ def run(
             accepted,
             complete,
             {
-                "rejected_reply": raw,
+                "status": "accepted" if accepted else "rejected",
+                "rejected_reply": None if accepted else raw,
+                "normalizations": normalizations,
                 "error": error,
                 "delivery": delivery_feedback(record),
             },
@@ -413,7 +450,12 @@ def run(
         except (RepairBudgetExceeded, PromptPreflightError) as exc:
             ready, stop_reason = False, str(exc)
         initial_check = ledger.assess(
-            brief, context, target_definitions, draft, graph_contract=graph_contract
+            brief,
+            context,
+            target_definitions,
+            draft,
+            graph_contract=graph_contract,
+            clarify_overlaps=True,
         )
         initial = sealed_write(
             directory / "before_repair.json",
@@ -449,7 +491,8 @@ def run(
                 "reviewed_public_graph_checks": check["reviewed_public_graph_checks"],
                 "deferred_scientific_checks": check["deferred_scientific_checks"],
                 "ready_requested": ready,
-                "last_local_error": diagnostic,
+                "last_edit_result": diagnostic,
+                "clarification_requests": check["clarification_requests"],
             }
             try:
                 accepted, complete, diagnostic = request(
@@ -465,6 +508,7 @@ def run(
                     target_definitions,
                     draft,
                     graph_contract=graph_contract,
+                    clarify_overlaps=True,
                 )
                 ready = complete
         return {
