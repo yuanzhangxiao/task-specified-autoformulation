@@ -107,9 +107,11 @@ The [M13 review](PHASE_C_FITTING_M13_RESULTS_2026-10-06.md) reports that the ext
 starts do not improve recovery: rollout-only and the rollout portfolio both solve
 two of three starts, while the portfolio costs more. The checkpoint arm has one
 success, one inaccurate result and one evaluation blocked by unconfirmed cleanup.
-Next proposed: exploit conditional linearity of output gains within rollout
-fitting; keep validation/reference values outside optimization. No production
-fitter promotion follows from these results.
+The approved follow-up is now the [M14 output-gain experiment](PHASE_C_FITTING_PROFILED_OUTPUT.md):
+six CPU-only Delta tasks compare the joint rollout control with bounded variable
+projection of four output gains, using all original starts and the same budgets.
+Validation/reference values stay outside optimization. No production fitter
+promotion follows from these results.
 
 ## Objective and ownership
 

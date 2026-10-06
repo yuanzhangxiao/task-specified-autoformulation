@@ -1,0 +1,21 @@
+{
+  "seconds": 1200,
+  "targets": [
+    6000,
+    60000,
+    90000,
+    null
+  ],
+  "medium_target": 60000,
+  "minimum_intervals": 24,
+  "observation_anchors": 8,
+  "collocation_fraction": 0.75,
+  "native_seconds": 250,
+  "point_seconds": 90,
+  "certificate_seconds": 180,
+  "maximum_rollout_calls": 900,
+  "training_nmse": 1e-06,
+  "trajectory_nmse": 1e-05,
+  "solver_agreement": 1e-05,
+  "replay_seconds": 300
+}

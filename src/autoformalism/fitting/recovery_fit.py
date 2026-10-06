@@ -36,7 +36,14 @@ def checkpoint_points(folder: Path) -> list[dict]:
     return list(unique.values())[:2]
 
 
-def fit(base: dict, arm: str, policy: dict, folder: Path) -> dict:
+def fit(
+    base: dict,
+    arm: str,
+    policy: dict,
+    folder: Path,
+    *,
+    rollout_mode: str = "recovery_rollout",
+) -> dict:
     """One 20-minute envelope, including setup/screens and early certificates.
 
     A coordinator interrupted before sealing its backend is terminal on resume;
@@ -45,7 +52,14 @@ def fit(base: dict, arm: str, policy: dict, folder: Path) -> dict:
     """
     if arm not in {"rollout_only", "medium_rollout", "mesh_rollout"}:
         raise ValueError("unknown recovery arm")
-    identity = public.content_sha256({"base": base, "arm": arm, "policy": policy})
+    if rollout_mode not in {"recovery_rollout", "profiled_rollout"} or (
+        rollout_mode == "profiled_rollout" and arm != "rollout_only"
+    ):
+        raise ValueError("unsupported recovery rollout mode")
+    identity_fields = {"base": base, "arm": arm, "policy": policy}
+    if rollout_mode != "recovery_rollout":
+        identity_fields["rollout_mode"] = rollout_mode
+    identity = public.content_sha256(identity_fields)
     started = folder / "fit-started.json"
     if started.exists():
         if read_seal(started)["identity"] != identity:
@@ -251,7 +265,7 @@ def fit(base: dict, arm: str, policy: dict, folder: Path) -> dict:
                 }
             ]
             out = operate(
-                "recovery_rollout",
+                rollout_mode,
                 {k: base[k] for k in ("request", "training", "coordinates")}
                 | {
                     "points": points,

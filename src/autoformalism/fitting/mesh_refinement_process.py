@@ -17,7 +17,15 @@ from autoformalism.fitting import public_fitting as public
 def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
     """Resume terminal work exactly; never grant a started operation a new budget."""
     if (
-        mode not in {"nodes", "point", "native", "recovery_rollout", "recovery_check"}
+        mode
+        not in {
+            "nodes",
+            "point",
+            "native",
+            "recovery_rollout",
+            "recovery_check",
+            "profiled_rollout",
+        }
         or seconds <= 0
     ):
         raise ValueError("invalid mesh operation")
@@ -109,7 +117,20 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
             "final_checkpoint_status.json",
             "checkpoint_rejections.json",
             "checkpoints.json",
-            *(("refinement/best.json",) if mode == "recovery_rollout" else ()),
+            *(
+                ("refinement/best.json",)
+                if mode in {"recovery_rollout", "profiled_rollout"}
+                else ()
+            ),
+            *(
+                (
+                    "refinement/structure.json",
+                    "refinement/training_history.json",
+                    "refinement/accounting.json",
+                )
+                if mode == "profiled_rollout"
+                else ()
+            ),
         )
         if result["termination_confirmed"] and (folder / name).exists()
     }

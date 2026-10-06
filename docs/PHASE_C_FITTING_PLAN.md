@@ -624,4 +624,17 @@ cleanup-blocked evaluation. The difficult start still suppresses an output gain
 at its zero boundary. A stiff checkpoint also exposes a Radau-screen/RK45-refinement
 compatibility gap. The proposed next experiment profiles the conditionally linear
 output gains during rollout fitting, preserving all original starts and budgets.
-It is not yet implemented; generic-start robustness remains unresolved.
+The approved follow-up is implemented as M14 below; generic-start robustness
+remains unresolved until its results are available.
+
+
+## M14 — conditionally linear output fitting
+
+The [M14 runbook](PHASE_C_FITTING_PROFILED_OUTPUT.md) implements a paired test of
+the unchanged joint rollout control against bounded variable projection of the
+four terminal output gains. The latter optimizes 14 nonlinear unknowns while
+still estimating all 18 parameters and initials. Structural certification, exact
+fixed-active-set sensitivities, declared bounds, full-training checkpoints and
+independent original-equation replay protect the comparison. All three original
+starts and 1,200-second ceilings are retained (six CPU-only Delta tasks).
+No restarts, benchmark changes or production promotion are included.
