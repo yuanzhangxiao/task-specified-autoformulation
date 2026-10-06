@@ -376,6 +376,16 @@ def test_the_v2_pilot_and_smoke_differ_from_v1_only_where_declared():
     smoke = load("phase_c_llm_sr_smoke_v2.json")
     assert pilot["reasoning_model_adaptation"] == smoke["reasoning_model_adaptation"]
     assert (pilot["budget"]["declared"], smoke["budget"]["declared"]) == (10000, 8)
+    # The GPU VM's 20b smoke is the hosted smoke, served on the VM instead.
+    vm = load("phase_c_llm_sr_smoke_vm_20b_v2.json")
+    assert {key for key in vm if vm[key] != smoke[key]} == {
+        "budget",
+        "endpoint",
+        "model",
+        "scope_note",
+    }
+    assert (vm["endpoint"], vm["model"]) == ("vm_local_vllm", "openai/gpt-oss-20b")
+    assert vm["budget"]["declared"] == smoke["budget"]["declared"]
 
 
 # --- running and resuming ----------------------------------------------------

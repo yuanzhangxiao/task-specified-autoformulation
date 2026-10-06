@@ -504,3 +504,13 @@ def test_the_committed_plans_are_phase_b_settings_on_the_roster():
     for plan in (smoke, full):
         assert plan.release_summary_sha256 == roster["release_summary_sha256"]
         assert (plan.endpoint, plan.model) == ("jetstream2_hosted", "gpt-oss-120b")
+    # The GPU VM's 20b smoke is the hosted smoke, served on the VM instead.
+    vm = campaign.load_plan(CONFIGS / "phase_c_d3_smoke_vm_20b_v1.json")
+    assert (vm.endpoint, vm.model) == ("vm_local_vllm", "openai/gpt-oss-20b")
+    assert vm.reporting_qualifications() == ()
+    hosted, local = smoke.model_dump(), vm.model_dump()
+    assert {key for key in local if local[key] != hosted[key]} == {
+        "endpoint",
+        "model",
+        "purpose",
+    }

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Run every task of one Phase C LLM-SR or LLM-ODE plan against this VM's model
-# server, several at a time, detached from the login.
+# Run every task of one Phase C LLM-SR, LLM-ODE or D3 plan against this VM's
+# model server, several at a time, detached from the login.
 #
 #   run_phase_c_tasks.sh METHOD CONFIG NAME TASKS
 #
-#   METHOD  llm_sr or llm_ode
+#   METHOD  llm_sr, llm_ode or d3
 #   CONFIG  a frozen plan declaring the vm_local_vllm endpoint
 #   NAME    the run's directory under ~/af/runs
 #   TASKS   how many tasks run at once; start the server for at least as many
@@ -12,9 +12,10 @@
 #
 # Rerunning is safe: a finished task is not repeated, a running one is refused
 # by its lock, and an interrupted one restarts with its partial attempt kept
-# beside it. Each start copies the server's record into the run, so the run
-# names the model revision, image and settings that answered it. When every
-# task has ended, the method's report is written to NAME/report.json.
+# beside it; a D3 task resumes from its last finished generation. Each start
+# copies the server's record into the run, so the run names the model revision,
+# image and settings that answered it. When every task has ended, the method's
+# report is written to NAME/report.json.
 
 set -euo pipefail
 
@@ -34,9 +35,10 @@ usage() {
 worker() {  # root, method, count, tasks: runs in the foreground
   local root="$1" method="$2" count="$3" tasks="$4"
   echo "started $(date -u +%FT%TZ): ${count} tasks, ${tasks} at a time"
-  # run() seals a failed search as a result, so a nonzero exit is a crash.
+  # run() seals a failed search as a result, so a nonzero exit is a crash, or for
+  # D3 (status 3) a server that stopped answering for longer than its patience.
   seq 0 $((count - 1)) | xargs -P "${tasks}" -I{} bash -c \
-    '"$1" "scripts/phase_c_$2.py" run --root "$3" --index "$4" >"$3/logs/task-$4.log" 2>&1 || echo "task $4 exited with status $?"' \
+    '"$1" "scripts/phase_c_$2.py" run --root "$3" --index "$4" >>"$3/logs/task-$4.log" 2>&1 || echo "task $4 exited with status $?"' \
     _ "${py}" "${method}" "${root}" {}
   "${py}" "scripts/phase_c_${method}.py" report --root "${root}" >"${root}/report.json" ||
     echo "the report failed"
@@ -55,7 +57,7 @@ if [[ "${1:-}" == --worker ]]; then
 fi
 
 method="${1:-}" config="${2:-}" name="${3:-}" tasks="${4:-}"
-[[ "${method}" == llm_sr || "${method}" == llm_ode ]] || usage
+[[ "${method}" == llm_sr || "${method}" == llm_ode || "${method}" == d3 ]] || usage
 [[ -f "${config}" && "${name}" =~ ^[A-Za-z0-9._-]+$ && "${tasks}" =~ ^[1-9][0-9]*$ ]] || usage
 readonly root="${AF_HOME}/runs/${name}"
 
