@@ -152,6 +152,7 @@ from autoformalism.rebuttal.baseline_pilot import BaselinePilotTask  # noqa: E40
 
 REPO = Path(__file__).resolve().parents[1]
 SHIPPED = REPO / "configs" / "phase_c_public_baseline_delta_cpu_v1.json"
+JETSTREAM = REPO / "configs" / "phase_c_public_baseline_jetstream_cpu_v1.json"
 PHASE_B = REPO / "configs" / "phase_b_public_baseline_full_delta_cpu_v1.json"
 
 
@@ -241,7 +242,15 @@ def test_freeze_refuses_a_different_prompt(tmp_path):
             "outside the Phase C roster",
         ),
         (lambda p: p["cells"][0].update(tier="hard"), "wrong tier"),
-        (lambda p: p["methods"][0].update(platform="aces_cpu"), "Delta CPUs only"),
+        (lambda p: p["methods"][0].update(platform="aces_cpu"), "one platform"),
+        (
+            lambda p: p["methods"][0].update(platform="jetstream2_cpu"),
+            "one platform",
+        ),
+        (
+            lambda p: [m.update(platform="jetstream2_cpu") for m in p["methods"]],
+            "Jetstream2 plan the VM ledger",
+        ),
         (lambda p: p.update(repetitions=[0, 0]), "unique and nonnegative"),
     ],
 )
@@ -249,4 +258,29 @@ def test_plan_refuses_cells_tiers_and_methods_it_does_not_cover(change, message)
     payload = json.loads(SHIPPED.read_text())
     change(payload)
     with pytest.raises(ValueError, match=message):
+        plan_module.PhaseCBaselinePlan.model_validate(payload)
+
+
+def test_jetstream_plan_is_the_delta_plan_on_a_jetstream2_vm():
+    """Only the platform and its ledger differ; every setting is Phase B's."""
+    delta = plan_module.load_phase_c_baseline_plan(SHIPPED)
+    plan = plan_module.load_phase_c_baseline_plan(JETSTREAM)
+    assert plan.platform == "jetstream2_cpu" and delta.platform == "delta_cpu"
+    assert (plan.cells, plan.repetitions) == (delta.cells, delta.repetitions)
+    assert plan.release_summary_sha256 == delta.release_summary_sha256
+    for ours, theirs in zip(plan.methods, delta.methods, strict=True):
+        assert ours.model_dump(exclude={"platform"}) == theirs.model_dump(
+            exclude={"platform"}
+        )
+    assert isinstance(plan.resource_accounting, plan_module.PhaseCVmResourceAccounting)
+    tasks = plan_module.build_phase_c_baseline_tasks(plan)
+    assert len(tasks) == 32 and {task.platform for task in tasks} == {"jetstream2_cpu"}
+
+
+def test_a_delta_plan_cannot_claim_the_vm_ledger():
+    payload = json.loads(SHIPPED.read_text())
+    payload["resource_accounting"] = json.loads(JETSTREAM.read_text())[
+        "resource_accounting"
+    ]
+    with pytest.raises(ValueError, match="Delta plan keeps the Slurm ledger"):
         plan_module.PhaseCBaselinePlan.model_validate(payload)

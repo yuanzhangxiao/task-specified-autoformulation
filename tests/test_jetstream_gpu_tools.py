@@ -164,6 +164,18 @@ def test_every_vm_script_parses(script: Path) -> None:
             ["d3", "configs/phase_c_d3_smoke_v1.json", "run", "0"],
             "METHOD",
         ),
+        ("run_phase_c_classical.sh", [], "CONFIG"),
+        ("run_phase_c_classical.sh", ["configs/no.json", "run"], "CONFIG"),
+        (
+            "run_phase_c_classical.sh",
+            ["configs/phase_c_public_baseline_jetstream_cpu_v1.json", "a run"],
+            "CONFIG",
+        ),
+        (
+            "run_phase_c_classical.sh",
+            ["configs/phase_c_public_baseline_jetstream_cpu_v1.json", "run"],
+            "setup_classical.sh first",
+        ),
     ],
 )
 def test_bad_arguments_are_refused_before_anything_runs(

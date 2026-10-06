@@ -6,7 +6,9 @@ release receipt and each cell's published prompt identify the inputs, the cells
 are the Phase C roster, and each method keeps its Phase B settings unchanged.
 
 Only the classical methods are planned here. The LLM baselines have their own
-launchers and endpoints and are frozen separately.
+launchers and endpoints and are frozen separately. A plan runs on one platform:
+Delta's Slurm CPU partition, or a Jetstream2 CPU VM, which has no scheduler and
+so keeps a ledger without queue times.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from autoformalism.rebuttal.phase_c_baselines import PROTOCOL, tier_of, verify_r
 from autoformalism.research.phase_c_inputs import ROSTER
 
 CLASSICAL_METHODS = frozenset({"persistence", "sindy", "pysr"})
+PLATFORMS = frozenset({"delta_cpu", "jetstream2_cpu"})
 
 
 class PhaseCBaselineCell(BaseModel):
@@ -38,6 +41,21 @@ class PhaseCBaselineCell(BaseModel):
     benchmark_id: str = Field(min_length=1)
     tier: Literal["easy", "hard", "fixed"]
     public_prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class PhaseCVmResourceAccounting(BaseModel):
+    """Resource fields for a run on a cloud VM: no scheduler, so no queue time."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["phase-c-vm-baseline-resource-ledger-1"]
+    process_wall_time_required: Literal[True]
+    machine_flavor_and_cpus_required: Literal[True]
+    cpu_core_hours_required: Literal[True]
+    gpu_hours_required: Literal[True]
+    logical_llm_tokens_required_when_applicable: Literal[True]
+    provider_attempts_required_when_applicable: Literal[True]
+    local_model_monetary_cost_policy: Literal["not_priced_report_hardware_time"]
 
 
 class PhaseCBaselinePlan(BaseModel):
@@ -54,10 +72,15 @@ class PhaseCBaselinePlan(BaseModel):
     cells: tuple[PhaseCBaselineCell, ...] = Field(min_length=1)
     repetitions: tuple[int, ...] = Field(min_length=1)
     methods: tuple[BaselinePilotMethod, ...] = Field(min_length=1)
-    resource_accounting: BaselinePilotResourceAccounting
+    resource_accounting: BaselinePilotResourceAccounting | PhaseCVmResourceAccounting
     test_data_opened: Literal[False]
     private_reference_opened: Literal[False]
     weighted_overall_score_defined: Literal[False]
+
+    @property
+    def platform(self) -> str:
+        """The one platform every method of this plan runs on."""
+        return self.methods[0].platform
 
     @model_validator(mode="after")
     def matrix_is_the_roster(self) -> PhaseCBaselinePlan:
@@ -73,10 +96,22 @@ class PhaseCBaselinePlan(BaseModel):
         methods = [method.method for method in self.methods]
         if len(methods) != len(set(methods)):
             raise ValueError("Phase C baseline methods must be unique")
-        if not set(methods) <= CLASSICAL_METHODS or any(
-            method.platform != "delta_cpu" for method in self.methods
+        platforms = {method.platform for method in self.methods}
+        if (
+            not set(methods) <= CLASSICAL_METHODS
+            or len(platforms) != 1
+            or not platforms <= PLATFORMS
         ):
-            raise ValueError("this plan runs classical methods on Delta CPUs only")
+            raise ValueError(
+                "this plan runs classical methods on one platform: Delta CPUs or "
+                "a Jetstream2 CPU VM"
+            )
+        on_vm = isinstance(self.resource_accounting, PhaseCVmResourceAccounting)
+        if on_vm != (self.platform == "jetstream2_cpu"):
+            raise ValueError(
+                "a Delta plan keeps the Slurm ledger and a Jetstream2 plan the VM "
+                "ledger"
+            )
         if len(self.repetitions) != len(set(self.repetitions)) or any(
             seed < 0 for seed in self.repetitions
         ):
