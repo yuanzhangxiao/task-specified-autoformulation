@@ -570,3 +570,15 @@ pool recovers an accurate model. Two independent replays time out and one cleanu
 exception leaves a missing record; no full assisted rerun is needed. Next qualify
 mesh refinement and perturbed training-fitted starts, with explicit assisted cost
 and independent post-selection evaluation. No production policy is promoted.
+
+## M11 — mesh convergence and explicit coarse-to-fine transfer
+
+The [M11 runbook](PHASE_C_FITTING_MESH_REFINEMENT.md) implements the approved
+mesh diagnostic first. The same two training-fitted alien starts feed four
+independent resolutions and one sequential transfer each (ten CPU tasks).
+Every released endpoint receives separate post-fit prediction and coefficient
+assessment; a preserved supplied incumbent cannot mask mesh bias. Radau
+polynomials, parameters and shared initials transfer only after a qualified solve.
+All observations and input corners remain intact. This fixed ladder qualifies
+mesh accuracy before an automatic adaptive policy or a matched generic-start
+robustness experiment. Those remain the next targets, not established outcomes.

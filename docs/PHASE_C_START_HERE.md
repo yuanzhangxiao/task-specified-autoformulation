@@ -72,6 +72,13 @@ still show no recovery. Next investigate mesh convergence and initialization
 robustness separately; a cleanup exception and two replay timeouts also need
 explicit closeout. This remains a diagnostic, not a production promotion.
 
+The [M11 mesh diagnostic](PHASE_C_FITTING_MESH_REFINEMENT.md) is now implemented:
+four independent resolutions and coarse-to-fine polynomial transfer from each of
+two previously training-fitted alien starts. Ten Delta CPU tasks evaluate every
+released endpoint separately from the retained incumbent. It qualifies mesh
+accuracy before generic-start robustness; it is not automatic adaptive fitting
+or a production default. Historical data/results are preserved.
+
 ## Objective and ownership
 
 Build reliable scientific model construction before expanding search. Separate

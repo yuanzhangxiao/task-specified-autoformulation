@@ -1,0 +1,9 @@
+{
+  "targets": [6000, 60000, 90000, null],
+  "minimum_intervals": 24,
+  "node_seconds": 180,
+  "fixed_seconds": 250,
+  "released_seconds": 250,
+  "point_seconds": 120,
+  "replay_seconds": 300
+}
