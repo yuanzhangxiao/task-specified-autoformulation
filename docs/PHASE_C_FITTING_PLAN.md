@@ -582,3 +582,14 @@ polynomials, parameters and shared initials transfer only after a qualified solv
 All observations and input corners remain intact. This fixed ladder qualifies
 mesh accuracy before an automatic adaptive policy or a matched generic-start
 robustness experiment. Those remain the next targets, not established outcomes.
+
+## M12 — generic-start recovery with training-verified early stopping
+
+The [M12 runbook](PHASE_C_FITTING_GENERIC_RECOVERY.md) records M11's mesh-convergence
+results and implements the approved next step: all three original generic starts
+on alien hard, comparing rollout-only, medium-mesh plus rollout and progressive
+meshes plus rollout under the same 1,200-second ceiling. Meshes retain input
+corners and add bounded training-observation anchors. Complete independent
+training rollouts can stop refinement early; validation and coefficient/initial
+errors are evaluated only after training selection freezes. Nine CPU tasks run
+on Delta. No production default or benchmark changes.

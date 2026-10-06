@@ -16,7 +16,10 @@ from autoformalism.fitting import public_fitting as public
 
 def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
     """Resume terminal work exactly; never grant a started operation a new budget."""
-    if mode not in {"nodes", "point", "native"} or seconds <= 0:
+    if (
+        mode not in {"nodes", "point", "native", "recovery_rollout", "recovery_check"}
+        or seconds <= 0
+    ):
         raise ValueError("invalid mesh operation")
     identity = {
         "mode": mode,
@@ -103,6 +106,7 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
             "nodes.json",
             "native.json",
             "final_checkpoint_diagnostics.json",
+            *(("refinement/best.json",) if mode == "recovery_rollout" else ()),
         )
         if result["termination_confirmed"] and (folder / name).exists()
     }

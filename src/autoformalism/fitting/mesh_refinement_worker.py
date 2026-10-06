@@ -102,6 +102,10 @@ def run(mode: str, folder: Path) -> None:
         from autoformalism.fitting.transcription_solver import solve
 
         solve(payload, folder)
+    elif mode in {"recovery_rollout", "recovery_check"}:
+        from autoformalism.fitting.recovery_worker import certify, rollout
+
+        (rollout if mode == "recovery_rollout" else certify)(payload, folder)
     else:
         raise ValueError("unknown mesh worker")
 

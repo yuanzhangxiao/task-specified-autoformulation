@@ -79,6 +79,15 @@ released endpoint separately from the retained incumbent. It qualifies mesh
 accuracy before generic-start robustness; it is not automatic adaptive fitting
 or a production default. Historical data/results are preserved.
 
+M11 now verifies decreasing discretization bias and complete independent replay
+at every resolution, but its accurate selected models remain inherited starts.
+The [M12 generic recovery milestone](PHASE_C_FITTING_GENERIC_RECOVERY.md) compares
+three fitting strategies on all three original generic starts, including the
+previous failure. Input-preserving meshes add training-response anchors; complete
+training-only independent rollout checks can stop fitting before denser meshes.
+Validation and coefficient/initial recovery remain post-fit diagnostics. Nine
+matched-ceiling CPU tasks are ready for Delta; production defaults stay unchanged.
+
 ## Objective and ownership
 
 Build reliable scientific model construction before expanding search. Separate
