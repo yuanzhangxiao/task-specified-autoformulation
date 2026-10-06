@@ -591,12 +591,11 @@ def test_the_hosted_route_is_fixed_and_local_kinds_stay_local():
         resolve_endpoint("", "http://127.0.0.1:8000")
 
 
-def test_the_served_model_must_be_the_plans_and_first_for_llm_ode():
-    check_served_model(("other", "served-model"), "served-model", first=False)
-    with pytest.raises(ValueError, match="first among"):
-        check_served_model(("other", "served-model"), "served-model", first=True)
+def test_the_plans_model_must_be_served_beside_any_others():
+    """The hosted gateway lists a dozen models, the plan's eighth."""
+    check_served_model(("other", "served-model"), "served-model")
     with pytest.raises(ValueError, match="not among"):
-        check_served_model(("other",), "served-model", first=False)
+        check_served_model(("other",), "served-model")
 
 
 class _Response(io.BytesIO):
@@ -649,15 +648,9 @@ def test_the_hosted_service_is_waited_out_for_hours_and_a_local_one_is_not():
     assert patience["job_local_vllm"] == patience["vm_local_vllm"] <= 15 * 60
 
 
-@pytest.mark.parametrize(
-    ("method", "served", "message"),
-    [
-        ("llm_sr", ("other",), "not among"),
-        ("llm_ode", ("other", "served-model"), "first among"),
-    ],
-)
+@pytest.mark.parametrize("method", ["llm_sr", "llm_ode"])
 def test_the_cli_checks_the_served_model_before_any_search(
-    tmp_path, monkeypatch, method, served, message
+    tmp_path, monkeypatch, method
 ):
     from scripts import phase_c_llm_ode, phase_c_llm_sr
 
@@ -668,15 +661,17 @@ def test_the_cli_checks_the_served_model_before_any_search(
     monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
     monkeypatch.setenv("AF_LLM_ODE_ROOT", str(tmp_path))
     monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: _complete(calls))
-    monkeypatch.setattr(cli, "served_model_ids", lambda base_url: served)
+    monkeypatch.setattr(cli, "served_model_ids", lambda base_url: ("other",))
     patience = {"patience_seconds": 60.0}
     search = cli._searcher(root, "http://127.0.0.1:8000", **patience)
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match="not among"):
         campaign.run_phase_c(root, 0, endpoint="vm_local_vllm", search=search)
     assert calls == []
     assert not (root / "results" / "0" / "result.json").exists()
 
-    monkeypatch.setattr(cli, "served_model_ids", lambda base_url: ("served-model",))
+    # A gateway that lists another model first still serves the plan's.
+    served = ("other", "served-model")
+    monkeypatch.setattr(cli, "served_model_ids", lambda base_url: served)
     search = cli._searcher(root, "http://127.0.0.1:8000", **patience)
     result = campaign.run_phase_c(root, 0, endpoint="vm_local_vllm", search=search)
     assert result["status"] == "complete" and len(calls) == 1
@@ -707,10 +702,35 @@ def test_the_cli_gives_a_search_the_patience_of_its_endpoint(
     assert seen["patience_seconds"] == vendored.OUTAGE_PATIENCE_SECONDS[
         "jetstream2_hosted"
     ]
+    # The hosted gateway replays stored answers unless asked not to.
+    assert seen["bypass_cache"] is True
     if method == "llm_sr":
-        # The hosted gateway replays stored answers unless asked not to.
-        assert seen["bypass_cache"] is True
         assert (seen["max_new_tokens"], seen["join_split_headers"]) == (512, False)
+    else:
+        # Named from the plan, not taken as the first model the gateway lists.
+        assert seen["model"] == "served-model"
+
+
+def test_the_llm_ode_cli_names_the_plans_model_to_a_vllm_it_serves(
+    tmp_path, monkeypatch
+):
+    import sys
+
+    from scripts import phase_c_llm_ode as cli
+
+    _, root, _ = _frozen(tmp_path, "llm_ode")
+    seen: dict = {}
+    monkeypatch.setenv("AF_LLM_ODE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AF_ENDPOINT_KIND", "vm_local_vllm")
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:8000")
+    monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr(cli, "run_phase_c", lambda *a, **k: {"status": "complete"})
+    monkeypatch.setattr(
+        sys, "argv", ["cli.py", "run", "--root", str(root), "--index", "0"]
+    )
+    cli.main()
+    assert seen["model"] == "served-model"
+    assert seen["bypass_cache"] is False  # a vLLM we serve replays nothing
 
 
 def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):

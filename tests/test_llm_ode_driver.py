@@ -9,6 +9,7 @@ driver extends. What is under test is our binding, not their search.
 from __future__ import annotations
 
 import inspect
+import json
 import sys
 import types
 from pathlib import Path
@@ -47,6 +48,28 @@ class _FakeSearcher:
         )
 
 
+class _Raw:
+    """What the SDK's raw-response call returns: the headers and the reply."""
+
+    def __init__(self, reply, headers: dict | None = None) -> None:
+        import httpx
+
+        self.headers = httpx.Headers(headers or {})
+        self._reply = reply
+
+    def parse(self):
+        return self._reply
+
+
+def _client(create) -> types.SimpleNamespace:
+    """An SDK client whose raw-response `responses.create` is `create`."""
+    return types.SimpleNamespace(
+        responses=types.SimpleNamespace(
+            with_raw_response=types.SimpleNamespace(create=create)
+        )
+    )
+
+
 class _FakeLlm:
     """Stands in for upstream's client, including what the driver wraps."""
 
@@ -55,12 +78,10 @@ class _FakeLlm:
         self.base_url = base_url
         self.n_queries = 7
         self.model_name = "m"
-        self.request_kwargs = {}
-        self.client = types.SimpleNamespace(
-            responses=types.SimpleNamespace(
-                create=lambda **kwargs: types.SimpleNamespace(
-                    output_text="x_0", usage={"total_tokens": 11}
-                )
+        self.request_kwargs = {"max_output_tokens": 1024}  # upstream's
+        self.client = _client(
+            lambda **kwargs: _Raw(
+                types.SimpleNamespace(output_text="x_0", usage={"total_tokens": 11})
             )
         )
 
@@ -399,8 +420,12 @@ def _openai_error(kind: str) -> Exception:
     return cls(kind, response=httpx.Response(status, request=request), body=None)
 
 
-def _install_endpoint(monkeypatch, replies) -> _Clock:
-    """A one-target upstream whose every step asks the endpoint once."""
+def _install_endpoint(monkeypatch, replies, requests: list | None = None) -> _Clock:
+    """A one-target upstream whose every step asks the endpoint once.
+
+    A reply is an error to raise, a `_Raw` to return as it is, or anything
+    else for a plain answer; `requests` collects what each call sent.
+    """
     _install_fake_upstream(monkeypatch, {"y": ["x_0"]})
     modules = driver.load_upstream(Path("/nonexistent"))
     answers = iter(replies)
@@ -410,14 +435,16 @@ def _install_endpoint(monkeypatch, replies) -> _Clock:
             super().__init__(api_key, base_url)
 
             def create(**kwargs):
+                if requests is not None:
+                    requests.append(kwargs)
                 reply = next(answers)
                 if isinstance(reply, Exception):
                     raise reply
-                return types.SimpleNamespace(output_text="x_0", usage={})
+                if isinstance(reply, _Raw):
+                    return reply
+                return _Raw(types.SimpleNamespace(output_text="x_0", usage={}))
 
-            self.client = types.SimpleNamespace(
-                responses=types.SimpleNamespace(create=create)
-            )
+            self.client = _client(create)
 
     class _Asking(_FakeSearcher):
         def step(self) -> None:
@@ -514,3 +541,68 @@ def test_a_refused_request_is_not_retried(monkeypatch, tmp_path: Path) -> None:
     assert clock.pauses == []
     assert outcome["status"] == "complete"  # upstream keeps what it had found
     assert outcome["accounting"]["search_error"].startswith("BadRequestError")
+
+
+# --- what a request carries ----------------------------------------------------
+
+
+def test_without_options_the_requests_are_upstreams(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The model the server listed first, upstream's output limit, nothing added."""
+    sent: list = []
+    _install_endpoint(monkeypatch, ["ok", "ok"], sent)
+    _search(tmp_path)
+    assert [request["model"] for request in sent] == ["m", "m"]
+    assert all(request["max_output_tokens"] == 1024 for request in sent)
+    assert all("extra_body" not in request for request in sent)
+
+
+def test_a_campaign_names_its_model_and_asks_for_fresh_answers(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The hosted gateway lists a dozen models and replays a repeated request."""
+    sent: list = []
+    _install_endpoint(monkeypatch, ["ok", "ok"], sent)
+    _search(tmp_path, model="gpt-oss-120b", bypass_cache=True)
+    assert [request["model"] for request in sent] == ["gpt-oss-120b"] * 2
+    assert all(
+        request["extra_body"] == {"cache": {"no-cache": True}} for request in sent
+    )
+    # The prompt and the output limit stay upstream's.
+    assert all(request["input"] == "propose" for request in sent)
+    assert all(request["max_output_tokens"] == 1024 for request in sent)
+
+
+def test_a_replayed_answer_and_a_cut_off_reply_are_logged(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The gateway marks a replay in a header; a reply says why it stopped."""
+    replayed = _Raw(
+        types.SimpleNamespace(
+            output_text="x_0",
+            usage={"total_tokens": 9},
+            status="completed",
+            incomplete_details=None,
+        ),
+        {"x-litellm-cache-key": "4f2a"},
+    )
+    cut_off = _Raw(
+        types.SimpleNamespace(
+            output_text="",
+            usage={"total_tokens": 1024},
+            status="incomplete",
+            incomplete_details=types.SimpleNamespace(reason="max_output_tokens"),
+        )
+    )
+    _install_endpoint(monkeypatch, [replayed, cut_off])
+    outcome = _search(tmp_path, bypass_cache=True)
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "llm_calls.jsonl").read_text().splitlines()
+    ]
+    assert [(event["cache_hit"], event["finish_reasons"]) for event in events] == [
+        (True, ["completed"]),
+        (False, ["max_output_tokens"]),
+    ]
+    assert outcome["accounting"]["cache_hits"] == 1

@@ -75,9 +75,10 @@ OUTAGE_PATIENCE_SECONDS: dict[str, float] = {
 #: Endpoint kinds that replay a stored answer to a repeated request unless a
 #: request says otherwise. The hosted service is a LiteLLM gateway (1.98.0 on
 #: 2026-10-05): an identical request came back in under a millisecond with
-#: the first answer's id. Upstream LLM-SR samples afresh for every request and
-#: its islands begin from the same prompt, so its requests ask the gateway to
-#: generate anew. LLM-ODE's requests do not ask yet.
+#: the first answer's id, and on 2026-10-06 the responses route LLM-ODE calls
+#: did the same. Both upstreams sample afresh for every request; LLM-SR's
+#: islands begin from the same prompt, and two LLM-ODE islands can ask the
+#: same thing, so both methods' requests ask the gateway to generate anew.
 CACHING_ENDPOINTS = frozenset({"jetstream2_hosted"})
 
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -141,17 +142,16 @@ def served_model_ids(base_url: str, *, timeout: float = 30.0) -> tuple[str, ...]
     return tuple(str(item.get("id")) for item in data if isinstance(item, dict))
 
 
-def check_served_model(served: tuple[str, ...], model: str, *, first: bool) -> None:
-    """Refuse an endpoint that would answer with a model other than the plan's.
+def check_served_model(served: tuple[str, ...], model: str) -> None:
+    """Refuse an endpoint that does not serve the plan's model.
 
-    LLM-SR names its model in every request. LLM-ODE's client takes whichever
-    model the server lists first, so for it the plan's model must come first.
+    Both methods name the plan's model in every request: LLM-SR as upstream
+    does, LLM-ODE in place of upstream's first listed model. So the model must
+    be served, and a gateway may serve others beside it.
     """
-    candidates = served[:1] if first else served
-    if model not in candidates:
-        place = "first among" if first else "among"
+    if model not in served:
         raise ValueError(
-            f"the plan's model {model!r} is not {place} the served models {served}"
+            f"the plan's model {model!r} is not among the served models {served}"
         )
 
 

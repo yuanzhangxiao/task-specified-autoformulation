@@ -26,6 +26,15 @@ Two departures from upstream are deliberate and declared in the campaign plan:
   uses the same quantity -- development rollout error -- computed by our
   evaluator, which holds the auxiliaries to their observed values. Upstream's
   ``evaluate_system`` also reports test error; it is never called.
+
+Each request is upstream's own: the same call, prompt and output limit. Two
+details of how it reaches a shared gateway are not upstream's, and neither
+changes the method. Upstream names whichever model the server lists first,
+which on its own one-model vLLM is the model it served; the Jetstream2 gateway
+lists several, so a campaign names its plan's model. That gateway also replays
+a stored answer to a repeated request, where upstream's server samples afresh,
+so a campaign against it asks for a fresh answer, and an answer the gateway
+marks as replayed is logged as a cache hit.
 """
 
 from __future__ import annotations
@@ -61,6 +70,10 @@ from autoformalism.rebuttal.llm_ode_upstream import (
     load_upstream,
     specification_prompt,
     to_state_equations,
+)
+from autoformalism.rebuttal.llm_sr_shim import (
+    LITELLM_CACHE_HIT_HEADER,
+    LITELLM_NO_CACHE,
 )
 from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
@@ -191,29 +204,43 @@ def development_rollout_error(
     return float(np.mean(squared)) if squared else None
 
 
+def _stop_reason(response: Any) -> str | None:
+    """Why a reply ended: what cut it short if it is incomplete, else its status."""
+    details = getattr(response, "incomplete_details", None)
+    return getattr(details, "reason", None) or getattr(response, "status", None)
+
+
 @contextmanager
 def _counted_requests(
-    llm: Any, log: CallLog, *, patience: float = DEFAULT_PATIENCE_SECONDS
+    llm: Any,
+    log: CallLog,
+    *,
+    patience: float = DEFAULT_PATIENCE_SECONDS,
+    bypass_cache: bool = False,
 ) -> Iterator[None]:
     """Record every provider call, with the usage upstream discards.
 
     Their client returns `response.output_text` and drops the usage object, so
     a campaign otherwise reports request counts that cannot be compared with
-    the token accounting every other method reports. A request the server
-    fails is retried until `patience` runs out; the prompt and the reply are
-    upstream's own either way.
+    the token accounting every other method reports. Why each reply ended is
+    kept too, so how often the output limit cut one off can be counted. A
+    request the server fails is retried until `patience` runs out, and
+    `bypass_cache` asks a caching gateway for a fresh answer; the prompt and
+    the reply are upstream's own either way.
     """
     original = llm.make_request
     first, longest = BACKOFF_SECONDS
+    extra = {"extra_body": LITELLM_NO_CACHE} if bypass_cache else {}
 
     def make_request(prompt):
         failing_since: float | None = None
         pause = first
         while True:
             try:
-                response = llm.client.responses.create(
-                    model=llm.model_name, input=prompt, **llm.request_kwargs
+                raw = llm.client.responses.with_raw_response.create(
+                    model=llm.model_name, input=prompt, **llm.request_kwargs, **extra
                 )
+                response = raw.parse()
             except Exception as exc:
                 log.failure(f"{type(exc).__name__}: {exc}")
                 if not _server_failure(exc):
@@ -228,7 +255,12 @@ def _counted_requests(
                 _pause(pause)
                 pause = min(longest, 2 * pause)
                 continue
-            log.response(response)
+            reason = _stop_reason(response)
+            log.response(
+                response,
+                finish_reasons=None if reason is None else [reason],
+                cache_hit=raw.headers.get(LITELLM_CACHE_HIT_HEADER) is not None,
+            )
             return response.output_text
 
     llm.make_request = make_request
@@ -282,8 +314,15 @@ def build_searcher(
     config: dict | None = None,
     seconds_per_rollout: float = 60.0,
     patience_seconds: float = DEFAULT_PATIENCE_SECONDS,
+    model: str | None = None,
+    bypass_cache: bool = False,
 ):
-    """Bind the pinned checkout to our data; returns a campaign searcher."""
+    """Bind the pinned checkout to our data; returns a campaign searcher.
+
+    ``model``, when given, is named in every request in place of the first
+    model the server lists; ``bypass_cache`` asks a caching gateway for fresh
+    answers. Without them the requests are exactly upstream's.
+    """
     modules = load_upstream(upstream_root)
     import llmode.llmode as upstream_module  # imported after load_upstream
 
@@ -300,6 +339,8 @@ def build_searcher(
         context: ValidationContext,
     ) -> dict:
         llm = modules.llm(api_key, base_url)
+        if model is not None:
+            llm.model_name = model
         log = CallLog(directory / "llm_calls.jsonl")
         indices = [train.channels.index(name) for name in targets]
         searchers = [
@@ -331,7 +372,12 @@ def build_searcher(
                     searchers, specifications, strict=True
                 ):
                     with (
-                        _counted_requests(llm, log, patience=patience_seconds),
+                        _counted_requests(
+                            llm,
+                            log,
+                            patience=patience_seconds,
+                            bypass_cache=bypass_cache,
+                        ),
                         _specification_appended(upstream_module, specification),
                     ):
                         searcher.step()

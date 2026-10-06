@@ -70,7 +70,7 @@ def _searcher(
 
     def checked(**kwargs) -> dict:
         # LLM-SR names its model in every request, so the endpoint must serve it.
-        check_served_model(served_model_ids(base_url), model, first=False)
+        check_served_model(served_model_ids(base_url), model)
         return search(**kwargs)
 
     return checked
