@@ -51,9 +51,10 @@ def submit(
         else "variables"
     )
     plan = controller.verify(root)
-    live_confirmation = (
-        compare_construction and plan.get("study") == "live_confirmation"
-    )
+    live_confirmation = compare_construction and plan.get("study") in {
+        "live_confirmation",
+        "basin_confirmation",
+    }
     if live_confirmation:
         construction_comparison.check_storage(root)
         label = "confirmation"

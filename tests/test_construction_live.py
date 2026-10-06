@@ -40,6 +40,60 @@ def test_live_roster_includes_all_cases_once_per_policy_and_no_imported_models(
         )
 
 
+def test_basin_confirmation_is_six_fresh_matched_constructions_and_resumes(tmp_path):
+    source_fixture(tmp_path)
+    root = tmp_path / "basins"
+    plan = campaign.freeze(tmp_path / "new", root, study="basin_confirmation")
+    assert campaign.verify(root) == plan
+    assert len(plan["tasks"]) == 6
+    assert set(plan["cells"]) == set(campaign.BASIN_CASES)
+    assert {t["benchmark_id"] for t in plan["tasks"][:2]} == set(campaign.BASIN_CASES)
+    assert {t["seed"] for t in plan["tasks"]} == {0}
+    assert {t["arm"] for t in plan["tasks"]} == {"full"}
+    calls = []
+    base_transport = transport(calls)
+
+    def basin_transport(url, body, timeout):
+        reply = base_transport(url, body, timeout)
+        message = reply["choices"][0]["message"]
+        edits = json.loads(message["content"])
+        for equation in edits.get("equations", []):
+            if equation["name"] == "h_down":
+                equation["terms"][0]["sources"].append("h_down")
+        message["content"] = json.dumps(edits)
+        return reply
+
+    for task in plan["tasks"]:
+        args = {"transport": basin_transport, "token_transport": tokenize}
+        result = campaign.propose(root, plan, task, "http://offline", **args)
+        assert result["status"] == "topology_complete"
+        count = len(calls)
+        assert campaign.propose(root, plan, task, "http://offline", **args) == result
+        assert len(calls) == count
+    summary = campaign.report(root, plan)
+    assert summary["status_counts"] == {"topology_complete": 6}
+    assert summary["all_tasks_terminal"]
+    assert "Basin confirmation: both cases" in (root / "SUMMARY.md").read_text()
+
+
+@pytest.mark.parametrize("change", ["non_basin", "extra_cell", "missing_policy"])
+def test_basin_roster_cannot_silently_expand_or_drop_a_schedule(tmp_path, change):
+    source_fixture(tmp_path)
+    root = tmp_path / "basins"
+    plan = campaign.freeze(tmp_path / "new", root, study="basin_confirmation")
+    if change == "non_basin":
+        plan["tasks"][0]["benchmark_id"] = "unplanned_case"
+    elif change == "extra_cell":
+        plan["cells"]["unplanned_case"] = next(iter(plan["cells"].values()))
+    else:
+        plan["tasks"].pop()
+    plan.pop("artifact_sha256")
+    (root / "plan.json").unlink()
+    sealed_write(root / "plan.json", plan)
+    with pytest.raises(ValueError):
+        campaign.verify(root)
+
+
 @pytest.mark.parametrize(
     "change", ["missing", "duplicate", "seed", "arm", "study", "flag", "wall"]
 )

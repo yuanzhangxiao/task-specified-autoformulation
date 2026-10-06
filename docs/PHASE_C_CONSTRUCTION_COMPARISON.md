@@ -1,5 +1,85 @@
 # Phase C construction schedules
 
+Version 7 adds exact consumer accounting, covariate-aware overlap clarification,
+and concrete cycle/binding repair feedback. The current protocol is
+`phase-c-construction-comparison-7`. The next confirmation is **six fresh
+constructions**: coupled and independent basins, each under separate, joint-fixed
+and joint-adaptive schedules, Full/seed 0. This targets the four affected basin
+drafts and retains the two adaptive basin constructions as matched comparisons.
+No other benchmark is rerun. Model settings and the three-request overall repair
+allowance are unchanged. No functions, fitting, critic or test access is launched.
+
+## Version 7: consumers, overlaps and feedback
+
+Every declared signed use must appear exactly once in its generated equation.
+Uses aimed at runtime-generated process definitions are diagnosed explicitly;
+they are never silently discarded or counted as shared consumers. A named law
+can depend on another named law through `depends_on`, but extra signed uses cannot
+be inserted into its automatic definition. The proposer must choose the intended
+representation. Forward consumer references remain permitted in provisional
+transactions; assembly/whole-draft assessment waits for their equations.
+Reports separate declared consumer counts from assembled uses (including their
+sign and conversion metadata). Only verified assembly is labeled local/shared;
+incomplete or inconsistent accounting is `unverified`. A local law remains legal.
+
+Overlap clarification retains the existing exact-source comparison and also
+detects equal, nonempty **non-covariate driver sets** when the only differences
+are public fixed covariates. Inputs, observations, states and time are never
+discarded as covariates. The prompt shows both source sets and process conversions.
+This asks whether the contributions are distinct; it does not infer a duplicate
+physical effect or delete one automatically. A distinction confirmation is bound
+to the exact evidence, including the covariate comparison.
+
+Algebraic-loop feedback includes a concrete cycle and its assembled equations.
+Memory-path feedback names the actual `mechanism_bindings` entry, target ancestors
+and appropriate edit options; it does not assign a state or substitute
+`feedback_bindings`. Optional claims may be explicitly withdrawn; mandatory
+assignments still require a valid replacement. Accepted-edit feedback now includes
+variable changes. A repeated process-definition equation is normalized only if
+its complete term declaration exactly matches the runtime-generated definition;
+conflicts and different definitions still require a proposer edit. Raw replies
+and the normalization log are retained.
+
+The live-v5 offline audit covers 99 actual-predecessor replies: all 92 historically
+accepted transactions remain accepted, and one exact repeated definition is newly
+accepted. Of 24 saved final drafts, 22 were historically eligible and 20 remain
+eligible under these checks. The two intended changes are independent/joint-fixed
+(self-consumer) and coupled/joint-fixed (covariate-only overlap). This does not
+recover or promote any model and cannot establish live scientific improvement.
+
+## Basin confirmation on ACES
+
+Use a fresh pinned source bundle with `inputs/topology-source/plan.json`. Upload
+the archive to the group scratch directory, verify its `SHA256SUMS`, then run:
+
+```bash
+bash scripts/hpc/start_phase_c_construction_basin.sh run
+```
+
+The wrapper defaults to
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-construction-basins-v1`,
+wave `basins-1`. It uses the existing one-H100 service, a three-hour worker window,
+quota write probes, logged/cached calls and submission receipts. Repeating `run`
+does not submit a duplicate wave. If a new allocation is needed for unfinished
+work, use the same source/root and a new `AF_COMPARISON_WAVE`; completed tasks
+remain cached. It does not continue automatically.
+
+After jobs finish, from that same source directory:
+
+```bash
+bash scripts/hpc/start_phase_c_construction_basin.sh inspect
+```
+
+Read `SUMMARY.md`, `TOPOLOGY.html` and the linked per-task request/response traces.
+Download `phase-c-construction-basins-v1/inspection.tar.gz` for inspection.
+Structural completion remains separate from scientific adequacy. Basin threshold
+laws, physical conversion choices, and successful fitting remain untested here.
+The general 24-task and 96-task options remain available with new defaults
+`phase-c-construction-live-v6` and `phase-c-construction-comparison-v7`.
+Historical campaigns still require their original pinned source.
+
+Historical implementation changes follow for provenance.
+
 Version 6 clarifies the binding and named-process handoff. The protocol is
 `phase-c-construction-comparison-6`; fresh defaults are
 `phase-c-construction-comparison-v6` and `phase-c-construction-live-v5`.

@@ -33,16 +33,17 @@ from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-6"
+PROTOCOL = "phase-c-construction-comparison-7"
 REPO = baseline.REPO
-Study = Literal["comparison", "live_confirmation"]
-STUDIES = ("comparison", "live_confirmation")
+Study = Literal["comparison", "live_confirmation", "basin_confirmation"]
+STUDIES = ("comparison", "live_confirmation", "basin_confirmation")
+BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 
 
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-6"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-7"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -66,6 +67,7 @@ def source_identity() -> dict:
                 "scripts/phase_c_construction_comparison.py",
                 "scripts/hpc/start_phase_c_construction_comparison.sh",
                 "scripts/hpc/start_phase_c_construction_live.sh",
+                "scripts/hpc/start_phase_c_construction_basin.sh",
             )
         },
     }
@@ -92,11 +94,16 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
                 if k != "protocol"
             },
             "protocol": PROTOCOL,
-            **({"wall_seconds": 10800} if study == "live_confirmation" else {}),
+            **({"wall_seconds": 10800} if study != "comparison" else {}),
         }
     )
+    roster = (
+        BASIN_CASES
+        if study == "basin_confirmation"
+        else topology_confirmation.phase_c_inputs.ROSTER
+    )
     cells = {}
-    for name in topology_confirmation.phase_c_inputs.ROSTER:
+    for name in roster:
         cell = contract.correct_roles(
             {
                 k: old["cells"][name][k]
@@ -117,15 +124,13 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
         )
         cells[name] = cell
     source_tasks = old["tasks"]
-    if study == "live_confirmation":
+    if study != "comparison":
         by_case = {
             t["benchmark_id"]: t
             for t in source_tasks
             if t["seed"] == 0 and t["arm"] == "full"
         }
-        source_tasks = [
-            by_case[name] for name in topology_confirmation.phase_c_inputs.ROSTER
-        ]
+        source_tasks = [by_case[name] for name in roster]
     blocks = []
     for i, task in enumerate(source_tasks):
         # Rotate policies within matched blocks so draining does not always omit
@@ -142,11 +147,11 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
                 for policy in policies
             ]
         )
-    # Expose every case in the first eight tasks of the small confirmation.
+    # Expose every selected case before starting its second policy.
     # Every case receives every policy; rotation is independent of results.
     tasks = (
         [block[j] for j in range(3) for block in blocks]
-        if study == "live_confirmation"
+        if study != "comparison"
         else [task for block in blocks for task in block]
     )
     with public._lock(root):
@@ -155,8 +160,10 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
             {
                 "protocol": PROTOCOL,
                 "study": study,
-                "selection_rule": "all-eight-cases-seed0-full-three-policies-1"
-                if study == "live_confirmation"
+                "selection_rule": "both-basins-seed0-full-three-policies-1"
+                if study == "basin_confirmation"
+                else "all-eight-cases-seed0-full-three-policies-1"
+                if study != "comparison"
                 else "full-case-seed-prompt-roster-1",
                 "config": config.model_dump(mode="json"),
                 "cells": cells,
@@ -174,7 +181,7 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
 
 
 def verify(root: Path) -> dict:
-    """Resume only the frozen source and the exact declared 96- or 24-task roster."""
+    """Resume only the frozen source and exact declared 96-, 24- or 6-task roster."""
     plan = sealed_read(root / "plan.json")
     if plan["protocol"] != PROTOCOL or plan["source_identity"] != source_identity():
         raise ValueError("construction comparison source/protocol differs")
@@ -188,15 +195,20 @@ def verify(root: Path) -> dict:
     study = plan.get("study", "comparison")
     if study not in STUDIES:
         raise ValueError("unknown construction study")
-    if study == "live_confirmation" and plan["config"]["wall_seconds"] != 10800:
+    if study != "comparison" and plan["config"]["wall_seconds"] != 10800:
         raise ValueError("live confirmation uses a three-hour worker window")
+    roster = (
+        BASIN_CASES
+        if study == "basin_confirmation"
+        else topology_confirmation.phase_c_inputs.ROSTER
+    )
+    if set(plan["cells"]) != set(roster):
+        raise ValueError("public cells differ from study roster")
     expected = {
         (case, seed, arm, policy)
-        for case in topology_confirmation.phase_c_inputs.ROSTER
-        for seed in ((0,) if study == "live_confirmation" else (0, 1))
-        for arm in (
-            ("full",) if study == "live_confirmation" else ("full", "brief_only")
-        )
+        for case in roster
+        for seed in ((0,) if study != "comparison" else (0, 1))
+        for arm in (("full",) if study != "comparison" else ("full", "brief_only"))
         for policy in schedules.POLICIES
     }
     actual = [
@@ -596,7 +608,12 @@ def report(root: Path, plan: dict) -> dict:
         "# Phase C construction schedules",
         "",
         "Fresh variables and topology; no functions or fitting.",
-        "Live confirmation: all eight cases, seed 0, Full only; not a strategy ranking."
+        "Basin confirmation: both cases, seed 0, Full only; not a strategy ranking."
+        if plan.get("study") == "basin_confirmation"
+        else (
+            "Live confirmation: all eight cases, seed 0, Full only; "
+            "not a strategy ranking."
+        )
         if plan.get("study") == "live_confirmation"
         else "Full matched construction comparison.",
         "Completion means declared structural checks passed, not scientific adequacy.",

@@ -198,10 +198,136 @@ def process_reference_issues(draft: Draft) -> list[dict]:
     return issues
 
 
+def consumer_destination_issues(draft: Draft) -> list[dict]:
+    """Never silently drop a use at a runtime-generated process definition."""
+    names = {p.name for p in draft.processes}
+    return [
+        {
+            "code": "process_definition_consumer",
+            "process": p.name,
+            "use": use.model_dump(mode="json"),
+            "reason": (
+                "A process definition is its one law, not an equation receiving "
+                "additional signed uses. It cannot consume itself or another law "
+                "through uses. No consumer was removed or reassigned."
+            ),
+            "repair_options": [
+                "Replace this process's uses with its intended generated-equation "
+                "consumers; preserve their signs and conversions. One actual "
+                "consumer is a valid local influence, not a shared process.",
+                "If a composite process law is intended, declare that dependency "
+                "in depends_on and remove this use; choose its scientific meaning "
+                "explicitly. Algebraic cycles remain invalid.",
+            ],
+        }
+        for p in draft.processes
+        for use in p.uses
+        if use.target in names
+    ]
+
+
+def normalize_definition_repeats(
+    raw: object, draft: Draft
+) -> tuple[object, list[dict]]:
+    """Drop only an exact repeat of an automatically generated law definition.
+
+    Validate the entire edit first. Conflicting operations and different laws
+    remain unchanged for the ordinary transactional validator to reject.
+    """
+    from autoformalism.search import shared_process_contract, signed_processes
+    from autoformalism.search.construction_ledger import DraftPatch
+
+    try:
+        patch = DraftPatch.model_validate(raw)
+    except ValueError:
+        return raw, []
+    if set(patch.remove_processes) & {p.name for p in patch.processes} or set(
+        patch.remove_equations
+    ) & {e.name for e in patch.equations}:
+        return raw, []
+    processes = {
+        p.name: p for p in draft.processes if p.name not in patch.remove_processes
+    }
+    processes.update((p.name, p) for p in patch.processes)
+    removed, log = set(), []
+    for e in patch.equations:
+        if e.name not in processes:
+            continue
+        expected = shared_process_contract.definition(
+            signed_processes.binding_for(processes[e.name])
+        )
+        if e.terms == expected.terms:
+            removed.add(e.name)
+            log.append(
+                {
+                    "code": "repeated_process_definition",
+                    "equation": e.model_dump(mode="json"),
+                    "canonical_definition": expected.model_dump(mode="json"),
+                    "scientific_content_changed": False,
+                }
+            )
+    if not removed:
+        return raw, []
+    return {
+        **raw,
+        "equations": [e for e in raw["equations"] if e["name"] not in removed],
+    }, log
+
+
+def algebraic_cycle_issues(equations: tuple) -> list[dict]:
+    """Give a concrete dependency cycle; differential feedback remains allowed."""
+    algebraic = {e.name: e for e in equations if e.definition == "algebraic"}
+    edges = {
+        n: sorted({s for t in e.terms for s in t.sources if s in algebraic})
+        for n, e in algebraic.items()
+    }
+    done: set[str] = set()
+
+    def visit(name: str, path: list[str]) -> list[str] | None:
+        if name in path:
+            return [*path[path.index(name) :], name]
+        if name in done:
+            return None
+        for child in edges[name]:
+            cycle = visit(child, [*path, name])
+            if cycle:
+                return cycle
+        done.add(name)
+        return None
+
+    for name in sorted(edges):
+        cycle = visit(name, [])
+        if cycle:
+            return [
+                {
+                    "code": "algebraic_dependency_cycle",
+                    "cycle": cycle,
+                    "edge_direction": "equation depends on source",
+                    "equations": [
+                        algebraic[n].model_dump(mode="json") for n in cycle[:-1]
+                    ],
+                    "repair_options": [
+                        "Reconsider the dependencies and consumers on this cycle. "
+                        "Replace the intended equations or process declarations "
+                        "together; runtime cannot choose which link is wrong.",
+                        "If a quantity is scientifically a state, explicitly revise "
+                        "its type and derivative dependencies; do not change type "
+                        "merely to suppress the cycle check.",
+                    ],
+                    "process_definition_rule": (
+                        "Edit depends_on to revise a named law. Runtime rebuilds its "
+                        "definition; do not provide a second equation for it."
+                    ),
+                }
+            ]
+    return []
+
+
 def edit_effects(before: Draft, after: Draft) -> dict:
     """Expose replaced RHSs and changed uses so the next call sees consequences."""
     changes = {}
     for field, key in (
+        ("variables", "name"),
         ("equations", "name"),
         ("processes", "name"),
         ("mechanism_bindings", "requirement_id"),

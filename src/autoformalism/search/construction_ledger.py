@@ -130,6 +130,8 @@ def normalize_reply(
     """Normalize delivery/namespace mistakes, without assigning scientific roles."""
     value = deepcopy(raw)
     changes = []
+    if draft is not None:
+        value, changes = construction_handoff.normalize_definition_repeats(value, draft)
     if graph_contract is not None and isinstance(value, dict):
         graph_ids = {r.id for r in graph_contract.obligations}
         real_ids = {r.id for r in brief.requirements}
@@ -232,18 +234,57 @@ def normalize_reply(
     return value, changes
 
 
-def process_usage(draft: Draft) -> list[dict]:
-    """Count distinct consumers, independently of process naming or prose."""
-    return [
-        {
-            "name": p.name,
-            "kind": p.kind,
-            "consumers": sorted({u.target for u in p.uses}),
-            "consumer_count": len({u.target for u in p.uses}),
-            "scope": "shared" if len({u.target for u in p.uses}) >= 2 else "local",
-        }
-        for p in draft.processes
-    ]
+def process_usage(
+    draft: Draft, equations: tuple[EquationDefinition, ...] | None = None
+) -> list[dict]:
+    """Separate declared consumers from uses actually present in assembled RHSs."""
+    assembled = {e.name: e for e in equations or ()}
+    process_names = {p.name for p in draft.processes}
+    rows = []
+    for p in draft.processes:
+        consumers = sorted({u.target for u in p.uses})
+        uses = []
+        for u in p.uses:
+            equation = assembled.get(u.target)
+            count = (
+                sum(
+                    t.sources == (p.name,) and t.outer_weight_sign.value == u.sign
+                    for t in equation.terms
+                )
+                if equation and u.target not in process_names
+                else 0
+            )
+            uses.append(
+                {
+                    **u.model_dump(mode="json"),
+                    "assembled_count": count if equations is not None else None,
+                }
+            )
+        verified = (
+            equations is not None
+            and len(consumers) == len(p.uses)
+            and all(u["assembled_count"] == 1 for u in uses)
+        )
+        rows.append(
+            {
+                "name": p.name,
+                "kind": p.kind,
+                "consumers": consumers,
+                "consumer_count": len(consumers),
+                "count_basis": "declared distinct consumers",
+                "assembled_consumers": sorted(
+                    {u["target"] for u in uses if u["assembled_count"] == 1}
+                )
+                if equations is not None
+                else None,
+                "uses": uses,
+                "assembly_verified": verified,
+                "scope": ("shared" if len(consumers) >= 2 else "local")
+                if verified
+                else "unverified",
+            }
+        )
+    return rows
 
 
 def inventory(
@@ -399,6 +440,9 @@ def assembled_equations(
     brief: PublicScientificBrief, draft: Draft
 ) -> tuple[EquationDefinition, ...]:
     """Insert one shared definition and its linked uses into the visible skeleton."""
+    issues = construction_handoff.consumer_destination_issues(draft)
+    if issues:
+        raise ValueError("process uses cannot target runtime-generated definitions")
     bindings = [signed_processes.binding_for(p) for p in draft.processes]
     definitions = {v.name: v.definition for v in inventory(brief, draft)}
     equations = [shared_process_contract.definition(b) for b in bindings]
@@ -419,19 +463,36 @@ def assembled_equations(
         equations.append(
             EquationDefinition(name=e.name, definition=definitions[e.name], terms=terms)
         )
-    return tuple(equations)
+    result = tuple(equations)
+    for usage in process_usage(draft, result):
+        if not usage["assembly_verified"]:
+            raise ValueError(
+                f"{usage['name']}: every declared consumer must have one assembled "
+                f"use with its declared sign; accounting={usage['uses']}"
+            )
+    return result
 
 
-def contribution_overlaps(draft: Draft) -> list[dict]:
+def contribution_overlaps(
+    draft: Draft, brief: PublicScientificBrief | None = None
+) -> list[dict]:
     """Identify ambiguous repeated source sets, never infer physical duplication."""
     confirmations = {c.overlap_id: c for c in draft.overlap_confirmations}
+    covariates = (
+        {v.name for v in brief.public_variables if v.data_role == "covariate"}
+        if brief
+        else set()
+    )
     rows = []
     for equation in draft.equations:
         for index, term in enumerate(equation.terms):
             for process in draft.processes:
                 for use in process.uses:
-                    if use.target != equation.name or set(term.sources) != set(
-                        process.depends_on
+                    ordinary, drivers = set(term.sources), set(process.depends_on)
+                    exact = ordinary == drivers
+                    dynamic = ordinary - covariates
+                    if use.target != equation.name or not (
+                        exact or (dynamic and dynamic == drivers - covariates)
                     ):
                         continue
                     evidence = {
@@ -443,6 +504,13 @@ def contribution_overlaps(draft: Draft) -> list[dict]:
                             v.model_dump(mode="json") for v in draft.variables
                         ],
                     }
+                    if not exact:
+                        evidence["fixed_covariate_comparison"] = {
+                            "matching_non_covariate_drivers": sorted(dynamic),
+                            "ordinary_covariates": sorted(ordinary & covariates),
+                            "process_covariates": sorted(drivers & covariates),
+                            "public_covariates": sorted(covariates),
+                        }
                     identity = content_hash(evidence)
                     confirmation = confirmations.get(identity)
                     rows.append(
@@ -465,6 +533,8 @@ def contribution_overlaps(draft: Draft) -> list[dict]:
                                 "retain both via overlap_confirmations with this "
                                 "overlap_id and a scientific_distinction. "
                                 "Matching drivers alone do not prove duplication."
+                                " Differences only in fixed covariates may express "
+                                "a conversion or a distinct effect; choose explicitly."
                             ),
                         }
                     )
@@ -511,21 +581,20 @@ def equation_views(draft: Draft) -> list[dict]:
 def snapshot(brief: PublicScientificBrief, draft: Draft) -> dict:
     """Render current truth, including unresolved work, on every initial/repair call."""
     try:
-        equations = [
-            e.model_dump(mode="json") for e in assembled_equations(brief, draft)
-        ]
+        assembled = assembled_equations(brief, draft)
+        equations = [e.model_dump(mode="json") for e in assembled]
         assembly_error = None
     except ValueError as exc:
-        equations, assembly_error = None, str(exc)
+        assembled, equations, assembly_error = None, None, str(exc)
     return {
         "declarations": draft.model_dump(mode="json"),
         "assembled_equations": equations,
         "assembly_pending_reason": assembly_error,
         "pending": pending(brief, draft),
-        "process_usage": process_usage(draft),
+        "process_usage": process_usage(draft, assembled),
         "equation_views": equation_views(draft),
-        "potential_contribution_overlaps": contribution_overlaps(draft),
-        "already_included_process_uses": [
+        "potential_contribution_overlaps": contribution_overlaps(draft, brief),
+        "declared_process_uses": [
             {
                 "process": p.name,
                 "drivers": list(p.depends_on),
@@ -590,9 +659,11 @@ def assess(
                 ),
             )
     errors.extend(construction_handoff.process_reference_issues(draft))
+    errors.extend(construction_handoff.consumer_destination_issues(draft))
     equations, topology, aliases = (), None, {}
     try:
         equations = assembled_equations(brief, draft)
+        errors.extend(construction_handoff.algebraic_cycle_issues(equations))
         topology, aliases = lower_topology(brief, inv, equations, context)
     except (ValueError, ModelValidationError) as exc:
         fail("compiler", reason=str(exc))
@@ -671,11 +742,35 @@ def assess(
             )
             continue
         prior_errors = len(errors)
+        binding_feedback = {
+            "field": "mechanism_bindings",
+            "entry": binding.model_dump(mode="json"),
+            "mandatory": r.requires_dynamic_memory,
+            "repair_options": [
+                "Replace this mechanism_bindings entry with the scientifically "
+                "intended state(s); feedback_bindings is a different field.",
+                "If these states are intended, revise the necessary equation "
+                "dependencies to establish the displayed driver/memory/target paths.",
+            ]
+            + (
+                []
+                if r.requires_dynamic_memory
+                else [
+                    f"If this optional assignment is unintended, remove it with "
+                    f"remove_bindings=[{r.id!r}]. Empty lists preserve old entries."
+                ]
+            ),
+        }
         for state in binding.memory_states:
             if definitions.get(state) != "differential" or (
                 r.requires_dynamic_memory and state in {*r.targets, *r.drivers}
             ):
-                fail("memory_type", requirement=r.id, state=state)
+                fail(
+                    "memory_type",
+                    requirement=r.id,
+                    state=state,
+                    binding_feedback=binding_feedback,
+                )
             for driver in r.drivers if graph_available else ():
                 if driver not in _ancestors(state, graph) and not (
                     not r.requires_dynamic_memory and driver == state
@@ -685,6 +780,7 @@ def assess(
                         requirement=r.id,
                         driver=driver,
                         memory=state,
+                        binding_feedback=binding_feedback,
                     )
         for target in r.targets if graph_available else ():
             ancestors = _ancestors(target, graph)
@@ -696,6 +792,8 @@ def assess(
                     requirement=r.id,
                     target=target,
                     memories=list(binding.memory_states),
+                    target_ancestors=sorted(_ancestors(target, graph)),
+                    binding_feedback=binding_feedback,
                 )
         memory_checks.append(
             {
@@ -714,7 +812,7 @@ def assess(
                 ),
             }
         )
-    overlaps = contribution_overlaps(draft)
+    overlaps = contribution_overlaps(draft, brief)
     clarifications = (
         [r for r in overlaps if r["status"] == "clarification_required"]
         if clarify_overlaps
@@ -744,7 +842,7 @@ def assess(
         "shared_process_bindings": [
             signed_processes.binding_for(p) for p in draft.processes
         ],
-        "process_usage": process_usage(draft),
+        "process_usage": process_usage(draft, equations or None),
         "scientific_adequacy": "not_assessed",
         "scope": (
             "Declared structural predicates only; functions, initialization and "

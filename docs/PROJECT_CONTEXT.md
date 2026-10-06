@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+Construction comparison version 7 verifies every declared process consumer in
+the assembled skeleton, clarifies covariate-only contribution overlap, and shows
+concrete algebraic cycles and binding edit options. Scientific assignments remain
+proposer decisions. The saved 99-reply audit preserves all 92 accepted transactions;
+two previously eligible basin drafts are intentionally flagged. The next fresh
+confirmation is six basin constructions (two cases, three schedules, Full/seed 0),
+with unchanged model/repair budgets and no functions or fitting. See
+`PHASE_C_CONSTRUCTION_COMPARISON.md` for commands and limitations.
+
 Construction comparison version 6 makes binding formats and removal keys explicit,
 logs irrelevant readout-annotation cleanup without assigning scientific mediators,
 and records unambiguous signed references to named laws as shared consumer uses.

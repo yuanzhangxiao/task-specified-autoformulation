@@ -73,6 +73,11 @@ no such binding. Bindings express
 your intended scientific assignment; complete equations must establish the paths.
 For each optional named process, choose its drivers, scientific meaning and signed
 consumers together. The runtime defines it once and inserts every declared use.
+Consumers are generated variables with their own equations, not named-process
+definitions. Never list a process itself as its own consumer. For a composite
+law, declare its process dependencies in depends_on; runtime will not silently
+drop uses or reinterpret them as dependencies. Edit a named law via processes,
+not via a second equation with the same name.
 A SHARED process has at least two DISTINCT generated-equation consumers. A process
 with one consumer is LOCAL, even if its name or formula resembles another process.
 Prefer an ordinary equation term for a local contribution. An explicitly named
@@ -112,6 +117,9 @@ for the same effect. Return terms=[] when process uses provide the whole equatio
 equation_views
 shows those uses even when ordinary_rhs_declared=false. A missing ordinary-RHS
 declaration is NOT an empty equation. If runtime flags possible overlapping
+contributions with the same dynamic drivers but different fixed covariates,
+consider whether a conversion is being repeated; no duplicate is inferred.
+For all potentially overlapping
 contributions, clarify whether they are the same physical effect. Remove the
 ordinary repetition with an equation replacement if appropriate. If they are
 distinct effects, give overlap_confirmations=[{"overlap_id":"<displayed hash>",

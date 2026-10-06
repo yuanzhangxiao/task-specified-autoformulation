@@ -9,8 +9,9 @@ export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432f
 export AF_REPO_ROOT="$AF_TOOLS"
 AF_STUDY=${AF_COMPARISON_STUDY:-comparison}
 case "$AF_STUDY" in
-  comparison) AF_DEFAULT_ROOT=phase-c-construction-comparison-v6 ;;
-  live_confirmation) AF_DEFAULT_ROOT=phase-c-construction-live-v5 ;;
+  comparison) AF_DEFAULT_ROOT=phase-c-construction-comparison-v7 ;;
+  live_confirmation) AF_DEFAULT_ROOT=phase-c-construction-live-v6 ;;
+  basin_confirmation) AF_DEFAULT_ROOT=phase-c-construction-basins-v1 ;;
   *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
 esac
 export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/$AF_DEFAULT_ROOT}

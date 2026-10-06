@@ -481,7 +481,10 @@ def test_explicit_feedback_dependency_is_checked_at_topology_without_forcing_dec
 def test_process_reporting_counts_distinct_consumers_not_names_or_repeated_uses():
     use = {"target": "y", "sign": "positive", "conversion": None}
     local = ledger.ProcessDeclaration(**process(kind="influence", uses=[use]))
-    assert ledger.process_usage(ledger.Draft(processes=(local,)))[0]["scope"] == "local"
+    assert (
+        ledger.process_usage(ledger.Draft(processes=(local,)))[0]["scope"]
+        == "unverified"
+    )
     duplicate = local.model_copy(update={"uses": (local.uses[0], local.uses[0])})
     assert (
         ledger.process_usage(ledger.Draft(processes=(duplicate,)))[0]["consumer_count"]
@@ -489,5 +492,6 @@ def test_process_reporting_counts_distinct_consumers_not_names_or_repeated_uses(
     )
     shared = ledger.ProcessDeclaration(**process())
     assert (
-        ledger.process_usage(ledger.Draft(processes=(shared,)))[0]["scope"] == "shared"
+        ledger.process_usage(ledger.Draft(processes=(shared,)))[0]["scope"]
+        == "unverified"
     )
