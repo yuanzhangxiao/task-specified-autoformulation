@@ -648,3 +648,14 @@ all latent initials pass. Next compare training-only polishing under the same
 budget, preserving the first certified checkpoint and evaluating coefficient
 recovery separately. This remains one assisted correct-structure problem, not
 production qualification or a universal fitting result.
+
+## M15 — polish residual coefficient errors without reference-guided stopping
+
+The [M15 runbook](PHASE_C_FITTING_POLISHING.md) implements the approved paired
+follow-up on all three original starts. Each arm preserves its first independently
+certified prediction, then may warm-start once toward tighter training-only
+targets using the remaining original time/call budget. Final selection precedes
+all coefficient/validation assessment; before/after errors quantify whether
+extra prediction precision improves parameter recovery. Six CPU tasks default to
+six-way concurrency on Delta. General coefficients inside coupled state equations
+remain a later strategy discussion, and production defaults remain unchanged.
