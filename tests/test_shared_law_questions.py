@@ -9,6 +9,7 @@ from autoformalism.llm.construction import ConstructionClient
 from autoformalism.llm.staged_topology import DeferredCall, StagedModelSettings
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import construction_comparison as campaign
+from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_schedules as schedules
 from tests.test_construction_comparison import source_fixture, transport
 from tests.test_construction_ledger import (
@@ -21,6 +22,147 @@ from tests.test_construction_ledger import (
 )
 from tests.test_explicit_variable_bindings import response
 from tests.test_phase_c_construction_baseline import tokenize
+
+
+@pytest.mark.parametrize("policy", schedules.POLICIES)
+def test_multi_lhs_batch_finishes_without_scope_retry_and_resumes(tmp_path, policy):
+    calls = []
+
+    def send(url, body, timeout):
+        p = json.loads(body["messages"][1]["content"])
+        calls.append(p)
+        if p["stage"] == "variables" or (
+            p["stage"] == "relationships" and policy != "separate"
+        ):
+            result = patch(
+                variables=[variable("x"), variable("y")], stage_complete=True
+            )
+        elif p["stage"] == "relationships":
+            result = patch(stage_complete=True)
+        else:
+            result = patch(
+                equations=[equation("x", "u"), equation("y", "x")],
+                stage_complete=True,
+            )
+        return response(result.model_dump(mode="json"))
+
+    def run():
+        client = ConstructionClient(
+            settings=StagedModelSettings(
+                maximum_requests=128, maximum_total_tokens=524288
+            ),
+            directory=tmp_path / "calls",
+            namespace="multi-lhs",
+            seed=0,
+            base_url="http://offline",
+            transport=send,
+            token_transport=tokenize,
+        )
+        return schedules.run(
+            brief(),
+            context(),
+            {},
+            brief().model_dump(mode="json"),
+            client,
+            tmp_path / "construction",
+            policy,
+        )
+
+    result = run()
+    assert result["status"] == "topology_complete"
+    assert result["before_repair"]["assessment"]["eligible"]
+    assert sum(p["stage"] == "equations" for p in calls) == 1
+    assert not any(p["stage"] == "repair" for p in calls)
+    count = len(calls)
+    assert run() == result and len(calls) == count
+    assert {e["name"] for e in result["draft"]["equations"]} == {"x", "y"}
+
+
+def test_rejected_batch_receipt_shows_actual_retained_entries(tmp_path):
+    calls = []
+
+    def send(url, body, timeout):
+        p = json.loads(body["messages"][1]["content"])
+        calls.append(p)
+        if p["stage"] == "relationships":
+            edits = patch(variables=[variable("x"), variable("y")], stage_complete=True)
+        elif sum(c["stage"] == "equations" for c in calls) == 1:
+            edits = patch(
+                variables=[variable("z")],
+                equations=[equation("x", "u"), equation("y", "x")],
+                remove_equations=["x"],
+                stage_complete=True,
+            )
+        else:
+            receipt = p["last_edit_result"]
+            assert not receipt["transaction_applied"]
+            assert receipt == p["runtime_diagnostics"]
+            assert {
+                v["name"] for v in p["current_draft"]["declarations"]["variables"]
+            } == {"x", "y"}
+            z = next(x for x in receipt["uncommitted_edits"] if x["key"] == "z")
+            assert z["retained_entry"] is None and not z["applied"]
+            assert not p["current_draft"]["declarations"]["equations"]
+            edits = patch(
+                equations=[equation("x", "u"), equation("y", "x")], stage_complete=True
+            )
+        return response(edits.model_dump(mode="json"))
+
+    client = ConstructionClient(
+        settings=StagedModelSettings(maximum_requests=128, maximum_total_tokens=524288),
+        directory=tmp_path / "calls",
+        namespace="rejection",
+        seed=0,
+        base_url="http://offline",
+        transport=send,
+        token_transport=tokenize,
+    )
+    result = schedules.run(
+        brief(),
+        context(),
+        {},
+        brief().model_dump(mode="json"),
+        client,
+        tmp_path / "construction",
+        "joint_guided",
+    )
+    assert result["status"] == "topology_complete"
+    assert {v["name"] for v in result["draft"]["variables"]} == {"x", "y"}
+    assert calls[0]["last_edit_result"] is None
+    assert calls[1]["last_edit_result"]["transaction_applied"]
+
+
+def test_multi_equation_removals_and_scientific_failures_remain_visible():
+    d = ledger.Draft.model_validate(
+        {
+            "variables": [variable("x"), variable("y")],
+            "equations": [equation("x", "u"), equation("y", "x")],
+        }
+    )
+    edits = patch(equations=[equation("y", "missing")], remove_equations=["x"])
+    for policy in schedules.POLICIES:
+        schedules.validate_scope(policy, "equations", "x", edits, d)
+    after = ledger.apply_patch(brief(), d, edits)
+    check = ledger.assess(brief(), context(), {}, after)
+    assert not check["eligible"]
+    assert {e["code"] for e in check["errors"]} >= {
+        "missing_declarations",
+        "equations_to_define",
+    }
+    errors = [
+        {"code": "public_path", "driver": "u"},
+        {"code": "memory_driver_path", "driver": "u", "state": "x"},
+        {"code": "memory_target_path", "target": "y"},
+        {"code": "memory_type", "state": "x"},
+    ]
+    groups = schedules.repair_issue_groups(errors)
+    assert groups["remaining_topology_failures"] == errors[:3]
+    assert groups["binding_failures"] == errors[3:]
+    raw = {"variables": [variable("x", "algebraic")], "remove_variables": ["y"]}
+    receipt = schedules.uncommitted_edits(raw, d)
+    assert receipt[0]["retained_entry"]["definition"] == "differential"
+    assert receipt[1]["retained_entry"]["name"] == "y"
+    assert schedules.uncommitted_edits(None, d) == []
 
 
 def attempt(

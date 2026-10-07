@@ -33,7 +33,7 @@ from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-8"
+PROTOCOL = "phase-c-construction-comparison-9"
 REPO = baseline.REPO
 Study = Literal[
     "comparison", "live_confirmation", "basin_confirmation", "shared_law_comparison"
@@ -51,7 +51,7 @@ BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-8"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-9"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 

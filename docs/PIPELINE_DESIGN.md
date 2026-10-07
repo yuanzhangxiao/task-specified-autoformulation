@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+Construction comparison version 9 allows coordinated ordinary topology edits
+across any LHS. Joint-guided supplies an advisory next target; joint-adaptive
+does not. Stage separation and the separate schedule's inventory freeze remain.
+All scientific edits still pass the same atomic ledger and whole-topology checks.
+Each request displays the previous transaction result, including retained values
+of rejected edits, and global repair keeps path failures visible beside bindings.
+Shared-process elicitation distinguishes one reused quantity from similar local
+laws. The independent draft PHASE_C_MINIMAL_PROMPTS.txt is not executed in v9.
+
 Construction comparison version 8 tests integrated versus dedicated shared-law
 elicitation with one common prompt/ledger and unchanged structural predicates.
 The dedicated decision uses the same request/token cap and local delivery retries;

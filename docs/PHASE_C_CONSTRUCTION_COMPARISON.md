@@ -1,7 +1,48 @@
 # Phase C construction schedules
 
-Version 8 clarifies topology prompts and compares **where the shared-law question
-is asked**. The next run is twelve fresh constructions: coupled and independent
+## Version 9: coordinated topology edits
+
+The current pilot keeps the twelve version-8 case/schedule/question-placement
+combinations, model settings and budgets. It starts fresh and makes three changes:
+
+- Ask about **one physical rate or quantity reused across generated variables**.
+  Different flows with similar formulas do not establish a shared process. The
+  focused question does not ask for local single-consumer processes.
+- Remove the single-LHS editing limit. The suggested LHS is advisory; any related
+  ordinary topologies may be added, replaced or removed together. `joint_fixed`
+  is now called `joint_guided`. `joint_adaptive` omits that suggested LHS. The
+  separate schedule still fixes variable declarations until overall repair.
+- Every request carries the previous transaction result. A rejected transaction
+  lists attempted edits beside their actual retained declarations (or null when
+  absent). Overall repair displays topology/path failures separately from binding
+  declaration failures. All changes remain atomic; rejected edits never survive.
+
+No new scientific acceptance rule, public prompt change or automatic scientific
+assignment is introduced. Shared-process uses still propagate to all consumers.
+Existing stage boundaries remain: variables first in the separate schedule,
+relationship/shared-process planning, then ordinary topology, then bounded repair.
+
+An offline audit of the version-8 basin evidence replays 73 replies against their
+actual displayed predecessors. All 59 previously accepted transactions remain
+accepted; eight more are mechanically accepted. Three other replies formerly
+stopped by the single-LHS rule still have independent representation errors.
+This audit neither reconstructs a hypothetical new dialogue nor recovers models.
+The fresh pilot is needed to measure proposer behavior with the revised prompts.
+
+Use the new pinned bundle and `start_phase_c_shared_laws.sh run`. Defaults are
+`phase-c-shared-laws-v2`, wave `shared-laws-2`; use `inspect` after completion.
+The roster remains coupled/independent basin x three schedules x two question
+placements, Full/seed 0. No interaction functions, fitting or test access.
+
+`PHASE_C_MINIMAL_PROMPTS.txt` is a separate, unimplemented review draft. It is not
+used in version 9. A future comparison must freeze its schema/prompt adapter and
+common scientific checks before launching; historical before/after runs alone
+cannot isolate the effect of wording, scheduling and editing flexibility.
+
+## Historical version 8
+
+Version 8 clarified topology prompts and compared **where the shared-law question
+was asked**. Its run used twelve fresh constructions: coupled and independent
 basins x three existing construction schedules x integrated/dedicated question,
 Full/seed 0. Use `start_phase_c_shared_laws.sh`, not the older basin wrapper.
 No functions, fitting, critic or test access is launched.

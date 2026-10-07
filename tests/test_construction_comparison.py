@@ -362,8 +362,7 @@ def test_policy_scope_does_not_change_structural_rules():
         variables=[variable("x")], equations=[equation("y", "x"), equation("x", "u")]
     )
     schedules.validate_scope("joint_adaptive", "equations", None, edits)
-    with pytest.raises(ValueError, match="only equation"):
-        schedules.validate_scope("joint_fixed", "equations", "y", edits)
+    schedules.validate_scope("joint_guided", "equations", "y", edits)
     with pytest.raises(ValueError, match="fixes the variable"):
         schedules.validate_scope("separate", "equations", "y", edits)
     for policy in schedules.POLICIES:
@@ -394,7 +393,7 @@ def test_resume_after_deferred_request_has_no_new_first_calls(tmp_path):
             brief(True).model_dump(mode="json"),
             client(lambda: len(calls) < 2),
             tmp_path / "construction",
-            "joint_fixed",
+            "joint_guided",
         )
     result = schedules.run(
         brief(True),
@@ -403,7 +402,7 @@ def test_resume_after_deferred_request_has_no_new_first_calls(tmp_path):
         brief(True).model_dump(mode="json"),
         client(lambda: True),
         tmp_path / "construction",
-        "joint_fixed",
+        "joint_guided",
     )
     assert result["status"] == "topology_complete"
     assert len(calls) == 3
@@ -616,11 +615,10 @@ def test_repeated_inventory_and_equations_are_idempotent_effective_edits():
     p = patch(variables=[{**variable("y"), "scientific_role": "rephrased"}])
     schedules.validate_scope("separate", "equations", "x", p, d)
     p = patch(equations=[equation("y", "u"), equation("x", "u")])
-    schedules.validate_scope("joint_fixed", "equations", "x", p, d)
-    with pytest.raises(ValueError, match="only equation"):
-        schedules.validate_scope(
-            "joint_fixed", "equations", "x", patch(equations=[equation("y", "x")]), d
-        )
+    schedules.validate_scope("joint_guided", "equations", "x", p, d)
+    schedules.validate_scope(
+        "joint_guided", "equations", "x", patch(equations=[equation("y", "x")]), d
+    )
     with pytest.raises(ValueError, match="new/type-changed"):
         schedules.validate_scope(
             "separate",
@@ -788,7 +786,7 @@ def test_truncated_whitespace_reply_is_not_committed_and_gets_delivery_feedback(
         brief(True).model_dump(mode="json"),
         client,
         tmp_path / "construction",
-        "joint_fixed",
+        "joint_guided",
     )
     assert result["status"] == "topology_complete"
     retry = next(p for p in calls if (p["runtime_diagnostics"] or {}).get("delivery"))
@@ -880,7 +878,7 @@ def test_conversion_normalization_preserves_raw_cache_and_replays_journal(tmp_pa
             brief(True).model_dump(mode="json"),
             client,
             tmp_path / "construction",
-            "joint_fixed",
+            "joint_guided",
         )
 
     result = attempt()

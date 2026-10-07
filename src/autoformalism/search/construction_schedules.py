@@ -19,21 +19,26 @@ from autoformalism.search import construction_ledger as ledger
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.staged_topology import content_hash
 
-Policy = Literal["separate", "joint_fixed", "joint_adaptive"]
-POLICIES = ("separate", "joint_fixed", "joint_adaptive")
+Policy = Literal["separate", "joint_guided", "joint_adaptive"]
+POLICIES = ("separate", "joint_guided", "joint_adaptive")
 ProcessQuestion = Literal["integrated", "dedicated"]
 PROCESS_QUESTIONS = ("integrated", "dedicated")
 
-SHARED_LAW_QUESTION = """Which contributions to DIFFERENT generated equations represent
-the SAME physical law? Consider the public task and all generated variables together.
-For each justified shared law, return one processes entry with its name, depends_on,
-scientific_meaning, kind and signed uses. These are dependencies and consumers, NOT
-a function expression. This explicitly links the later function across equations;
-separate ordinary terms do not establish that link, even with identical drivers.
-Do not add consumers or coupling merely to create a shared law. If none is justified,
-return no process additions. Empty processes is a valid decision, not a failure.
-Unknown conversions may remain null. The runtime defines each declared law once
-and inserts its signed uses; do not also repeat those effects as ordinary terms."""
+SHARED_LAW_QUESTION = """Is there ONE physical rate or quantity whose value is reused
+as a contribution to two or more generated variables? Consider all targets together.
+For example, a single internal flow P leaves A and enters B: A uses -P and B uses +P.
+P is computed once from its drivers; consumer conversions and magnitudes are applied
+outside it. Two different flows with similar formulas are NOT the same shared process.
+For each justified shared process, return one processes entry with name, depends_on,
+scientific_meaning, kind and signed uses. Each use names a DIFFERENT receiving
+variable; uses are not the separate terms inside one variable's balance.
+This is topology: give drivers and uses, not a formula. Separate ordinary terms
+with identical drivers do not establish reuse of the same later interaction.
+Keep local, single-consumer contributions for the remaining topology work; do not
+create named local processes merely to answer this question. If no quantity is
+reused, return no process additions. Never invent a consumer or physical coupling.
+Empty processes is a valid answer. Unknown conversions may remain null. Runtime
+inserts each declared use once; do not repeat the effect as an ordinary term."""
 
 SYSTEM = """Construct a scientific model's VARIABLES AND TOPOLOGY, not functions.
 The unchanged public scientific task is authoritative. Work on the displayed
@@ -123,10 +128,11 @@ weight sign: positive, negative or unrestricted. A fixed outer sign does not
 assert global monotonicity/nonnegativity of the later function. Self-dependence
 can represent decay, relaxation or feedback when scientifically justified.
 Use ordinary terms for contributions not linked by a shared-law declaration.
-You MAY add or revise processes while declaring a selected equation's topology.
+You MAY add or revise processes while declaring topology.
 Such a process edit can affect OTHER equations: runtime propagates all its uses.
-The selected-LHS restriction applies only to ordinary equations entries, NOT to
-processes entries. A singleton sources=["P"] with an
+The selected LHS is a suggested starting point, never an editing restriction.
+You may add, replace or remove several ordinary topologies together.
+A singleton sources=["P"] with an
 explicit positive/negative outer sign declares use of that SAME named law. Runtime
 records a new consumer with conversion=null (unknown), or includes an existing
 matching use exactly once, preserving its conversion. Do not delete a physical
@@ -173,9 +179,11 @@ stage_complete=true ends the CURRENT STAGE, not merely the selected equation.
 The full brief, current declarations, assembled contributions and pending work
 are repeated on every request. last_edit_result labels accepted edits separately.
 A rejected_reply is a failed attempt, NOT a model
-to copy. Use its separately labeled error to correct the draft. Global structural
-feedback is supplied only after the initial construction ends. Do not claim
-scientific correctness merely because those finite structural checks pass.
+to copy. Its uncommitted_edits list shows the entries that were NOT applied and
+their actual retained values. Redeclare anything still needed; no part of a rejected
+transaction survives. Use its separately labeled error to correct the draft.
+Global structural feedback is supplied only after the initial construction ends.
+Do not claim scientific correctness merely because those finite checks pass.
 An unavailable graph check requires fixing compilation first; it is not a missing
 path verdict. Unresolved public predicates are not scientific passes. Topology
 specifies dependencies; do not defer a known missing dependency to function writing.
@@ -218,8 +226,6 @@ def validate_scope(
     changed_variables = [
         v.name for v in patch.variables if variables.get(v.name) != v.definition
     ]
-    equations = {e.name: e for e in current.equations}
-    changed_equations = [e.name for e in patch.equations if equations.get(e.name) != e]
     if stage == "variables" and (
         patch.equations
         or patch.processes
@@ -243,16 +249,6 @@ def validate_scope(
             f"new/type-changed={changed_variables}, "
             f"removed={list(patch.remove_variables)}. "
             "Unchanged variables may be omitted or repeated."
-        )
-    if (
-        stage == "equations"
-        and policy != "joint_adaptive"
-        and (patch.remove_equations or any(n != focus for n in changed_equations))
-    ):
-        raise ValueError(
-            f"fixed schedule requests only equation {focus}; "
-            f"other changed equations={[n for n in changed_equations if n != focus]}. "
-            "Previously accepted unchanged equations may be omitted or repeated."
         )
 
 
@@ -307,6 +303,8 @@ def instructions(
             "All variable, equation-topology, process and binding edits are allowed. "
             "This is still topology; do not supply function expressions. Preserve "
             "unaffected declarations. Inspect the rebuilt model before further edits. "
+            "Address remaining_topology_failures as well as binding_failures; changing "
+            "an annotation does not itself restore a missing input-to-target path. "
             "Set stage_complete=true when the whole topology is ready for checking."
         )
     if policy == "joint_adaptive":
@@ -320,13 +318,14 @@ def instructions(
     return (
         "You MAY add or revise a shared process and its consumers in this reply; "
         "runtime propagates that declaration to ALL affected equations. "
-        f"Declare signed dependencies for selected LHS {focus}, "
+        f"Suggested next LHS: {focus}. Declare signed dependencies, "
         "not function expressions. "
-        f"Only ordinary equations entries are restricted to {focus}; processes and "
-        "bindings may describe relationships across multiple equations. "
+        "You may handle this and any related LHS variables together, or choose a "
+        "different order. Multiple ordinary topology replacements/removals are "
+        "allowed in one reply. Coordinate processes and bindings as needed. "
         + (
             "You may declare its newly needed variables alongside it. "
-            if policy == "joint_fixed"
+            if policy == "joint_guided"
             else "Use the previously selected generated-variable inventory. "
         )
         + "The runtime then visits remaining targets/dependencies. Do not set "
@@ -363,6 +362,62 @@ def delivery_feedback(record: dict) -> dict | None:
     }
 
 
+def uncommitted_edits(raw: object, draft: ledger.Draft) -> list[dict]:
+    """Show attempted edits against retained truth, without salvaging a rejection."""
+    if not isinstance(raw, dict):
+        return []
+    fields = (
+        ("variables", "name", "remove_variables"),
+        ("equations", "name", "remove_equations"),
+        ("processes", "name", "remove_processes"),
+        ("mechanism_bindings", "requirement_id", "remove_bindings"),
+        ("feedback_bindings", "target", "remove_feedback_bindings"),
+        ("overlap_confirmations", "overlap_id", "remove_overlap_confirmations"),
+    )
+    result = []
+    for field, key, removal in fields:
+        current = {
+            getattr(entry, key): entry.model_dump(mode="json")
+            for entry in getattr(draft, field)
+        }
+        for edit_field, operation in ((field, "replace"), (removal, "remove")):
+            entries = raw.get(edit_field, [])
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                name = entry.get(key) if isinstance(entry, dict) else entry
+                if isinstance(name, str):
+                    result.append(
+                        {
+                            "field": field,
+                            "key": name,
+                            "attempted_operation": operation,
+                            "applied": False,
+                            "retained_entry": current.get(name),
+                        }
+                    )
+    return result
+
+
+def repair_issue_groups(errors: list[dict]) -> dict:
+    """Keep model failures visible separately from annotation failures."""
+    binding_codes = {
+        "required_memory_bindings",
+        "unknown_memory_requirement",
+        "unknown_feedback_target",
+        "differential_target_is_own_coordinate",
+        "memory_type",
+    }
+    return {
+        "remaining_topology_failures": [
+            error for error in errors if error["code"] not in binding_codes
+        ],
+        "binding_failures": [
+            error for error in errors if error["code"] in binding_codes
+        ],
+    }
+
+
 def run(
     brief: PublicScientificBrief,
     context: ValidationContext,
@@ -379,6 +434,7 @@ def run(
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
     draft, events, records = ledger.Draft(), [], []
+    last_edit_result = None
     original = client.settings
     if policy not in POLICIES:
         raise ValueError("unknown construction policy")
@@ -399,7 +455,7 @@ def run(
     )
 
     def request(stage: str, focus: str | None, diagnostic: dict | None, attempt: int):
-        nonlocal draft
+        nonlocal draft, last_edit_result
         payload = {
             "policy": policy,
             "stage": stage,
@@ -437,6 +493,7 @@ def run(
             ),
             "current_draft": ledger.snapshot(brief, draft),
             "runtime_diagnostics": diagnostic,
+            "last_edit_result": last_edit_result,
         }
         record = client.call(
             system=SYSTEM,
@@ -483,20 +540,17 @@ def run(
         }
         sealed_write(directory / "events" / f"{len(events):03d}.json", event)
         events.append(event)
-        return (
-            accepted,
-            complete,
-            {
-                "status": "accepted" if accepted else "rejected",
-                "rejected_reply": None if accepted else raw,
-                "normalizations": normalizations,
-                "error": error,
-                "edit_effects": handoff.edit_effects(before, draft)
-                if accepted
-                else None,
-                "delivery": delivery_feedback(record),
-            },
-        )
+        last_edit_result = {
+            "status": "accepted" if accepted else "rejected",
+            "rejected_reply": None if accepted else raw,
+            "uncommitted_edits": [] if accepted else uncommitted_edits(raw, before),
+            "transaction_applied": accepted,
+            "normalizations": normalizations,
+            "error": error,
+            "edit_effects": handoff.edit_effects(before, draft) if accepted else None,
+            "delivery": delivery_feedback(record),
+        }
+        return accepted, complete, last_edit_result
 
     def stage(name: str) -> tuple[bool, str | None]:
         while True:
@@ -587,6 +641,7 @@ def run(
                 break
             feedback = {
                 "structural_failures": check["errors"],
+                **repair_issue_groups(check["errors"]),
                 "graph_check_status": check["graph_check_status"],
                 "graph_check_reason": check["graph_check_reason"],
                 "unresolved_public_predicates": check["unresolved_public_predicates"],

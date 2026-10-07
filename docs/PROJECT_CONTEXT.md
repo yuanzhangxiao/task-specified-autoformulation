@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+Construction comparison version 9 removes single-LHS editing restrictions and
+renames joint_fixed to joint_guided (the suggested LHS is advisory). The focused
+question asks for one physical quantity reused across distinct consumers, rather
+than different laws with similar formulas. Rejected-edit receipts show actual
+retained declarations; repair separates topology failures from binding errors.
+A saved-reply audit retains all 59 accepted transactions and accepts eight more.
+The fresh twelve-task basin comparison keeps the model, checks and budgets fixed.
+The minimal stage-specific prompt system in PHASE_C_MINIMAL_PROMPTS.txt remains
+an unimplemented draft for user review, not part of the next run.
+
 Construction comparison version 8 clarifies equation topology versus interaction
 functions and makes shared-law edits explicitly legal across consumer equations.
 A twelve-task basin pilot compares the same shared-law question integrated into
