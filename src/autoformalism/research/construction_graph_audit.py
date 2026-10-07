@@ -23,7 +23,7 @@ def audit(source: Path, output: Path) -> dict:
     plan = sealed_read(source / "plan.json")
     if (
         plan.get("protocol")
-        not in {f"phase-c-construction-comparison-{n}" for n in range(1, 10)}
+        not in {f"phase-c-construction-comparison-{n}" for n in range(1, 11)}
         or plan.get("test_data_opened") is not False
     ):
         raise ValueError("requires a saved public construction-comparison plan")

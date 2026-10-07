@@ -1,5 +1,5 @@
-MINIMAL CONSTRUCTION PROMPTS — REVIEW DRAFT 2
-2026-10-07 | Draft only; not active in an experiment
+MINIMAL CONSTRUCTION PROMPTS — IMPLEMENTED COMPARISON 1
+2026-10-07 | Ready for the frozen prompt comparison
 
 The initial prompt text is below. On each request the runtime also supplies the
 public specification, source availability, any training-trajectory summary, the
@@ -66,6 +66,8 @@ Return changes only. Omitted entries remain unchanged.
 For a variable whose topology you revise, return its COMPLETE new list of ordinary
 (non-shared) contributions, including those you wish to keep. Its old ordinary list
 is replaced. Shared-process uses are maintained separately by the runtime.
+Suppose a variable's ordinary contribution list is [A, B]. To change only B
+into C, return [A, C]. Returning [C] removes both old entries and installs only C.
 A variable with no topology entry in this reply keeps its previous list.
 
 Other named entries replace the corresponding declaration. Use the explicit

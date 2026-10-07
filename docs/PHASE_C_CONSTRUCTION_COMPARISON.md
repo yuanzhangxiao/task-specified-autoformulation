@@ -1,6 +1,84 @@
 # Phase C construction schedules
 
-## Version 9: coordinated topology edits
+## Version 10: minimal/current wording under a common schedule
+
+The new `prompt_comparison` pilot contains **16 fresh constructions**: all eight
+Phase C development cases, including both basins, Full/seed 0, crossed only with
+current versus minimal wording. There is no additional schedule or question-placement
+sweep. Both families use variables -> shared processes -> remaining topology ->
+bounded structural repair. Both allow coordinated changes to multiple variables.
+The control uses current wording under this common schedule, not the historical
+version-9 call order. Conclusions concern this prompt-family comparison; neither
+historical comparisons nor a single seed establish a general strategy ranking.
+
+Both arms receive the same public brief, source availability, training summary,
+target requirements, reviewed graph contract, applicable binding questions, accepted
+draft and repair diagnostics. Both use the same stage-specific typed JSON fields,
+ledger normalization, atomic transactions, checks, model settings and budgets.
+The minimal family uses the reviewed short system and only the current stage's
+instructions. The shared-process question appears once. The existing JSON key
+`equations` denotes ordinary topology entries; no function expressions are accepted.
+The requested [A, B] -> [A, C] replacement example is in its editing instructions.
+No generic relaxation tutorial, textbook naming rule or initialization lecture is added.
+
+Variable-stage schemas omit topology/process fields; the shared-process schema
+omits ordinary topology fields. Topology and repair expose the complete edit schema.
+These are views of the existing ledger fields, not a new model representation or
+field-alias adapter. Mechanical scope and final structural checks remain common.
+Optional relationship delivery failure still does not prevent ordinary topology.
+An invalid transaction saves nothing; a structurally incomplete draft may be saved
+and diagnosed after all topology entries have been proposed.
+
+Each matched pair starts empty, with identical public inputs and model seed. The
+order is counterbalanced by case, with every case exposed before its other arm.
+The frozen model settings retain their total limits; three requests/131072 tokens
+are reserved for structural repair. Every actual call is charged and cached.
+Reports group `current:full` and `minimal:full`, retain initial/final skeletons,
+show median [unscaled MAD] costs, and link original prompts/responses and transactions.
+Completion is structural eligibility, not mechanism compliance or predictive accuracy.
+This pilot ends at topology: functions, fitting, scientific critic and test access
+are absent. Equation inspection remains necessary before proceeding to interaction.
+
+Upload the pinned bundle to ACES group scratch and use:
+
+```bash
+bash scripts/hpc/start_phase_c_minimal_prompts.sh run
+# After the jobs have ended:
+bash scripts/hpc/start_phase_c_minimal_prompts.sh inspect
+```
+
+Default output is `phase-c-minimal-prompts-v1`, wave `minimal-prompts-1`. The wrapper
+uses the bundle's embedded public source plan. One 1-H100 server has a three-hour
+worker window, followed by a CPU report. Repeating the same wave reuses submission
+receipts; if tasks remain pending after the allocation ends, resume the same pinned
+source/root with `AF_COMPARISON_WAVE=minimal-prompts-2`. No automatic follow-up.
+
+### Observed version-9 shared-process revision (2026-10-07)
+
+The supplied archive has all twelve terminal records, 49 recorded calls and
+643512 observed tokens; no unmeasured usage or length-limited replies. Cached call
+hashes, displayed predecessor drafts, event chains and terminal accounting were
+checked for every task. Initial structural completion is 7/12; final is 11/12.
+Integrated placement is initially 5/6 and finally 6/6; dedicated placement is
+initially 2/6 and finally 5/6. This small sample does not establish superiority.
+All six coupled constructions retain a named upstream-to-downstream quantity with
+opposite uses (five label it transfer, one influence). Five of these complete;
+the unsuccessful coupled/joint-guided/dedicated run lacks inflow paths and downstream
+feedback. Its three repair transactions each try to define an ordinary topology
+for a process already defined by the runtime, so all three are rejected atomically.
+There are no single-LHS-scope rejections.
+
+Passing graphs still need scientific inspection. Independent/separate/dedicated
+retains an ordinary negative `Q_out` term and a second named negative `outflow`
+contribution in both depth and storage dynamics; their stated meanings suggest
+duplication. Independent/joint-adaptive/integrated calls its `h_down` contribution
+algebraic but declares `h_down` differential, so assembly makes it a derivative.
+Independent/separate/integrated similarly makes the apparent storage-to-depth
+readout a derivative. These are human interpretation findings, not new automatic
+rejection rules. No equations are repaired by inferring their prose. Threshold
+laws, conversions and gains remain unverified until interaction and fitting.
+
+## Version 9: coordinated topology edits (historical)
 
 The current pilot keeps the twelve version-8 case/schedule/question-placement
 combinations, model settings and budgets. It starts fresh and makes three changes:
@@ -34,12 +112,11 @@ Use the new pinned bundle and `start_phase_c_shared_laws.sh run`. Defaults are
 The roster remains coupled/independent basin x three schedules x two question
 placements, Full/seed 0. No interaction functions, fitting or test access.
 
-`PHASE_C_MINIMAL_PROMPTS.txt` is a separate, unimplemented review draft. It is not
-used in version 9. A future comparison must freeze its stage-specific schemas/prompts and
-common scientific checks before launching; historical before/after runs alone
-cannot isolate the effect of wording, scheduling and editing flexibility.
+`PHASE_C_MINIMAL_PROMPTS.txt` was a separate review draft at version 9. Version 10
+implements it with frozen stage-specific schemas and common checks as described
+above. Historical before/after runs alone cannot isolate wording and scheduling.
 
-### Minimal-prompt review revision 2 (draft only)
+### Minimal-prompt review revision 2 (historical rationale)
 
 The initial prompt draft now contains only the stage task, relevant definitions,
 and exact editing semantics. Historical-error reminders move to conditional

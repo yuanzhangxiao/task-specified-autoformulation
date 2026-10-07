@@ -431,11 +431,22 @@ def run(
     repair_tokens: int = 131072,
     graph_contract: PublicGraphContract | None = None,
     process_question: ProcessQuestion = "integrated",
+    prompt_family: str | None = None,
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
     draft, events, records = ledger.Draft(), [], []
     last_edit_result = None
     original = client.settings
+    from autoformalism.search import construction_prompts as prompts
+
+    if prompt_family is not None and (
+        prompt_family not in prompts.FAMILIES
+        or policy != "joint_adaptive"
+        or process_question != "dedicated"
+    ):
+        raise ValueError(
+            "prompt comparison requires the common adaptive staged schedule"
+        )
     if policy not in POLICIES:
         raise ValueError("unknown construction policy")
     if process_question not in PROCESS_QUESTIONS:
@@ -495,10 +506,28 @@ def run(
             "runtime_diagnostics": diagnostic,
             "last_edit_result": last_edit_result,
         }
+        response_model = ledger.DraftPatch
+        system = SYSTEM
+        if prompt_family is not None:
+            response_model = prompts.response_model(stage)
+            payload.update(
+                prompt_family=prompt_family,
+                stage_schedule=prompts.SCHEDULE,
+                response_template=response_model(stage_complete=False).model_dump(
+                    mode="json"
+                ),
+                binding_context=prompts.binding_questions(brief, draft, graph_contract),
+            )
+            if prompt_family == "minimal":
+                system = prompts.SYSTEM
+                payload["stage_instructions"] = prompts.stage_text(stage)
+                # The question already appears once in the stage instructions.
+                payload["shared_law_question"] = None
+                payload["editing_rules"] = prompts.EDITING
         record = client.call(
-            system=SYSTEM,
+            system=system,
             user=json.dumps(payload, sort_keys=True),
-            response_model=ledger.DraftPatch,
+            response_model=response_model,
             step=f"{stage}_{len(events):03d}",
             attempt=attempt,
         )
@@ -578,10 +607,14 @@ def run(
         ready, stop_reason = False, None
         stage_outcomes = []
         stages = (
-            (("variables",) if policy == "separate" else ())
-            + ("relationships",)
-            + (("shared_laws",) if process_question == "dedicated" else ())
-            + ("equations",)
+            prompts.STAGES
+            if prompt_family is not None
+            else (
+                (("variables",) if policy == "separate" else ())
+                + ("relationships",)
+                + (("shared_laws",) if process_question == "dedicated" else ())
+                + ("equations",)
+            )
         )
         try:
             for name in stages:

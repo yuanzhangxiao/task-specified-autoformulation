@@ -28,21 +28,27 @@ from autoformalism.research import construction_trace, topology_confirmation
 from autoformalism.research.construction_obligations import reviewed_contract
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import construction_prompts as prompts
 from autoformalism.search import construction_schedules as schedules
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-9"
+PROTOCOL = "phase-c-construction-comparison-10"
 REPO = baseline.REPO
 Study = Literal[
-    "comparison", "live_confirmation", "basin_confirmation", "shared_law_comparison"
+    "comparison",
+    "live_confirmation",
+    "basin_confirmation",
+    "shared_law_comparison",
+    "prompt_comparison",
 ]
 STUDIES = (
     "comparison",
     "live_confirmation",
     "basin_confirmation",
     "shared_law_comparison",
+    "prompt_comparison",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -51,7 +57,7 @@ BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-9"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-10"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -77,6 +83,7 @@ def source_identity() -> dict:
                 "scripts/hpc/start_phase_c_construction_live.sh",
                 "scripts/hpc/start_phase_c_construction_basin.sh",
                 "scripts/hpc/start_phase_c_shared_laws.sh",
+                "scripts/hpc/start_phase_c_minimal_prompts.sh",
             )
         },
     }
@@ -142,6 +149,23 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
         source_tasks = [by_case[name] for name in roster]
     blocks = []
     for i, task in enumerate(source_tasks):
+        if study == "prompt_comparison":
+            families = prompts.FAMILIES if i % 2 == 0 else prompts.FAMILIES[::-1]
+            blocks.append(
+                [
+                    {
+                        **task,
+                        "task_id": f"{task['task_id']}_{family}",
+                        "policy": "joint_adaptive",
+                        "process_question": "dedicated",
+                        "prompt_family": family,
+                        "stage_schedule": prompts.SCHEDULE,
+                        "matched_task_id": task["task_id"],
+                    }
+                    for family in families
+                ]
+            )
+            continue
         # Rotate policies within matched blocks so draining does not always omit
         # the same arm. This is scheduling, never score-based task selection.
         policies = schedules.POLICIES[i % 3 :] + schedules.POLICIES[: i % 3]
@@ -181,9 +205,9 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
             {
                 "protocol": PROTOCOL,
                 "study": study,
-                "selection_rule": (
-                    "both-basins-seed0-full-three-policies-two-placements-1"
-                )
+                "selection_rule": ("all-eight-cases-seed0-full-two-prompt-families-1")
+                if study == "prompt_comparison"
+                else ("both-basins-seed0-full-three-policies-two-placements-1")
                 if study == "shared_law_comparison"
                 else "both-basins-seed0-full-three-policies-1"
                 if study == "basin_confirmation"
@@ -245,6 +269,20 @@ def verify(root: Path) -> dict:
         (t["benchmark_id"], t["seed"], t["arm"], t["policy"], t.get("process_question"))
         for t in plan["tasks"]
     ]
+    if study == "prompt_comparison":
+        expected = {
+            (case, 0, "full", "joint_adaptive", "dedicated", family, prompts.SCHEDULE)
+            for case in roster
+            for family in prompts.FAMILIES
+        }
+        actual = [
+            (*row, task.get("prompt_family"), task.get("stage_schedule"))
+            for row, task in zip(actual, plan["tasks"], strict=True)
+        ]
+    elif any(
+        "prompt_family" in task or "stage_schedule" in task for task in plan["tasks"]
+    ):
+        raise ValueError("prompt families require the dedicated matched study")
     if len(actual) != len(expected) or set(actual) != expected:
         raise ValueError(f"requires the exact {len(expected)}-task {study} roster")
     ids = [t["task_id"] for t in plan["tasks"]]
@@ -387,6 +425,7 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
                 directory / "construction",
                 task["policy"],
                 process_question=task["process_question"],
+                prompt_family=task.get("prompt_family"),
                 repair_requests=config.repair_requests,
                 repair_tokens=config.repair_tokens,
                 graph_contract=PublicGraphContract.model_validate(
@@ -511,6 +550,10 @@ def process_history(records: list[dict], events: list[dict]) -> list[dict]:
                 "stage": event["stage"],
                 "shared_law_question_displayed": bool(
                     payload.get("shared_law_question")
+                    or (
+                        payload.get("prompt_family") == "minimal"
+                        and payload["stage"] == "shared_laws"
+                    )
                 ),
                 "request_hash": event["request_hash"],
                 "accepted": event["accepted"],
@@ -672,50 +715,41 @@ def report(root: Path, plan: dict) -> dict:
                     + block(saved["assessment"].get("clarification_requests", []))
                 )
     groups = {}
-    for policy in schedules.POLICIES:
-        for arm, placement in (
-            (arm, placement)
-            for arm in ("full", "brief_only")
-            for placement in schedules.PROCESS_QUESTIONS
-        ):
-            selected = [
-                r
-                for r in rows
-                if r["policy"] == policy
-                and r["arm"] == arm
-                and r.get("process_question", "integrated") == placement
-            ]
-            if not selected:
-                continue
-            done = [r for r in selected if r["status"] != "pending"]
-            key = f"{policy}:{arm}"
-            if plan.get("study") == "shared_law_comparison":
-                key += f":{placement}"
-            groups[key] = {
-                "planned": len(selected),
-                "finished": len(done),
-                "equation_stage_reached": sum(
-                    r["equation_stage_reached"] for r in done
-                ),
-                "initial_complete": sum(
-                    r["initial_complete"] is True for r in selected
-                ),
-                "final_complete": sum(
-                    r["status"] == "topology_complete" for r in selected
-                ),
-                "tokens": spread([r["cost"]["observed_tokens"] for r in done]),
-                "calls": spread([r["cost"]["physical_requests"] for r in done]),
-                "models_retaining_shared_laws": sum(
-                    r["process_counts"]["retained_shared_laws"] > 0 for r in done
-                ),
-                "replies_with_process_declarations": sum(
-                    r["process_counts"]["replies_with_declarations"] for r in done
-                ),
-                "rejected_replies_with_process_declarations": sum(
-                    r["process_counts"]["rejected_replies_with_declarations"]
-                    for r in done
-                ),
-            }
+    group_labels = sorted(
+        {
+            (r.get("prompt_family", r["policy"]), r["arm"], r["process_question"])
+            for r in rows
+        }
+    )
+    for label, arm, placement in group_labels:
+        selected = [
+            r
+            for r in rows
+            if (r.get("prompt_family", r["policy"]), r["arm"], r["process_question"])
+            == (label, arm, placement)
+        ]
+        done = [r for r in selected if r["status"] != "pending"]
+        key = f"{label}:{arm}"
+        if plan.get("study") == "shared_law_comparison":
+            key += f":{placement}"
+        groups[key] = {
+            "planned": len(selected),
+            "finished": len(done),
+            "equation_stage_reached": sum(r["equation_stage_reached"] for r in done),
+            "initial_complete": sum(r["initial_complete"] is True for r in selected),
+            "final_complete": sum(r["status"] == "topology_complete" for r in selected),
+            "tokens": spread([r["cost"]["observed_tokens"] for r in done]),
+            "calls": spread([r["cost"]["physical_requests"] for r in done]),
+            "models_retaining_shared_laws": sum(
+                r["process_counts"]["retained_shared_laws"] > 0 for r in done
+            ),
+            "replies_with_process_declarations": sum(
+                r["process_counts"]["replies_with_declarations"] for r in done
+            ),
+            "rejected_replies_with_process_declarations": sum(
+                r["process_counts"]["rejected_replies_with_declarations"] for r in done
+            ),
+        }
     result = {
         "protocol": PROTOCOL,
         "study": plan.get("study", "comparison"),
@@ -751,7 +785,13 @@ def report(root: Path, plan: dict) -> dict:
         "# Phase C construction schedules",
         "",
         "Fresh variables and topology; no functions or fitting.",
-        "Shared-law question: integrated versus dedicated; both basins, "
+        "Matched current/minimal wording: all eight cases, Full/seed 0. "
+        "Both use variables -> shared processes -> remaining topology -> repair, "
+        "adaptive batches, the same response schemas, checks and budgets. "
+        "The control is current wording under this common schedule, not a replay "
+        "of the historical schedule."
+        if plan.get("study") == "prompt_comparison"
+        else "Shared-law question: integrated versus dedicated; both basins, "
         "three schedules, "
         "Full/seed 0. Same total budgets; the dedicated call is charged, not free. "
         "A small paired pilot, not a strategy ranking."
