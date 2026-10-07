@@ -638,3 +638,13 @@ fixed-active-set sensitivities, declared bounds, full-training checkpoints and
 independent original-equation replay protect the comparison. All three original
 starts and 1,200-second ceilings are retained (six CPU-only Delta tasks).
 No restarts, benchmark changes or production promotion are included.
+
+The [M14 results](PHASE_C_FITTING_M14_RESULTS_2026-10-06.md) now show independent
+prediction recovery from all three original starts with profiled gains, versus
+two with joint rollout, with lower fitting time in each pair. The difficult start
+recovers the previously suppressed output contribution. Two profiled fits narrowly
+miss the 1% coefficient gate (1.34% and 1.25%) after prediction-based early stop;
+all latent initials pass. Next compare training-only polishing under the same
+budget, preserving the first certified checkpoint and evaluating coefficient
+recovery separately. This remains one assisted correct-structure problem, not
+production qualification or a universal fitting result.
