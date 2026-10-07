@@ -52,9 +52,11 @@ def fit(
     """
     if arm not in {"rollout_only", "medium_rollout", "mesh_rollout"}:
         raise ValueError("unknown recovery arm")
-    if rollout_mode not in {"recovery_rollout", "profiled_rollout"} or (
-        rollout_mode == "profiled_rollout" and arm != "rollout_only"
-    ):
+    if rollout_mode not in {
+        "recovery_rollout",
+        "profiled_rollout",
+        "coupled_profiled_rollout",
+    } or (rollout_mode != "recovery_rollout" and arm != "rollout_only"):
         raise ValueError("unsupported recovery rollout mode")
     identity_fields = {"base": base, "arm": arm, "policy": policy}
     if rollout_mode != "recovery_rollout":

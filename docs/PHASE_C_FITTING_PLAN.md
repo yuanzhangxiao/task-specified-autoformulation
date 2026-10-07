@@ -659,3 +659,20 @@ all coefficient/validation assessment; before/after errors quantify whether
 extra prediction precision improves parameter recovery. Six CPU tasks default to
 six-way concurrency on Delta. General coefficients inside coupled state equations
 remain a later strategy discussion, and production defaults remain unchanged.
+
+## M16: coupled linear blocks before general conditional profiling
+
+The next isolated milestone is [coupled linear rollout profiling](PHASE_C_FITTING_COUPLED_PROFILE.md).
+It profiles forcing gains and affine shared latent initials through an entire
+linear state system with feedback, keeping matrix coefficients in the nonlinear
+outer problem. Twelve CPU tasks compare joint and profiled rollout from every
+one of three generic starts on ordinary and fast–slow identifiable controls.
+Correct equations, identical domains/budgets and independent original-equation
+replay are retained; benchmark data and production defaults are unchanged.
+
+Keep two later directions open: (1) coefficient profiling at fixed trajectory
+nodes for the relaxed collocation objective, followed by independent rollout;
+(2) prove conditional convexity, feasible-domain convexity and derivative
+conditions before introducing nonquadratic inner losses. Poor performance of
+unprofiled collocation is not evidence that the first direction cannot help.
+M15 coefficient-polishing results remain a separate assessment.

@@ -1,0 +1,9 @@
+{
+  "seconds": 300,
+  "certificate_seconds": 60,
+  "maximum_rollout_calls": 300,
+  "training_nmse": 1e-8,
+  "trajectory_nmse": 1e-7,
+  "solver_agreement": 1e-5,
+  "replay_seconds": 120
+}

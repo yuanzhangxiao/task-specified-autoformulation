@@ -21,7 +21,7 @@ class _Stop(Exception):
     pass
 
 
-def rollout(payload: dict, folder: Path) -> dict:
+def rollout(payload: dict, folder: Path, *, profiler=ProfiledOutput) -> dict:
     """One original start, exact inner bounded LS, outer scaled TRF, no restarts."""
     expected = {
         "request",
@@ -46,7 +46,7 @@ def rollout(payload: dict, folder: Path) -> dict:
         public._lower(PublicFitRequest.model_validate(payload["request"]))[0],
         allow_piecewise=True,
     )
-    profiled = ProfiledOutput(system)
+    profiled = profiler(system)
     bounds = domain(payload)
     names, lo, hi, units = bounds
     if names != system.names or not valid(payload["points"][0]["parameters"], bounds):

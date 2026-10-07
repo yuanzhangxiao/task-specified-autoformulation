@@ -25,6 +25,7 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
             "recovery_rollout",
             "recovery_check",
             "profiled_rollout",
+            "coupled_profiled_rollout",
         }
         or seconds <= 0
     ):
@@ -119,7 +120,8 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
             "checkpoints.json",
             *(
                 ("refinement/best.json",)
-                if mode in {"recovery_rollout", "profiled_rollout"}
+                if mode
+                in {"recovery_rollout", "profiled_rollout", "coupled_profiled_rollout"}
                 else ()
             ),
             *(
@@ -128,7 +130,7 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
                     "refinement/training_history.json",
                     "refinement/accounting.json",
                 )
-                if mode == "profiled_rollout"
+                if mode in {"profiled_rollout", "coupled_profiled_rollout"}
                 else ()
             ),
         )

@@ -102,6 +102,11 @@ def run(mode: str, folder: Path) -> None:
         from autoformalism.fitting.transcription_solver import solve
 
         solve(payload, folder)
+    elif mode == "coupled_profiled_rollout":
+        from autoformalism.fitting.profiled_coupled import ProfiledCoupled
+        from autoformalism.fitting.profiled_worker import rollout
+
+        rollout(payload, folder, profiler=ProfiledCoupled)
     elif mode == "profiled_rollout":
         from autoformalism.fitting.profiled_worker import rollout
 

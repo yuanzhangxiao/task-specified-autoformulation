@@ -124,12 +124,13 @@ def prepare(
     *,
     protocol: str = PROTOCOL,
     arms: tuple[str, ...] = ARMS,
+    base_factory=None,
 ) -> dict:
     """Freeze the complete roster and budgets; no optimizer or regeneration."""
     data = read_seal(inputs)
     tasks = [
         {"task_id": f"{common}_{arm}", "common": common, "arm": arm}
-        for common in sorted(bases(data))
+        for common in sorted((base_factory or bases)(data))
         for arm in arms
     ]
     plan = {
@@ -162,7 +163,15 @@ def verify(root: Path, *, runtime=True, protocol=PROTOCOL):
     return plan, data
 
 
-def run_task(root: Path, index: int, *, protocol=PROTOCOL, fitter=None) -> dict:
+def run_task(
+    root: Path,
+    index: int,
+    *,
+    protocol=PROTOCOL,
+    fitter=None,
+    base_factory=None,
+    evaluation_data=None,
+) -> dict:
     """Seal all training decisions before scoring validation or coefficients."""
     plan, data = verify(root, protocol=protocol)
     fitter = fitter or fitting.fit
@@ -183,7 +192,10 @@ def run_task(root: Path, index: int, *, protocol=PROTOCOL, fitter=None) -> dict:
         path = folder / "backend.json"
         if not path.exists():
             backend = fitter(
-                bases(data)[task["common"]], task["arm"], plan["policy"], folder / "fit"
+                (base_factory or bases)(data)[task["common"]],
+                task["arm"],
+                plan["policy"],
+                folder / "fit",
             )
             seal(path, {"identity": identity, **backend})
         backend = read_seal(path)
@@ -208,7 +220,7 @@ def run_task(root: Path, index: int, *, protocol=PROTOCOL, fitter=None) -> dict:
             )
             evaluation = replay._evaluation(
                 evaluation_folder,
-                data,
+                evaluation_data(data, task) if evaluation_data else data,
                 data["commons"][task["common"]],
                 selected["parameters"],
                 plan["policy"]["replay_seconds"],
