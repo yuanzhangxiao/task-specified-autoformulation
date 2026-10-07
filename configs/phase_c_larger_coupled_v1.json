@@ -1,0 +1,11 @@
+{
+  "seconds": 600,
+  "certificate_seconds": 90,
+  "maximum_rollout_calls": 600,
+  "training_nmse": 1e-08,
+  "trajectory_nmse": 1e-07,
+  "polish_training_nmse": 1e-11,
+  "polish_trajectory_nmse": 1e-10,
+  "solver_agreement": 1e-05,
+  "replay_seconds": 180
+}

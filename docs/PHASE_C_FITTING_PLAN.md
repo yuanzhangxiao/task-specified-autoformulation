@@ -691,3 +691,25 @@ fresh paired fits aim for stricter training precision after independent initial
 certification, sharing 300 seconds/300 residual calls across both stages.
 Wall/CPU timing covers imports, integration and checkpoint writes. Neither truth
 nor validation controls polishing. Larger coupled blocks remain the next step.
+
+M17 completed all 14 tasks, including the two explicitly separate repeats.
+Both methods recovered prediction, coefficients and initials on all six polishing
+starts. Worst relative coefficient error was 0.01193% for joint rollout and
+0.00220% for profiling. Profiling used fewer residual calls and less integration
+CPU, but did not lower total wall time in this small run. Tight training-only
+polishing resolved the earlier coefficient errors without reference-guided fitting.
+
+## M18 — larger coupled linear controls before nonlinear benchmark blocks
+
+The approved [M18 runbook](PHASE_C_LARGER_COUPLED.md) compares three- and six-state
+coupled linear controls, each with ordinary and separated timescales. Four cases,
+three generic starts and two methods give 24 CPU tasks on Delta. Both use the
+same 600-second/600-call fitting and polishing policy. Known skew couplings anchor
+latent coordinates; shared hidden initials and every diagonal decay/input gain
+are estimated. Independent reference replay and local sensitivity-rank gates run
+before fitting. All starts, coefficient/initial errors and timing remain visible.
+
+These controls are separate from the benchmark release and production fitter.
+After larger-block qualification, return to the nonlinear benchmark blocks and
+test coefficient profiling conditional on collocation trajectories. Exact linear
+rollout profiling does not extend automatically to nonlinear feedback systems.
