@@ -1,184 +1,106 @@
-MINIMAL CONSTRUCTION PROMPTS — DRAFT FOR REVIEW
-2026-10-07 | Not implemented or used in the next experiment
+MINIMAL CONSTRUCTION PROMPTS — REVIEW DRAFT 2
+2026-10-07 | Draft only; not active in an experiment
 
-PURPOSE
+The initial prompt text is below. On each request the runtime also supplies the
+public specification, source availability, any training-trajectory summary, the
+accepted draft and the JSON format for the current stage. Conditional text is
+listed separately at the end. Implementation notes are in
+docs/PHASE_C_CONSTRUCTION_COMPARISON.md, outside these prompts.
 
-Use a short common system prompt, the unchanged public task and variable catalog,
-the accepted draft, and instructions only for the current stage. Keep the runtime
-as the bookkeeper. It does not choose scientific roles, signs or missing physics.
-The following quoted blocks are proposed instructions to the proposer; surrounding
-notes describe the interface. This is a new prompt family, not another paragraph
-to append to the current long system prompt.
+COMMON SYSTEM PROMPT
 
-1. COMMON SYSTEM PROMPT
+Construct a system of ODEs and algebraic equations for the supplied scientific
+task. Work in three stages: variables, topology, then interaction functions.
+Follow the current stage's instructions. The runtime stores accepted declarations
+and shows the current model. Return JSON in the supplied format.
 
-"Construct a system of ODEs and algebraic equations for the public scientific task.
-Work in three stages: variables, topology, then interaction functions. Follow only
-the current stage's instructions. The runtime stores your accepted declarations
-and shows the current model after each edit. Choose the scientific content; do not
-assume that passing a structural check proves the model correct. Return JSON using
-the supplied stage-specific format."
+VARIABLES
 
-Each call also includes the public task, permitted source availability, exact
-target names, current accepted declarations, pending work and remaining budget.
-Repair repeats this same context. It never relies on the proposer remembering an
-earlier request. The output schema is part of the request, not a prose tutorial
-for stages that have not started.
+Declare the variables the model will generate.
 
-2. VARIABLES
+1. Start with every prediction target. Choose differential for a state governed
+   by an ODE, or algebraic for an instantaneous quantity.
+2. Review the supplied inputs and observed quantities, including when they are
+   available during prediction. Supplied sources need no generated declaration.
+3. Consider what is needed to generate the targets and represent the required
+   mechanisms. Use permitted observations where sufficient; otherwise introduce
+   the necessary latent states or algebraic quantities.
 
-"Decide which variables the model must generate.
+For each generated variable, give its name, type and scientific meaning. You may
+declare several together. Leave dependencies and function formulas for later stages.
 
-1. Declare every public target. Choose differential for a state whose evolution
-   needs an ODE, or algebraic for a quantity determined instantaneously.
-2. Review the supplied inputs and permitted observed channels. They are available
-   as sources without a generated-variable declaration. A source has no model
-   equation unless you choose to model it; absence from your declarations does
-   not mean it is forbidden as an input.
-3. Consider what is needed to generate the targets and realize the required
-   mechanisms. Reuse available observations when their allowed availability is
-   sufficient. Otherwise declare the necessary latent states or algebraic
-   quantities, with a short scientific meaning.
-4. For each displayed requirement needing memory, identify your chosen state(s).
-   Memory means storing history; it does not by itself require decay or a self-loop.
+TOPOLOGY: SHARED PROCESSES
 
-A target must be predicted, not read from its measured trajectory. An initial
-reading is boundary information, not an ongoing input. If you model an observed
-quantity, later references use the generated value. Coefficients to be fitted
-are not variables. Do not propose dependencies or function formulas yet.
-You may declare several variables together. Finish when the inventory is ready."
+Consider all generated variables together. Identify any single physical rate or
+quantity whose value contributes to at least two different generated variables.
+For each such shared process, give its name, drivers, scientific meaning, receiving
+variables and contribution signs. Return an empty list if none is needed.
 
-Display only variable fields (name, differential/algebraic, scientific meaning)
-and applicable requirement-to-state assignments. Public requirements that allow
-multiple realizations must not be converted into mandatory textbook state names.
-Initial values and causal initialization maps are needed by the eventual model;
-their formulas and parameters belong in the later interaction/initialization work.
+For each shared process, use transfer for a pairwise internal transfer with two
+opposite signs; otherwise use influence and choose the scientifically appropriate
+signs. Give any known fixed consumer conversions; leave unknown conversions null.
 
-3. TOPOLOGY: SHARED PROCESSES FIRST
+Give dependencies, not function formulas. This declaration defines the process
+once; the runtime inserts its uses in the receiving variables' topologies.
 
-"Consider all generated variables together. Does one physical rate or quantity
-contribute to more than one of them? If so, declare a shared process: its name,
-drivers, scientific meaning, and each receiving variable with its contribution sign.
+TOPOLOGY: REMAINING CONTRIBUTIONS
 
-For example, one internal flow P leaves A and enters B: A receives -P and B receives
-+P. Both use the same value of P. Two separate flows with similar formulas are not
-necessarily shared. A shared process needs at least two distinct receiving variables.
-If none is justified, return no shared processes; do not invent coupling.
+Complete the topology for each generated variable: which contributions enter its
+derivative (differential) or its value (algebraic)? The current draft already
+includes declared shared-process uses.
 
-Mark a pairwise internal transfer as transfer, with two opposite signs. Otherwise
-use influence; its signs need not be opposite. Known fixed consumer conversions
-may be supplied using public covariates. Leave unknown conversions null. Opposite
-signs alone do not establish conservation or require equal fitted gains.
+For each remaining contribution, give the variables that jointly determine it
+and its outer sign: positive, negative or unrestricted. Each contribution becomes
+one additive term: a coefficient times a function of those variables. The function
+may be nonlinear; its formula will be chosen in the interaction stage.
 
-Give dependencies and signs, not function formulas. This declaration also defines
-P's algebraic topology; do not create a second topology for P. The runtime inserts
-every declared use once. You will see these contributions in the next stage."
+Use the scientific specification and, when supplied, the training-trajectory
+summary to choose dependencies. You may address several related variables together
+in any order and explicitly revise earlier declarations. Finish when all necessary
+variables and dependencies are declared.
 
-This is the first topology step after variables. There is no separate
-"relationships" stage: the relationships needed here are exactly the shared
-processes and requirement assignments. Allow coordinated variable corrections
-when a new necessity is discovered; log them rather than forcing a hidden reset.
+EDITING RULES — INCLUDED WITH THE JSON FORMAT
 
-4. TOPOLOGY: REMAINING CONTRIBUTIONS
+Return changes only. Omitted entries remain unchanged.
 
-"Complete the topology for every generated variable: which contributions enter
-its derivative (differential) or its value (algebraic)?
+For a variable whose topology you revise, return its COMPLETE new list of ordinary
+(non-shared) contributions, including those you wish to keep. Its old ordinary list
+is replaced. Shared-process uses are maintained separately by the runtime.
+A variable with no topology entry in this reply keeps its previous list.
 
-For each remaining contribution, group the variables that jointly determine it
-and give its outer sign: positive, negative or unrestricted. Each contribution
-will be one additive RHS term: a coefficient times a function of those drivers.
-That function may be nonlinear. We choose its formula in the interaction stage.
+Other named entries replace the corresponding declaration. Use the explicit
+removal lists to delete entries. Never replace and remove the same entry in one
+reply. Transaction-valid edits are saved together; an invalid transaction saves
+none of its edits. Incomplete topology may remain pending until the final check.
+stage_complete means the entire current stage is ready for checking.
 
-The displayed shared-process contributions are already included. Do not add a
-second term for the same physical effect. If they provide the whole RHS, mark its
-remaining contributions empty. A process with only one receiver is an ordinary
-contribution here; it does not need a separate named shared-process declaration.
+CONDITIONAL TEXT — NOT PART OF EVERY INITIAL PROMPT
 
-Choose dependencies consistent with the public behavior. Accumulation can continue
-to store past input when input stops. Return to baseline requires appropriate
-restoring dynamics, directly or through coupled states; do not add decay to every
-state automatically. Complete all required input-to-target paths and feedback.
+Requirement-to-state assignment, only when the displayed contract needs one:
 
-You may address several related variables together, in any order, and revise shared
-processes or variables explicitly if needed. The runtime keeps a complete list of
-what remains. Resolve pending names and definitions before finishing. Algebraic
-loops are unsupported; feedback involving differential states is allowed."
+  For requirement {requirement_id}: {public_requirement}, identify the declared
+  differential state(s) that carry the relevant history. Use the supplied assignment
+  field. This assigns a role to your states; topology will establish the required
+  connections.
 
-Show the assembled topology, including shared contributions, before asking for
-more edits. A suggested next target is optional guidance, never an editing limit.
-Show state/readout assignment fields only for public checks that actually need
-them. Explain their meaning in that request: which dynamic quantity represents
-the storage or energy underlying this output? Do not ask for unrelated bindings.
+Structural repair, only after a concrete failed check:
 
-5. STRUCTURAL CHECK AND TARGETED REPAIR — ONLY WHEN NEEDED
+  The complete topology has the following failures: {failures}. Revise the accepted
+  draft to resolve them, using the same public specification and source availability.
+  You may make coordinated changes across variables and contributions.
 
-"The runtime checked the complete topology. Review the concrete failures below
-against the accepted draft and public task. Correct them with coordinated edits.
-Do not remove a required physical effect merely to satisfy an output format.
-When the scientific choice is ambiguous, make that choice explicitly and explain
-it briefly; the runtime will not infer it from your explanation.
+Rejected-transaction receipt, only after rejection:
 
-Your previous edit is labeled accepted or rejected. No part of a rejected edit was
-saved. Its attempted declarations are shown beside the actual retained values.
-Redeclare anything still needed. Finish when the whole topology is ready."
+  The previous transaction was not saved: {error}. Here are the attempted edits
+  beside the actual retained declarations: {uncommitted_edits}. Correct the reply
+  using the accepted draft shown below.
 
-Examples of concrete feedback: unresolved generated names; missing target
-definitions; algebraic cycles; required/forbidden paths; invalid shared consumers;
-same-sign transfer uses; an ambiguous duplicate contribution. Only relevant
-instructions and legal repair alternatives are displayed. No always-on catalogue
-of every historical error. Explanations guide reasoning, not automatic prose-based
-acceptance. A structurally valid graph remains subject to equation inspection.
+Ambiguity clarification, only when detected:
 
-6. SMALL EDITING CONTRACT, DISPLAYED WITH THE OUTPUT SCHEMA
+  {precise_question_about_the_displayed_declarations}
+  Make the scientific choice explicitly in your structured reply.
 
-"Return changes only. A named entry replaces its previous declaration. A topology
-entry replaces all ordinary contributions for that variable; shared uses remain
-separate and are inserted by the runtime. Omission preserves an entry. Remove it
-only through the explicit removal list. Never replace and remove the same entry
-in one reply. The reply is applied as one transaction or rejected in full.
-stage_complete ends the current stage, not just the current variable."
-
-Proposed terminology in the human-facing JSON: variables, shared_processes,
-topology, requirement_assignments. For example, a topology entry names a generated
-variable and a list of signed driver groups. Names in these groups identify
-variables or previously declared shared processes; they are not expressions.
-
-This renamed interface needs a tested deterministic adapter to the existing typed
-ledger (currently variables, processes, equations, mechanism_bindings and
-feedback_bindings). It is not yet runnable JSON. The final review version must
-include exact schemas and one small valid example per stage, generated from those
-schemas. Schemas must preserve identifiers, atomic edits and distinct binding
-semantics without asking the proposer to learn internal field names unnecessarily.
-
-7. INTERACTION STAGE — OUTLINE ONLY, NOT PART OF THE NEXT TOPOLOGY TEST
-
-For each retained contribution, show its declared drivers, scientific meaning,
-receivers, signs and conversions. Ask for one function and its parameters. A shared
-process gets one function reused at every receiver. Signs/conversions applied
-outside that function must not be added again. A dependency change needs an
-explicit coordinated revision, not silent inference. Also complete algebraic
-readouts and causal initialization. Existing expression safety and fitting checks
-remain necessary. This prompt is to be drafted after topology is stable.
-
-WHAT THIS DESIGN RETAINS
-
-- The representation remains a graph metamodel: variable nodes feed contribution
-  nodes, which feed generated-variable equations. This can be represented as a
-  bipartite directed incidence graph/hypergraph. The proposer need only say topology.
-- Scientific meaning is supplied by the proposer. Typed public requirements make
-  only the agreed structural properties mechanically checkable, not all science.
-- A short system prompt is not a short total request: the public context, accepted
-  model and schema still consume tokens. Measure actual tokens and truncation.
-- Ordinary terms and shared processes use the same later interaction machinery.
-  Shared means reuse of one quantity, not just similar names or symbolic forms.
-
-PROPOSED COMPARISON AFTER REVIEW
-
-First implement the schema adapter and audit exact prompts offline. Then compare
-the minimal and revised-current prompt families on matched cases, model/settings,
-runtime scientific checks and maximum budgets. Keep scheduling and scope matched
-where possible; if stage ordering also changes, call it a prompt-system comparison,
-not an isolated wording ablation. Inspect initial topology, repaired topology,
-scientific content, costs and failure types. Do not select a winner solely by
-structural acceptance or the number of shared processes. No live minimal-prompt
-run is authorized by this draft alone; the user requested review first.
+Further guidance about accumulation, relaxation, duplicate contributions or other
+observed errors is to be evaluated only if needed. No generic decay instruction,
+textbook naming rule or initialization tutorial is included in the initial prompts.
+The interaction-stage prompt is outside this topology review.

@@ -35,9 +35,59 @@ The roster remains coupled/independent basin x three schedules x two question
 placements, Full/seed 0. No interaction functions, fitting or test access.
 
 `PHASE_C_MINIMAL_PROMPTS.txt` is a separate, unimplemented review draft. It is not
-used in version 9. A future comparison must freeze its schema/prompt adapter and
+used in version 9. A future comparison must freeze its stage-specific schemas/prompts and
 common scientific checks before launching; historical before/after runs alone
 cannot isolate the effect of wording, scheduling and editing flexibility.
+
+### Minimal-prompt review revision 2 (draft only)
+
+The initial prompt draft now contains only the stage task, relevant definitions,
+and exact editing semantics. Historical-error reminders move to conditional
+feedback. This changes documentation only; version-9 workers and frozen bundles
+continue to use their existing prompts. The minimal family has not been run.
+
+- Memory is a role of a differential state in a specified input/output mechanism,
+  not a fourth variable type. All differential states retain initial/history
+  information through integration, but a particular public memory requirement
+  needs the appropriate driver/state/target connections. Current mandatory memory
+  contracts also require distinct mediators; that is a specific contract rule,
+  not the definition of state or memory. Show only applicable assignments.
+- Source availability belongs in each case's explicit catalog: full-horizon,
+  initial-only, fixed covariate, or prediction target. Do not imply that an initial
+  measurement supplies the subsequent hidden trajectory. The current inventory
+  resolves a modeled observed identifier to the generated value; show the resolved
+  identity in the accepted draft. Do not silently conflate supplied and modeled data.
+- Public identifiers must match the channels; generated names need consistent
+  references, not textbook spelling. Equivalent latent coordinates remain allowed
+  by the public task. The naming note was runtime guidance, not proposer input.
+- Initialization formulas belong in later work. Mentioning their future existence
+  does not help select variables, so that note is removed from the prompt page.
+- Shared versus local describes reuse. Transfer versus influence selects the
+  existing sign/consumer validation rule: transfer has exactly two opposite uses;
+  influence permits other patterns. The current schema can represent local
+  influence too. The minimal shared-process question explicitly concerns only
+  quantities reused across at least two generated variables. No conservation or
+  equal-gain guarantee follows from the label alone.
+- The accumulator/relaxation explanation responded to earlier missing-restoring-
+  dynamics examples. The caution against decay everywhere was preventive, not
+  evidence of a systematic observed error. Neither is assumed necessary for this
+  new prompt family. Do not add a self-loop or interpret prose automatically.
+- "Public behavior" is replaced by scientific specification and, when supplied,
+  training-trajectory summary. A specification can require behavior not identifiable
+  from the displayed trajectories alone; neither validation nor test data is added.
+- A topology edit replaces the full ordinary-term list for that named variable,
+  not all topologies or all shared uses. For example, replacing [A, B] with [A, C]
+  keeps A and changes B to C; submitting [C] instead removes A and B.
+- Current construction transactions are atomic. A mechanically invalid batch
+  saves none of its entries; incomplete paths/definitions can still be committed
+  as a provisional draft and checked at completion. Partial acceptance of independent
+  edit groups would be a separate runtime experiment, not a wording revision.
+- "Human-facing JSON" was an unnecessary label for the proposer's structured
+  response. Use one explicit, stage-specific schema consumed by the runtime.
+  Do not create a second representation or generic field-alias layer merely for
+  terminology. Any future field naming change must preserve the separate semantics
+  of memory assignments, readout coordinates and topology edits. Exact schemas are
+  still to be finalized before implementing or launching this draft.
 
 ## Historical version 8
 
