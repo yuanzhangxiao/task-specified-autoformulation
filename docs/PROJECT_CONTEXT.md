@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+Construction comparison version 8 clarifies equation topology versus interaction
+functions and makes shared-law edits explicitly legal across consumer equations.
+A twelve-task basin pilot compares the same shared-law question integrated into
+relationship planning versus a dedicated call: two basins, three schedules,
+Full/seed 0. Budgets/checks remain common, empty decisions remain legal, and reports
+separate proposed, rejected and retained laws. No functions/fitting are launched.
+See `PHASE_C_CONSTRUCTION_COMPARISON.md` and `start_phase_c_shared_laws.sh`.
+
 Construction comparison version 7 verifies every declared process consumer in
 the assembled skeleton, clarifies covariate-only contribution overlap, and shows
 concrete algebraic cycles and binding edit options. Scientific assignments remain

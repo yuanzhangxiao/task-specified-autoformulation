@@ -223,23 +223,15 @@ def test_comparison_submission_has_no_fit_and_resumes_receipts(
         monkeypatch.setenv(key, "/test")
     result = submitter.submit(root, "comparison-1", compare_construction=True)
     assert set(result["jobs"]) == {"propose", "report"}
-    label = (
-        "confirmation"
-        if study in {"live_confirmation", "basin_confirmation"}
-        else "comparison"
-    )
+    label = "confirmation" if study != "comparison" else "comparison"
     assert result["resources"] == f"aces-1h100-{label}-only-1"
-    assert (
-        "--time=03:30:00"
-        if study in {"live_confirmation", "basin_confirmation"}
-        else "--time=06:30:00"
-    ) in calls[0][1]
+    assert ("--time=03:30:00" if study != "comparison" else "--time=06:30:00") in calls[
+        0
+    ][1]
     assert "--dependency=afterany:101" in calls[1][1]
     assert submitter.submit(root, "comparison-1", compare_construction=True) == result
     assert len(calls) == 2
-    assert len(storage_checks) == (
-        2 if study in {"live_confirmation", "basin_confirmation"} else 0
-    )
+    assert len(storage_checks) == (2 if study != "comparison" else 0)
     with pytest.raises(ValueError, match="choose one"):
         submitter.submit(root, "bad", topology_only=True, compare_construction=True)
     (root / "submissions/comparison-1/report.id").unlink()

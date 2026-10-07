@@ -1,8 +1,103 @@
 # Phase C construction schedules
 
+Version 8 clarifies topology prompts and compares **where the shared-law question
+is asked**. The next run is twelve fresh constructions: coupled and independent
+basins x three existing construction schedules x integrated/dedicated question,
+Full/seed 0. Use `start_phase_c_shared_laws.sh`, not the older basin wrapper.
+No functions, fitting, critic or test access is launched.
+
+## Version 8: shared-law question placement
+
+The previous six-basin confirmation completed all structural checks after repair,
+but every one of the 20 coupled-basin replies contained `processes: []`. No shared
+transfer declaration was rejected. The proposer described physical overflow yet
+represented its effects as separate ordinary terms. In joint-fixed it incorrectly
+treated process edits as forbidden during the per-equation stage, despite the
+permission in the prompt. This motivates an elicitation experiment, not a claim
+that the larger model is needed or that the new prompts already work.
+
+Both arms use the same revised system prompt. It calls the current work **equation
+topology / signed dependencies**, explicitly reserves function expressions for the
+later interaction stage, and states that a sources list is not a linear law.
+Process edits may affect any declared consumer while the selected-LHS restriction
+applies only to ordinary equation entries. Ordinary terms are preferred only for
+effects not linked by a shared-law declaration. Public targets still need explicit
+generated-variable declarations; appearing in the public catalog is not enough.
+No new scientific acceptance predicate or prose interpreter is added.
+
+The identical focused question in both arms is: **Which contributions to different
+generated equations represent the same physical law?** The proposer supplies the
+existing process schema: name, drivers, meaning, kind, signed consumers and optional
+conversions. Unknown conversions remain null. Empty declarations remain valid;
+inventing a second consumer or coupling disconnected basins is not rewarded.
+
+- **Integrated:** ask the question within the existing relationship-planning call,
+  alongside variable/memory/readout choices.
+- **Dedicated:** plan variables/bindings first, then ask the question in one focused
+  call before ordinary equation topology. A law volunteered earlier is preserved.
+  This call has the existing local delivery retries (at most three attempts), but
+  no repeated successful self-review loop. A failed optional delivery or an open
+  decision is logged and ordinary topology continues. Actual invalid retained
+  structures still face the same whole-draft checks and repair.
+
+Both arms allow later process edits, use the same transactional ledger and retain
+the complete public task/current draft in every request. Model/revision, low
+reasoning, sampling settings, context/output limits and task seeds are unchanged.
+The dedicated call is charged against the **same** per-construction request/token
+cap; it is not free compute. Each arm reserves the same three-request overall
+repair allowance. This tests the placement of a focused question under a common
+maximum budget, not an equal-actual-token comparison. Costs remain reported.
+
+The frozen `shared_law_comparison` roster has twelve tasks. Placement order rotates
+within case/schedule blocks and cases are interleaved independent of outcomes.
+All start from empty drafts using only the earlier sealed public context/training
+packet. No historical variables, functions, validation scores or fitted models
+are imported. Two cases and one seed are a diagnostic pilot, not a general ranking.
+The independent basin is a negative control: more shared laws is not a success
+criterion. Signs, drivers and scientific meaning need inspection; equal flux,
+thresholds and conversions cannot be certified before functions exist.
+
+`summary.json` groups costs and completion by schedule **and question placement**.
+Each row has `process_history` with original request IDs, proposed names/kinds/
+consumers, transaction rejection reasons and retained names, including empty and
+unreadable replies separately. Initial/final `process_usage` verifies assembled
+consumers. Counts of replies or repeated proposals are not model counts. Use
+`TOPOLOGY.html` and linked original prompts/replies to inspect scientific content.
+
+### Run the paired pilot on ACES
+
+Upload the new pinned source archive to group scratch, unpack it in a fresh
+directory and verify its `SHA256SUMS`. From that directory:
+
+```bash
+bash scripts/hpc/start_phase_c_shared_laws.sh run
+```
+
+It defaults to `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-shared-laws-v1`,
+wave `shared-laws-1`, one H100, a three-hour worker window and a dependent CPU report.
+The embedded `inputs/topology-source/plan.json` supplies public-only inputs.
+No trajectory files or old model artifacts are needed. Existing cache/resume,
+quota probes and immutable scheduler receipts apply. Repeating `run` reuses the
+same submission receipts. If tasks remain after the allocation, inspect first;
+use the same pinned source/root and a new `AF_COMPARISON_WAVE` for another allocation.
+No automatic follow-up is submitted.
+
+After jobs finish:
+
+```bash
+bash scripts/hpc/start_phase_c_shared_laws.sh inspect
+```
+
+Download `phase-c-shared-laws-v1/inspection.tar.gz`. The protocol is
+`phase-c-construction-comparison-8`; old plans must use their original code.
+Other version-8 defaults are `phase-c-construction-comparison-v8`,
+`phase-c-construction-live-v7` and `phase-c-construction-basins-v2`.
+
+Historical implementation changes follow for provenance.
+
 Version 7 adds exact consumer accounting, covariate-aware overlap clarification,
-and concrete cycle/binding repair feedback. The current protocol is
-`phase-c-construction-comparison-7`. The next confirmation is **six fresh
+and concrete cycle/binding repair feedback. Its protocol is
+`phase-c-construction-comparison-7`. Its confirmation was **six fresh
 constructions**: coupled and independent basins, each under separate, joint-fixed
 and joint-adaptive schedules, Full/seed 0. This targets the four affected basin
 drafts and retains the two adaptive basin constructions as matched comparisons.

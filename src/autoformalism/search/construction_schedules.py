@@ -21,10 +21,26 @@ from autoformalism.staged_topology import content_hash
 
 Policy = Literal["separate", "joint_fixed", "joint_adaptive"]
 POLICIES = ("separate", "joint_fixed", "joint_adaptive")
+ProcessQuestion = Literal["integrated", "dedicated"]
+PROCESS_QUESTIONS = ("integrated", "dedicated")
+
+SHARED_LAW_QUESTION = """Which contributions to DIFFERENT generated equations represent
+the SAME physical law? Consider the public task and all generated variables together.
+For each justified shared law, return one processes entry with its name, depends_on,
+scientific_meaning, kind and signed uses. These are dependencies and consumers, NOT
+a function expression. This explicitly links the later function across equations;
+separate ordinary terms do not establish that link, even with identical drivers.
+Do not add consumers or coupling merely to create a shared law. If none is justified,
+return no process additions. Empty processes is a valid decision, not a failure.
+Unknown conversions may remain null. The runtime defines each declared law once
+and inserts its signed uses; do not also repeat those effects as ordinary terms."""
 
 SYSTEM = """Construct a scientific model's VARIABLES AND TOPOLOGY, not functions.
 The unchanged public scientific task is authoritative. Work on the displayed
 stage using the structured edit schema. The runtime maintains the current draft.
+Here equations means equation TOPOLOGY: the LHS, grouped dependencies and signs.
+The later interaction stage supplies mathematical expressions and parameters.
+A sources list such as ["x"] does not specify a linear function of x.
 
 PUBLIC SOURCES AND GENERATED VARIABLES
 Public non-target input/observation channels, covariates and time are available
@@ -34,6 +50,8 @@ remain those in the public task. Initial readings are boundary information, not
 ongoing inputs; diagnostic thresholds are not physical forcing merely because
 they are in the catalog. Covariates can parameterize ongoing laws when justified.
 Every public target must be generated, never read from its future measurements.
+Being listed as a public target does NOT declare its generated variable: include
+its differential/algebraic declaration as well as its eventual equation topology.
 Choose differential (state with derivative equation) or algebraic (instantaneous
 readout/process) for each generated variable. Supplied observations can optionally
 be modeled; then RHS references denote your generated quantity, not the supplied
@@ -51,7 +69,7 @@ Choose accumulation, relaxation or another memory mechanism from the public task
 do not add a decay term mechanically. Explain the intended behavior. These are
 scientific choices, not a new runtime requirement that every state depends on itself.
 
-RELATIONSHIPS BEFORE INDIVIDUAL EQUATIONS
+RELATIONSHIPS BEFORE INDIVIDUAL EQUATION TOPOLOGIES
 Consider all targets together, their necessary states and shared mechanisms.
 Bind each displayed dynamic-memory requirement to your chosen differential
 mediator(s), distinct from that requirement's driver and target. Optional memory
@@ -71,7 +89,7 @@ It declares the actual storage/energy realization of that readout, not an arbitr
 upstream cause. Differential targets are already their own coordinate and need
 no such binding. Bindings express
 your intended scientific assignment; complete equations must establish the paths.
-For each optional named process, choose its drivers, scientific meaning and signed
+For each scientifically justified named process, choose its drivers, meaning and signed
 consumers together. The runtime defines it once and inserts every declared use.
 Consumers are generated variables with their own equations, not named-process
 definitions. Never list a process itself as its own consumer. For a composite
@@ -99,12 +117,16 @@ Use null for an unknown conversion; the runtime handles fitted magnitudes later.
 The consumer sign, conversion and fitted magnitude are outside the one shared law.
 Opposite signs or shared syntax alone do not prove conservation.
 
-EQUATION SKELETONS
+SIGNED DEPENDENCIES, NOT INTERACTION FUNCTIONS
 Group jointly interacting variables in each term's sources. Select the outer
 weight sign: positive, negative or unrestricted. A fixed outer sign does not
 assert global monotonicity/nonnegativity of the later function. Self-dependence
 can represent decay, relaxation or feedback when scientifically justified.
-Prefer ordinary contributions in equations. A singleton sources=["P"] with an
+Use ordinary terms for contributions not linked by a shared-law declaration.
+You MAY add or revise processes while declaring a selected equation's topology.
+Such a process edit can affect OTHER equations: runtime propagates all its uses.
+The selected-LHS restriction applies only to ordinary equations entries, NOT to
+processes entries. A singleton sources=["P"] with an
 explicit positive/negative outer sign declares use of that SAME named law. Runtime
 records a new consumer with conversion=null (unknown), or includes an existing
 matching use exactly once, preserving its conversion. Do not delete a physical
@@ -207,7 +229,9 @@ def validate_scope(
         raise ValueError(
             "variable stage permits variable and memory-binding edits only"
         )
-    if stage == "relationships" and (patch.equations or patch.remove_equations):
+    if stage in {"relationships", "shared_laws"} and (
+        patch.equations or patch.remove_equations
+    ):
         raise ValueError("relationship planning precedes equation skeletons")
     if (
         policy == "separate"
@@ -232,7 +256,12 @@ def validate_scope(
         )
 
 
-def instructions(policy: Policy, stage: str, focus: str | None) -> str:
+def instructions(
+    policy: Policy,
+    stage: str,
+    focus: str | None,
+    process_question: ProcessQuestion = "integrated",
+) -> str:
     """State the selected work unit while preserving the same scientific context."""
     if stage == "variables":
         return (
@@ -242,8 +271,14 @@ def instructions(policy: Policy, stage: str, focus: str | None) -> str:
         )
     if stage == "relationships":
         return (
-            "Plan relationships across all targets: memory bindings and optional "
-            "shared processes. Do not define ordinary equations yet. "
+            "Plan relationships across all targets and choose memory/readout bindings. "
+            + (
+                "Answer shared_law_question in this same reply. "
+                if process_question == "integrated"
+                else "A dedicated shared-law question follows this stage. You may "
+                "already record a law if identified; no declaration is discarded. "
+            )
+            + "Do not define ordinary equation topologies yet. "
             + (
                 "The generated-variable inventory is fixed. "
                 if policy == "separate"
@@ -251,25 +286,44 @@ def instructions(policy: Policy, stage: str, focus: str | None) -> str:
             )
             + "Finish relationship planning with stage_complete=true."
         )
+    if stage == "shared_laws":
+        return (
+            "Answer shared_law_question in this focused call, using the displayed "
+            "public task and current draft. Preserve earlier variables and bindings "
+            "unless an explicit correction is needed. Do not write ordinary equation "
+            "topologies or function expressions. "
+            + (
+                "The generated-variable inventory remains fixed. "
+                if policy == "separate"
+                else "You may declare generated variables needed by the relationship. "
+            )
+            + "Return stage_complete=true when this decision is finished, including "
+            "when no shared law is justified."
+        )
     if stage == "repair":
         return (
             "Repair structural failures and answer contribution clarification requests "
             "with explicit coordinated edits. "
-            "All variable, equation, process and binding edits are allowed. Preserve "
+            "All variable, equation-topology, process and binding edits are allowed. "
+            "This is still topology; do not supply function expressions. Preserve "
             "unaffected declarations. Inspect the rebuilt model before further edits. "
             "Set stage_complete=true when the whole topology is ready for checking."
         )
     if policy == "joint_adaptive":
         return (
-            "Choose the order and number of related variables/equations to address "
+            "Declare signed dependencies: choose the order and number of related "
+            "variables/equation topologies to address "
             "in this reply. Add or amend declarations together as scientifically "
             "useful. Use pending work to finish all targets and dependencies. "
             "stage_complete=true means the WHOLE topology draft is ready."
         )
     return (
-        f"Construct the ordinary RHS for selected LHS {focus}; only this equation "
-        "may be defined/replaced in this response. Shared-process and binding edits "
-        "remain possible. "
+        "You MAY add or revise a shared process and its consumers in this reply; "
+        "runtime propagates that declaration to ALL affected equations. "
+        f"Declare signed dependencies for selected LHS {focus}, "
+        "not function expressions. "
+        f"Only ordinary equations entries are restricted to {focus}; processes and "
+        "bindings may describe relationships across multiple equations. "
         + (
             "You may declare its newly needed variables alongside it. "
             if policy == "joint_fixed"
@@ -321,12 +375,15 @@ def run(
     repair_requests: int = 3,
     repair_tokens: int = 131072,
     graph_contract: PublicGraphContract | None = None,
+    process_question: ProcessQuestion = "integrated",
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
     draft, events, records = ledger.Draft(), [], []
     original = client.settings
     if policy not in POLICIES:
         raise ValueError("unknown construction policy")
+    if process_question not in PROCESS_QUESTIONS:
+        raise ValueError("unknown shared-law question placement")
     if graph_contract is not None:
         graph_contract.validate_public(brief)
     if (
@@ -346,7 +403,12 @@ def run(
         payload = {
             "policy": policy,
             "stage": stage,
-            "stage_instructions": instructions(policy, stage, focus),
+            "process_question": process_question,
+            "stage_instructions": instructions(policy, stage, focus, process_question),
+            "shared_law_question": SHARED_LAW_QUESTION
+            if stage == "shared_laws"
+            or (stage == "relationships" and process_question == "integrated")
+            else None,
             "selected_lhs": focus,
             "public_brief": enriched_brief,
             "public_source_catalog": [
@@ -406,6 +468,7 @@ def run(
         event = {
             "index": len(events),
             "stage": stage,
+            "process_question": process_question,
             "selected_lhs": focus,
             "attempt": attempt,
             "request_hash": record["request_hash"],
@@ -449,8 +512,10 @@ def run(
                     name, focus, diagnostic, attempt
                 )
                 if accepted:
-                    if complete:
-                        return True, None
+                    if complete or name == "shared_laws":
+                        # One focused decision, with existing local delivery retries;
+                        # no open-ended self-review or extra successful calls.
+                        return complete, None if complete else "decision left open"
                     break
             else:
                 return False, f"local response repair exhausted in {name}"
@@ -459,9 +524,10 @@ def run(
         ready, stop_reason = False, None
         stage_outcomes = []
         stages = (
-            ("variables", "relationships", "equations")
-            if policy == "separate"
-            else ("relationships", "equations")
+            (("variables",) if policy == "separate" else ())
+            + ("relationships",)
+            + (("shared_laws",) if process_question == "dedicated" else ())
+            + ("equations",)
         )
         try:
             for name in stages:
@@ -471,13 +537,15 @@ def run(
                         "stage": name,
                         "completed": ready,
                         "error": stop_reason,
-                        "continued_to_equations": name == "relationships" and not ready,
+                        "continued_to_equations": name
+                        in {"relationships", "shared_laws"}
+                        and not ready,
                     }
                 )
                 # Optional relationship delivery must not prevent construction of
                 # ordinary equations. Retain all accepted declarations; required
                 # bindings and unresolved references still face the final checks.
-                if name == "relationships" and not ready:
+                if name in {"relationships", "shared_laws"} and not ready:
                     continue
                 if not ready:
                     break
@@ -550,6 +618,7 @@ def run(
             if check["eligible"] and ready
             else "topology_incomplete",
             "policy": policy,
+            "process_question": process_question,
             "draft": draft.model_dump(mode="json"),
             "assessment": check,
             "ready_requested": ready,

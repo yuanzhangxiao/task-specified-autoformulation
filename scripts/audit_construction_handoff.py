@@ -29,6 +29,7 @@ def audit(source: Path, output: Path) -> dict:
             "phase-c-construction-comparison-5",
             "phase-c-construction-comparison-6",
             "phase-c-construction-comparison-7",
+            "phase-c-construction-comparison-8",
         }
         or plan.get("test_data_opened") is not False
     ):

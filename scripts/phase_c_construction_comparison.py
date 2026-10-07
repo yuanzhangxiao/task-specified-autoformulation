@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare, run and inspect the 96-, 24- or 6-task construction study."""
+"""Prepare, run and inspect a frozen construction study; no functions or fitting."""
 
 import argparse
 import json
@@ -38,7 +38,7 @@ def main():
     if args.command == "run":
         if not args.base_url:
             parser.error("run requires --base-url")
-        if plan.get("study") in {"live_confirmation", "basin_confirmation"}:
+        if plan.get("study") != "comparison":
             print(
                 json.dumps({"storage_check": campaign.check_storage(root)}), flush=True
             )

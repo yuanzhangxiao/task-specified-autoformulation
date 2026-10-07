@@ -19,7 +19,7 @@ from pydantic import Field, model_validator
 from autoformalism.expressions import ValidationContext
 from autoformalism.fitting import public_fitting as public
 from autoformalism.llm.construction import ConstructionClient
-from autoformalism.llm.staged_topology import atomic_json
+from autoformalism.llm.staged_topology import atomic_json, visible_response
 from autoformalism.rebuttal.prefit_construction_campaign import _cache_records, _cost
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import construction_baseline as baseline
@@ -33,17 +33,25 @@ from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
 
-PROTOCOL = "phase-c-construction-comparison-7"
+PROTOCOL = "phase-c-construction-comparison-8"
 REPO = baseline.REPO
-Study = Literal["comparison", "live_confirmation", "basin_confirmation"]
-STUDIES = ("comparison", "live_confirmation", "basin_confirmation")
+Study = Literal[
+    "comparison", "live_confirmation", "basin_confirmation", "shared_law_comparison"
+]
+STUDIES = (
+    "comparison",
+    "live_confirmation",
+    "basin_confirmation",
+    "shared_law_comparison",
+)
+BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 
 
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
-    protocol: Literal["phase-c-construction-comparison-7"] = PROTOCOL
+    protocol: Literal["phase-c-construction-comparison-8"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
 
@@ -68,6 +76,7 @@ def source_identity() -> dict:
                 "scripts/hpc/start_phase_c_construction_comparison.sh",
                 "scripts/hpc/start_phase_c_construction_live.sh",
                 "scripts/hpc/start_phase_c_construction_basin.sh",
+                "scripts/hpc/start_phase_c_shared_laws.sh",
             )
         },
     }
@@ -99,7 +108,7 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
     )
     roster = (
         BASIN_CASES
-        if study == "basin_confirmation"
+        if study in BASIN_STUDIES
         else topology_confirmation.phase_c_inputs.ROSTER
     )
     cells = {}
@@ -136,21 +145,33 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
         # Rotate policies within matched blocks so draining does not always omit
         # the same arm. This is scheduling, never score-based task selection.
         policies = schedules.POLICIES[i % 3 :] + schedules.POLICIES[: i % 3]
-        blocks.append(
-            [
-                {
-                    **task,
-                    "task_id": f"{task['task_id']}_{policy}",
-                    "policy": policy,
-                    "matched_task_id": task["task_id"],
-                }
-                for policy in policies
-            ]
-        )
+        block = []
+        for j, policy in enumerate(policies):
+            placements = (
+                schedules.PROCESS_QUESTIONS
+                if study == "shared_law_comparison"
+                else ("integrated",)
+            )
+            if (i + j) % 2:
+                placements = placements[::-1]
+            block.extend(
+                [
+                    {
+                        **task,
+                        "task_id": f"{task['task_id']}_{policy}"
+                        + (f"_{placement}" if study == "shared_law_comparison" else ""),
+                        "policy": policy,
+                        "process_question": placement,
+                        "matched_task_id": task["task_id"],
+                    }
+                    for placement in placements
+                ]
+            )
+        blocks.append(block)
     # Expose every selected case before starting its second policy.
     # Every case receives every policy; rotation is independent of results.
     tasks = (
-        [block[j] for j in range(3) for block in blocks]
+        [block[j] for j in range(len(blocks[0])) for block in blocks]
         if study != "comparison"
         else [task for block in blocks for task in block]
     )
@@ -160,7 +181,11 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
             {
                 "protocol": PROTOCOL,
                 "study": study,
-                "selection_rule": "both-basins-seed0-full-three-policies-1"
+                "selection_rule": (
+                    "both-basins-seed0-full-three-policies-two-placements-1"
+                )
+                if study == "shared_law_comparison"
+                else "both-basins-seed0-full-three-policies-1"
                 if study == "basin_confirmation"
                 else "all-eight-cases-seed0-full-three-policies-1"
                 if study != "comparison"
@@ -181,7 +206,7 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
 
 
 def verify(root: Path) -> dict:
-    """Resume only the frozen source and exact declared 96-, 24- or 6-task roster."""
+    """Resume only the frozen source and exact declared matched roster."""
     plan = sealed_read(root / "plan.json")
     if plan["protocol"] != PROTOCOL or plan["source_identity"] != source_identity():
         raise ValueError("construction comparison source/protocol differs")
@@ -199,20 +224,26 @@ def verify(root: Path) -> dict:
         raise ValueError("live confirmation uses a three-hour worker window")
     roster = (
         BASIN_CASES
-        if study == "basin_confirmation"
+        if study in BASIN_STUDIES
         else topology_confirmation.phase_c_inputs.ROSTER
     )
     if set(plan["cells"]) != set(roster):
         raise ValueError("public cells differ from study roster")
     expected = {
-        (case, seed, arm, policy)
+        (case, seed, arm, policy, placement)
         for case in roster
         for seed in ((0,) if study != "comparison" else (0, 1))
         for arm in (("full",) if study != "comparison" else ("full", "brief_only"))
         for policy in schedules.POLICIES
+        for placement in (
+            schedules.PROCESS_QUESTIONS
+            if study == "shared_law_comparison"
+            else ("integrated",)
+        )
     }
     actual = [
-        (t["benchmark_id"], t["seed"], t["arm"], t["policy"]) for t in plan["tasks"]
+        (t["benchmark_id"], t["seed"], t["arm"], t["policy"], t.get("process_question"))
+        for t in plan["tasks"]
     ]
     if len(actual) != len(expected) or set(actual) != expected:
         raise ValueError(f"requires the exact {len(expected)}-task {study} roster")
@@ -355,6 +386,7 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
                 client,
                 directory / "construction",
                 task["policy"],
+                process_question=task["process_question"],
                 repair_requests=config.repair_requests,
                 repair_tokens=config.repair_tokens,
                 graph_contract=PublicGraphContract.model_validate(
@@ -425,6 +457,70 @@ def _skeleton(assessment: dict) -> str:
     return (
         "\n".join(lines) or "No assembled skeleton available; inspect raw declarations."
     )
+
+
+def process_history(records: list[dict], events: list[dict]) -> list[dict]:
+    """Distinguish absent, rejected and committed law declarations from raw replies.
+
+    Consumer counts below describe proposals, not verified assembly or science.
+    Unreadable delivery stays unknown rather than becoming an empty decision.
+    """
+    by_hash = {r["request_hash"]: r for r in records}
+    history = []
+    for event in events:
+        record = by_hash[event["request_hash"]]
+        payload = json.loads(record["request"]["body"]["messages"][1]["content"])
+        declarations = None
+        removals = None
+        try:
+            raw = visible_response(record)
+            if isinstance(raw, dict):
+                items = raw.get("processes")
+                if isinstance(items, list):
+                    declarations = []
+                    for p in items:
+                        uses = p.get("uses") if isinstance(p, dict) else None
+                        targets = (
+                            sorted(
+                                {
+                                    u["target"]
+                                    for u in uses
+                                    if isinstance(u, dict)
+                                    and isinstance(u.get("target"), str)
+                                }
+                            )
+                            if isinstance(uses, list)
+                            else None
+                        )
+                        declarations.append(
+                            {
+                                "name": p.get("name") if isinstance(p, dict) else None,
+                                "kind": p.get("kind") if isinstance(p, dict) else None,
+                                "declared_consumers": targets,
+                                "declared_shared": len(targets) >= 2
+                                if targets is not None
+                                else None,
+                            }
+                        )
+                removals = raw.get("remove_processes")
+        except (ValueError, TypeError, KeyError):
+            pass
+        history.append(
+            {
+                "event": event["index"],
+                "stage": event["stage"],
+                "shared_law_question_displayed": bool(
+                    payload.get("shared_law_question")
+                ),
+                "request_hash": event["request_hash"],
+                "accepted": event["accepted"],
+                "error": event["error"],
+                "proposed_processes": declarations,
+                "requested_removals": removals,
+                "retained_names": [p["name"] for p in event["after"]["processes"]],
+            }
+        )
+    return history
 
 
 def report(root: Path, plan: dict) -> dict:
@@ -510,6 +606,10 @@ def report(root: Path, plan: dict) -> dict:
             if value
             else None,
             "process_usage": value["assessment"]["process_usage"] if value else None,
+            "initial_process_usage": initial["assessment"]["process_usage"]
+            if initial
+            else None,
+            "process_history": process_history(records, events),
             "reviewed_public_graph_checks": value["assessment"][
                 "reviewed_public_graph_checks"
             ]
@@ -532,6 +632,26 @@ def report(root: Path, plan: dict) -> dict:
             "repair_calls": sum(e["stage"] == "repair" for e in events),
             "scientific_adequacy": "requires independent equation inspection",
         }
+        row["process_counts"] = {
+            "replies_with_declarations": sum(
+                bool(h["proposed_processes"]) for h in row["process_history"]
+            ),
+            "rejected_replies_with_declarations": sum(
+                bool(h["proposed_processes"]) and not h["accepted"]
+                for h in row["process_history"]
+            ),
+            "unreadable_process_lists": sum(
+                h["proposed_processes"] is None for h in row["process_history"]
+            ),
+            "retained_shared_laws": sum(
+                p["scope"] == "shared" for p in row["process_usage"]
+            )
+            if value
+            else None,
+            "scope": (
+                "Replies may repeat declarations; retained counts verify assembly only."
+            ),
+        }
         rows.append(row)
         if records:
             row["trace"] = render_trace(directory, identity)
@@ -553,12 +673,25 @@ def report(root: Path, plan: dict) -> dict:
                 )
     groups = {}
     for policy in schedules.POLICIES:
-        for arm in ("full", "brief_only"):
-            selected = [r for r in rows if r["policy"] == policy and r["arm"] == arm]
+        for arm, placement in (
+            (arm, placement)
+            for arm in ("full", "brief_only")
+            for placement in schedules.PROCESS_QUESTIONS
+        ):
+            selected = [
+                r
+                for r in rows
+                if r["policy"] == policy
+                and r["arm"] == arm
+                and r.get("process_question", "integrated") == placement
+            ]
             if not selected:
                 continue
             done = [r for r in selected if r["status"] != "pending"]
-            groups[f"{policy}:{arm}"] = {
+            key = f"{policy}:{arm}"
+            if plan.get("study") == "shared_law_comparison":
+                key += f":{placement}"
+            groups[key] = {
                 "planned": len(selected),
                 "finished": len(done),
                 "equation_stage_reached": sum(
@@ -572,6 +705,16 @@ def report(root: Path, plan: dict) -> dict:
                 ),
                 "tokens": spread([r["cost"]["observed_tokens"] for r in done]),
                 "calls": spread([r["cost"]["physical_requests"] for r in done]),
+                "models_retaining_shared_laws": sum(
+                    r["process_counts"]["retained_shared_laws"] > 0 for r in done
+                ),
+                "replies_with_process_declarations": sum(
+                    r["process_counts"]["replies_with_declarations"] for r in done
+                ),
+                "rejected_replies_with_process_declarations": sum(
+                    r["process_counts"]["rejected_replies_with_declarations"]
+                    for r in done
+                ),
             }
     result = {
         "protocol": PROTOCOL,
@@ -608,7 +751,14 @@ def report(root: Path, plan: dict) -> dict:
         "# Phase C construction schedules",
         "",
         "Fresh variables and topology; no functions or fitting.",
-        "Basin confirmation: both cases, seed 0, Full only; not a strategy ranking."
+        "Shared-law question: integrated versus dedicated; both basins, "
+        "three schedules, "
+        "Full/seed 0. Same total budgets; the dedicated call is charged, not free. "
+        "A small paired pilot, not a strategy ranking."
+        if plan.get("study") == "shared_law_comparison"
+        else (
+            "Basin confirmation: both cases, seed 0, Full only; not a strategy ranking."
+        )
         if plan.get("study") == "basin_confirmation"
         else (
             "Live confirmation: all eight cases, seed 0, Full only; "
@@ -623,16 +773,21 @@ def report(root: Path, plan: dict) -> dict:
         f"{result['delivery']['whitespace_heavy_length_responses']}.",
         "Costs include variable construction and repairs. Brackets show unscaled "
         "MAD over finished tasks; pending tasks are not zeros.",
+        "Process counts distinguish raw proposals, rejected edits "
+        "and verified assembly. "
+        "More shared laws is not inherently better; inspect the independent control. "
+        "No conservation or function-equivalence claim follows from topology.",
         "",
         "| Policy / prompt | Finished / planned | Initial complete | Final complete "
-        "| Tokens median [MAD] | Calls median [MAD] |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Tokens median [MAD] | Calls median [MAD] | Models retaining shared laws |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for name, g in groups.items():
         lines.append(
             f"| {name} | {g['finished']}/{g['planned']} | {g['initial_complete']} "
             f"| {g['final_complete']} | {g['tokens']['median']} [{g['tokens']['MAD']}] "
-            f"| {g['calls']['median']} [{g['calls']['MAD']}] |"
+            f"| {g['calls']['median']} [{g['calls']['MAD']}] "
+            f"| {g['models_retaining_shared_laws']} |"
         )
     (root / "SUMMARY.md").write_text("\n".join(lines) + "\n")
     (root / "TOPOLOGY.html").write_text(

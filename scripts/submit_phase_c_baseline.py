@@ -54,6 +54,7 @@ def submit(
     live_confirmation = compare_construction and plan.get("study") in {
         "live_confirmation",
         "basin_confirmation",
+        "shared_law_comparison",
     }
     if live_confirmation:
         construction_comparison.check_storage(root)

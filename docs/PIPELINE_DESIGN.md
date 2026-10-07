@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+Construction comparison version 8 tests integrated versus dedicated shared-law
+elicitation with one common prompt/ledger and unchanged structural predicates.
+The dedicated decision uses the same request/token cap and local delivery retries;
+empty/failed optional delivery does not prevent ordinary topology, and all actual
+retained declarations face the usual whole-draft checks. The twelve-task basin
+roster, placement-aware report and pinned ACES launcher stop before functions or
+fitting. See `PHASE_C_CONSTRUCTION_COMPARISON.md` for the prospective protocol.
+
 Construction comparison version 7 verifies every declared process consumer in
 the assembled skeleton, clarifies covariate-only contribution overlap, and shows
 concrete algebraic cycles and binding edit options. Scientific assignments remain
