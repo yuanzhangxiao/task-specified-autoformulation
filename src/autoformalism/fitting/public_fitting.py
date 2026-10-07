@@ -27,6 +27,7 @@ from autoformalism.expressions import compile_candidate
 from autoformalism.fitting.fitter import fit_candidate
 from autoformalism.fitting.initialization import apply_initialization_plan
 from autoformalism.fitting.models import FitConfig
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.schemas.public_fitting import (
     PublicFitMetrics,
     PublicFitRequest,
@@ -66,10 +67,12 @@ def content_sha256(value) -> str:
     ).hexdigest()
 
 
+@timed("json_read")
 def _read(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
+@timed("checkpoint_write")
 def _write(path: Path, value) -> None:
     """Atomically publish a JSON checkpoint; callers hold the attempt lock."""
     temporary = path.with_suffix(path.suffix + ".tmp")

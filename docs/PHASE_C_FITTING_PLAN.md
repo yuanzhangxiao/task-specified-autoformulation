@@ -676,3 +676,18 @@ nodes for the relaxed collocation objective, followed by independent rollout;
 conditions before introducing nonquadratic inner losses. Poor performance of
 unprofiled collocation is not evidence that the first direction cannot help.
 M15 coefficient-polishing results remain a separate assessment.
+
+## M17 — diagnose coupled timeouts and compare matched polishing
+
+M16 completed 10/12 fits. Both methods passed prediction/1% coefficient recovery
+on 5/6 original starts; joint recovered initials on 5/6 and profiled on 3/6.
+The two profiled fast/slow fits stopped at the prediction target while retaining
+small initial errors. Both methods also lost fast/slow seed 2 before a complete
+candidate; runtime timing was insufficient to establish the cause.
+
+The [M17 protocol](PHASE_C_COUPLED_POLISHING.md) freezes the exact original inputs.
+Two explicit repeat tasks remain separate from the original failures. Twelve
+fresh paired fits aim for stricter training precision after independent initial
+certification, sharing 300 seconds/300 residual calls across both stages.
+Wall/CPU timing covers imports, integration and checkpoint writes. Neither truth
+nor validation controls polishing. Larger coupled blocks remain the next step.

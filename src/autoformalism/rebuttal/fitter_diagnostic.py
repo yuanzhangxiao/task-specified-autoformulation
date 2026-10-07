@@ -40,6 +40,7 @@ from autoformalism.expressions import (
     compile_candidate,
 )
 from autoformalism.fitting import FitConfig, fit_candidate, simulate_trajectory
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.base import FiniteFloat, StrictSchema
 
@@ -127,6 +128,7 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@timed("checkpoint_write")
 def write_json(path: Path, value: object, *, immutable: bool = False) -> None:
     """Atomically publish a JSON checkpoint; reject changed frozen artifacts."""
     _write_bytes(path, json_bytes(value), immutable=immutable)

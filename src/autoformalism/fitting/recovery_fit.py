@@ -43,6 +43,7 @@ def fit(
     folder: Path,
     *,
     rollout_mode: str = "recovery_rollout",
+    diagnostic_timing: bool = False,
 ) -> dict:
     """One 20-minute envelope, including setup/screens and early certificates.
 
@@ -61,6 +62,8 @@ def fit(
     identity_fields = {"base": base, "arm": arm, "policy": policy}
     if rollout_mode != "recovery_rollout":
         identity_fields["rollout_mode"] = rollout_mode
+    if diagnostic_timing:
+        identity_fields["diagnostic_timing"] = "fitting-worker-timing-1"
     identity = public.content_sha256(identity_fields)
     started = folder / "fit-started.json"
     if started.exists():
@@ -105,7 +108,8 @@ def fit(
         if halted or seconds < 1:
             return None
         payload = {**payload, "seconds": seconds}
-        outcome = process.invoke(mode, payload, path, seconds)
+        options = {"diagnostic_timing": True} if diagnostic_timing else {}
+        outcome = process.invoke(mode, payload, path, seconds, **options)
         if not outcome["termination_confirmed"]:
             halted = True
         target = path / "result.json"

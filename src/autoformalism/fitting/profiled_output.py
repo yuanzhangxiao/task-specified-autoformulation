@@ -14,6 +14,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import lsq_linear
 
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
 from autoformalism.fitting.simulation import forcing_segment_indices, trajectory_forcing
 
@@ -176,6 +177,7 @@ class ProfiledOutput:
         )
 
 
+@timed("bounded_linear_solve")
 def project(design, offset, d_design, d_offset, lower, upper) -> dict:
     """Bounded linear LS and exact residual Jacobian on a fixed active set.
 

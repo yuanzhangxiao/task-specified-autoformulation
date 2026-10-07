@@ -60,13 +60,21 @@ def call_count(backend: dict) -> int | None:
     return count if type(count) is int and count >= 0 else None
 
 
-def fit(base: dict, arm: str, policy: dict, folder: Path) -> dict:
+def fit(
+    base: dict,
+    arm: str,
+    policy: dict,
+    folder: Path,
+    *,
+    stage_fitter=None,
+    allowed_arms=None,
+) -> dict:
     """Preserve a certified prediction before one parameter warm-start polish.
 
     Optimizer state is restarted once, but time and evaluation budgets are not.
     Interrupted coordinators are terminal; durable first checkpoints survive.
     """
-    if arm not in profiled.ARMS or set(base) != {
+    if arm not in (allowed_arms or profiled.ARMS) or set(base) != {
         "request",
         "training",
         "coordinates",
@@ -138,7 +146,7 @@ def fit(base: dict, arm: str, policy: dict, folder: Path) -> dict:
         stage_base = deepcopy(base)
         stage_base["start"] = point
         settings = settings | {"seconds": max(0, deadline - monotonic())}
-        value = profiled.fit(stage_base, arm, settings, folder / name)
+        value = (stage_fitter or profiled.fit)(stage_base, arm, settings, folder / name)
         stage = {"name": name, "policy": settings, "backend": value}
         seal(folder / f"{name}.json", {"identity": identity, "stage": stage})
         result["stages"].append(stage)

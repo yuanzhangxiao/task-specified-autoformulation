@@ -14,7 +14,14 @@ from autoformalism.benchmarks.audited_release import read_seal, seal
 from autoformalism.fitting import public_fitting as public
 
 
-def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
+def invoke(
+    mode: str,
+    payload: dict,
+    folder: Path,
+    seconds: float,
+    *,
+    diagnostic_timing: bool = False,
+) -> dict:
     """Resume terminal work exactly; never grant a started operation a new budget."""
     if (
         mode
@@ -35,6 +42,8 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
         "payload_sha256": public.content_sha256(payload),
         "seconds": seconds,
     }
+    if diagnostic_timing:
+        identity["diagnostic_timing"] = "fitting-worker-timing-1"
     saved, started = folder / "process.json", folder / "started.json"
     if saved.exists():
         result = read_seal(saved)
@@ -67,16 +76,14 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
         "termination_confirmed": True,
         "budget_restarted": False,
     }
+    command = [sys.executable, "-m", "autoformalism.fitting.mesh_refinement_worker"]
+    if diagnostic_timing:
+        script = Path(__file__).resolve().parents[3] / "scripts/fitting_timed_worker.py"
+        command = [sys.executable, str(script)]
     with (folder / "worker.log").open("w") as log:
         try:
             process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "autoformalism.fitting.mesh_refinement_worker",
-                    mode,
-                    str(folder),
-                ],
+                [*command, mode, str(folder)],
                 stdout=log,
                 stderr=log,
                 start_new_session=True,
@@ -112,6 +119,7 @@ def invoke(mode: str, payload: dict, folder: Path, seconds: float) -> dict:
         name: public.content_sha256(public._read(folder / name))
         for name in (
             "result.json",
+            *(("timing.json",) if diagnostic_timing else ()),
             "nodes.json",
             "native.json",
             "final_checkpoint_diagnostics.json",

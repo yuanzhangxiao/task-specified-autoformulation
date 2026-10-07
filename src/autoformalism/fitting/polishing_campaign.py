@@ -43,6 +43,13 @@ def run_task(root: Path, index: int) -> dict:
     """Evaluate the first checkpoint only after the final selection is sealed."""
     row = common.run_task(root, index, protocol=PROTOCOL, fitter=polishing_fit.fit)
     plan, data = verify(root)
+    return compare_first(root, row, plan, data)
+
+
+def compare_first(
+    root: Path, row: dict, plan: dict, data: dict, *, evaluation_data=None
+):
+    """Score the first vector after final sealing, with an optional case resolver."""
     folder = root / "results" / row["task_id"]
     identity = {"identity": row["identity"], "backend_sha256": row["backend_sha256"]}
     with public._lock(folder):
@@ -74,7 +81,7 @@ def run_task(root: Path, index: int) -> dict:
                 )
                 evaluation = common.replay._evaluation(
                     destination,
-                    data,
+                    evaluation_data(data, row) if evaluation_data else data,
                     data["commons"][row["common"]],
                     parameters,
                     plan["policy"]["replay_seconds"],

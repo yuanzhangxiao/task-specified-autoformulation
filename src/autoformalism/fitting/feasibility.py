@@ -14,6 +14,7 @@ from autoformalism.fitting.coordinates import (
     coordinate_least_squares,
 )
 from autoformalism.fitting.directional_poll import poll_fit
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.fitting.sensitivity_probe import SymbolicOracle
 from autoformalism.fitting.stagnation import instrumented_fit
 from autoformalism.rebuttal.fitter_diagnostic import _finite_payload, write_json
@@ -55,6 +56,7 @@ class GuardedOracle(SymbolicOracle):
         self.reject_invalid_trials = reject_invalid_trials
         self.rejected_trials = 0
 
+    @timed("residual_point")
     def __call__(self, values):
         self.budget.take()
         self.deadline = min(self.budget.deadline, monotonic() + self.point_seconds)

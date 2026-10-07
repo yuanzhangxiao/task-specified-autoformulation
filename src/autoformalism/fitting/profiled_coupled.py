@@ -7,6 +7,7 @@ import casadi as ca
 import numpy as np
 from scipy.integrate import solve_ivp
 
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.fitting.profiled_output import _zero
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
 from autoformalism.fitting.simulation import forcing_segment_indices, trajectory_forcing
@@ -21,6 +22,7 @@ class ProfiledCoupled:
     problem. The existing gain attribute names implement the M14 worker interface.
     """
 
+    @timed("profile_structure")
     def __init__(self, system: SymbolicODE, gains: tuple[str, ...] | None = None):
         self.system = system
         n, p = system.state_count, len(system.names)
@@ -111,6 +113,7 @@ class ProfiledCoupled:
             "exactness": "algebraic separability; numerical tolerance error remains",
         }
 
+    @timed("trajectory_integration")
     def trajectory(self, trajectory, vector, settings, deadline, *, sensitivities=True):
         """Integrate affine basis responses and their exact outer sensitivities."""
         system = self.system

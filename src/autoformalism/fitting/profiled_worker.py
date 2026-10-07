@@ -11,6 +11,7 @@ from autoformalism.fitting.bounded_screening import TrainingOnlySplit
 from autoformalism.fitting.feasibility import EvaluationBudget
 from autoformalism.fitting.identifiable_campaign import SETTINGS, scale_for
 from autoformalism.fitting.identifiable_refinement import RefinementPolicy
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.fitting.portfolio_starts import domain, valid
 from autoformalism.fitting.profiled_output import ProfiledOutput, project
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
@@ -69,6 +70,7 @@ def rollout(payload: dict, folder: Path, *, profiler=ProfiledOutput) -> dict:
     }
     public._write(directory / "structure.json", profiled.audit)
 
+    @timed("residual_point")
     def evaluate(q):
         nonlocal best, last_q, last_jac
         budget.take()

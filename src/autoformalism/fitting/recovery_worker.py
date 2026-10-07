@@ -13,11 +13,13 @@ from autoformalism.fitting.coordinates import NumericalCoordinates
 from autoformalism.fitting.identifiable_campaign import SETTINGS, scale_for
 from autoformalism.fitting.identifiable_refinement import RefinementPolicy, refine
 from autoformalism.fitting.models import FitConfig
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
 from autoformalism.fitting.simulation import simulate_trajectory
 from autoformalism.schemas.public_fitting import PublicFitRequest
 
 
+@timed("independent_training_check")
 def certify(payload: dict, folder: Path) -> dict:
     """Check every training trajectory with two solvers; no parameter certificate."""
     launched = public._read(folder / "launch.json")["monotonic"]

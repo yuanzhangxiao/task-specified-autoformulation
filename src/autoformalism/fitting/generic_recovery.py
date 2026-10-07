@@ -125,6 +125,7 @@ def prepare(
     protocol: str = PROTOCOL,
     arms: tuple[str, ...] = ARMS,
     base_factory=None,
+    task_filter=None,
 ) -> dict:
     """Freeze the complete roster and budgets; no optimizer or regeneration."""
     data = read_seal(inputs)
@@ -133,6 +134,8 @@ def prepare(
         for common in sorted((base_factory or bases)(data))
         for arm in arms
     ]
+    if task_filter is not None:
+        tasks = [task for task in tasks if task_filter(task)]
     plan = {
         "protocol": protocol,
         "inputs_sha256": public.content_sha256(data),

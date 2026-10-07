@@ -22,6 +22,7 @@ from autoformalism.expressions import CompiledModel
 from autoformalism.expressions.diagnostics import RuntimeExpressionError
 from autoformalism.fitting.casadi_initializer import _translate
 from autoformalism.fitting.models import FitConfig
+from autoformalism.fitting.operation_timing import timed
 from autoformalism.fitting.sensitivity_contract import (
     SensitivityContractError,
     certify_expressions,
@@ -44,6 +45,7 @@ class SymbolicODE:
     allow_piecewise: bool = False
     solver_jacobian_format: str = "dense"
 
+    @timed("symbolic_model_build")
     def __post_init__(self) -> None:
         if self.solver_jacobian_format not in {"dense", "sparse"}:
             raise ValueError("unknown solver Jacobian format")
@@ -282,6 +284,7 @@ class SymbolicRolloutTimeout(TimeoutError):
         self.diagnostic = diagnostic
 
 
+@timed("trajectory_integration")
 def symbolic_rollout(
     system: SymbolicODE,
     trajectory: Trajectory,
