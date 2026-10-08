@@ -1,13 +1,12 @@
 {
-  "schema_version": "phase-c-d3-plan-1",
+  "schema_version": "phase-c-d3-plan-2",
   "development_only": true,
   "release_protocol": "phase-c-development-2",
   "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
   "status": "frozen_before_calls",
-  "purpose": "A smoke test of the whole path on a Jetstream2 GPU VM, not a result: two D3 generations on one cell against gpt-oss-20b served on the VM, our strict-JSON client, native fitting, validation selection, the rollout check and the sealed result. The second generation sees the first one's feedback. No model from this root may be evaluated or reported.",
+  "purpose": "A smoke test of the whole path, not a result: two D3 generations on one cell, so that both of D3's requests are made, a first model and then a reflection followed by a new model, through gpt-oss-20b served on a Jetstream2 GPU VM, native fitting, D3's selection, the rollout check and the sealed result. No model from this root may be evaluated or reported.",
   "endpoint": "vm_local_vllm",
   "model": "openai/gpt-oss-20b",
-  "reasoning_effort": "low",
   "cells": [
     {
       "benchmark_id": "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
@@ -20,6 +19,10 @@
   ],
   "generations": 2,
   "patience": 2,
+  "keep_top_samples": 16,
+  "temperature": 0.7,
+  "top_p": 0.95,
+  "reasoning_effort": null,
   "max_output_tokens": 8192,
   "trajectory_seconds": 120,
   "test_data_opened": false,

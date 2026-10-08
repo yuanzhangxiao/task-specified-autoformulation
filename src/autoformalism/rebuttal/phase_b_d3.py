@@ -313,24 +313,56 @@ def discover_and_seal(
     context: ValidationContext,
     *,
     directory: Path,
-    generations: int,
-    patience: int,
     trajectory_seconds: float,
-    llm_model: str,
-    task_prompt: Callable[[], str],
-    native_client: Callable[[], Any],
     protocol: str,
+    generations: int | None = None,
+    patience: int | None = None,
+    llm_model: str | None = None,
+    task_prompt: Callable[[], str] | None = None,
+    native_client: Callable[[], Any] | None = None,
+    discover: Callable[[], BaselineDevelopmentResult] | None = None,
+    selection_metric: str = "native_one_step_validation",
 ) -> dict:
     """Discover, check and seal one D3 task, resuming whatever it finished.
 
-    Shared by the Phase B and Phase C campaigns, so both run D3 the same way:
-    the native prompt with the declared clarification and the task identity,
-    native fitting and validation selection, the recursive rollout check and
-    one sealed result. A sealed result is verified and returned without a call,
-    and a saved native selection is evaluated without one; the client and the
-    prompt are asked for only when generations remain to run.
+    Phase B discovers with our one-call adapter: the native prompt with the
+    declared clarification and the task identity, native fitting and
+    validation selection. A campaign that runs another D3 loop passes it as
+    `discover` and names its rule in `selection_metric`. Both then share the
+    recursive rollout check and one sealed result. A sealed result is verified
+    and returned without a call, and a saved selection is evaluated without
+    one; discovery runs only when generations remain to run.
     """
     row = plan["rows"][index]
+    if discover is None and None in (
+        generations, patience, llm_model, task_prompt, native_client
+    ):
+        raise TypeError("the adapter needs its budget, model, prompt and client")
+
+    def adapter() -> BaselineDevelopmentResult:
+        client = native_client()
+        return run_d3_native_no_tools_development(
+            BaselineConfig(
+                method="d3_native_no_tools",
+                seed=row["repetition"],
+                llm_model=llm_model,
+                d3_generations=generations,
+                d3_patience=patience,
+            ),
+            data,
+            context,
+            task_prompt=task_prompt(),
+            work_directory=directory,
+            llm_client=_NativeClient(
+                client,
+                {
+                    "plan_sha256": plan["artifact_sha256"],
+                    "task_index": index,
+                    "repetition": row["repetition"],
+                },
+            ),
+        )
+
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / "result.json"
     with (directory / "task.lock").open("a") as lock:
@@ -351,28 +383,7 @@ def discover_and_seal(
             if saved is not None:
                 selected = BaselineDevelopmentResult.model_validate(saved["selection"])
             else:
-                actual_client = native_client()
-                selected = run_d3_native_no_tools_development(
-                    BaselineConfig(
-                        method="d3_native_no_tools",
-                        seed=row["repetition"],
-                        llm_model=llm_model,
-                        d3_generations=generations,
-                        d3_patience=patience,
-                    ),
-                    data,
-                    context,
-                    task_prompt=task_prompt(),
-                    work_directory=directory,
-                    llm_client=_NativeClient(
-                        actual_client,
-                        {
-                            "plan_sha256": plan["artifact_sha256"],
-                            "task_index": index,
-                            "repetition": row["repetition"],
-                        },
-                    ),
-                )
+                selected = adapter() if discover is None else discover()
                 sealed_write(
                     native_path,
                     {
@@ -423,7 +434,7 @@ def discover_and_seal(
                 "accounting": accounting(directory / "llm_calls.jsonl"),
                 "test_data_opened": False,
                 "private_reference_opened": False,
-                "selection_metric": "native_one_step_validation",
+                "selection_metric": selection_metric,
                 "recursive_score_fed_to_proposer": False,
             },
         )

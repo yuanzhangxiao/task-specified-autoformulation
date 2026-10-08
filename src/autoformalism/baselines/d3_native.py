@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import copy
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -89,16 +90,25 @@ def fit_native_d3(
     learning_rate: float = 1e-2,
     validation_interval: int = 10,
     patience_checks: int = 100,
+    initial_values: Mapping[str, float] | None = None,
 ) -> NativeD3Fit:
-    """Fit with Adam and teacher-forced one-step Euler updates like upstream D3."""
+    """Fit with Adam and teacher-forced one-step Euler updates like upstream D3.
+
+    A parameter starts from `initial_values` when it is named there, as in
+    upstream D3, whose model code sets each starting value; otherwise from the
+    midpoint of its declared initialization range, or 1.
+    """
     torch = _import_torch()
     torch.manual_seed(seed)
     scales = _target_scales(training, targets)
+    starts = dict(initial_values or {})
     parameters = {
         item.name: torch.nn.Parameter(
             torch.tensor(
                 (
-                    1.0
+                    float(starts[item.name])
+                    if item.name in starts
+                    else 1.0
                     if item.initialization_range is None
                     else (
                         item.initialization_range.lower
@@ -182,6 +192,36 @@ def evaluate_native_d3(
         for target, errors in per_target.items()
     }
     return float(np.mean(list(metrics.values()))), metrics
+
+
+def raw_state_losses(
+    candidate: CandidateModel,
+    split: DatasetSplit,
+    parameters: dict[str, float],
+) -> tuple[float, dict[str, float]]:
+    """D3's validation loss and each modeled state's share of it.
+
+    The one-step squared error over every state the model advances, in the
+    data's own units, as upstream D3 scores a model and as the fit's early
+    stopping does: averaged within each trajectory, then over trajectories.
+    The overall loss is the mean of the per-state losses.
+    """
+    torch = _import_torch()
+    states = observed_state_names(candidate)
+    shares: dict[str, list[float]] = {name: [] for name in states}
+    with torch.no_grad():
+        for trajectory in split.trajectories:
+            predictions, truth = _predict_trajectory(
+                candidate, trajectory, parameters, torch
+            )
+            squared = torch.mean((predictions - truth) ** 2, dim=0)
+            for index, name in enumerate(states):
+                shares[name].append(float(squared[index].item()))
+    per_state = {name: float(np.mean(values)) for name, values in shares.items()}
+    loss = float(np.mean(list(per_state.values())))
+    if not math.isfinite(loss):
+        raise NativeD3Error("native D3 validation loss became nonfinite")
+    return loss, per_state
 
 
 def _raw_state_loss(candidate, split, parameters, torch):

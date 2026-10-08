@@ -154,19 +154,19 @@ def test_every_vm_script_parses(script: Path) -> None:
         ("run_phase_c_tasks.sh", ["sindy", "configs/x.json", "run", "4"], "METHOD"),
         (
             "run_phase_c_tasks.sh",
-            ["d3", "configs/phase_c_d3_smoke_vm_20b_v1.json", "run", "0"],
+            ["d3", "configs/phase_c_d3_smoke_vm_20b_v2.json", "run", "0"],
             "METHOD",
         ),
         ("run_phase_c_tasks.sh", ["llm_sr", "configs/no.json", "run", "4"], "METHOD"),
         (
             "run_phase_c_hosted.sh",
-            ["llm_sr", "configs/phase_c_d3_smoke_v1.json", "run"],
+            ["llm_sr", "configs/phase_c_d3_smoke_v2.json", "run"],
             "METHOD",
         ),
         ("run_phase_c_hosted.sh", ["d3", "configs/no.json", "run"], "METHOD"),
         (
             "run_phase_c_hosted.sh",
-            ["d3", "configs/phase_c_d3_smoke_v1.json", "run", "0"],
+            ["d3", "configs/phase_c_d3_smoke_v2.json", "run", "0"],
             "METHOD",
         ),
         ("run_phase_c_classical.sh", [], "CONFIG"),

@@ -1,13 +1,12 @@
 {
-  "schema_version": "phase-c-d3-plan-1",
+  "schema_version": "phase-c-d3-plan-2",
   "development_only": true,
   "release_protocol": "phase-c-development-2",
   "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
   "status": "proposed_pending_review",
-  "purpose": "D3-native-no-tools on the eight Phase C roster cells with two seeds, development data only, at the Phase B campaign's settings: five generations, patience five, 8192 output tokens, a 120 s rollout check, low reasoning effort, temperature 0, one attempt. The model is the hosted gpt-oss-120b, the model Phase B's baselines used.",
+  "purpose": "D3 as published, in its white-box mode, on the eight Phase C roster cells with two seeds, development data only. Upstream's loop, prompts and settings: twenty generations, patience twenty, the sixteen best models shown back for reflection, top-p 0.95, and the paper's temperature 0.7; the model with the lowest one-step validation loss is kept, D3's own rule. The model is the hosted gpt-oss-120b, as for the other baselines and our method; it gets no reasoning effort, so the server's default applies, and an 8192-token output limit because its thinking counts against it.",
   "endpoint": "jetstream2_hosted",
   "model": "gpt-oss-120b",
-  "reasoning_effort": "low",
   "cells": [
     {
       "benchmark_id": "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
@@ -54,8 +53,12 @@
     0,
     1
   ],
-  "generations": 5,
-  "patience": 5,
+  "generations": 20,
+  "patience": 20,
+  "keep_top_samples": 16,
+  "temperature": 0.7,
+  "top_p": 0.95,
+  "reasoning_effort": null,
   "max_output_tokens": 8192,
   "trajectory_seconds": 120,
   "test_data_opened": false,
