@@ -321,3 +321,44 @@ original portable M19 source completed both retrospective evaluations in 17.6
 seconds, preserved its saved fitting backend exactly, and reused the results on
 a second run without refitting. Changed-file Ruff checks and `git diff --check`
 passed. Repository-wide Ruff still reports 37 pre-existing unrelated findings.
+
+## Completed scoring recovery: 2026-10-08
+
+Archive `review-20261008-084818.tar.gz` has 24/24 complete results and 48/48
+complete postfit evaluations. Plan identity remains
+`318cdc03bc281a226a76d4f66f08a44166ab62f54b0d7a642eb9fc5a4fce3738`.
+Recovery jobs were `22746831` (scoring array) and `22746832` (report).
+All 2,232 sealed JSON artifacts verify. All 3,186 JSON files inside the saved
+fitting directories are byte-identical to the first archive; recovery performed
+no new optimization. Independent scoring took 649 summed task-wall seconds
+(10.8 minutes), with a median of 26.8 seconds per endpoint for its two evaluations.
+
+The official scores confirm the earlier matrix-exponential archive analysis:
+coefficient recovery within 1% improves from 15/24 to 16/24; hidden-initial
+recovery within 0.001 improves from 13/24 to 15/24; prediction passes on 23/24
+both before and after. Six-state fast/slow median maximum coefficient error is
+4.832%, down from 55.57%. Their final validation NMSEs span 1.61e-17 to 6.68e-15,
+despite five of six missing the coefficient criterion and all six missing the
+initial-value criterion.
+
+The confidence/recovery cross-tabulation is:
+
+| Assessment | Coefficients recovered | Not recovered |
+|---|---:|---:|
+| Weakly constrained | 1 | 5 |
+| Search incomplete | 15 | 3 |
+
+A correct coefficient vector can still be weakly constrained: alternative
+vectors can explain the observations equally well. This is not a false alarm
+against that vector. Conversely, `search_incomplete` supplies no assurance of
+correct coefficients; its three unrecovered endpoints include the two ordinary
+six-state 323% errors and one three-state fast/slow failed basin.
+
+The complete campaign status certifies persisted terminal records, not successful
+profile searches. Profiles remain 862 unavailable and two domain-limited. The
+six weak assessments are supported by reliability-search witnesses. No endpoint
+has earned `locally_supported_on_tested_grid`, and no statistical confidence
+probability is available. Finish verification of saved profile candidates under
+a separately identified diagnostic before spending more optimization budget;
+low-loss alternatives can establish ambiguity, whereas high-loss candidates
+still require better nuisance searches before exclusion is even locally supported.
