@@ -730,3 +730,15 @@ probabilities; no statistical coverage is claimed for these noiseless controls.
 Ground truth and validation remain retrospective, after endpoint selection seals.
 Stage-level CPU/wall/call overhead and uncertainty/recovery outcomes are reported.
 Nonlinear benchmark blocks and integration with construction remain later steps.
+
+## M20 — saved-profile verification and bounded follow-up recovery
+
+M19's completed scoring confirms 16/24 coefficient and 15/24 initial recoveries.
+Six endpoints have verified ambiguity witnesses, but all 862 in-domain profiles
+exhausted their original check allowance. The approved
+[M20 diagnostic](PHASE_C_PROFILE_RECOVERY.md) imports every endpoint and candidate,
+uses equation-derived affine propagation with independent output-only ODE checks,
+then allows at most four training-selected nuisance refits and two free searches
+per endpoint. It preserves all historical budgets and reports new overhead by stage.
+It supplies conditional numerical evidence, not probability or exclusion claims.
+Production fitting and nonlinear benchmark integration remain unchanged.

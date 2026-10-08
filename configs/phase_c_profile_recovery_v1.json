@@ -1,0 +1,31 @@
+{
+  "check_seconds": 30.0,
+  "nuisance_seconds": 60.0,
+  "nuisance_calls": 200,
+  "maximum_profile_refits": 4,
+  "rescue_seconds": 120.0,
+  "rescue_calls": 300,
+  "replay_seconds": 180.0,
+  "numerical": {
+    "restart_seconds": 120.0,
+    "restart_calls": 160,
+    "profile_seconds": 25.0,
+    "profile_calls": 40,
+    "check_seconds": 60.0,
+    "replay_seconds": 180.0,
+    "offsets": [
+      0.01,
+      0.1
+    ],
+    "loss_tolerances": [
+      1e-12,
+      1e-10,
+      1e-8
+    ],
+    "relative_tolerance": 1e-10,
+    "absolute_tolerance": 1e-12,
+    "residual_multiplier": 1000000.0,
+    "stop_nmse": 1e-18,
+    "mode": "noiseless_tolerance_profiles"
+  }
+}
