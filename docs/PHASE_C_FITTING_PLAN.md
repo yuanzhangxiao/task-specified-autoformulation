@@ -713,3 +713,20 @@ These controls are separate from the benchmark release and production fitter.
 After larger-block qualification, return to the nonlinear benchmark blocks and
 test coefficient profiling conditional on collocation trajectories. Exact linear
 rollout profiling does not extend automatically to nonlinear feedback systems.
+
+## M19 — fitting reliability and coefficient uncertainty
+
+M18 recovered coefficients on 8/12 joint and 7/12 profiled endpoints. Both methods
+fit the six-state fast/slow observations exceptionally well while retaining large
+coefficient errors. Two ordinary six-state profiled starts also reached the same
+incorrect region. Prediction thresholds alone cannot establish parameter accuracy.
+
+The approved [M19 diagnostic](PHASE_C_FITTING_CONFIDENCE.md) retains all 24 endpoints
+and tests three training-only reliability searches, complete joint sensitivity
+analysis including fitted initials, and fixed-coefficient/initial nuisance profiles.
+Verified profile alternatives may support a separately charged recovery search.
+Confidence categories are conditional numerical evidence, not confidence
+probabilities; no statistical coverage is claimed for these noiseless controls.
+Ground truth and validation remain retrospective, after endpoint selection seals.
+Stage-level CPU/wall/call overhead and uncertainty/recovery outcomes are reported.
+Nonlinear benchmark blocks and integration with construction remain later steps.

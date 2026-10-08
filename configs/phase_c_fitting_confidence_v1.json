@@ -1,0 +1,15 @@
+{
+  "restart_seconds": 120,
+  "restart_calls": 160,
+  "profile_seconds": 25,
+  "profile_calls": 40,
+  "check_seconds": 60,
+  "replay_seconds": 180,
+  "offsets": [0.01, 0.1],
+  "loss_tolerances": [1e-12, 1e-10, 1e-8],
+  "relative_tolerance": 1e-10,
+  "absolute_tolerance": 1e-12,
+  "residual_multiplier": 1000000,
+  "stop_nmse": 1e-18,
+  "mode": "noiseless_tolerance_profiles"
+}
