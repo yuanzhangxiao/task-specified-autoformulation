@@ -1,0 +1,13 @@
+{
+  "warm_seconds": 180.0,
+  "warm_calls": 400,
+  "trial_seconds": 60.0,
+  "trial_calls": 150,
+  "portfolio_size": 3,
+  "continuation_seconds": 180.0,
+  "continuation_calls": 400,
+  "check_seconds": 30.0,
+  "replay_seconds": 180.0,
+  "target_nmse": 1e-20,
+  "protocol": "assessed-recovery-policy-1"
+}

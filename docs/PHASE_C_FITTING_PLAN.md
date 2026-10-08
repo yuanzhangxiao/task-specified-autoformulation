@@ -758,5 +758,28 @@ retention (one usable historical fit was excluded and replaced by a worse one),
 diagnose five nuisance-start domain failures, and compare direct warm searches
 with affine gain/initial profiling under matched budgets. A training-only diverse
 start portfolio should target persistent local solutions; repeated full profile
-grids should not be the default recovery mechanism. This follow-up is proposed,
-not yet implemented or promoted to production.
+grids should not be the default recovery mechanism. The approved follow-up is
+implemented as the isolated M21 experiment below, not promoted to production.
+
+## M21 — actionable assessments and matched recovery
+
+The [M21 runbook](PHASE_C_ASSESSED_RECOVERY.md) implements separate fit-retention
+and stringent uncertainty checks, then compares warm joint affine rollouts
+against exact profiling of forcing gain and hidden initials. Both methods
+receive every frozen M19 incumbent, identical stage ceilings, and the same
+training/domain-only portfolio of three different starts when needed: 48 CPU
+tasks on Delta. A tighter declared noiseless numerical target tests the remaining
+initial-value errors; ground truth and validation remain retrospective only.
+
+All five M20 domain failures were reproduced as the same floating-point lower
+bound reconstruction error in `a4` (2.13e-16 below 0.01). Only arithmetic-scale
+overshoots are projected and recorded; material violations remain errors.
+Usable incumbents survive stricter uncertainty-check failures, and replacements
+must improve under both independent solvers. Results include fit quality,
+numerical reliability, search status, parameter information, recommended action,
+and separate computation costs. No calibrated confidence probability, global
+identifiability certificate or complete profile minimization is claimed.
+
+Qualification on these correct linear skeletons precedes nonlinear benchmark
+blocks and integration with construction. The full matched campaign awaits
+execution on Delta; historical results and production fitting stay unchanged.
