@@ -12,17 +12,25 @@ from autoformalism.llm.staged_topology import visible_response
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research import construction_contract as contracts
+from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_schedules as schedules
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 
 
-def audit(source: Path, output: Path) -> dict:
+def audit(
+    source: Path, output: Path, *, bookkeeping_policy: bookkeeping.Policy = "legacy"
+) -> dict:
     """Keep transaction acceptance separate from whole-topology eligibility."""
     if output.resolve().is_relative_to(source.resolve()):
         raise ValueError("audit output must be outside historical source")
     plan = sealed_read(source / "plan.json")
+    bookkeeping.validate_policy(
+        bookkeeping_policy,
+        "current" if plan.get("study") == "prompt_comparison" else None,
+    )
+    improved_bookkeeping = bookkeeping_policy == bookkeeping.POLICY
     if (
         plan.get("protocol")
         not in {
@@ -65,6 +73,7 @@ def audit(source: Path, output: Path) -> dict:
                     visible_response(record),
                     graph_contract=contract,
                     draft=before,
+                    ignore_definition_description=improved_bookkeeping,
                 )
                 patch = ledger.DraftPatch.model_validate(normalized)
                 schedules.validate_scope(
@@ -86,6 +95,8 @@ def audit(source: Path, output: Path) -> dict:
                     graph_contract=contract,
                     clarify_overlaps=True,
                 )
+                if improved_bookkeeping:
+                    check = bookkeeping.assessment_context(check, after)
             except (ValueError, TypeError, KeyError) as exc:
                 error = str(exc)
             counts.update(x["code"] for x in log if accepted)
@@ -110,6 +121,7 @@ def audit(source: Path, output: Path) -> dict:
         output,
         {
             "protocol": "saved-construction-handoff-audit-1",
+            "bookkeeping_policy": bookkeeping_policy,
             "source_plan_sha256": plan["artifact_sha256"],
             "audit_runtime": campaign.baseline.source_identity(),
             "audit_script_sha256": hashlib.sha256(
@@ -141,8 +153,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--bookkeeping-policy", choices=bookkeeping.POLICIES, default="legacy"
+    )
     args = parser.parse_args()
-    result = audit(args.source, args.output)
+    result = audit(args.source, args.output, bookkeeping_policy=args.bookkeeping_policy)
     print(
         json.dumps(
             {k: v for k, v in result.items() if k not in {"rows", "audit_runtime"}},

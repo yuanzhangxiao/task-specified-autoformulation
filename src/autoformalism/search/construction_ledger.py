@@ -126,12 +126,15 @@ def normalize_reply(
     *,
     graph_contract: graph_obligations.PublicGraphContract | None = None,
     draft: Draft | None = None,
+    ignore_definition_description: bool = False,
 ) -> tuple[object, list[dict]]:
     """Normalize delivery/namespace mistakes, without assigning scientific roles."""
     value = deepcopy(raw)
     changes = []
     if draft is not None:
-        value, changes = construction_handoff.normalize_definition_repeats(value, draft)
+        value, changes = construction_handoff.normalize_definition_repeats(
+            value, draft, ignore_description=ignore_definition_description
+        )
     if graph_contract is not None and isinstance(value, dict):
         graph_ids = {r.id for r in graph_contract.obligations}
         real_ids = {r.id for r in brief.requirements}

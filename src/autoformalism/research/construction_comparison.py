@@ -27,6 +27,7 @@ from autoformalism.research import construction_contract as contract
 from autoformalism.research import construction_trace, topology_confirmation
 from autoformalism.research.construction_obligations import reviewed_contract
 from autoformalism.schemas.staged_topology import PublicScientificBrief
+from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_prompts as prompts
 from autoformalism.search import construction_schedules as schedules
@@ -60,6 +61,7 @@ class Config(baseline.Config):
     protocol: Literal["phase-c-construction-comparison-10"] = PROTOCOL
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
+    bookkeeping_policy: bookkeeping.Policy = "legacy"
 
     @model_validator(mode="after")
     def positive_initial_budget(self):
@@ -89,10 +91,19 @@ def source_identity() -> dict:
     }
 
 
-def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
+def freeze(
+    source: Path,
+    root: Path,
+    *,
+    study: Study = "comparison",
+    bookkeeping_policy: bookkeeping.Policy = "legacy",
+) -> dict:
     """Reuse public contexts/settings only; all three arms start from empty drafts."""
     if study not in STUDIES:
         raise ValueError("unknown construction study")
+    bookkeeping.validate_policy(
+        bookkeeping_policy, "current" if study == "prompt_comparison" else None
+    )
     old = sealed_read(source / "plan.json")
     if (
         old["protocol"] != topology_confirmation.PROTOCOL
@@ -110,6 +121,7 @@ def freeze(source: Path, root: Path, *, study: Study = "comparison") -> dict:
                 if k != "protocol"
             },
             "protocol": PROTOCOL,
+            "bookkeeping_policy": bookkeeping_policy,
             **({"wall_seconds": 10800} if study != "comparison" else {}),
         }
     )
@@ -234,7 +246,11 @@ def verify(root: Path) -> dict:
     plan = sealed_read(root / "plan.json")
     if plan["protocol"] != PROTOCOL or plan["source_identity"] != source_identity():
         raise ValueError("construction comparison source/protocol differs")
-    Config.model_validate(plan["config"])
+    config = Config.model_validate(plan["config"])
+    bookkeeping.validate_policy(
+        config.bookkeeping_policy,
+        "current" if plan.get("study") == "prompt_comparison" else None,
+    )
     for name, cell in plan["cells"].items():
         expected = reviewed_contract(
             name, PublicScientificBrief.model_validate(cell["brief"])
@@ -426,6 +442,7 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
                 task["policy"],
                 process_question=task["process_question"],
                 prompt_family=task.get("prompt_family"),
+                bookkeeping_policy=config.bookkeeping_policy,
                 repair_requests=config.repair_requests,
                 repair_tokens=config.repair_tokens,
                 graph_contract=PublicGraphContract.model_validate(
@@ -752,6 +769,7 @@ def report(root: Path, plan: dict) -> dict:
         }
     result = {
         "protocol": PROTOCOL,
+        "bookkeeping_policy": plan["config"].get("bookkeeping_policy", "legacy"),
         "study": plan.get("study", "comparison"),
         "identity": plan["artifact_sha256"],
         "planned_tasks": len(rows),
@@ -785,6 +803,7 @@ def report(root: Path, plan: dict) -> dict:
         "# Phase C construction schedules",
         "",
         "Fresh variables and topology; no functions or fitting.",
+        f"Bookkeeping policy: {result['bookkeeping_policy']}.",
         "Matched current/minimal wording: all eight cases, Full/seed 0. "
         "Both use variables -> shared processes -> remaining topology -> repair, "
         "adaptive batches, the same response schemas, checks and budgets. "

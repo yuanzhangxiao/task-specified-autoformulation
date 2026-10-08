@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--study", choices=campaign.STUDIES)
+    parser.add_argument("--bookkeeping-policy", choices=campaign.bookkeeping.POLICIES)
     parser.add_argument("--base-url")
     parser.add_argument("--wall-seconds", type=int, default=21600)
     args = parser.parse_args()
@@ -30,9 +31,14 @@ def main():
     if args.command == "prepare":
         if args.source is None:
             parser.error("prepare requires --source (the previous topology campaign)")
-        plan = campaign.freeze(args.source, root, study=args.study or "comparison")
+        plan = campaign.freeze(
+            args.source,
+            root,
+            study=args.study or "comparison",
+            bookkeeping_policy=args.bookkeeping_policy or "legacy",
+        )
     else:
-        if args.source or args.study:
+        if args.source or args.study or args.bookkeeping_policy:
             parser.error("public inputs and study are frozen by prepare")
         plan = campaign.verify(root)
     if args.command == "run":

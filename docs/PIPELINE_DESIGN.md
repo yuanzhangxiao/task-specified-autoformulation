@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+Construction bookkeeping policy `current-bookkeeping-1` is independently frozen
+and opt-in for current-prompt schedule studies. It retains the transactional schema
+and checks while improving generated-definition normalization and displayed edit
+ownership, LHS types and process-overlap feedback. It never infers types from prose
+or decomposes joint terms scientifically. The submitted minimal/current comparison
+retains legacy behavior in both arms; the new policy is rejected for that study.
+See `PHASE_C_CONSTRUCTION_COMPARISON.md` for the separately tracked current fixes.
+
 Construction comparison version 9 allows coordinated ordinary topology edits
 across any LHS. Joint-guided supplies an advisory next target; joint-adaptive
 does not. Stage separation and the separate schedule's inventory freeze remain.

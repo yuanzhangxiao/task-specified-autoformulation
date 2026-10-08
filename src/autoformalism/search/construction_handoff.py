@@ -227,12 +227,13 @@ def consumer_destination_issues(draft: Draft) -> list[dict]:
 
 
 def normalize_definition_repeats(
-    raw: object, draft: Draft
+    raw: object, draft: Draft, *, ignore_description: bool = False
 ) -> tuple[object, list[dict]]:
-    """Drop only an exact repeat of an automatically generated law definition.
+    """Drop a repeated generated law; description equality is policy-controlled.
 
     Validate the entire edit first. Conflicting operations and different laws
     remain unchanged for the ordinary transactional validator to reject.
+    The opt-in comparison omits only scientific_role, never a computational field.
     """
     from autoformalism.search import shared_process_contract, signed_processes
     from autoformalism.search.construction_ledger import DraftPatch
@@ -256,7 +257,18 @@ def normalize_definition_repeats(
         expected = shared_process_contract.definition(
             signed_processes.binding_for(processes[e.name])
         )
-        if e.terms == expected.terms:
+        actual_terms = [t.model_dump(mode="json") for t in e.terms]
+        expected_terms = [t.model_dump(mode="json") for t in expected.terms]
+        if ignore_description:
+            actual_terms = [
+                {k: v for k, v in t.items() if k != "scientific_role"}
+                for t in actual_terms
+            ]
+            expected_terms = [
+                {k: v for k, v in t.items() if k != "scientific_role"}
+                for t in expected_terms
+            ]
+        if actual_terms == expected_terms:
             removed.add(e.name)
             log.append(
                 {
@@ -264,6 +276,15 @@ def normalize_definition_repeats(
                     "equation": e.model_dump(mode="json"),
                     "canonical_definition": expected.model_dump(mode="json"),
                     "scientific_content_changed": False,
+                    **(
+                        {
+                            "comparison": "all_term_fields_except_scientific_role",
+                            "descriptions_preserved_in_receipt": True,
+                            "scientific_equivalence_asserted": False,
+                        }
+                        if ignore_description
+                        else {}
+                    ),
                 }
             )
     if not removed:

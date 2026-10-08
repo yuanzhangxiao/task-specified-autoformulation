@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `current-bookkeeping-1` construction policy normalizes description-only
+repeats of generated process definitions, labels editable versus generated records,
+shows explicit derivative/algebraic LHSs, and asks targeted process-overlap questions.
+The saved 49-reply audit preserves 46 accepted transactions and admits three more,
+without recovering a complete model. Scientific types and effects remain proposer
+decisions. The submitted version-10 minimal/current wording experiment is excluded
+from this policy; potential minimal-prompt fixes are evaluated separately. See
+`PHASE_C_CONSTRUCTION_COMPARISON.md` for the fix register and verification commands.
+
 Construction comparison version 9 removes single-LHS editing restrictions and
 renames joint_fixed to joint_guided (the suggested LHS is advisory). The focused
 question asks for one physical quantity reused across distinct consumers, rather

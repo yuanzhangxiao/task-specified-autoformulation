@@ -14,6 +14,7 @@ from autoformalism.rebuttal.prefit_construction_campaign import _cost
 from autoformalism.rebuttal.prefit_replay import sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.schemas.staged_topology import PublicScientificBrief
+from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search.public_graph_obligations import PublicGraphContract
@@ -432,6 +433,7 @@ def run(
     graph_contract: PublicGraphContract | None = None,
     process_question: ProcessQuestion = "integrated",
     prompt_family: str | None = None,
+    bookkeeping_policy: bookkeeping.Policy = "legacy",
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
     draft, events, records = ledger.Draft(), [], []
@@ -439,6 +441,8 @@ def run(
     original = client.settings
     from autoformalism.search import construction_prompts as prompts
 
+    bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
+    improved_bookkeeping = bookkeeping_policy == bookkeeping.POLICY
     if prompt_family is not None and (
         prompt_family not in prompts.FAMILIES
         or policy != "joint_adaptive"
@@ -508,6 +512,10 @@ def run(
         }
         response_model = ledger.DraftPatch
         system = SYSTEM
+        if improved_bookkeeping:
+            payload["bookkeeping_policy"] = bookkeeping_policy
+            payload["current_draft"] = bookkeeping.snapshot(brief, draft)
+            system = system.replace("equation_views", "read_only_balances")
         if prompt_family is not None:
             response_model = prompts.response_model(stage)
             payload.update(
@@ -534,14 +542,20 @@ def run(
         records.append(record)
         before = draft
         raw, accepted, complete, error = None, False, False, None
-        normalizations = []
+        normalizations, conflicts = [], []
         try:
             raw = visible_response(record)
             normalized, normalizations = ledger.normalize_reply(
-                brief, raw, graph_contract=graph_contract, draft=draft
+                brief,
+                raw,
+                graph_contract=graph_contract,
+                draft=draft,
+                ignore_definition_description=improved_bookkeeping,
             )
             patch = ledger.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
+            if improved_bookkeeping:
+                conflicts = bookkeeping.definition_conflicts(draft, patch)
             candidate = ledger.apply_patch(brief, draft, patch)
             candidate, consumer_log = handoff.normalize_consumers(
                 candidate, patch, draft
@@ -551,6 +565,8 @@ def run(
             accepted, complete = True, patch.stage_complete
         except (ValueError, TypeError, KeyError) as exc:
             error = str(exc)[:6000]
+            if conflicts and "runtime-generated definition" in error:
+                error += ": " + ", ".join(c["process"] for c in conflicts)
         event = {
             "index": len(events),
             "stage": stage,
@@ -566,6 +582,14 @@ def run(
             "before": before.model_dump(mode="json"),
             "after": draft.model_dump(mode="json"),
             "pending_after": ledger.pending(brief, draft),
+            **(
+                {
+                    "bookkeeping_policy": bookkeeping_policy,
+                    "definition_conflicts": conflicts,
+                }
+                if improved_bookkeeping
+                else {}
+            ),
         }
         sealed_write(directory / "events" / f"{len(events):03d}.json", event)
         events.append(event)
@@ -578,6 +602,7 @@ def run(
             "error": error,
             "edit_effects": handoff.edit_effects(before, draft) if accepted else None,
             "delivery": delivery_feedback(record),
+            **({"definition_conflicts": conflicts} if improved_bookkeeping else {}),
         }
         return accepted, complete, last_edit_result
 
@@ -646,6 +671,8 @@ def run(
             graph_contract=graph_contract,
             clarify_overlaps=True,
         )
+        if improved_bookkeeping:
+            initial_check = bookkeeping.assessment_context(initial_check, draft)
         initial = sealed_write(
             directory / "before_repair.json",
             {
@@ -700,6 +727,8 @@ def run(
                     graph_contract=graph_contract,
                     clarify_overlaps=True,
                 )
+                if improved_bookkeeping:
+                    check = bookkeeping.assessment_context(check, draft)
                 ready = complete
         return {
             "status": "topology_complete"
@@ -714,6 +743,11 @@ def run(
             "stop_reason": stop_reason,
             "event_count": len(events),
             "cost": _cost(sorted(records, key=lambda r: r["request_hash"])),
+            **(
+                {"bookkeeping_policy": bookkeeping_policy}
+                if improved_bookkeeping
+                else {}
+            ),
         }
     finally:
         client.settings = original

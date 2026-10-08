@@ -1,5 +1,63 @@
 # Phase C construction schedules
 
+## Current-prompt bookkeeping fixes, 2026-10-07
+
+`current-bookkeeping-1` is an explicit opt-in policy for the current prompt and
+schedule studies. It does **not** modify either arm of the submitted version-10
+minimal/current prompt comparison. That comparison retains its pinned 4869909
+source, requests and strict duplicate comparator. Enabling this new policy with
+`prompt_comparison` is rejected, including for its current-wording control arm.
+Potential changes to minimal prompts require evidence from that experiment and a
+separate decision; these fixes are not automatically inherited.
+
+| Observed issue | Current-prompt change | Scientific boundary |
+| --- | --- | --- |
+| Three repairs repeated the same process topology with different description text. | Normalize a repeated definition when every term field except `scientific_role` matches; retain both descriptions in the receipt. | Changed drivers, signs, term grouping/counts and conflicting operations remain errors. No claim of scientific equivalence follows from matching topology. |
+| Assembled process definitions resembled editable ordinary entries. | Show editable `declarations` separately from `read_only_generated_process_definitions` and `read_only_balances`; identify `processes` as the editing location. | Runtime-generated definitions still come solely from explicit process declarations. |
+| Prose described an algebraic readout while the saved variable type remained differential. | Display `d(x)/dt` versus `x` explicitly, and explain coordinated `variables` and complete `equations` edits. | Prose never changes type. No new prose-based gate, mandatory self-review call or forced differential target is added. Separate-schedule type changes still wait for overall repair. |
+| A joint ordinary term mentioned a process already inserted as a signed use. | Show that target's ordinary terms and signed process uses side by side, with a concrete balance and targeted clarification options. | Runtime does not split joint drivers, delete an effect, change signs/conversions or decide scientific intent. Existing structural checks remain in force. |
+
+The display uses `phi` and coefficient placeholders to illustrate additive
+structure, not to propose executable interaction formulas. It remains available
+when compilation fails or ordinary topology is not yet declared. The same atomic
+edit schema, call limits, cache, source hashes and deterministic resume apply.
+The policy is frozen in the plan and recorded in requests, events and reports.
+Defaults remain `legacy`; existing source-bound plans require their original code.
+
+### Saved-response verification
+
+The twelve-task version-9 archive (plan SHA-256
+`cceced34a73c70202a7065c430f387a10ab710742fbd556686b863a98f145d2f`)
+contains 49 replies. Replaying each against its **actual displayed predecessor**
+preserves all 46 historical acceptances and mechanically admits the three
+description-only definition repeats. No previously accepted reply becomes blocked.
+All three newly admitted replies still require process-consumer clarification;
+this is not recovery of a complete model. The audit makes no LLM calls or fits,
+does not alter historical files and does not create a hypothetical new reply chain.
+
+Reproduce the read-only audit with an output outside the historical directory:
+
+```bash
+PYTHONPATH=src python scripts/audit_construction_handoff.py \
+  --source /path/to/shared-law-results \
+  --output /path/to/current-bookkeeping-audit.json \
+  --bookkeeping-policy current-bookkeeping-1
+```
+
+To freeze a future current-prompt confirmation in a fresh root (preparation only;
+this does not submit jobs or make LLM calls):
+
+```bash
+PYTHONPATH=src python scripts/phase_c_construction_comparison.py prepare \
+  --source /path/to/topology-source \
+  --root /path/to/new-current-bookkeeping-run \
+  --study shared_law_comparison \
+  --bookkeeping-policy current-bookkeeping-1
+```
+
+The existing `verify`, `run` and `report` commands use that frozen policy; changing
+it at resume is forbidden. No additional live experiment is launched by these fixes.
+
 ## Version 10: minimal/current wording under a common schedule
 
 The new `prompt_comparison` pilot contains **16 fresh constructions**: all eight
