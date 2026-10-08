@@ -1,5 +1,18 @@
 # Phase 1 Pipeline Design
 
+Prompt refinement keeps policy boundaries explicit. `minimal-clarity-1` uses the
+short stage-specific system, exact generated/ordinary edit locations, completion
+instructions and edit receipts, without importing the current prompt's long
+scientific instructions or its description-only normalization. Current-only
+`current-repair-fidelity-1` records before/after assembled balances, type changes
+and removed contributions after an atomic edit. Those differences are facts,
+not scientific equivalence judgments or automatic restoration instructions.
+An optional sealed starting draft is allowed only for bounded fidelity repair;
+cache verification starts its chain at that draft, never at an empty model.
+The refinement experiment uses eight fresh minimal tasks and three diagnosed
+saved-current tasks as separate groups. No model-scoring or test access is added.
+See `PHASE_C_STAGE_PROGRESS_2026-10-08.md` for evidence and launch scope.
+
 Current-prompt policy `current-bookkeeping-2` distinguishes accepted variable edits
 from accepted stage completion. Missing public-target declarations keep the stage
 editable for bounded local correction; exhaustion goes directly to global repair.

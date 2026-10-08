@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+`PHASE_C_STAGE_PROGRESS_2026-10-08.md` records the first minimal run stage by stage:
+public-target declarations improve from 7/8 first replies to 8/8 stage exits;
+whole-topology eligibility improves from 3/8 before global repair to 6/8 after it.
+These are structural facts, not scientific recovery. The opt-in `minimal-clarity-1`
+adds explicit completion, parameter/variable separation and concrete edit receipts.
+The separate `current-repair-fidelity-1` policy retries three actual saved pre-global
+drafts without rebuilding them. The eleven-task refinement combines eight fresh
+minimal constructions with those three diagnostics; it is not a matched ranking.
+Existing prompt studies/policies, public specifications and fitter are unchanged.
+
 The opt-in `current-bookkeeping-2` policy retains valid partial inventories while
 blocking premature variable-stage completion when a public target is undeclared.
 Existing local retries and global repair budgets remain fixed. Target-feedback

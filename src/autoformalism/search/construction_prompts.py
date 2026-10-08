@@ -84,6 +84,31 @@ Revise the accepted draft to resolve them, using the same public specification
 and source availability. You may make coordinated changes across variables and
 contributions. Make each scientific choice explicitly in your structured reply."""
 
+# Versioned additions are independent of the current-prompt repair experiment.
+COMPLETION = {
+    "variables": "Set stage_complete=true when the generated-variable inventory and "
+    "applicable state assignments are complete. No topology is needed yet. "
+    "If nothing more is needed, return empty edit lists and true; do not repeat "
+    "unchanged declarations with false. Fitted coefficients are parameters for "
+    "the later interaction stage, not generated variables needing equations.",
+    "shared_laws": "Set stage_complete=true after this shared-process decision, "
+    "including when no shared process is needed.",
+    "equations": "Set stage_complete=true when the whole topology is ready to check.",
+    "repair": "Set stage_complete=true when the revised topology is ready to check.",
+}
+CLARITY_EDITING = """Only declarations are editable; read_only views are rebuilt.
+Edit a named process in processes, not in equations: its drivers already define
+its one topology. Empty processes means no edits, not deletion. To delete P,
+return remove_processes=["P"]; runtime removes its generated definition and uses.
+Preserve or replace its physical contributions explicitly if they are still needed.
+Explanations do not perform edits. After a reply, inspect the recorded changes.
+Fitted coefficients belong in the later interaction stage, not in variables."""
+
+
+def clarity_stage_text(stage: str) -> str:
+    """Minimal additions justified by the first saved run, not a new science gate."""
+    return stage_text(stage) + "\n" + COMPLETION[stage]
+
 
 def stage_text(stage: str) -> str:
     """Only instructions for the stage being performed; no interaction tutorial."""

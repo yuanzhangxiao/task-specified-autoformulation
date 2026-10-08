@@ -173,7 +173,9 @@ def test_resume_refuses_changed_reviewed_contract(tmp_path):
         campaign.verify(root)
 
 
-@pytest.mark.parametrize("study", campaign.STUDIES)
+@pytest.mark.parametrize(
+    "study", [s for s in campaign.STUDIES if s != "refinement_confirmation"]
+)
 def test_comparison_submission_has_no_fit_and_resumes_receipts(
     tmp_path, monkeypatch, study
 ):

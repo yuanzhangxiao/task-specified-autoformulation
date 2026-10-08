@@ -43,6 +43,7 @@ Study = Literal[
     "basin_confirmation",
     "shared_law_comparison",
     "prompt_comparison",
+    "refinement_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -50,6 +51,7 @@ STUDIES = (
     "basin_confirmation",
     "shared_law_comparison",
     "prompt_comparison",
+    "refinement_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -86,6 +88,7 @@ def source_identity() -> dict:
                 "scripts/hpc/start_phase_c_construction_basin.sh",
                 "scripts/hpc/start_phase_c_shared_laws.sh",
                 "scripts/hpc/start_phase_c_minimal_prompts.sh",
+                "scripts/hpc/start_phase_c_prompt_refinement.sh",
             )
         },
     }
@@ -97,10 +100,17 @@ def freeze(
     *,
     study: Study = "comparison",
     bookkeeping_policy: bookkeeping.Policy = "legacy",
+    repair_source: Path | None = None,
 ) -> dict:
-    """Reuse public contexts/settings only; all three arms start from empty drafts."""
+    """Freeze public construction tasks and any explicitly selected saved repairs."""
     if study not in STUDIES:
         raise ValueError("unknown construction study")
+    if (repair_source is not None) != (study == "refinement_confirmation"):
+        raise ValueError(
+            "refinement confirmation requires its saved repair source only"
+        )
+    if study == "refinement_confirmation" and bookkeeping_policy != "legacy":
+        raise ValueError("refinement policies are frozen separately by task")
     bookkeeping.validate_policy(
         bookkeeping_policy, "current" if study == "prompt_comparison" else None
     )
@@ -161,6 +171,22 @@ def freeze(
         source_tasks = [by_case[name] for name in roster]
     blocks = []
     for i, task in enumerate(source_tasks):
+        if study == "refinement_confirmation":
+            blocks.append(
+                [
+                    {
+                        **task,
+                        "task_id": f"{task['task_id']}_minimal_clarity",
+                        "policy": "joint_adaptive",
+                        "process_question": "dedicated",
+                        "prompt_family": "minimal",
+                        "stage_schedule": prompts.SCHEDULE,
+                        "matched_task_id": task["task_id"],
+                        "bookkeeping_policy": bookkeeping.MINIMAL_POLICY,
+                    }
+                ]
+            )
+            continue
         if study == "prompt_comparison":
             families = prompts.FAMILIES if i % 2 == 0 else prompts.FAMILIES[::-1]
             blocks.append(
@@ -211,13 +237,19 @@ def freeze(
         if study != "comparison"
         else [task for block in blocks for task in block]
     )
+    if study == "refinement_confirmation":
+        from autoformalism.research.construction_refinement import repair_tasks
+
+        tasks.extend(repair_tasks(repair_source, cells))
     with public._lock(root):
         return sealed_write(
             root / "plan.json",
             {
                 "protocol": PROTOCOL,
                 "study": study,
-                "selection_rule": ("all-eight-cases-seed0-full-two-prompt-families-1")
+                "selection_rule": "eight-fresh-minimal-and-three-saved-repairs-1"
+                if study == "refinement_confirmation"
+                else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
                 else ("both-basins-seed0-full-three-policies-two-placements-1")
                 if study == "shared_law_comparison"
@@ -232,7 +264,10 @@ def freeze(
                 "source_identity": source_identity(),
                 "source_plan_sha256": old["artifact_sha256"],
                 "scope": (
-                    "Fresh variables and topology only; no historical inventories, "
+                    "Eight fresh minimal constructions and three saved repairs; "
+                    "separate diagnostics, not a ranking. No functions or fitting."
+                    if study == "refinement_confirmation"
+                    else "Fresh variables and topology only; no old inventories, "
                     "equations, fitting or scientific critic."
                 ),
                 "automatic_followup": False,
@@ -285,6 +320,15 @@ def verify(root: Path) -> dict:
         (t["benchmark_id"], t["seed"], t["arm"], t["policy"], t.get("process_question"))
         for t in plan["tasks"]
     ]
+    if study == "refinement_confirmation":
+        from autoformalism.research.construction_refinement import validate_tasks
+
+        validate_tasks(plan)
+        return plan
+    if any(
+        "bookkeeping_policy" in t or "starting_checkpoint" in t for t in plan["tasks"]
+    ):
+        raise ValueError("per-task refinement requires its dedicated study")
     if study == "prompt_comparison":
         expected = {
             (case, 0, "full", "joint_adaptive", "dedicated", family, prompts.SCHEDULE)
@@ -356,11 +400,20 @@ def delivery_counts(records: list[dict]) -> dict:
     }
 
 
-def checked_records(directory: Path, identity: str) -> list[dict]:
+def checked_records(
+    directory: Path, identity: str, starting_draft: dict | None = None
+) -> list[dict]:
     """Do not accept a resumed result without its exact cached call evidence."""
     records = _cache_records(directory / "calls", identity)
     by_hash = {r["request_hash"]: r for r in records}
-    drafts, used = [ledger.Draft().model_dump(mode="json")], []
+    drafts, used = (
+        [
+            starting_draft
+            if starting_draft is not None
+            else ledger.Draft().model_dump(mode="json")
+        ],
+        [],
+    )
     for index, path in enumerate(
         sorted((directory / "construction" / "events").glob("*.json"))
     ):
@@ -407,7 +460,8 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
     """Run the selected schedule through the same cache, ledger and public checks."""
     directory, identity = baseline.location(root, task), baseline.namespace(plan, task)
     with public._lock(directory / "construction-lock"):
-        records = checked_records(directory, identity)
+        starting = task.get("starting_checkpoint", {}).get("draft")
+        records = checked_records(directory, identity, starting)
         previous = baseline.read_outcome(directory / "proposal.json", plan, task)
         if previous:
             if previous["cost"] != _cost(records):
@@ -442,7 +496,12 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
                 task["policy"],
                 process_question=task["process_question"],
                 prompt_family=task.get("prompt_family"),
-                bookkeeping_policy=config.bookkeeping_policy,
+                bookkeeping_policy=task.get(
+                    "bookkeeping_policy", config.bookkeeping_policy
+                ),
+                starting_draft=ledger.Draft.model_validate(starting)
+                if starting is not None
+                else None,
                 repair_requests=config.repair_requests,
                 repair_tokens=config.repair_tokens,
                 graph_contract=PublicGraphContract.model_validate(
@@ -600,7 +659,9 @@ def report(root: Path, plan: dict) -> dict:
             baseline.location(root, task),
             baseline.namespace(plan, task),
         )
-        records = checked_records(directory, identity)
+        records = checked_records(
+            directory, identity, task.get("starting_checkpoint", {}).get("draft")
+        )
         delivery = delivery_counts(records)
         deliveries.append(delivery)
         value = baseline.read_outcome(directory / "proposal.json", plan, task)
@@ -769,7 +830,9 @@ def report(root: Path, plan: dict) -> dict:
         }
     result = {
         "protocol": PROTOCOL,
-        "bookkeeping_policy": plan["config"].get("bookkeeping_policy", "legacy"),
+        "bookkeeping_policy": "per-task (minimal-clarity-1 / current-repair-fidelity-1)"
+        if plan.get("study") == "refinement_confirmation"
+        else plan["config"].get("bookkeeping_policy", "legacy"),
         "study": plan.get("study", "comparison"),
         "identity": plan["artifact_sha256"],
         "planned_tasks": len(rows),
@@ -802,9 +865,14 @@ def report(root: Path, plan: dict) -> dict:
     lines = [
         "# Phase C construction schedules",
         "",
-        "Fresh variables and topology; no functions or fitting.",
+        "Eight fresh minimal constructions and three saved repairs; not a ranking."
+        if plan.get("study") == "refinement_confirmation"
+        else "Fresh variables and topology; no functions or fitting.",
         f"Bookkeeping policy: {result['bookkeeping_policy']}.",
-        "Matched current/minimal wording: all eight cases, Full/seed 0. "
+        "Eight fresh minimal cases plus three diagnosed saved repair episodes. "
+        "Saved repairs are not fresh-current controls or a matched comparison."
+        if plan.get("study") == "refinement_confirmation"
+        else "Matched current/minimal wording: all eight cases, Full/seed 0. "
         "Both use variables -> shared processes -> remaining topology -> repair, "
         "adaptive batches, the same response schemas, checks and budgets. "
         "The control is current wording under this common schedule, not a replay "

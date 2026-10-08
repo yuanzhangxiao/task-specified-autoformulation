@@ -18,6 +18,7 @@ from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_feedback
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import construction_repair_fidelity as fidelity
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.staged_topology import content_hash
 
@@ -435,16 +436,28 @@ def run(
     process_question: ProcessQuestion = "integrated",
     prompt_family: str | None = None,
     bookkeeping_policy: bookkeeping.Policy = "legacy",
+    starting_draft: ledger.Draft | None = None,
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
-    draft, events, records = ledger.Draft(), [], []
+    draft, events, records = starting_draft or ledger.Draft(), [], []
     last_edit_result = None
     original = client.settings
     from autoformalism.search import construction_prompts as prompts
 
     bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
-    improved_bookkeeping = bookkeeping_policy != "legacy"
-    specific_feedback = bookkeeping_policy == bookkeeping.FEEDBACK_POLICY
+    minimal_clarity = bookkeeping_policy == bookkeeping.MINIMAL_POLICY
+    improved_bookkeeping = bookkeeping_policy not in {
+        "legacy",
+        bookkeeping.MINIMAL_POLICY,
+    }
+    specific_feedback = bookkeeping_policy in {
+        bookkeeping.FEEDBACK_POLICY,
+        bookkeeping.FIDELITY_POLICY,
+    }
+    fidelity_feedback = bookkeeping_policy == bookkeeping.FIDELITY_POLICY
+    completion_check = specific_feedback or minimal_clarity
+    if starting_draft is not None and not fidelity_feedback:
+        raise ValueError("saved-draft repair requires the fidelity policy")
     if prompt_family is not None and (
         prompt_family not in prompts.FAMILIES
         or policy != "joint_adaptive"
@@ -518,6 +531,9 @@ def run(
             payload["bookkeeping_policy"] = bookkeeping_policy
             payload["current_draft"] = bookkeeping.snapshot(brief, draft)
             system = system.replace("equation_views", "read_only_balances")
+        if fidelity_feedback and stage == "repair":
+            payload["stage_instructions"] += "\n" + fidelity.INSTRUCTION
+            payload["explicit_removal_options"] = fidelity.removal_options(draft)
         if specific_feedback and stage in {"variables", "repair"}:
             payload["stage_instructions"] += "\n" + (
                 construction_feedback.VARIABLE_COMPLETION
@@ -540,6 +556,16 @@ def run(
                 # The question already appears once in the stage instructions.
                 payload["shared_law_question"] = None
                 payload["editing_rules"] = prompts.EDITING
+                if minimal_clarity:
+                    payload["bookkeeping_policy"] = bookkeeping_policy
+                    payload["stage_instructions"] = prompts.clarity_stage_text(stage)
+                    payload["current_draft"] = bookkeeping.snapshot(brief, draft)
+                    payload["current_draft"]["editing_contract"] = (
+                        prompts.CLARITY_EDITING
+                    )
+                    payload["explicit_removal_options"] = fidelity.removal_options(
+                        draft
+                    )
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -563,7 +589,7 @@ def run(
             )
             patch = ledger.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
-            if improved_bookkeeping:
+            if improved_bookkeeping or minimal_clarity:
                 conflicts = bookkeeping.definition_conflicts(draft, patch)
             candidate = ledger.apply_patch(brief, draft, patch)
             candidate, consumer_log = handoff.normalize_consumers(
@@ -572,7 +598,7 @@ def run(
             normalizations.extend(consumer_log)
             draft = candidate
             accepted, complete = True, patch.stage_complete
-            if specific_feedback and stage == "variables" and complete:
+            if completion_check and stage == "variables" and complete:
                 completion = construction_feedback.variable_completion(brief, draft)
                 complete = completion["status"] == "ready"
         except (ValueError, TypeError, KeyError) as exc:
@@ -594,13 +620,22 @@ def run(
             "before": before.model_dump(mode="json"),
             "after": draft.model_dump(mode="json"),
             "pending_after": ledger.pending(brief, draft),
-            **({"stage_completion": completion} if specific_feedback else {}),
+            **({"stage_completion": completion} if completion_check else {}),
+            **(
+                {
+                    "repair_receipt": fidelity.receipt(before, draft)
+                    if accepted
+                    else None
+                }
+                if fidelity_feedback or minimal_clarity
+                else {}
+            ),
             **(
                 {
                     "bookkeeping_policy": bookkeeping_policy,
                     "definition_conflicts": conflicts,
                 }
-                if improved_bookkeeping
+                if improved_bookkeeping or minimal_clarity
                 else {}
             ),
         }
@@ -615,8 +650,17 @@ def run(
             "error": error,
             "edit_effects": handoff.edit_effects(before, draft) if accepted else None,
             "delivery": delivery_feedback(record),
-            **({"stage_completion": completion} if specific_feedback else {}),
-            **({"definition_conflicts": conflicts} if improved_bookkeeping else {}),
+            **({"stage_completion": completion} if completion_check else {}),
+            **(
+                {"definition_conflicts": conflicts}
+                if improved_bookkeeping or minimal_clarity
+                else {}
+            ),
+            **(
+                {"repair_receipt": event["repair_receipt"]}
+                if fidelity_feedback or minimal_clarity
+                else {}
+            ),
         }
         return accepted, complete, last_edit_result
 
@@ -635,7 +679,7 @@ def run(
                 )
                 if accepted:
                     if (
-                        specific_feedback
+                        completion_check
                         and name == "variables"
                         and (diagnostic.get("stage_completion") or {}).get("status")
                         == "incomplete"
@@ -666,7 +710,7 @@ def run(
             )
         )
         try:
-            for name in stages:
+            for name in () if starting_draft is not None else stages:
                 ready, stop_reason = stage(name)
                 stage_outcomes.append(
                     {

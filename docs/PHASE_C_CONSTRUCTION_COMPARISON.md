@@ -1,5 +1,15 @@
 # Phase C construction schedules
 
+## Stage audit and independent prompt refinement, 2026-10-08
+
+See `PHASE_C_STAGE_PROGRESS_2026-10-08.md` for per-case/per-stage findings,
+the distinction between immediate edit retries and global structural repair,
+and the explicit `minimal-clarity-1` / `current-repair-fidelity-1` changes.
+The new `refinement_confirmation` study has eight fresh minimal tasks and three
+saved-current repair episodes; it is not a matched system comparison. The
+`start_phase_c_prompt_refinement.sh` launcher submits only construction/repair
+and report jobs. Historical studies and pinned source bundles remain unchanged.
+
 ## Current-prompt stage completion and feedback, 2026-10-07
 
 `current-bookkeeping-2` is a new opt-in policy. It includes version 1's bookkeeping

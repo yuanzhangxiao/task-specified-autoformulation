@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source", type=Path)
+    parser.add_argument("--repair-source", type=Path)
     parser.add_argument("--study", choices=campaign.STUDIES)
     parser.add_argument("--bookkeeping-policy", choices=campaign.bookkeeping.POLICIES)
     parser.add_argument("--base-url")
@@ -36,9 +37,10 @@ def main():
             root,
             study=args.study or "comparison",
             bookkeeping_policy=args.bookkeeping_policy or "legacy",
+            repair_source=args.repair_source,
         )
     else:
-        if args.source or args.study or args.bookkeeping_policy:
+        if args.source or args.study or args.bookkeeping_policy or args.repair_source:
             parser.error("public inputs and study are frozen by prepare")
         plan = campaign.verify(root)
     if args.command == "run":

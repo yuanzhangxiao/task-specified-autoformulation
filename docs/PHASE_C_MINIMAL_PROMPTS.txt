@@ -106,3 +106,42 @@ Further guidance about accumulation, relaxation, duplicate contributions or othe
 observed errors is to be evaluated only if needed. No generic decay instruction,
 textbook naming rule or initialization tutorial is included in the initial prompts.
 The interaction-stage prompt is outside this topology review.
+
+OPT-IN MINIMAL-CLARITY-1 ADDITIONS — 2026-10-08
+
+The text above remains the historical minimal prompt. The new confirmation adds
+the following short instructions rather than the long current-prompt system.
+
+VARIABLE COMPLETION
+
+Set stage_complete=true when the generated-variable inventory and applicable
+state assignments are complete. No topology is needed yet. If nothing more is
+needed, return empty edit lists and true; do not repeat unchanged declarations
+with false. Fitted coefficients are parameters for the later interaction stage,
+not generated variables needing equations.
+
+SHARED-PROCESS COMPLETION
+
+Set stage_complete=true after this shared-process decision, including when no
+shared process is needed.
+
+TOPOLOGY COMPLETION
+
+Set stage_complete=true when the whole topology is ready to check.
+
+REPAIR COMPLETION
+
+Set stage_complete=true when the revised topology is ready to check.
+
+EDIT LOCATION AND REMOVAL
+
+Only declarations are editable; read_only views are rebuilt.
+Edit a named process in processes, not in equations: its drivers already define
+its one topology. Empty processes means no edits, not deletion. To delete P,
+return remove_processes=["P"]; runtime removes its generated definition and uses.
+Preserve or replace its physical contributions explicitly if they are still needed.
+Explanations do not perform edits. After a reply, inspect the recorded changes.
+Fitted coefficients belong in the later interaction stage, not in variables.
+
+The display also supplies exact removal keys for existing processes and recorded
+before/after balances after a saved edit. It never infers changes from explanation.

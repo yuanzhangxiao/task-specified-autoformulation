@@ -9,10 +9,18 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import shared_process_contract, signed_processes
 
-Policy = Literal["legacy", "current-bookkeeping-1", "current-bookkeeping-2"]
+Policy = Literal[
+    "legacy",
+    "current-bookkeeping-1",
+    "current-bookkeeping-2",
+    "current-repair-fidelity-1",
+    "minimal-clarity-1",
+]
 POLICY = "current-bookkeeping-1"
 FEEDBACK_POLICY = "current-bookkeeping-2"
-POLICIES = ("legacy", POLICY, FEEDBACK_POLICY)
+FIDELITY_POLICY = "current-repair-fidelity-1"
+MINIMAL_POLICY = "minimal-clarity-1"
+POLICIES = ("legacy", POLICY, FEEDBACK_POLICY, FIDELITY_POLICY, MINIMAL_POLICY)
 
 EDITING = """Only current_draft.declarations contains editable records. The other
 views are read-only previews rebuilt from those records. Edit a named process
@@ -36,6 +44,10 @@ def validate_policy(policy: str, prompt_family: str | None = None) -> None:
     """Do not silently apply current-prompt fixes to the matched wording study."""
     if policy not in POLICIES:
         raise ValueError("unknown construction bookkeeping policy")
+    if policy == MINIMAL_POLICY:
+        if prompt_family != "minimal":
+            raise ValueError("minimal clarity requires minimal prompts")
+        return
     if policy != "legacy" and prompt_family is not None:
         raise ValueError("bookkeeping fixes are separate from the prompt comparison")
 
@@ -208,7 +220,7 @@ def assessment_context(
                 ),
             },
         ]
-    if policy == FEEDBACK_POLICY:
+    if policy in {FEEDBACK_POLICY, FIDELITY_POLICY}:
         from autoformalism.search import construction_feedback
 
         result = construction_feedback.explain_feedback(result, draft)

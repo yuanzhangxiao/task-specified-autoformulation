@@ -14,6 +14,7 @@ case "$AF_STUDY" in
   basin_confirmation) AF_DEFAULT_ROOT=phase-c-construction-basins-v3 ;;
   shared_law_comparison) AF_DEFAULT_ROOT=phase-c-shared-laws-v2 ;;
   prompt_comparison) AF_DEFAULT_ROOT=phase-c-minimal-prompts-v1 ;;
+  refinement_confirmation) AF_DEFAULT_ROOT=phase-c-prompt-refinement-v1 ;;
   *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
 esac
 export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/$AF_DEFAULT_ROOT}
@@ -25,9 +26,13 @@ case "${1:?Use run or inspect}" in
     export AF_COMPUTE_CACHE_ROOT="$AF_GROUP/phase-c-runtime-cache"
     export AF_IPC_TMP_ROOT=/tmp/phase-c-ipc-u.yx126462
     if [[ ! -f "$AF_OUTPUT_ROOT/plan.json" ]]; then
+      AF_PREPARE_EXTRA=()
+      if [[ "$AF_STUDY" == refinement_confirmation ]]; then
+        AF_PREPARE_EXTRA+=(--repair-source "${AF_REPAIR_SOURCE:-$AF_GROUP/phase-c-current-bookkeeping-v2}")
+      fi
       "$AF_PYTHON" "$AF_REPO_ROOT/scripts/phase_c_construction_comparison.py" prepare \
         --source "${AF_COMPARISON_SOURCE:-$AF_GROUP/phase-c-topology-v1}" \
-        --root "$AF_OUTPUT_ROOT" --study "$AF_STUDY"
+        --root "$AF_OUTPUT_ROOT" --study "$AF_STUDY" "${AF_PREPARE_EXTRA[@]}"
     else
       "$AF_PYTHON" "$AF_REPO_ROOT/scripts/phase_c_construction_comparison.py" verify --root "$AF_OUTPUT_ROOT"
     fi
