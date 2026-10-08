@@ -15,6 +15,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_bookkeeping as bookkeeping
+from autoformalism.search import construction_feedback
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search.public_graph_obligations import PublicGraphContract
@@ -442,7 +443,8 @@ def run(
     from autoformalism.search import construction_prompts as prompts
 
     bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
-    improved_bookkeeping = bookkeeping_policy == bookkeeping.POLICY
+    improved_bookkeeping = bookkeeping_policy != "legacy"
+    specific_feedback = bookkeeping_policy == bookkeeping.FEEDBACK_POLICY
     if prompt_family is not None and (
         prompt_family not in prompts.FAMILIES
         or policy != "joint_adaptive"
@@ -516,6 +518,12 @@ def run(
             payload["bookkeeping_policy"] = bookkeeping_policy
             payload["current_draft"] = bookkeeping.snapshot(brief, draft)
             system = system.replace("equation_views", "read_only_balances")
+        if specific_feedback and stage in {"variables", "repair"}:
+            payload["stage_instructions"] += "\n" + (
+                construction_feedback.VARIABLE_COMPLETION
+                if stage == "variables"
+                else construction_feedback.FEEDBACK_REPAIR
+            )
         if prompt_family is not None:
             response_model = prompts.response_model(stage)
             payload.update(
@@ -543,6 +551,7 @@ def run(
         before = draft
         raw, accepted, complete, error = None, False, False, None
         normalizations, conflicts = [], []
+        completion = None
         try:
             raw = visible_response(record)
             normalized, normalizations = ledger.normalize_reply(
@@ -563,6 +572,9 @@ def run(
             normalizations.extend(consumer_log)
             draft = candidate
             accepted, complete = True, patch.stage_complete
+            if specific_feedback and stage == "variables" and complete:
+                completion = construction_feedback.variable_completion(brief, draft)
+                complete = completion["status"] == "ready"
         except (ValueError, TypeError, KeyError) as exc:
             error = str(exc)[:6000]
             if conflicts and "runtime-generated definition" in error:
@@ -582,6 +594,7 @@ def run(
             "before": before.model_dump(mode="json"),
             "after": draft.model_dump(mode="json"),
             "pending_after": ledger.pending(brief, draft),
+            **({"stage_completion": completion} if specific_feedback else {}),
             **(
                 {
                     "bookkeeping_policy": bookkeeping_policy,
@@ -602,6 +615,7 @@ def run(
             "error": error,
             "edit_effects": handoff.edit_effects(before, draft) if accepted else None,
             "delivery": delivery_feedback(record),
+            **({"stage_completion": completion} if specific_feedback else {}),
             **({"definition_conflicts": conflicts} if improved_bookkeeping else {}),
         }
         return accepted, complete, last_edit_result
@@ -620,6 +634,16 @@ def run(
                     name, focus, diagnostic, attempt
                 )
                 if accepted:
+                    if (
+                        specific_feedback
+                        and name == "variables"
+                        and (diagnostic.get("stage_completion") or {}).get("status")
+                        == "incomplete"
+                    ):
+                        # Keep the accepted partial inventory editable. Repeated
+                        # premature completion consumes the existing local attempts,
+                        # not an unbounded loop or the reserved global repair budget.
+                        continue
                     if complete or name == "shared_laws":
                         # One focused decision, with existing local delivery retries;
                         # no open-ended self-review or extra successful calls.
@@ -672,7 +696,9 @@ def run(
             clarify_overlaps=True,
         )
         if improved_bookkeeping:
-            initial_check = bookkeeping.assessment_context(initial_check, draft)
+            initial_check = bookkeeping.assessment_context(
+                initial_check, draft, policy=bookkeeping_policy
+            )
         initial = sealed_write(
             directory / "before_repair.json",
             {
@@ -728,7 +754,9 @@ def run(
                     clarify_overlaps=True,
                 )
                 if improved_bookkeeping:
-                    check = bookkeeping.assessment_context(check, draft)
+                    check = bookkeeping.assessment_context(
+                        check, draft, policy=bookkeeping_policy
+                    )
                 ready = complete
         return {
             "status": "topology_complete"

@@ -83,6 +83,68 @@ def _path(graph: dict[str, set[str]], start: str, end: str) -> list[str] | None:
     return None
 
 
+def target_feedback_evidence(
+    equations: tuple[EquationDefinition, ...] | None,
+    target: str,
+    feedback_coordinates: dict[str, tuple[str, ...]] | None = None,
+) -> dict:
+    """Separate coordinate declarations from actual cycle and readout witnesses."""
+    if equations is None:
+        return {
+            "graph_available": False,
+            "binding_status": "unassessed",
+            "target_definition": None,
+            "coordinate_checks": [],
+            "passed": None,
+            "witness": None,
+        }
+    definitions = {e.name: e.definition for e in equations}
+    graph: dict[str, set[str]] = {}
+    for equation in equations:
+        for term in equation.terms:
+            for source in term.sources:
+                graph.setdefault(source, set()).add(equation.name)
+    states = {n for n, d in definitions.items() if d == "differential"}
+    implicit = target in states
+    coordinates = (
+        (target,) if implicit else (feedback_coordinates or {}).get(target, ())
+    )
+    readout_graph = {
+        source: {end for end in ends if end not in states}
+        for source, ends in graph.items()
+    }
+    checks, witnesses = [], []
+    for state in coordinates:
+        cycle = _path(graph, state, state) if state in states else None
+        readout = [state] if state == target else _path(readout_graph, state, target)
+        checks.append(
+            {
+                "state": state,
+                "declared": state in definitions,
+                "differential": state in states,
+                "feedback_cycle_exists": cycle is not None,
+                "algebraic_readout_path_exists": readout is not None,
+                "feedback_cycle": cycle,
+                "target_path": readout,
+            }
+        )
+        if cycle and readout:
+            witnesses.append({"state": state, "cycle": cycle, "target_path": readout})
+    passed = bool(coordinates) and len(witnesses) == len(coordinates)
+    return {
+        "graph_available": True,
+        "binding_status": "implicit_target_coordinate"
+        if implicit
+        else "present"
+        if coordinates
+        else "missing",
+        "target_definition": definitions.get(target),
+        "coordinate_checks": checks,
+        "passed": passed,
+        "witness": witnesses if passed else None,
+    }
+
+
 def check(
     contract: PublicGraphContract,
     equations: tuple[EquationDefinition, ...] | None,
@@ -109,29 +171,10 @@ def check(
                 # A differential target is already its own dynamic coordinate.
                 # For an algebraic readout the proposer owns that assignment;
                 # an arbitrary upstream ancestor is not a storage realization.
-                coordinates = (
-                    (rule.target,)
-                    if rule.target in states
-                    else (feedback_coordinates or {}).get(rule.target, ())
+                evidence = target_feedback_evidence(
+                    equations, rule.target, feedback_coordinates
                 )
-                witnesses = []
-                readout_graph = {
-                    source: {end for end in ends if end not in states}
-                    for source, ends in graph.items()
-                }
-                for state in coordinates:
-                    cycle = _path(graph, state, state) if state in states else None
-                    readout = (
-                        [state]
-                        if state == rule.target
-                        else _path(readout_graph, state, rule.target)
-                    )
-                    if cycle and readout:
-                        witnesses.append(
-                            {"state": state, "cycle": cycle, "target_path": readout}
-                        )
-                passed = bool(coordinates) and len(witnesses) == len(coordinates)
-                witness = witnesses if passed else None
+                passed, witness = evidence["passed"], evidence["witness"]
                 reason = (
                     None
                     if passed

@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+Current-prompt policy `current-bookkeeping-2` distinguishes accepted variable edits
+from accepted stage completion. Missing public-target declarations keep the stage
+editable for bounded local correction; exhaustion goes directly to global repair.
+No topology is demanded during variable declaration. Target-feedback explanations
+report the existing binding and each chosen coordinate's type, cycle and readout
+path; no annotation is treated as an edge. The graph predicate is unchanged and
+shares its evaluator with the explanation. Version 1/legacy behavior remains
+available, and neither policy is enabled in the submitted prompt-family study.
+
 Construction bookkeeping policy `current-bookkeeping-1` is independently frozen
 and opt-in for current-prompt schedule studies. It retains the transactional schema
 and checks while improving generated-definition normalization and displayed edit

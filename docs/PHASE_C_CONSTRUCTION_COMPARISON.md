@@ -1,5 +1,51 @@
 # Phase C construction schedules
 
+## Current-prompt stage completion and feedback, 2026-10-07
+
+`current-bookkeeping-2` is a new opt-in policy. It includes version 1's bookkeeping
+and adds two changes from its twelve-task live confirmation:
+
+- A valid variable reply is retained, but `stage_complete=true` cannot freeze an
+  inventory missing a public target. The receipt names the missing declarations
+  and records effective stage completion separately from transaction acceptance.
+  The next request stays in the variable stage. Repeated premature completion
+  consumes the existing local attempt allowance; exhaustion skips the frozen
+  relationship/topology stages and proceeds to the existing bounded global repair.
+  No extra successful confirmation call, automatic variable/type assignment,
+  topology requirement at the variable stage, or budget increase is introduced.
+- Target-feedback diagnostics separate coordinate binding, differential type,
+  feedback cycle and algebraic readout path. Both the checker and explanation use
+  the same path evaluator. Existing bindings are acknowledged explicitly; a
+  missing cycle requires proposer-chosen topology edits, not another annotation.
+  Direct and coupled feedback, shared-process paths and multiple coordinates are
+  supported. An uncompiled graph remains unavailable, never a missing-path claim.
+
+These are completion/feedback changes, not new scientific acceptance criteria.
+No generic decay term, sign, conversion or type is inserted by the runtime.
+`legacy` remains the default, version 1 retains its previous behavior, and both
+nonlegacy policies are forbidden in the submitted minimal/current prompt study.
+Historical plans remain source-bound and use their original bundles.
+
+The version-1 live archive has plan SHA-256
+`c40bb7992a7dc4c06c0fa6b68104b86c96dc64b132a09999c5fff692c84f0611`:
+4/12 initially complete, 10/12 finally complete, 53 calls and 730344 tokens.
+All seven transaction rejections arose from the separate inventory freeze;
+six occurred after one variable-stage reply omitted both downstream declarations.
+The other final failure repeatedly added an existing binding without fixing its
+missing storage feedback. Accepted graphs still include scientifically questionable
+depth/volume representations, unexplained decay and warning/crest confusion.
+No scientific improvement or strategy ranking follows from this small run.
+
+Saved-reply replay under version 2 preserves all 46 accepted and seven rejected
+transactions in their actual displayed contexts. This does not simulate a new
+dialogue: the variable completion fix would change its subsequent requests, and
+new proposer behavior is untested. No live campaign is automatically launched.
+
+For a future fresh current-prompt confirmation, prepare with
+`--bookkeeping-policy current-bookkeeping-2` instead of version 1, in a new root;
+the existing shared-law launcher can submit that prepared plan. Wait for the
+separate minimal-prompt evidence before deciding on another broad comparison.
+
 ## Current-prompt bookkeeping fixes, 2026-10-07
 
 `current-bookkeeping-1` is an explicit opt-in policy for the current prompt and

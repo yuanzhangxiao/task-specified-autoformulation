@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `current-bookkeeping-2` policy retains valid partial inventories while
+blocking premature variable-stage completion when a public target is undeclared.
+Existing local retries and global repair budgets remain fixed. Target-feedback
+diagnostics distinguish binding, state type, cycle and readout path using the same
+graph evaluator as acceptance. The 53-reply live archive retains all 46 mechanical
+acceptances on replay; prospective proposer improvement is untested. Historical
+policies and the submitted minimal/current comparison remain separate. See
+`PHASE_C_CONSTRUCTION_COMPARISON.md` for the observed failures and policy boundary.
+
 The opt-in `current-bookkeeping-1` construction policy normalizes description-only
 repeats of generated process definitions, labels editable versus generated records,
 shows explicit derivative/algebraic LHSs, and asks targeted process-overlap questions.

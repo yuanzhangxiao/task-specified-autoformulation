@@ -30,7 +30,7 @@ def audit(
         bookkeeping_policy,
         "current" if plan.get("study") == "prompt_comparison" else None,
     )
-    improved_bookkeeping = bookkeeping_policy == bookkeeping.POLICY
+    improved_bookkeeping = bookkeeping_policy != "legacy"
     if (
         plan.get("protocol")
         not in {
@@ -96,7 +96,9 @@ def audit(
                     clarify_overlaps=True,
                 )
                 if improved_bookkeeping:
-                    check = bookkeeping.assessment_context(check, after)
+                    check = bookkeeping.assessment_context(
+                        check, after, policy=bookkeeping_policy
+                    )
             except (ValueError, TypeError, KeyError) as exc:
                 error = str(exc)
             counts.update(x["code"] for x in log if accepted)

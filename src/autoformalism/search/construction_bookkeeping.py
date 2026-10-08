@@ -9,9 +9,10 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import shared_process_contract, signed_processes
 
-Policy = Literal["legacy", "current-bookkeeping-1"]
+Policy = Literal["legacy", "current-bookkeeping-1", "current-bookkeeping-2"]
 POLICY = "current-bookkeeping-1"
-POLICIES = ("legacy", POLICY)
+FEEDBACK_POLICY = "current-bookkeeping-2"
+POLICIES = ("legacy", POLICY, FEEDBACK_POLICY)
 
 EDITING = """Only current_draft.declarations contains editable records. The other
 views are read-only previews rebuilt from those records. Edit a named process
@@ -161,7 +162,9 @@ def definition_conflicts(draft: ledger.Draft, patch: ledger.DraftPatch) -> list[
     ]
 
 
-def assessment_context(check: dict, draft: ledger.Draft) -> dict:
+def assessment_context(
+    check: dict, draft: ledger.Draft, *, policy: Policy = POLICY
+) -> dict:
     """Add targeted questions without changing any scientific acceptance decision."""
     result = deepcopy(check)
     for issue in result["errors"]:
@@ -205,4 +208,8 @@ def assessment_context(check: dict, draft: ledger.Draft) -> dict:
                 ),
             },
         ]
+    if policy == FEEDBACK_POLICY:
+        from autoformalism.search import construction_feedback
+
+        result = construction_feedback.explain_feedback(result, draft)
     return result
