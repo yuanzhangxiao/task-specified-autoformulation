@@ -138,6 +138,33 @@ def test_numerical_derivative_includes_initials(exported):
     assert len(r) == 651
 
 
+def test_real_postfit_scoring_creates_directory_and_resumes(
+    exported, tmp_path, monkeypatch
+):
+    """Exercise the real journal writer, which a mocked evaluator cannot cover."""
+    data = read_seal(exported)["data"]
+    base = data["commons"]["linear3_s0"]
+    case = data["cases"]["linear3"]
+    folder = tmp_path / "previously-absent" / "evaluation"
+    evaluation = {"case": case, "case_name": "linear3", "config": data["config"]}
+    first = campaign.screening_replay._evaluation(
+        folder, evaluation, base, case["reference_parameters"], 30
+    )
+    assert first["status"] == "complete" and first["accuracy_passed"]
+    assert (folder / "replay_progress.json").is_file()
+    monkeypatch.setattr(
+        campaign.screening_replay.campaign,
+        "replay",
+        lambda *a, **k: pytest.fail("completed evaluation replayed"),
+    )
+    assert (
+        campaign.screening_replay._evaluation(
+            folder, evaluation, base, case["reference_parameters"], 30
+        )
+        == first
+    )
+
+
 def test_submission_idempotent_and_one_hour(exported, tmp_path, monkeypatch):
     from scripts import submit_phase_c_fitting_confidence as submit
     from scripts import submit_phase_c_generic_recovery as scheduler
@@ -166,3 +193,74 @@ def test_shell_syntax():
             ["bash", "-n", f"scripts/hpc/{kind}_phase_c_fitting_confidence_delta.sh"],
             check=True,
         )
+
+
+def test_recovery_requires_complete_backends_and_never_refits(
+    exported, tmp_path, monkeypatch
+):
+    from scripts import recover_fitting_confidence_evaluation as recovery
+
+    campaign.prepare(tmp_path, exported, campaign.ConfidencePolicy())
+    plan, data = campaign.verify(tmp_path)
+    task = plan["tasks"][0]
+    folder = tmp_path / "results" / task["task_id"]
+    problem = campaign.training_problem(data, data["endpoints"][0])
+    backend = {
+        "status": "complete",
+        "identity": {
+            "problem_sha256": public.content_sha256(problem.model_dump(mode="json")),
+            "policy": plan["policy"],
+        },
+        "selected": {"parameters": problem.incumbent},
+        "after_reliability": {"parameters": problem.incumbent},
+    }
+    seal(folder / "backend.json", backend)
+    with pytest.raises(FileNotFoundError):
+        recovery.ready(tmp_path, 0)
+    seal(folder / "fit/finished.json", backend | {"status": "interrupted"})
+    with pytest.raises(ValueError, match="intact completed fit"):
+        recovery.ready(tmp_path, 0)
+    (folder / "fit/finished.json").unlink()
+    seal(folder / "fit/finished.json", backend)
+    monkeypatch.setattr(
+        checks, "Rollouts", lambda *a, **k: pytest.fail("recovery tried to refit")
+    )
+
+    def score(path, *args):
+        assert path.is_dir()
+        return {"status": "complete"}
+
+    monkeypatch.setattr(campaign.screening_replay, "_evaluation", score)
+    result = recovery.run(tmp_path, 0)
+    assert result["status"] == "complete"
+    assert recovery.run(tmp_path, 0) == result
+    assert read_seal(folder / "backend.json") == backend
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_recovery_submission_journal(tmp_path, monkeypatch, uncertain):
+    from scripts import recover_fitting_confidence_evaluation as recovery
+
+    monkeypatch.setattr(recovery, "ready", lambda *a: {"tasks": list(range(24))})
+    calls = []
+
+    def sbatch(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(
+            returncode=0,
+            stdout="" if uncertain else str(100 + len(calls)),
+            stderr="uncertain test reply" if uncertain else "",
+        )
+
+    monkeypatch.setattr(recovery.subprocess, "run", sbatch)
+    if uncertain:
+        with pytest.raises(ValueError, match="unconfirmed"):
+            recovery.submit(tmp_path)
+        with pytest.raises(ValueError, match="uncertain"):
+            recovery.submit(tmp_path)
+        assert len(calls) == 1
+    else:
+        value = recovery.submit(tmp_path)
+        assert recovery.submit(tmp_path) == value and len(calls) == 2
+        assert "--array=0-23%6" in calls[0] and "--time=00:15:00" in calls[0]
+        assert "--dependency=afterany:101" in calls[1]

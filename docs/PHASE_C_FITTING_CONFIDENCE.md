@@ -200,3 +200,124 @@ timing-sensitive tests passed in a separate sequential rerun. The missing
 benchmark fixtures were not copied into this diagnostic. Changed-file Ruff checks
 passed; repository-wide `ruff check .` still reports 37 unrelated existing
 findings. No production fitter defaults or benchmark data were changed.
+
+## First Delta return: completed fits, incomplete scoring and profiles
+
+Reviewed `review-20261008-034116.tar.gz`, plan
+`318cdc03bc281a226a76d4f66f08a44166ab62f54b0d7a642eb9fc5a4fce3738`,
+from commit `cced88bb0f3338d2cddc27e970eb8e2ef6f5b529`.
+All 24 fitting/checking backends finished. All 2,159 sealed JSON artifacts passed
+their content-digest checks; each backend equals its finished fitting checkpoint.
+The zero-result summary is a **postfit evaluator failure**: `_evaluation` did not
+create its directory before the replay journal's first write. The regression
+test now calls the real evaluator rather than mocking its filesystem behavior.
+The fix does not alter any optimization objective or fitted vector.
+
+Before resubmission, a read-only matrix-exponential replay of the saved vectors
+gave the following retrospective results. This evaluator uses the existing known
+linear control generator with piecewise-linear forcing. No optimization or
+parameter selection was performed, and reference/validation values did not
+enter the fitting stage. These are an independent archive analysis; the original
+campaign's DOP853/Radau scoring still needs its recovery jobs.
+
+| Control | All coefficients within 1%, before | After | All hidden initials within 0.001, before | After |
+|---|---:|---:|---:|---:|
+| 3 states | 6/6 | 6/6 | 6/6 | 6/6 |
+| 3 states, separated timescales | 5/6 | 5/6 | 3/6 | 5/6 |
+| 6 states | 4/6 | 4/6 | 4/6 | 4/6 |
+| 6 states, separated timescales | 0/6 | 1/6 | 0/6 | 0/6 |
+| Total | 15/24 | 16/24 | 13/24 | 15/24 |
+
+For the hardest six-state controls, median maximum coefficient error decreased
+from 55.57% to 4.832%. The best coefficient recovery has maximum relative error
+8.89e-6, but its worst hidden-initial absolute error is still 0.0401. The two
+ordinary six-state profiled starts with 323% coefficient error remain in that
+region; their validation NMSE is still about 3.68e-7. The bad three-state
+fast/slow joint start also remains unsuccessful. Thus the additional restart
+searches improve some fits without establishing robust joint recovery.
+
+Of 864 planned profile points, two are outside bounds and **all 862 in-domain
+points are unavailable**. They exhausted the 25-second operation allowance
+while computing a sensitivity rollout. Each verification currently recomputes
+the entire coefficient/initial Jacobian before its independent solver check;
+the reserved ten seconds was insufficient on Delta. Saved optimization
+checkpoints exist, but a saved candidate is not a completed verified profile.
+No profile rescue was triggered.
+
+At each declared loss tolerance, the original backends label six endpoints
+`weakly_constrained` and 18 `search_incomplete`. All six weak endpoints are the
+six-state fast/slow controls. Their witnesses come from independently checked
+**reliability-search alternatives**, not successful profiles. A separate
+matrix-exponential training replay of all 862 saved profile candidates also
+finds near-equivalent alternatives for those same six endpoints at tolerance
+1e-12. This corroborates ambiguity, but does not convert the timed-out searches
+into completed profile minima or calibrated confidence intervals. High-loss
+profile candidates cannot rule out better nuisance fits.
+
+### Observed additional cost
+
+| Stage | Sum of task wall time | Purpose/outcome |
+|---|---:|---|
+| Incumbent checks | 287 s | Independent rollouts and joint sensitivity |
+| Restart searches and their checks | 5,731 s (1.59 h) | Partial recovery and alternative-vector witnesses |
+| Profiles | 21,551 s (5.99 h) | Checkpoints saved; no verified profile points |
+| Total, including setup | 27,576 s (7.66 h) | 25,231 process-CPU seconds; 17,736 dataset rollout calls |
+
+This is summed work across tasks, not elapsed queue or campaign time. Median
+additional time per endpoint is 18.5 minutes. Profiles consume approximately
+78% of the added wall time. Postfit scoring cost is still outstanding. The added
+wall time is about 9.4 times the source M18 fit time; these are additional-budget
+diagnostics, not evidence of a cost-efficient replacement fitter.
+
+### Scoring-only recovery on Delta
+
+Keep the original `code/fitting-m19` directory and frozen plan unchanged. Its
+source/runtime identity is required for deterministic resume. Upload only
+`scripts/recover_fitting_confidence_evaluation.py` to
+`/work/hdd/bibo/yxiao2/phase_c/recover_fitting_confidence_evaluation.py`.
+The helper verifies matching completed backends, creates the missing scoring
+directories, and resumes the original controller. It refuses incomplete or
+changed fits, preserves operation budgets, and journals separate CPU submission
+receipts without replacing the original submission manifest.
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+AF_CODE=/work/hdd/bibo/yxiao2/phase_c/code/fitting-m19
+export PYTHONPATH="$AF_CODE/src:$AF_CODE:/projects/bibo/yxiao2/venvs/fitter-methods-v1-deps"
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python \
+  /work/hdd/bibo/yxiao2/phase_c/recover_fitting_confidence_evaluation.py submit \
+  --root /work/hdd/bibo/yxiao2/phase_c/fitting-confidence-v1
+BASH
+```
+
+This requests 24 CPU scoring tasks, six concurrent, one CPU and 15 minutes per
+task, followed by a report. It makes no fitting, profile or LLM calls. New job IDs
+are in `submission/evaluation-recovery/manifest.json`. After completion, the
+existing inspector command above regenerates the report/review archive. Its
+original submission listing can still show the old failed jobs; recovery jobs
+have separate receipts and logs.
+
+### Next diagnostic, before further scaling
+
+Avoid recomputing a full sensitivity matrix at every profile point: verify the
+fixed candidate's outputs first and calculate sensitivities only where needed.
+Use exact linear propagation as a qualification control for these linear tests;
+it is not a substitute for a nonlinear benchmark integrator. Measure verification
+cost before freezing the next budgets, and test targeted profiles of weak joint
+directions/parameters. Reuse saved candidates only with explicit provenance and
+separate accounting. Retain the conservative distinction between a verified
+alternative, an unresolved search, and evidence supporting a local constraint.
+None of these changes should retroactively replace the M19 frozen protocol.
+
+### Recovery verification
+
+The full primary-checkout suite passed: **4,277 passed, eight skipped** (Torch
+unavailable), with no failures. The final targeted suite passed **28 tests**,
+including refusal of incomplete/mismatched backends, saved-result reuse and
+idempotent/uncertain scheduler submissions. A real scoring-only smoke using the
+original portable M19 source completed both retrospective evaluations in 17.6
+seconds, preserved its saved fitting backend exactly, and reused the results on
+a second run without refitting. Changed-file Ruff checks and `git diff --check`
+passed. Repository-wide Ruff still reports 37 pre-existing unrelated findings.

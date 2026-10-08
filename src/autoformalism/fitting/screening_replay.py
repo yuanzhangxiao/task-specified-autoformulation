@@ -300,6 +300,9 @@ def _evaluation(
             "training_nmse": None,
             "validation_nmse": None,
         }
+    # The replay journal is written before the final sealed score. A fresh
+    # evaluation stage therefore needs its directory before launching replay.
+    folder.mkdir(parents=True, exist_ok=True)
     path = folder / "replay.json"
     if not path.exists():
         checked = campaign.replay(
