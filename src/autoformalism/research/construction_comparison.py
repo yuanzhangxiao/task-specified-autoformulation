@@ -898,7 +898,13 @@ def report(root: Path, plan: dict) -> dict:
         f"Length-limited responses: {result['delivery']['length_limited_responses']}; "
         "with at least 97% trailing whitespace: "
         f"{result['delivery']['whitespace_heavy_length_responses']}.",
-        "Costs include variable construction and repairs. Brackets show unscaled "
+        (
+            "Costs include new calls only; saved repair episodes exclude their "
+            "historical construction cost. "
+            if plan.get("study") == "refinement_confirmation"
+            else "Costs include variable construction and repairs. "
+        )
+        + "Brackets show unscaled "
         "MAD over finished tasks; pending tasks are not zeros.",
         "Process counts distinguish raw proposals, rejected edits "
         "and verified assembly. "

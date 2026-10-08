@@ -47,6 +47,8 @@ three rejected replies. Eligibility includes unresolved overlap clarifications.
 Binding absence is an annotation issue, not evidence that the state itself was
 missing. T2-hard supplied its binding in ordinary topology; the other three
 applicable cases supplied it during global repair.
+Transfer-format counts include three cases that declared no named processes;
+they are not counts of correctly identified shared physical laws.
 
 ## Per-case scientific interpretation
 
