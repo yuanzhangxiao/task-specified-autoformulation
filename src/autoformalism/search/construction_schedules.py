@@ -15,6 +15,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_bookkeeping as bookkeeping
+from autoformalism.search import construction_checklist as checklist
 from autoformalism.search import construction_feedback
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
@@ -445,10 +446,15 @@ def run(
     from autoformalism.search import construction_prompts as prompts
 
     bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
-    minimal_clarity = bookkeeping_policy == bookkeeping.MINIMAL_POLICY
+    variable_checks = bookkeeping_policy == checklist.POLICY
+    minimal_clarity = bookkeeping_policy in {
+        bookkeeping.MINIMAL_POLICY,
+        checklist.POLICY,
+    }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
         bookkeeping.MINIMAL_POLICY,
+        checklist.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -566,6 +572,15 @@ def run(
                     payload["explicit_removal_options"] = fidelity.removal_options(
                         draft
                     )
+        if variable_checks:
+            payload["variable_checklist"] = checklist.variable_checklist(
+                brief, draft, target_definitions, graph_contract
+            )
+            if stage == "variables":
+                payload["stage_instructions"] += "\n" + checklist.INSTRUCTION
+                payload["current_draft"] = checklist.variable_snapshot(draft)
+                payload["editing_rules"] = payload["current_draft"]["editing_contract"]
+                payload.pop("explicit_removal_options", None)
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -599,7 +614,13 @@ def run(
             draft = candidate
             accepted, complete = True, patch.stage_complete
             if completion_check and stage == "variables" and complete:
-                completion = construction_feedback.variable_completion(brief, draft)
+                completion = (
+                    checklist.variable_checklist(
+                        brief, draft, target_definitions, graph_contract
+                    )
+                    if variable_checks
+                    else construction_feedback.variable_completion(brief, draft)
+                )
                 complete = completion["status"] == "ready"
         except (ValueError, TypeError, KeyError) as exc:
             error = str(exc)[:6000]
@@ -620,6 +641,15 @@ def run(
             "before": before.model_dump(mode="json"),
             "after": draft.model_dump(mode="json"),
             "pending_after": ledger.pending(brief, draft),
+            **(
+                {
+                    "variable_checklist_after": checklist.variable_checklist(
+                        brief, draft, target_definitions, graph_contract
+                    )
+                }
+                if variable_checks
+                else {}
+            ),
             **({"stage_completion": completion} if completion_check else {}),
             **(
                 {
@@ -650,6 +680,11 @@ def run(
             "error": error,
             "edit_effects": handoff.edit_effects(before, draft) if accepted else None,
             "delivery": delivery_feedback(record),
+            **(
+                {"variable_checklist": event["variable_checklist_after"]}
+                if variable_checks
+                else {}
+            ),
             **({"stage_completion": completion} if completion_check else {}),
             **(
                 {"definition_conflicts": conflicts}
@@ -663,6 +698,33 @@ def run(
             ),
         }
         return accepted, complete, last_edit_result
+
+    def assess_draft() -> dict:
+        """Recheck declarations after later edits as well as on stage completion."""
+        check = ledger.assess(
+            brief,
+            context,
+            target_definitions,
+            draft,
+            graph_contract=graph_contract,
+            clarify_overlaps=True,
+        )
+        if variable_checks:
+            values = checklist.variable_checklist(
+                brief, draft, target_definitions, graph_contract
+            )
+            check["variable_checklist"] = values
+            check["errors"].extend(
+                {"code": "variable_declaration", "item": row}
+                for row in values["items"]
+                if row["status"] in {"missing", "inconsistent"}
+            )
+            check["eligible"] &= values["status"] == "ready"
+        if improved_bookkeeping:
+            check = bookkeeping.assessment_context(
+                check, draft, policy=bookkeeping_policy
+            )
+        return check
 
     def stage(name: str) -> tuple[bool, str | None]:
         while True:
@@ -731,18 +793,7 @@ def run(
                     break
         except (RepairBudgetExceeded, PromptPreflightError) as exc:
             ready, stop_reason = False, str(exc)
-        initial_check = ledger.assess(
-            brief,
-            context,
-            target_definitions,
-            draft,
-            graph_contract=graph_contract,
-            clarify_overlaps=True,
-        )
-        if improved_bookkeeping:
-            initial_check = bookkeeping.assessment_context(
-                initial_check, draft, policy=bookkeeping_policy
-            )
+        initial_check = assess_draft()
         initial = sealed_write(
             directory / "before_repair.json",
             {
@@ -789,18 +840,7 @@ def run(
                 stop_reason = str(exc)
                 break
             if accepted:
-                check = ledger.assess(
-                    brief,
-                    context,
-                    target_definitions,
-                    draft,
-                    graph_contract=graph_contract,
-                    clarify_overlaps=True,
-                )
-                if improved_bookkeeping:
-                    check = bookkeeping.assessment_context(
-                        check, draft, policy=bookkeeping_policy
-                    )
+                check = assess_draft()
                 ready = complete
         return {
             "status": "topology_complete"

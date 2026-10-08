@@ -57,6 +57,7 @@ def submit(
         "shared_law_comparison",
         "prompt_comparison",
         "refinement_confirmation",
+        "variable_checklist_confirmation",
     }
     if live_confirmation:
         construction_comparison.check_storage(root)

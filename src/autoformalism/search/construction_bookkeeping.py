@@ -8,6 +8,7 @@ from typing import Literal
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import shared_process_contract, signed_processes
+from autoformalism.search.construction_checklist import POLICY as CHECKLIST_POLICY
 
 Policy = Literal[
     "legacy",
@@ -15,12 +16,20 @@ Policy = Literal[
     "current-bookkeeping-2",
     "current-repair-fidelity-1",
     "minimal-clarity-1",
+    "minimal-variable-checklist-1",
 ]
 POLICY = "current-bookkeeping-1"
 FEEDBACK_POLICY = "current-bookkeeping-2"
 FIDELITY_POLICY = "current-repair-fidelity-1"
 MINIMAL_POLICY = "minimal-clarity-1"
-POLICIES = ("legacy", POLICY, FEEDBACK_POLICY, FIDELITY_POLICY, MINIMAL_POLICY)
+POLICIES = (
+    "legacy",
+    POLICY,
+    FEEDBACK_POLICY,
+    FIDELITY_POLICY,
+    MINIMAL_POLICY,
+    CHECKLIST_POLICY,
+)
 
 EDITING = """Only current_draft.declarations contains editable records. The other
 views are read-only previews rebuilt from those records. Edit a named process
@@ -44,7 +53,7 @@ def validate_policy(policy: str, prompt_family: str | None = None) -> None:
     """Do not silently apply current-prompt fixes to the matched wording study."""
     if policy not in POLICIES:
         raise ValueError("unknown construction bookkeeping policy")
-    if policy == MINIMAL_POLICY:
+    if policy in {MINIMAL_POLICY, CHECKLIST_POLICY}:
         if prompt_family != "minimal":
             raise ValueError("minimal clarity requires minimal prompts")
         return

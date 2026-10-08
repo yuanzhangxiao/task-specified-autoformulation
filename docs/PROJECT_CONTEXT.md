@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`PHASE_C_VARIABLE_CHECKLIST.md` defines opt-in `minimal-variable-checklist-1`:
+per-turn accepted-draft checklists and bounded variable completion checks for
+targets, explicit types and proposer-owned memory/readout assignments. Topology
+requirements remain deferred until assembly; assignments do not certify science.
+An eight-case fresh minimal confirmation includes both basins and reports first
+replies, variable-stage completion and post-global declaration status separately.
+Earlier prompt policies and benchmark assets remain unchanged.
+
 `PHASE_C_STAGE_PROGRESS_2026-10-08.md` records the first minimal run stage by stage:
 public-target declarations improve from 7/8 first replies to 8/8 stage exits;
 whole-topology eligibility improves from 3/8 before global repair to 6/8 after it.

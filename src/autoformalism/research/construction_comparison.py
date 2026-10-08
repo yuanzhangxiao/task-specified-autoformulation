@@ -44,6 +44,7 @@ Study = Literal[
     "shared_law_comparison",
     "prompt_comparison",
     "refinement_confirmation",
+    "variable_checklist_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -52,6 +53,7 @@ STUDIES = (
     "shared_law_comparison",
     "prompt_comparison",
     "refinement_confirmation",
+    "variable_checklist_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -89,6 +91,7 @@ def source_identity() -> dict:
                 "scripts/hpc/start_phase_c_shared_laws.sh",
                 "scripts/hpc/start_phase_c_minimal_prompts.sh",
                 "scripts/hpc/start_phase_c_prompt_refinement.sh",
+                "scripts/hpc/start_phase_c_variable_checklist.sh",
             )
         },
     }
@@ -111,8 +114,17 @@ def freeze(
         )
     if study == "refinement_confirmation" and bookkeeping_policy != "legacy":
         raise ValueError("refinement policies are frozen separately by task")
+    if study == "variable_checklist_confirmation":
+        if bookkeeping_policy not in {"legacy", bookkeeping.CHECKLIST_POLICY}:
+            raise ValueError("variable checklist study fixes its minimal policy")
+        bookkeeping_policy = bookkeeping.CHECKLIST_POLICY
     bookkeeping.validate_policy(
-        bookkeeping_policy, "current" if study == "prompt_comparison" else None
+        bookkeeping_policy,
+        "minimal"
+        if study == "variable_checklist_confirmation"
+        else "current"
+        if study == "prompt_comparison"
+        else None,
     )
     old = sealed_read(source / "plan.json")
     if (
@@ -171,18 +183,27 @@ def freeze(
         source_tasks = [by_case[name] for name in roster]
     blocks = []
     for i, task in enumerate(source_tasks):
-        if study == "refinement_confirmation":
+        if study in {"refinement_confirmation", "variable_checklist_confirmation"}:
             blocks.append(
                 [
                     {
                         **task,
-                        "task_id": f"{task['task_id']}_minimal_clarity",
+                        "task_id": f"{task['task_id']}_minimal_"
+                        + (
+                            "checklist"
+                            if study == "variable_checklist_confirmation"
+                            else "clarity"
+                        ),
                         "policy": "joint_adaptive",
                         "process_question": "dedicated",
                         "prompt_family": "minimal",
                         "stage_schedule": prompts.SCHEDULE,
                         "matched_task_id": task["task_id"],
-                        "bookkeeping_policy": bookkeeping.MINIMAL_POLICY,
+                        **(
+                            {"bookkeeping_policy": bookkeeping.MINIMAL_POLICY}
+                            if study == "refinement_confirmation"
+                            else {}
+                        ),
                     }
                 ]
             )
@@ -249,6 +270,8 @@ def freeze(
                 "study": study,
                 "selection_rule": "eight-fresh-minimal-and-three-saved-repairs-1"
                 if study == "refinement_confirmation"
+                else "all-eight-cases-seed0-full-variable-checklist-1"
+                if study == "variable_checklist_confirmation"
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
                 else ("both-basins-seed0-full-three-policies-two-placements-1")
@@ -284,7 +307,11 @@ def verify(root: Path) -> dict:
     config = Config.model_validate(plan["config"])
     bookkeeping.validate_policy(
         config.bookkeeping_policy,
-        "current" if plan.get("study") == "prompt_comparison" else None,
+        "minimal"
+        if plan.get("study") == "variable_checklist_confirmation"
+        else "current"
+        if plan.get("study") == "prompt_comparison"
+        else None,
     )
     for name, cell in plan["cells"].items():
         expected = reviewed_contract(
@@ -329,11 +356,19 @@ def verify(root: Path) -> dict:
         "bookkeeping_policy" in t or "starting_checkpoint" in t for t in plan["tasks"]
     ):
         raise ValueError("per-task refinement requires its dedicated study")
-    if study == "prompt_comparison":
+    if study in {"prompt_comparison", "variable_checklist_confirmation"}:
+        if study == "variable_checklist_confirmation" and (
+            config.bookkeeping_policy != bookkeeping.CHECKLIST_POLICY
+        ):
+            raise ValueError("variable checklist policy differs")
         expected = {
             (case, 0, "full", "joint_adaptive", "dedicated", family, prompts.SCHEDULE)
             for case in roster
-            for family in prompts.FAMILIES
+            for family in (
+                ("minimal",)
+                if study == "variable_checklist_confirmation"
+                else prompts.FAMILIES
+            )
         }
         actual = [
             (*row, task.get("prompt_family"), task.get("stage_schedule"))
@@ -872,6 +907,10 @@ def report(root: Path, plan: dict) -> dict:
         "Eight fresh minimal cases plus three diagnosed saved repair episodes. "
         "Saved repairs are not fresh-current controls or a matched comparison."
         if plan.get("study") == "refinement_confirmation"
+        else "Eight fresh minimal cases, Full/seed 0, with a per-turn variable "
+        "checklist and bounded completion repair. Assignments do not certify "
+        "mechanisms. Compare stage evidence with earlier runs; not a matched ranking."
+        if plan.get("study") == "variable_checklist_confirmation"
         else "Matched current/minimal wording: all eight cases, Full/seed 0. "
         "Both use variables -> shared processes -> remaining topology -> repair, "
         "adaptive batches, the same response schemas, checks and budgets. "
@@ -932,4 +971,8 @@ def report(root: Path, plan: dict) -> dict:
         "initialization, NMSE and fitted mechanism compliance remain unassessed.</p>"
         + "\n".join(sections)
     )
+    if plan.get("study") == "variable_checklist_confirmation":
+        from autoformalism.research import construction_variable_report
+
+        construction_variable_report.report(root, plan)
     return result

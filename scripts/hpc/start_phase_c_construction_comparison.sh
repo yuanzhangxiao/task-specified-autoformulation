@@ -15,6 +15,7 @@ case "$AF_STUDY" in
   shared_law_comparison) AF_DEFAULT_ROOT=phase-c-shared-laws-v2 ;;
   prompt_comparison) AF_DEFAULT_ROOT=phase-c-minimal-prompts-v1 ;;
   refinement_confirmation) AF_DEFAULT_ROOT=phase-c-prompt-refinement-v1 ;;
+  variable_checklist_confirmation) AF_DEFAULT_ROOT=phase-c-variable-checklist-v1 ;;
   *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
 esac
 export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/$AF_DEFAULT_ROOT}
@@ -46,6 +47,10 @@ case "${1:?Use run or inspect}" in
     "$AF_PYTHON" "$AF_REPO_ROOT/scripts/phase_c_construction_comparison.py" report --root "$AF_OUTPUT_ROOT"
     cat "$AF_OUTPUT_ROOT/SUMMARY.md"
     AF_CONTENTS=(plan.json summary.json SUMMARY.md TOPOLOGY.html)
+    if [[ "$AF_STUDY" == variable_checklist_confirmation ]]; then
+      cat "$AF_OUTPUT_ROOT/VARIABLES.md"
+      AF_CONTENTS+=(VARIABLES.json VARIABLES.md)
+    fi
     for AF_PART in results logs submissions runtime; do
       [[ ! -d "$AF_OUTPUT_ROOT/$AF_PART" ]] || AF_CONTENTS+=("$AF_PART")
     done
