@@ -556,7 +556,7 @@ def test_the_committed_plans_are_upstreams_settings_on_the_roster():
     assert (full.generations, full.patience, full.keep_top_samples) == (20, 20, 16)
     assert (full.temperature, full.top_p, full.reasoning_effort) == (0.7, 0.95, None)
     assert (full.max_output_tokens, full.trajectory_seconds) == (8192, 120)
-    assert full.status == "proposed_pending_review"
+    assert full.status == "frozen_before_calls"
     assert set(smoke.cells) <= set(full.cells)
     assert (smoke.generations, smoke.patience, smoke.repetitions) == (2, 2, (0,))
     sampling = ("keep_top_samples", "temperature", "top_p", "reasoning_effort",

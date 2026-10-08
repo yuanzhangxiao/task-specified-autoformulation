@@ -3,7 +3,7 @@
   "development_only": true,
   "release_protocol": "phase-c-development-2",
   "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
-  "status": "proposed_pending_review",
+  "status": "frozen_before_calls",
   "purpose": "D3 as published, in its white-box mode, on the eight Phase C roster cells with two seeds, development data only. Upstream's loop, prompts and settings: twenty generations, patience twenty, the sixteen best models shown back for reflection, top-p 0.95, and the paper's temperature 0.7; the model with the lowest one-step validation loss is kept, D3's own rule. The model is the hosted gpt-oss-120b, as for the other baselines and our method; it gets no reasoning effort, so the server's default applies, and an 8192-token output limit because its thinking counts against it.",
   "endpoint": "jetstream2_hosted",
   "model": "gpt-oss-120b",

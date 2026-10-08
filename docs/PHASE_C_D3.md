@@ -56,7 +56,7 @@ The sealed plan records these departures.
 ## Plans
 
 - `configs/phase_c_d3_smoke_v2.json`: two generations on one cell, so both requests are exercised. It makes 3 requests. Frozen; not a result.
-- `configs/phase_c_d3_hosted_120b_v2.json`: 8 roster cells × 2 seeds. **Proposed, pending review.**
+- `configs/phase_c_d3_hosted_120b_v2.json`: 8 roster cells × 2 seeds. Frozen on 2026-10-08, after smoke v2 passed and the user signed off.
 - `configs/phase_c_d3_smoke_vm_20b_v2.json`: the smoke plan, served on the GPU VM.
 
 Run from a clean checkout on the VM:
@@ -64,4 +64,7 @@ Run from a clean checkout on the VM:
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh d3 configs/phase_c_d3_smoke_v2.json phase-c-d3-smoke-v2
 PYTHONPATH=src ~/af/venv/bin/python scripts/phase_c_d3.py report --root ~/af/runs/phase-c-d3-smoke-v2
+bash scripts/jetstream/run_phase_c_hosted.sh d3 configs/phase_c_d3_hosted_120b_v2.json phase-c-d3-hosted-120b-v2 4
 ```
+
+The full run takes four tasks at a time. When every task has ended, the launcher writes the report to `report.json` in the run's directory.
