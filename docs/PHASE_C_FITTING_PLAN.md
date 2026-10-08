@@ -742,3 +742,21 @@ then allows at most four training-selected nuisance refits and two free searches
 per endpoint. It preserves all historical budgets and reports new overhead by stage.
 It supplies conditional numerical evidence, not probability or exclusion claims.
 Production fitting and nonlinear benchmark integration remain unchanged.
+
+M20's [completed review](PHASE_C_PROFILE_RECOVERY.md#completed-delta-results--2026-10-08)
+confirms 24/24 completed endpoints and 836/862 verified in-domain profile
+candidates. Coefficient recovery improves from 16/24 to 21/24; all five new
+recoveries arise in the final warm joint rollout searches on fast/slow six-state
+controls. Hidden initials improve numerically but remain recovered on 15/24.
+Two ordinary six-state solutions still have 323% coefficient error, and one
+three-state solution remains poor. Eight endpoints have numerical ambiguity
+witnesses; none has a probabilistic correctness certificate. Additional work
+costs 75.20 summed task-minutes plus 8.80 minutes of retrospective scoring.
+
+Before scaling further, separate strict uncertainty verification from incumbent
+retention (one usable historical fit was excluded and replaced by a worse one),
+diagnose five nuisance-start domain failures, and compare direct warm searches
+with affine gain/initial profiling under matched budgets. A training-only diverse
+start portfolio should target persistent local solutions; repeated full profile
+grids should not be the default recovery mechanism. This follow-up is proposed,
+not yet implemented or promoted to production.
