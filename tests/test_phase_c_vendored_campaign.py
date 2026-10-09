@@ -744,6 +744,124 @@ def test_a_refused_model_list_says_why_in_the_servers_words(monkeypatch):
         vendored.served_model_ids(JETSTREAM2_HOSTED_BASE_URL)
 
 
+def test_an_endpoint_that_cannot_answer_is_told_apart_from_a_wrong_answer(
+    monkeypatch,
+):
+    """Only a list the service could not give is worth asking for again."""
+
+    def http(code):
+        def make(request):
+            return vendored.urllib.error.HTTPError(
+                request.full_url, code, "status", {}, io.BytesIO(b"")
+            )
+
+        return make
+
+    cases = [
+        (lambda request: TimeoutError("The read operation timed out"), True),
+        (lambda request: vendored.urllib.error.URLError("refused"), True),
+        (http(502), True),
+        (http(401), True),  # what the hosted route answered during its outage
+        (http(404), False),
+    ]
+    for make, unavailable in cases:
+
+        def urlopen(request, timeout, make=make):
+            raise make(request)
+
+        monkeypatch.setattr(vendored.urllib.request, "urlopen", urlopen)
+        with pytest.raises(ValueError, match="cannot list the models") as caught:
+            vendored.served_model_ids(JETSTREAM2_HOSTED_BASE_URL)
+        assert isinstance(caught.value, vendored.ModelListUnavailable) is unavailable
+    monkeypatch.setattr(
+        vendored.urllib.request,
+        "urlopen",
+        lambda request, timeout: _Response(b"<!doctype html><html></html>"),
+    )
+    with pytest.raises(ValueError) as caught:
+        vendored.served_model_ids(JETSTREAM2_HOSTED_BASE_URL)
+    assert not isinstance(caught.value, vendored.ModelListUnavailable)
+
+
+def _patient_clock(monkeypatch) -> list[float]:
+    """Time that passes only while the model check pauses."""
+    clock = {"now": 0.0}
+    pauses: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(vendored, "_clock", lambda: clock["now"])
+    monkeypatch.setattr(vendored, "_pause", pause)
+    return pauses
+
+
+def _answers(*answers):
+    """A model listing that gives these answers in turn, raising the errors."""
+    remaining = iter(answers)
+
+    def listing(base_url: str) -> tuple[str, ...]:
+        answer = next(remaining)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return listing
+
+
+def test_a_model_list_the_service_cannot_give_is_asked_for_again(monkeypatch):
+    pauses = _patient_clock(monkeypatch)
+    slow = vendored.ModelListUnavailable("cannot list the models: timed out")
+    vendored.wait_for_served_model(
+        "http://x", "gpt-oss-120b", patience_seconds=3600.0,
+        list_models=_answers(slow, slow, ("other", "gpt-oss-120b")),
+    )
+    assert pauses == [60.0, 60.0]
+
+    # A list without the model is refused at once, however patient the wait.
+    with pytest.raises(ValueError, match="not among"):
+        vendored.wait_for_served_model(
+            "http://x", "gpt-oss-120b", patience_seconds=3600.0,
+            list_models=_answers(("other",)),
+        )
+    assert pauses == [60.0, 60.0]
+
+    # One that never answers is given up on when patience would run out.
+    with pytest.raises(vendored.ModelListUnavailable):
+        vendored.wait_for_served_model(
+            "http://x", "gpt-oss-120b", patience_seconds=300.0,
+            list_models=_answers(*[slow] * 10),
+        )
+    assert pauses[2:] == [60.0] * 5
+
+
+def test_the_llm_sr_cli_waits_for_the_model_list_before_a_search(
+    tmp_path, monkeypatch
+):
+    import sys
+
+    from scripts import phase_c_llm_sr as cli
+
+    _, root, _ = _frozen(tmp_path)
+    seen: dict = {}
+    monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
+    monkeypatch.setenv("AF_ENDPOINT_KIND", "vm_local_vllm")
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:8000")
+    monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr(cli, "run_phase_c", lambda *a, **k: {"status": "searched"})
+    monkeypatch.setattr(
+        sys, "argv",
+        ["cli.py", "run", "--root", str(root), "--index", "0", "--target", "h_down"],
+    )
+    cli.main()
+    pauses = _patient_clock(monkeypatch)
+    slow = vendored.ModelListUnavailable("cannot list the models: timed out")
+    monkeypatch.setattr(cli, "served_model_ids", _answers(slow, ("served-model",)))
+    seen["before_search"]()
+    assert pauses == [60.0]
+
+
 def test_the_hosted_service_is_waited_out_for_hours_and_a_local_one_is_not():
     patience = vendored.OUTAGE_PATIENCE_SECONDS
     assert set(patience) == set(vendored.ENDPOINT_IDENTITIES)

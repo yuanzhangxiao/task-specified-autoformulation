@@ -44,6 +44,7 @@ The sealed plan records these.
 - Each target is searched by its own process. The launcher starts all 22 searches (11 targets × 2 seeds) at once, then seals each task once its targets have finished. In turn, the three-target T2 easy cell alone would take about six days instead of two.
 - This changes only the orchestration. Each target was always a separate LLM-SR run.
 - A finished search leaves `search.json` beside its samples and is kept. A search that stopped part-way (a reboot, a killed process) starts over, because LLM-SR cannot resume; the stopped attempt is kept beside it as `llmsr-<target>.interrupted-N`.
+- Before each search the service is asked which models it serves. One that cannot answer is asked again every minute, for as long as a search would wait for it: six hours on the hosted service. On 2026-10-09 two D3 tasks were lost to one slow answer at their start.
 - A search that the hosted service stopped, by failing for longer than six hours, is searched again from the start when its task is sealed.
 - Their sampler counts samples on its class, which only a new process resets; their runner gives each problem a new process. A process that searches several targets in turn resets the count before each search. Before this was fixed, a second target searched in the same process stopped at once and kept LLM-SR's starting program. No reported result used that path: Phase B reported no LLM-SR results, and the budget pilot's cell has one target.
 

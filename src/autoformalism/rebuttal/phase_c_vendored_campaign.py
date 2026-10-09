@@ -16,6 +16,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -120,8 +121,23 @@ def resolve_endpoint(kind: str, base_url: str | None) -> tuple[str, str]:
     return kind, base_url.rstrip("/")
 
 
+#: Statuses a model list comes back with while a service is down or restarting.
+#: On 2026-10-05 the hosted route answered 401, then 503, then 502, then
+#: recovered; from inside Jetstream2 a 401 is that outage, not a refusal.
+UNAVAILABLE_STATUSES = frozenset({401, 408, 429, 500, 502, 503, 504})
+
+
+class ModelListUnavailable(ValueError):
+    """The endpoint could not say which models it serves; asking later may work."""
+
+
 def served_model_ids(base_url: str, *, timeout: float = 30.0) -> tuple[str, ...]:
-    """List the models an OpenAI-compatible endpoint serves, in its order."""
+    """List the models an OpenAI-compatible endpoint serves, in its order.
+
+    An endpoint that does not answer, or answers that it is unavailable,
+    raises `ModelListUnavailable`; an answer that is not a model list raises a
+    plain ValueError.
+    """
     request = urllib.request.Request(
         base_url.rstrip("/") + "/v1/models", headers={"Accept": "application/json"}
     )
@@ -130,11 +146,16 @@ def served_model_ids(base_url: str, *, timeout: float = 30.0) -> tuple[str, ...]
             value = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = http_error_detail(exc)
-        raise ValueError(
+        error = ModelListUnavailable if exc.code in UNAVAILABLE_STATUSES else ValueError
+        raise error(
             f"cannot list the models served at {base_url}: {exc}"
             + (f" ({detail})" if detail else "")
         ) from exc
-    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+    except OSError as exc:  # no connection, or no answer in time
+        raise ModelListUnavailable(
+            f"cannot list the models served at {base_url}: {exc}"
+        ) from exc
+    except ValueError as exc:  # a body that is not JSON, such as a web page
         raise ValueError(f"cannot list the models served at {base_url}: {exc}") from exc
     data = value.get("data") if isinstance(value, dict) else None
     if not isinstance(data, list):
@@ -153,6 +174,46 @@ def check_served_model(served: tuple[str, ...], model: str) -> None:
         raise ValueError(
             f"the plan's model {model!r} is not among the served models {served}"
         )
+
+
+def _clock() -> float:
+    """Seconds on a monotonic clock; a seam so tests can move time on."""
+    return time.monotonic()
+
+
+def _pause(seconds: float) -> None:
+    """Wait before asking again; a seam so tests need not sleep."""
+    time.sleep(seconds)
+
+
+def wait_for_served_model(
+    base_url: str,
+    model: str,
+    *,
+    patience_seconds: float,
+    pause_seconds: float = 60.0,
+    list_models=None,
+) -> None:
+    """Confirm the endpoint serves the plan's model, waiting out one that cannot say.
+
+    A list without the model is refused at once. A list that cannot be read is
+    asked for again every `pause_seconds` until `patience_seconds`, the
+    patience a search gives the same endpoint, would be exceeded. On
+    2026-10-09 two Phase C D3 tasks were lost to one slow answer at their
+    start. `list_models` stands in for `served_model_ids`.
+    """
+    listing = served_model_ids if list_models is None else list_models
+    started = _clock()
+    while True:
+        try:
+            served = listing(base_url)
+        except ModelListUnavailable:
+            if _clock() - started + pause_seconds > patience_seconds:
+                raise
+            _pause(pause_seconds)
+            continue
+        check_served_model(served, model)
+        return
 
 
 class ReasoningModelAdaptation(BaseModel):
