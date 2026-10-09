@@ -388,6 +388,32 @@ def test_the_v2_pilot_and_smoke_differ_from_v1_only_where_declared():
     assert vm["budget"]["declared"] == smoke["budget"]["declared"]
 
 
+def test_the_full_llm_sr_plan_is_the_pilot_on_the_whole_roster():
+    """Only scope, budget and status differ from the budget pilot."""
+    configs = REPO / "configs"
+
+    def load(name: str) -> dict:
+        return load_phase_c_vendored_plan(configs / name).model_dump(mode="json")
+
+    pilot = load("phase_c_llm_sr_budget_pilot_v2.json")
+    smoke = load("phase_c_llm_sr_smoke_v3.json")
+    full = load("phase_c_llm_sr_hosted_120b_v1.json")
+    roster = json.loads(
+        (configs / "phase_c_public_baseline_delta_cpu_v1.json").read_text()
+    )
+    assert full["cells"] == roster["cells"] and full["repetitions"] == [0, 1]
+    assert full["budget"]["declared"] == full["budget"]["published_default"] == 10000
+    assert full["status"] == "proposed_pending_review"
+    assert (smoke["status"], smoke["budget"]["declared"]) == ("frozen_before_calls", 8)
+    scope = {"status", "budget", "scope_note", "cells", "repetitions"}
+    for plan in (smoke, full):
+        assert {key for key in plan if plan[key] != pilot[key]} <= scope
+    # The smoke's cell has two targets, so separate searches and assembly both run.
+    (cell,) = smoke["cells"]
+    assert cell in roster["cells"]
+    assert cell["benchmark_id"] == "phase_c_dalla_man_t2_canonical_named_hard_rates_v1"
+
+
 # --- running and resuming ----------------------------------------------------
 
 
@@ -411,6 +437,10 @@ def test_a_task_searches_development_data_and_seals_its_model(tmp_path):
     selection = BaselineDevelopmentResult.model_validate(saved["selection"])
     assert (selection.method, selection.tier) == ("llm_sr", "fixed")
     assert selection.selected_hyperparameters["llm_samples"] == 10000
+    # LLM-SR's own pick is kept; the rollout error is reported, not chosen by.
+    assert selection.selected_hyperparameters["selection"] == sr.SELECTION
+    assert result["selection_metric"] == sr.SELECTION
+    assert result["development_rollout_error"] == 0.25
 
     # A finished task resumes from its seal without a second search.
     again = sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_complete(calls))
@@ -509,12 +539,11 @@ def test_an_endpoint_outage_is_reported_as_an_infrastructure_failure(
     assert summary["status"] == "pending"
 
 
-@pytest.mark.parametrize("method", ["llm_sr", "llm_ode"])
-def test_an_interrupted_attempt_is_kept_aside_and_the_task_restarts_clean(
-    tmp_path, method
+def test_an_interrupted_llm_ode_attempt_is_kept_aside_and_the_task_restarts_clean(
+    tmp_path,
 ):
-    _, root, _ = _frozen(tmp_path, method)
-    campaign = sr if method == "llm_sr" else ode
+    _, root, _ = _frozen(tmp_path, "llm_ode")
+    campaign = ode
     # What a search stopped part-way leaves: samples and calls, no result.
     stale = root / "results" / "0" / "llmsr-h_down" / "samples"
     stale.mkdir(parents=True)
@@ -542,6 +571,70 @@ def test_an_interrupted_attempt_is_kept_aside_and_the_task_restarts_clean(
         "0",
         "0.interrupted-1",
     ]
+
+
+def test_an_llm_sr_task_keeps_the_target_searches_that_finished(tmp_path):
+    """An LLM-SR task directory is never set aside whole, unlike LLM-ODE's.
+
+    Other processes may have searched its targets; the driver sets aside only a
+    target search that stopped part-way.
+    """
+    _, root, _ = _frozen(tmp_path)
+    finished = root / "results" / "0" / "llmsr-h_down"
+    finished.mkdir(parents=True)
+    (finished / "search.json").write_text("{}", encoding="utf-8")
+    calls: list = []
+    result = sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_complete(calls))
+    assert result["status"] == "complete" and len(calls) == 1
+    assert (finished / "search.json").exists()
+    assert sorted(path.name for path in (root / "results").iterdir()) == ["0"]
+
+
+def test_one_target_is_searched_and_kept_until_the_task_is_sealed(tmp_path):
+    _, root, _ = _frozen(tmp_path)
+    calls: list = []
+
+    def searched(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"status": "searched", "target": kwargs["only"], "accounting": {}}
+
+    outcome = sr.run_phase_c(
+        root, 0, endpoint="vm_local_vllm", search=searched, target="h_down"
+    )
+    assert outcome == {"status": "searched", "target": "h_down", "accounting": {}}
+    assert calls[0]["targets"] == ("h_down",)
+    assert not (root / "results" / "0" / "result.json").exists()
+    with pytest.raises(ValueError, match="searches h_down, not 'h_up'"):
+        sr.run_phase_c(
+            root, 0, endpoint="vm_local_vllm", search=searched, target="h_up"
+        )
+    assert len(calls) == 1
+
+    # Without a target the task is assembled and sealed, after which a target
+    # search returns the seal and searches nothing.
+    sealed = sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_complete(calls))
+    assert sealed["status"] == "complete" and "only" not in calls[1]
+    assert sr.run_phase_c(
+        root, 0, endpoint="vm_local_vllm", search=searched, target="h_down"
+    ) == sealed
+    assert len(calls) == 2
+
+
+def test_a_target_searched_elsewhere_is_neither_searched_nor_sealed(tmp_path):
+    _, root, _ = _frozen(tmp_path)
+    calls: list = []
+    with vendored.task_lock(root, "0-h_down"):
+        for target in (None, "h_down"):
+            with pytest.raises(ValueError, match="already running"):
+                sr.run_phase_c(
+                    root, 0, endpoint="vm_local_vllm", search=_complete(calls),
+                    target=target,
+                )
+        # Another task holds its own locks.
+        assert sr.run_phase_c(
+            root, 1, endpoint="vm_local_vllm", search=_complete(calls)
+        )["status"] == "complete"
+    assert len(calls) == 1
 
 
 def test_a_second_interruption_is_kept_beside_the_first(tmp_path):
@@ -670,7 +763,20 @@ def test_the_cli_checks_the_served_model_before_any_search(
     calls: list = []
     monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
     monkeypatch.setenv("AF_LLM_ODE_ROOT", str(tmp_path))
-    monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: _complete(calls))
+
+    def build(**kwargs):
+        searcher = _complete(calls)
+        check = kwargs.get("before_search")
+        if check is None:  # LLM-ODE's CLI checks before the search it returns
+            return searcher
+
+        def search(**arguments):
+            check()  # LLM-SR's driver checks before each target search it starts
+            return searcher(**arguments)
+
+        return search
+
+    monkeypatch.setattr(cli, "build_searcher", build)
     monkeypatch.setattr(cli, "served_model_ids", lambda base_url: ("other",))
     patience = {"patience_seconds": 60.0}
     search = cli._searcher(root, "http://127.0.0.1:8000", **patience)
@@ -762,6 +868,29 @@ def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):
     cli.main()
     assert (seen["max_new_tokens"], seen["join_split_headers"]) == (4096, True)
     assert seen["bypass_cache"] is False  # a vLLM we serve replays nothing
+
+
+def test_the_llm_sr_cli_searches_one_target_when_asked(tmp_path, monkeypatch):
+    import sys
+
+    from scripts import phase_c_llm_sr as cli
+
+    _, root, _ = _frozen(tmp_path)
+    seen: dict = {}
+    monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
+    monkeypatch.setenv("AF_ENDPOINT_KIND", "vm_local_vllm")
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:8000")
+    monkeypatch.setattr(cli, "build_searcher", lambda **kwargs: None)
+    monkeypatch.setattr(
+        cli, "run_phase_c", lambda *a, **k: seen.update(k) or {"status": "searched"}
+    )
+    for extra, target in (([], None), (["--target", "h_down"], "h_down")):
+        monkeypatch.setattr(
+            sys, "argv",
+            ["cli.py", "run", "--root", str(root), "--index", "0", *extra],
+        )
+        cli.main()
+        assert seen["target"] == target
 
 
 def test_the_cli_takes_the_endpoint_from_the_environment(monkeypatch):

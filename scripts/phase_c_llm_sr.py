@@ -6,7 +6,9 @@ AF_LLM_SR_ROOT. AF_ENDPOINT_KIND declares where the model is served and must
 match the frozen plan; AF_VLLM_BASE_URL is that endpoint's address, and for
 the Jetstream2 hosted kind it defaults to the service's fixed route. `prepare`
 and `report` never contact a provider, and `run` contacts one only when its
-task still has a search to do.
+task still has a search to do. `run --target` searches one target of a task,
+so separate processes can search a task's targets at once; a later `run`
+without it assembles and seals the task's model.
 """
 
 from __future__ import annotations
@@ -48,7 +50,9 @@ def _searcher(
     `patience_seconds` is how long a search waits out an endpoint that keeps
     failing, and `bypass_cache` whether it replays stored answers; both follow
     the endpoint kind, not the plan. The generation limit and header reading
-    follow the plan's declared adaptation, if any.
+    follow the plan's declared adaptation, if any. LLM-SR names its model in
+    every request, so the endpoint must serve it; that is checked before each
+    target search that starts, and not when a run only assembles.
     """
     checkout = os.environ.get("AF_LLM_SR_ROOT")
     if not checkout:
@@ -58,22 +62,16 @@ def _searcher(
     if budget["unit"] != "llm_samples":
         raise ValueError(f"unexpected budget unit {budget['unit']!r}")
     model = sealed["plan"]["model"]
-    search = build_searcher(
+    return build_searcher(
         upstream_root=Path(checkout),
         base_url=base_url,
         model=model,
         samples=int(budget["declared"]),
         patience_seconds=patience_seconds,
         bypass_cache=bypass_cache,
+        before_search=lambda: check_served_model(served_model_ids(base_url), model),
         **llm_sr_transport_settings(sealed["plan"]),
     )
-
-    def checked(**kwargs) -> dict:
-        # LLM-SR names its model in every request, so the endpoint must serve it.
-        check_served_model(served_model_ids(base_url), model)
-        return search(**kwargs)
-
-    return checked
 
 
 def main() -> None:
@@ -87,6 +85,7 @@ def main() -> None:
     worker = sub.add_parser("run")
     worker.add_argument("--root", type=Path, required=True)
     worker.add_argument("--index", type=int, required=True)
+    worker.add_argument("--target", help="search only this target of the task")
     summary = sub.add_parser("report")
     summary.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
@@ -113,6 +112,7 @@ def main() -> None:
                 patience_seconds=OUTAGE_PATIENCE_SECONDS[endpoint],
                 bypass_cache=endpoint in CACHING_ENDPOINTS,
             ),
+            target=args.target,
         )
         value = {key: item for key, item in result.items() if key != "rows"}
     else:

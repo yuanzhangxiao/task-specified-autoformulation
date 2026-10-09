@@ -380,22 +380,32 @@ def set_aside_unfinished(directory: Path) -> Path | None:
 
 
 @contextmanager
-def exclusive_attempt(root: Path, index: int) -> Iterator[None]:
-    """Hold one task for this process, and start it clean after an interruption.
+def task_lock(root: Path, name: str) -> Iterator[None]:
+    """Hold one named piece of work under a campaign root for this process.
 
-    Neither upstream search can resume part-way, and on a VM no scheduler stops
-    the same task from being started twice. A second process for a task is
-    refused while the first holds its lock, which also makes it safe to set an
-    unfinished attempt aside: only a stopped attempt can be left unlocked.
+    On a VM no scheduler stops the same work from being started twice, so a
+    second process is refused while the first holds the lock.
     """
     locks = root / "locks"
     locks.mkdir(parents=True, exist_ok=True)
-    with (locks / f"{index}.lock").open("w") as handle:
+    with (locks / f"{name}.lock").open("w") as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError(
-                f"task {index} under {root} is already running in another process"
+                f"task {name} under {root} is already running in another process"
             ) from None
+        yield
+
+
+@contextmanager
+def exclusive_attempt(root: Path, index: int) -> Iterator[None]:
+    """Hold one task for this process, and start it clean after an interruption.
+
+    Neither upstream search can resume part-way. Holding the task's lock makes
+    it safe to set an unfinished attempt aside: only a stopped attempt can be
+    left unlocked.
+    """
+    with task_lock(root, str(index)):
         set_aside_unfinished(root / "results" / str(index))
         yield

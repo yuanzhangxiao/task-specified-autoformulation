@@ -18,6 +18,12 @@ the job confines it rather than preventing it. Nothing in the recovery path
 here executes anything: the selected program is parsed, its coefficients are
 refitted over a numeric evaluator, and the result is scored by our own rollout.
 
+Each target is its own LLM-SR run, so a cell's targets can be searched by
+separate processes at once. A finished search leaves a record beside its
+samples and is never run again; one that stopped part-way is set aside and
+starts over, because their search cannot resume. The cell's model is assembled
+once every target has finished.
+
 The one behaviour that must be guarded is `_draw_samples_local`, which wraps
 its request loop in `while True: except Exception: continue`. An endpoint fault
 would otherwise spin until the job's walltime with nothing recorded, so the
@@ -27,9 +33,12 @@ patience.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -38,6 +47,7 @@ import numpy as np
 
 from autoformalism.data import DatasetSplit
 from autoformalism.expressions import ValidationContext
+from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.llm_call_log import CallLog
 from autoformalism.rebuttal.llm_ode_upstream import InexpressibleEquation
 from autoformalism.rebuttal.llm_sr_shim import (
@@ -69,6 +79,14 @@ DEFAULT_PATIENCE_SECONDS = 15 * 60.0
 #: pause doubles per consecutive failure: a blip costs seconds, and a long
 #: outage is retried about once a minute until it ends or patience runs out.
 BACKOFF_SECONDS = (1.0, 60.0)
+
+#: What a finished target search leaves beside its samples: what it cost and
+#: when it ran. A target with one is never searched again.
+SEARCH_RECORD = "search.json"
+
+#: The shared accounting rule's counts, summed over a task's target searches.
+CALL_COUNTS = ("physical_requests", "observed_tokens", "unknown_usage_requests",
+               "cache_hits")
 
 
 class SamplerStalled(BaseException):
@@ -164,12 +182,15 @@ def build_searcher(
     max_new_tokens: int = DEFAULT_MAX_TOKENS,
     join_split_headers: bool = False,
     bypass_cache: bool = False,
+    before_search: Callable[[], None] | None = None,
 ):
     """Bind the pinned checkout to our data; returns a campaign searcher.
 
     `max_new_tokens` and `join_split_headers` come from a plan's declared
     reasoning-model adaptation; the defaults are upstream's own behaviour.
     `bypass_cache` is for an endpoint that replays stored answers.
+    `before_search` runs before each target search that actually starts, so a
+    run that only assembles finished searches contacts no endpoint.
     """
     import sys
 
@@ -192,22 +213,32 @@ def build_searcher(
         development: tuple[DatasetSplit, DatasetSplit],
         context: ValidationContext,
         score_rollout,
+        only: str | None = None,
     ) -> dict:
-        """One LLM-SR run per target, as their specification format requires."""
-        accounting = ShimAccounting(log=CallLog(directory / "llm_calls.jsonl"))
+        """One LLM-SR run per target, as their specification format requires.
+
+        A target whose search has finished is not searched again. `only`
+        searches that one target and returns without assembling a model.
+        """
+        if only is not None and only not in targets:
+            raise ValueError(f"{only!r} is not among the searched targets {targets}")
         equations: dict[str, str] = {}
         inexpressible: list[str] = []
-        started = monotonic()
+        # The search this process is running, counted if it stalls.
+        running: dict[str, Any] = {"accounting": ShimAccounting(), "started": None}
 
         def spent() -> dict:
-            return _accounting(accounting, started, inexpressible, directory)
+            return _accounting(directory, targets, inexpressible, running)
 
-        for target in targets:
-            specification, mapping = build_specification(
-                description, channels, target
-            )
+        for target in targets if only is None else (only,):
             log_dir = directory / f"llmsr-{target}"
+            if (log_dir / SEARCH_RECORD).is_file():
+                continue
+            if before_search is not None:
+                before_search()
+            set_aside_unfinished_search(log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
+            specification, _ = build_specification(description, channels, target)
             (log_dir / "specification.txt").write_text(specification, encoding="utf-8")
 
             column = channels.index(target)
@@ -220,6 +251,14 @@ def build_searcher(
             class_config = config_lib.ClassConfig(
                 llm_class=sampler.LocalLLM, sandbox_class=evaluator.LocalSandbox
             )
+            accounting = ShimAccounting(log=CallLog(log_dir / "llm_calls.jsonl"))
+            started_utc = _utc_now()
+            running.update(accounting=accounting, started=monotonic())
+            # Their sampler counts samples on its class, which only a new
+            # process resets; their runner gives each problem a new process.
+            # Without this, a second target searched here would stop at once,
+            # its budget spent by the first.
+            sampler.Sampler._global_samples_nums = 1
             try:
                 with _transport(
                     sampler,
@@ -245,7 +284,28 @@ def build_searcher(
                     "error": str(exc),
                     "accounting": spent(),
                 }
+            atomic_json(
+                log_dir / SEARCH_RECORD,
+                {
+                    "target": target,
+                    "llm_requests": accounting.requests,
+                    "llm_samples": accounting.samples,
+                    "transport_failures": accounting.failures,
+                    "transport_failure_reasons": dict(accounting.reasons),
+                    "search_seconds": round(monotonic() - running["started"], 1),
+                    "started_utc": started_utc,
+                    "finished_utc": _utc_now(),
+                },
+            )
+            running.update(accounting=ShimAccounting(), started=None)
 
+        if only is not None:
+            return {"status": "searched", "target": only, "accounting": spent()}
+
+        for target in targets:
+            log_dir = directory / f"llmsr-{target}"
+            _, mapping = build_specification(description, channels, target)
+            column = channels.index(target)
             best = best_sample(log_dir)
             if best is None:
                 return {
@@ -308,28 +368,89 @@ def build_searcher(
     return search
 
 
+def _utc_now() -> str:
+    """The wall-clock time a record states, in UTC."""
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def set_aside_unfinished_search(log_dir: Path) -> Path | None:
+    """Move a target search that stopped part-way out of the next one's way.
+
+    It is kept beside the task for its cost and its logs, under a name the
+    task's accounting does not read. Restarting into the same directory would
+    let the new search's model be chosen from samples the stopped one wrote.
+    """
+    if not log_dir.is_dir() or (log_dir / SEARCH_RECORD).exists():
+        return None
+    if not any(log_dir.iterdir()):
+        return None
+    number = 1
+    while (
+        moved := log_dir.with_name(f"{log_dir.name}.interrupted-{number}")
+    ).exists():
+        number += 1
+    log_dir.rename(moved)
+    return moved
+
+
 def _accounting(
-    accounting: ShimAccounting,
-    started: float,
-    inexpressible: list[str],
     directory: Path,
+    targets: tuple[str, ...],
+    inexpressible: list[str],
+    running: dict[str, Any],
 ) -> dict:
-    """What the run cost, how many samples scored, what our grammar refused."""
+    """What the searches cost, how many samples scored, what our grammar refused.
+
+    A finished search is counted from its record, so one that another process
+    or an earlier run finished is counted too; a search that stopped in this
+    process is counted from `running`. `search_seconds` adds the searches'
+    durations; `wall_seconds` spans the first start to the last finish, which
+    is shorter when targets were searched at once.
+    """
+    calls = dict.fromkeys(CALL_COUNTS, 0)
     written = scored = 0
-    for log_dir in sorted(directory.glob("llmsr-*")):
+    accounting: ShimAccounting = running["accounting"]
+    requests, samples, failures = (
+        accounting.requests, accounting.samples, accounting.failures
+    )
+    reasons = dict(accounting.reasons)
+    seconds = 0.0 if running["started"] is None else monotonic() - running["started"]
+    starts: list[datetime] = []
+    finishes: list[datetime] = []
+    for target in targets:
+        log_dir = directory / f"llmsr-{target}"
+        for key, value in d3_accounting(log_dir / "llm_calls.jsonl").items():
+            calls[key] += value
         counts = sample_yield(log_dir)
         written += counts["model_samples"]
         scored += counts["model_samples_scored"]
-    return {
-        **d3_accounting(directory / "llm_calls.jsonl"),
-        "llm_requests": accounting.requests,
-        "llm_samples": accounting.samples,
+        path = log_dir / SEARCH_RECORD
+        if not path.is_file():
+            continue
+        record = json.loads(path.read_text(encoding="utf-8"))
+        requests += record["llm_requests"]
+        samples += record["llm_samples"]
+        failures += record["transport_failures"]
+        for reason, count in record["transport_failure_reasons"].items():
+            reasons[reason] = reasons.get(reason, 0) + count
+        seconds += record["search_seconds"]
+        starts.append(datetime.fromisoformat(record["started_utc"]))
+        finishes.append(datetime.fromisoformat(record["finished_utc"]))
+    value = {
+        **calls,
+        "llm_requests": requests,
+        "llm_samples": samples,
         # Samples the model wrote that LLM-SR's evaluator could score; one
         # that is empty or does not parse never scores.
         "model_samples": written,
         "model_samples_scored": scored,
-        "transport_failures": accounting.failures,
-        "transport_failure_reasons": accounting.reasons,
-        "search_seconds": round(monotonic() - started, 1),
+        "transport_failures": failures,
+        "transport_failure_reasons": reasons,
+        "search_seconds": round(seconds, 1),
         "inexpressible_targets": inexpressible,
     }
+    if running["started"] is None and len(starts) == len(targets):
+        value["wall_seconds"] = round(
+            (max(finishes) - min(starts)).total_seconds(), 1
+        )
+    return value

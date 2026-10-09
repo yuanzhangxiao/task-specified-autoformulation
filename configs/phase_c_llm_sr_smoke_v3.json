@@ -1,0 +1,48 @@
+{
+  "schema_version": "phase-c-vendored-campaign-plan-1",
+  "status": "frozen_before_calls",
+  "development_only": true,
+  "release_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "method": "llm_sr",
+  "upstream": {
+    "repository": "https://github.com/deep-symbolic-mathematics/LLM-SR",
+    "commit": "41c212312df6c16d936c9cb395356a62774c47e3",
+    "license": "MIT (config.py carries a DeepMind Apache-2.0 header)",
+    "search_modified": false
+  },
+  "budget": {
+    "unit": "llm_samples",
+    "published_default": 10000,
+    "declared": 8,
+    "rationale": "A smoke test of the whole path, not a result: a cell with two targets, each searched by its own process with two requests, then the task assembled from both searches, through the hosted endpoint, LLM-SR's own evaluator, our conversion and refit, a development rollout and the sealed result."
+  },
+  "prompt_policy": {
+    "supplies_public_task_specification": true,
+    "upstream_withholds_specification": false,
+    "description": "LLM-SR specifications natively embed a problem description, so supplying the public task specification matches its own protocol."
+  },
+  "islands": 10,
+  "scope_note": "Smoke test on the roster's Dalla Man T2 hard cell, whose two targets (Gp and I) exercise the separate target searches and the assembly. Its model is never reported.",
+  "endpoint": "jetstream2_hosted",
+  "model": "gpt-oss-120b",
+  "reasoning_model_adaptation": {
+    "max_new_tokens": 4096,
+    "join_split_headers": true,
+    "rationale": "LLM-SR was published with models that answer at once. gpt-oss reasons before it answers, within the same token limit, and writes its function header over several lines. Measured on 2026-10-05 by sending this cell's first LLM-SR prompt as a chat message to the hosted gpt-oss-120b, four samples per request: at upstream's 512 new tokens all four stopped at the limit while still reasoning; at 4096 all four finished, at low and at the served default reasoning effort (about 2,200 tokens per sample at the default), but every one split its header, which upstream's reader (sampler._extract_body) takes as the start of the body, so its trimming kept nothing; with the header read as one line, all four were usable, at either effort. Sampling controls, reasoning effort included, stay at the served defaults, as upstream leaves them unset."
+  },
+  "cells": [
+    {
+      "benchmark_id": "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
+      "tier": "hard",
+      "public_prompt_sha256": "ea8b212bdb021267b57c2bc40423a3c24bcd9d45877b7457027d896040eeb383"
+    }
+  ],
+  "repetitions": [
+    0
+  ],
+  "execution_semantics": "continuous_ode_free_rollout",
+  "derivative_provenance": "upstream_findiff_fourth_order",
+  "test_data_opened": false,
+  "private_reference_opened": false
+}

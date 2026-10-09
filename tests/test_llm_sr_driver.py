@@ -38,6 +38,9 @@ def _fake_upstream(monkeypatch, tmp_path: Path, *, best: str | None, score: floa
 
     sampler = types.ModuleType("llmsr.sampler")
     sampler.LocalLLM = _FakeLocalLLM
+    # Their sample counter, kept on the class as upstream keeps it.
+    sampler.Sampler = type("Sampler", (), {"_global_samples_nums": 1})
+    sampler.counts_at_start = []
     evaluator = types.ModuleType("llmsr.evaluator")
     evaluator.LocalSandbox = object
     config = types.ModuleType("llmsr.config")
@@ -50,6 +53,9 @@ def _fake_upstream(monkeypatch, tmp_path: Path, *, best: str | None, score: floa
         # exercise the substituted transport exactly as their sampler would
         llm = sampler.LocalLLM()
         llm._do_request("a prompt")
+        # their sampler stops once the class counter reaches the budget
+        sampler.counts_at_start.append(sampler.Sampler._global_samples_nums)
+        sampler.Sampler._global_samples_nums = max_sample_nums + 1
         if best is None:
             return
         samples = Path(log_dir) / "samples"
@@ -347,3 +353,152 @@ def test_a_missing_checkout_is_refused_before_anything_runs(tmp_path: Path) -> N
         driver.build_searcher(
             upstream_root=tmp_path, base_url="http://127.0.0.1:1", model="m", samples=1
         )
+
+
+# --- one search per target, kept once finished --------------------------------
+
+LINEAR = "def equation(G, I, params):\n    return params[0] * G + params[1] * I\n"
+
+
+def _counting(monkeypatch, tmp_path: Path, best: str | None = LINEAR):
+    """The fake checkout, recording which target each run of their pipeline searched."""
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=best, score=-0.01)
+    pipeline = sys.modules["llmsr.pipeline"]
+    original = pipeline.main
+    runs: list[str] = []
+
+    def main(**kwargs):
+        runs.append(Path(kwargs["log_dir"]).name)
+        original(**kwargs)
+
+    monkeypatch.setattr(pipeline, "main", main)
+    monkeypatch.setattr(driver, "complete", lambda *a, **k: {"content": ["x"] * 4})
+    return checkout, runs
+
+
+def test_each_target_is_searched_once_and_the_model_assembled_from_all(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Separate processes can search a cell's targets; assembly reuses them."""
+    checkout, runs = _counting(monkeypatch, tmp_path)
+    checks: list[str] = []
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m",
+        samples=20, before_search=lambda: checks.append("checked"),
+    )
+    task = tmp_path / "task"
+    first = _run(search, directory=task, targets=("G", "I"), only="I")
+    assert (first["status"], first["target"]) == ("searched", "I")
+    assert runs == ["llmsr-I"] and checks == ["checked"]
+    record = json.loads((task / "llmsr-I" / driver.SEARCH_RECORD).read_text())
+    assert record["target"] == "I" and record["started_utc"] <= record["finished_utc"]
+    assert not (task / "llmsr-G").exists()
+
+    # Without `only`, what is missing is searched and the model takes both.
+    outcome = _run(search, directory=task, targets=("G", "I"))
+    assert outcome["status"] == "complete"
+    assert runs == ["llmsr-I", "llmsr-G"] and len(checks) == 2
+    assert set(outcome["equations"]) == {"G", "I"}
+    assert outcome["accounting"]["model_samples"] == 2
+    assert "wall_seconds" in outcome["accounting"]
+
+    # Assembling again searches nothing and contacts no endpoint.
+    again = _run(search, directory=task, targets=("G", "I"))
+    assert again["equations"] == outcome["equations"]
+    assert runs == ["llmsr-I", "llmsr-G"] and len(checks) == 2
+    with pytest.raises(ValueError, match="not among the searched targets"):
+        _run(search, directory=task, targets=("G", "I"), only="X")
+
+
+def test_finished_searches_are_counted_from_their_records(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A search another process finished costs what its record says."""
+    checkout, runs = _counting(monkeypatch, tmp_path)
+    task = tmp_path / "task"
+    times = {
+        "G": ("2026-10-09T00:00:00+00:00", "2026-10-10T00:00:00+00:00", 3, 1),
+        "I": ("2026-10-09T01:00:00+00:00", "2026-10-11T00:00:00+00:00", 2, 0),
+    }
+    for target, (started, finished, requests, failures) in times.items():
+        samples = task / f"llmsr-{target}" / "samples"
+        samples.mkdir(parents=True)
+        (samples / "samples_1.json").write_text(
+            json.dumps({"sample_order": 1, "function": LINEAR, "score": -0.01})
+        )
+        reasons = {"timeout": failures} if failures else {}
+        (task / f"llmsr-{target}" / driver.SEARCH_RECORD).write_text(json.dumps({
+            "target": target, "llm_requests": requests, "llm_samples": 4 * requests,
+            "transport_failures": failures, "transport_failure_reasons": reasons,
+            "search_seconds": 100.0 * requests, "started_utc": started,
+            "finished_utc": finished,
+        }))
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    outcome = _run(search, directory=task, targets=("G", "I"))
+    assert outcome["status"] == "complete" and runs == []
+    accounting = outcome["accounting"]
+    assert (accounting["llm_requests"], accounting["llm_samples"]) == (5, 20)
+    assert accounting["transport_failure_reasons"] == {"timeout": 1}
+    # Durations add up; the wall time spans the first start to the last finish.
+    assert accounting["search_seconds"] == 500.0
+    assert accounting["wall_seconds"] == 48 * 3600.0
+
+
+def test_a_target_search_that_stopped_part_way_starts_over(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Their search cannot resume, and a stopped one's samples must not count."""
+    checkout, runs = _counting(monkeypatch, tmp_path)
+    stale = tmp_path / "task" / "llmsr-G" / "samples"
+    stale.mkdir(parents=True)
+    unfinished = "def equation(G, I, params):\n    return params[0] * I\n"
+    (stale / "samples_9.json").write_text(
+        json.dumps({"sample_order": 9, "function": unfinished, "score": 0.0})
+    )
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    outcome = _run(search, directory=tmp_path / "task")
+    assert outcome["status"] == "complete" and runs == ["llmsr-G"]
+    kept = tmp_path / "task" / "llmsr-G.interrupted-1" / "samples" / "samples_9.json"
+    assert kept.exists()
+    assert not (tmp_path / "task" / "llmsr-G" / "samples" / "samples_9.json").exists()
+    assert "G" in outcome["equations"]["G"]  # the new search's model, not the stale one
+    # Nothing to set aside: a finished search, an empty or a missing directory.
+    assert driver.set_aside_unfinished_search(tmp_path / "task" / "llmsr-G") is None
+    assert driver.set_aside_unfinished_search(tmp_path / "missing") is None
+
+
+def test_a_stalled_target_search_leaves_no_record(monkeypatch, tmp_path: Path) -> None:
+    """A search the endpoint stopped is searched again, from the start."""
+    checkout, _ = _counting(monkeypatch, tmp_path)
+
+    def stalled(**kwargs):
+        raise driver.SamplerStalled("the endpoint failed 360 times in a row")
+
+    monkeypatch.setattr(sys.modules["llmsr.pipeline"], "main", stalled)
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    outcome = _run(search, directory=tmp_path / "task", only="G")
+    assert outcome["status"] == "endpoint_unavailable"
+    assert "360 times" in outcome["error"]
+    assert not (tmp_path / "task" / "llmsr-G" / driver.SEARCH_RECORD).exists()
+    assert "wall_seconds" not in outcome["accounting"]
+
+
+def test_each_search_in_one_process_gets_its_whole_budget(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Their sample counter lives on a class, so only a new process resets it."""
+    checkout, sampler = _fake_upstream(monkeypatch, tmp_path, best=LINEAR, score=-0.01)
+    monkeypatch.setattr(driver, "complete", lambda *a, **k: {"content": ["x"] * 4})
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    outcome = _run(search, directory=tmp_path / "task", targets=("G", "I"))
+    assert outcome["status"] == "complete"
+    # Without the reset the second search would start at 21 and stop at once.
+    assert sampler.counts_at_start == [1, 1]

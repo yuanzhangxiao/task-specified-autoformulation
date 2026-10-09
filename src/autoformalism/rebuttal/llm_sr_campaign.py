@@ -8,10 +8,17 @@ LLM-SR learns one function per run, so a cell with several targets runs their
 pipeline once per target, which is what their specification format requires.
 Phase C cells enter through ``prepare_phase_c`` and ``run_phase_c``, which read
 a verified release and resume only against the endpoint kind frozen in the plan.
+A Phase C task's targets can be searched by separate processes at once; the
+task's model is assembled and sealed once all of them have finished.
+
+The model kept is LLM-SR's own choice: the sample its evaluator scored highest.
+The development rollout error is reported beside it and chooses nothing.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Protocol
 
@@ -29,10 +36,10 @@ from autoformalism.rebuttal.llm_ode_campaign import (
 from autoformalism.rebuttal.llm_sr_driver import build_searcher  # noqa: F401
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     endpoint_environment,
-    exclusive_attempt,
     load_development,
     load_phase_c_vendored_plan,
     require_endpoint,
+    task_lock,
 )
 from autoformalism.rebuttal.prefit_replay import (
     content_hash,
@@ -43,6 +50,11 @@ from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
 
 PROTOCOL = "phase-b-llm-sr-campaign-1"
 PHASE_C_PROTOCOL = "phase-c-llm-sr-campaign-1"
+
+#: LLM-SR's own rule: of every sample its evaluator scored, the one with the
+#: highest score, the negative mean squared error of the program fitted to the
+#: training derivatives.
+SELECTION = "highest_llm_sr_training_score"
 
 
 class SearcherFactory(Protocol):
@@ -168,18 +180,51 @@ def run_phase_c(
     *,
     endpoint: str,
     search: SearcherFactory | None = None,
+    target: str | None = None,
 ) -> dict:
-    """Resume one Phase C task, only against the endpoint kind it was frozen for."""
+    """Resume one Phase C task, only against the endpoint kind it was frozen for.
+
+    With `target`, only that target is searched and kept for the task, and
+    nothing is sealed. Without it, every target not yet searched is searched in
+    turn, then the task's model is assembled and sealed.
+    """
     sealed = sealed_read(root / "plan.json")
     if sealed["protocol"] != PHASE_C_PROTOCOL:
         raise ValueError(f"{root / 'plan.json'} is not a Phase C LLM-SR plan")
     require_endpoint(sealed, root, endpoint)
-    with exclusive_attempt(root, index):
+    if not 0 <= index < len(sealed["rows"]):
+        raise ValueError("task index out of range")
+    targets = tuple(sealed["rows"][index]["searched_targets"])
+    if target is not None and target not in targets:
+        raise ValueError(f"task {index} searches {', '.join(targets)}, not {target!r}")
+    held = targets if target is None else (target,)
+    with _held(root, index, held, whole_task=target is None):
         row, directory, finished = _task(sealed, root, index)
         if finished is not None:
             return finished
         development, context = load_development(sealed, row)
-        return _search_and_seal(sealed, row, directory, development, context, search)
+        return _search_and_seal(
+            sealed, row, directory, development, context, search, only=target
+        )
+
+
+@contextmanager
+def _held(
+    root: Path, index: int, targets: tuple[str, ...], *, whole_task: bool
+) -> Iterator[None]:
+    """Hold the targets this process searches, and the task when it seals it.
+
+    A target search cannot resume, so the driver sets a stopped one aside
+    before searching that target again; holding the target's lock makes that
+    safe. The task directory is never set aside, because it keeps the targets
+    that finished.
+    """
+    with ExitStack() as stack:
+        if whole_task:
+            stack.enter_context(task_lock(root, str(index)))
+        for name in targets:
+            stack.enter_context(task_lock(root, f"{index}-{name}"))
+        yield
 
 
 def _task(sealed: dict, root: Path, index: int) -> tuple[dict, Path, dict | None]:
@@ -200,8 +245,13 @@ def _search_and_seal(
     development,
     context,
     search: SearcherFactory | None,
+    *,
+    only: str | None = None,
 ) -> dict:
-    """Run upstream's search on development data and seal what it selected."""
+    """Run upstream's search on development data and seal what it selected.
+
+    With `only`, that one target is searched and kept, and nothing is sealed.
+    """
     result_path = directory / "result.json"
     if search is None:  # pragma: no cover - requires the vendored checkout
         raise ValueError(
@@ -220,7 +270,10 @@ def _search_and_seal(
         development=(development.train, development.validation),
         context=context,
         score_rollout=development_rollout_error,
+        **({} if only is None else {"only": only}),
     )
+    if only is not None:
+        return outcome
 
     if outcome["status"] == "complete":
         equations = outcome["equations"]
@@ -233,7 +286,7 @@ def _search_and_seal(
             selected_hyperparameters={
                 "llm_samples": int(sealed["plan"]["budget"]["declared"]),
                 "num_islands": int(sealed["plan"].get("islands", 10)),
-                "selection": "development_rollout_error",
+                "selection": SELECTION,
             },
             selection_payload={
                 "candidate": equation_candidate(
@@ -244,7 +297,9 @@ def _search_and_seal(
             },
             training_normalized_mse=float(outcome["training_rollout_error"]),
             validation_normalized_mse=float(outcome["development_rollout_error"]),
-            elapsed_wall_seconds=outcome.get("accounting", {}).get("search_seconds"),
+            elapsed_wall_seconds=outcome.get("accounting", {}).get(
+                "wall_seconds", outcome.get("accounting", {}).get("search_seconds")
+            ),
         )
         sealed_write(
             directory / "native-selection.json",
@@ -269,7 +324,7 @@ def _search_and_seal(
             "accounting": outcome.get("accounting", {}),
             "test_data_opened": False,
             "private_reference_opened": False,
-            "selection_metric": "development_rollout_error",
+            "selection_metric": SELECTION,
         },
     )
 
