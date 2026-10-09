@@ -7,8 +7,9 @@ declares where its model is served, because the same campaign can run against
 a vLLM started inside a cluster job, a vLLM on a Jetstream2 VM, or the
 Jetstream2 hosted service. A task resumes only against the kind it was frozen
 for. The plan names the model; nothing here chooses one. An LLM-SR plan may
-also declare how LLM-SR is adapted to a reasoning model, which a report must
-then state.
+also declare how LLM-SR is adapted to a reasoning model, that it takes the
+regression table the PySR baseline fits, and the settings its paper states
+where the released code differs; a report must then state each.
 """
 
 from __future__ import annotations
@@ -285,6 +286,86 @@ def llm_sr_transport_settings(plan: dict) -> dict[str, int | bool]:
     }
 
 
+class RegressionTable(BaseModel):
+    """LLM-SR given the derivative-regression table the PySR baseline fits.
+
+    LLM-SR is symbolic regression, as PySR is: it fits an equation of the
+    current variables to derivative labels and has no notion of time. So it
+    takes the data as PySR does: the same training rows, the same channels at
+    each row, in PySR's order, and the same labels, the derivatives estimated
+    with ``numpy.gradient`` within each trajectory
+    (``baselines.core.regression_table``). PySR's expressions cannot see the
+    order of the rows, but LLM-SR's programs can, so the rows are given in an
+    order fixed by ``row_order_seed`` rather than in time order. The same order
+    serves every repetition, as PySR's seeds all fit one table.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source: Literal["pysr_regression_table"]
+    row_order: Literal["shuffled"]
+    row_order_seed: int = Field(ge=0)
+    rationale: str = Field(min_length=1)
+
+    def qualification(self) -> str:
+        """The statement a report of such a campaign carries."""
+        return (
+            "given the derivative-regression table the PySR baseline fits: the "
+            "same training rows, channels and numpy.gradient derivative labels, "
+            f"its rows in a random order fixed by seed {self.row_order_seed} "
+            "rather than in time order"
+        )
+
+
+class PaperSettings(BaseModel):
+    """Search settings the LLM-SR paper states where its released code differs.
+
+    Shojaee et al. (ICLR 2025) sample at temperature 0.8 (Sec. 3.2, App. A),
+    decay the cluster-sampling temperature over N = 10,000 programs, and use
+    four evaluators (App. A). Their code at 41c2123 leaves the temperature
+    unset in its client, so its engine samples at 1.0; it sets the period to
+    30,000; and it evaluates one sample at a time whatever the number of
+    evaluators. Each value is one of their own settings, so the search code
+    is unchanged.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    temperature: float = Field(gt=0.0, le=2.0)
+    cluster_sampling_temperature_period: int = Field(gt=0)
+    num_evaluators: int = Field(ge=1, le=64)
+    rationale: str = Field(min_length=1)
+
+    def qualification(self) -> str:
+        """The statement a report of such a campaign carries."""
+        return (
+            f"sampled at the paper's temperature {self.temperature:g}, with its "
+            "cluster-sampling period of "
+            f"{self.cluster_sampling_temperature_period:,} programs and "
+            f"{self.num_evaluators} evaluators; the released code leaves the "
+            "temperature unset and uses 30,000 and 1"
+        )
+
+
+def llm_sr_search_settings(plan: dict) -> dict[str, float | int | None]:
+    """The paper's settings a sealed LLM-SR plan declares; ``None`` keeps the code's."""
+    declared = plan.get("paper_settings")
+    if declared is None:
+        return {
+            "temperature": None,
+            "cluster_sampling_temperature_period": None,
+            "num_evaluators": None,
+        }
+    settings = PaperSettings.model_validate(declared)
+    return {
+        "temperature": settings.temperature,
+        "cluster_sampling_temperature_period": (
+            settings.cluster_sampling_temperature_period
+        ),
+        "num_evaluators": settings.num_evaluators,
+    }
+
+
 class PhaseCVendoredCampaignPlan(BaseModel):
     """Everything that fixes a Phase C vendored campaign before its first call."""
 
@@ -309,12 +390,19 @@ class PhaseCVendoredCampaignPlan(BaseModel):
     model: str = Field(min_length=1)
     #: LLM-SR only; absent means upstream's own generation limit and reading.
     reasoning_model_adaptation: ReasoningModelAdaptation | None = None
+    #: LLM-SR only; absent means the cell's arrays in time order, as before.
+    regression_table: RegressionTable | None = None
+    #: LLM-SR only; absent means their code's own settings.
+    paper_settings: PaperSettings | None = None
     cells: tuple[PhaseCBaselineCell, ...] = Field(min_length=1)
     repetitions: tuple[int, ...] = Field(min_length=1)
     execution_semantics: Literal["continuous_ode_free_rollout"]
-    #: Both campaigns differentiate with the fourth-order stencil in
-    #: ``cell_arrays``, so no other provenance can be declared truthfully.
-    derivative_provenance: Literal["upstream_findiff_fourth_order"]
+    #: Campaigns differentiate with the fourth-order stencil in
+    #: ``cell_arrays``, except an LLM-SR campaign given PySR's table, whose
+    #: labels are numpy.gradient's; the validator holds the two together.
+    derivative_provenance: Literal[
+        "upstream_findiff_fourth_order", "estimated_numpy_gradient"
+    ]
     test_data_opened: Literal[False]
     private_reference_opened: Literal[False]
 
@@ -344,6 +432,23 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             )
         if self.reasoning_model_adaptation is not None and self.method != "llm_sr":
             raise ValueError("a reasoning-model adaptation is declared for LLM-SR only")
+        if self.method != "llm_sr" and (
+            self.regression_table is not None or self.paper_settings is not None
+        ):
+            raise ValueError(
+                "a regression table and the paper's settings are declared for "
+                "LLM-SR only"
+            )
+        expected = (
+            "estimated_numpy_gradient"
+            if self.regression_table is not None
+            else "upstream_findiff_fourth_order"
+        )
+        if self.derivative_provenance != expected:
+            raise ValueError(
+                f"derivative_provenance must be {expected!r}: PySR's table "
+                "carries numpy.gradient labels, the cell arrays fourth-order ones"
+            )
         return self
 
     @property
@@ -369,6 +474,10 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             )
         if self.reasoning_model_adaptation is not None:
             notes.append(self.reasoning_model_adaptation.qualification())
+        if self.regression_table is not None:
+            notes.append(self.regression_table.qualification())
+        if self.paper_settings is not None:
+            notes.append(self.paper_settings.qualification())
         return tuple(notes)
 
 

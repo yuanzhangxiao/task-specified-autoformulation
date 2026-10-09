@@ -13,6 +13,10 @@ task's model is assembled and sealed once all of them have finished.
 
 The model kept is LLM-SR's own choice: the sample its evaluator scored highest.
 The development rollout error is reported beside it and chooses nothing.
+
+A Phase C plan may declare that LLM-SR takes the regression table the PySR
+baseline fits, since both are symbolic regression over (state, derivative)
+pairs; its rows are then given in a seeded random order, not in time order.
 """
 
 from __future__ import annotations
@@ -22,7 +26,12 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Protocol
 
+import numpy as np
+
+from autoformalism.baselines.core import numeric_feature_names, regression_table
 from autoformalism.baselines.models import BaselineDevelopmentResult
+from autoformalism.data import DatasetSplit
+from autoformalism.expressions import ValidationContext
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.baseline_validation import load_public
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
@@ -34,6 +43,7 @@ from autoformalism.rebuttal.llm_ode_campaign import (
     public_task_specification,
 )
 from autoformalism.rebuttal.llm_sr_driver import build_searcher  # noqa: F401
+from autoformalism.rebuttal.phase_c_baselines import PhaseCBaselineCell
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     endpoint_environment,
     load_development,
@@ -61,6 +71,41 @@ class SearcherFactory(Protocol):
     """Runs upstream's search for one cell, injected so tests need no provider."""
 
     def __call__(self, **kwargs) -> dict: ...
+
+
+def pysr_features(cell: PhaseCBaselineCell) -> tuple[str, ...]:
+    """The channels PySR regresses on in a cell: numeric ones, targets first."""
+    return numeric_feature_names(cell.dataset.train, cell.context)
+
+
+def training_rows(
+    plan: dict, row: dict, train: DatasetSplit, context: ValidationContext
+) -> tuple[np.ndarray, np.ndarray]:
+    """The rows LLM-SR searches: one per training point, and its labels.
+
+    A plan that declares PySR's regression table gets PySR's rows, channels
+    and numpy.gradient labels, in the order its seed fixes. Otherwise the
+    cell's arrays are stacked in time order with fourth-order derivatives, as
+    Phase B gave them. Labels have one column per searched target.
+    """
+    channels = tuple(row["channels"])
+    targets = tuple(context.targets)
+    table = plan.get("regression_table")
+    if table is None:
+        arrays = cell_arrays(train)
+        if tuple(arrays.channels) != channels:
+            raise ValueError("public development input drift: channels differ")
+        columns = [channels.index(target) for target in targets]
+        return arrays.states, arrays.derivatives[:, columns]
+    names = numeric_feature_names(train, context)
+    if names != channels:
+        raise ValueError(
+            "public development input drift: PySR's features differ from the "
+            "frozen channels"
+        )
+    values, labels, _ = regression_table(train, names, targets)
+    order = np.random.default_rng(table["row_order_seed"]).permutation(len(values))
+    return values[order], labels[order]
 
 
 def environment_identity() -> dict:
@@ -129,7 +174,11 @@ def prepare_phase_c(config_path: Path, release: Path, root: Path) -> dict:
     if plan.method != "llm_sr":
         raise ValueError(f"expected an llm_sr plan, not {plan.method!r}")
     release = release.expanduser().resolve()
-    receipt, rows = phase_c_rows(plan, release)
+    receipt, rows = phase_c_rows(
+        plan,
+        release,
+        features=None if plan.regression_table is None else pysr_features,
+    )
     root.mkdir(parents=True, exist_ok=True)
     return sealed_write(
         root / "plan.json",
@@ -259,12 +308,12 @@ def _search_and_seal(
         )
     from autoformalism.rebuttal.llm_ode_driver import development_rollout_error
 
-    train = cell_arrays(development.train)
+    values, labels = training_rows(sealed["plan"], row, development.train, context)
     outcome = search(
         channels=tuple(row["channels"]),
         targets=tuple(context.targets),
-        values=train.states,
-        derivatives=train.derivatives,
+        values=values,
+        labels=labels,
         description=row.get("prompt", ""),
         directory=directory,
         development=(development.train, development.validation),
@@ -320,6 +369,7 @@ def _search_and_seal(
             "status": outcome["status"],
             "error": outcome.get("error"),
             "equations": outcome.get("equations"),
+            "selected_samples": outcome.get("selected_samples"),
             "development_rollout_error": outcome.get("development_rollout_error"),
             "accounting": outcome.get("accounting", {}),
             "test_data_opened": False,

@@ -44,7 +44,7 @@ from autoformalism.data import BenchmarkRegistry, DatasetSplit, Trajectory
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.baseline_validation import load_public
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
-from autoformalism.rebuttal.phase_c_baselines import load_cell
+from autoformalism.rebuttal.phase_c_baselines import PhaseCBaselineCell, load_cell
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     PhaseCVendoredCampaignPlan,
     endpoint_environment,
@@ -294,19 +294,27 @@ def public_task_specification(prompt: str) -> str:
 
 
 def phase_c_rows(
-    plan: PhaseCVendoredCampaignPlan, release: Path
+    plan: PhaseCVendoredCampaignPlan,
+    release: Path,
+    *,
+    features: Callable[[PhaseCBaselineCell], tuple[str, ...]] | None = None,
 ) -> tuple[str, list[dict]]:
     """Check a Phase C release against the plan, then freeze one row per task.
 
     Rows keep the Phase B shape, so the search, selection and sealed result
     are unchanged. Each identity also names the release receipt, and the
     specification is cut from the released prompt by the same rule.
+    `features` names a cell's channels; by default, `observed_channels`.
     """
     receipt = verify_plan_release(plan, release)
     rows: list[dict] = []
     for cell in plan.cells:
         loaded = load_cell(release, cell.benchmark_id)
-        channels = observed_channels(loaded.dataset.train)
+        channels = (
+            observed_channels(loaded.dataset.train)
+            if features is None
+            else features(loaded)
+        )
         specification = (
             public_task_specification(loaded.prompt)
             if plan.prompt_policy.supplies_public_task_specification

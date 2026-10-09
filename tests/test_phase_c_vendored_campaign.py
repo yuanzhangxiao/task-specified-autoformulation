@@ -30,6 +30,7 @@ from autoformalism.rebuttal.phase_c_vendored_campaign import (
     PhaseCVendoredCampaignPlan,
     check_served_model,
     endpoint_environment,
+    llm_sr_search_settings,
     llm_sr_transport_settings,
     load_phase_c_vendored_plan,
     resolve_endpoint,
@@ -352,6 +353,111 @@ def test_an_adaptation_must_be_real_and_llm_srs(tmp_path, method, adaptation, me
         PhaseCVendoredCampaignPlan.model_validate(payload)
 
 
+TABLE = {
+    "source": "pysr_regression_table",
+    "row_order": "shuffled",
+    "row_order_seed": 0,
+    "rationale": "LLM-SR is symbolic regression, as PySR is.",
+}
+PAPER = {
+    "temperature": 0.8,
+    "cluster_sampling_temperature_period": 10000,
+    "num_evaluators": 4,
+    "rationale": "The paper's values where the released code differs.",
+}
+
+
+def test_the_papers_settings_are_frozen_reported_and_read(tmp_path):
+    _, _, sealed = _frozen(tmp_path, paper_settings=PAPER)
+    assert llm_sr_search_settings(sealed["plan"]) == {
+        "temperature": 0.8,
+        "cluster_sampling_temperature_period": 10000,
+        "num_evaluators": 4,
+    }
+    assert any(
+        note.startswith("sampled at the paper's temperature 0.8")
+        for note in sealed["reporting_qualifications"]
+    )
+
+
+def test_without_the_papers_settings_their_code_keeps_its_own(tmp_path):
+    _, _, sealed = _frozen(tmp_path)
+    assert set(llm_sr_search_settings(sealed["plan"]).values()) == {None}
+    assert not any(
+        "paper's" in note or "PySR" in note
+        for note in sealed["reporting_qualifications"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "overrides", "message"),
+    [
+        ("llm_sr", {"regression_table": TABLE},
+         "must be 'estimated_numpy_gradient'"),
+        ("llm_sr", {"derivative_provenance": "estimated_numpy_gradient"},
+         "must be 'upstream_findiff_fourth_order'"),
+        ("llm_sr", {"regression_table": {**TABLE, "row_order": "time"},
+                    "derivative_provenance": "estimated_numpy_gradient"},
+         "shuffled"),
+        ("llm_sr", {"paper_settings": {**PAPER, "temperature": 0.0}},
+         "greater than 0"),
+        ("llm_ode", {"regression_table": TABLE,
+                     "derivative_provenance": "estimated_numpy_gradient"},
+         "LLM-SR only"),
+        ("llm_ode", {"paper_settings": PAPER}, "LLM-SR only"),
+    ],
+)
+def test_the_table_and_the_papers_settings_are_declared_truthfully(
+    tmp_path, method, overrides, message
+):
+    payload = _payload(_release(tmp_path / "release"), method, **overrides)
+    with pytest.raises(ValueError, match=message):
+        PhaseCVendoredCampaignPlan.model_validate(payload)
+
+
+def test_llm_sr_given_pysrs_table_searches_its_rows_in_a_seeded_order(tmp_path):
+    """PySR's rows, channels and labels, in an order that carries no time."""
+    from autoformalism.baselines.core import numeric_feature_names, regression_table
+
+    _, root, sealed = _frozen(
+        tmp_path,
+        regression_table=TABLE,
+        derivative_provenance="estimated_numpy_gradient",
+    )
+    assert any(
+        note.startswith("given the derivative-regression table the PySR")
+        for note in sealed["reporting_qualifications"]
+    )
+    calls: list = []
+    sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_complete(calls))
+    (arguments,) = calls
+    train, _ = arguments["development"]
+    context = arguments["context"]
+    names = numeric_feature_names(train, context)
+    assert arguments["channels"] == names == tuple(sealed["rows"][0]["channels"])
+    rows, labels, _ = regression_table(train, names, context.targets)
+    order = np.random.default_rng(0).permutation(len(rows))
+    assert np.array_equal(arguments["values"], rows[order])
+    assert np.array_equal(arguments["labels"], labels[order])
+    assert not np.array_equal(arguments["values"], rows)
+    # The second seed's task searches the very same table, as PySR's seeds do.
+    sr.run_phase_c(root, 1, endpoint="vm_local_vllm", search=_complete(calls))
+    assert np.array_equal(calls[1]["values"], arguments["values"])
+
+
+def test_without_the_table_llm_sr_searches_the_cell_arrays_in_time_order(tmp_path):
+    _, root, _ = _frozen(tmp_path)
+    calls: list = []
+    sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_complete(calls))
+    (arguments,) = calls
+    train, _ = arguments["development"]
+    arrays = ode.cell_arrays(train)
+    assert arguments["channels"] == tuple(arrays.channels)
+    assert np.array_equal(arguments["values"], arrays.states)
+    column = arrays.channels.index("h_down")
+    assert np.array_equal(arguments["labels"][:, 0], arrays.derivatives[:, column])
+
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -406,12 +512,51 @@ def test_the_full_llm_sr_plan_is_the_pilot_on_the_whole_roster():
     assert full["status"] == "proposed_pending_review"
     assert (smoke["status"], smoke["budget"]["declared"]) == ("frozen_before_calls", 8)
     scope = {"status", "budget", "scope_note", "cells", "repetitions"}
-    for plan in (smoke, full):
-        assert {key for key in plan if plan[key] != pilot[key]} <= scope
+    assert {key for key in smoke if smoke[key] != pilot[key]} <= scope
+    # The full plan also declares the PySR table and the paper's settings.
+    declared = {
+        "regression_table",
+        "paper_settings",
+        "derivative_provenance",
+        "reasoning_model_adaptation",
+    }
+    assert {key for key in full if full[key] != pilot[key]} <= scope | declared
+    assert full["regression_table"]["row_order_seed"] == 0
+    assert full["derivative_provenance"] == "estimated_numpy_gradient"
+    assert (
+        full["paper_settings"]["temperature"],
+        full["paper_settings"]["cluster_sampling_temperature_period"],
+    ) == (0.8, 10000)
+    # Of the adaptation, only what its rationale says of sampling changed.
+    for key in ("max_new_tokens", "join_split_headers"):
+        assert (
+            full["reasoning_model_adaptation"][key]
+            == pilot["reasoning_model_adaptation"][key]
+        )
     # The smoke's cell has two targets, so separate searches and assembly both run.
     (cell,) = smoke["cells"]
     assert cell in roster["cells"]
     assert cell["benchmark_id"] == "phase_c_dalla_man_t2_canonical_named_hard_rates_v1"
+
+
+def test_the_v4_smoke_is_the_full_plan_on_the_pilots_cell_and_t2_hard():
+    configs = REPO / "configs"
+
+    def load(name: str) -> dict:
+        return load_phase_c_vendored_plan(configs / name).model_dump(mode="json")
+
+    full = load("phase_c_llm_sr_hosted_120b_v1.json")
+    smoke = load("phase_c_llm_sr_smoke_v4.json")
+    scope = {"status", "budget", "scope_note", "cells", "repetitions"}
+    assert {key for key in smoke if smoke[key] != full[key]} <= scope
+    assert smoke["status"] == "frozen_before_calls"
+    assert smoke["budget"]["declared"] == 400
+    assert [cell["benchmark_id"] for cell in smoke["cells"]] == [
+        "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
+        "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
+    ]
+    assert all(cell in full["cells"] for cell in smoke["cells"])
+    assert smoke["repetitions"] == [0]
 
 
 # --- running and resuming ----------------------------------------------------
@@ -973,7 +1118,9 @@ def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):
 
     from scripts import phase_c_llm_sr as cli
 
-    _, root, _ = _frozen(tmp_path, reasoning_model_adaptation=ADAPTATION)
+    _, root, _ = _frozen(
+        tmp_path, reasoning_model_adaptation=ADAPTATION, paper_settings=PAPER
+    )
     seen: dict = {}
     monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
     monkeypatch.setenv("AF_ENDPOINT_KIND", "vm_local_vllm")
@@ -986,6 +1133,11 @@ def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):
     cli.main()
     assert (seen["max_new_tokens"], seen["join_split_headers"]) == (4096, True)
     assert seen["bypass_cache"] is False  # a vLLM we serve replays nothing
+    assert (
+        seen["temperature"],
+        seen["cluster_sampling_temperature_period"],
+        seen["num_evaluators"],
+    ) == (0.8, 10000, 4)
 
 
 def test_the_llm_sr_cli_searches_one_target_when_asked(tmp_path, monkeypatch):

@@ -10,13 +10,17 @@ limit than their engine's 512 tokens, and a function header the model split
 over several lines read as one (`llm_sr_shim.join_split_header`). Both act in
 the transport; without a declaration the transport behaves as their engine.
 Against an endpoint that replays stored answers, every request asks it to
-generate afresh, as their engine always does.
+generate afresh, as their engine always does. A plan may also declare the
+settings the LLM-SR paper states where their released code differs: the
+sampling temperature, which their client leaves unset, and two fields of their
+own configuration, the cluster-sampling period and the number of evaluators.
 
 Their evaluator executes each synthesized program to score it. That is what
 program synthesis is, and it cannot be removed without removing the method, so
 the job confines it rather than preventing it. Nothing in the recovery path
-here executes anything: the selected program is parsed, its coefficients are
-refitted over a numeric evaluator, and the result is scored by our own rollout.
+here executes anything: the selected program is read without being run, its
+coefficients are refitted as their evaluator fits them, and the result is
+scored by our own rollout.
 
 Each target is its own LLM-SR run, so a cell's targets can be searched by
 separate processes at once. A finished search leaves a record beside its
@@ -56,13 +60,15 @@ from autoformalism.rebuttal.llm_sr_shim import (
     complete,
 )
 from autoformalism.rebuttal.llm_sr_upstream import (
+    MAX_NPARAMS,
     InexpressibleProgram,
     best_sample,
     build_specification,
     convert_program,
     equation_body,
-    refit_parameters,
+    refit_program,
     sample_yield,
+    training_error,
 )
 from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
@@ -114,14 +120,16 @@ def _transport(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     join_headers: bool = False,
     bypass_cache: bool = False,
+    temperature: float | None = None,
 ):
     """Answer their sampler's requests from the OpenAI-compatible endpoint.
 
     Replaces the request method rather than the URL, which avoids running a
     second server inside the job; the payload and reply are theirs unchanged.
     `max_tokens` and `join_headers` are what a plan declares for a reasoning
-    model; their defaults are their engine's behaviour. `bypass_cache` follows
-    the endpoint kind.
+    model; their defaults are their engine's behaviour. `temperature` is the
+    paper's, when a plan declares it; their client sends none. `bypass_cache`
+    follows the endpoint kind.
     """
     original = module.LocalLLM._do_request
     first, longest = BACKOFF_SECONDS
@@ -131,7 +139,7 @@ def _transport(
         payload = {
             "prompt": content.strip("\n").strip(),
             "repeat_prompt": self._samples_per_prompt if self._batch_inference else 1,
-            "params": {"do_sample": True, "temperature": None, "top_k": None,
+            "params": {"do_sample": True, "temperature": temperature, "top_k": None,
                        "top_p": None, "add_special_tokens": False,
                        "skip_special_tokens": True},
         }
@@ -183,12 +191,17 @@ def build_searcher(
     join_split_headers: bool = False,
     bypass_cache: bool = False,
     before_search: Callable[[], None] | None = None,
+    temperature: float | None = None,
+    cluster_sampling_temperature_period: int | None = None,
+    num_evaluators: int | None = None,
 ):
     """Bind the pinned checkout to our data; returns a campaign searcher.
 
     `max_new_tokens` and `join_split_headers` come from a plan's declared
     reasoning-model adaptation; the defaults are upstream's own behaviour.
-    `bypass_cache` is for an endpoint that replays stored answers.
+    `temperature`, `cluster_sampling_temperature_period` and `num_evaluators`
+    are the paper's values where a plan declares them; left out, their code's
+    own apply. `bypass_cache` is for an endpoint that replays stored answers.
     `before_search` runs before each target search that actually starts, so a
     run that only assembles finished searches contacts no endpoint.
     """
@@ -202,12 +215,20 @@ def build_searcher(
     from llmsr import config as config_lib
     from llmsr import evaluator, pipeline, sampler
 
+    settings: dict[str, Any] = {}
+    if cluster_sampling_temperature_period is not None:
+        settings["experience_buffer"] = config_lib.ExperienceBufferConfig(
+            cluster_sampling_temperature_period=cluster_sampling_temperature_period
+        )
+    if num_evaluators is not None:
+        settings["num_evaluators"] = num_evaluators
+
     def search(
         *,
         channels: tuple[str, ...],
         targets: tuple[str, ...],
         values: np.ndarray,
-        derivatives: np.ndarray,
+        labels: np.ndarray,
         description: str,
         directory: Path,
         development: tuple[DatasetSplit, DatasetSplit],
@@ -217,12 +238,17 @@ def build_searcher(
     ) -> dict:
         """One LLM-SR run per target, as their specification format requires.
 
-        A target whose search has finished is not searched again. `only`
-        searches that one target and returns without assembling a model.
+        `values` holds one row per training point over `channels`, and
+        `labels` the derivative of each of `targets` at that row. A target
+        whose search has finished is not searched again. `only` searches that
+        one target and returns without assembling a model.
         """
         if only is not None and only not in targets:
             raise ValueError(f"{only!r} is not among the searched targets {targets}")
+        if labels.shape != (values.shape[0], len(targets)):
+            raise ValueError("one derivative label per row and target is required")
         equations: dict[str, str] = {}
+        selected: dict[str, dict] = {}
         inexpressible: list[str] = []
         # The search this process is running, counted if it stalls.
         running: dict[str, Any] = {"accounting": ShimAccounting(), "started": None}
@@ -241,11 +267,10 @@ def build_searcher(
             specification, _ = build_specification(description, channels, target)
             (log_dir / "specification.txt").write_text(specification, encoding="utf-8")
 
-            column = channels.index(target)
             dataset = {
                 "data": {
                     "inputs": values,
-                    "outputs": derivatives[:, column].reshape(-1),
+                    "outputs": labels[:, targets.index(target)].reshape(-1),
                 }
             }
             class_config = config_lib.ClassConfig(
@@ -269,11 +294,12 @@ def build_searcher(
                     max_tokens=max_new_tokens,
                     join_headers=join_split_headers,
                     bypass_cache=bypass_cache,
+                    temperature=temperature,
                 ):
                     pipeline.main(
                         specification=specification,
                         inputs=dataset,
-                        config=config_lib.Config(),
+                        config=config_lib.Config(**settings),
                         max_sample_nums=samples,
                         class_config=class_config,
                         log_dir=str(log_dir),
@@ -302,10 +328,11 @@ def build_searcher(
         if only is not None:
             return {"status": "searched", "target": only, "accounting": spent()}
 
+        columns = {name: values[:, index] for index, name in enumerate(channels)}
         for target in targets:
             log_dir = directory / f"llmsr-{target}"
             _, mapping = build_specification(description, channels, target)
-            column = channels.index(target)
+            label = labels[:, targets.index(target)].reshape(-1)
             best = best_sample(log_dir)
             if best is None:
                 return {
@@ -315,35 +342,41 @@ def build_searcher(
                 }
             try:
                 body = equation_body(best["function"])
-                symbolic = convert_program(body, mapping)
-                fitted = refit_parameters(
-                    symbolic.expression,
-                    {name: values[:, index] for index, name in enumerate(channels)},
-                    derivatives[:, column].reshape(-1),
-                    symbolic.used_parameters,
-                )
+                # A body with no equation is refused for its own reason, not
+                # for the fit that could not then be made.
+                convert_program(body, mapping, dict.fromkeys(range(MAX_NPARAMS), 1.0))
+                fitted = refit_program(body, mapping, columns, label)
                 if fitted is None:
                     raise InexpressibleProgram("coefficient refit did not converge")
                 equations[target] = convert_program(body, mapping, fitted).expression
-            except InexpressibleProgram as exc:
+                selected[target] = {
+                    "sample_order": best.get("sample_order"),
+                    "llm_sr_score": best["score"],
+                    "refitted_training_mse": training_error(
+                        equations[target], columns, label
+                    ),
+                }
+            except (InexpressibleProgram, RecursionError) as exc:
                 inexpressible.append(f"{target}: {exc}")
 
         if len(equations) != len(targets):
             return {
                 "status": "inexpressible",
                 "error": "; ".join(inexpressible),
+                "selected_samples": selected,
                 "accounting": spent(),
             }
         try:
             error = score_rollout(equations, context, *development,
                                   seconds=seconds_per_rollout)
         except InexpressibleEquation as exc:
-            # A refitted exponent such as `G ** 0.73` converts cleanly but the
-            # grammar accepts only integer powers; record it, do not crash.
+            # What converts can still name something the evaluator's grammar
+            # refuses; record it, do not crash.
             inexpressible.append(str(exc))
             return {
                 "status": "inexpressible",
                 "error": "; ".join(inexpressible),
+                "selected_samples": selected,
                 "accounting": spent(),
             }
         if error is None:
@@ -351,12 +384,14 @@ def build_searcher(
                 "status": "rollout_failed",
                 "error": "the selected system did not complete a development rollout",
                 "equations": equations,
+                "selected_samples": selected,
                 "accounting": spent(),
             }
         return {
             "status": "complete",
             "error": None,
             "equations": equations,
+            "selected_samples": selected,
             "development_rollout_error": error,
             "training_rollout_error": score_rollout(
                 equations, context, development[0], development[0],

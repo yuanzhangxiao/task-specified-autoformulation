@@ -41,15 +41,18 @@ def _fake_upstream(monkeypatch, tmp_path: Path, *, best: str | None, score: floa
     # Their sample counter, kept on the class as upstream keeps it.
     sampler.Sampler = type("Sampler", (), {"_global_samples_nums": 1})
     sampler.counts_at_start = []
+    sampler.configs = []
     evaluator = types.ModuleType("llmsr.evaluator")
     evaluator.LocalSandbox = object
     config = types.ModuleType("llmsr.config")
     config.Config = lambda **kwargs: types.SimpleNamespace(**kwargs)
+    config.ExperienceBufferConfig = lambda **kwargs: types.SimpleNamespace(**kwargs)
     config.ClassConfig = lambda **kwargs: types.SimpleNamespace(**kwargs)
 
     pipeline = types.ModuleType("llmsr.pipeline")
 
     def main(*, specification, inputs, config, max_sample_nums, class_config, log_dir):
+        sampler.configs.append(config)
         # exercise the substituted transport exactly as their sampler would
         llm = sampler.LocalLLM()
         llm._do_request("a prompt")
@@ -76,6 +79,7 @@ def _fake_upstream(monkeypatch, tmp_path: Path, *, best: str | None, score: floa
 
 
 def _arrays(rows: int = 40) -> tuple[np.ndarray, np.ndarray]:
+    """Rows over the channels (G, I), and the derivative of each channel."""
     rng = np.random.default_rng(0)
     values = rng.normal(size=(rows, 2))
     derivatives = np.column_stack(
@@ -86,11 +90,13 @@ def _arrays(rows: int = 40) -> tuple[np.ndarray, np.ndarray]:
 
 def _run(driver_search, **overrides):
     values, derivatives = _arrays()
+    targets = overrides.get("targets", ("G",))
     kwargs = {
         "channels": ("G", "I"),
-        "targets": ("G",),
+        "targets": targets,
         "values": values,
-        "derivatives": derivatives,
+        # one label column per searched target
+        "labels": derivatives[:, [("G", "I").index(name) for name in targets]],
         "description": "Recover the flux.",
         "development": (object(), object()),
         "context": object(),
@@ -124,6 +130,10 @@ def test_a_recovered_model_carries_refitted_coefficients(
     # the profiler's one sample was the model's, and it scored
     assert outcome["accounting"]["model_samples"] == 1
     assert outcome["accounting"]["model_samples_scored"] == 1
+    # LLM-SR's own score is kept beside the refitted error, for comparison
+    record = outcome["selected_samples"]["G"]
+    assert (record["sample_order"], record["llm_sr_score"]) == (1, -0.01)
+    assert record["refitted_training_mse"] < 1e-10
 
 
 def _capturing(monkeypatch) -> list[dict]:
@@ -131,7 +141,7 @@ def _capturing(monkeypatch) -> list[dict]:
     seen: list[dict] = []
 
     def complete(payload, **kwargs):
-        seen.append(kwargs)
+        seen.append({**kwargs, "payload": payload})
         return {"content": ["x"] * 4}
 
     monkeypatch.setattr(driver, "complete", complete)
@@ -160,7 +170,7 @@ def test_the_declared_adaptation_reaches_every_request(
 def test_without_a_declaration_the_transport_is_upstreams(
     monkeypatch, tmp_path: Path
 ) -> None:
-    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    checkout, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
     seen = _capturing(monkeypatch)
     search = driver.build_searcher(
         upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
@@ -170,6 +180,29 @@ def test_without_a_declaration_the_transport_is_upstreams(
         (call["max_tokens"], call["join_headers"], call["bypass_cache"])
         for call in seen
     ] == [(512, False, False)]
+    # their client sends no temperature, and their Config keeps its defaults
+    assert seen[0]["payload"]["params"]["temperature"] is None
+    assert [vars(config) for config in sampler.configs] == [{}]
+
+
+def test_the_papers_settings_reach_every_request_and_their_configuration(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The temperature is sent; the period and evaluators are their Config's."""
+    checkout, sampler = _fake_upstream(monkeypatch, tmp_path, best=None, score=0.0)
+    seen = _capturing(monkeypatch)
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m",
+        samples=20, temperature=0.8, cluster_sampling_temperature_period=10_000,
+        num_evaluators=4,
+    )
+    _run(search, directory=tmp_path / "paper")
+    assert seen and all(
+        call["payload"]["params"]["temperature"] == 0.8 for call in seen
+    )
+    (config,) = sampler.configs
+    assert config.num_evaluators == 4
+    assert config.experience_buffer.cluster_sampling_temperature_period == 10_000
 
 
 class _Clock:
@@ -303,9 +336,9 @@ def test_a_program_outside_the_grammar_is_reported_with_its_reason(
     """A loop over timesteps is a real discovery we cannot score."""
     best = (
         "def equation(G, I, params):\n"
-        "    out = 0\n"
-        "    for i in range(3):\n"
-        "        out = out + params[i] * G\n"
+        "    out = np.zeros_like(G)\n"
+        "    for t in range(1, len(G)):\n"
+        "        out[t] = out[t - 1] + params[0] * (G[t] - out[t - 1])\n"
         "    return out\n"
     )
     checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=best, score=-0.01)
@@ -315,7 +348,7 @@ def test_a_program_outside_the_grammar_is_reported_with_its_reason(
     )
     outcome = _run(search, directory=tmp_path / "loop")
     assert outcome["status"] == "inexpressible"
-    assert "no expression equivalent" in outcome["error"]
+    assert "a range over the rows" in outcome["error"]
     assert outcome["accounting"]["inexpressible_targets"]
 
 
@@ -502,3 +535,24 @@ def test_each_search_in_one_process_gets_its_whole_budget(
     assert outcome["status"] == "complete"
     # Without the reset the second search would start at 21 and stop at once.
     assert sampler.counts_at_start == [1, 1]
+
+
+def test_a_branch_on_a_coefficient_is_refitted_as_their_evaluator_runs_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Their fit follows whichever branch each trial vector takes; so does ours."""
+    best = (
+        "def equation(G, I, params):\n"
+        "    k = params[0] if len(params) > 0 else 1.0\n"
+        "    if params[1] == 0:\n"
+        "        return k * G\n"
+        "    return k * G + params[1] * I\n"
+    )
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=best, score=-0.01)
+    monkeypatch.setattr(driver, "complete", lambda *a, **k: {"content": ["x"] * 4})
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    outcome = _run(search, directory=tmp_path / "branch")
+    assert outcome["status"] == "complete"
+    assert outcome["selected_samples"]["G"]["refitted_training_mse"] < 1e-10
