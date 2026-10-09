@@ -20,6 +20,7 @@ from autoformalism.search import construction_feedback
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_repair_fidelity as fidelity
+from autoformalism.search import construction_stage_checks as stage_checks
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.staged_topology import content_hash
 
@@ -446,15 +447,18 @@ def run(
     from autoformalism.search import construction_prompts as prompts
 
     bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
-    variable_checks = bookkeeping_policy == checklist.POLICY
+    local_stage_checks = bookkeeping_policy == stage_checks.POLICY
+    variable_checks = bookkeeping_policy in {checklist.POLICY, stage_checks.POLICY}
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
         checklist.POLICY,
+        stage_checks.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
         bookkeeping.MINIMAL_POLICY,
         checklist.POLICY,
+        stage_checks.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -581,6 +585,17 @@ def run(
                 payload["current_draft"] = checklist.variable_snapshot(draft)
                 payload["editing_rules"] = payload["current_draft"]["editing_contract"]
                 payload.pop("explicit_removal_options", None)
+        if local_stage_checks and stage != "variables":
+            payload["shared_process_checklist"] = stage_checks.shared_checklist(
+                brief, draft
+            )
+            payload["topology_editing"] = stage_checks.topology_editing(draft)
+            payload["stage_instructions"] += "\n" + stage_checks.IDENTIFIERS
+            payload["stage_instructions"] += "\n" + (
+                stage_checks.SHARED_INSTRUCTION
+                if stage == "shared_laws"
+                else stage_checks.EMPTY_ORDINARY
+            )
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -622,6 +637,17 @@ def run(
                     else construction_feedback.variable_completion(brief, draft)
                 )
                 complete = completion["status"] == "ready"
+            if local_stage_checks and stage == "shared_laws":
+                completion = stage_checks.shared_checklist(brief, draft)
+                declaration_checks = checklist.variable_checklist(
+                    brief, draft, target_definitions, graph_contract
+                )
+                completion["variable_blocking_items"] = declaration_checks[
+                    "blocking_items"
+                ]
+                if declaration_checks["status"] != "ready":
+                    completion["status"] = "incomplete"
+                complete = complete and completion["status"] == "ready"
         except (ValueError, TypeError, KeyError) as exc:
             error = str(exc)[:6000]
             if conflicts and "runtime-generated definition" in error:
@@ -651,6 +677,15 @@ def run(
                 else {}
             ),
             **({"stage_completion": completion} if completion_check else {}),
+            **(
+                {
+                    "shared_process_checklist_after": stage_checks.shared_checklist(
+                        brief, draft
+                    )
+                }
+                if local_stage_checks
+                else {}
+            ),
             **(
                 {
                     "repair_receipt": fidelity.receipt(before, draft)
@@ -686,6 +721,11 @@ def run(
                 else {}
             ),
             **({"stage_completion": completion} if completion_check else {}),
+            **(
+                {"shared_process_checklist": event["shared_process_checklist_after"]}
+                if local_stage_checks
+                else {}
+            ),
             **(
                 {"definition_conflicts": conflicts}
                 if improved_bookkeeping or minimal_clarity
@@ -724,6 +764,13 @@ def run(
             check = bookkeeping.assessment_context(
                 check, draft, policy=bookkeeping_policy
             )
+        if local_stage_checks:
+            check["shared_process_checklist"] = stage_checks.shared_checklist(
+                brief, draft
+            )
+            # These rules already belong to final ledger validation. The new
+            # view explains them locally without adding a scientific predicate.
+            check["eligible"] &= check["shared_process_checklist"]["status"] == "ready"
         return check
 
     def stage(name: str) -> tuple[bool, str | None]:
@@ -740,6 +787,10 @@ def run(
                     name, focus, diagnostic, attempt
                 )
                 if accepted:
+                    if local_stage_checks and name == "shared_laws" and not complete:
+                        # Partial/invalid process decisions get only the existing
+                        # local allowance; accepted edits survive exhaustion.
+                        continue
                     if (
                         completion_check
                         and name == "variables"

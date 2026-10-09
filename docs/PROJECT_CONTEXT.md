@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+`PHASE_C_STAGE_CHECKS.md` defines opt-in `minimal-stage-checks-1`: exact topology
+identifier examples, supplied-receiver guidance and bounded local shared-process
+completion checks using existing final rules. Separate reports retain first,
+post-local, pre-global and post-global declarations, with named local contributions
+distinguished from genuinely shared uses. Eight fresh minimal cases include both
+basins; no functions or fitting. The preceding variable-checklist run passed
+declaration checks at all eight variable exits, without certifying scientific
+sufficiency. Unknown future references and whole-graph checks remain deferred.
+
 `PHASE_C_VARIABLE_CHECKLIST.md` defines opt-in `minimal-variable-checklist-1`:
 per-turn accepted-draft checklists and bounded variable completion checks for
 targets, explicit types and proposer-owned memory/readout assignments. Topology

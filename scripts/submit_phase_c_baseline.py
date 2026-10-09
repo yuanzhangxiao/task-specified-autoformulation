@@ -58,6 +58,7 @@ def submit(
         "prompt_comparison",
         "refinement_confirmation",
         "variable_checklist_confirmation",
+        "stage_check_confirmation",
     }
     if live_confirmation:
         construction_comparison.check_storage(root)

@@ -268,22 +268,33 @@ def test_later_type_edit_reopens_declaration_problem_and_assignment_is_not_graph
     assert result["status"] == "topology_complete" and len(calls) == 4
 
 
-def test_eight_case_study_reports_real_stage_evidence_and_resumes(tmp_path):
+@pytest.mark.parametrize(
+    "study, policy",
+    [
+        ("variable_checklist_confirmation", checklist.POLICY),
+        ("stage_check_confirmation", bookkeeping.STAGE_POLICY),
+    ],
+)
+def test_eight_case_study_reports_real_stage_evidence_and_resumes(
+    tmp_path, study, policy
+):
     from tests.test_construction_comparison import source_fixture, transport
 
     source_fixture(tmp_path)
     root = tmp_path / "study"
-    plan = campaign.freeze(
-        tmp_path / "new", root, study="variable_checklist_confirmation"
-    )
+    plan = campaign.freeze(tmp_path / "new", root, study=study)
     assert campaign.verify(root) == plan
     assert len(plan["tasks"]) == 8
     assert sum("detention" in t["benchmark_id"] for t in plan["tasks"]) == 2
-    assert plan["config"]["bookkeeping_policy"] == checklist.POLICY
+    assert plan["config"]["bookkeeping_policy"] == policy
     campaign.report(root, plan)
     pending = json.loads((root / "VARIABLES.json").read_text())
     assert pending["checkpoints"]["first_retained"]["available"] == 0
     assert all(r["variable_stage_completed"] is None for r in pending["rows"])
+    if study == "stage_check_confirmation":
+        shared = json.loads((root / "SHARED_PROCESSES.json").read_text())
+        assert shared["checkpoints"]["first_retained"]["available"] == 0
+        assert all(r["stage_completed"] is None for r in shared["rows"])
     calls = []
     base = transport(calls)
 
@@ -313,17 +324,22 @@ def test_eight_case_study_reports_real_stage_evidence_and_resumes(tmp_path):
     assert values["checkpoints"]["first_retained"]["declaration_ready"] == 8
     assert values["checkpoints"]["after_topology_and_global_repair"]["available"] == 8
     assert "not scientific correctness" in (root / "VARIABLES.md").read_text()
+    if study == "stage_check_confirmation":
+        shared = json.loads((root / "SHARED_PROCESSES.json").read_text())
+        assert shared["completed_shared_stages"] == 8
+        assert shared["checkpoints"]["first_retained"]["empty_decisions"] == 8
+        assert shared["checkpoints"]["after_global_repair"]["locally_consistent"] == 8
     for task in plan["tasks"]:
         campaign.propose(
             root, plan, task, "http://offline", transport=send, token_transport=tokenize
         )
     assert len(calls) == n
     with pytest.raises(ValueError):
-        bookkeeping.validate_policy(checklist.POLICY, "current")
+        bookkeeping.validate_policy(policy, "current")
     with pytest.raises(ValueError):
         campaign.freeze(
             tmp_path / "new",
             tmp_path / "invalid",
             study="prompt_comparison",
-            bookkeeping_policy=checklist.POLICY,
+            bookkeeping_policy=policy,
         )
