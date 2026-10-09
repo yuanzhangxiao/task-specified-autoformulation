@@ -104,7 +104,9 @@ def check_point(oracle, parameters, deadline, checkpoint, *, tight=False):
     }
 
 
-def search(oracle, start, deadline, checkpoint, *, calls, target, profile=None):
+def search(
+    oracle, start, deadline, checkpoint, *, calls, target, profile=None, acceptable=None
+):
     """Joint or exact projected TRF, charged identically by complete residual calls."""
     anchor = oracle.vector(start)
     free = list(range(len(anchor))) if profile is None else list(profile.outer)
@@ -146,7 +148,7 @@ def search(oracle, start, deadline, checkpoint, *, calls, target, profile=None):
             best = {"parameters": oracle.parameters(vector), "training_nmse": value}
         save()
         cached = (q.copy(), r, j * units)
-        if value <= target:
+        if value <= target and (acceptable is None or acceptable(r)):
             raise Reached
         return cached[1:]
 

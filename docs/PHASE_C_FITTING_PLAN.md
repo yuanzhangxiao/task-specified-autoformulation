@@ -803,5 +803,31 @@ comparing generic-start joint rollout against trajectory-conditional coefficient
 profiling with collocation and rollout polishing. Preserve the current methods,
 training-only routing, independent checks and separate cost accounting. Exact
 affine rollout profiling is not assumed valid for nonlinear coupled states.
-Historical results and production fitting stay unchanged; a new milestone has
-not yet been implemented.
+Historical results and production fitting stay unchanged. The clarified
+comparison is implemented as M22 below.
+
+## M22 — nonlinear conditional fitting against the strongest applicable rollout
+
+The user clarified that the comparator must retain all applicable profiling
+improvements, rather than disabling exact profiling merely because the full
+state system is nonlinear. The [M22 runbook](PHASE_C_NONLINEAR_COMPARISON.md)
+implements six CPU tasks on the frozen alien-device hard inputs: three original
+generic starts and two strategies. Both retain exact terminal-output profiling
+(four gains), scaled coordinates and sensitivities, tight polishing, the same
+three-start portfolio, independent verification, incumbent retention and the
+training-only fitting assessment. Hidden initials remain outer variables where
+the nonlinear dynamics prevent exact affine profiling.
+
+The experimental arm uses up to 30% of its warm/trial allowance to alternate
+bounded coefficient least squares with node/shape/initial optimization, then
+uses the same rollout kernel. Twelve coefficients are affine conditional on
+trajectories. Two input-preserving meshes and formulation reuse test whether this
+larger conditional block helps enough to justify its cost. Conditional work is
+charged inside the matched search ceilings, with separate diagnostic overhead.
+Only original-equation rollouts select retained parameters; reference and
+validation scores are retrospective after sealing fitting decisions.
+
+This qualifies known anchored skeletons with noiseless development observations.
+It makes no global-identifiability or calibrated-confidence claim, does not
+minimize a new likelihood-profile grid, and changes no production defaults.
+Full nonlinear comparison results are pending the Delta run.

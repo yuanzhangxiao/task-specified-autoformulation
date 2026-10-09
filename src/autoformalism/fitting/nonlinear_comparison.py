@@ -1,0 +1,307 @@
+"""M22 conditional trajectories versus strongest applicable rollout recovery."""
+
+from pathlib import Path
+from time import monotonic, process_time
+
+import numpy as np
+from pydantic import Field, model_validator
+
+from autoformalism.benchmarks.audited_release import read_seal, seal
+from autoformalism.fitting import confidence_checks as checks
+from autoformalism.fitting import nonlinear_rollout as rollout
+from autoformalism.fitting import public_fitting as public
+from autoformalism.fitting import recovery_numerics as numerical
+from autoformalism.fitting.affine_propagation import numerically_verified
+from autoformalism.fitting.fitting_assessment import assess
+from autoformalism.fitting.trajectory_profile_fit import ConditionalEngine
+from autoformalism.schemas.base import StrictSchema
+
+METHODS = ("best_rollout", "conditional_then_best_rollout")
+
+
+class ComparisonPolicy(StrictSchema):
+    """Matched ceilings; conditional computation consumes its arm's search budget."""
+
+    warm_seconds: float = Field(default=600, ge=1, le=1200)
+    warm_calls: int = Field(default=600, ge=2, le=1200)
+    trial_seconds: float = Field(default=200, ge=1, le=600)
+    trial_calls: int = Field(default=200, ge=2, le=600)
+    portfolio_size: int = Field(default=3, ge=0, le=5)
+    continuation_seconds: float = Field(default=600, ge=1, le=1200)
+    continuation_calls: int = Field(default=600, ge=2, le=1200)
+    check_seconds: float = Field(default=120, ge=1, le=180)
+    sensitivity_seconds: float = Field(default=120, ge=1, le=180)
+    replay_seconds: float = Field(default=300, ge=1, le=600)
+    target_nmse: float = Field(default=1e-12, gt=0, le=1e-6)
+    trajectory_nmse: float = Field(default=1e-11, gt=0, le=1e-5)
+    conditional_fraction: float = Field(default=0.3, gt=0, le=0.5)
+    node_targets: tuple[int, ...] = (36000, 54000)
+    penalties: tuple[float, ...] = (100.0, 10000.0)
+    minimum_intervals: int = Field(default=16, ge=1, le=128)
+    observation_anchors: int = Field(default=8, ge=0, le=32)
+    cycles: int = Field(default=4, ge=1, le=20)
+    block_iterations: int = Field(default=25, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def limits(self):
+        if (
+            not 1 <= len(self.node_targets) <= 3
+            or len(self.penalties) != len(self.node_targets)
+            or list(self.node_targets) != sorted(set(self.node_targets))
+            or any(n < 1 or n > 60000 for n in self.node_targets)
+            or any(not np.isfinite(p) or p <= 0 for p in self.penalties)
+            or self.trajectory_nmse < self.target_nmse
+        ):
+            raise ValueError("invalid conditional mesh/penalty/accuracy policy")
+        return self
+
+
+def run(
+    problem: checks.TrainingProblem, policy: ComparisonPolicy, method: str, folder: Path
+):
+    """One training-only strategy; evaluator data cannot enter this interface."""
+    if method not in METHODS:
+        raise ValueError("unknown nonlinear comparison method")
+    problem_sha = public.content_sha256(problem.model_dump(mode="json"))
+    identity = {
+        "problem_sha256": problem_sha,
+        "method": method,
+        "policy": policy.model_dump(mode="json"),
+    }
+    finished = folder / "finished.json"
+    if finished.exists():
+        result = read_seal(finished)
+        if result["identity"] != identity:
+            raise ValueError("nonlinear comparison resume identity differs")
+        return result
+    begun, cpu = monotonic(), process_time()
+    oracle, profile, route = rollout.build(problem)
+    setup = folder / "setup"
+    setup.mkdir(parents=True, exist_ok=True)
+    seal(
+        setup / f"{len(list(setup.glob('*.json'))):04d}.json",
+        {
+            "wall_seconds": monotonic() - begun,
+            "cpu_seconds": process_time() - cpu,
+            "routing": route,
+            "problem_sha256": problem_sha,
+        },
+    )
+    engine = (
+        ConditionalEngine(oracle, problem, policy) if method != METHODS[0] else None
+    )
+    operations, candidates, stops = [], [], []
+    selected = None
+
+    def operation(name, point, seconds, work):
+        record = checks.operation(
+            folder / name, identity | {"point": point}, seconds, work
+        )
+        operations.append({"operation": name, **record})
+        return record
+
+    def inspect(name, parameters):
+        nonlocal selected
+        record = operation(
+            name,
+            parameters,
+            policy.check_seconds,
+            lambda end, save: rollout.verify(oracle, parameters, end, save),
+        )
+        point = record.get("value")
+        if point and not numerically_verified(point, 1e-12):
+            tighter = operation(
+                name + "-tight",
+                parameters,
+                policy.check_seconds,
+                lambda end, save: rollout.verify(
+                    oracle, parameters, end, save, tight=True
+                ),
+            )
+            if numerical.usable(tighter.get("value")):
+                point = tighter["value"]
+        if point:
+            point = point | {"origin": name}
+            candidates.append(point)
+            if numerical.improves(point, selected):
+                selected = point
+        return point
+
+    def reached(point):
+        return bool(
+            numerical.usable(point)
+            and max(point["training_nmse"], point["alternate_training_nmse"])
+            <= policy.target_nmse
+            and point["maximum_trajectory_nmse"] <= policy.trajectory_nmse
+        )
+
+    def stage(name, start, seconds, calls, *, conditional=True):
+        point, remaining = start, seconds
+        if engine is not None and conditional:
+            record = operation(
+                name + "/conditional",
+                start,
+                seconds * policy.conditional_fraction,
+                lambda end, save: engine.propose(
+                    start, end, save, folder / name / "nodes"
+                ),
+            )
+            remaining -= record["budget_charge_seconds"]
+            if record.get("value"):
+                point = record["value"]["parameters"]
+        if remaining <= 0:
+            stops.append("conditional_spent_stage_allowance")
+            return None
+
+        def search(initial, end, save, use_profile, limit):
+            return numerical.search(
+                oracle,
+                initial,
+                end,
+                save,
+                calls=limit,
+                target=policy.target_nmse,
+                profile=use_profile,
+                acceptable=lambda r: max(rollout.trajectory_losses(oracle, r))
+                <= policy.trajectory_nmse,
+            )
+
+        record = operation(
+            name + "/rollout",
+            {"start": point, "calls": calls},
+            remaining,
+            lambda end, save: search(point, end, save, profile, calls),
+        )
+        value = record.get("value")
+        best = value.get("best") if value else None
+        stops.append(value["stop_reason"] if value else "operation_unavailable")
+        # A mathematically valid profiling block can be numerically singular at
+        # one start. A bounded joint fallback keeps that start usable if possible.
+        if (
+            profile is not None
+            and value
+            and value["stop_reason"] == "numerical_failure"
+            and record["accounting_complete"]
+            and calls - value["calls"] >= 2
+            and remaining - record["budget_charge_seconds"] > 1
+        ):
+            fallback_start = best["parameters"] if best else point
+            fallback = operation(
+                name + "/joint-fallback",
+                {"start": fallback_start, "calls": calls - value["calls"]},
+                remaining - record["budget_charge_seconds"],
+                lambda end, save: search(
+                    fallback_start, end, save, None, calls - value["calls"]
+                ),
+            )
+            other = fallback.get("value")
+            stops.append(other["stop_reason"] if other else "fallback_unavailable")
+            if (
+                other
+                and other.get("best")
+                and (
+                    best is None
+                    or other["best"]["training_nmse"] < best["training_nmse"]
+                )
+            ):
+                best = other["best"]
+        return inspect(name + "/check", best["parameters"]) if best else None
+
+    before = inspect("incumbent", problem.incumbent)
+    if not reached(selected):
+        stage("warm", problem.incumbent, policy.warm_seconds, policy.warm_calls)
+    after_warm = selected
+    starts = numerical.diverse_starts(
+        oracle, problem, policy.portfolio_size, int(problem_sha[:8], 16)
+    )
+    portfolio = {
+        "starts": starts,
+        "run": not reached(selected),
+        "source": "training_and_declared_domains_only",
+    }
+    seal(folder / "portfolio.json", portfolio)
+    trials = []
+    if portfolio["run"]:
+        for i, start in enumerate(starts):
+            point = stage(f"trial-{i}", start, policy.trial_seconds, policy.trial_calls)
+            if numerical.usable(point):
+                trials.append(point)
+    winner = (
+        min(trials, key=lambda p: max(p["training_nmse"], p["alternate_training_nmse"]))
+        if trials
+        else None
+    )
+    continuation = not reached(selected) and winner is not None
+    seal(folder / "continuation-decision.json", {"run": continuation, "winner": winner})
+    if continuation:
+        # Keep the incumbent but explore the most promising distinct trial basin.
+        stage(
+            "continuation",
+            winner["parameters"],
+            policy.continuation_seconds,
+            policy.continuation_calls,
+            conditional=False,
+        )
+    sensitivity = None
+    if selected:
+
+        def derivative(end, save):
+            save({"calls": 1})
+            _, j = oracle.evaluate(oracle.vector(selected["parameters"]), end)
+            return checks.sensitivity(j, oracle.units, oracle.names)
+
+        sensitivity = operation(
+            "final-sensitivity",
+            selected["parameters"],
+            policy.sensitivity_seconds,
+            derivative,
+        ).get("value")
+    assessment = assess(selected, sensitivity, candidates, stops, policy.target_nmse)
+    if numerical.usable(selected) and not reached(selected):
+        assessment.update(
+            fit_quality="above_numerical_target", search_status="further_search_needed"
+        )
+        if assessment["numerical_status"] == "strictly_verified":
+            assessment["recommended_action"] = "diversify_or_extend_search"
+    trajectory_assessment = {
+        "maximum_trajectory_nmse": selected["maximum_trajectory_nmse"]
+        if selected
+        else None,
+        "trajectory_target": policy.trajectory_nmse,
+    }
+    setups = [read_seal(p) for p in sorted(setup.glob("*.json"))]
+
+    def total(field):
+        return sum(r[field] or 0 for r in operations)
+
+    result = {
+        "identity": identity,
+        "status": "complete" if selected else "retained_unverified",
+        "routing": route,
+        "before": before,
+        "after_warm": after_warm,
+        "selected": selected,
+        "retained_parameters": selected["parameters"]
+        if selected
+        else problem.incumbent,
+        "assessment": assessment,
+        "trajectory_assessment": trajectory_assessment,
+        "operations": operations,
+        "setup": setups,
+        "portfolio_triggered": portfolio["run"],
+        "trial_count": len(starts) if portfolio["run"] else 0,
+        "verified_trial_count": len(trials),
+        "continuation_run": continuation,
+        "additional_wall_seconds": total("wall_seconds")
+        + sum(s["wall_seconds"] for s in setups),
+        "additional_cpu_seconds": total("cpu_seconds")
+        + sum(s["cpu_seconds"] for s in setups),
+        "additional_budget_charge_seconds": total("budget_charge_seconds")
+        + sum(s["wall_seconds"] for s in setups),
+        "cost_complete": all(r["accounting_complete"] for r in operations),
+        "rollout_calls_observed": total("calls"),
+        "validation_used_for_selection": False,
+        "reference_values_used": False,
+    }
+    seal(finished, result)
+    return result

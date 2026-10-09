@@ -141,6 +141,19 @@ def test_profiled_search_returns_inner_solution():
     assert r["projection"] == {"inner": True}
 
 
+def test_additional_accuracy_gate_can_prevent_average_loss_early_stop():
+    r = numerical.search(
+        QuadraticOracle(),
+        {"a": 1.0, "initial": 0.0},
+        monotonic() + 5,
+        lambda _: None,
+        calls=2,
+        target=100.0,
+        acceptable=lambda _: False,
+    )
+    assert r["stop_reason"] == "budget_limited" and r["calls"] == 2
+
+
 def test_portfolio_reproducible_distinct_and_bounded():
     oracle = QuadraticOracle()
     problem = SimpleNamespace(start={"a": 1.0, "initial": 0.0})
