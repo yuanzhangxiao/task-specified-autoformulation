@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from time import monotonic, process_time
+from typing import Literal
 
 import numpy as np
 from pydantic import Field, model_validator
@@ -12,6 +13,10 @@ from autoformalism.fitting import nonlinear_rollout as rollout
 from autoformalism.fitting import public_fitting as public
 from autoformalism.fitting import recovery_numerics as numerical
 from autoformalism.fitting.affine_propagation import numerically_verified
+from autoformalism.fitting.fitting_allocation import (
+    MeasuredConditionalEngine,
+    precision_reason,
+)
 from autoformalism.fitting.fitting_assessment import assess
 from autoformalism.fitting.trajectory_profile_fit import ConditionalEngine
 from autoformalism.schemas.base import StrictSchema
@@ -22,6 +27,10 @@ METHODS = ("best_rollout", "conditional_then_best_rollout")
 class ComparisonPolicy(StrictSchema):
     """Matched ceilings; conditional computation consumes its arm's search budget."""
 
+    allocation: Literal["legacy", "measured"] = "legacy"
+    screening_safety_factor: float = Field(default=2, ge=1.5, le=5)
+    minimum_node_seconds: float = Field(default=20, ge=0.1, le=120)
+    precision_near_factor: float = Field(default=10, ge=1, le=100)
     warm_seconds: float = Field(default=600, ge=1, le=1200)
     warm_calls: int = Field(default=600, ge=2, le=1200)
     trial_seconds: float = Field(default=200, ge=1, le=600)
@@ -87,10 +96,11 @@ def run(
             "problem_sha256": problem_sha,
         },
     )
-    engine = (
-        ConditionalEngine(oracle, problem, policy) if method != METHODS[0] else None
-    )
+    measured = policy.allocation == "measured"
+    engine_type = MeasuredConditionalEngine if measured else ConditionalEngine
+    engine = engine_type(oracle, problem, policy) if method != METHODS[0] else None
     operations, candidates, stops = [], [], []
+    precision_decisions, precision_cache, screen_costs = [], {}, []
     selected = None
 
     def operation(name, point, seconds, work):
@@ -106,10 +116,56 @@ def run(
             name,
             parameters,
             policy.check_seconds,
-            lambda end, save: rollout.verify(oracle, parameters, end, save),
+            lambda end, save: rollout.verify(
+                oracle, parameters, end, save, **({"timing": True} if measured else {})
+            ),
         )
         point = record.get("value")
-        if point and not numerically_verified(point, 1e-12):
+        if measured:
+            elapsed = (point or {}).get("integrator_seconds", {}).get("DOP853")
+            if elapsed is not None and np.isfinite(elapsed) and elapsed > 0:
+                screen_costs.append(elapsed)
+            reason = precision_reason(point, selected, policy)
+            decision = {"origin": name, "reason": reason, "attempts": []}
+
+            def tighter(value):
+                if numerically_verified(value, policy.target_nmse):
+                    return value
+                digest = public.content_sha256(value["parameters"])
+                reused = digest in precision_cache
+                if not reused:
+                    precision_cache[digest] = operation(
+                        "precision/" + digest,
+                        value["parameters"],
+                        policy.check_seconds,
+                        lambda end, save: rollout.verify(
+                            oracle, value["parameters"], end, save, tight=True
+                        ),
+                    ).get("value")
+                checked = precision_cache[digest]
+                decision["attempts"].append(
+                    {"parameters_sha256": digest, "reused": reused}
+                )
+                # A failed or less precise retry cannot replace a useful check.
+                if numerical.usable(checked) and (
+                    not numerical.usable(value)
+                    or checked["solver_loss_discrepancy"]
+                    <= value["solver_loss_discrepancy"]
+                ):
+                    return checked
+                return value
+
+            if reason in {
+                "ordinary_numerics_unreliable",
+                "near_accuracy_target",
+                "retention_interval_overlap",
+            }:
+                point = tighter(point)
+                if reason == "retention_interval_overlap":
+                    origin = selected["origin"]
+                    selected = tighter(selected) | {"origin": origin}
+            precision_decisions.append(decision)
+        elif point and not numerically_verified(point, 1e-12):
             tighter = operation(
                 name + "-tight",
                 parameters,
@@ -130,6 +186,7 @@ def run(
     def reached(point):
         return bool(
             numerical.usable(point)
+            and (not measured or numerically_verified(point, policy.target_nmse))
             and max(point["training_nmse"], point["alternate_training_nmse"])
             <= policy.target_nmse
             and point["maximum_trajectory_nmse"] <= policy.trajectory_nmse
@@ -138,9 +195,13 @@ def run(
     def stage(name, start, seconds, calls, *, conditional=True):
         point, remaining = start, seconds
         if engine is not None and conditional:
+            if measured:
+                engine.screen_cost = max(screen_costs) if screen_costs else None
             record = operation(
                 name + "/conditional",
-                start,
+                {"start": start, "measured_screen_seconds": engine.screen_cost}
+                if measured
+                else start,
                 seconds * policy.conditional_fraction,
                 lambda end, save: engine.propose(
                     start, end, save, folder / name / "nodes"
@@ -149,6 +210,10 @@ def run(
             remaining -= record["budget_charge_seconds"]
             if record.get("value"):
                 point = record["value"]["parameters"]
+                if measured:
+                    screen_costs.extend(
+                        record["value"].get("complete_screen_seconds", [])
+                    )
         if remaining <= 0:
             stops.append("conditional_spent_stage_allowance")
             return None
@@ -209,7 +274,13 @@ def run(
 
     before = inspect("incumbent", problem.incumbent)
     if not reached(selected):
-        stage("warm", problem.incumbent, policy.warm_seconds, policy.warm_calls)
+        stage(
+            "warm",
+            problem.incumbent,
+            policy.warm_seconds,
+            policy.warm_calls,
+            conditional=not measured,
+        )
     after_warm = selected
     starts = numerical.diverse_starts(
         oracle, problem, policy.portfolio_size, int(problem_sha[:8], 16)
@@ -261,7 +332,16 @@ def run(
         assessment.update(
             fit_quality="above_numerical_target", search_status="further_search_needed"
         )
-        if assessment["numerical_status"] == "strictly_verified":
+        search_reliable = measured and precision_reason(selected, None, policy) in {
+            "ordinary_precision_sufficient_for_search",
+            "already_strictly_verified",
+        }
+        if search_reliable:
+            assessment["reasons"].append(
+                "Ordinary independent rollouts resolve poor fit; ultimate precision "
+                "remains necessary for an eventual accuracy certificate."
+            )
+        if assessment["numerical_status"] == "strictly_verified" or search_reliable:
             assessment["recommended_action"] = "diversify_or_extend_search"
     trajectory_assessment = {
         "maximum_trajectory_nmse": selected["maximum_trajectory_nmse"]
@@ -302,6 +382,7 @@ def run(
         "rollout_calls_observed": total("calls"),
         "validation_used_for_selection": False,
         "reference_values_used": False,
+        **({"precision_decisions": precision_decisions} if measured else {}),
     }
     seal(finished, result)
     return result

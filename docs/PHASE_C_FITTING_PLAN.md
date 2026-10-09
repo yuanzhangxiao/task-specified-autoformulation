@@ -849,3 +849,24 @@ diagnostic should preserve its original-start attempt, budget screening from
 measured rollout costs, separate coefficient-subproblem correctness from latent
 trajectory error, and reserve stringent precision retries for decisions that
 need them. These follow-ups are recommendations, not implemented changes.
+
+## M23 — protected rollout and measured conditional allocation
+
+The user approved implementation of the M22 follow-up. The opt-in
+`phase-c-nonlinear-allocation-1` experiment is described in
+[PHASE_C_FITTING_ALLOCATION.md](PHASE_C_FITTING_ALLOCATION.md). Both arms retain
+the identical original-start profiled rollout; conditional work moves to restart
+trials and reserves screening time from measured complete rollout cost. Ordinary
+independent checks remain mandatory, while ultimate-precision retries are
+restricted to unreliable outputs, near-target fits and uncertain retention ties.
+Failed retries are cached per vector; useful incumbents and interrupted-budget
+accounting remain protected.
+
+A separate evaluator compares exact reference derivatives, reference trajectories
+on the actual meshes, and six saved M22 estimated-node checkpoints. It reports
+conditional rank and coefficient/discretization/trajectory errors without
+exposing reference values to fitting. A preparation job runs these diagnostics
+before six matched Delta CPU tasks on the unchanged three generic starts.
+Search ceilings remain 1,800 seconds per task, with additional verification and
+diagnostic overhead recorded. No production defaults or benchmark assets change.
+The implementation is qualified locally; hard-case results remain pending.

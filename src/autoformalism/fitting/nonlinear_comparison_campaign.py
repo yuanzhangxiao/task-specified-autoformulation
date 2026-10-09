@@ -12,6 +12,7 @@ from autoformalism.fitting import screening_replay
 from autoformalism.fitting.confidence_checks import TrainingProblem
 
 PROTOCOL = "phase-c-nonlinear-conditional-comparison-1"
+ALLOCATION_PROTOCOL = "phase-c-nonlinear-allocation-1"
 INPUT_DIGEST = "ed71b7ee77608f94b66e7c16a91c0a0c29f9c05ec7b25bc594694ba079d42d09"
 ComparisonPolicy = fitting.ComparisonPolicy
 
@@ -40,8 +41,34 @@ def roster(data):
 
 def prepare(root: Path, inputs: Path, policy: ComparisonPolicy):
     data = read_seal(inputs)
+    diagnostic = None
+    if policy.allocation == "measured":
+        # Saved nodes have a specific time layout, not just an array shape.
+        # Changing observation anchors can preserve the size but change meaning.
+        mesh_keys = (
+            "node_targets",
+            "penalties",
+            "minimum_intervals",
+            "observation_anchors",
+        )
+        if any(getattr(policy, k) != getattr(ComparisonPolicy(), k) for k in mesh_keys):
+            raise ValueError(
+                "M23 saved-node diagnostics require the frozen M22 mesh policy"
+            )
+        diagnostic = read_seal(inputs.parent / "conditional-diagnostic-inputs.json")
+        from autoformalism.fitting.conditional_diagnostics import PROTOCOL as DP
+        from autoformalism.fitting.conditional_diagnostics import SOURCE_PLAN
+
+        if (
+            diagnostic["protocol"] != DP
+            or diagnostic["source_plan_sha256"] != SOURCE_PLAN
+            or diagnostic["inputs_sha256"] != public.content_sha256(data)
+            or sorted((r["common"], r["level"]) for r in diagnostic["rows"])
+            != [(n, k) for n in sorted(bases(data)) for k in range(2)]
+        ):
+            raise ValueError("conditional diagnostic source identity/roster differs")
     plan = {
-        "protocol": PROTOCOL,
+        "protocol": ALLOCATION_PROTOCOL if diagnostic is not None else PROTOCOL,
         "inputs_sha256": public.content_sha256(data),
         "source_sha256": public._source_identity(),
         "runtime": public._runtime(),
@@ -49,21 +76,35 @@ def prepare(root: Path, inputs: Path, policy: ComparisonPolicy):
         "tasks": roster(data),
         "test_data_opened": False,
         "live_llm_calls": 0,
+        **(
+            {"diagnostic_inputs_sha256": public.content_sha256(diagnostic)}
+            if diagnostic is not None
+            else {}
+        ),
     }
     with public._lock(root):
         seal(root / "inputs.json", data)
+        if diagnostic is not None:
+            seal(root / "diagnostic-inputs.json", diagnostic)
         seal(root / "plan.json", plan)
     return {"identity": public.content_sha256(plan), "tasks": len(plan["tasks"])}
 
 
 def verify(root: Path, *, runtime=True):
     plan, data = read_seal(root / "plan.json"), read_seal(root / "inputs.json")
+    measured = plan["policy"].get("allocation", "legacy") == "measured"
     if (
-        plan["protocol"] != PROTOCOL
+        plan["protocol"] != (ALLOCATION_PROTOCOL if measured else PROTOCOL)
         or plan["inputs_sha256"] != public.content_sha256(data)
         or plan["tasks"] != roster(data)
     ):
         raise ValueError("nonlinear comparison plan/inputs/roster differ")
+    if (
+        measured
+        and public.content_sha256(read_seal(root / "diagnostic-inputs.json"))
+        != plan["diagnostic_inputs_sha256"]
+    ):
+        raise ValueError("conditional diagnostic input digest differs")
     if runtime and (
         plan["source_sha256"] != public._source_identity()
         or plan["runtime"] != public._runtime()
@@ -74,6 +115,15 @@ def verify(root: Path, *, runtime=True):
 
 def run_task(root: Path, index: int):
     plan, data = verify(root)
+    if plan["protocol"] == ALLOCATION_PROTOCOL:
+        diagnostic = read_seal(root / "diagnostics/result.json")
+        if (
+            diagnostic["plan_sha256"] != public.content_sha256(plan)
+            or not diagnostic["correctness_passed"]
+        ):
+            raise ValueError(
+                "complete matching coefficient diagnostic required before fitting"
+            )
     if not 0 <= index < len(plan["tasks"]):
         raise ValueError("unknown nonlinear task index")
     task = plan["tasks"][index]
@@ -213,7 +263,7 @@ def report(root: Path):
             }
         )
     result = {
-        "protocol": PROTOCOL,
+        "protocol": plan["protocol"],
         "plan_sha256": public.content_sha256(plan),
         "status": "complete" if len(recorded) == len(rows) else "incomplete",
         "expected": len(rows),
@@ -230,6 +280,12 @@ def report(root: Path):
         "No global identifiability or calibrated confidence claim; "
         "production fitter unchanged.",
     }
+    if plan["protocol"] == ALLOCATION_PROTOCOL:
+        path = root / "diagnostics/result.json"
+        diagnostic = read_seal(path) if path.exists() else {"status": "pending"}
+        if path.exists() and diagnostic["plan_sha256"] != public.content_sha256(plan):
+            raise ValueError("diagnostic report identity differs")
+        result["diagnostics"] = diagnostic
     public._write(root / "summary.json", result)
     lines = [
         "# Nonlinear fitting assessments",

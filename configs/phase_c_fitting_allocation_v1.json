@@ -1,0 +1,31 @@
+{
+  "warm_seconds": 600.0,
+  "warm_calls": 600,
+  "trial_seconds": 200.0,
+  "trial_calls": 200,
+  "portfolio_size": 3,
+  "continuation_seconds": 600.0,
+  "continuation_calls": 600,
+  "check_seconds": 120.0,
+  "sensitivity_seconds": 120.0,
+  "replay_seconds": 300.0,
+  "target_nmse": 1e-12,
+  "trajectory_nmse": 1e-11,
+  "conditional_fraction": 0.3,
+  "node_targets": [
+    36000,
+    54000
+  ],
+  "penalties": [
+    100.0,
+    10000.0
+  ],
+  "minimum_intervals": 16,
+  "observation_anchors": 8,
+  "cycles": 4,
+  "block_iterations": 25,
+  "allocation": "measured",
+  "screening_safety_factor": 2,
+  "minimum_node_seconds": 20,
+  "precision_near_factor": 10
+}

@@ -11,7 +11,7 @@ from autoformalism.fitting import nonlinear_comparison_campaign as campaign
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("prepare", "run", "report"):
+    for name in ("prepare", "run", "report", "diagnose"):
         p = commands.add_parser(name)
         p.add_argument("--root", type=Path, required=True)
         if name == "prepare":
@@ -28,9 +28,15 @@ def main():
         )
     elif args.command == "run":
         result = campaign.run_task(args.root, args.index)
+    elif args.command == "diagnose":
+        from autoformalism.fitting import conditional_diagnostics
+
+        result = conditional_diagnostics.run(args.root)
     else:
         result = campaign.report(args.root)
     print(json.dumps(result, indent=2))
+    if args.command == "diagnose" and not result["correctness_passed"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

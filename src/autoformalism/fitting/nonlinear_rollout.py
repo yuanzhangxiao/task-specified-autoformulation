@@ -105,7 +105,7 @@ def trajectory_losses(oracle, residual):
     return [float(np.mean(r**2)) for r in np.split(residual, np.cumsum(sizes)[:-1])]
 
 
-def verify(oracle, parameters, deadline, checkpoint, *, tight=False):
+def verify(oracle, parameters, deadline, checkpoint, *, tight=False, timing=False):
     """Independent DOP853/Radau checks of original equations, never node fits."""
     previous = oracle.settings
     vector = oracle.vector(parameters)
@@ -115,9 +115,13 @@ def verify(oracle, parameters, deadline, checkpoint, *, tight=False):
         )
     try:
         checkpoint({"calls": 1})
+        begun = monotonic()
         a, _ = oracle.evaluate(vector, deadline, jacobian=False, method="DOP853")
+        dop_seconds = monotonic() - begun
         checkpoint({"calls": 2})
+        begun = monotonic()
         b, _ = oracle.evaluate(vector, deadline, jacobian=False, method="Radau")
+        radau_seconds = monotonic() - begun
     finally:
         oracle.settings = previous
     if monotonic() >= deadline or not np.isfinite(np.r_[a, b]).all():
@@ -134,4 +138,6 @@ def verify(oracle, parameters, deadline, checkpoint, *, tight=False):
         "verification": "original_equations_DOP853_vs_Radau_outputs_only",
         "tight_verification": tight,
     }
+    if timing:
+        result["integrator_seconds"] = {"DOP853": dop_seconds, "Radau": radau_seconds}
     return result | {"usable_for_retention": numerical.usable(result)}
