@@ -830,4 +830,22 @@ validation scores are retrospective after sealing fitting decisions.
 This qualifies known anchored skeletons with noiseless development observations.
 It makes no global-identifiability or calibrated-confidence claim, does not
 minimize a new likelihood-profile grid, and changes no production defaults.
-Full nonlinear comparison results are pending the Delta run.
+Completed Delta review (`review-20261009-081105`): all six tasks finished, but
+strongest profiled rollout recovers all parameters and hidden initials for only
+1/3 original starts; the conditional arm recovers 0/3. The successful nonlinear
+endpoint has train/validation NMSE 1.26e-16/3.13e-16, maximum relative dynamic
+parameter error 1.05e-7 and maximum absolute hidden-initial error 4.52e-8.
+All five poor final searches are budget-limited, not evidence of proven
+nonidentifiability.
+
+The [completed review](PHASE_C_NONLINEAR_COMPARISON.md#completed-delta-review-archive-review-20261009-081105)
+records two important pilot limitations: unconverged conditional node solves
+produce much worse physical starts despite small nodal losses, and 10/12
+conditional stages cannot finish candidate screening within their allocations.
+Both arms together also spend 54 minutes on 27 failed ultimate-precision
+verification retries. The conditional arm uses 35% more fitting/diagnostic
+elapsed time overall. Keep strongest rollout as the reference; the next proposed
+diagnostic should preserve its original-start attempt, budget screening from
+measured rollout costs, separate coefficient-subproblem correctness from latent
+trajectory error, and reserve stringent precision retries for decisions that
+need them. These follow-ups are recommendations, not implemented changes.
