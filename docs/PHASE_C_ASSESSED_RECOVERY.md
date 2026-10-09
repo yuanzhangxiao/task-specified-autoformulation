@@ -284,6 +284,144 @@ bash /work/hdd/bibo/yxiao2/phase_c/code/fitting-m21/scripts/hpc/inspect_phase_c_
 
 The inspector prints before/after prediction and coefficient/initial recovery,
 assessments and costs, then creates a dated `review-*.tar.gz` for download.
-Missing tasks remain explicit. This run will establish the comparison results;
-implementation and local smoke checks are not evidence of recovery success on
-the full 48-task campaign.
+Missing tasks remain explicit. The completed campaign is reviewed below;
+implementation and local smoke checks alone are not recovery evidence.
+
+## Completed Delta results — 2026-10-08
+
+Reviewed `review-20261008-235055.tar.gz` (archive SHA256
+`1ce793756510d062514029472f71c71d141e68d3cb978f2a502ec48837ebe6ad`).
+The plan identity is
+`111a6998b8cc5c74ae7d23706ede5fe913de815e3615806877421fe809d730c2`.
+All **48 tasks and 177 recorded numerical operations completed**; cost accounting
+is complete. Verification checked 789 sealed JSON artifacts, the frozen input
+digest, the complete paired roster, and result/backend identities. Regenerating
+the summary and assessment table reproduced both exactly. All 24 paired
+portfolios contain identical proposed starts. No new fitting was performed in
+this review.
+
+Review verification: 36 focused regression tests passed, the real-archive report
+replay matched, and `git diff --check` passed. Repository-wide Ruff still reports
+37 unrelated findings. Only this runbook and the fitting-plan record are edited;
+the uploaded artifacts remain outside Git.
+
+The baseline is the same **24 M19 endpoints**, not M20's improved outputs. These
+are four control systems, three seeds and two historical source methods, not 24
+independent benchmark problems. The two new methods each receive every endpoint.
+
+| Retained result | Prediction recovered | Coefficients recovered | Hidden initials recovered | All three |
+|---|---:|---:|---:|---:|
+| Frozen M19 incumbent | 23/24 | 16/24 | 15/24 | 15/24 |
+| Joint, after warm search | 23/24 | 21/24 | 21/24 | 21/24 |
+| Profiled, after warm search | 23/24 | 21/24 | 21/24 | 21/24 |
+| Joint, after adaptive portfolio | 24/24 | 22/24 | 22/24 | 22/24 |
+| Profiled, after adaptive portfolio | **24/24** | **24/24** | **24/24** | **24/24** |
+
+Prediction recovery requires training and validation NMSE at most 1e-6 with the
+independent numerical check. Coefficient recovery requires every dynamic
+coefficient within 1% relative error; initial recovery requires every hidden
+initial within 0.001 absolute error. Reference errors and validation are computed
+after selection; neither supplies a search objective nor a stopping rule.
+
+### Where recovery came from
+
+Fifteen endpoints already met the tighter numerical target, so neither method
+searched them. Both methods warm-polished the remaining nine endpoints. The six
+fast/slow six-state endpoints all recovered their coefficients **and initials**
+in this stage. Their worst coefficient errors were 0.08034% (joint) and 0.09289%
+(profiled); worst initial errors were 0.0009363 and 0.0007588 respectively. Thus
+the tighter training target resolves the remaining M20 initial-error threshold
+failures on these controls. It does not make parameter error monotonic: one
+already excellent coefficient vector becomes slightly less accurate while its
+initials improve, and both methods still satisfy the recovery thresholds.
+
+Warm searches stalled on the same three difficult endpoints. Both methods then
+evaluated all three frozen diverse starts:
+
+- The fast/slow three-state `s2_rollout_only` endpoint recovered with both
+  methods. Its previous validation NMSE of 0.001615 fell to approximately
+  5.05e-22. Warm polishing alone did not leave the poor local solution.
+- The ordinary six-state `s0_coupled_profiled_rollout` and
+  `s1_coupled_profiled_rollout` endpoints recovered only with the new profiled
+  searches. Different starts found the accurate solution, with validation NMSE
+  approximately 3.32e-22 and largest coefficient relative error below 1.32e-10.
+- Joint searches retained those two original incumbents: validation NMSE
+  3.675e-7, maximum coefficient relative error 322.69%, and maximum hidden-initial
+  error 1.543. Every short trial exhausted its 150-call allowance, and continuing
+  the best trial for another 400 calls still failed to improve the incumbent.
+  Longer repeated joint polishing is therefore not the supported first remedy.
+
+The comparison supports **profiling plus diverse starts**, not a claim that
+profiling eliminates local minima: its warm searches also stalled, and four of
+its six diverse trials on the two ordinary six-state endpoints returned to the
+poor solution. Profiling reduces the nonlinear search from twelve unknowns to
+six decay coefficients, solving gain and five initials conditionally at each
+step. This removes coupled nuisance-variable search from the outer optimizer;
+it does not make the remaining decay-coefficient problem convex.
+
+### Retention, numerical checks and assessment
+
+Every changed endpoint improves the two-solver training-loss comparison over
+its starting incumbent. The previously excluded three-state incumbent survives
+the warm stage until a verified better trial is available. Both unresolved joint
+six-state endpoints retain their original fitted vectors. All final endpoints
+pass the strict numerical check. No domain failures or boundary-projection
+events occurred in this run; the separate regression test covers the specific
+M20 roundoff failure and rejection of material violations.
+
+The assessment remains more informative than prediction NMSE alone:
+
+| Endpoint class | Training-only assessment | Interpretation |
+|---|---|---|
+| Two unresolved joint six-state fits | `diversify_or_extend_search` | Prediction passes the coarse 1e-6 gate, but the 1e-20 numerical target is unmet. Locally full-rank sensitivity does not certify a correct optimum. |
+| Six fast/slow six-state fits, each method | `assess_parameter_uncertainty` | Accurate retained solution, but verified alternatives and weak joint sensitivity remain. |
+| Other recovered endpoints | `retain_with_local_evidence` | Numerical target and local sensitivity checks pass; global uniqueness and statistical coverage remain untested. |
+
+For the fast/slow six-state endpoints, the scaled joint Jacobian still has
+numerical rank 11/12 under the declared threshold and condition numbers
+1.99e8–2.57e8. Search alternatives remain within the 1e-12 loss-difference
+tolerance despite materially different coordinates. This is compatible with
+accurate parameters at the selected point: precise noiseless fitting can find
+them, while the data remain weakly informative under finite perturbations.
+Neither warning nor success establishes structural identifiability or a
+calibrated confidence probability. No profile grid was minimized in M21.
+
+### Additional computation
+
+These are summed measured task times, not elapsed campaign or queue time. They
+exclude historical M19 computation, which is common to both methods.
+
+| Additional work | Joint | Profiled |
+|---|---:|---:|
+| Fitting, numerical checks and sensitivity: wall minutes | 12.53 | 6.06 |
+| Same work: CPU minutes | 8.41 | 4.24 |
+| Observed rollout calls, including diagnostics | 3,128 | 1,275 |
+| Separate retrospective scoring: wall minutes | 9.16 | 9.13 |
+| Wall minutes including scoring | 21.69 | 15.19 |
+
+Profiling uses 51.6% less added fitting/diagnostic wall time in this run, with
+more recoveries. It uses 30.0% less when common retrospective scoring is included.
+Both methods have matched stage ceilings and proposed starts, but adaptively
+consume different effort; these are not fixed-cost or equal-convergence-accuracy
+comparisons. Joint fitting sometimes returns more accurate coefficients within
+the accepted tolerance. The 1e-20 target is specific to noiseless controls and
+must not become a universal stopping rule for experimental data.
+
+### Recommended next milestone
+
+Retain direct joint rollout as the general baseline and exact profiling as an
+option for symbolically certified affine blocks. For those blocks, these results
+favor a bounded profiled restart portfolio after warm stagnation over repeatedly
+extending the same joint search. Preserve the assessment and independent-rollout
+retention rules regardless of fitting strategy.
+
+Return next to a known-structure **nonlinear benchmark block** with generic
+training-only starts. Compare direct rollout fitting against coefficient
+profiling conditional on collocation trajectories followed by rollout polishing,
+recording setup, search and diagnostic overhead separately. Such conditional
+profiling is not exact rollout profiling: nonlinear state coupling usually
+removes affine dependence of the full trajectories on coefficients. Keep
+coefficient/initial recovery retrospective and report solver failures and all
+starts, including unsuccessful ones. Noise robustness, arbitrary skeletons and
+construction integration remain later qualifications. No production defaults or
+new experiment implementation are changed by this completed-results review.

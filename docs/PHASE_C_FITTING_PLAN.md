@@ -781,5 +781,27 @@ and separate computation costs. No calibrated confidence probability, global
 identifiability certificate or complete profile minimization is claimed.
 
 Qualification on these correct linear skeletons precedes nonlinear benchmark
-blocks and integration with construction. The full matched campaign awaits
-execution on Delta; historical results and production fitting stay unchanged.
+blocks and integration with construction. The
+[completed M21 review](PHASE_C_ASSESSED_RECOVERY.md#completed-delta-results--2026-10-08)
+confirms 48/48 tasks: both methods recover predictions on all 24 source endpoints;
+joint fitting recovers coefficients and hidden initials on 22/24, and profiling
+on 24/24 (1% relative coefficient / 0.001 absolute initial thresholds). Both warm
+methods resolve the six fast/slow initial errors. Diverse starts are essential
+for three persistent local solutions; profiling recovers all three, while joint
+fitting recovers one and safely preserves the other two incumbents.
+
+Additional fitting/diagnostic time is 12.53 summed task-minutes for joint versus
+6.06 for profiling, with approximately 9.1 minutes of separate retrospective
+scoring per method. Six fast/slow endpoints per method still carry parameter
+uncertainty warnings despite successful retrospective recovery. This is evidence
+for conditional numerical assessments, not calibrated confidence or global
+identifiability. No domain failures occurred, and the old retention regression
+does not recur.
+
+Next recommended qualification: a known-structure nonlinear benchmark block,
+comparing generic-start joint rollout against trajectory-conditional coefficient
+profiling with collocation and rollout polishing. Preserve the current methods,
+training-only routing, independent checks and separate cost accounting. Exact
+affine rollout profiling is not assumed valid for nonlinear coupled states.
+Historical results and production fitting stay unchanged; a new milestone has
+not yet been implemented.
