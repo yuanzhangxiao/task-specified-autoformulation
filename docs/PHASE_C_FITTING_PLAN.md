@@ -942,3 +942,17 @@ The [M25 protocol and Delta commands](PHASE_C_FITTING_STAGNATION.md) document
 identity-bound import, local qualification, cost accounting, interruption behavior
 and retrospective scoring. Production defaults and benchmark assets are unchanged;
 benchmark accuracy and runtime effects await the new run.
+
+Completed M25 review (`review-20261010-191931`): all three tasks and 75 derivative
+audit evaluations complete; 33 seals verify and the report reproduces exactly.
+Start 0 passes and both arms preserve the already accurate M24 point without
+optimization. Start 1 is inconclusive; start 2 fails the frozen finite-step
+criterion. Neither difficult endpoint reaches the scaling comparison. The
+analytic-versus-finite-difference discrepancies shrink approximately 100-fold
+when the perturbation shrinks tenfold, with unchanged active sets. This suggests
+the derivative checker needs smaller perturbations; it does not establish a
+Jacobian defect or a scaling winner. All start-1 directions pass individually
+at the finest step but lack two-scale confirmation. Total audit overhead is
+18.74 worker-minutes. Next: refine the perturbations to `1e-5, 1e-6, 1e-7` from
+the same frozen points, preserving tolerances and budgets, before changing the
+fitter. See the [detailed review](PHASE_C_FITTING_STAGNATION.md#completed-m25-review--review-20261010-191931).

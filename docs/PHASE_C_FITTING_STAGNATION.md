@@ -176,3 +176,81 @@ affect initial step geometry under Jacobian scaling even though it leaves the
 mathematical minimizer unchanged. This is a candidate explanation for slow
 startup, not an established explanation for the difficult benchmark endpoints.
 M25 keeps the amplification unchanged in both arms to isolate the scaling policy.
+
+## Completed M25 review — review-20261010-191931
+
+Source archive: `review-20261010-191931.tar.gz`; code `54791d2`; plan
+`b40ff87cb1199a5264a19b4bab928b56a8a85f88b1486eba0a89de4afda2cf41`.
+All 33 sealed JSON records verify, and rebuilding the report reproduces it
+exactly. All three tasks and all 75 audit evaluations completed, with complete
+cost accounting. The campaign's `complete` status means all planned tasks have
+records; two are deliberately `diagnostic_blocked`.
+
+| Saved start | Training NMSE at audit point | Derivative gate | Continuation outcome |
+|---|---:|---|---|
+| 0 | 1.6935e-14 | Passed, four directions | Both arms verify and retain the identical accurate point; zero optimization calls |
+| 1 | 0.353834 | Inconclusive | Neither scaling arm launched |
+| 2 | 0.734933 | Failed under the frozen three-step rule | Neither scaling arm launched |
+
+The start-0 independent evaluation remains train/validation
+`1.6935e-14 / 2.2565e-14`; maximum coefficient relative error is `5.50e-7`.
+This is preservation of the M24 result, not an M25 fitting improvement. No actual
+optimization was performed anywhere in M25, so this run provides no comparison
+of the two scaling methods on the difficult endpoints.
+
+### Why the blocked audits do not yet establish a derivative defect
+
+All sampled perturbations stayed within the outer parameter bounds and retained
+the same inner active set. Start 1 has no active gain bounds; start 2 keeps two
+output gains at their lower bounds throughout. Neither active-set transitions
+nor a provider/worker failure caused the blocks.
+
+The residual derivative discrepancies show the convergence pattern of central
+finite-difference truncation. For a smooth residual along a direction,
+
+```text
+[r(theta + h S d) - r(theta - h S d)] / (2h)
+    = J(theta) S d + O(h^2).
+```
+
+At the difficult endpoints, shrinking `h` from `1e-4` to `1e-5` reduces the
+absolute discrepancy by factors of 97.2 to 100.0 across all four directions.
+That supports an under-refined finite-difference check, rather than establishing
+an incorrect analytic derivative. An error floor at smaller steps has not yet
+been measured, so this remains an inference rather than a passed audit.
+
+For the normalized-gradient direction, the relative RMS discrepancies are:
+
+| Start | h = 1e-4 | h = 1e-5 | Nominal relative tolerance |
+|---|---:|---:|---:|
+| 1 | 0.1677% | 0.001683% | 0.05% plus absolute allowance |
+| 2 | 8.4595% | 0.09415% | 0.05% plus absolute allowance |
+
+At `h=1e-5`, **every start-1 direction passes individually**, but three lack a
+second agreeing scale and are therefore inconclusive. Start 2's coordinate and
+gradient directions still fail the two finest available steps; their finest
+relative errors are 0.06505% and 0.09415%, respectively. They are approaching the
+tolerance rapidly. The current `failed` label records failure of this bounded
+check, not proof of a software bug, invalid equations or nonidentifiability.
+
+### Costs and next recommendation
+
+Shared audit costs are 403.37, 379.06 and 342.08 seconds (25 profile evaluations
+each), totaling 18.74 worker-minutes. Start 0 additionally spends 251.32 seconds
+across the two arms on setup, independent verification and final sensitivity,
+plus 277.39 seconds on retrospective evaluation. Total recorded audit/arm/
+evaluation time is about 27.55 worker-minutes, excluding scheduler/preflight/
+report overhead. There are zero optimizer evaluations, GPUs or LLM calls.
+
+Refine the derivative check before changing the fitting algorithm or raising
+its budget. The smallest follow-up can use `h = 1e-5, 1e-6, 1e-7` with the
+existing configurable policy, on the same three frozen points and in a fresh
+campaign root. Keep the agreement tolerance, two-scale requirement, active-set
+checks and matched continuation budgets unchanged. Only a passing gate should
+release the already implemented scaling comparison. If discrepancies plateau
+or worsen, investigate integration accuracy and projection conditioning before
+attributing them to the analytic Jacobian. An adaptive perturbation ladder is
+a sensible later improvement; it has not been implemented by this review.
+
+No benchmark fitting was rerun locally, and no production default, model
+structure, dataset or numerical tolerance was changed during this review.
