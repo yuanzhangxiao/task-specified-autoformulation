@@ -116,13 +116,18 @@ def search(
     profile=None,
     acceptable=None,
     telemetry=False,
+    optimizer_scaling="jacobian",
+    record_steps=False,
 ):
     """Joint or projected TRF; charge started attempts, distinguish completed calls."""
+    if optimizer_scaling not in {"jacobian", "fixed_coordinates"}:
+        raise ValueError("unknown optimizer scaling")
     anchor = oracle.vector(start)
     free = list(range(len(anchor))) if profile is None else list(profile.outer)
     units = oracle.units[free]
     count, best, cached, domain_events, projection = 0, None, None, [], None
-    begun, trace = monotonic(), []
+    begun, trace, steps = monotonic(), [], []
+    accepted = None
 
     class Reached(Exception):
         pass
@@ -135,10 +140,11 @@ def search(
                 if telemetry
                 else {}
             )
+            | ({"accepted_steps": steps} if record_steps else {})
         )
 
     def evaluate(q):
-        nonlocal count, best, cached, projection
+        nonlocal count, best, cached, projection, accepted
         if cached is not None and np.array_equal(q, cached[0]):
             return cached[1:]
         if count >= calls or monotonic() >= deadline:
@@ -192,9 +198,37 @@ def search(
             )
         save()
         cached = (q.copy(), r, j * units)
+        if record_steps and accepted is None:
+            accepted = cached
         if value <= target and (acceptable is None or acceptable(r)):
             raise Reached
         return cached[1:]
+
+    def callback(intermediate_result):
+        """Accepted displacement and local linear prediction; no extra evaluations."""
+        nonlocal accepted
+        q = intermediate_result.x
+        if np.array_equal(q, accepted[0]):
+            return
+        if cached is None or not np.array_equal(q, cached[0]):
+            raise ValueError("accepted optimizer point missing from evaluation cache")
+        step = q - accepted[0]
+        previous = float(np.mean(accepted[1] ** 2))
+        actual = previous - float(np.mean(cached[1] ** 2))
+        predicted = previous - float(np.mean((accepted[1] + accepted[2] @ step) ** 2))
+        steps.append(
+            {
+                "evaluation_count": count,
+                "elapsed_seconds": monotonic() - begun,
+                "training_nmse": float(np.mean(cached[1] ** 2)),
+                "coordinate_step_norm": float(np.linalg.norm(step)),
+                "actual_reduction": actual,
+                "linearized_residual_reduction": predicted,
+                "reduction_ratio": actual / predicted if predicted > 0 else None,
+            }
+        )
+        accepted = cached
+        save()
 
     try:
         solved = least_squares(
@@ -205,11 +239,12 @@ def search(
                 (oracle.lower[free] - anchor[free]) / units,
                 (oracle.upper[free] - anchor[free]) / units,
             ),
-            x_scale="jac",
+            x_scale="jac" if optimizer_scaling == "jacobian" else 1.0,
             ftol=None,
             xtol=1e-12,
             gtol=1e-10,
             max_nfev=calls,
+            **({"callback": callback} if record_steps else {}),
         )
         stop = "step_or_gradient_converged" if solved.success else "budget_limited"
         detail = {"message": solved.message, "optimality": float(solved.optimality)}
@@ -229,6 +264,11 @@ def search(
         "domain_events": domain_events,
         "projection": projection,
         **({"completed_calls": len(trace), "evaluations": trace} if telemetry else {}),
+        **(
+            {"accepted_steps": steps, "optimizer_scaling": optimizer_scaling}
+            if record_steps
+            else {}
+        ),
     }
 
 

@@ -73,6 +73,7 @@ def run(
     *,
     shared_warm: dict[str, float] | None = None,
     continuation_order: Literal["incumbent_first", "restart_first"] | None = None,
+    optimizer_scaling: Literal["jacobian", "fixed_coordinates"] | None = None,
 ):
     """One training-only strategy; evaluator data cannot enter this interface."""
     if method not in METHODS:
@@ -87,10 +88,17 @@ def run(
     ):
         raise ValueError("shared warm continuation requires a measured rollout policy")
     problem_sha = public.content_sha256(problem.model_dump(mode="json"))
+    if optimizer_scaling is not None and (
+        optimizer_scaling not in {"jacobian", "fixed_coordinates"}
+        or shared_warm is None
+        or method != "best_rollout"
+    ):
+        raise ValueError("scaling diagnostic requires a shared best-rollout point")
     identity = {
         "problem_sha256": problem_sha,
         "method": method,
         "policy": policy.model_dump(mode="json"),
+        **({"optimizer_scaling": optimizer_scaling} if optimizer_scaling else {}),
         **(
             {"shared_warm": shared_warm, "continuation_order": continuation_order}
             if shared_warm is not None
@@ -252,6 +260,11 @@ def run(
                 acceptable=lambda r: max(rollout.trajectory_losses(oracle, r))
                 <= policy.trajectory_nmse,
                 **({"telemetry": True} if shared_warm is not None else {}),
+                **(
+                    {"optimizer_scaling": optimizer_scaling, "record_steps": True}
+                    if optimizer_scaling is not None
+                    else {}
+                ),
             )
 
         record = operation(

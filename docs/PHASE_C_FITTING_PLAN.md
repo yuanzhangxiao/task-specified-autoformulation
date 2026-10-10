@@ -924,3 +924,21 @@ audit profiled derivatives at the saved stalled points, then test continuation
 and scaling with matched evaluation limits before increasing broad restart
 budgets. Keep useful incumbent continuation, verified early stopping and
 restart capacity; defer a universal allocation rule until that diagnosis.
+
+## M25 — derivative-gated scaling at saved stalled endpoints
+
+The user approved the stagnation diagnostic. The opt-in
+`phase-c-fitting-stagnation-1` protocol uses all three saved M24
+incumbent-continuation endpoints, with start 0 as an accurate control. One shared
+four-direction/three-step derivative audit per point gates matched continuation
+under Jacobian versus fixed-coordinate optimizer scaling. Active-set ambiguity
+is inconclusive, never an automatic derivative pass. Each arm receives up to
+120 evaluations/2,400 seconds, with unchanged exact profiling, independent
+checks and training-only retention. No new starts or construction changes occur.
+
+Accepted-step records distinguish actual loss reduction from the linearized
+residual prediction without claiming access to internal trust-region state.
+The [M25 protocol and Delta commands](PHASE_C_FITTING_STAGNATION.md) document
+identity-bound import, local qualification, cost accounting, interruption behavior
+and retrospective scoring. Production defaults and benchmark assets are unchanged;
+benchmark accuracy and runtime effects await the new run.
