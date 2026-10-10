@@ -1,0 +1,13 @@
+{
+  "allocation": "measured",
+  "portfolio_size": 3,
+  "continuation_seconds": 1200,
+  "continuation_calls": 60,
+  "trial_seconds": 400,
+  "trial_calls": 15,
+  "check_seconds": 180,
+  "sensitivity_seconds": 180,
+  "replay_seconds": 300,
+  "target_nmse": 1e-12,
+  "trajectory_nmse": 1e-11
+}

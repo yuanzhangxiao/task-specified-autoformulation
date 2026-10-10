@@ -355,3 +355,144 @@ initialize its nodes from a feasible rollout and verify any coefficient update
 again through a free rollout. More mesh density alone is unlikely to cure the
 estimated-trajectory error documented here, although this does not rule out
 better trajectory estimation or better-budgeted collocation.
+
+## M24 implementation: shared-warm incumbent continuation
+
+The user approved incumbent continuation on 2026-10-09. The new opt-in protocol
+is `phase-c-incumbent-continuation-1`. It tests allocation of further rollout
+search; it does not change the production fitter or the conditional-trajectory
+algorithm.
+
+### Frozen handoff and comparison
+
+Export the **warm/check** checkpoint of the `best_rollout` arm for each of the
+three original M23 starts. This predeclared source arm is used for all seeds;
+neither validation nor reference coefficient accuracy chooses a parent. In
+particular, start 0 uses the less accurate `5.289e-5` training warm checkpoint,
+not the other arm's already excellent warm checkpoint. Starts 1 and 2 retain
+their difficult warm points (`0.4060` and `0.7368`).
+
+The exporter verifies source plan
+`3f9c8d1286131dc3ae57c6eda8c0d0e3d61f9ae4a17e02edd8b26b95845a250c`,
+original input identity, result/backend hashes, original training-problem
+identity, the warm search's starting vector, and agreement between its best
+vector and the saved independent check. All three sources are mandatory.
+The sealed portable handoff has content digest
+`796c2f2ac5a12ddeaf12d54e2a67541fca67d24c5060c9e1b54c5fa805aa3144`.
+
+Each pair receives exactly the same warm parameter vector and the same three
+training/domain-only restart vectors, generated using the original problem
+identity. Both independently recheck their shared warm vector before work:
+
+1. **`incumbent_first`:** continue the verified incumbent, then try the three
+   distinct starts if accuracy remains insufficient.
+2. **`restart_first`:** try those same three starts, then continue the best
+   independently verified restart. This preserves the M23 allocation rule even
+   when that restart is worse than the retained incumbent; it never authorizes
+   replacing the incumbent with a worse result.
+
+Continuation starts a fresh bounded TRF optimizer at saved parameters. It does
+not restore an internal trust-region radius, Hessian approximation or optimizer
+iteration state. Both arms preserve exact terminal-output coefficient profiling
+where applicable, bounded joint fallback on numerical profiling failure,
+independent DOP853/Radau verification, selective tighter checks and conservative
+incumbent retention. There is no conditional-collocation work in M24.
+
+### Allowances and stopping
+
+Each arm has one continuation block of at most **60 started residual/Jacobian
+evaluations / 1,200 seconds**, and three restart blocks of at most **15 started
+evaluations / 400 seconds each**. Thus both have the same potential 105 attempts
+and 2,400 search seconds. A failed profiling stage's bounded joint fallback
+consumes that stage's remaining attempts/time, not a new allocation.
+
+These wall guards are more generous than M23's 600/200-second blocks. M24 is a
+within-experiment comparison from shared checkpoints, not a matched-budget
+claim against M23. Actual work can differ because a solver converges, fails,
+hits its guard, or achieves the early-stop certificate. Independent checks have
+180 seconds per attempt; final sensitivity has 180 seconds; retrospective
+scoring has its own recorded budget. Slurm reserves 90 minutes per one-CPU task
+including overhead, rather than forcing search to last 90 minutes.
+
+Search stops early only when independent numerical checks support both the
+`1e-12` mean training target and `1e-11` worst-trajectory target. Ordinary TRF
+step/gradient termination also ends a block. A small solver step by itself is
+not an accuracy or identifiability certificate. If the incumbent remains poor,
+the restart allowance stays available. This initial experiment deliberately
+tests one bounded continuation opportunity; it does not yet infer an optimal
+adaptive allocation rule from noisy progress curves.
+
+### Progress, uncertainty and accounting
+
+For every **completed** residual/Jacobian evaluation, save training NMSE,
+best-so-far training NMSE, elapsed time, parameter-vector hash, active outer
+bounds, and the projected gradient of the unamplified mean squared residual
+in scaled outer optimizer coordinates. Bound activity uses a relative `1e-8`
+proximity tolerance. These records include rejected optimizer trial points;
+they must not be described as accepted iterations. Profiled inner coefficients
+are excluded from the outer gradient/bound diagnostic.
+
+Started calls, completed calls, stop reasons and incomplete accounting are
+distinct. A timeout inside integration can increase the first count without
+increasing the second. The summary includes first/best/last evaluation details
+and the final five best-so-far losses for each search stage. These are numerical
+diagnostics, not calibrated confidence levels.
+If an interruption prevents complete accounting, aggregate call counts are
+`null` with an explicit incomplete flag, rather than zero. If the imported warm
+vector cannot be independently reverified on the current worker, the task keeps
+that vector and reports `retained_unverified` without spending its search budget
+or promoting a restart against an unavailable comparison.
+
+The existing fitting assessment and full joint sensitivity, including shared
+hidden initials, remain outputs. Warm computation is reported **once per
+original seed**, separately from new per-arm search, verification, sensitivity
+and retrospective scoring. Interrupted stage allowances are charged without
+reset; completed operations and final tasks resume by exact identity. An
+unverified resumed operation cannot erase a verified incumbent. Validation and
+ground-truth coefficient errors enter only after the fitting backend is sealed.
+
+### Delta execution
+
+The portable archive is `transfers/phase-c-fitting-m24.tar.gz`. It includes the
+sealed handoff, configuration and source snapshot, with `SOURCE_COMMIT` and
+`SHA256SUMS`. Generated inputs, results and source API artifacts are not committed.
+No prior M23 directory is required on the worker after this archive is unpacked.
+
+After uploading that archive to `/work/hdd/bibo/yxiao2/phase_c`:
+
+```bash
+cd /work/hdd/bibo/yxiao2/phase_c
+tar -xzf phase-c-fitting-m24.tar.gz
+bash phase-c-fitting-m24/scripts/hpc/submit_phase_c_incumbent_continuation_delta.sh
+```
+
+This creates `/work/hdd/bibo/yxiao2/phase_c/fitting-incumbent-v1`, with a CPU
+preflight, six CPU fitting tasks (three concurrent by default), and a dependent
+report. It uses existing Delta Python/CasADi environments, no GPU or LLM calls.
+`AF_CONCURRENCY` overrides the array throttle; it does not change account limits.
+
+```bash
+bash /work/hdd/bibo/yxiao2/phase_c/phase-c-fitting-m24/scripts/hpc/inspect_phase_c_incumbent_continuation_delta.sh
+```
+
+Inspection reports completion and produces a review archive with source
+provenance, results, progress and logs. A repeated submission reuses confirmed
+job IDs; an uncertain scheduler reply requires reconciliation, not resubmission.
+
+Local qualification covers shared vector identity, identical restart vectors,
+early stopping, incumbent protection, interruption charging, completed-call
+telemetry, frozen-source rejection, evaluator separation and idempotent CPU
+submission. A small real nonlinear smoke exercises profiling, independent
+rollouts and exact finished-task resume. Full alien-device fitting remains a
+Delta experiment; no empirical improvement on that benchmark is claimed yet.
+
+Qualification on 2026-10-09: the full repository suite passed 4,394 tests with
+eight Torch-dependent skips. After final verification-failure/count-accounting
+guards, all 42 affected tests passed again. The final nonlinear smoke reached
+training NMSE `5.083e-13` with incumbent-first (27 completed calls) and
+`1.363e-11` with restart-first (127 completed of 128 started calls); both resumed
+identically. The smoke uses small test-only budgets, not the benchmark budgets
+above, and is a wiring check rather than comparative research evidence.
+Changed-file Ruff, shell syntax and whitespace checks passed. Whole-repository
+Ruff retains 37 pre-existing findings confined to `analysis/claude`; those
+unrelated files were left untouched.

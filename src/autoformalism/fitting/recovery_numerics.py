@@ -9,6 +9,7 @@ from autoformalism.fitting.affine_propagation import (
     numerically_verified,
     verify_outputs,
 )
+from autoformalism.fitting.public_fitting import content_sha256
 
 
 class DomainViolation(ValueError):
@@ -105,19 +106,36 @@ def check_point(oracle, parameters, deadline, checkpoint, *, tight=False):
 
 
 def search(
-    oracle, start, deadline, checkpoint, *, calls, target, profile=None, acceptable=None
+    oracle,
+    start,
+    deadline,
+    checkpoint,
+    *,
+    calls,
+    target,
+    profile=None,
+    acceptable=None,
+    telemetry=False,
 ):
-    """Joint or exact projected TRF, charged identically by complete residual calls."""
+    """Joint or projected TRF; charge started attempts, distinguish completed calls."""
     anchor = oracle.vector(start)
     free = list(range(len(anchor))) if profile is None else list(profile.outer)
     units = oracle.units[free]
     count, best, cached, domain_events, projection = 0, None, None, [], None
+    begun, trace = monotonic(), []
 
     class Reached(Exception):
         pass
 
     def save():
-        checkpoint({"calls": count, "best": best, "domain_events": domain_events})
+        checkpoint(
+            {"calls": count, "best": best, "domain_events": domain_events}
+            | (
+                {"completed_calls": len(trace), "evaluations": trace}
+                if telemetry
+                else {}
+            )
+        )
 
     def evaluate(q):
         nonlocal count, best, cached, projection
@@ -146,6 +164,32 @@ def search(
             raise ValueError("nonfinite fitted residual or derivative")
         if best is None or value < best["training_nmse"]:
             best = {"parameters": oracle.parameters(vector), "training_nmse": value}
+        if telemetry:
+            # Gradient of unamplified mean squared residual in scaled outer
+            # coordinates. Trial evaluations are not accepted optimizer iterates.
+            gradient = 2 * (j * units).T @ r / len(r)
+            tolerance = 1e-8 * np.maximum(1, np.abs(vector[free]))
+            lower_active = vector[free] - oracle.lower[free] <= tolerance
+            upper_active = oracle.upper[free] - vector[free] <= tolerance
+            projected = gradient.copy()
+            projected[
+                (lower_active & (gradient > 0)) | (upper_active & (gradient < 0))
+            ] = 0
+            trace.append(
+                {
+                    "attempt": count,
+                    "elapsed_seconds": monotonic() - begun,
+                    "training_nmse": value,
+                    "best_training_nmse": best["training_nmse"],
+                    "projected_gradient_inf": float(np.max(np.abs(projected))),
+                    "active_outer_bounds": {
+                        oracle.names[i]: "lower" if lower_active[k] else "upper"
+                        for k, i in enumerate(free)
+                        if lower_active[k] or upper_active[k]
+                    },
+                    "parameters_sha256": content_sha256(oracle.parameters(vector)),
+                }
+            )
         save()
         cached = (q.copy(), r, j * units)
         if value <= target and (acceptable is None or acceptable(r)):
@@ -184,6 +228,7 @@ def search(
         **detail,
         "domain_events": domain_events,
         "projection": projection,
+        **({"completed_calls": len(trace), "evaluations": trace} if telemetry else {}),
     }
 
 

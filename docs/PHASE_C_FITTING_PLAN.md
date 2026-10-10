@@ -884,4 +884,26 @@ spending all remaining effort on worse restarts, and compare policies from one
 shared sealed warm checkpoint per start. Track completed evaluations as well as
 wall time: M23 start-0 warm stages stop at 33 versus 35 started evaluations and
 retain very different accuracies despite identical algorithms. This follow-up
-is proposed, not implemented; production fitting remains unchanged.
+was subsequently approved and implemented as M24 below; production fitting
+remains unchanged.
+
+## M24 — incumbent continuation from shared warm checkpoints
+
+The `phase-c-incumbent-continuation-1` diagnostic compares incumbent-first
+continuation with M23's restart-first allocation, using exactly one sealed
+M23 `best_rollout` warm checkpoint per original seed for both policies. All
+three seeds and identical domain-only restart vectors are retained. The fitter
+still uses the strongest applicable exact rollout kernel, independent numerical
+verification, conservative retention and final joint sensitivity. It never
+receives validation or reference coefficient values.
+
+Each arm has a 60-attempt/1,200-second continuation block and three
+15-attempt/400-second restart blocks, stopping on certified training accuracy
+or its numerical/compute limits. Progress records separate started and completed
+evaluations and include active outer bounds and scaled projected gradients.
+Historical warm cost is separate from new computation. Continuation restores
+parameters, not optimizer internal state. The protocol, six-task Delta commands
+and limitations are recorded in
+[PHASE_C_FITTING_ALLOCATION.md](PHASE_C_FITTING_ALLOCATION.md#m24-implementation-shared-warm-incumbent-continuation).
+This is an opt-in experiment, not a production-default change or a claim that
+all poor starts can be recovered.

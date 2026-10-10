@@ -66,16 +66,36 @@ class ComparisonPolicy(StrictSchema):
 
 
 def run(
-    problem: checks.TrainingProblem, policy: ComparisonPolicy, method: str, folder: Path
+    problem: checks.TrainingProblem,
+    policy: ComparisonPolicy,
+    method: str,
+    folder: Path,
+    *,
+    shared_warm: dict[str, float] | None = None,
+    continuation_order: Literal["incumbent_first", "restart_first"] | None = None,
 ):
     """One training-only strategy; evaluator data cannot enter this interface."""
     if method not in METHODS:
         raise ValueError("unknown nonlinear comparison method")
+    if (shared_warm is None) != (continuation_order is None) or (
+        continuation_order is not None
+        and (
+            continuation_order not in {"incumbent_first", "restart_first"}
+            or method != METHODS[0]
+            or policy.allocation != "measured"
+        )
+    ):
+        raise ValueError("shared warm continuation requires a measured rollout policy")
     problem_sha = public.content_sha256(problem.model_dump(mode="json"))
     identity = {
         "problem_sha256": problem_sha,
         "method": method,
         "policy": policy.model_dump(mode="json"),
+        **(
+            {"shared_warm": shared_warm, "continuation_order": continuation_order}
+            if shared_warm is not None
+            else {}
+        ),
     }
     finished = folder / "finished.json"
     if finished.exists():
@@ -85,6 +105,8 @@ def run(
         return result
     begun, cpu = monotonic(), process_time()
     oracle, profile, route = rollout.build(problem)
+    if shared_warm is not None:
+        oracle.vector(shared_warm)
     setup = folder / "setup"
     setup.mkdir(parents=True, exist_ok=True)
     seal(
@@ -229,6 +251,7 @@ def run(
                 profile=use_profile,
                 acceptable=lambda r: max(rollout.trajectory_losses(oracle, r))
                 <= policy.trajectory_nmse,
+                **({"telemetry": True} if shared_warm is not None else {}),
             )
 
         record = operation(
@@ -272,8 +295,12 @@ def run(
                 best = other["best"]
         return inspect(name + "/check", best["parameters"]) if best else None
 
-    before = inspect("incumbent", problem.incumbent)
-    if not reached(selected):
+    before = (
+        inspect("incumbent", problem.incumbent)
+        if shared_warm is None
+        else inspect("shared-warm/check", shared_warm)
+    )
+    if shared_warm is None and not reached(selected):
         stage(
             "warm",
             problem.incumbent,
@@ -282,18 +309,35 @@ def run(
             conditional=not measured,
         )
     after_warm = selected
+    incumbent_continuation = (
+        continuation_order == "incumbent_first"
+        and selected is not None
+        and not reached(selected)
+    )
+    if incumbent_continuation:
+        stage(
+            "incumbent-continuation",
+            selected["parameters"],
+            policy.continuation_seconds,
+            policy.continuation_calls,
+            conditional=False,
+        )
+    after_incumbent_continuation = selected
     starts = numerical.diverse_starts(
         oracle, problem, policy.portfolio_size, int(problem_sha[:8], 16)
     )
     portfolio = {
         "starts": starts,
-        "run": not reached(selected),
+        "run": not reached(selected)
+        and (shared_warm is None or numerical.usable(selected)),
         "source": "training_and_declared_domains_only",
     }
     seal(folder / "portfolio.json", portfolio)
     trials = []
     if portfolio["run"]:
         for i, start in enumerate(starts):
+            if shared_warm is not None and reached(selected):
+                break
             point = stage(f"trial-{i}", start, policy.trial_seconds, policy.trial_calls)
             if numerical.usable(point):
                 trials.append(point)
@@ -302,7 +346,11 @@ def run(
         if trials
         else None
     )
-    continuation = not reached(selected) and winner is not None
+    continuation = (
+        continuation_order != "incumbent_first"
+        and not reached(selected)
+        and winner is not None
+    )
     seal(folder / "continuation-decision.json", {"run": continuation, "winner": winner})
     if continuation:
         # Keep the incumbent but explore the most promising distinct trial basin.
@@ -354,6 +402,19 @@ def run(
     def total(field):
         return sum(r[field] or 0 for r in operations)
 
+    search_operations = [
+        o
+        for o in operations
+        if o["operation"].endswith(("/rollout", "/joint-fallback"))
+    ]
+    search_accounted = all(
+        o["accounting_complete"]
+        and o.get("value") is not None
+        and isinstance(o["value"].get("calls"), int)
+        and isinstance(o["value"].get("completed_calls"), int)
+        for o in search_operations
+    )
+
     result = {
         "identity": identity,
         "status": "complete" if selected else "retained_unverified",
@@ -363,13 +424,25 @@ def run(
         "selected": selected,
         "retained_parameters": selected["parameters"]
         if selected
+        else shared_warm
+        if shared_warm is not None
         else problem.incumbent,
         "assessment": assessment,
         "trajectory_assessment": trajectory_assessment,
         "operations": operations,
         "setup": setups,
         "portfolio_triggered": portfolio["run"],
-        "trial_count": len(starts) if portfolio["run"] else 0,
+        "trial_count": (
+            sum(
+                o["operation"].startswith("trial-")
+                and o["operation"].endswith("/rollout")
+                for o in operations
+            )
+            if shared_warm is not None
+            else len(starts)
+            if portfolio["run"]
+            else 0
+        ),
         "verified_trial_count": len(trials),
         "continuation_run": continuation,
         "additional_wall_seconds": total("wall_seconds")
@@ -382,6 +455,25 @@ def run(
         "rollout_calls_observed": total("calls"),
         "validation_used_for_selection": False,
         "reference_values_used": False,
+        **(
+            {
+                "after_incumbent_continuation": after_incumbent_continuation,
+                "incumbent_continuation_run": incumbent_continuation,
+                "search_calls_started": sum(
+                    o["value"]["calls"] for o in search_operations
+                )
+                if search_accounted
+                else None,
+                "search_calls_completed": sum(
+                    o["value"]["completed_calls"] for o in search_operations
+                )
+                if search_accounted
+                else None,
+                "search_call_accounting_complete": search_accounted,
+            }
+            if shared_warm is not None
+            else {}
+        ),
         **({"precision_decisions": precision_decisions} if measured else {}),
     }
     seal(finished, result)
