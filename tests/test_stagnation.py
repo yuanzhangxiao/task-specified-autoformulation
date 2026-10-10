@@ -1,6 +1,7 @@
 """M25 derivative gates, scaling instrumentation, frozen inputs and CPU submission."""
 
 from copy import deepcopy
+from pathlib import Path
 from time import monotonic
 
 import numpy as np
@@ -27,6 +28,36 @@ class Profile:
         return vector, vector - [2, 3], np.eye(2), {"active_mask": [0]}
 
 
+def refined_policy():
+    return campaign.Policy.model_validate_json(
+        (Path(__file__).resolve().parents[1] / "configs/phase_c_stagnation_v2.json")
+        .read_text()
+    )
+
+
+def test_refined_steps_resolve_truncation_without_accepting_wrong_derivatives():
+    class Curved(Profile):
+        def evaluate(self, vector, end):
+            phase = 4000 * (vector[0] - 1) + 0.2
+            residual = np.array([np.sin(phase), vector[1] - 3])
+            jacobian = np.diag([4000 * np.cos(phase), 1])
+            return vector, residual, jacobian, {"active_mask": [0]}
+
+    class Wrong(Curved):
+        def evaluate(self, vector, end):
+            v, r, j, info = super().evaluate(vector, end)
+            return v, r, 1.01 * j, info
+
+    oracle, parameters = QuadraticOracle(), {"a": 1.0, "initial": 0.0}
+    end, save = monotonic() + 10, lambda _: None
+    coarse = audit(oracle, Curved(), parameters, AuditPolicy(), end, save)
+    fine = audit(oracle, Curved(), parameters, refined_policy().audit, end, save)
+    wrong = audit(oracle, Wrong(), parameters, refined_policy().audit, end, save)
+    assert coarse["status"] == "failed"
+    assert fine["status"] == "passed" and fine["calls"] == 25
+    assert wrong["status"] == "failed"
+
+
 def test_derivative_audit_checks_four_directions_three_scales():
     progress = []
     result = audit(
@@ -43,7 +74,8 @@ def test_derivative_audit_checks_four_directions_three_scales():
     assert progress[-1]["completed_calls"] == 25
 
 
-def test_wrong_derivative_fails_and_active_transitions_are_inconclusive():
+@pytest.mark.parametrize("policy", [AuditPolicy(), refined_policy().audit])
+def test_wrong_derivative_fails_and_active_transitions_are_inconclusive(policy):
     class Wrong(Profile):
         def evaluate(self, vector, end):
             v, r, j, info = super().evaluate(vector, end)
@@ -54,7 +86,7 @@ def test_wrong_derivative_fails_and_active_transitions_are_inconclusive():
             v, r, j, _ = super().evaluate(vector, end)
             return v, r, j, {"active_mask": [int(vector[0] > 1)]}
 
-    args = ({"a": 1, "initial": 0}, AuditPolicy(), monotonic() + 10, lambda _: None)
+    args = ({"a": 1, "initial": 0}, policy, monotonic() + 10, lambda _: None)
     assert audit(QuadraticOracle(), Wrong(), *args)["status"] == "failed"
     result = audit(QuadraticOracle(), Transition(), *args)
     assert result["status"] == "inconclusive"
@@ -67,7 +99,7 @@ def test_wrong_derivative_fails_and_active_transitions_are_inconclusive():
         QuadraticOracle(),
         Profile(),
         {"a": 0.01, "initial": 0},
-        AuditPolicy(),
+        policy,
         monotonic() + 10,
         lambda _: None,
     )
@@ -278,6 +310,23 @@ def test_source_tamper_and_endpoint_substitution_rejected(bundle_path):
             p["backend_sha256"] = public.content_sha256(p["backend"])
         with pytest.raises(ValueError):
             campaign.validate_inputs(bad)
+
+
+def test_refined_campaign_cannot_overwrite_coarse_results(bundle_path, tmp_path):
+    original = tmp_path / "original"
+    campaign.prepare(original, bundle_path, campaign.Policy())
+    before = read_seal(original / "plan.json")
+    with pytest.raises(ValueError, match="sealed artifact differs"):
+        campaign.prepare(original, bundle_path, refined_policy())
+    assert read_seal(original / "plan.json") == before
+    fresh = tmp_path / "refined"
+    campaign.prepare(fresh, bundle_path, refined_policy())
+    after, _ = campaign.verify(fresh)
+    assert before["inputs_sha256"] == after["inputs_sha256"]
+    assert before["tasks"] == after["tasks"]
+    old_policy, new_policy = deepcopy(before["policy"]), deepcopy(after["policy"])
+    assert old_policy["audit"].pop("steps") != new_policy["audit"].pop("steps")
+    assert old_policy == new_policy
 
 
 def test_export_freezes_predeclared_points(bundle_path, tmp_path, monkeypatch):

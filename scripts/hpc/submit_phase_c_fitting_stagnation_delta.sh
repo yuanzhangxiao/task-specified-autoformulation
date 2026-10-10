@@ -10,5 +10,5 @@ AF_STAGNATION_ROOT=${AF_STAGNATION_ROOT:-/work/hdd/bibo/yxiao2/phase_c/fitting-s
 cd "$AF_CODE"
 [[ ! -f SHA256SUMS ]] || sha256sum -c SHA256SUMS --quiet
 "$AF_PYTHON" -c 'import casadi, scipy; print("CasADi", casadi.__version__, "SciPy", scipy.__version__)'
-"$AF_PYTHON" scripts/submit_phase_c_fitting_stagnation.py --root "$AF_STAGNATION_ROOT" --inputs "${AF_STAGNATION_INPUTS:-$AF_CODE/stagnation-inputs.json}" --config "$AF_CODE/configs/phase_c_stagnation_v1.json" --account "${AF_ACCOUNT:-bibo-delta-cpu}" --concurrency "${AF_CONCURRENCY:-3}"
+"$AF_PYTHON" scripts/submit_phase_c_fitting_stagnation.py --root "$AF_STAGNATION_ROOT" --inputs "${AF_STAGNATION_INPUTS:-$AF_CODE/stagnation-inputs.json}" --config "${AF_STAGNATION_CONFIG:-$AF_CODE/configs/phase_c_stagnation_v1.json}" --account "${AF_ACCOUNT:-bibo-delta-cpu}" --concurrency "${AF_CONCURRENCY:-3}"
 printf '\nResults: %s/summary.json\n' "$AF_STAGNATION_ROOT"

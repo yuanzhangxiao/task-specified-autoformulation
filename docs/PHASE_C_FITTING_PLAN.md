@@ -956,3 +956,13 @@ at the finest step but lack two-scale confirmation. Total audit overhead is
 18.74 worker-minutes. Next: refine the perturbations to `1e-5, 1e-6, 1e-7` from
 the same frozen points, preserving tolerances and budgets, before changing the
 fitter. See the [detailed review](PHASE_C_FITTING_STAGNATION.md#completed-m25-review--review-20261010-191931).
+
+The smaller-perturbation follow-up is now approved and implemented as the
+separate `fitting-stagnation-v2` campaign. Its configuration changes only the
+three finite-difference step sizes; existing runtime, thresholds, frozen source
+points and continuation budgets are reused. A new launcher chooses the fresh
+root, preserving v1 defaults and results. The
+[M25 refined-run commands](PHASE_C_FITTING_STAGNATION.md#approved-follow-up-smaller-perturbations-separate-v2-campaign)
+include the portable bundle and explicit result root. Focused tests and a small
+nonlinear ODE smoke pass; difficult-endpoint derivative agreement and scaling
+benefit remain unmeasured until the Delta follow-up completes.

@@ -254,3 +254,51 @@ a sensible later improvement; it has not been implemented by this review.
 
 No benchmark fitting was rerun locally, and no production default, model
 structure, dataset or numerical tolerance was changed during this review.
+
+## Approved follow-up: smaller perturbations, separate v2 campaign
+
+The user approved this follow-up on 2026-10-10. It uses the existing audit and
+fitting implementations, with `configs/phase_c_stagnation_v2.json` changing only
+`audit.steps` to `[1e-5, 1e-6, 1e-7]`. This is a fixed finer sequence, not a new
+adaptive algorithm. The acceptance tolerance, two-scale agreement requirement,
+active-set checks, audit allowance and all fitting/verification budgets stay
+unchanged. There are still three saved endpoints, at most 25 audit evaluations
+each, and two scaling arms per passing endpoint. Source inputs retain digest
+`68a64d3d56cf31aa2a65008c2a3e851b88772f57f1c09ae485e5d13f698ad759`.
+
+The original launcher defaults to v1 as before. The new refined launcher selects
+the v2 configuration and a fresh `fitting-stagnation-v2` root. The existing
+immutable plan rejects attempts to reuse a v1 root with the new configuration.
+The protocol remains `phase-c-fitting-stagnation-1`; the complete policy and
+plan digest distinguish the campaigns. No existing results or models are edited.
+
+Local qualification: 31 focused tests pass, including a curved residual whose
+correct derivative fails the coarse check and passes the refined check, while
+a deliberately incorrect derivative still fails. Both step sequences preserve
+active-set/bound ambiguity. A separate two-state nonlinear ODE smoke passes all
+four directions in 25 evaluations at the refined steps. Packaged preflight also
+checks source-preserving, separate-root preparation and deterministic resume.
+No difficult benchmark audit or fit is run locally. Smaller steps can eventually
+hit integration or roundoff error, so the follow-up may still report a blocked
+audit; that outcome must be inspected rather than bypassed.
+
+Upload `transfers/phase-c-fitting-m25-refined.tar.gz` to
+`/work/hdd/bibo/yxiao2/phase_c`, then run on Delta:
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+cd /work/hdd/bibo/yxiao2/phase_c
+tar -xzf phase-c-fitting-m25-refined.tar.gz
+bash phase-c-fitting-m25-refined/scripts/hpc/submit_phase_c_fitting_stagnation_refined_delta.sh
+BASH
+```
+
+This submits three CPU tasks with the previous maximum concurrency and wall
+reservations, no GPUs or LLM calls. The self-contained bundle carries the same
+frozen input handoff; no older campaign directory is needed. Inspect and collect:
+
+```bash
+bash /work/hdd/bibo/yxiao2/phase_c/phase-c-fitting-m25-refined/scripts/hpc/inspect_phase_c_fitting_stagnation_delta.sh \
+  /work/hdd/bibo/yxiao2/phase_c/fitting-stagnation-v2
+```
