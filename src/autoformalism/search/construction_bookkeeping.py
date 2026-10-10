@@ -9,6 +9,7 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import shared_process_contract, signed_processes
 from autoformalism.search.construction_checklist import POLICY as CHECKLIST_POLICY
+from autoformalism.search.construction_deferred import POLICY as DEFERRED_POLICY
 from autoformalism.search.construction_stage_checks import POLICY as STAGE_POLICY
 
 Policy = Literal[
@@ -19,6 +20,7 @@ Policy = Literal[
     "minimal-clarity-1",
     "minimal-variable-checklist-1",
     "minimal-stage-checks-1",
+    "minimal-deferred-interaction-1",
 ]
 POLICY = "current-bookkeeping-1"
 FEEDBACK_POLICY = "current-bookkeeping-2"
@@ -32,6 +34,7 @@ POLICIES = (
     MINIMAL_POLICY,
     CHECKLIST_POLICY,
     STAGE_POLICY,
+    DEFERRED_POLICY,
 )
 
 EDITING = """Only current_draft.declarations contains editable records. The other
@@ -56,7 +59,7 @@ def validate_policy(policy: str, prompt_family: str | None = None) -> None:
     """Do not silently apply current-prompt fixes to the matched wording study."""
     if policy not in POLICIES:
         raise ValueError("unknown construction bookkeeping policy")
-    if policy in {MINIMAL_POLICY, CHECKLIST_POLICY, STAGE_POLICY}:
+    if policy in {MINIMAL_POLICY, CHECKLIST_POLICY, STAGE_POLICY, DEFERRED_POLICY}:
         if prompt_family != "minimal":
             raise ValueError("minimal clarity requires minimal prompts")
         return

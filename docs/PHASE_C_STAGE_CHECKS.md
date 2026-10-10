@@ -1,5 +1,47 @@
 # Minimal shared-process stage checks and topology identifiers
 
+## Review revision: defer function ambiguity (2026-10-09)
+
+The opt-in `minimal-deferred-interaction-1` runner policy retains stage checks
+but removes same-dependency overlap questions from topology admission. Exact
+repeated references to a named process still use the existing normalization;
+invalid receiver lists, unavailable sources and encoded pathway failures still
+block. No law is merged, deleted or scientifically reassigned automatically.
+Historical policies remain available and frozen campaigns must not be resumed
+under the new policy.
+
+Every new-policy request displays `requirement_status`: variable declarations,
+mechanism paths, target composition, reviewed graph predicates, and explicit
+unassessed public-science scope. Missing public-prose coverage is not labeled
+passed. This is a view of existing checks, not a new disposal/baseline predicate
+or a claim to have formalized every public requirement.
+
+`interaction_review_handoff` retains same-dependency candidates and syntactic
+negative-definition/negative-consumer chains. It asks the future interaction
+review to compare full laws and clarify positive-rate versus signed-flux meaning.
+This runner still stops before functions; the handoff is saved, not executed.
+No destructive-repair guards have been added pending this simpler comparison.
+
+The saved eight-case `8958d41` run contains three repairs that lost previously
+passing graph predicates. Two followed only overlap questions (T2-hard and alien
+device); the coupled basin followed a single-receiver transfer error. Both
+overlap-only predecessors passed the other checks. This is a counterfactual
+admission audit, not a prospective result or recovered scientific model.
+
+Regenerate the marked HTML review without model calls:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/review_deferred_topology_prompts.py \
+  --source output/stage-checks-inspection-1f64adb0 \
+  --output output/minimal-prompts-review-20261009
+```
+
+`PROMPTS.html` compares actual saved requests with the new policy applied to
+those exact predecessors. Later historical calls would not necessarily occur
+in a fresh run. `AUDIT.json` retains event/request identifiers and lost predicates;
+`PROMPTS.json` retains the old and proposed request packets. Generated evidence
+is not committed. Review precedes any fresh cluster submission.
+
 The opt-in `minimal-stage-checks-1` policy extends `minimal-variable-checklist-1`.
 It preserves the short stage prompts and adds concrete editing examples and local
 shared-process completion checks. Earlier studies require their original pinned

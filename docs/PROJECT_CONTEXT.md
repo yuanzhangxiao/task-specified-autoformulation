@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `minimal-deferred-interaction-1` constructor defers matching-driver
+overlap questions to a saved interaction-review handoff and displays per-request
+requirement statuses with explicit scientific coverage limits. Existing structural
+checks remain. In the saved eight-case stage-check run, two of three repairs that
+lost required graph predicates followed overlap-only feedback. The marked prompt
+HTML is for review; no fresh run or new deletion guard is included. See
+`PHASE_C_STAGE_CHECKS.md` for the audit and review command.
+
 `PHASE_C_STAGE_CHECKS.md` defines opt-in `minimal-stage-checks-1`: exact topology
 identifier examples, supplied-receiver guidance and bounded local shared-process
 completion checks using existing final rules. Separate reports retain first,

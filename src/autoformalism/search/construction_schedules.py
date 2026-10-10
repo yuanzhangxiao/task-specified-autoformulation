@@ -447,18 +447,27 @@ def run(
     from autoformalism.search import construction_prompts as prompts
 
     bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
-    local_stage_checks = bookkeeping_policy == stage_checks.POLICY
-    variable_checks = bookkeeping_policy in {checklist.POLICY, stage_checks.POLICY}
+    from autoformalism.search import construction_deferred as deferred
+
+    defer_interaction = bookkeeping_policy == deferred.POLICY
+    local_stage_checks = bookkeeping_policy in {stage_checks.POLICY, deferred.POLICY}
+    variable_checks = bookkeeping_policy in {
+        checklist.POLICY,
+        stage_checks.POLICY,
+        deferred.POLICY,
+    }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
         checklist.POLICY,
         stage_checks.POLICY,
+        deferred.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
         bookkeeping.MINIMAL_POLICY,
         checklist.POLICY,
         stage_checks.POLICY,
+        deferred.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -595,6 +604,10 @@ def run(
                 stage_checks.SHARED_INSTRUCTION
                 if stage == "shared_laws"
                 else stage_checks.EMPTY_ORDINARY
+            )
+        if defer_interaction:
+            payload = deferred.update_payload(
+                payload, brief, context, target_definitions, draft, graph_contract
             )
         record = client.call(
             system=system,
@@ -741,14 +754,22 @@ def run(
 
     def assess_draft() -> dict:
         """Recheck declarations after later edits as well as on stage completion."""
-        check = ledger.assess(
-            brief,
-            context,
-            target_definitions,
-            draft,
-            graph_contract=graph_contract,
-            clarify_overlaps=True,
-        )
+        if defer_interaction:
+            check = deferred.assessment(
+                brief, context, target_definitions, draft, graph_contract
+            )
+            check["requirement_status"] = deferred.requirement_status(
+                brief, draft, target_definitions, graph_contract, "final", check
+            )
+        else:
+            check = ledger.assess(
+                brief,
+                context,
+                target_definitions,
+                draft,
+                graph_contract=graph_contract,
+                clarify_overlaps=True,
+            )
         if variable_checks:
             values = checklist.variable_checklist(
                 brief, draft, target_definitions, graph_contract
