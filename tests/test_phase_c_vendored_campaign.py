@@ -30,6 +30,7 @@ from autoformalism.rebuttal.phase_c_vendored_campaign import (
     PhaseCVendoredCampaignPlan,
     check_served_model,
     endpoint_environment,
+    llm_sr_recovery_settings,
     llm_sr_search_settings,
     llm_sr_transport_settings,
     load_phase_c_vendored_plan,
@@ -365,6 +366,17 @@ PAPER = {
     "num_evaluators": 4,
     "rationale": "The paper's values where the released code differs.",
 }
+IN_TIME = {
+    "source": "pysr_regression_table",
+    "row_order": "time",
+    "rationale": "PySR's table, each trajectory's rows in time order.",
+}
+PROGRAMS = {
+    "runner": "allowlisted_subprocess",
+    "rollout": "heun_on_observation_grid",
+    "look_ahead": "recorded",
+    "rationale": "A pick that reads the history is run as the program it is.",
+}
 
 
 def test_the_papers_settings_are_frozen_reported_and_read(tmp_path):
@@ -397,8 +409,24 @@ def test_without_the_papers_settings_their_code_keeps_its_own(tmp_path):
         ("llm_sr", {"derivative_provenance": "estimated_numpy_gradient"},
          "must be 'upstream_findiff_fourth_order'"),
         ("llm_sr", {"regression_table": {**TABLE, "row_order": "time"},
+                    "program_rollout": PROGRAMS,
                     "derivative_provenance": "estimated_numpy_gradient"},
-         "shuffled"),
+         "exactly when the rows are shuffled"),
+        ("llm_sr", {"regression_table": {**IN_TIME, "row_order": "shuffled"},
+                    "derivative_provenance": "estimated_numpy_gradient"},
+         "exactly when the rows are shuffled"),
+        ("llm_sr", {"regression_table": IN_TIME,
+                    "derivative_provenance": "estimated_numpy_gradient"},
+         "declared together"),
+        ("llm_sr", {"regression_table": TABLE, "program_rollout": PROGRAMS,
+                    "derivative_provenance": "estimated_numpy_gradient"},
+         "declared together"),
+        ("llm_sr", {"program_rollout": PROGRAMS}, "declared together"),
+        ("llm_sr", {"regression_table": IN_TIME,
+                    "program_rollout": {**PROGRAMS, "look_ahead": "refused"},
+                    "derivative_provenance": "estimated_numpy_gradient"},
+         "look_ahead"),
+        ("llm_ode", {"program_rollout": PROGRAMS}, "LLM-SR only"),
         ("llm_sr", {"paper_settings": {**PAPER, "temperature": 0.0}},
          "greater than 0"),
         ("llm_ode", {"regression_table": TABLE,
@@ -443,6 +471,94 @@ def test_llm_sr_given_pysrs_table_searches_its_rows_in_a_seeded_order(tmp_path):
     # The second seed's task searches the very same table, as PySR's seeds do.
     sr.run_phase_c(root, 1, endpoint="vm_local_vllm", search=_complete(calls))
     assert np.array_equal(calls[1]["values"], arguments["values"])
+
+
+def test_llm_sr_given_pysrs_table_in_time_order_searches_its_rows_as_built(tmp_path):
+    """Each trajectory's rows in time order, one after another, as PySR's table."""
+    from autoformalism.baselines.core import numeric_feature_names, regression_table
+
+    _, root, sealed = _frozen(
+        tmp_path,
+        regression_table=IN_TIME,
+        program_rollout=PROGRAMS,
+        derivative_provenance="estimated_numpy_gradient",
+    )
+    notes = sealed["reporting_qualifications"]
+    assert any(note.endswith("each trajectory's rows in time order") for note in notes)
+    assert any(
+        note.startswith("a selected program that reads the history") for note in notes
+    )
+    assert llm_sr_recovery_settings(sealed["plan"]) == {"program_rollout": True}
+    calls: list = []
+    sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_complete(calls))
+    (arguments,) = calls
+    train, _ = arguments["development"]
+    names = numeric_feature_names(train, arguments["context"])
+    rows, labels, _ = regression_table(train, names, arguments["context"].targets)
+    assert np.array_equal(arguments["values"], rows)
+    assert np.array_equal(arguments["labels"], labels)
+    first = train.trajectories[0].targets["h_down"]
+    assert np.array_equal(arguments["values"][:31, 0], first)
+
+
+def test_without_a_program_rollout_a_plan_refuses_programs_as_before(tmp_path):
+    _, _, sealed = _frozen(tmp_path)
+    assert llm_sr_recovery_settings(sealed["plan"]) == {"program_rollout": False}
+    assert not any("program" in note for note in sealed["reporting_qualifications"])
+
+
+PROGRAM = {
+    "function": "def equation(h_down, inflow_up, params): ...",
+    "name": "equation",
+    "variables": ["h_down", "inflow_up", "inflow_down", "area_up", "area_down"],
+    "parameters": [0.5] + [1.0] * 9,
+    "equation_refusal": "a range over the rows: range(len(h_down))",
+    "look_ahead": {
+        "cuts": 3, "largest_relative_change": 0.25, "reads_later_rows": True
+    },
+}
+
+
+def _programs(calls: list) -> object:
+    def searcher(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {
+            "status": "complete",
+            "equations": None,
+            "programs": {"h_down": PROGRAM},
+            "execution": "llm_sr_program_grid_rollout",
+            "grid_step": 0.1,
+            "selected_samples": {"h_down": {"sample_order": 7, "llm_sr_score": -0.5}},
+            "development_rollout_error": 0.25,
+            "training_rollout_error": 0.125,
+            "accounting": {"search_seconds": 1.0},
+        }
+
+    return searcher
+
+
+def test_a_selected_program_is_sealed_with_its_coefficients_and_grid(tmp_path):
+    _, root, sealed = _frozen(
+        tmp_path,
+        regression_table=IN_TIME,
+        program_rollout=PROGRAMS,
+        derivative_provenance="estimated_numpy_gradient",
+    )
+    result = sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=_programs([]))
+    assert result["status"] == "complete"
+    assert result["programs"] == {"h_down": PROGRAM} and result["grid_step"] == 0.1
+    saved = json.loads((root / "results" / "0" / "native-selection.json").read_text())
+    selection = BaselineDevelopmentResult.model_validate(saved["selection"])
+    assert selection.equations == {}
+    assert selection.selection_payload == {
+        "execution": "llm_sr_program_grid_rollout",
+        "programs": {"h_down": PROGRAM},
+        "channels": sealed["rows"][0]["channels"],
+        "grid_step": 0.1,
+    }
+    assert selection.validation_normalized_mse == 0.25
+    summary = sr.report(root)
+    assert (summary["program_models"], summary["programs_reading_later_rows"]) == (1, 1)
 
 
 def test_without_the_table_llm_sr_searches_the_cell_arrays_in_time_order(tmp_path):
@@ -513,15 +629,19 @@ def test_the_full_llm_sr_plan_is_the_pilot_on_the_whole_roster():
     assert (smoke["status"], smoke["budget"]["declared"]) == ("frozen_before_calls", 8)
     scope = {"status", "budget", "scope_note", "cells", "repetitions"}
     assert {key for key in smoke if smoke[key] != pilot[key]} <= scope
-    # The full plan also declares the PySR table and the paper's settings.
+    # The full plan also declares the PySR table in time order, the program
+    # rollout that goes with it, and the paper's settings.
     declared = {
         "regression_table",
+        "program_rollout",
         "paper_settings",
         "derivative_provenance",
         "reasoning_model_adaptation",
     }
     assert {key for key in full if full[key] != pilot[key]} <= scope | declared
-    assert full["regression_table"]["row_order_seed"] == 0
+    assert full["regression_table"]["row_order"] == "time"
+    assert full["regression_table"]["row_order_seed"] is None
+    assert full["program_rollout"]["look_ahead"] == "recorded"
     assert full["derivative_provenance"] == "estimated_numpy_gradient"
     assert (
         full["paper_settings"]["temperature"],
@@ -539,14 +659,14 @@ def test_the_full_llm_sr_plan_is_the_pilot_on_the_whole_roster():
     assert cell["benchmark_id"] == "phase_c_dalla_man_t2_canonical_named_hard_rates_v1"
 
 
-def test_the_v4_smoke_is_the_full_plan_on_the_pilots_cell_and_t2_hard():
+def test_the_v5_smoke_is_the_full_plan_on_the_pilots_cell_and_t2_hard():
     configs = REPO / "configs"
 
     def load(name: str) -> dict:
         return load_phase_c_vendored_plan(configs / name).model_dump(mode="json")
 
     full = load("phase_c_llm_sr_hosted_120b_v1.json")
-    smoke = load("phase_c_llm_sr_smoke_v4.json")
+    smoke = load("phase_c_llm_sr_smoke_v5.json")
     scope = {"status", "budget", "scope_note", "cells", "repetitions"}
     assert {key for key in smoke if smoke[key] != full[key]} <= scope
     assert smoke["status"] == "frozen_before_calls"
@@ -557,6 +677,15 @@ def test_the_v4_smoke_is_the_full_plan_on_the_pilots_cell_and_t2_hard():
     ]
     assert all(cell in full["cells"] for cell in smoke["cells"])
     assert smoke["repetitions"] == [0]
+    # The v4 smoke stays as frozen: the same, but with the rows shuffled and
+    # programs that read the history refused. It never ran.
+    v4 = load("phase_c_llm_sr_smoke_v4.json")
+    assert {key for key in v4 if v4[key] != smoke[key]} == {
+        "budget", "regression_table", "program_rollout",
+    }
+    assert (v4["regression_table"]["row_order"], v4["program_rollout"]) == (
+        "shuffled", None,
+    )
 
 
 # --- running and resuming ----------------------------------------------------
@@ -1119,7 +1248,12 @@ def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):
     from scripts import phase_c_llm_sr as cli
 
     _, root, _ = _frozen(
-        tmp_path, reasoning_model_adaptation=ADAPTATION, paper_settings=PAPER
+        tmp_path,
+        reasoning_model_adaptation=ADAPTATION,
+        paper_settings=PAPER,
+        regression_table=IN_TIME,
+        program_rollout=PROGRAMS,
+        derivative_provenance="estimated_numpy_gradient",
     )
     seen: dict = {}
     monkeypatch.setenv("AF_LLM_SR_ROOT", str(tmp_path))
@@ -1138,6 +1272,7 @@ def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):
         seen["cluster_sampling_temperature_period"],
         seen["num_evaluators"],
     ) == (0.8, 10000, 4)
+    assert seen["program_rollout"] is True
 
 
 def test_the_llm_sr_cli_searches_one_target_when_asked(tmp_path, monkeypatch):

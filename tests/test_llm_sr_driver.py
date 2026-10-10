@@ -15,7 +15,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from autoformalism.data import DatasetSplit, SplitName, Trajectory
+from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal import llm_sr_driver as driver
+from autoformalism.rebuttal.llm_sr_programs import ProgramRolloutScore
 from autoformalism.rebuttal.llm_sr_shim import ShimAccounting, UpstreamEndpointError
 
 
@@ -556,3 +559,196 @@ def test_a_branch_on_a_coefficient_is_refitted_as_their_evaluator_runs_it(
     outcome = _run(search, directory=tmp_path / "branch")
     assert outcome["status"] == "complete"
     assert outcome["selected_samples"]["G"]["refitted_training_mse"] < 1e-10
+
+
+# --- a plan's program rollout: picks recovered by running them --------------
+
+EMA = (
+    "def equation(G, I, params):\n"
+    "    y = np.zeros_like(I)\n"
+    "    for t in range(1, len(I)):\n"
+    "        y[t] = params[0] * y[t - 1] + I[t]\n"
+    "    return params[1] * y - params[2] * G\n"
+)
+
+
+def _development(rows: int = 20) -> tuple[DatasetSplit, DatasetSplit]:
+    """Two training trajectories and one for validation, a minute apart."""
+
+    def trajectory(name: str, start: float) -> Trajectory:
+        time = np.arange(rows, dtype=float)
+        return Trajectory(
+            trajectory_id=name,
+            time=time,
+            targets={"G": start * np.exp(-0.1 * time)},
+            auxiliaries={},
+            external_inputs={"I": np.where(time >= 5, 1.0, 0.0)},
+            fixed_covariates={},
+            derivatives={},
+        )
+
+    return (
+        DatasetSplit(
+            SplitName.TRAIN, (trajectory("a", 1.0), trajectory("b", 2.0)), "t"
+        ),
+        DatasetSplit(SplitName.VALIDATION, (trajectory("c", 1.5),), "v"),
+    )
+
+
+def _running(monkeypatch, tmp_path: Path, best: str):
+    """A searcher with the plan's program rollout, over a fake checkout."""
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=best, score=-0.01)
+    monkeypatch.setattr(driver, "complete", lambda *a, **k: {"content": ["x"] * 4})
+    return driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m",
+        samples=20, program_rollout=True,
+    )
+
+
+def test_a_pick_that_reads_the_history_is_run_as_its_program(
+    monkeypatch, tmp_path: Path
+) -> None:
+    search = _running(monkeypatch, tmp_path, EMA)
+    outcome = _run(
+        search, directory=tmp_path / "ema", development=_development(),
+        context=ValidationContext(targets=("G",), external_inputs=("I",)),
+    )
+    assert outcome["status"] == "complete" and outcome["equations"] is None
+    assert outcome["execution"] == "llm_sr_program_grid_rollout"
+    assert outcome["grid_step"] == 1.0
+    (record,) = outcome["programs"].values()
+    assert record["function"] == EMA and len(record["parameters"]) == 10
+    assert record["variables"] == ["G", "I"]
+    # The reader's reason is kept: it is why the program is run.
+    assert "range over the rows" in record["equation_refusal"]
+    assert record["look_ahead"]["reads_later_rows"] is False
+    assert record["look_ahead"]["cuts"] == 3
+    # Rolled out on the grid, on validation and on training data.
+    assert outcome["development_rollout_error"] > 0.0
+    assert outcome["training_rollout_error"] > 0.0
+    selected = outcome["selected_samples"]["G"]
+    assert selected["llm_sr_score"] == -0.01
+    assert selected["refit_loss"] == pytest.approx(selected["refitted_training_mse"])
+
+
+def test_with_a_program_rollout_an_equation_still_goes_to_the_shared_evaluator(
+    monkeypatch, tmp_path: Path
+) -> None:
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    scored: list = []
+
+    def shared(equations, *args, **kwargs):
+        scored.append(equations)
+        return 0.25
+
+    outcome = _run(
+        search, directory=tmp_path / "linear", development=_development(),
+        score_rollout=shared,
+    )
+    assert outcome["status"] == "complete" and "programs" not in outcome
+    # Coefficients come from running their fit; the equation is read from it.
+    assert "-0.7" in outcome["equations"]["G"] or "-0.69" in outcome["equations"]["G"]
+    assert scored and outcome["development_rollout_error"] == 0.25
+    assert outcome["selected_samples"]["G"]["refit_loss"] < 1e-10
+
+
+def test_a_branch_that_hides_a_filter_is_run_as_the_program_their_fit_chose(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """In the pilot, `if alpha >= 1: copy the meal` guarded a filter.
+
+    Reading without running, the fit cannot enter the filter's branch and
+    settles on the copy, a different and worse model. Their fit runs the
+    program, enters the branch, and that is the model kept.
+    """
+    best = (
+        "def equation(G, I, params):\n"
+        "    alpha = 1.0 / max(params[0], 1e-6)\n"
+        "    if alpha >= 1.0:\n"
+        "        y = I.copy()\n"
+        "    else:\n"
+        "        y = np.empty_like(I)\n"
+        "        y[0] = I[0]\n"
+        "        for t in range(1, len(I)):\n"
+        "            y[t] = (1.0 - alpha) * y[t - 1] + alpha * I[t]\n"
+        "    return params[1] * y - params[2] * G\n"
+    )
+    values, _ = _arrays()
+    inflow = values[:, 1]
+    filtered = np.empty_like(inflow)
+    filtered[0] = inflow[0]
+    for row in range(1, len(inflow)):
+        filtered[row] = 0.6 * filtered[row - 1] + 0.4 * inflow[row]
+    label = 0.6 * filtered - 0.2 * values[:, 0]
+    search = _running(monkeypatch, tmp_path, best)
+    outcome = _run(
+        search, directory=tmp_path / "branch", development=_development(),
+        values=values, labels=label.reshape(-1, 1),
+        score_programs=lambda *a, **k: ProgramRolloutScore(0.5),
+    )
+    assert outcome["status"] == "complete"
+    record = outcome["programs"]["G"]
+    assert record["parameters"][0] == pytest.approx(2.5, rel=1e-3)
+    # Fitted, the program is a filter along the rows, not an equation.
+    assert "rows" in record["equation_refusal"]
+    assert outcome["selected_samples"]["G"]["refit_loss"] < 1e-8
+
+
+def test_a_pick_outside_the_allowlist_is_reported_by_name(
+    monkeypatch, tmp_path: Path
+) -> None:
+    best = "def equation(G, I, params):\n    return params[0] * np.load('x')\n"
+    search = _running(monkeypatch, tmp_path, best)
+    outcome = _run(search, directory=tmp_path / "load", development=_development())
+    assert outcome["status"] == "inexpressible"
+    assert "G: the attribute load is not allowed" in outcome["error"]
+
+
+def test_in_a_cell_with_one_program_every_target_is_run_as_its_program(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The cell is rolled out as one system, so all of it runs on the grid."""
+    task = tmp_path / "task"
+    for target, function in (("G", LINEAR), ("I", EMA)):
+        samples = task / f"llmsr-{target}" / "samples"
+        samples.mkdir(parents=True)
+        (samples / "samples_1.json").write_text(
+            json.dumps({"sample_order": 1, "function": function, "score": -0.01})
+        )
+        (task / f"llmsr-{target}" / driver.SEARCH_RECORD).write_text(json.dumps({
+            "target": target, "llm_requests": 1, "llm_samples": 4,
+            "transport_failures": 0, "transport_failure_reasons": {},
+            "search_seconds": 1.0, "started_utc": "2026-10-10T00:00:00+00:00",
+            "finished_utc": "2026-10-10T00:01:00+00:00",
+        }))
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    rolled: list = []
+
+    def grid(programs, channels, context, train, split, *, step, seconds):
+        rolled.append((sorted(programs), split.name, step))
+        return ProgramRolloutScore(0.5)
+
+    outcome = _run(
+        search, directory=task, targets=("G", "I"), development=_development(),
+        score_programs=grid,
+    )
+    assert outcome["status"] == "complete"
+    assert set(outcome["programs"]) == {"G", "I"}
+    assert outcome["programs"]["G"]["equation_refusal"] is None
+    assert "range over the rows" in outcome["programs"]["I"]["equation_refusal"]
+    assert rolled == [
+        (["G", "I"], SplitName.VALIDATION, 1.0), (["G", "I"], SplitName.TRAIN, 1.0)
+    ]
+
+
+def test_a_program_whose_rollout_fails_is_recorded_with_the_reason(
+    monkeypatch, tmp_path: Path
+) -> None:
+    search = _running(monkeypatch, tmp_path, EMA)
+    outcome = _run(
+        search, directory=tmp_path / "fails", development=_development(),
+        score_programs=lambda *a, **k: ProgramRolloutScore(None, "c, row 3: x"),
+    )
+    assert outcome["status"] == "rollout_failed"
+    assert outcome["error"] == "the development rollout failed: c, row 3: x"
+    assert set(outcome["programs"]) == {"G"}

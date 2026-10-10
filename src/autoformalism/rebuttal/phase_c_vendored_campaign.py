@@ -8,8 +8,9 @@ a vLLM started inside a cluster job, a vLLM on a Jetstream2 VM, or the
 Jetstream2 hosted service. A task resumes only against the kind it was frozen
 for. The plan names the model; nothing here chooses one. An LLM-SR plan may
 also declare how LLM-SR is adapted to a reasoning model, that it takes the
-regression table the PySR baseline fits, and the settings its paper states
-where the released code differs; a report must then state each.
+regression table the PySR baseline fits, how a selected program that reads the
+history is run, and the settings its paper states where the released code
+differs; a report must then state each.
 """
 
 from __future__ import annotations
@@ -289,31 +290,79 @@ def llm_sr_transport_settings(plan: dict) -> dict[str, int | bool]:
 class RegressionTable(BaseModel):
     """LLM-SR given the derivative-regression table the PySR baseline fits.
 
-    LLM-SR is symbolic regression, as PySR is: it fits an equation of the
-    current variables to derivative labels and has no notion of time. So it
-    takes the data as PySR does: the same training rows, the same channels at
-    each row, in PySR's order, and the same labels, the derivatives estimated
-    with ``numpy.gradient`` within each trajectory
-    (``baselines.core.regression_table``). PySR's expressions cannot see the
-    order of the rows, but LLM-SR's programs can, so the rows are given in an
-    order fixed by ``row_order_seed`` rather than in time order. The same order
-    serves every repetition, as PySR's seeds all fit one table.
+    LLM-SR is symbolic regression, as PySR is: it fits a function to
+    derivative labels. So it takes the data as PySR does: the same training
+    rows, the same channels at each row, in PySR's order, and the same labels,
+    the derivatives estimated with ``numpy.gradient`` within each trajectory
+    (``baselines.core.regression_table``).
+
+    ``time`` keeps the rows as that table builds them: each trajectory in time
+    order, one after another. LLM-SR's programs may then read the history, and
+    the plan's ``program_rollout`` says how such a pick is run. ``shuffled``
+    gives the rows in an order fixed by ``row_order_seed``; only the smoke
+    frozen on 2026-10-09 declares it, and it never ran.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     source: Literal["pysr_regression_table"]
-    row_order: Literal["shuffled"]
-    row_order_seed: int = Field(ge=0)
+    row_order: Literal["time", "shuffled"]
+    row_order_seed: int | None = Field(default=None, ge=0)
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def seed_only_when_shuffled(self) -> RegressionTable:
+        """A seed orders shuffled rows; rows in time order need none."""
+        if (self.row_order == "shuffled") != (self.row_order_seed is not None):
+            raise ValueError(
+                "row_order_seed is declared exactly when the rows are shuffled"
+            )
+        return self
+
+    def qualification(self) -> str:
+        """The statement a report of such a campaign carries."""
+        given = (
+            "given the derivative-regression table the PySR baseline fits: the "
+            "same training rows, channels and numpy.gradient derivative labels, "
+        )
+        if self.row_order == "time":
+            return given + "each trajectory's rows in time order"
+        return given + (
+            f"its rows in a random order fixed by seed {self.row_order_seed} "
+            "rather than in time order"
+        )
+
+
+class ProgramRollout(BaseModel):
+    """LLM-SR picks that read the history, run as the programs they are.
+
+    Given its rows in time order, LLM-SR's programs may read along them, as a
+    filter of the meal series did in the budget pilot. The shared evaluator
+    reads only equations of the current values, so such a pick is run as a
+    program (``llm_sr_programs``): checked against an allowlist, run in a
+    separate process, refitted with their evaluator's own call, and rolled out
+    along each trajectory's observation grid with the trapezoid rule, given
+    only that trajectory's rows so far. A pick that is an equation of the
+    current values still goes through the shared evaluator. Whether a
+    program's output depends on later rows is recorded and chooses nothing;
+    how a report treats such a pick is decided before the test data open.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    runner: Literal["allowlisted_subprocess"]
+    rollout: Literal["heun_on_observation_grid"]
+    look_ahead: Literal["recorded"]
     rationale: str = Field(min_length=1)
 
     def qualification(self) -> str:
         """The statement a report of such a campaign carries."""
         return (
-            "given the derivative-regression table the PySR baseline fits: the "
-            "same training rows, channels and numpy.gradient derivative labels, "
-            f"its rows in a random order fixed by seed {self.row_order_seed} "
-            "rather than in time order"
+            "a selected program that reads the history is run as a program, "
+            "after an allowlist check and in a separate process, and rolled out "
+            "along each trajectory's observation grid with the trapezoid rule, "
+            "given only that trajectory's rows so far; whether its output "
+            "depends on later rows is recorded, not acted on"
         )
 
 
@@ -345,6 +394,11 @@ class PaperSettings(BaseModel):
             f"{self.num_evaluators} evaluators; the released code leaves the "
             "temperature unset and uses 30,000 and 1"
         )
+
+
+def llm_sr_recovery_settings(plan: dict) -> dict[str, bool]:
+    """Whether a sealed LLM-SR plan runs a selected program that reads the history."""
+    return {"program_rollout": plan.get("program_rollout") is not None}
 
 
 def llm_sr_search_settings(plan: dict) -> dict[str, float | int | None]:
@@ -392,6 +446,9 @@ class PhaseCVendoredCampaignPlan(BaseModel):
     reasoning_model_adaptation: ReasoningModelAdaptation | None = None
     #: LLM-SR only; absent means the cell's arrays in time order, as before.
     regression_table: RegressionTable | None = None
+    #: LLM-SR only, with the table in time order; absent means a selected
+    #: program that reads the history is refused, as before.
+    program_rollout: ProgramRollout | None = None
     #: LLM-SR only; absent means their code's own settings.
     paper_settings: PaperSettings | None = None
     cells: tuple[PhaseCBaselineCell, ...] = Field(min_length=1)
@@ -433,11 +490,23 @@ class PhaseCVendoredCampaignPlan(BaseModel):
         if self.reasoning_model_adaptation is not None and self.method != "llm_sr":
             raise ValueError("a reasoning-model adaptation is declared for LLM-SR only")
         if self.method != "llm_sr" and (
-            self.regression_table is not None or self.paper_settings is not None
+            self.regression_table is not None
+            or self.paper_settings is not None
+            or self.program_rollout is not None
         ):
             raise ValueError(
-                "a regression table and the paper's settings are declared for "
-                "LLM-SR only"
+                "a regression table, a program rollout and the paper's settings "
+                "are declared for LLM-SR only"
+            )
+        in_time_order = (
+            self.regression_table is not None
+            and self.regression_table.row_order == "time"
+        )
+        if in_time_order != (self.program_rollout is not None):
+            raise ValueError(
+                "PySR's table in time order and a program rollout are declared "
+                "together: in time order LLM-SR's programs read the history, "
+                "and only such a table carries trajectories a rollout can follow"
             )
         expected = (
             "estimated_numpy_gradient"
@@ -476,6 +545,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             notes.append(self.reasoning_model_adaptation.qualification())
         if self.regression_table is not None:
             notes.append(self.regression_table.qualification())
+        if self.program_rollout is not None:
+            notes.append(self.program_rollout.qualification())
         if self.paper_settings is not None:
             notes.append(self.paper_settings.qualification())
         return tuple(notes)

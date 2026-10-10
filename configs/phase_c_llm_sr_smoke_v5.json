@@ -1,6 +1,6 @@
 {
   "schema_version": "phase-c-vendored-campaign-plan-1",
-  "status": "proposed_pending_review",
+  "status": "frozen_before_calls",
   "development_only": true,
   "release_protocol": "phase-c-development-2",
   "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
@@ -14,8 +14,8 @@
   "budget": {
     "unit": "llm_samples",
     "published_default": 10000,
-    "declared": 10000,
-    "rationale": "The published budget, unreduced, for every searched target. The roster's eight cells have eleven targets, so two seeds make 22 searches and 220,000 samples, about 55,000 requests. Each target is searched by its own process, all at once; at the budget pilot's pace on 2026-10-08, about 206 samples an hour, a search takes about two days."
+    "declared": 400,
+    "rationale": "A smoke test, not a result: LLM-SR given the PySR table in time order and sampling at the paper's temperature, through the hosted endpoint, LLM-SR's own evaluator, the recovery of each pick by running it, a development rollout and the sealed result. 400 samples per target (100 requests): in the time-ordered budget pilot the best program read the history by sample 200 and all ten best did by sample 400, so the smoke should seal a pick that reads the history, and show what a two-target cell does."
   },
   "prompt_policy": {
     "supplies_public_task_specification": true,
@@ -23,7 +23,7 @@
     "description": "LLM-SR specifications natively embed a problem description, so supplying the public task specification matches its own protocol."
   },
   "islands": 10,
-  "scope_note": "The eight Phase C roster cells with two seeds. LLM-SR takes the PySR baseline's regression table in time order, and samples at the paper's temperature 0.8 with the paper's cluster-sampling period; every other LLM-SR setting is its own default: 10 islands, 4 samples per prompt, 2 examples per prompt, a 30-second evaluation timeout and a 4-hour island reset. The model kept is LLM-SR's own choice, the sample its evaluator scored highest on the training derivatives; a pick that reads the history is run as the program it is (program_rollout).",
+  "scope_note": "Smoke test on the budget pilot's cell (Dalla Man T1 easy, target Gp) and the two-target Dalla Man T2 hard cell (Gp and I), whose searches run at once and whose task is assembled from both. Its models are never reported.",
   "endpoint": "jetstream2_hosted",
   "model": "gpt-oss-120b",
   "reasoning_model_adaptation": {
@@ -55,44 +55,13 @@
       "public_prompt_sha256": "03367bc88a0cda7478961c0209a2ac354fc9a4bed644c8709dcba7c23dd5574b"
     },
     {
-      "benchmark_id": "phase_c_dalla_man_t1_canonical_named_hard_rates_v1",
-      "tier": "hard",
-      "public_prompt_sha256": "2587c4207eb96349c1e5a35fea88a86728113e13b3b309697b00172233ff856a"
-    },
-    {
-      "benchmark_id": "phase_c_dalla_man_t2_canonical_named_easy_rates_v1",
-      "tier": "easy",
-      "public_prompt_sha256": "0977074f7c5ce540cc9de8e982e405041027bda17d77978c2b47c3dd0f17d3e9"
-    },
-    {
       "benchmark_id": "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
       "tier": "hard",
       "public_prompt_sha256": "ea8b212bdb021267b57c2bc40423a3c24bcd9d45877b7457027d896040eeb383"
-    },
-    {
-      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1",
-      "tier": "easy",
-      "public_prompt_sha256": "70fd22109db442ca16eae824b3851ab5c178180eeb935273bb9037dc88a36034"
-    },
-    {
-      "benchmark_id": "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
-      "tier": "easy",
-      "public_prompt_sha256": "8af1e2e7bd089bbe4786eb5f5d25abb6b87e6c751eb440636713dee5e857f881"
-    },
-    {
-      "benchmark_id": "phase_c_detention_coupled_noise0_v1",
-      "tier": "fixed",
-      "public_prompt_sha256": "10406a7fcced1a5d92f8c42856c646805d96f15e891234e06e806efe327e38d9"
-    },
-    {
-      "benchmark_id": "phase_c_detention_independent_noise0_v1",
-      "tier": "fixed",
-      "public_prompt_sha256": "5235aeb88574cd7cc92214bbd2a570d28ddb6206b66a62e10379a2c56a884415"
     }
   ],
   "repetitions": [
-    0,
-    1
+    0
   ],
   "execution_semantics": "continuous_ode_free_rollout",
   "derivative_provenance": "estimated_numpy_gradient",

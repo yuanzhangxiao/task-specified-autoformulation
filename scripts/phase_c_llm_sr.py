@@ -23,6 +23,7 @@ from autoformalism.rebuttal.llm_sr_driver import build_searcher
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     CACHING_ENDPOINTS,
     OUTAGE_PATIENCE_SECONDS,
+    llm_sr_recovery_settings,
     llm_sr_search_settings,
     llm_sr_transport_settings,
     resolve_endpoint,
@@ -51,8 +52,9 @@ def _searcher(
     `patience_seconds` is how long a search waits out an endpoint that keeps
     failing, and `bypass_cache` whether it replays stored answers; both follow
     the endpoint kind, not the plan. The generation limit and header reading
-    follow the plan's declared adaptation, and the temperature and search
-    settings follow the paper's values it declares, if any. LLM-SR names its
+    follow the plan's declared adaptation, the temperature and search settings
+    follow the paper's values it declares, if any, and a selected program that
+    reads the history is run only if it declares a program rollout. LLM-SR names its
     model in every request, so the endpoint must serve it; that is checked
     before each target search that starts, and not when a run only assembles.
     An endpoint that cannot list its models is asked again for as long as a
@@ -81,6 +83,7 @@ def _searcher(
         ),
         **llm_sr_transport_settings(sealed["plan"]),
         **llm_sr_search_settings(sealed["plan"]),
+        **llm_sr_recovery_settings(sealed["plan"]),
     )
 
 

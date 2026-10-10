@@ -17,10 +17,15 @@ own configuration, the cluster-sampling period and the number of evaluators.
 
 Their evaluator executes each synthesized program to score it. That is what
 program synthesis is, and it cannot be removed without removing the method, so
-the job confines it rather than preventing it. Nothing in the recovery path
-here executes anything: the selected program is read without being run, its
-coefficients are refitted as their evaluator fits them, and the result is
-scored by our own rollout.
+the job confines it rather than preventing it. The recovery path first reads
+the selected program without running it: if it is an equation of the current
+values, its coefficients are refitted as their evaluator fits them, and the
+result is scored by the shared rollout. A plan with a program rollout runs a
+selected program that reads the history instead (``llm_sr_programs``): after
+an allowlist check, in a separate process, with their fit, rolled out along
+each trajectory's grid. In a cell where any target's program reads the
+history, every target is run as its program, so the cell is rolled out as one
+system.
 
 Each target is its own LLM-SR run, so a cell's targets can be searched by
 separate processes at once. A finished search leaves a record beside its
@@ -54,6 +59,16 @@ from autoformalism.expressions import ValidationContext
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.llm_call_log import CallLog
 from autoformalism.rebuttal.llm_ode_upstream import InexpressibleEquation
+from autoformalism.rebuttal.llm_sr_programs import (
+    EXECUTION,
+    CheckedProgram,
+    ProgramRefused,
+    check_program,
+    observation_step,
+    program_rollout_error,
+    refit,
+    training_outputs,
+)
 from autoformalism.rebuttal.llm_sr_shim import (
     DEFAULT_MAX_TOKENS,
     ShimAccounting,
@@ -66,6 +81,7 @@ from autoformalism.rebuttal.llm_sr_upstream import (
     build_specification,
     convert_program,
     equation_body,
+    evaluate_expression,
     refit_program,
     sample_yield,
     training_error,
@@ -73,6 +89,11 @@ from autoformalism.rebuttal.llm_sr_upstream import (
 from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
 LOGGER = logging.getLogger(__name__)
+
+#: How far an equation read from a fitted program may stray from the
+#: program's own outputs, as a fraction of the largest; past it, the reading
+#: is not the program and the program is run instead.
+EQUATION_TOLERANCE = 1e-9
 
 #: How long the endpoint may go on failing, from the first failure in a row,
 #: before the search is stopped. A vLLM started inside the job does not come
@@ -194,6 +215,7 @@ def build_searcher(
     temperature: float | None = None,
     cluster_sampling_temperature_period: int | None = None,
     num_evaluators: int | None = None,
+    program_rollout: bool = False,
 ):
     """Bind the pinned checkout to our data; returns a campaign searcher.
 
@@ -204,6 +226,8 @@ def build_searcher(
     own apply. `bypass_cache` is for an endpoint that replays stored answers.
     `before_search` runs before each target search that actually starts, so a
     run that only assembles finished searches contacts no endpoint.
+    `program_rollout` follows a plan's declaration: a selected program that
+    reads the history is run as one rather than refused.
     """
     import sys
 
@@ -234,6 +258,7 @@ def build_searcher(
         development: tuple[DatasetSplit, DatasetSplit],
         context: ValidationContext,
         score_rollout,
+        score_programs=program_rollout_error,
         only: str | None = None,
     ) -> dict:
         """One LLM-SR run per target, as their specification format requires.
@@ -241,7 +266,8 @@ def build_searcher(
         `values` holds one row per training point over `channels`, and
         `labels` the derivative of each of `targets` at that row. A target
         whose search has finished is not searched again. `only` searches that
-        one target and returns without assembling a model.
+        one target and returns without assembling a model. `score_rollout`
+        scores equations and `score_programs` programs, on development data.
         """
         if only is not None and only not in targets:
             raise ValueError(f"{only!r} is not among the searched targets {targets}")
@@ -328,18 +354,38 @@ def build_searcher(
         if only is not None:
             return {"status": "searched", "target": only, "accounting": spent()}
 
-        columns = {name: values[:, index] for index, name in enumerate(channels)}
+        picks: dict[str, dict] = {}
         for target in targets:
-            log_dir = directory / f"llmsr-{target}"
-            _, mapping = build_specification(description, channels, target)
-            label = labels[:, targets.index(target)].reshape(-1)
-            best = best_sample(log_dir)
+            best = best_sample(directory / f"llmsr-{target}")
             if best is None:
                 return {
                     "status": "no_candidates",
                     "error": f"no sample scored for target {target}",
                     "accounting": spent(),
                 }
+            picks[target] = best
+        if program_rollout:
+            return _recover_by_running(
+                picks=picks,
+                channels=channels,
+                targets=targets,
+                description=description,
+                values=values,
+                labels=labels,
+                development=development,
+                context=context,
+                score_rollout=score_rollout,
+                score_programs=score_programs,
+                seconds=seconds_per_rollout,
+                inexpressible=inexpressible,
+                spent=spent,
+            )
+
+        columns = {name: values[:, index] for index, name in enumerate(channels)}
+        for target in targets:
+            best = picks[target]
+            _, mapping = build_specification(description, channels, target)
+            label = labels[:, targets.index(target)].reshape(-1)
             try:
                 body = equation_body(best["function"])
                 # A body with no equation is refused for its own reason, not
@@ -401,6 +447,170 @@ def build_searcher(
         }
 
     return search
+
+
+def _as_equation(
+    function: str,
+    mapping: dict[str, str],
+    parameters: tuple[float, ...],
+    columns: dict[str, np.ndarray],
+    outputs: np.ndarray,
+) -> str:
+    """The fitted program as one equation of the current values, if it is one.
+
+    The reader takes the coefficients LLM-SR's own fit found, so a branch on a
+    coefficient goes the way the fitted program goes. The equation is kept
+    only if it reproduces the program's outputs on the training rows.
+    """
+    body = equation_body(function)
+    expression = convert_program(body, mapping, dict(enumerate(parameters))).expression
+    predicted = np.broadcast_to(evaluate_expression(expression, columns), outputs.shape)
+    scale = float(np.max(np.abs(outputs))) if outputs.size else 0.0
+    gap = float(np.max(np.abs(predicted - outputs))) if outputs.size else 0.0
+    if not np.isfinite(gap) or gap > EQUATION_TOLERANCE * scale:
+        raise InexpressibleProgram(
+            "the equation read from the program differs from its outputs",
+            f"by {gap:.3g}",
+        )
+    return expression
+
+
+def _recover_by_running(
+    *,
+    picks: dict[str, dict],
+    channels: tuple[str, ...],
+    targets: tuple[str, ...],
+    description: str,
+    values: np.ndarray,
+    labels: np.ndarray,
+    development: tuple[DatasetSplit, DatasetSplit],
+    context: ValidationContext,
+    score_rollout,
+    score_programs,
+    seconds: float,
+    inexpressible: list[str],
+    spent: Callable[[], dict],
+) -> dict:
+    """Recover each target's pick by running it, as a plan's program rollout does.
+
+    Each pick is checked against the allowlist and refitted with their
+    evaluator's own call, so its coefficients are LLM-SR's. Its output on the
+    training rows and whether that output depends on later rows are recorded.
+    If every fitted pick is an equation of the current values, the shared
+    evaluator rolls the cell out, as it does PySR's. Otherwise, or if its
+    grammar refuses an equation, every target is run as its program and the
+    cell is rolled out along its grid, on validation and on training data.
+    """
+    train, validation = development
+    rows = [trajectory.number_of_rows for trajectory in train.trajectories]
+    columns = {name: values[:, index] for index, name in enumerate(channels)}
+    programs: dict[str, tuple[CheckedProgram, tuple[float, ...]]] = {}
+    records: dict[str, dict] = {}
+    selected: dict[str, dict] = {}
+    equations: dict[str, str] = {}
+    for target in targets:
+        best = picks[target]
+        _, mapping = build_specification(description, channels, target)
+        label = labels[:, targets.index(target)].reshape(-1)
+        try:
+            program = check_program(best["function"], tuple(mapping))
+            fitted = refit(program, values, label)
+            outputs, error, look_ahead = training_outputs(
+                program, fitted.parameters, values, label, rows
+            )
+        except ProgramRefused as exc:
+            inexpressible.append(f"{target}: {exc}")
+            continue
+        programs[target] = (program, fitted.parameters)
+        selected[target] = {
+            "sample_order": best.get("sample_order"),
+            "llm_sr_score": best["score"],
+            "refit_loss": fitted.loss,
+            "refitted_training_mse": error,
+        }
+        refusal = None
+        try:
+            equations[target] = _as_equation(
+                best["function"], mapping, fitted.parameters, columns, outputs
+            )
+        except (InexpressibleProgram, RecursionError) as exc:
+            refusal = str(exc)
+        records[target] = {
+            "function": program.source,
+            "name": program.name,
+            "variables": list(program.variables),
+            "parameters": list(fitted.parameters),
+            # Why the fitted pick is not an equation of the current values;
+            # None when it is one.
+            "equation_refusal": refusal,
+            "look_ahead": look_ahead,
+        }
+    if inexpressible:
+        return {
+            "status": "inexpressible",
+            "error": "; ".join(inexpressible),
+            "selected_samples": selected,
+            "accounting": spent(),
+        }
+    if len(equations) == len(targets):
+        try:
+            error = score_rollout(equations, context, *development, seconds=seconds)
+        except InexpressibleEquation as exc:
+            # The grammar refuses what the program computes; run the program.
+            for target in targets:
+                records[target]["equation_refusal"] = (
+                    f"the evaluator's grammar refuses the equation: {exc}"
+                )
+        else:
+            if error is None:
+                return {
+                    "status": "rollout_failed",
+                    "error": (
+                        "the selected system did not complete a development rollout"
+                    ),
+                    "equations": equations,
+                    "selected_samples": selected,
+                    "accounting": spent(),
+                }
+            return {
+                "status": "complete",
+                "error": None,
+                "equations": equations,
+                "selected_samples": selected,
+                "development_rollout_error": error,
+                "training_rollout_error": score_rollout(
+                    equations, context, train, train, seconds=seconds
+                ),
+                "accounting": spent(),
+            }
+    step = observation_step(train)
+    errors: dict[str, float] = {}
+    for name, split in (("development", validation), ("training", train)):
+        score = score_programs(
+            programs, channels, context, train, split, step=step, seconds=seconds
+        )
+        if score.error is None:
+            return {
+                "status": "rollout_failed",
+                "error": f"the {name} rollout failed: {score.failure}",
+                "programs": records,
+                "grid_step": step,
+                "selected_samples": selected,
+                "accounting": spent(),
+            }
+        errors[name] = score.error
+    return {
+        "status": "complete",
+        "error": None,
+        "equations": None,
+        "programs": records,
+        "execution": EXECUTION,
+        "grid_step": step,
+        "selected_samples": selected,
+        "development_rollout_error": errors["development"],
+        "training_rollout_error": errors["training"],
+        "accounting": spent(),
+    }
 
 
 def _utc_now() -> str:

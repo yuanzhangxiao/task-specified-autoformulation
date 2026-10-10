@@ -15,8 +15,10 @@ The model kept is LLM-SR's own choice: the sample its evaluator scored highest.
 The development rollout error is reported beside it and chooses nothing.
 
 A Phase C plan may declare that LLM-SR takes the regression table the PySR
-baseline fits, since both are symbolic regression over (state, derivative)
-pairs; its rows are then given in a seeded random order, not in time order.
+baseline fits, since both fit derivative labels; current plans keep its rows
+in time order. A plan that does may also declare a program rollout: a selected
+program that reads the history is then sealed as the program it is, with its
+coefficients and its grid, and rolled out by ``llm_sr_programs``.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from autoformalism.rebuttal.llm_ode_campaign import (
     public_task_specification,
 )
 from autoformalism.rebuttal.llm_sr_driver import build_searcher  # noqa: F401
+from autoformalism.rebuttal.llm_sr_programs import EXECUTION as PROGRAM_EXECUTION
 from autoformalism.rebuttal.phase_c_baselines import PhaseCBaselineCell
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     endpoint_environment,
@@ -84,9 +87,10 @@ def training_rows(
     """The rows LLM-SR searches: one per training point, and its labels.
 
     A plan that declares PySR's regression table gets PySR's rows, channels
-    and numpy.gradient labels, in the order its seed fixes. Otherwise the
-    cell's arrays are stacked in time order with fourth-order derivatives, as
-    Phase B gave them. Labels have one column per searched target.
+    and numpy.gradient labels, in time order or in the order its seed fixes.
+    Otherwise the cell's arrays are stacked in time order with fourth-order
+    derivatives, as Phase B gave them. Labels have one column per searched
+    target.
     """
     channels = tuple(row["channels"])
     targets = tuple(context.targets)
@@ -104,6 +108,8 @@ def training_rows(
             "frozen channels"
         )
     values, labels, _ = regression_table(train, names, targets)
+    if table["row_order"] == "time":
+        return values, labels
     order = np.random.default_rng(table["row_order_seed"]).permutation(len(values))
     return values[order], labels[order]
 
@@ -325,7 +331,26 @@ def _search_and_seal(
         return outcome
 
     if outcome["status"] == "complete":
-        equations = outcome["equations"]
+        programs = outcome.get("programs")
+        if programs:
+            # A program that reads the history has no equation; the shared
+            # evaluator cannot run it, so the selection names how it is run.
+            equations: dict[str, str] = {}
+            payload: dict[str, object] = {
+                "execution": PROGRAM_EXECUTION,
+                "programs": programs,
+                "channels": list(row["channels"]),
+                "grid_step": outcome["grid_step"],
+            }
+        else:
+            equations = outcome["equations"]
+            payload = {
+                "candidate": equation_candidate(
+                    "llm_sr", equations, context
+                ).model_dump(mode="json"),
+                # Coefficients are refitted into the expressions, so none remain.
+                "parameters": {},
+            }
         selection = BaselineDevelopmentResult(
             method="llm_sr",
             benchmark_id=row["benchmark_id"],
@@ -337,13 +362,7 @@ def _search_and_seal(
                 "num_islands": int(sealed["plan"].get("islands", 10)),
                 "selection": SELECTION,
             },
-            selection_payload={
-                "candidate": equation_candidate(
-                    "llm_sr", equations, context
-                ).model_dump(mode="json"),
-                # Coefficients are refitted into the expressions, so none remain.
-                "parameters": {},
-            },
+            selection_payload=payload,
             training_normalized_mse=float(outcome["training_rollout_error"]),
             validation_normalized_mse=float(outcome["development_rollout_error"]),
             elapsed_wall_seconds=outcome.get("accounting", {}).get(
@@ -369,6 +388,8 @@ def _search_and_seal(
             "status": outcome["status"],
             "error": outcome.get("error"),
             "equations": outcome.get("equations"),
+            "programs": outcome.get("programs"),
+            "grid_step": outcome.get("grid_step"),
             "selected_samples": outcome.get("selected_samples"),
             "development_rollout_error": outcome.get("development_rollout_error"),
             "accounting": outcome.get("accounting", {}),
@@ -412,6 +433,15 @@ def report(root: Path) -> dict:
             if (
                 root / "results" / str(task["index"]) / "native-selection.json"
             ).is_file()
+        ),
+        # Tasks whose model is a program that reads the history, and of their
+        # targets, those whose output changed when later rows were removed.
+        "program_models": sum(1 for item in rows if item.get("programs")),
+        "programs_reading_later_rows": sum(
+            1
+            for item in rows
+            for record in (item.get("programs") or {}).values()
+            if record["look_ahead"]["reads_later_rows"]
         ),
         "counts": counts,
         "reporting_qualifications": sealed["reporting_qualifications"],
