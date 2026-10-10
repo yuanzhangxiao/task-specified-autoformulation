@@ -54,6 +54,7 @@ def shared_checklist(brief: PublicScientificBrief, draft: ledger.Draft) -> dict:
                 )
             if process.kind == "transfer" and (
                 len(process.uses) != 2
+                or len(receivers) != 2
                 or {u.sign for u in process.uses} != {"positive", "negative"}
             ):
                 errors.append(

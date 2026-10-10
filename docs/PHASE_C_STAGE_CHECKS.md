@@ -46,6 +46,12 @@ At each shared-process turn, the runtime checks:
 - a known supplied channel is not used as a generated receiver.
 
 These are existing final rules, applied earlier with specific repair options.
+Duplicate targets in a transfer now display both the duplicate-receiver and
+transfer-type diagnoses in the same reply. Removing a repeated receiver alone
+cannot repair a transfer with only one distinct receiver. The feedback presents
+influence/ordinary-contribution alternatives immediately, without changing the
+proposer's declaration. The completed `8958d41` run used the earlier diagnostic;
+keep its pinned source for replay and do not overwrite its frozen plan.
 Proposers retain control of signs, process kind, receiver selection, variable
 types and removals. Accepted partial transactions remain visible, but inconsistent
 declarations cannot complete the shared-process stage. Up to three requests use

@@ -84,9 +84,28 @@ def test_same_receiver_with_opposite_signs_is_not_shared_or_a_valid_transfer():
         ],
     )
     result = check(d)
-    assert result["items"][0]["code"] == "duplicate_receiver"
+    assert [item["code"] for item in result["items"]] == [
+        "duplicate_receiver",
+        "transfer_signs",
+    ]
+    assert "revise kind to influence" in result["items"][1]["action"]
     assert result["shared_declarations"] == 0
     assert result["status"] == "incomplete"
+    # Both diagnoses are available immediately; the proposer need not first
+    # delete one use just to discover the single-receiver transfer error.
+    assert len(d.processes[0].uses) == 2
+    assert d.processes[0].kind == "transfer"
+    repaired = apply(
+        d,
+        processes=[
+            process(
+                kind="influence",
+                uses=[{"target": "y", "sign": "positive"}],
+            )
+        ],
+    )
+    assert check(repaired)["status"] == "ready"
+    assert check(repaired)["local_declarations"] == 1
 
 
 def test_transfer_sign_options_do_not_invent_a_receiver_or_change_kind():
