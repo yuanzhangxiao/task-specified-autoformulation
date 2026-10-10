@@ -10,6 +10,9 @@ block. No law is merged, deleted or scientifically reassigned automatically.
 Historical policies remain available and frozen campaigns must not be resumed
 under the new policy.
 
+Stage instructions remain unchanged: this runtime correction adds no coaching
+to retain contributions with matching drivers.
+
 Every new-policy request displays `requirement_status`: variable declarations,
 mechanism paths, target composition, reviewed graph predicates, and explicit
 unassessed public-science scope. Missing public-prose coverage is not labeled

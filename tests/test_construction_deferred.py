@@ -196,6 +196,19 @@ def test_new_policy_completes_without_overlap_repair_and_resumes_cached_calls(tm
     assert len(calls) == 3
 
 
+@pytest.mark.parametrize("stage", ["variables", "shared_laws", "equations", "repair"])
+def test_request_adapter_keeps_stage_wording_and_shows_requirement_status(stage):
+    draft = overlapping()
+    old = {
+        "stage": stage,
+        "stage_instructions": "Original stage instructions.",
+        "current_draft": ledger.snapshot(brief(), draft),
+    }
+    new = deferred.update_payload(old, brief(), context(), {}, draft, None)
+    assert new["stage_instructions"] == old["stage_instructions"]
+    assert new["requirement_status"]["items"]
+
+
 def test_request_preview_removes_old_overlap_questions_but_preserves_other_failures():
     draft = overlapping()
     old = {

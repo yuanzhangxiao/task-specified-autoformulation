@@ -8,15 +8,6 @@ from autoformalism.search import construction_checklist as checklist
 from autoformalism.search import construction_ledger as ledger
 
 POLICY = "minimal-deferred-interaction-1"
-STATUS_INSTRUCTION = """The requirement_status table separates checked declarations
-and paths from deferred, unavailable or unassessed checks. Only the listed typed
-predicates are checked; a stage pass does not establish all scientific claims."""
-INSTRUCTION = """Contributions with the same drivers may have different function forms.
-Keep your intended contributions; matching drivers alone do not require a topology
-repair or a duplication explanation. Function-level overlap and signed-rate
-interpretations are reviewed when interaction functions are constructed.
-The requirement_status table separates checked declarations/paths from deferred
-or unavailable checks. A topology pass does not establish all scientific claims."""
 SIGN_QUESTION = """Does this generated quantity denote a positive outward rate or a
 signed flux? Review its defining law and every consuming contribution together.
 Choose consistent function forms and assembly signs; do not flip a sign merely
@@ -235,9 +226,6 @@ def update_payload(payload, brief, context, target_definitions, draft, graph_con
     stage = result["stage"]
     check = assessment(brief, context, target_definitions, draft, graph_contract)
     result["bookkeeping_policy"] = POLICY
-    result["stage_instructions"] += "\n" + (
-        STATUS_INSTRUCTION if stage == "variables" else INSTRUCTION
-    )
     result["requirement_status"] = requirement_status(
         brief, draft, target_definitions, graph_contract, stage, check
     )

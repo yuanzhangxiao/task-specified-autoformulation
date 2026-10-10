@@ -262,11 +262,6 @@ are a saved handoff, not an executed interaction-stage implementation.</p></div>
         "A fresh run is needed to measure prospective improvement.</p>"
     )
     parts.append(
-        "<h2>New stage instruction</h2><pre><ins>"
-        + html.escape(deferred.INSTRUCTION)
-        + "</ins></pre>"
-    )
-    parts.append(
         "<h2>Deferred interaction question: signed quantities</h2><pre><ins>"
         + html.escape(deferred.SIGN_QUESTION)
         + "</ins></pre>"
