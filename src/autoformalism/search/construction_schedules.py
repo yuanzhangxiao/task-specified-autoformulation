@@ -447,20 +447,24 @@ def run(
     from autoformalism.search import construction_prompts as prompts
 
     bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
+    from autoformalism.search import construction_compact as compact
     from autoformalism.search import construction_deferred as deferred
 
-    defer_interaction = bookkeeping_policy == deferred.POLICY
-    local_stage_checks = bookkeeping_policy in {stage_checks.POLICY, deferred.POLICY}
+    compact_feedback = bookkeeping_policy == compact.POLICY
+    defer_interaction = bookkeeping_policy in {deferred.POLICY, compact.POLICY}
+    local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
         checklist.POLICY,
         stage_checks.POLICY,
         deferred.POLICY,
+        compact.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
         checklist.POLICY,
         stage_checks.POLICY,
         deferred.POLICY,
+        compact.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -468,6 +472,7 @@ def run(
         checklist.POLICY,
         stage_checks.POLICY,
         deferred.POLICY,
+        compact.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -609,6 +614,8 @@ def run(
             payload = deferred.update_payload(
                 payload, brief, context, target_definitions, draft, graph_contract
             )
+        if compact_feedback:
+            payload = compact.compact_payload(payload)
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -620,6 +627,7 @@ def run(
         before = draft
         raw, accepted, complete, error = None, False, False, None
         normalizations, conflicts = [], []
+        name_conflicts = []
         completion = None
         try:
             raw = visible_response(record)
@@ -634,6 +642,8 @@ def run(
             validate_scope(policy, stage, focus, patch, draft)
             if improved_bookkeeping or minimal_clarity:
                 conflicts = bookkeeping.definition_conflicts(draft, patch)
+            if compact_feedback:
+                name_conflicts = compact.naming_conflicts(brief, draft, patch)
             candidate = ledger.apply_patch(brief, draft, patch)
             candidate, consumer_log = handoff.normalize_consumers(
                 candidate, patch, draft
@@ -666,6 +676,7 @@ def run(
             if conflicts and "runtime-generated definition" in error:
                 error += ": " + ", ".join(c["process"] for c in conflicts)
         event = {
+            **({"name_conflicts": name_conflicts} if compact_feedback else {}),
             "index": len(events),
             "stage": stage,
             "process_question": process_question,
@@ -720,6 +731,7 @@ def run(
         sealed_write(directory / "events" / f"{len(events):03d}.json", event)
         events.append(event)
         last_edit_result = {
+            **({"name_conflicts": name_conflicts} if compact_feedback else {}),
             "status": "accepted" if accepted else "rejected",
             "rejected_reply": None if accepted else raw,
             "uncommitted_edits": [] if accepted else uncommitted_edits(raw, before),

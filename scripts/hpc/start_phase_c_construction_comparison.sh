@@ -17,7 +17,7 @@ case "$AF_STUDY" in
   refinement_confirmation) AF_DEFAULT_ROOT=phase-c-prompt-refinement-v1 ;;
   variable_checklist_confirmation) AF_DEFAULT_ROOT=phase-c-variable-checklist-v1 ;;
   stage_check_confirmation) AF_DEFAULT_ROOT=phase-c-stage-checks-v1 ;;
-  deferred_interaction_confirmation) AF_DEFAULT_ROOT=phase-c-minimal-deferred-v1 ;;
+  deferred_interaction_confirmation) AF_DEFAULT_ROOT=phase-c-minimal-deferred-v2 ;;
   *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
 esac
 export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/$AF_DEFAULT_ROOT}

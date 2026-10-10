@@ -47,13 +47,17 @@ is not committed.
 
 ### Fresh confirmation of the reviewed policy
 
+The current launcher selects `minimal-deferred-interaction-2`, described below.
+Version 1 remains available in the constructor; its submitted campaign requires
+its original `20a84d2` source and output root.
+
 `deferred_interaction_confirmation` runs eight fresh minimal constructions:
 T1-easy, T1-hard, T2-easy, T2-hard, CSTR, alien device, and both basins. All use
 Full context, seed 0, joint-adaptive declarations and a dedicated shared-process
 stage. The sealed source plan supplies the same public context and training
 summaries as the previous confirmation; no historical draft is reused.
 
-The frozen policy is `minimal-deferred-interaction-1`. This includes the current
+Both policies include the current
 duplicate-receiver/transfer-type feedback, permits same-driver contributions
 without a topology duplication explanation, and exposes requirement status.
 Stage instruction wording is unchanged. Function comparisons and signed-rate
@@ -69,7 +73,7 @@ bash scripts/hpc/start_phase_c_deferred_interaction.sh inspect
 ```
 
 The new default output root is
-`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-minimal-deferred-v1`.
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-minimal-deferred-v2`.
 The launcher refuses a plan from another study. Its eight-task roster and
 policy are verified on resume. One H100 runs GPT-OSS-20B with the unchanged
 settings and budgets, in a 3.5-hour allocation with a three-hour work window;
@@ -82,6 +86,43 @@ prompts/responses and edit history. Compare first replies, local stage exits,
 and pre/post-global-repair drafts, especially whether overlap-driven deletions
 disappear. This small diagnostic cannot establish a general improvement or
 scientific correctness; no interaction, fitting, or test-data evaluation runs.
+
+### Exact-copy compaction and naming feedback (2026-10-10)
+
+The v1 run completed eight constructions: 5/8 passed topology before global
+repair and 7/8 afterward, using 36 calls and 485,809 observed tokens. None of the
+four global repair replies lost previously passing graph predicates. This does
+not certify the laws or establish a causal improvement from one small run.
+
+T2-easy's second global repair was blocked before generation: 25,978 input tokens
+exceeded the 24,000 cap. The short stage instructions were only about 1.2 KB;
+the surrounding user packet contained public context/training summaries, current
+declarations, checks and redundant edit receipts. The exact same 11.6 KB receipt
+appeared in both `last_edit_result` and `runtime_diagnostics.last_edit_result`.
+
+V2 replaces only equal redundant fields at explicitly listed bookkeeping locations
+with a small `payload_references` map. One full canonical copy remains visible.
+The offline expander reconstructs every original field exactly (apart from the
+new policy label); nonidentical feedback is retained. Scientific context, training
+evidence, declarations, stage wording and runtime predicates are unchanged.
+All 36 saved tokenization packets round-trip; the blocked user packet shrinks
+from 86,612 to 71,585 serialized bytes. Bytes are not tokens: the serving tokenizer
+still enforces the unchanged cap before each new request. Historical replies are
+not replayed as if they had seen a compacted prompt.
+
+T2-hard repeatedly named a new process `X_I`, even though `X_I` was already a
+differential state, and also reused both forcing-channel names as process names.
+The new diagnostic lists the structured conflicts together, explains that a named
+process defines `P_X = phi(X_I)` rather than a derivative, and offers an unused law
+name or an ordinary RHS contribution. Explicit scientific type revisions remain
+proposer decisions. No variable, law or scientific sign is renamed or changed
+automatically, and admission rules are unchanged.
+
+An ordinary contribution is an inline term, such as `dG/dt = ... - b*phi(X_I)`.
+A named process factors it into `P_X = phi(X_I)` and `dG/dt = ... - b*P_X`.
+It becomes shared when the same `P_X` has multiple receiving variables; merely
+naming a local term does not make it shared. No linear law is implied by the
+placeholder `phi`, and no function was proposed in these topology-only runs.
 
 The opt-in `minimal-stage-checks-1` policy extends `minimal-variable-checklist-1`.
 It preserves the short stage prompts and adds concrete editing examples and local

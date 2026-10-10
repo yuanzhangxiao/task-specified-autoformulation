@@ -273,7 +273,7 @@ def test_later_type_edit_reopens_declaration_problem_and_assignment_is_not_graph
     [
         ("variable_checklist_confirmation", checklist.POLICY),
         ("stage_check_confirmation", bookkeeping.STAGE_POLICY),
-        ("deferred_interaction_confirmation", bookkeeping.DEFERRED_POLICY),
+        ("deferred_interaction_confirmation", bookkeeping.COMPACT_POLICY),
     ],
 )
 def test_eight_case_study_reports_real_stage_evidence_and_resumes(

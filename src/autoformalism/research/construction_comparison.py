@@ -62,7 +62,7 @@ STUDIES = (
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
     "stage_check_confirmation": bookkeeping.STAGE_POLICY,
-    "deferred_interaction_confirmation": bookkeeping.DEFERRED_POLICY,
+    "deferred_interaction_confirmation": bookkeeping.COMPACT_POLICY,
 }
 SHARED_STAGE_STUDIES = ("stage_check_confirmation", "deferred_interaction_confirmation")
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")

@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+`minimal-deferred-interaction-2` adds lossless removal of exact duplicate prompt
+fields and actionable state/process naming feedback. Scientific context, training
+summaries, accepted declarations, checks, stage wording and budgets are retained.
+The v1 eight-case run reached 7/8 final topologies; T2-easy's next repair was never
+sent because its complete request exceeded the 24,000-token input cap. Its 86,612
+byte user packet becomes 71,585 bytes under exact-copy deduplication; new serving
+token counts remain to be measured. V2 runs fresh under `phase-c-minimal-deferred-v2`;
+use the original pinned code for v1. See `PHASE_C_STAGE_CHECKS.md`.
+
 The opt-in `minimal-deferred-interaction-1` constructor defers matching-driver
 overlap questions to a saved interaction-review handoff and displays per-request
 requirement statuses with explicit scientific coverage limits. Existing structural
