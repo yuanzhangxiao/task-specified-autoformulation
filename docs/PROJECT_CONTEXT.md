@@ -5,8 +5,10 @@ overlap questions to a saved interaction-review handoff and displays per-request
 requirement statuses with explicit scientific coverage limits. Existing structural
 checks remain. In the saved eight-case stage-check run, two of three repairs that
 lost required graph predicates followed overlap-only feedback. The marked prompt
-HTML is for review; no fresh run or new deletion guard is included. See
-`PHASE_C_STAGE_CHECKS.md` for the audit and review command.
+HTML is for review. The dedicated `deferred_interaction_confirmation` launch uses
+eight fresh Full/seed-0 cases, including both basins, with the same budgets and
+separate variable/shared-stage reports. No new deletion guard or stage wording
+is added. See `PHASE_C_STAGE_CHECKS.md` for audit and launch commands.
 
 `PHASE_C_STAGE_CHECKS.md` defines opt-in `minimal-stage-checks-1`: exact topology
 identifier examples, supplied-receiver guidance and bounded local shared-process

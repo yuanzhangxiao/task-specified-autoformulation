@@ -273,6 +273,7 @@ def test_later_type_edit_reopens_declaration_problem_and_assignment_is_not_graph
     [
         ("variable_checklist_confirmation", checklist.POLICY),
         ("stage_check_confirmation", bookkeeping.STAGE_POLICY),
+        ("deferred_interaction_confirmation", bookkeeping.DEFERRED_POLICY),
     ],
 )
 def test_eight_case_study_reports_real_stage_evidence_and_resumes(
@@ -291,7 +292,7 @@ def test_eight_case_study_reports_real_stage_evidence_and_resumes(
     pending = json.loads((root / "VARIABLES.json").read_text())
     assert pending["checkpoints"]["first_retained"]["available"] == 0
     assert all(r["variable_stage_completed"] is None for r in pending["rows"])
-    if study == "stage_check_confirmation":
+    if study in campaign.SHARED_STAGE_STUDIES:
         shared = json.loads((root / "SHARED_PROCESSES.json").read_text())
         assert shared["checkpoints"]["first_retained"]["available"] == 0
         assert all(r["stage_completed"] is None for r in shared["rows"])
@@ -318,13 +319,23 @@ def test_eight_case_study_reports_real_stage_evidence_and_resumes(
         )
         assert result["status"] == "topology_complete"
     n = len(calls)
+    if study == "deferred_interaction_confirmation":
+        assert all(p["bookkeeping_policy"] == policy for p in calls)
+        assert all(p["requirement_status"]["items"] for p in calls)
+        with pytest.raises(ValueError, match="fixes its minimal policy"):
+            campaign.freeze(
+                tmp_path / "new",
+                tmp_path / "wrong-policy",
+                study=study,
+                bookkeeping_policy=bookkeeping.STAGE_POLICY,
+            )
     campaign.report(root, plan)
     values = json.loads((root / "VARIABLES.json").read_text())
     assert values["completed_variable_stages"] == 8
     assert values["checkpoints"]["first_retained"]["declaration_ready"] == 8
     assert values["checkpoints"]["after_topology_and_global_repair"]["available"] == 8
     assert "not scientific correctness" in (root / "VARIABLES.md").read_text()
-    if study == "stage_check_confirmation":
+    if study in campaign.SHARED_STAGE_STUDIES:
         shared = json.loads((root / "SHARED_PROCESSES.json").read_text())
         assert shared["completed_shared_stages"] == 8
         assert shared["checkpoints"]["first_retained"]["empty_decisions"] == 8

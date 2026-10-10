@@ -43,7 +43,45 @@ PYTHONPATH=src .venv/bin/python scripts/review_deferred_topology_prompts.py \
 those exact predecessors. Later historical calls would not necessarily occur
 in a fresh run. `AUDIT.json` retains event/request identifiers and lost predicates;
 `PROMPTS.json` retains the old and proposed request packets. Generated evidence
-is not committed. Review precedes any fresh cluster submission.
+is not committed.
+
+### Fresh confirmation of the reviewed policy
+
+`deferred_interaction_confirmation` runs eight fresh minimal constructions:
+T1-easy, T1-hard, T2-easy, T2-hard, CSTR, alien device, and both basins. All use
+Full context, seed 0, joint-adaptive declarations and a dedicated shared-process
+stage. The sealed source plan supplies the same public context and training
+summaries as the previous confirmation; no historical draft is reused.
+
+The frozen policy is `minimal-deferred-interaction-1`. This includes the current
+duplicate-receiver/transfer-type feedback, permits same-driver contributions
+without a topology duplication explanation, and exposes requirement status.
+Stage instruction wording is unchanged. Function comparisons and signed-rate
+questions remain saved for the future interaction stage; this run stops at
+topology. No destructive-repair protections are added.
+
+Use the portable bundle's `RUN_ACES.sh`, or these repository equivalents:
+
+```bash
+bash scripts/hpc/start_phase_c_deferred_interaction.sh run
+# After the proposer and report jobs finish:
+bash scripts/hpc/start_phase_c_deferred_interaction.sh inspect
+```
+
+The new default output root is
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-minimal-deferred-v1`.
+The launcher refuses a plan from another study. Its eight-task roster and
+policy are verified on resume. One H100 runs GPT-OSS-20B with the unchanged
+settings and budgets, in a 3.5-hour allocation with a three-hour work window;
+a dependent CPU job writes the report. Repeating `run` preserves submission
+receipts; it does not submit a second wave automatically.
+
+`inspect` produces `VARIABLES.md`, `SHARED_PROCESSES.md`, `SUMMARY.md`,
+`TOPOLOGY.html`, and `inspection.tar.gz` containing the complete cached
+prompts/responses and edit history. Compare first replies, local stage exits,
+and pre/post-global-repair drafts, especially whether overlap-driven deletions
+disappear. This small diagnostic cannot establish a general improvement or
+scientific correctness; no interaction, fitting, or test-data evaluation runs.
 
 The opt-in `minimal-stage-checks-1` policy extends `minimal-variable-checklist-1`.
 It preserves the short stage prompts and adds concrete editing examples and local

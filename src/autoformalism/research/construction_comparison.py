@@ -46,6 +46,7 @@ Study = Literal[
     "refinement_confirmation",
     "variable_checklist_confirmation",
     "stage_check_confirmation",
+    "deferred_interaction_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -56,11 +57,14 @@ STUDIES = (
     "refinement_confirmation",
     "variable_checklist_confirmation",
     "stage_check_confirmation",
+    "deferred_interaction_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
     "stage_check_confirmation": bookkeeping.STAGE_POLICY,
+    "deferred_interaction_confirmation": bookkeeping.DEFERRED_POLICY,
 }
+SHARED_STAGE_STUDIES = ("stage_check_confirmation", "deferred_interaction_confirmation")
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 
@@ -99,6 +103,7 @@ def source_identity() -> dict:
                 "scripts/hpc/start_phase_c_prompt_refinement.sh",
                 "scripts/hpc/start_phase_c_variable_checklist.sh",
                 "scripts/hpc/start_phase_c_stage_checks.sh",
+                "scripts/hpc/start_phase_c_deferred_interaction.sh",
             )
         },
     }
@@ -199,6 +204,8 @@ def freeze(
                         + (
                             "checklist"
                             if study == "variable_checklist_confirmation"
+                            else "deferred_interaction"
+                            if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
                             else "clarity"
@@ -283,6 +290,8 @@ def freeze(
                 if study == "variable_checklist_confirmation"
                 else "all-eight-cases-seed0-full-stage-checks-1"
                 if study == "stage_check_confirmation"
+                else "all-eight-cases-seed0-full-deferred-interaction-1"
+                if study == "deferred_interaction_confirmation"
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
                 else ("both-basins-seed0-full-three-policies-two-placements-1")
@@ -916,6 +925,11 @@ def report(root: Path, plan: dict) -> dict:
         "Eight fresh minimal cases plus three diagnosed saved repair episodes. "
         "Saved repairs are not fresh-current controls or a matched comparison."
         if plan.get("study") == "refinement_confirmation"
+        else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
+        "deferred to interaction and visible requirement status. Existing structural "
+        "checks remain; no new stage wording or destructive-repair guard. Inspect "
+        "VARIABLES.md and SHARED_PROCESSES.md. Not a matched ranking."
+        if plan.get("study") == "deferred_interaction_confirmation"
         else "Eight fresh minimal cases, Full/seed 0, with variable and local "
         "shared-process completion checks and specific topology editing examples. "
         "Inspect SHARED_PROCESSES.md at each checkpoint; local checks do not "
@@ -989,7 +1003,7 @@ def report(root: Path, plan: dict) -> dict:
         from autoformalism.research import construction_variable_report
 
         construction_variable_report.report(root, plan)
-    if plan.get("study") == "stage_check_confirmation":
+    if plan.get("study") in SHARED_STAGE_STUDIES:
         from autoformalism.research import construction_shared_report
 
         construction_shared_report.report(root, plan)
