@@ -869,4 +869,19 @@ exposing reference values to fitting. A preparation job runs these diagnostics
 before six matched Delta CPU tasks on the unchanged three generic starts.
 Search ceilings remain 1,800 seconds per task, with additional verification and
 diagnostic overhead recorded. No production defaults or benchmark assets change.
-The implementation is qualified locally; hard-case results remain pending.
+The implementation is qualified locally. The completed M23 review is recorded
+in the linked document: six tasks complete; nine of nine conditional screens
+finish; no expensive precision retries; no conditional restart improves an
+incumbent. The sole excellent conditional-labelled result was already reached
+by its shared rollout warm stage. Exact-derivative coefficient diagnostics
+recover the twelve affine coefficients to about `1e-14`, while saved estimated
+latent trajectories give very wrong coefficients. Reference mesh refinement
+reduces bias from 0.582% to 0.0163%, much smaller than the trajectory-estimation
+failure.
+
+Next recommendation: continue promising budget-limited incumbents before
+spending all remaining effort on worse restarts, and compare policies from one
+shared sealed warm checkpoint per start. Track completed evaluations as well as
+wall time: M23 start-0 warm stages stop at 33 versus 35 started evaluations and
+retain very different accuracies despite identical algorithms. This follow-up
+is proposed, not implemented; production fitting remains unchanged.
