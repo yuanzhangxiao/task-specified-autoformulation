@@ -496,3 +496,121 @@ above, and is a wiring check rather than comparative research evidence.
 Changed-file Ruff, shell syntax and whitespace checks passed. Whole-repository
 Ruff retains 37 pre-existing findings confined to `analysis/claude`; those
 unrelated files were left untouched.
+
+## Completed M24 review: `review-20261010-174649`
+
+All six tasks completed on Delta using commit
+`7fbbec1f72d228fc0702833ed974e62623033639` and plan
+`562879ac15f0614cc69a7110536fe5dbe2d369f75687165cf581e7b2bd525391`.
+The downloaded report reproduces exactly from the sealed inputs/results. All
+159 sealed JSON records verify; each policy pair has the same warm vector and
+restart roster. The two difficult seeds' corresponding short-restart evaluation
+traces match exactly in parameters, loss and gradient despite differing runtime.
+No interrupted search calls, domain-failure events or joint fallback stages are
+recorded. No test observations or live LLM calls were used.
+
+### Outcome: continue a useful incumbent, but preserve restart opportunities
+
+Retrospective scores below use independent original-equation rollouts. Dynamic
+coefficient error is the maximum relative error, expressed as a **percentage**;
+hidden-initial error is maximum absolute error in physical coordinates. New
+minutes include fitting, setup, verification and sensitivity, excluding the
+shared historical warm cost and retrospective evaluation.
+
+| Original start | Policy | Train NMSE | Validation NMSE | Max coefficient error | Max initial error | Completed search evaluations | New minutes |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 0 | incumbent first | 1.6935e-14 | 2.2565e-14 | 0.0000550% | 2.002e-7 | 25 | 11.89 |
+| 0 | restart first | 5.2893e-5 | 7.9733e-5 | 13.2756% | 0.08095 | 105 | 28.83 |
+| 1 | incumbent first | 0.35383 | 0.55813 | 264.955% | 0.99659 | 105 | 30.77 |
+| 1 | restart first | 0.40602 | 0.61070 | 243.018% | 0.99659 | 105 | 27.90 |
+| 2 | incumbent first | 0.49699 | 0.34627 | 1516.725% | 1.91241 | 105 | 31.15 |
+| 2 | restart first | 0.39292 | 0.35737 | 1190.765% | 1.05643 | 105 | 27.91 |
+
+Start 0 is the decisive positive result. Its incumbent training error falls
+from `5.2893e-5` to `1.6935e-14` in 25 additional evaluations and 466.97 search
+seconds. Original-equation DOP853/Radau checks independently satisfy both the
+mean training target and the worst-trajectory target (maximum trajectory NMSE
+`4.2653e-14`). Restarts are therefore skipped. All thirteen dynamic coefficients
+and five shared hidden initials recover accurately in the retrospective check.
+Restart-first instead spends its 105 evaluations continuing a much worse new
+start, ending at 0.36736; conservative retention correctly keeps the original
+`5.2893e-5` warm incumbent. Incumbent-first uses 58.8% less new fitting/check time
+for this pair and achieves much better accuracy. This supports the allocation
+fix, not a new profiling formula.
+
+Start 1 improves from 0.40602 to 0.35383 with incumbent continuation, but remains
+inaccurate and its maximum coefficient error actually increases. Start 2's
+incumbent continuation barely helps (`0.73682 -> 0.73493`); a subsequent short
+restart supplies its retained 0.49699 result. Restart-first gives that same
+restart a long continuation and reaches 0.39292. Its validation score happens
+to be slightly worse than incumbent-first's, but validation does not choose
+the policy or retained model. Neither start-2 endpoint is accurate. Thus an
+unconditional "always continue the incumbent" rule is not supported.
+
+Recovery of both coefficients and hidden initials is **1/3 original starts**
+for incumbent-first and **0/3** for restart-first. The six-state nonlinear
+problem still has thirteen dynamic coefficients and five shared hidden initials;
+exact terminal-output profiling eliminates four gains, leaving fourteen outer
+unknowns. The skeleton and data are unchanged. These are three starts on one
+anchored, noiseless development block, not independent benchmark families or
+evidence that generic initialization is solved.
+
+### Failure diagnosis and fitting assessment
+
+Every poor search stage reaches its evaluation ceiling: 15 evaluations per
+short restart or 60 for continuation. All started evaluations finish; none is
+cut off by the wall guard, unlike the M23 warm-stage comparison. They do not
+terminate by gradient/step convergence. Incumbent-continuation final projected
+gradient infinity norms are 0.713 for start 1 and 1.499 for start 2, with no active
+outer bounds at those points. Start 2's profiled inner gains do include active
+lower bounds. Across the last five evaluations the incumbent losses change
+very little despite non-small recorded gradients. This warrants an optimizer
+and derivative diagnostic; it does not establish a derivative bug, a local
+minimum, or nonidentifiability. Saved evaluation traces include rejected trial
+points and do not reconstruct accepted-step or trust-region history.
+
+Independent solvers agree on the poor endpoints, so their large losses are not
+an artifact of coarse collocation or failed verification. No ultimate-precision
+retry is needed. Joint sensitivity includes all eighteen unknowns and has local
+rank 18 at all retained endpoints; condition numbers range from approximately
+779 to 41,495. Full local rank does not certify global uniqueness or optimizer
+success. Only start 0/incumbent-first receives
+`numerical_target_reached / strictly_verified / retain_with_local_evidence`.
+The others remain `above_numerical_target` and recommend further search.
+Likelihood profiles were not minimized in M24, so no calibrated confidence or
+coefficient-accuracy guarantee is reported to the fitter.
+
+### Costs and next proposed diagnostic
+
+Summed new fitting/check wall time is 73.81 minutes for incumbent-first and
+84.63 for restart-first (235 versus 315 completed search evaluations). This is
+12.8% less new time overall, driven by start 0's early stop; starts 1 and 2 cost
+more under incumbent-first. Verification costs 16.16/17.92 minutes and sensitivity
+0.91/0.87 minutes respectively, already included in those totals. Retrospective
+scoring adds 12.59/11.84 minutes. Historical warm costs are 13.76, 13.26 and 13.06
+minutes, charged once per seed rather than once per arm. These are sums of task
+times, not queue latency, and do not imply identical evaluation speed.
+
+Keep incumbent continuation and early stopping. Before a larger restart sweep,
+use the saved difficult endpoints for a bounded **stagnation diagnostic**:
+
+1. Compare the supplied profiled residual Jacobian against finite-difference
+   directional derivatives at several step sizes, recording inner active sets
+   so nonsmooth transitions are distinguished from incorrect derivatives.
+2. If derivatives check out, compare additional continuation with the current
+   scaling against a predeclared alternative parameter scaling, from identical
+   saved points and with matched evaluation limits. Record accepted-step progress,
+   step norms and predicted/actual reductions where the solver exposes them.
+3. Preserve independently verified incumbents and a distinct restart allowance.
+   A later adaptive allocator can use recent training improvement per evaluation
+   to divide work between useful continuation and genuine exploration, instead
+   of exhausting a fixed long block on the almost unchanged start-2 incumbent.
+
+These are recommendations, not implemented changes. No new remote fitting was
+launched during this review; production defaults, benchmarks and prompts remain
+unchanged.
+
+Review verification: exact report regeneration, sealed-record and matched-start
+checks, and 37 focused continuation/numerics/profiling tests passed. Whitespace
+checks passed. Whole-repository Ruff still reports the same 37 unrelated
+`analysis/claude` findings. This review changes documentation only.

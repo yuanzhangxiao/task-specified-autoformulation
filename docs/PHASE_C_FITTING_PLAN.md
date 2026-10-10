@@ -907,3 +907,20 @@ and limitations are recorded in
 [PHASE_C_FITTING_ALLOCATION.md](PHASE_C_FITTING_ALLOCATION.md#m24-implementation-shared-warm-incumbent-continuation).
 This is an opt-in experiment, not a production-default change or a claim that
 all poor starts can be recovered.
+
+Completed M24 review (`review-20261010-174649`): six tasks complete with exact
+report reproduction and complete call accounting. From the identical start-0
+warm checkpoint, incumbent-first reaches train/validation NMSE
+`1.6935e-14 / 2.2565e-14` in 25 evaluations, with maximum coefficient relative
+error `5.50e-7` and hidden-initial absolute error `2.00e-7`. Restart-first spends
+105 evaluations and retains the unchanged warm point. Start 1 improves modestly;
+start 2 benefits more in training from continuing a restart. Only one of three
+original starts is fully recovered. Poor stages exhaust evaluation limits with
+non-small gradients; they are not demonstrated converged or nonidentifiable.
+
+The [detailed review](PHASE_C_FITTING_ALLOCATION.md#completed-m24-review-review-20261010-174649)
+records accuracy, sensitivity and separate costs. Next proposed milestone:
+audit profiled derivatives at the saved stalled points, then test continuation
+and scaling with matched evaluation limits before increasing broad restart
+budgets. Keep useful incumbent continuation, verified early stopping and
+restart capacity; defer a universal allocation rule until that diagnosis.
