@@ -9,6 +9,14 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
+Current fitting milestone (October 11): the [M28 common rollout adapter](PHASE_C_FITTING_ADAPTER.md)
+packages the methods qualified through [M27](PHASE_C_FITTING_M27_RESULTS_2026-10-11.md)
+behind a training-only interface. It starts with guarded scaling, preserves
+verified incumbents, and tests bounded fixed-scaling fallback under the same
+search budget. Thirty paired CPU fits and one separate fixed-parameter replay
+are prepared for Delta; remote qualification is pending. This remains opt-in
+and does not change construction or the production fitting dispatcher.
+
 The first executable step is the [construction baseline](PHASE_C_CONSTRUCTION_BASELINE.md):
 32 constructions on eight corrected public cases, including coupled/independent
 noiseless basin controls, independently assessed for NMSE

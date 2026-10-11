@@ -182,12 +182,25 @@ def _replay_summary(rows: list[dict], channels: list[str]) -> dict:
     }
 
 
-def replay(request, parameters, train, val, seconds: float, *, journal=None) -> dict:
+def replay(
+    request,
+    parameters,
+    train,
+    val,
+    seconds: float,
+    *,
+    journal=None,
+    relative_tolerance: float = 1e-9,
+    absolute_tolerance: float = 1e-11,
+) -> dict:
     """Bounded independent scoring, optionally journaled without a resumed budget.
 
     A terminal journal is reused. An interrupted journal is closed as unavailable;
     previously completed rows survive but no additional integration is performed.
     """
+    settings = FitConfig(
+        relative_tolerance=relative_tolerance, absolute_tolerance=absolute_tolerance
+    )
     model, _, _ = public._lower(request)
     if set(parameters) != set(model.parameter_names):
         raise ValueError("incomplete replay parameters")
@@ -209,6 +222,14 @@ def replay(request, parameters, train, val, seconds: float, *, journal=None) -> 
             "val": val.model_dump(mode="json"),
             "seconds": seconds,
         }
+        | (
+            {
+                "relative_tolerance": relative_tolerance,
+                "absolute_tolerance": absolute_tolerance,
+            }
+            if (relative_tolerance, absolute_tolerance) != (1e-9, 1e-11)
+            else {}
+        )
     )
     rows = []
 
@@ -274,11 +295,7 @@ def replay(request, parameters, train, val, seconds: float, *, journal=None) -> 
                     trajectory,
                     parameters,
                     {},
-                    FitConfig(
-                        integration_method=method,
-                        relative_tolerance=1e-9,
-                        absolute_tolerance=1e-11,
-                    ),
+                    settings.model_copy(update={"integration_method": method}),
                     reset_observed_states=False,
                     deadline=deadline,
                 )

@@ -18,6 +18,7 @@ from autoformalism.fitting.optimizer_scaling import RelativeScaling
 from autoformalism.schemas.base import StrictSchema
 
 METHODS = ("jacobian", "fixed_coordinates", "guarded_relative")
+ADAPTER_METHODS = ("adapter_guarded_only", "adapter_guarded_portfolio")
 
 
 class Policy(StrictSchema):
@@ -62,9 +63,13 @@ def continuation_reason(value: dict, policy: Policy) -> str:
     return "improving" if relative >= policy.minimum_relative_progress else "plateau"
 
 
-def validate_starts(oracle, profile, problem, starts: list[dict]) -> None:
+def validate_starts(
+    oracle, profile, problem, starts: list[dict], *, allow_incumbent=False
+) -> None:
     """Check domains and genuinely distinct optimized coordinates before searching."""
-    if starts[0] != problem.start or problem.incumbent != problem.start:
+    if starts[0] != problem.start or (
+        not allow_incumbent and problem.incumbent != problem.start
+    ):
         raise ValueError("recovery must begin at the original generic start")
     indices = list(range(len(oracle.names))) if profile is None else list(profile.outer)
     vectors = [oracle.vector(s)[indices] / oracle.units[indices] for s in starts]
@@ -84,10 +89,17 @@ def run(
     folder: Path,
 ) -> dict:
     """Run one scale policy; no evaluator arrays exist in this function's input."""
-    if method not in METHODS or len(starts) != 1 + policy.restart_count:
+    if (
+        method not in METHODS + ADAPTER_METHODS
+        or len(starts) != 1 + policy.restart_count
+    ):
         raise ValueError("invalid scaling method or complete restart roster")
+    adapter = method in ADAPTER_METHODS
+    portfolio = method == "adapter_guarded_portfolio"
     identity = {
-        "protocol": "generic-scaling-recovery-1",
+        "protocol": "rollout-adapter-recovery-1"
+        if adapter
+        else "generic-scaling-recovery-1",
         "problem_sha256": public.content_sha256(problem.model_dump(mode="json")),
         "starts": starts,
         "method": method,
@@ -101,7 +113,7 @@ def run(
         return saved
     began, cpu = monotonic(), process_time()
     oracle, profile, route = rollout.build(problem)
-    validate_starts(oracle, profile, problem, starts)
+    validate_starts(oracle, profile, problem, starts, allow_incumbent=adapter)
     setup = folder / "setup"
     setup.mkdir(parents=True, exist_ok=True)
     seal(
@@ -167,7 +179,7 @@ def run(
             and selected["maximum_trajectory_nmse"] <= policy.trajectory_nmse
         )
 
-    def search_block(name, start):
+    def search_block(name, start, block_method):
         def search(initial, end, save, kernel, calls):
             return numerical.search(
                 oracle,
@@ -181,7 +193,7 @@ def run(
                 profile=kernel,
                 telemetry=True,
                 record_steps=True,
-                optimizer_scaling=method,
+                optimizer_scaling=block_method,
                 scaling_policy=policy.scaling,
                 normalized_objective=True,
                 objective_multiplier=policy.objective_multiplier,
@@ -227,18 +239,21 @@ def run(
         point = inspect(name + "/check", best["parameters"]) if best else None
         return value, point
 
+    if adapter and problem.incumbent != problem.start:
+        inspect("incumbent/check", problem.incumbent)
     inspect("original/check", starts[0])
     blocks = 0
     for index, start in enumerate(starts):
         if reached():
             break
         point = None
+        block_method = "guarded_relative" if adapter else method
         for visit in range(policy.maximum_consecutive_blocks):
             if blocks >= policy.maximum_blocks or reached():
                 break
             name = f"start-{index}/block-{visit}"
             value, point = search_block(
-                name, start if point is None else point["parameters"]
+                name, start if point is None else point["parameters"], block_method
             )
             blocks += 1
             reason = continuation_reason(value, policy)
@@ -251,17 +266,37 @@ def run(
                 reason = "consecutive_block_limit"
             elif policy.maximum_blocks - blocks <= unvisited:
                 reason = "reserve_unvisited_starts"
+            next_method = block_method
+            if (
+                portfolio
+                and block_method == "guarded_relative"
+                and reason
+                in {
+                    "plateau",
+                    "native_stop_or_failure",
+                    "insufficient_progress_evidence",
+                }
+            ):
+                # This replaces a continuation block, never adds an allowance.
+                reason = "bounded_fixed_alternative"
+                next_method = "fixed_coordinates"
             decisions.append(
                 {
                     "block": name,
                     "reason": reason,
-                    "continue": reason == "improving",
+                    "continue": reason in {"improving", "bounded_fixed_alternative"},
                     "selected_origin": selected["origin"] if selected else None,
                 }
+                | (
+                    {"scaling": block_method, "next_scaling": next_method}
+                    if adapter
+                    else {}
+                )
             )
             seal(folder / name / "decision.json", decisions[-1])
-            if reason != "improving":
+            if not decisions[-1]["continue"]:
                 break
+            block_method = next_method
     sensitivity = None
     if selected:
 
