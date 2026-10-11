@@ -1,6 +1,8 @@
 # M27: broader qualification of rollout scaling
 
-Implemented October 11, 2026; remote experiment not yet run. This follows the
+Implemented October 11, 2026; all 45 remote tasks completed. See the
+[M27 results review](PHASE_C_FITTING_M27_RESULTS_2026-10-11.md) for recovery,
+costs and one retrospective solver-agreement flag. This follows the
 [M26 review](PHASE_C_FITTING_M26_RESULTS_2026-10-11.md). Fixed and guarded scaling
 both recovered all three alien-device starts in M26. That small comparison does
 not justify choosing a universal default.
