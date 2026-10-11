@@ -61,12 +61,20 @@ class TrainingProblem(StrictSchema):
     incumbent: dict[str, float]
 
 
+class PiecewiseTrainingProblem(TrainingProblem):
+    """Explicit diagnostic opt-in; derivatives are branch-local at hinges."""
+
+    allow_piecewise: Literal[True] = True
+
+
 class Rollouts:
     """Complete normalized residual/Jacobian, including fitted initial values."""
 
     def __init__(self, problem: TrainingProblem, policy: ConfidencePolicy):
         self.model = public._lower(problem.request)[0]
-        self.system = SymbolicODE(self.model)
+        self.system = SymbolicODE(
+            self.model, allow_piecewise=isinstance(problem, PiecewiseTrainingProblem)
+        )
         self.names = self.system.names
         self.train = public.unpack_split(problem.training)
         self.scales = scale_for(self.train)

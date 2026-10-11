@@ -10,6 +10,10 @@ nine completed tasks: fixed and guarded scaling recover all three original
 starts; iterative Jacobian scaling recovers two. Fixed and guarded remain
 paired alternatives pending broader qualification.
 
+The next experiment is [M27 broader scaling qualification](PHASE_C_FITTING_BROAD_SCALING.md):
+45 paired tasks across alien-device, nonlinear CSTR and coupled detention basins,
+with five original starts per case. M26 remains an immutable historical protocol.
+
 ## Scaling principle
 
 Keep the training/public-domain coordinate units introduced earlier in Phase C.
