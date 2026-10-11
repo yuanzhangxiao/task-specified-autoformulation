@@ -5,6 +5,10 @@ AGENTS.md, change a frozen protocol, or announce a new production algorithm.
 Read this before the chronological campaign history in PROJECT_CONTEXT.md and
 PIPELINE_DESIGN.md. Implementation still follows their relevant contracts.
 
+New to the compute platforms? Start with the
+[Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
+pinned deliveries, submission, inspection and recovery.
+
 The first executable step is the [construction baseline](PHASE_C_CONSTRUCTION_BASELINE.md):
 32 constructions on eight corrected public cases, including coupled/independent
 noiseless basin controls, independently assessed for NMSE

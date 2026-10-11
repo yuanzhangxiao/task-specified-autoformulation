@@ -1,5 +1,9 @@
 # Research operations: observe, preserve, then retire
 
+For first-time experiment setup, read the
+[Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md). This document focuses
+on inventories, retention and recovery of existing work.
+
 The inventory commands run metadata audits, not experiments. They do not submit jobs,
 fit models, invoke an LLM, modify benchmark releases or open test payloads.
 Orion's corrected benchmarks remain separate from the historical campaign.
