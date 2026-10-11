@@ -15,8 +15,10 @@ variables. Existing policies retain their prior flow. See
 confirmation freezes five sampling seeds per cell without changing the public
 data or per-episode budgets. Each task has separate calls/checkpoints; reporting
 retains all outcomes and separates pending from failed episodes. Historical
-studies keep their original rosters. This is still an ACES launch protocol;
-Jetstream2 VM portability requires separate serving provenance validation.
+studies keep their original rosters. The Jetstream2 pilot uses this constructor
+under a separate eight-case, seed-0 plan with its Docker platform and verified
+serving provenance recorded explicitly. Compatibility costs remain separate.
+ACES plans retain their original configuration. See `JETSTREAM_CONSTRUCTION_PILOT.md`.
 
 Prompt refinement keeps policy boundaries explicit. `minimal-clarity-1` uses the
 short stage-specific system, exact generated/ordinary edit locations, completion

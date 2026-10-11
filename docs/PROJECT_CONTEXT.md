@@ -1,16 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
-The Jetstream2 H100 VM is created, with a 200GB root disk. Its separate
-four-request compatibility check pins the 20B weights/container and preserves
-complete stage requests, tokenizer evidence, schema outcomes and uncertain
-calls. It does not launch a campaign or change ACES plans. See
-`JETSTREAM_CONSTRUCTION_COMPATIBILITY.md`; live GPU compatibility is pending.
+The Jetstream2 H100 serving check passed on October 11, 2026: four independently
+verified requests, 54,068 measured tokens, valid schemas and pinned serving
+provenance. This establishes compatibility, not science or ACES equivalence.
+A separate eight-case, Full/seed-0 focused construction pilot reuses this server,
+records Jetstream provenance, and retains all ACES scientific settings. No
+functions, fitting or test access. See `JETSTREAM_CONSTRUCTION_PILOT.md`.
 
 The equation-based `minimal-focused-construction-1` view has been reviewed by the
 user. Its next ACES confirmation defaults to five frozen sampling seeds across
 all eight Full-specification cells (40 constructions), with per-case seed outcomes
-and median/MAD costs. Historical rosters remain unchanged. Jetstream2 GPU VM
-deployment is being evaluated separately; its platform has not been validated.
+and median/MAD costs. Historical rosters remain unchanged. Jetstream2 workflow
+validation is separate from this ACES experiment.
 See `PHASE_C_FOCUSED_PROMPTS.md` for launch/resume and VM resource guidance.
 
 `minimal-focused-construction-1` is implemented, not launched by the agent.

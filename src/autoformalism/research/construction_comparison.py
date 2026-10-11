@@ -97,6 +97,7 @@ class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
     protocol: Literal["phase-c-construction-comparison-10"] = PROTOCOL
+    platform: Literal["aces-h100x1", "jetstream2-h100x1-docker"] = "aces-h100x1"
     repair_requests: int = Field(default=3, ge=1, le=5)
     repair_tokens: int = Field(default=131072, ge=256)
     bookkeeping_policy: bookkeeping.Policy = "legacy"
@@ -141,11 +142,18 @@ def freeze(
     bookkeeping_policy: bookkeeping.Policy = "legacy",
     repair_source: Path | None = None,
     seeds: list[int] | None = None,
+    serving_environment: dict | None = None,
 ) -> dict:
     """Freeze public construction tasks and any explicitly selected saved repairs."""
     if study not in STUDIES:
         raise ValueError("unknown construction study")
     selected_seeds = sampling_seeds(study, seeds)
+    if serving_environment is not None and (
+        study != "focused_prompt_confirmation"
+        or set(serving_environment) != {"platform", "serving_image_sha256"}
+        or serving_environment["platform"] != "jetstream2-h100x1-docker"
+    ):
+        raise ValueError("serving override requires the focused Jetstream study")
     if (repair_source is not None) != (study == "refinement_confirmation"):
         raise ValueError(
             "refinement confirmation requires its saved repair source only"
@@ -188,6 +196,7 @@ def freeze(
                 else {}
             ),
             **({"wall_seconds": 10800} if study != "comparison" else {}),
+            **(serving_environment or {}),
         }
     )
     roster = (

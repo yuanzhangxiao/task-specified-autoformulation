@@ -121,8 +121,9 @@ bash scripts/jetstream/check_construction.sh stop
 ```
 
 Stopping a container does not stop VM allocation charges. Shelving an idle VM
-stops compute charging, but resuming it depends on available capacity. The full
-Jetstream construction campaign launcher remains a later step after this check.
+stops compute charging, but resuming it depends on available capacity. The
+separate eight-case end-to-end launcher is in `JETSTREAM_CONSTRUCTION_PILOT.md`.
+It requires this compatibility check to pass and does not start automatically.
 
 ## Offline verification
 

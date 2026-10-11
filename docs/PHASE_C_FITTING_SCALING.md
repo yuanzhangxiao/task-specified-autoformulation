@@ -5,6 +5,11 @@ endpoints survives from the original generic initializations. It adds an opt-in
 experiment, `phase-c-generic-scaling-1`. Production defaults, historical fitting
 protocols, equations, prompts and datasets are unchanged.
 
+The [M26 results review](PHASE_C_FITTING_M26_RESULTS_2026-10-11.md) records all
+nine completed tasks: fixed and guarded scaling recover all three original
+starts; iterative Jacobian scaling recovers two. Fixed and guarded remain
+paired alternatives pending broader qualification.
+
 ## Scaling principle
 
 Keep the training/public-domain coordinate units introduced earlier in Phase C.
