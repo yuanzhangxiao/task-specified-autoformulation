@@ -302,3 +302,138 @@ frozen input handoff; no older campaign directory is needed. Inspect and collect
 bash /work/hdd/bibo/yxiao2/phase_c/phase-c-fitting-m25-refined/scripts/hpc/inspect_phase_c_fitting_stagnation_delta.sh \
   /work/hdd/bibo/yxiao2/phase_c/fitting-stagnation-v2
 ```
+
+## Completed refined M25 review — review-20261011-015310
+
+The returned v2 campaign is complete: three tasks, all three derivative audits
+passed, 75 audit evaluations and 315 completed optimizer evaluations, with
+complete accounting. All 85 sealed JSON artifacts verify and the summary
+reproduces exactly from the saved results. Submission records identify source
+commit `07e4539d6ba334af013a6f2c10f8c9a78e010166` and plan
+`082fac4eed12eab588517924dcf4f4e135762a166887c4e1867463c45a534e95`.
+The archive SHA256 is
+`cde8bdea84158cb1610a98af74e8405181fabbad398b72d5b2e50aad8a38ed11`.
+There are no LLM calls, GPUs, new starts or test observations. Both arms use the
+same saved starting vector for each task; retained parameters are selected by
+training-only independent checks before retrospective scoring.
+
+### The smaller perturbations resolve the derivative-check blocks
+
+All four directions pass at the two finest steps, `1e-6` and `1e-7`, without
+loosening any agreement threshold. Inner active sets remain unchanged during
+the audits. Start 2's coordinate and gradient directions still disagree at
+`1e-5`, but the discrepancies shrink approximately 100-fold at each subsequent
+tenfold reduction in step size. In the gradient direction, absolute RMS error
+falls from `5.308e-2` to `5.310e-4` to `5.341e-6`, against an allowance of about
+`2.82e-2`.
+
+This supports finite-difference truncation as the explanation of the earlier
+blocks. It supplies local evidence for the profiled analytic derivative at
+these points; it is not a global derivative certificate or a reason to remove
+the active-set and numerical checks.
+
+### Scaling comparison and recovery
+
+Each difficult endpoint receives the same allowance of 120 evaluations or
+2,400 seconds per arm. Both retain exact output-gain profiling, the same
+coordinate units, equations, domains and residual amplification. Only the
+optimizer's additional scaling differs. Search time below excludes the shared
+audit, independent verification, sensitivity and retrospective scoring.
+
+| Saved start | Optimizer scaling | Train NMSE | Validation NMSE | Search evaluations | Search minutes | Maximum coefficient relative error |
+|---|---|---:|---:|---:|---:|---:|
+| 0 | Either | 1.693e-14 | 2.256e-14 | 0 | 0 | 5.500e-7 |
+| 1 | Jacobian | 1.921e-16 | 2.109e-16 | 67 | 17.25 | 2.617e-7 |
+| 1 | Fixed coordinates | 9.662e-19 | 3.230e-18 | 16 | 4.22 | 2.334e-8 |
+| 2 | Jacobian | 0.731346 | 0.576945 | 120 | 26.43 | 10.290 |
+| 2 | Fixed coordinates | 0.123069 | 0.101675 | 112 | 26.44 | 9.475 |
+
+Relative errors in the table are fractions, not percentages. Start 0 preserves
+the accurate M24 point without optimization. Start 1 is newly recovered by both
+arms; fixed scaling needs 4.19 times fewer evaluations and about 4.09 times less
+search time. Maximum hidden-initial absolute errors are `1.37e-7` (Jacobian) and
+`1.08e-8` (fixed). Both meet the frozen accuracy, coefficient and initial-recovery
+criteria and pass independent DOP853/Radau verification. Their extremely small
+losses should not be used to claim a meaningful predictive advantage of one
+successful fit over the other.
+
+Start 2 improves substantially under fixed scaling, but remains unsuccessful:
+its largest coefficient relative error is about 947%, and largest hidden-initial
+absolute error is 2.855. Two of the three saved lineages now have accurate
+solutions, including the already successful control. This is not a two-of-three
+fresh-start success rate.
+
+### What the saved optimization steps explain
+
+For start 1, the first accepted displacement in the common scaled coordinates
+has norm `1.67e-5` with Jacobian scaling and `0.653` with fixed scaling. At
+evaluation 10, their best training losses are respectively `0.353828` and
+`0.007279`, from the same initial `0.353834`. For start 2, the first displacements
+are `8.89e-6` and `0.979`; at evaluation 20, losses are `0.734437` and `0.138439`,
+from initial `0.734933`. Thus the scaling choice changes actual progress, not
+only the final stop label.
+
+Both arms operate in already centered and scaled parameter coordinates. Fixed
+scaling means omitting SciPy's additional Jacobian-column scaling, not returning
+to unscaled physical parameters. The search multiplies residuals and Jacobians
+by `1e6` for polishing. In the installed SciPy implementation, Jacobian-based
+variable scales therefore depend on that multiplier; a centered zero start also
+uses a default initial trust radius. This is a plausible explanation for the
+tiny initial steps, consistent with the telemetry. It has not been isolated by
+an amplification-controlled experiment. The saved linearized-residual reduction
+ratios are not SciPy's internal bound-corrected trust-region ratios.
+
+The two remaining poor outcomes have different stopping evidence:
+
+- Jacobian scaling reaches the 120-evaluation limit with unamplified projected
+  gradient infinity norm `1.536`; its loss is still slowly decreasing.
+- Fixed scaling stops after 112 evaluations by `xtol`, with projected gradient
+  about `3.75e-8` and loss unchanged to roughly machine precision over the last
+  evaluations. Its native amplified optimality statistic is still large, so
+  this is not a native gradient-convergence certificate. One profiled output
+  gain is at zero; the Jacobian arm has two gains at zero. No outer bounds are
+  active and no domain errors were recorded in either search.
+
+The fixed arm is consistent with a poor stationary region or numerical plateau;
+neither a global optimum nor structural nonidentifiability is established. The
+full coefficient-plus-initial sensitivity matrix has numerical rank 18/18 at
+all retained points. Its condition number is about 1,078 at the accurate points,
+3,800 at the fixed start-2 endpoint, and 4,895 at the Jacobian endpoint. The
+start-2 assessments conservatively withhold resolved parameter information
+because ultimate-precision uncertainty is unverified, while ordinary independent
+rollouts establish that their fit is poor. Rank alone does not certify correct
+coefficients, uniqueness or successful optimization.
+
+### Cost, interpretation and next recommendation
+
+Shared audits take 6.44, 6.20 and 5.39 worker-minutes, totaling 18.02. Optimizer
+search totals 74.33 worker-minutes. All arm work including verification,
+sensitivity and setup totals 91.47 minutes; retrospective scoring adds 12.43.
+Together with the shared audits this is 121.92 worker-minutes, excluding
+scheduler/preflight/report overhead. These are sums over tasks, not elapsed
+campaign time. The successful start-1 fixed arm costs 7.81 minutes including
+its verification/sensitivity/setup, versus 20.80 for the Jacobian arm; the
+shared audit is additional and charged once.
+
+Retain fixed-coordinate profiled rollout as the leading candidate for the next
+robustness experiment, without changing the production default yet. Test from
+the original generic starts, with the same predetermined domain-only restart
+vectors and matched evaluation/wall budgets for both scaling policies. Continue
+useful incumbents, but allocate a bounded genuinely different start when a poor
+fit plateaus. Keep all selection and stopping training-only, independent rollout
+checks, and separate coefficient scoring afterward. This tests whether the
+benefit survives without the M24 warm checkpoints and whether diversification
+can resolve the remaining failure. Merely extending the unchanged start-2 fixed
+run is less informative given its plateau. Do not force a particular gain to
+be nonzero using reference knowledge.
+
+This review changes documentation only. No benchmark optimization was rerun
+locally, no production policy was promoted, and the next experiment has not
+been implemented or submitted.
+
+Review qualification: 40 focused tests pass on the final run; the saved-report
+reproduction is the artifact smoke check. An initial run had one legacy CLI
+resume test rejected by its runtime-identity guard; it passed in isolation and
+on the complete focused rerun without code changes. Focused Ruff and whitespace
+checks pass. Repository-wide Ruff still reports 37 pre-existing issues in
+unrelated `analysis/claude` files, which this review leaves untouched.

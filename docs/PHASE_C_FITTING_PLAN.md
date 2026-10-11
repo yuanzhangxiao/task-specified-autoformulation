@@ -966,3 +966,28 @@ root, preserving v1 defaults and results. The
 include the portable bundle and explicit result root. Focused tests and a small
 nonlinear ODE smoke pass; difficult-endpoint derivative agreement and scaling
 benefit remain unmeasured until the Delta follow-up completes.
+
+Completed refined M25 review (`review-20261011-015310`): all three local derivative
+audits pass at the finer perturbations with unchanged thresholds. All 85 seals
+verify and the report reproduces exactly. Start 0 preserves its accurate M24
+solution without fitting. Both scaling arms recover start 1, but fixed-coordinate
+scaling needs 16 evaluations/4.22 search-minutes versus 67/17.25 for Jacobian
+scaling. Its independent train/validation NMSEs are `9.66e-19 / 3.23e-18`, maximum
+coefficient relative error `2.33e-8`, and maximum hidden-initial absolute error
+`1.08e-8`. Start 2 improves from train `0.73493` to `0.12307` (validation `0.10168`)
+under fixed scaling, versus `0.73135 / 0.57694` under Jacobian scaling, but still
+fails coefficient/initial recovery. It stops on negligible steps, while the
+Jacobian arm exhausts its evaluation limit with a non-small gradient.
+
+The [refined M25 review](PHASE_C_FITTING_STAGNATION.md#completed-refined-m25-review--review-20261011-015310)
+records accepted-step evidence, independent checks, sensitivity and all costs.
+Shared derivative audits cost 18.02 worker-minutes; all recorded audit, arm and
+retrospective evaluation work totals 121.92 worker-minutes. Tiny early steps
+under Jacobian scaling suggest an interaction with centered starts and residual
+amplification, but the specific cause is not isolated. This is recovery from
+saved endpoints on one known skeleton, not a new generic-start success rate.
+Next proposed milestone: qualify fixed-coordinate profiled rollout against the
+Jacobian control from the original generic starts, with matched budgets and
+the same bounded domain-only restart portfolio for poor plateaus. Preserve
+training-only retention and verification; no production default or new campaign
+is changed by this review.
