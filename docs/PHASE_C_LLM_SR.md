@@ -150,6 +150,8 @@ The sealed plan records each, and a report states them.
 
 From the budget pilot (T1 easy, one seed, time order), on 2026-10-08:
 - A sample takes about 17.6 s: 11.7 s waiting for the model and 5.9 s in their evaluator. That is about 206 samples an hour, so a 10,000-sample search takes about two days.
+- The pilot finished on 2026-10-10: 10,000 samples in 54.5 hours, about 183 an hour overall.
+- Smoke v5, three searches at once at the paper's temperature, ran at 260 to 390 samples an hour on 2026-10-10.
 - A search uses about a third of a core on average. 22 at once use about 7–8 of js2's 16 cores and keep about 22 requests in flight at the hosted service. If the service slows under that load, the searches slow with it.
 - The full set is 220,000 samples, about 55,000 requests.
 
@@ -159,11 +161,11 @@ Recovering a program costs seconds per target. On a laptop:
 
 ## Plans
 
-- `configs/phase_c_llm_sr_smoke_v5.json`: the full plan's settings on the budget pilot's cell (T1 easy) and the two-target T2 hard cell, 400 samples per target, at most 300 requests. It shows that a pick that reads the history is recovered by running it, rolled out on validation and sealed. Frozen; not a result.
+- `configs/phase_c_llm_sr_smoke_v5.json`: the full plan's settings on the budget pilot's cell (T1 easy) and the two-target T2 hard cell, 400 samples per target, at most 300 requests. It shows that a pick that reads the history is recovered by running it, rolled out on validation and sealed. Frozen; not a result. Ran on 2026-10-10 and passed: both tasks sealed complete with programs that read the history, rolled out on the grid; each refit loss equalled LLM-SR's score exactly, and no output changed when later rows were removed. 300 requests, no cache hits, no failed requests.
 - `configs/phase_c_llm_sr_smoke_v4.json`: the same with the rows shuffled. Frozen on 2026-10-09 and superseded the same day; it never ran.
 - `configs/phase_c_llm_sr_smoke_v3.json`: the T2 hard cell in time order, 8 samples per target, without a program rollout. Frozen; ran on 2026-10-09 and sealed "inexpressible": both picks read along the rows.
-- `configs/phase_c_llm_sr_hosted_120b_v1.json`: 8 roster cells × 2 seeds at 10,000 samples per target, with PySR's table in time order, the program rollout and the paper's settings. **Proposed, pending review.**
-- The budget pilot (`configs/phase_c_llm_sr_budget_pilot_v2.json`) runs in time order from its own checkout. Only its pace is used.
+- `configs/phase_c_llm_sr_hosted_120b_v1.json`: 8 roster cells × 2 seeds at 10,000 samples per target, with PySR's table in time order, the program rollout and the paper's settings. Frozen on 2026-10-10, after smoke v5 passed and the user signed off; no setting changed, and the budget's rationale now gives the measured paces.
+- The budget pilot (`configs/phase_c_llm_sr_budget_pilot_v2.json`) ran in time order from its own checkout and finished on 2026-10-10. Only its pace is used.
 
 A run reads its checkout's code until it ends, so run from a clean checkout that no other run is using:
 
@@ -172,7 +174,7 @@ bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_smoke
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_hosted_120b_v1.json phase-c-llm-sr-hosted-120b-v1 22
 ```
 
-The last argument is how many target searches run at once. On the GPU VM, `run_phase_c_tasks.sh` still searches a task's targets one after another.
+The last argument is how many target searches run at once; the full run searches all 22 at once, then seals each task. When every task has ended, the launcher writes the report to `report.json` in the run's directory. On the GPU VM, `run_phase_c_tasks.sh` still searches a task's targets one after another.
 
 ## Limitations
 

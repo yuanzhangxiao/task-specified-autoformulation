@@ -1,6 +1,6 @@
 {
   "schema_version": "phase-c-vendored-campaign-plan-1",
-  "status": "proposed_pending_review",
+  "status": "frozen_before_calls",
   "development_only": true,
   "release_protocol": "phase-c-development-2",
   "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
@@ -15,7 +15,7 @@
     "unit": "llm_samples",
     "published_default": 10000,
     "declared": 10000,
-    "rationale": "The published budget, unreduced, for every searched target. The roster's eight cells have eleven targets, so two seeds make 22 searches and 220,000 samples, about 55,000 requests. Each target is searched by its own process, all at once; at the budget pilot's pace on 2026-10-08, about 206 samples an hour, a search takes about two days."
+    "rationale": "The published budget, unreduced, for every searched target. The roster's eight cells have eleven targets, so two seeds make 22 searches and 220,000 samples, about 55,000 requests. Each target is searched by its own process, all at once. Alone, the budget pilot's 10,000-sample search took 54.5 hours (2026-10-08 to 10), about 183 samples an hour; smoke v5's three searches ran at 260 to 390 an hour. At those paces a search takes one to two and a half days, longer if the hosted service slows with 22 at once."
   },
   "prompt_policy": {
     "supplies_public_task_specification": true,

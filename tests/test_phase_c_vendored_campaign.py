@@ -625,7 +625,7 @@ def test_the_full_llm_sr_plan_is_the_pilot_on_the_whole_roster():
     )
     assert full["cells"] == roster["cells"] and full["repetitions"] == [0, 1]
     assert full["budget"]["declared"] == full["budget"]["published_default"] == 10000
-    assert full["status"] == "proposed_pending_review"
+    assert full["status"] == "frozen_before_calls"
     assert (smoke["status"], smoke["budget"]["declared"]) == ("frozen_before_calls", 8)
     scope = {"status", "budget", "scope_note", "cells", "repetitions"}
     assert {key for key in smoke if smoke[key] != pilot[key]} <= scope
