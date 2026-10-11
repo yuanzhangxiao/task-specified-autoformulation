@@ -991,3 +991,22 @@ Jacobian control from the original generic starts, with matched budgets and
 the same bounded domain-only restart portfolio for poor plateaus. Preserve
 training-only retention and verification; no production default or new campaign
 is changed by this review.
+
+## M26 — guarded scaling from original generic starts
+
+The user approved implementing the relative-Jacobian scaling rule and testing
+initialization robustness. The opt-in `phase-c-generic-scaling-1` experiment
+compares Jacobian, fixed-coordinate and guarded relative scaling on all three
+original generic starts, with the same three frozen domain-only restarts per
+start. It preserves exact terminal-gain profiling and the existing base units.
+The guarded adjustment partially balances relative sensitivities, is bounded
+between 0.1 and 10, and is frozen within each search block.
+
+Every arm uses the same mean-residual objective without historical polishing
+amplification. Six matched search blocks reserve restart opportunities while
+allowing improving, independently usable endpoints to continue. Training-only
+independent checks retain the best incumbent and certify early stopping;
+coefficient/validation scoring follows sealed selection. Production defaults and
+historical protocols are unchanged. The [M26 protocol](PHASE_C_FITTING_SCALING.md)
+records the numerical rule, normalization change, allocation policy, full cost
+accounting, qualification, limitations and portable Delta CPU commands.

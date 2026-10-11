@@ -9,6 +9,7 @@ from autoformalism.fitting.affine_propagation import (
     numerically_verified,
     verify_outputs,
 )
+from autoformalism.fitting.optimizer_scaling import RelativeScaling, relative_scales
 from autoformalism.fitting.public_fitting import content_sha256
 
 
@@ -118,16 +119,27 @@ def search(
     telemetry=False,
     optimizer_scaling="jacobian",
     record_steps=False,
+    scaling_policy: RelativeScaling | None = None,
+    normalized_objective=False,
+    objective_multiplier: float | None = None,
 ):
     """Joint or projected TRF; charge started attempts, distinguish completed calls."""
-    if optimizer_scaling not in {"jacobian", "fixed_coordinates"}:
+    if optimizer_scaling not in {"jacobian", "fixed_coordinates", "guarded_relative"}:
         raise ValueError("unknown optimizer scaling")
+    multiplier = (
+        objective_multiplier
+        if objective_multiplier is not None
+        else (1.0 if normalized_objective else 1e6)
+    )
+    if not np.isfinite(multiplier) or multiplier <= 0:
+        raise ValueError("objective multiplier must be finite and positive")
     anchor = oracle.vector(start)
     free = list(range(len(anchor))) if profile is None else list(profile.outer)
     units = oracle.units[free]
     count, best, cached, domain_events, projection = 0, None, None, [], None
     begun, trace, steps = monotonic(), [], []
     accepted = None
+    scaling = {}
 
     class Reached(Exception):
         pass
@@ -141,6 +153,7 @@ def search(
                 else {}
             )
             | ({"accepted_steps": steps} if record_steps else {})
+            | ({"solver_scaling": scaling} if scaling else {})
         )
 
     def evaluate(q):
@@ -231,18 +244,35 @@ def search(
         save()
 
     try:
+        x_scale = "jac" if optimizer_scaling == "jacobian" else 1.0
+        factor = multiplier
+        if normalized_objective or optimizer_scaling == "guarded_relative":
+            residual, jacobian = evaluate(np.zeros(len(free)))
+            if normalized_objective:
+                factor /= np.sqrt(len(residual))
+            if optimizer_scaling == "guarded_relative":
+                scaling = relative_scales(jacobian, scaling_policy or RelativeScaling())
+                x_scale = np.asarray(scaling["scales"])
+            scaling |= {
+                "method": optimizer_scaling,
+                "coordinate_units": units.tolist(),
+                "mean_objective": normalized_objective,
+                "objective_multiplier": multiplier,
+                "absolute_gradient_stop_enabled": not normalized_objective,
+            }
+            save()
         solved = least_squares(
-            lambda q: evaluate(q)[0] * 1e6,
+            lambda q: evaluate(q)[0] * factor,
             np.zeros(len(free)),
-            jac=lambda q: evaluate(q)[1] * 1e6,
+            jac=lambda q: evaluate(q)[1] * factor,
             bounds=(
                 (oracle.lower[free] - anchor[free]) / units,
                 (oracle.upper[free] - anchor[free]) / units,
             ),
-            x_scale="jac" if optimizer_scaling == "jacobian" else 1.0,
+            x_scale=x_scale,
             ftol=None,
             xtol=1e-12,
-            gtol=1e-10,
+            gtol=None if normalized_objective else 1e-10,
             max_nfev=calls,
             **({"callback": callback} if record_steps else {}),
         )
@@ -263,6 +293,7 @@ def search(
         **detail,
         "domain_events": domain_events,
         "projection": projection,
+        **({"solver_scaling": scaling} if scaling else {}),
         **({"completed_calls": len(trace), "evaluations": trace} if telemetry else {}),
         **(
             {"accepted_steps": steps, "optimizer_scaling": optimizer_scaling}
