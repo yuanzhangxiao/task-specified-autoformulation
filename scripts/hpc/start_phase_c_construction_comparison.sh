@@ -18,7 +18,7 @@ case "$AF_STUDY" in
   variable_checklist_confirmation) AF_DEFAULT_ROOT=phase-c-variable-checklist-v1 ;;
   stage_check_confirmation) AF_DEFAULT_ROOT=phase-c-stage-checks-v1 ;;
   deferred_interaction_confirmation) AF_DEFAULT_ROOT=phase-c-minimal-deferred-v2 ;;
-  focused_prompt_confirmation) AF_DEFAULT_ROOT=phase-c-focused-prompts-v1 ;;
+  focused_prompt_confirmation) AF_DEFAULT_ROOT=phase-c-focused-prompts-seeds5-v1 ;;
   *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
 esac
 export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/$AF_DEFAULT_ROOT}
@@ -31,6 +31,10 @@ case "${1:?Use run or inspect}" in
     export AF_IPC_TMP_ROOT=/tmp/phase-c-ipc-u.yx126462
     if [[ ! -f "$AF_OUTPUT_ROOT/plan.json" ]]; then
       AF_PREPARE_EXTRA=()
+      if [[ "$AF_STUDY" == focused_prompt_confirmation ]]; then
+        read -r -a AF_SEEDS <<< "${AF_COMPARISON_SEEDS:-0 1 2 3 4}"
+        AF_PREPARE_EXTRA+=(--seeds "${AF_SEEDS[@]}")
+      fi
       if [[ "$AF_STUDY" == refinement_confirmation ]]; then
         AF_PREPARE_EXTRA+=(--repair-source "${AF_REPAIR_SOURCE:-$AF_GROUP/phase-c-current-bookkeeping-v2}")
       fi
@@ -43,6 +47,12 @@ case "${1:?Use run or inspect}" in
     [[ "$(jq -r '.study // "comparison"' "$AF_OUTPUT_ROOT/plan.json")" == "$AF_STUDY" ]] || {
       echo 'Study differs from saved plan; use its original study/root.' >&2; exit 2;
     }
+    if [[ -n "${AF_COMPARISON_SEEDS:-}" ]]; then
+      AF_SAVED_SEEDS=$(jq -r '(.sampling_seeds // [0]) | map(tostring) | join(" ")' "$AF_OUTPUT_ROOT/plan.json")
+      [[ "$AF_COMPARISON_SEEDS" == "$AF_SAVED_SEEDS" ]] || {
+        echo 'Seeds differ from saved plan; use a fresh root for a different roster.' >&2; exit 2;
+      }
+    fi
     exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_phase_c_baseline.py" \
       --root "$AF_OUTPUT_ROOT" --construction-comparison --wave "${AF_COMPARISON_WAVE:-comparison-1}"
     ;;

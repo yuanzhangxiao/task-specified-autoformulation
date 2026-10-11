@@ -20,6 +20,12 @@ def main():
     parser.add_argument("--source", type=Path)
     parser.add_argument("--repair-source", type=Path)
     parser.add_argument("--study", choices=campaign.STUDIES)
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        help="Sampling seeds for focused_prompt_confirmation (1-10 unique seeds)",
+    )
     parser.add_argument("--bookkeeping-policy", choices=campaign.bookkeeping.POLICIES)
     parser.add_argument("--base-url")
     parser.add_argument("--wall-seconds", type=int, default=21600)
@@ -38,9 +44,16 @@ def main():
             study=args.study or "comparison",
             bookkeeping_policy=args.bookkeeping_policy or "legacy",
             repair_source=args.repair_source,
+            seeds=args.seeds,
         )
     else:
-        if args.source or args.study or args.bookkeeping_policy or args.repair_source:
+        if (
+            args.source
+            or args.study
+            or args.bookkeeping_policy
+            or args.repair_source
+            or args.seeds is not None
+        ):
             parser.error("public inputs and study are frozen by prepare")
         plan = campaign.verify(root)
     if args.command == "run":

@@ -77,6 +77,22 @@ BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 
 
+def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
+    """Validate a frozen seed roster; historical studies keep their old rosters."""
+    if seeds is None:
+        return (0, 1) if study == "comparison" else (0,)
+    if study != "focused_prompt_confirmation":
+        raise ValueError("explicit seeds require focused_prompt_confirmation")
+    if (
+        not isinstance(seeds, list)
+        or not 1 <= len(seeds) <= 10
+        or any(type(s) is not int or not 0 <= s < 2**31 for s in seeds)
+        or len(set(seeds)) != len(seeds)
+    ):
+        raise ValueError("seeds must be 1-10 distinct integers in [0, 2**31)")
+    return tuple(seeds)
+
+
 class Config(baseline.Config):
     """Identical total budgets, with a reserved bounded repair allowance per arm."""
 
@@ -124,10 +140,12 @@ def freeze(
     study: Study = "comparison",
     bookkeeping_policy: bookkeeping.Policy = "legacy",
     repair_source: Path | None = None,
+    seeds: list[int] | None = None,
 ) -> dict:
     """Freeze public construction tasks and any explicitly selected saved repairs."""
     if study not in STUDIES:
         raise ValueError("unknown construction study")
+    selected_seeds = sampling_seeds(study, seeds)
     if (repair_source is not None) != (study == "refinement_confirmation"):
         raise ValueError(
             "refinement confirmation requires its saved repair source only"
@@ -206,6 +224,22 @@ def freeze(
             if t["seed"] == 0 and t["arm"] == "full"
         }
         source_tasks = [by_case[name] for name in roster]
+        if seeds is not None:
+            case_names = tuple(roster)
+            # Fresh construction, not reuse of any old seed's proposed inventory.
+            # Interleave cases across seeds, rotating their order without scores.
+            source_tasks = [
+                {
+                    **by_case[name],
+                    "task_id": f"cell{case_names.index(name):02d}_seed{seed}_full",
+                    "seed": seed,
+                }
+                for index, seed in enumerate(selected_seeds)
+                for name in (
+                    case_names[index % len(case_names) :]
+                    + case_names[: index % len(case_names)]
+                )
+            ]
     blocks = []
     for i, task in enumerate(source_tasks):
         if study == "refinement_confirmation" or study in CHECKLIST_STUDIES:
@@ -299,7 +333,16 @@ def freeze(
             {
                 "protocol": PROTOCOL,
                 "study": study,
-                "selection_rule": "eight-fresh-minimal-and-three-saved-repairs-1"
+                **(
+                    {"sampling_seeds": list(selected_seeds)}
+                    if seeds is not None
+                    else {}
+                ),
+                "selection_rule": (
+                    "all-eight-cases-declared-seeds-full-focused-prompts-1"
+                )
+                if seeds is not None
+                else "eight-fresh-minimal-and-three-saved-repairs-1"
                 if study == "refinement_confirmation"
                 else "all-eight-cases-seed0-full-variable-checklist-1"
                 if study == "variable_checklist_confirmation"
@@ -359,6 +402,7 @@ def verify(root: Path) -> dict:
     study = plan.get("study", "comparison")
     if study not in STUDIES:
         raise ValueError("unknown construction study")
+    selected_seeds = sampling_seeds(study, plan.get("sampling_seeds"))
     if study != "comparison" and plan["config"]["wall_seconds"] != 10800:
         raise ValueError("live confirmation uses a three-hour worker window")
     roster = (
@@ -371,7 +415,7 @@ def verify(root: Path) -> dict:
     expected = {
         (case, seed, arm, policy, placement)
         for case in roster
-        for seed in ((0,) if study != "comparison" else (0, 1))
+        for seed in selected_seeds
         for arm in (("full",) if study != "comparison" else ("full", "brief_only"))
         for policy in schedules.POLICIES
         for placement in (
@@ -399,8 +443,17 @@ def verify(root: Path) -> dict:
         ):
             raise ValueError("checklist policy differs")
         expected = {
-            (case, 0, "full", "joint_adaptive", "dedicated", family, prompts.SCHEDULE)
+            (
+                case,
+                seed,
+                "full",
+                "joint_adaptive",
+                "dedicated",
+                family,
+                prompts.SCHEDULE,
+            )
             for case in roster
+            for seed in selected_seeds
             for family in (
                 ("minimal",) if study in CHECKLIST_STUDIES else prompts.FAMILIES
             )
@@ -719,6 +772,59 @@ def process_history(records: list[dict], events: list[dict]) -> list[dict]:
     return history
 
 
+def seed_results(rows: list[dict]) -> list[dict]:
+    """Report every planned repetition without treating missing work as failure."""
+    labels = sorted(
+        {
+            (
+                r["benchmark_id"],
+                r.get("prompt_family", r["policy"]),
+                r["arm"],
+                r["process_question"],
+            )
+            for r in rows
+        }
+    )
+    result = []
+    for case, policy, arm, placement in labels:
+        selected = [
+            r
+            for r in rows
+            if (
+                r["benchmark_id"],
+                r.get("prompt_family", r["policy"]),
+                r["arm"],
+                r["process_question"],
+            )
+            == (case, policy, arm, placement)
+        ]
+        done = [r for r in selected if r["status"] != "pending"]
+        result.append(
+            {
+                "benchmark_id": case,
+                "policy": policy,
+                "arm": arm,
+                "process_question": placement,
+                "planned": len(selected),
+                "finished": len(done),
+                "status_counts": dict(Counter(r["status"] for r in selected)),
+                "initial_complete": sum(
+                    r["initial_complete"] is True for r in selected
+                ),
+                "final_complete": sum(
+                    r["status"] == "topology_complete" for r in selected
+                ),
+                "tokens": spread([r["cost"]["observed_tokens"] for r in done]),
+                "calls": spread([r["cost"]["physical_requests"] for r in done]),
+                "seeds": [
+                    {k: r[k] for k in ("task_id", "seed", "status", "initial_complete")}
+                    for r in sorted(selected, key=lambda r: r["seed"])
+                ],
+            }
+        )
+    return result
+
+
 def report(root: Path, plan: dict) -> dict:
     """Show before/after skeletons and every trace; never label syntax as science."""
     rows, sections = [], []
@@ -923,6 +1029,7 @@ def report(root: Path, plan: dict) -> dict:
             ),
         },
         "status_counts": dict(Counter(r["status"] for r in rows)),
+        "per_case_seed_results": seed_results(rows),
         "groups": groups,
         "observed_total_tokens": sum(r["cost"]["observed_tokens"] for r in rows),
         "physical_requests": sum(r["cost"]["physical_requests"] for r in rows),
@@ -939,6 +1046,7 @@ def report(root: Path, plan: dict) -> dict:
         "automatic_followup": False,
     }
     atomic_json(root / "summary.json", result)
+    seed_roster = list(sampling_seeds(plan.get("study"), plan.get("sampling_seeds")))
     lines = [
         "# Phase C construction schedules",
         "",
@@ -949,7 +1057,8 @@ def report(root: Path, plan: dict) -> dict:
         "Eight fresh minimal cases plus three diagnosed saved repair episodes. "
         "Saved repairs are not fresh-current controls or a matched comparison."
         if plan.get("study") == "refinement_confirmation"
-        else "Eight fresh minimal cases, Full/seed 0: one model view, specific "
+        else f"Eight fresh minimal cases, Full/seeds {seed_roster}: "
+        "one model view, specific "
         "feedback, bounded local recovery and up to five global repairs. "
         "Existing scientific acceptance checks remain. Provisional paths are "
         "advisory. Inspect VARIABLES.md and SHARED_PROCESSES.md. "
@@ -1019,6 +1128,27 @@ def report(root: Path, plan: dict) -> dict:
             f"| {g['calls']['median']} [{g['calls']['MAD']}] "
             f"| {g['models_retaining_shared_laws']} |"
         )
+    if plan.get("sampling_seeds") is not None:
+        lines.extend(
+            [
+                "",
+                "## Results across seeds",
+                "",
+                "Each cell uses the frozen seed roster. Pending runs are separate; "
+                "completion is structural, not scientific correctness. Costs use "
+                "terminal runs only. Resolution in one seed is not a general fix.",
+                "",
+                "| Case | Finished / planned | Before global repair | Final complete "
+                "| Tokens median [MAD] |",
+                "| --- | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for group in result["per_case_seed_results"]:
+            lines.append(
+                f"| {group['benchmark_id']} | {group['finished']}/{group['planned']} "
+                f"| {group['initial_complete']} | {group['final_complete']} "
+                f"| {group['tokens']['median']} [{group['tokens']['MAD']}] |"
+            )
     (root / "SUMMARY.md").write_text("\n".join(lines) + "\n")
     (root / "TOPOLOGY.html").write_text(
         "<!doctype html><meta charset='utf-8'><title>Construction comparison</title>"

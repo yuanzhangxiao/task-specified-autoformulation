@@ -86,3 +86,121 @@ confirmation is needed to measure actual prompt tokens and proposer behavior.
 
 No live test is submitted by the renderer. Review the prompts before using the
 new opt-in campaign study.
+
+## Repeated construction seeds
+
+The ACES launcher now defaults this study to five sampling seeds (0–4): eight
+public cells, Full specification, 40 fresh variable-to-topology episodes. This is
+repetition of each cell, not five new datasets. Every episode keeps the reviewed
+prompt policy, public context, model revision, temperature (0.2), checks, and
+request/token budgets. Seeds propagate to every physical request through the
+existing stage/attempt seed derivation. Each episode has its own namespace and
+cache. Cases rotate within each seed's block to reduce fixed scheduling order.
+No functions, fitting or test data are involved.
+
+Use all five outcomes, not the best seed. Compare future prompt versions on the
+same seed roster and serving configuration. Report per-case first reply,
+post-local-repair and post-global-repair checks from `VARIABLES.md`,
+`SHARED_PROCESSES.md`, and the topology report. `summary.json` adds
+`per_case_seed_results`: planned/finished counts, statuses and every seed's
+outcome, plus terminal-run cost median and unscaled MAD. Pending is not failure
+or a zero-cost completed episode. Targeted error counts and equation inspection
+remain necessary: structural completion alone does not establish a scientific
+fix. Five seeds support diagnosis, not a precise estimate of rare-error rates.
+Same-seed runs on different hardware are not guaranteed to be identical.
+
+From a pinned new checkout on ACES:
+
+```bash
+export AF_COMPARISON_STUDY=focused_prompt_confirmation
+export AF_COMPARISON_SEEDS='0 1 2 3 4'
+export AF_COMPARISON_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/phase-c-focused-prompts-seeds5-v1
+bash scripts/hpc/start_phase_c_construction_comparison.sh run
+```
+
+After the jobs finish, use the same exports and checkout:
+
+```bash
+bash scripts/hpc/start_phase_c_construction_comparison.sh inspect
+```
+
+Workers retain the bounded three-hour window. A 40-task campaign may need more
+than one allocation. If the report still contains pending tasks and the previous
+wave is terminal, resume the identical plan with a new wave name:
+
+```bash
+export AF_COMPARISON_WAVE=seeds5-continuation-2
+bash scripts/hpc/start_phase_c_construction_comparison.sh run
+```
+
+Completed outcomes and cached calls are reused, without resetting any episode's
+budget. There is no automatic resubmission. Do not edit a saved plan or switch
+its code/platform. Earlier eight-task plans must use their original source.
+
+For direct plan preparation, `phase_c_construction_comparison.py prepare` accepts
+`--study focused_prompt_confirmation --seeds 0 1 2 3 4`. The explicit roster is
+sealed in the plan and checked on resume. Other studies retain their historical
+rosters; the Python API's omitted-seeds default remains seed 0 for compatibility.
+
+## Jetstream2 GPU VM deployment decision
+
+A GPU VM can keep the model loaded across experiment batches without a Slurm
+submission for each batch. VM creation/unshelving remains subject to available
+capacity and project-wide quotas, including other agents' running instances.
+
+As of 2026-10-10, Jetstream2 documents `g5.xl` (one H100, 80 GB GPU RAM) at
+128 GPU SUs/hour, and `g3.xl` (one A100, 40 GB) at 64 GPU SUs/hour. A 40,000-SU
+GPU allocation therefore represents 312.5 H100 hours or 625 A100 hours, excluding
+any other consumption. H100 access may require enablement for the project.
+See [flavors](https://docs.jetstream-cloud.org/general/instance-flavors/) and
+[quotas](https://docs.jetstream-cloud.org/general/quotas/).
+
+Claude's project-specific handoff at
+`work/agent-comms/2026-10-10-claude-jetstream2-guide.md` reports A100-only access
+and no GPU VM yet. Plan around one **g3.xl A100** unless the project UI confirms
+otherwise; the general documentation's H100 listing does not establish this
+allocation's access. Use the user's newer **40,000 GPU SUs**, not the handoff's
+older 20,000. A100 support appears in vLLM's
+[GPT-OSS recipe](https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html),
+subject to an actual pinned-container/32K-context preflight. Do not silently
+change model size, quantization, context, sampling or repair budget while
+comparing prompt versions.
+
+The existing `js2` is a CPU VM with active baseline work. The baseline branch's
+`gpu_server.sh` pins the same GPT-OSS-20B revision and vLLM 0.27.1/32K context,
+but its setup installs baseline tools and its sequence concurrency is four times
+its task count. Reuse the serving pins, not that entire baseline setup or its
+sampling settings. Construction currently serves at most one sequence at a time.
+Use a separate construction environment and result root, without changing an
+active baseline checkout/server. GPU hardware identity and the actual driver
+must be recorded; the CUDA 13 image requires a successful kernel preflight.
+
+In Exosphere, select the IU allocation CIS261457, Create → Instance, an official
+Ubuntu image, quantity one, and the available GPU flavor. A 200-GB volume-backed
+root is a suggested starting size for the environment, one model and results,
+subject to remaining storage quota. Add an SSH key and wait for setup to finish.
+Use [Exosphere's creation guide](https://docs.jetstream-cloud.org/ui/exo/create_instance/).
+After connecting, inspect `nvidia-smi`, `df -h`, and `df -i` before installation.
+
+With an already configured project-scoped OpenStack CLI, read-only quota and
+inventory checks are:
+
+```bash
+openstack quota show --usage
+openstack flavor list
+openstack server list
+```
+
+The current production launcher is still ACES-specific and pins
+`platform=aces-h100x1`. This change adds repetition, not a tested Jetstream VM
+launcher. A VM deployment needs its own recorded platform, pinned model/image,
+GPU/driver record and startup smoke test before using a fresh plan. The eventual
+inference server should bind to localhost and be accessed from the same VM or
+through SSH, with complete request caches retained on persistent storage. It is
+separate from the managed Jetstream LLM API used in earlier critic experiments.
+
+Shelve an idle VM to stop compute charging; stopped/suspended instances still
+consume SUs. Unshelving may encounter capacity limits. See
+[Jetstream accounting](https://docs.jetstream-cloud.org/general/access/).
+Jetstream staff may also limit GPU runtime to two weeks when resources are in
+contention: [resource policy](https://docs.jetstream-cloud.org/general/resources/).

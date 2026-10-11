@@ -1,6 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
-`minimal-focused-construction-1` is implemented for prompt review, not launched.
+The equation-based `minimal-focused-construction-1` view has been reviewed by the
+user. Its next ACES confirmation defaults to five frozen sampling seeds across
+all eight Full-specification cells (40 constructions), with per-case seed outcomes
+and median/MAD costs. Historical rosters remain unchanged. Jetstream2 GPU VM
+deployment is being evaluated separately; its platform has not been validated.
+See `PHASE_C_FOCUSED_PROMPTS.md` for launch/resume and VM resource guidance.
+
+`minimal-focused-construction-1` is implemented, not launched by the agent.
 It projects the full runtime ledger into one equation-based model view, a small
 edit receipt and a requirement checklist, with conditional binding/receiver
 repair examples. Public science/training evidence and final acceptance predicates

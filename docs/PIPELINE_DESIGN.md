@@ -11,7 +11,12 @@ it never applies a scientific change. Provisional graph observations do not gran
 eligibility. Final compilation and checks remain authoritative. Bounded variable
 recovery resumes the stage sequence; it cannot silently bypass unresolved
 variables. Existing policies retain their prior flow. See
-`PHASE_C_FOCUSED_PROMPTS.md`; this version is awaiting human prompt review.
+`PHASE_C_FOCUSED_PROMPTS.md`; the user has reviewed this version. The next
+confirmation freezes five sampling seeds per cell without changing the public
+data or per-episode budgets. Each task has separate calls/checkpoints; reporting
+retains all outcomes and separates pending from failed episodes. Historical
+studies keep their original rosters. This is still an ACES launch protocol;
+Jetstream2 VM portability requires separate serving provenance validation.
 
 Prompt refinement keeps policy boundaries explicit. `minimal-clarity-1` uses the
 short stage-specific system, exact generated/ordinary edit locations, completion
