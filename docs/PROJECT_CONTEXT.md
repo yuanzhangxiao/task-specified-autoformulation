@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+`minimal-focused-construction-1` is implemented for prompt review, not launched.
+It projects the full runtime ledger into one equation-based model view, a small
+edit receipt and a requirement checklist, with conditional binding/receiver
+repair examples. Public science/training evidence and final acceptance predicates
+are retained. Independent provisional path observations are advisory when an
+unrelated incomplete RHS blocks final compilation. Variables get two additional
+bounded local recovery calls and then resume shared/topology stages; exhaustion
+stops incomplete. The new study reserves up to five global repairs, stopping
+early on success or repeated identical no-progress feedback. Historical policies
+retain their existing budgets/behavior. `PHASE_C_FOCUSED_PROMPTS.md` documents the
+offline preview, new policy boundary and remaining scientific limitations.
+
 `minimal-deferred-interaction-2` adds lossless removal of exact duplicate prompt
 fields and actionable state/process naming feedback. Scientific context, training
 summaries, accepted declarations, checks, stage wording and budgets are retained.

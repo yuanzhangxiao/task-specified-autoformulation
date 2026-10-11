@@ -1,5 +1,18 @@
 # Phase 1 Pipeline Design
 
+The opt-in `minimal-focused-construction-1` policy separates the proposer view
+from the full accepted ledger. The view renders joint local functions and shared
+uses with exact signs/conversions, retaining types and meanings without repeating
+the editable JSON. All edits still use the existing typed transactional schema.
+Internal bookkeeping/handoff metadata stays in saved records, outside LLM input.
+Binding suggestions enumerate type-eligible syntax examples without choosing a
+scientific assignment. Receiver feedback preserves valid uses conditionally;
+it never applies a scientific change. Provisional graph observations do not grant
+eligibility. Final compilation and checks remain authoritative. Bounded variable
+recovery resumes the stage sequence; it cannot silently bypass unresolved
+variables. Existing policies retain their prior flow. See
+`PHASE_C_FOCUSED_PROMPTS.md`; this version is awaiting human prompt review.
+
 Prompt refinement keeps policy boundaries explicit. `minimal-clarity-1` uses the
 short stage-specific system, exact generated/ordinary edit locations, completion
 instructions and edit receipts, without importing the current prompt's long

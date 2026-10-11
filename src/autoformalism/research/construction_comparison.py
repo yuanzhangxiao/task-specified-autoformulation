@@ -28,6 +28,7 @@ from autoformalism.research import construction_trace, topology_confirmation
 from autoformalism.research.construction_obligations import reviewed_contract
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_bookkeeping as bookkeeping
+from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_prompts as prompts
 from autoformalism.search import construction_schedules as schedules
@@ -47,6 +48,7 @@ Study = Literal[
     "variable_checklist_confirmation",
     "stage_check_confirmation",
     "deferred_interaction_confirmation",
+    "focused_prompt_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -58,13 +60,19 @@ STUDIES = (
     "variable_checklist_confirmation",
     "stage_check_confirmation",
     "deferred_interaction_confirmation",
+    "focused_prompt_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
     "stage_check_confirmation": bookkeeping.STAGE_POLICY,
     "deferred_interaction_confirmation": bookkeeping.COMPACT_POLICY,
+    "focused_prompt_confirmation": focused.POLICY,
 }
-SHARED_STAGE_STUDIES = ("stage_check_confirmation", "deferred_interaction_confirmation")
+SHARED_STAGE_STUDIES = (
+    "stage_check_confirmation",
+    "deferred_interaction_confirmation",
+    "focused_prompt_confirmation",
+)
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 
@@ -156,6 +164,11 @@ def freeze(
             },
             "protocol": PROTOCOL,
             "bookkeeping_policy": bookkeeping_policy,
+            **(
+                {"repair_requests": focused.REPAIR_REQUESTS}
+                if study == "focused_prompt_confirmation"
+                else {}
+            ),
             **({"wall_seconds": 10800} if study != "comparison" else {}),
         }
     )
@@ -208,6 +221,8 @@ def freeze(
                             if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
+                            else "focused"
+                            if study == "focused_prompt_confirmation"
                             else "clarity"
                         ),
                         "policy": "joint_adaptive",
@@ -292,6 +307,8 @@ def freeze(
                 if study == "stage_check_confirmation"
                 else "all-eight-cases-seed0-full-deferred-interaction-1"
                 if study == "deferred_interaction_confirmation"
+                else "all-eight-cases-seed0-full-focused-prompts-1"
+                if study == "focused_prompt_confirmation"
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
                 else ("both-basins-seed0-full-three-policies-two-placements-1")
@@ -475,12 +492,19 @@ def checked_records(
         if record is None or content_hash(record) != event["record_sha256"]:
             raise ValueError("missing or changed construction call records")
         displayed = json.loads(record["request"]["body"]["messages"][1]["content"])
+        displayed_matches = (
+            displayed.get("model_view")
+            == focused.model_view(ledger.Draft.model_validate(event["before"]))
+            if event.get("bookkeeping_policy") == focused.POLICY
+            else displayed.get("current_draft", {}).get("declarations")
+            == event["before"]
+        )
         if (
             path.name != f"{index:03d}.json"
             or event["index"] != index
             or ledger.Draft.model_validate(event["before"])
             != ledger.Draft.model_validate(drafts[-1])
-            or displayed["current_draft"]["declarations"] != event["before"]
+            or not displayed_matches
             or event["request_hash"] in used
         ):
             raise ValueError("construction transaction chain differs")
@@ -925,6 +949,12 @@ def report(root: Path, plan: dict) -> dict:
         "Eight fresh minimal cases plus three diagnosed saved repair episodes. "
         "Saved repairs are not fresh-current controls or a matched comparison."
         if plan.get("study") == "refinement_confirmation"
+        else "Eight fresh minimal cases, Full/seed 0: one model view, specific "
+        "feedback, bounded local recovery and up to five global repairs. "
+        "Existing scientific acceptance checks remain. Provisional paths are "
+        "advisory. Inspect VARIABLES.md and SHARED_PROCESSES.md. "
+        "Not a matched-budget ranking against earlier policies."
+        if plan.get("study") == "focused_prompt_confirmation"
         else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
         "deferred to interaction and visible requirement status. Existing structural "
         "checks remain; no new stage wording or destructive-repair guard. Inspect "

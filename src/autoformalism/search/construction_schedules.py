@@ -17,6 +17,7 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_checklist as checklist
 from autoformalism.search import construction_feedback
+from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_repair_fidelity as fidelity
@@ -432,7 +433,7 @@ def run(
     directory: Path,
     policy: Policy,
     *,
-    repair_requests: int = 3,
+    repair_requests: int | None = None,
     repair_tokens: int = 131072,
     graph_contract: PublicGraphContract | None = None,
     process_question: ProcessQuestion = "integrated",
@@ -441,7 +442,11 @@ def run(
     starting_draft: ledger.Draft | None = None,
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
+    focused_view = bookkeeping_policy == focused.POLICY
+    if repair_requests is None:
+        repair_requests = focused.REPAIR_REQUESTS if focused_view else 3
     draft, events, records = starting_draft or ledger.Draft(), [], []
+    continuation = None
     last_edit_result = None
     original = client.settings
     from autoformalism.search import construction_prompts as prompts
@@ -450,14 +455,19 @@ def run(
     from autoformalism.search import construction_compact as compact
     from autoformalism.search import construction_deferred as deferred
 
-    compact_feedback = bookkeeping_policy == compact.POLICY
-    defer_interaction = bookkeeping_policy in {deferred.POLICY, compact.POLICY}
+    compact_feedback = bookkeeping_policy == compact.POLICY or focused_view
+    defer_interaction = bookkeeping_policy in {
+        deferred.POLICY,
+        compact.POLICY,
+        focused.POLICY,
+    }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
         checklist.POLICY,
         stage_checks.POLICY,
         deferred.POLICY,
         compact.POLICY,
+        focused.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -465,6 +475,7 @@ def run(
         stage_checks.POLICY,
         deferred.POLICY,
         compact.POLICY,
+        focused.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -473,6 +484,7 @@ def run(
         stage_checks.POLICY,
         deferred.POLICY,
         compact.POLICY,
+        focused.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -616,6 +628,19 @@ def run(
             )
         if compact_feedback:
             payload = compact.compact_payload(payload)
+        if focused_view:
+            system = focused.SYSTEM
+            payload = focused.payload(
+                stage,
+                brief,
+                context,
+                target_definitions,
+                enriched_brief,
+                draft,
+                graph_contract,
+                last_edit_result,
+                continuation,
+            )
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -736,6 +761,7 @@ def run(
             "rejected_reply": None if accepted else raw,
             "uncommitted_edits": [] if accepted else uncommitted_edits(raw, before),
             "transaction_applied": accepted,
+            **({"no_progress": draft == before} if focused_view else {}),
             "normalizations": normalizations,
             "error": error,
             "edit_effects": handoff.edit_effects(before, draft) if accepted else None,
@@ -807,6 +833,7 @@ def run(
         return check
 
     def stage(name: str) -> tuple[bool, str | None]:
+        nonlocal continuation
         while True:
             work = ledger.pending(brief, draft)
             focus = None
@@ -815,7 +842,29 @@ def run(
                     return True, None
                 focus = work["equations_to_define"][0]
             diagnostic = None
-            for attempt in range(original.attempts_per_step):
+            allowance = original.attempts_per_step + (
+                focused.LOCAL_RECOVERY_REQUESTS
+                if focused_view and name == "variables"
+                else 0
+            )
+            for attempt in range(allowance):
+                continuation = None
+                if focused_view and (
+                    attempt >= original.attempts_per_step
+                    or (attempt > 0 and (last_edit_result or {}).get("no_progress"))
+                ):
+                    continuation = {
+                        "stage": name,
+                        "no_progress": bool(
+                            (last_edit_result or {}).get("no_progress")
+                        ),
+                        "local_recovery": attempt >= original.attempts_per_step,
+                        "instruction": "Continue this stage. Resolve the "
+                        "outstanding checklist fields. An existing state does "
+                        "not record a mechanism assignment. Successful "
+                        "completion resumes the next scheduled stage.",
+                        "remaining_local_attempts_including_this": allowance - attempt,
+                    }
                 accepted, complete, diagnostic = request(
                     name, focus, diagnostic, attempt
                 )
@@ -845,6 +894,7 @@ def run(
     try:
         ready, stop_reason = False, None
         stage_outcomes = []
+        variables_finished = not focused_view
         stages = (
             prompts.STAGES
             if prompt_family is not None
@@ -858,6 +908,8 @@ def run(
         try:
             for name in () if starting_draft is not None else stages:
                 ready, stop_reason = stage(name)
+                if focused_view and name == "variables":
+                    variables_finished = ready
                 stage_outcomes.append(
                     {
                         "stage": name,
@@ -875,6 +927,7 @@ def run(
                     continue
                 if not ready:
                     break
+            continuation = None
         except (RepairBudgetExceeded, PromptPreflightError) as exc:
             ready, stop_reason = False, str(exc)
         initial_check = assess_draft()
@@ -901,7 +954,10 @@ def run(
         )
         check = initial_check
         diagnostic = None
-        for attempt in range(repair_requests):
+        repair_limit = repair_requests if variables_finished else 0
+        stagnant = 0
+        previous_stagnation = None
+        for attempt in range(repair_limit):
             if check["eligible"] and ready:
                 break
             feedback = {
@@ -926,6 +982,36 @@ def run(
             if accepted:
                 check = assess_draft()
                 ready = complete
+            if focused_view:
+                signature = content_hash(
+                    {
+                        "draft": draft.model_dump(mode="json"),
+                        "errors": check["errors"],
+                        "last_error": (last_edit_result or {}).get("error"),
+                    }
+                )
+                unchanged = bool((last_edit_result or {}).get("no_progress"))
+                stagnant = (
+                    (stagnant + 1 if signature == previous_stagnation else 1)
+                    if unchanged
+                    else 0
+                )
+                previous_stagnation = signature
+                continuation = (
+                    {
+                        "no_progress": stagnant > 0,
+                        "instruction": "The last reply did not change the "
+                        "accepted model. Return edits addressing the specific "
+                        "outstanding fields/paths.",
+                    }
+                    if stagnant
+                    else None
+                )
+                if stagnant >= 2 and not (check["eligible"] and ready):
+                    stop_reason = (
+                        "two consecutive global repairs made no draft progress"
+                    )
+                    break
         return {
             "status": "topology_complete"
             if check["eligible"] and ready
@@ -941,7 +1027,7 @@ def run(
             "cost": _cost(sorted(records, key=lambda r: r["request_hash"])),
             **(
                 {"bookkeeping_policy": bookkeeping_policy}
-                if improved_bookkeeping
+                if improved_bookkeeping or focused_view
                 else {}
             ),
         }

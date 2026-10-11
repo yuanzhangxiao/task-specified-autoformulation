@@ -11,6 +11,7 @@ from autoformalism.search import shared_process_contract, signed_processes
 from autoformalism.search.construction_checklist import POLICY as CHECKLIST_POLICY
 from autoformalism.search.construction_compact import POLICY as COMPACT_POLICY
 from autoformalism.search.construction_deferred import POLICY as DEFERRED_POLICY
+from autoformalism.search.construction_focus import POLICY as FOCUSED_POLICY
 from autoformalism.search.construction_stage_checks import POLICY as STAGE_POLICY
 
 Policy = Literal[
@@ -23,6 +24,7 @@ Policy = Literal[
     "minimal-stage-checks-1",
     "minimal-deferred-interaction-1",
     "minimal-deferred-interaction-2",
+    "minimal-focused-construction-1",
 ]
 POLICY = "current-bookkeeping-1"
 FEEDBACK_POLICY = "current-bookkeeping-2"
@@ -38,6 +40,7 @@ POLICIES = (
     STAGE_POLICY,
     DEFERRED_POLICY,
     COMPACT_POLICY,
+    FOCUSED_POLICY,
 )
 
 EDITING = """Only current_draft.declarations contains editable records. The other
@@ -68,6 +71,7 @@ def validate_policy(policy: str, prompt_family: str | None = None) -> None:
         STAGE_POLICY,
         DEFERRED_POLICY,
         COMPACT_POLICY,
+        FOCUSED_POLICY,
     }:
         if prompt_family != "minimal":
             raise ValueError("minimal clarity requires minimal prompts")
