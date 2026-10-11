@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+The Jetstream2 H100 VM is created, with a 200GB root disk. Its separate
+four-request compatibility check pins the 20B weights/container and preserves
+complete stage requests, tokenizer evidence, schema outcomes and uncertain
+calls. It does not launch a campaign or change ACES plans. See
+`JETSTREAM_CONSTRUCTION_COMPATIBILITY.md`; live GPU compatibility is pending.
+
 The equation-based `minimal-focused-construction-1` view has been reviewed by the
 user. Its next ACES confirmation defaults to five frozen sampling seeds across
 all eight Full-specification cells (40 constructions), with per-case seed outcomes

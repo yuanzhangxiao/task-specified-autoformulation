@@ -144,6 +144,11 @@ rosters; the Python API's omitted-seeds default remains seed 0 for compatibility
 
 ## Jetstream2 GPU VM deployment decision
 
+Update: the user has now created an H100 80GB HBM3 VM (driver 580.159.03)
+with a 200GB root disk. The earlier handoff's A100-only access assumption no
+longer applies to this allocation. A separate bounded serving check is in
+`JETSTREAM_CONSTRUCTION_COMPATIBILITY.md`; a full VM campaign is not yet launched.
+
 A GPU VM can keep the model loaded across experiment batches without a Slurm
 submission for each batch. VM creation/unshelving remains subject to available
 capacity and project-wide quotas, including other agents' running instances.
