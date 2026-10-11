@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Eight fresh focused constructions on the already verified local H100 server."""
+"""Fresh construction seed rosters on the verified local H100 server."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ def operation_identity() -> str:
         "scripts/jetstream_construction_probe.py",
         "scripts/jetstream_server_record.py",
         "scripts/jetstream/run_construction.sh",
+        "scripts/jetstream/run_readable_construction.sh",
     )
     return content_hash(
         {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest() for name in names}
@@ -52,9 +53,10 @@ def compatibility(work: Path, requests: Path) -> dict:
         or [r["stage"] for r in inputs["requests"]] != list(probe.STAGES)
     ):
         raise ValueError("compatibility inputs or server differ")
-    if hashlib.sha256((work / "weights.json").read_bytes()).hexdigest() != server[
-        "weights_manifest_sha256"
-    ]:
+    if (
+        hashlib.sha256((work / "weights.json").read_bytes()).hexdigest()
+        != server["weights_manifest_sha256"]
+    ):
         raise ValueError("weights manifest differs")
     tokens = 0
     for i, row in enumerate(inputs["requests"]):
@@ -119,24 +121,35 @@ def validate_settings(config: dict) -> None:
         raise ValueError("construction context differs")
 
 
-def prepare(source: Path, work: Path, requests: Path, root: Path) -> dict:
-    """Freeze a distinct seed-0 campaign; preserve the source and compatibility run."""
+def prepare(
+    source: Path,
+    work: Path,
+    requests: Path,
+    root: Path,
+    *,
+    study: str = "focused_prompt_confirmation",
+    seeds: list[int] | None = None,
+) -> dict:
+    """Freeze a distinct campaign; preserve the source and compatibility run."""
+    if study not in {"focused_prompt_confirmation", "readable_prompt_confirmation"}:
+        raise ValueError("unsupported Jetstream construction study")
+    selected = list(campaign.sampling_seeds(study, [0] if seeds is None else seeds))
     evidence = compatibility(work, requests)
     old = sealed_read(source / "plan.json")
     validate_settings(old["config"])
     plan = campaign.freeze(
         source,
         root,
-        study="focused_prompt_confirmation",
-        seeds=[0],
+        study=study,
+        seeds=selected,
         serving_environment={
             "platform": PLATFORM,
             "serving_image_sha256": probe.IMAGE.split("sha256:")[1],
         },
     )
     plan = campaign.verify(root)
-    if len(plan["tasks"]) != 8 or plan["sampling_seeds"] != [0]:
-        raise ValueError("requires eight fresh seed-0 constructions")
+    if len(plan["tasks"]) != 8 * len(selected) or plan["sampling_seeds"] != selected:
+        raise ValueError("construction seed roster differs")
     sealed_write(
         root / "execution.json",
         {
@@ -154,17 +167,18 @@ def prepare(source: Path, work: Path, requests: Path, root: Path) -> dict:
 
 
 def verify(root: Path) -> dict:
-    """Require the same source, provenance and eight-case roster on every resume."""
+    """Require the same source, provenance and seed roster on every resume."""
     plan = campaign.verify(root)
     execution = sealed_read(root / "execution.json")
     validate_settings(plan["config"])
+    seeds = campaign.sampling_seeds(plan["study"], plan.get("sampling_seeds"))
     if (
         execution["protocol"] != PROTOCOL
         or execution["plan_sha256"] != plan["artifact_sha256"]
         or execution["operation_identity"] != operation_identity()
-        or plan["study"] != "focused_prompt_confirmation"
-        or plan.get("sampling_seeds") != [0]
-        or len(plan["tasks"]) != 8
+        or plan["study"]
+        not in {"focused_prompt_confirmation", "readable_prompt_confirmation"}
+        or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
         or plan["config"]["serving_image_sha256"] != probe.IMAGE.split("sha256:")[1]
     ):
@@ -174,6 +188,7 @@ def verify(root: Path) -> dict:
 
 def live_server() -> None:
     """Read serving metadata on loopback only; never issue a model generation."""
+
     def read(route):
         with urllib.request.urlopen(probe.BASE_URL + route, timeout=10) as response:
             return json.load(response)
@@ -181,9 +196,11 @@ def live_server() -> None:
     if read("/version").get("version") != "0.27.1":
         raise ValueError("live vLLM version differs")
     models = read("/v1/models").get("data", [])
-    if len(models) != 1 or models[0].get("id") != probe.MODEL or models[0].get(
-        "max_model_len"
-    ) != 32768:
+    if (
+        len(models) != 1
+        or models[0].get("id") != probe.MODEL
+        or models[0].get("max_model_len") != 32768
+    ):
         raise ValueError("live model or context differs")
 
 
@@ -233,18 +250,35 @@ def main() -> None:
     parser.add_argument("--work", type=Path)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--requests", type=Path)
+    parser.add_argument(
+        "--study",
+        choices=("focused_prompt_confirmation", "readable_prompt_confirmation"),
+        default="focused_prompt_confirmation",
+    )
+    parser.add_argument("--seeds", nargs="+", type=int, default=[0])
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
         if args.command == "run":
             if any(x is None for x in (args.work, args.source, args.requests)):
                 parser.error("run requires --work, --source and --requests")
-            prepare(args.source, args.work, args.requests, args.root)
+            prepare(
+                args.source,
+                args.work,
+                args.requests,
+                args.root,
+                study=args.study,
+                seeds=args.seeds,
+            )
             result = run(args.root)
         else:
             result = campaign.report(args.root, verify(args.root))
         keys = (
-            "status_counts", "all_tasks_terminal", "physical_requests",
-            "observed_total_tokens", "unmeasured_requests", "test_data_opened",
+            "status_counts",
+            "all_tasks_terminal",
+            "physical_requests",
+            "observed_total_tokens",
+            "unmeasured_requests",
+            "test_data_opened",
         )
         print(json.dumps({k: result[k] for k in keys}, indent=2))
 

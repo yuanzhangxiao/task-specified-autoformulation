@@ -8,19 +8,29 @@ from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research import construction_focus_review as review
 from autoformalism.search import construction_focus as focus
+from autoformalism.search import construction_readable as readable
 from tests.test_construction_comparison import source_fixture
 from tests.test_construction_ledger import equation, variable
 from tests.test_explicit_variable_bindings import response
 from tests.test_phase_c_construction_baseline import tokenize
 
 
-def test_focused_study_live_projection_reports_and_offline_review(tmp_path):
+@pytest.mark.parametrize(
+    "study,policy",
+    [
+        ("focused_prompt_confirmation", focus.POLICY),
+        ("readable_prompt_confirmation", readable.POLICY),
+    ],
+)
+def test_focused_study_live_projection_reports_and_offline_review(
+    tmp_path, study, policy
+):
     source_fixture(tmp_path)
     root = tmp_path / "study"
-    plan = campaign.freeze(tmp_path / "new", root, study="focused_prompt_confirmation")
+    plan = campaign.freeze(tmp_path / "new", root, study=study)
     assert campaign.verify(root) == plan
     assert plan["config"]["repair_requests"] == 5
-    assert plan["config"]["bookkeeping_policy"] == focus.POLICY
+    assert plan["config"]["bookkeeping_policy"] == policy
     assert len(plan["tasks"]) == 8
     requests = []
 
@@ -78,10 +88,12 @@ def test_focused_study_live_projection_reports_and_offline_review(tmp_path):
     task = plan["tasks"][0]
     directory = root / "results" / task["task_id"]
     event = sealed_read(directory / "construction/events/000.json")
-    row = review.preview(plan["cells"][task["benchmark_id"]], task, event, requests[0])
+    row = review.preview(
+        plan["cells"][task["benchmark_id"]], task, event, requests[0], policy
+    )
     assert row["after"] == requests[0]
     output = tmp_path / "review"
-    summary = review.render(root, output)
+    summary = review.render(root, output, policy)
     assert summary["requests"] == count and summary["llm_calls"] == 0
     assert "New model view" in (output / "request-000.html").read_text()
     with pytest.raises(ValueError, match="must be empty"):

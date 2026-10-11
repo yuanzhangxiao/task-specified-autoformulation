@@ -4,27 +4,41 @@ from __future__ import annotations
 
 import html
 import json
+from contextlib import suppress
 from copy import deepcopy
 from pathlib import Path
 
 from autoformalism.expressions import ValidationContext
+from autoformalism.llm.staged_topology import visible_response
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research.construction_deferred_review import marked_diff
 from autoformalism.search import construction_compact as compact
 from autoformalism.search import construction_focus as focused
+from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import construction_readable as readable
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 
 
-def preview(cell: dict, task: dict, event: dict, body: dict) -> dict:
+def preview(
+    cell: dict,
+    task: dict,
+    event: dict,
+    body: dict,
+    policy: str = focused.POLICY,
+    last: dict | None = None,
+) -> dict:
     """Use the live projection on one actual historical predecessor, not a new chain."""
+    if policy not in {focused.POLICY, readable.POLICY}:
+        raise ValueError("unsupported preview policy")
+    presentation = readable if policy == readable.POLICY else focused
     old = compact.expand_payload(json.loads(body["messages"][1]["content"]))
     brief = campaign.contract.visible_brief(cell, task)
     new = (
         old
-        if event.get("bookkeeping_policy") == focused.POLICY
-        else focused.payload(
+        if event.get("bookkeeping_policy") == policy
+        else presentation.payload(
             event["stage"],
             brief,
             ValidationContext.model_validate(cell["context"]),
@@ -32,12 +46,15 @@ def preview(cell: dict, task: dict, event: dict, body: dict) -> dict:
             old["public_brief"],
             ledger.Draft.model_validate(event["before"]),
             PublicGraphContract.model_validate(cell["public_graph_contract"]),
-            old.get("last_edit_result"),
+            last or old.get("last_edit_result"),
+            old.get("feedback", {}).get("continuation"),
         )
     )
+    if policy == readable.POLICY and event["stage"] == "repair":
+        readable.repair_budget(new, focused.REPAIR_REQUESTS, event["attempt"])
     proposed = deepcopy(body)
     proposed["messages"] = [
-        {"role": "system", "content": focused.SYSTEM},
+        {"role": "system", "content": presentation.SYSTEM},
         {"role": "user", "content": json.dumps(new, sort_keys=True)},
     ]
     return {
@@ -52,7 +69,7 @@ def preview(cell: dict, task: dict, event: dict, body: dict) -> dict:
     }
 
 
-def inspect(source: Path) -> tuple[dict, list[dict]]:
+def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict]]:
     """Check sealed event chains and retain all displayed public evidence verbatim."""
     plan = sealed_read(source / "plan.json")
     if (
@@ -72,6 +89,7 @@ def inspect(source: Path) -> tuple[dict, list[dict]]:
             task.get("starting_checkpoint", {}).get("draft"),
         )
         by_hash = {r["request_hash"]: r for r in records}
+        previous = None
         for path in sorted((directory / "construction/events").glob("*.json")):
             event = sealed_read(path)
             record = by_hash[event["request_hash"]]
@@ -81,12 +99,33 @@ def inspect(source: Path) -> tuple[dict, list[dict]]:
                     task,
                     event,
                     record["request"]["body"],
+                    policy,
+                    previous,
                 )
             )
+            previous = {
+                "status": "accepted" if event["accepted"] else "rejected",
+                "transaction_applied": event["accepted"],
+                "error": event["error"],
+                "edit_effects": handoff.edit_effects(
+                    ledger.Draft.model_validate(event["before"]),
+                    ledger.Draft.model_validate(event["after"]),
+                )
+                if event["accepted"]
+                else None,
+                "normalizations": event.get("normalizations", []),
+                "name_conflicts": event.get("name_conflicts", []),
+                "definition_conflicts": event.get("definition_conflicts", []),
+                "rejected_reply": None,
+            }
+            if not event["accepted"]:
+                # Unparseable delivery is preserved in the saved error.
+                with suppress(ValueError, TypeError, KeyError):
+                    previous["rejected_reply"] = visible_response(record)
     before = sum(r["saved_user_bytes"] for r in requests)
     after = sum(r["revised_user_bytes"] for r in requests)
     return {
-        "policy": focused.POLICY,
+        "policy": policy,
         "source_identity": plan["artifact_sha256"],
         "requests": len(requests),
         "tasks": len({r["task"] for r in requests}),
@@ -188,14 +227,15 @@ def _request_page(row: dict) -> str:
     return _page(f"{row['task']} · {row['stage']} · turn {row['event']}", body)
 
 
-def render(source: Path, output: Path) -> dict:
+def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
     """Write a fresh escaped HTML review; never overwrite a saved campaign."""
     source, output = source.resolve(), output.resolve()
     if output == source or source in output.parents:
         raise ValueError("review must be outside the historical campaign")
     if output.exists() and any(output.iterdir()):
         raise ValueError("review output must be empty")
-    summary, rows = inspect(source)
+    summary, rows = inspect(source, policy)
+    presentation = readable if policy == readable.POLICY else focused
     output.mkdir(parents=True, exist_ok=True)
     links, highlights = [], {}
     for i, row in enumerate(rows):
@@ -204,6 +244,16 @@ def render(source: Path, output: Path) -> dict:
         p = json.loads(row["after"]["messages"][1]["content"])
         issues = p["feedback"]["issues"]
         for code, title in (
+            ("algebraic_dependency_cycle", "Algebraic cycle: conditional type repair"),
+            ("conversion_role_decision", "Clarify a coefficient in conversion"),
+            (
+                "process_consumer_decision",
+                "Additive contribution or composite function",
+            ),
+            (
+                "memory_target_path",
+                "Assigned memory: keep the required pathway visible",
+            ),
             ("memory_assignment", "Missing memory assignment: explicit JSON example"),
             ("supplied_receiver", "Invalid receiver: preserve the valid effect"),
             ("compiler", "Incomplete RHS: show provisional paths too"),
@@ -226,6 +276,7 @@ def render(source: Path, output: Path) -> dict:
         "remain in the runtime log. This projection changes how they are "
         "presented, not the scientific acceptance rules.</p>"
         '<section class="new"><h2>Changes to review</h2><ul>'
+        "<li>Policy: " + html.escape(policy) + ".</li>"
         "<li>One model view with joint arguments, signs, conversions and meanings; "
         "no duplicate declaration JSON.</li><li>A compact edit receipt, "
         "one requirement checklist and specific feedback with conditional "
@@ -238,10 +289,10 @@ def render(source: Path, output: Path) -> dict:
         + "".join(highlights.values())
         + "</ul>"
         + "<h2>System instruction (every call)</h2>"
-        + _block(focused.SYSTEM)
+        + _block(presentation.SYSTEM)
         + "<h2>Stage instructions</h2>"
         + "".join(
-            f"<h3>{title}</h3>" + _block(focused.stage_text(stage))
+            f"<h3>{title}</h3>" + _block(presentation.stage_text(stage))
             for stage, title in (
                 ("variables", "1. Variables"),
                 ("shared_laws", "2. Shared processes"),
@@ -250,7 +301,7 @@ def render(source: Path, output: Path) -> dict:
             )
         )
         + "<h2>Editing contract</h2>"
-        + _block(focused.EDITING)
+        + _block(presentation.EDITING)
         + "<h2>Bounded continuation and scope</h2>"
         + _block(summary["new_schedule"])
         + "<p>"

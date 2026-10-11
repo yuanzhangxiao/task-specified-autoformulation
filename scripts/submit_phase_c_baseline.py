@@ -61,6 +61,7 @@ def submit(
         "stage_check_confirmation",
         "deferred_interaction_confirmation",
         "focused_prompt_confirmation",
+        "readable_prompt_confirmation",
     }
     if live_confirmation:
         construction_comparison.check_storage(root)

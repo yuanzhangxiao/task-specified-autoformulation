@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `minimal-readable-construction-1` policy removes synthetic function,
+coefficient and occurrence labels from the topology display, retains exact
+signs/conversions, and adds conditional role, cycle and process-reference feedback.
+A repair agenda exposes outstanding public paths and the unchanged five-call
+allowance. Runtime validation/scientific assignments remain unchanged. The ACES
+five-seed focused run reached 31/40 structural completions (19/40 before global
+repair); this does not establish scientific recovery. A fresh 40-task Jetstream
+confirmation reuses the verified H100 server. See `PHASE_C_READABLE_PROMPTS.md`.
+
 The Jetstream2 H100 serving check passed on October 11, 2026: four independently
 verified requests, 54,068 measured tokens, valid schemas and pinned serving
 provenance. This establishes compatibility, not science or ACES equivalence.

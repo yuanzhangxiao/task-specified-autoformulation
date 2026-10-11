@@ -31,6 +31,7 @@ from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_prompts as prompts
+from autoformalism.search import construction_readable as readable
 from autoformalism.search import construction_schedules as schedules
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
@@ -49,6 +50,7 @@ Study = Literal[
     "stage_check_confirmation",
     "deferred_interaction_confirmation",
     "focused_prompt_confirmation",
+    "readable_prompt_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -61,17 +63,20 @@ STUDIES = (
     "stage_check_confirmation",
     "deferred_interaction_confirmation",
     "focused_prompt_confirmation",
+    "readable_prompt_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
     "stage_check_confirmation": bookkeeping.STAGE_POLICY,
     "deferred_interaction_confirmation": bookkeeping.COMPACT_POLICY,
     "focused_prompt_confirmation": focused.POLICY,
+    "readable_prompt_confirmation": readable.POLICY,
 }
 SHARED_STAGE_STUDIES = (
     "stage_check_confirmation",
     "deferred_interaction_confirmation",
     "focused_prompt_confirmation",
+    "readable_prompt_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -81,7 +86,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
     """Validate a frozen seed roster; historical studies keep their old rosters."""
     if seeds is None:
         return (0, 1) if study == "comparison" else (0,)
-    if study != "focused_prompt_confirmation":
+    if study not in {"focused_prompt_confirmation", "readable_prompt_confirmation"}:
         raise ValueError("explicit seeds require focused_prompt_confirmation")
     if (
         not isinstance(seeds, list)
@@ -149,7 +154,7 @@ def freeze(
         raise ValueError("unknown construction study")
     selected_seeds = sampling_seeds(study, seeds)
     if serving_environment is not None and (
-        study != "focused_prompt_confirmation"
+        study not in {"focused_prompt_confirmation", "readable_prompt_confirmation"}
         or set(serving_environment) != {"platform", "serving_image_sha256"}
         or serving_environment["platform"] != "jetstream2-h100x1-docker"
     ):
@@ -192,7 +197,8 @@ def freeze(
             "bookkeeping_policy": bookkeeping_policy,
             **(
                 {"repair_requests": focused.REPAIR_REQUESTS}
-                if study == "focused_prompt_confirmation"
+                if study
+                in {"focused_prompt_confirmation", "readable_prompt_confirmation"}
                 else {}
             ),
             **({"wall_seconds": 10800} if study != "comparison" else {}),
@@ -264,8 +270,14 @@ def freeze(
                             if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
+                            else "readable"
+                            if study == "readable_prompt_confirmation"
                             else "focused"
-                            if study == "focused_prompt_confirmation"
+                            if study
+                            in {
+                                "focused_prompt_confirmation",
+                                "readable_prompt_confirmation",
+                            }
                             else "clarity"
                         ),
                         "policy": "joint_adaptive",
@@ -360,7 +372,8 @@ def freeze(
                 else "all-eight-cases-seed0-full-deferred-interaction-1"
                 if study == "deferred_interaction_confirmation"
                 else "all-eight-cases-seed0-full-focused-prompts-1"
-                if study == "focused_prompt_confirmation"
+                if study
+                in {"focused_prompt_confirmation", "readable_prompt_confirmation"}
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
                 else ("both-basins-seed0-full-three-policies-two-placements-1")
@@ -556,8 +569,12 @@ def checked_records(
         displayed = json.loads(record["request"]["body"]["messages"][1]["content"])
         displayed_matches = (
             displayed.get("model_view")
-            == focused.model_view(ledger.Draft.model_validate(event["before"]))
-            if event.get("bookkeeping_policy") == focused.POLICY
+            == (
+                readable
+                if event.get("bookkeeping_policy") == readable.POLICY
+                else focused
+            ).model_view(ledger.Draft.model_validate(event["before"]))
+            if event.get("bookkeeping_policy") in {focused.POLICY, readable.POLICY}
             else displayed.get("current_draft", {}).get("declarations")
             == event["before"]
         )
@@ -1072,7 +1089,8 @@ def report(root: Path, plan: dict) -> dict:
         "Existing scientific acceptance checks remain. Provisional paths are "
         "advisory. Inspect VARIABLES.md and SHARED_PROCESSES.md. "
         "Not a matched-budget ranking against earlier policies."
-        if plan.get("study") == "focused_prompt_confirmation"
+        if plan.get("study")
+        in {"focused_prompt_confirmation", "readable_prompt_confirmation"}
         else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
         "deferred to interaction and visible requirement status. Existing structural "
         "checks remain; no new stage wording or destructive-repair guard. Inspect "

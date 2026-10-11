@@ -182,3 +182,24 @@ def test_launcher_does_not_install_or_launch_gpu_server():
     assert "nohup" in shell and "flock" in shell
     assert '"$AF_WORK/worker.lock"' in shell
     assert "--source" in shell and "--requests" in shell
+
+
+def test_readable_five_seed_roster_is_frozen_and_old_plan_cannot_be_repurposed(
+    tmp_path,
+):
+    args = fixture(tmp_path)
+    plan = pilot.prepare(
+        *args, study="readable_prompt_confirmation", seeds=[0, 1, 2, 3, 4]
+    )
+    assert len(plan["tasks"]) == 40
+    assert plan["config"]["bookkeeping_policy"] == "minimal-readable-construction-1"
+    assert plan["config"]["repair_requests"] == 5
+    assert pilot.verify(args[-1]) == plan
+    assert (
+        pilot.prepare(
+            *args, study="readable_prompt_confirmation", seeds=[0, 1, 2, 3, 4]
+        )
+        == plan
+    )
+    with pytest.raises(ValueError, match="frozen artifact differs"):
+        pilot.prepare(*args, study="readable_prompt_confirmation", seeds=[0])

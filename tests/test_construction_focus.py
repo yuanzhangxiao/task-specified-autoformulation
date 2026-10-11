@@ -10,6 +10,7 @@ from autoformalism.llm.staged_topology import DeferredCall, StagedModelSettings
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.search import construction_focus as focus
+from autoformalism.search import construction_readable as readable
 from autoformalism.search import construction_schedules as schedules
 from tests.test_construction_ledger import (
     apply,
@@ -153,7 +154,7 @@ def test_provisional_forbidden_paths_and_feedback_include_known_edges_only():
     )
 
 
-def execute(root, send, can_start=lambda: True):
+def execute(root, send, can_start=lambda: True, policy=focus.POLICY):
     b = brief(True)
     c = ConstructionClient(
         settings=StagedModelSettings(maximum_requests=128, maximum_total_tokens=524288),
@@ -175,7 +176,7 @@ def execute(root, send, can_start=lambda: True):
         "joint_adaptive",
         prompt_family="minimal",
         process_question="dedicated",
-        bookkeeping_policy=focus.POLICY,
+        bookkeeping_policy=policy,
     )
 
 
@@ -246,9 +247,10 @@ def test_receipt_keeps_rejection_distinct_from_current_model():
     assert p["feedback"]["issues"][-1]["code"] == "last_reply_rejected"
 
 
+@pytest.mark.parametrize("policy", [focus.POLICY, readable.POLICY])
 @pytest.mark.parametrize("progress", [True, False])
 def test_global_repair_cap_and_no_progress_stop_preserve_cached_chain(
-    tmp_path, progress
+    tmp_path, progress, policy
 ):
     calls, repairs = [], []
 
@@ -267,6 +269,11 @@ def test_global_repair_cap_and_no_progress_stop_preserve_cached_chain(
             edit["equations"] = [equation("M", "u"), equation("y", "u")]
         elif p["stage"] == "repair":
             repairs.append(p)
+            if policy == readable.POLICY:
+                assert p["feedback"]["repair_budget"]["current_call"] == len(repairs)
+                assert p["feedback"]["repair_budget"][
+                    "remaining_after_this_call"
+                ] == 5 - len(repairs)
             if progress:
                 edit["variables"] = [
                     {**variable("M"), "scientific_role": f"revision {len(repairs)}"}
@@ -275,7 +282,7 @@ def test_global_repair_cap_and_no_progress_stop_preserve_cached_chain(
                     edit["equations"] = [equation("y", "M")]
         return response(edit)
 
-    result = execute(tmp_path, send)
+    result = execute(tmp_path, send, policy=policy)
     assert len(repairs) == (5 if progress else 2)
     assert result["status"] == (
         "topology_complete" if progress else "topology_incomplete"
@@ -283,9 +290,9 @@ def test_global_repair_cap_and_no_progress_stop_preserve_cached_chain(
     if not progress:
         assert repairs[-1]["feedback"]["continuation"]["no_progress"]
         assert "no draft progress" in result["stop_reason"]
-    assert result["bookkeeping_policy"] == focus.POLICY
+    assert result["bookkeeping_policy"] == policy
     count = len(calls)
-    assert execute(tmp_path, send) == result and len(calls) == count
+    assert execute(tmp_path, send, policy=policy) == result and len(calls) == count
     assert len(campaign.checked_records(tmp_path, "focused")) == count
     # The log retains full declarations; only the displayed projection changed.
     event = sealed_read(tmp_path / "construction/events/001.json")

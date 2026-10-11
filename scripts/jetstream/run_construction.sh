@@ -67,9 +67,11 @@ if s.f_files and s.f_favail < 10000:
     raise SystemExit('Need 10,000 free filesystem entries before this pilot.')
 PY
     AF_EXIT=0
+    read -r -a AF_SEEDS <<< "${AF_JS2_SEEDS:-0}"
     "$AF_PYTHON" "$AF_REPO/scripts/jetstream_construction_campaign.py" run \
       --root "$AF_ROOT" --work "$AF_WORK" \
-      --source "$AF_REPO/inputs/topology-source" --requests "$AF_REPO/probe-requests.json" || AF_EXIT=$?
+      --source "$AF_REPO/inputs/topology-source" --requests "$AF_REPO/probe-requests.json" \
+      --study "${AF_JS2_STUDY:-focused_prompt_confirmation}" --seeds "${AF_SEEDS[@]}" || AF_EXIT=$?
     sudo -n docker logs "$AF_CONTAINER" >"$AF_ROOT/runtime/server.log" 2>&1 || true
     # Package only after this still-open log is closed, via inspect.
     echo "Worker exit: $AF_EXIT. Results: $AF_ROOT/SUMMARY.md"

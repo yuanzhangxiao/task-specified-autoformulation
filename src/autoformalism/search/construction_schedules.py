@@ -20,6 +20,7 @@ from autoformalism.search import construction_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import construction_readable as readable
 from autoformalism.search import construction_repair_fidelity as fidelity
 from autoformalism.search import construction_stage_checks as stage_checks
 from autoformalism.search.public_graph_obligations import PublicGraphContract
@@ -442,7 +443,7 @@ def run(
     starting_draft: ledger.Draft | None = None,
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
-    focused_view = bookkeeping_policy == focused.POLICY
+    focused_view = bookkeeping_policy in {focused.POLICY, readable.POLICY}
     if repair_requests is None:
         repair_requests = focused.REPAIR_REQUESTS if focused_view else 3
     draft, events, records = starting_draft or ledger.Draft(), [], []
@@ -460,6 +461,7 @@ def run(
         deferred.POLICY,
         compact.POLICY,
         focused.POLICY,
+        readable.POLICY,
     }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
@@ -468,6 +470,7 @@ def run(
         deferred.POLICY,
         compact.POLICY,
         focused.POLICY,
+        readable.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -476,6 +479,7 @@ def run(
         deferred.POLICY,
         compact.POLICY,
         focused.POLICY,
+        readable.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -485,6 +489,7 @@ def run(
         deferred.POLICY,
         compact.POLICY,
         focused.POLICY,
+        readable.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -629,8 +634,11 @@ def run(
         if compact_feedback:
             payload = compact.compact_payload(payload)
         if focused_view:
-            system = focused.SYSTEM
-            payload = focused.payload(
+            presentation = (
+                readable if bookkeeping_policy == readable.POLICY else focused
+            )
+            system = presentation.SYSTEM
+            payload = presentation.payload(
                 stage,
                 brief,
                 context,
@@ -641,6 +649,8 @@ def run(
                 last_edit_result,
                 continuation,
             )
+            if bookkeeping_policy == readable.POLICY and stage == "repair":
+                readable.repair_budget(payload, repair_requests, attempt)
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
