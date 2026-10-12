@@ -14,7 +14,14 @@ is implemented for an eleven-entry CPU-only Delta qualification: six available
 archived constructions, two construction failures retained in the denominator,
 and three known-structure controls. It generates training-only coordinates and
 restarts, preserves initializer/domain contracts, and uses guarded-only scaling.
-Experimental results are pending. The [M28 common rollout adapter](PHASE_C_FITTING_ADAPTER.md)
+The [completed M29 review](PHASE_C_FITTING_M29_RESULTS_2026-10-12.md) finds accurate
+recovery in all three known controls. The six available archived constructions
+remain poor or unavailable; missing dependencies and wrong physical signs are
+visible in their equations. An analytic basin check establishes its poor
+within-model optimum, while exposing redundant outer optimization after profiling.
+Next address output-inactive coordinates and stationary-poor-fit stopping under
+matched budgets. These are September 30 constructions, not the latest constructor.
+The [M28 common rollout adapter](PHASE_C_FITTING_ADAPTER.md)
 packages the methods qualified through [M27](PHASE_C_FITTING_M27_RESULTS_2026-10-11.md)
 behind a training-only interface. It starts with guarded scaling, preserves
 verified incumbents, and tests bounded fixed-scaling fallback under the same

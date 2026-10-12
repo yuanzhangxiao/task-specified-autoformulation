@@ -6,6 +6,15 @@ This is an opt-in integration qualification, with no new construction calls,
 benchmark changes, test access or production-default change. Astra's construction
 work is unaffected. The public fitting dispatcher still uses its existing paths.
 
+The [completed M29 review](PHASE_C_FITTING_M29_RESULTS_2026-10-12.md) accounts for
+all eleven entries. All three known controls recover accurately; the six available
+archived constructions remain inaccurate or numerically unavailable. Equation
+inspection identifies missing output dependencies and wrong physical signs. The
+independent-basin example reaches its analytic within-model optimum but exposes
+flat-outer-profile failures and wasted fallback work. Next qualify output-inactive
+coordinate handling and stationary-poor-fit stopping; keep production defaults
+unchanged.
+
 ## What this milestone tests
 
 `autoformalism.fitting.public_rollout.run(inputs, policy, folder)` accepts a typed
