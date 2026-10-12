@@ -1,6 +1,9 @@
 # M28: common rollout fitting interface and bounded numerical verification
 
-Implemented October 11, 2026; remote qualification has not run. This follows
+Implemented October 11, 2026. The [completed M28 review](PHASE_C_FITTING_M28_RESULTS_2026-10-12.md)
+records accurate recovery in all 30 fits and successful fixed-parameter replay.
+The fixed-scaling alternative never activates, so its empirical benefit remains
+untested. This follows
 the [M27 results](PHASE_C_FITTING_M27_RESULTS_2026-10-11.md). Guarded scaling
 reached the training target on all fifteen tested case/start combinations,
 including nonlinear CSTR fitting without output profiling. One accurate basin
