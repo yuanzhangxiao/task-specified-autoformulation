@@ -14,6 +14,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research.construction_deferred_review import marked_diff
 from autoformalism.search import construction_compact as compact
+from autoformalism.search import construction_completion as completion_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
@@ -28,11 +29,18 @@ def preview(
     body: dict,
     policy: str = focused.POLICY,
     last: dict | None = None,
+    budget_context: dict | None = None,
 ) -> dict:
     """Use the live projection on one actual historical predecessor, not a new chain."""
-    if policy not in {focused.POLICY, readable.POLICY}:
+    if policy not in {focused.POLICY, readable.POLICY, completion_feedback.POLICY}:
         raise ValueError("unsupported preview policy")
-    presentation = readable if policy == readable.POLICY else focused
+    presentation = (
+        completion_feedback
+        if policy == completion_feedback.POLICY
+        else readable
+        if policy == readable.POLICY
+        else focused
+    )
     old = compact.expand_payload(json.loads(body["messages"][1]["content"]))
     brief = campaign.contract.visible_brief(cell, task)
     new = (
@@ -52,6 +60,21 @@ def preview(
     )
     if policy == readable.POLICY and event["stage"] == "repair":
         readable.repair_budget(new, focused.REPAIR_REQUESTS, event["attempt"])
+    if (
+        policy == completion_feedback.POLICY
+        and event["stage"] == "repair"
+        and event.get("bookkeeping_policy") != policy
+    ):
+        if budget_context is None:
+            raise ValueError("historical repair preview requires budget accounting")
+        completion_feedback.repair_budget(
+            new,
+            budget_context["maximum_calls"],
+            event["attempt"],
+            budget_context["ceiling"],
+            budget_context["charged"],
+            budget_context["repair_tokens"],
+        )
     proposed = deepcopy(body)
     proposed["messages"] = [
         {"role": "system", "content": presentation.SYSTEM},
@@ -90,6 +113,7 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
         )
         by_hash = {r["request_hash"]: r for r in records}
         previous = None
+        charged = 0
         for path in sorted((directory / "construction/events").glob("*.json")):
             event = sealed_read(path)
             record = by_hash[event["request_hash"]]
@@ -101,8 +125,17 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
                     record["request"]["body"],
                     policy,
                     previous,
+                    {
+                        "maximum_calls": plan["config"]["repair_requests"],
+                        "ceiling": record["request"]["settings"][
+                            "maximum_total_tokens"
+                        ],
+                        "charged": charged,
+                        "repair_tokens": plan["config"]["repair_tokens"],
+                    },
                 )
             )
+            charged += record["budget_charge"]
             previous = {
                 "status": "accepted" if event["accepted"] else "rejected",
                 "transaction_applied": event["accepted"],
@@ -235,7 +268,13 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
     if output.exists() and any(output.iterdir()):
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
-    presentation = readable if policy == readable.POLICY else focused
+    presentation = (
+        completion_feedback
+        if policy == completion_feedback.POLICY
+        else readable
+        if policy == readable.POLICY
+        else focused
+    )
     output.mkdir(parents=True, exist_ok=True)
     links, highlights = [], {}
     for i, row in enumerate(rows):
@@ -244,6 +283,10 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         p = json.loads(row["after"]["messages"][1]["content"])
         issues = p["feedback"]["issues"]
         for code, title in (
+            ("confirm_memory_assignment", "Explicit memory-assignment confirmation"),
+            ("equation_destination", "Exact quantity whose equation needs repair"),
+            ("flow_classification_decision", "Boundary flow or internal transfer"),
+            ("memory_driver_path", "Correct or explicitly withdraw a memory binding"),
             ("algebraic_dependency_cycle", "Algebraic cycle: conditional type repair"),
             ("conversion_role_decision", "Clarify a coefficient in conversion"),
             (

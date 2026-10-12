@@ -19,8 +19,49 @@ class ConstructionClient(ServingTokenCounter, BudgetedRepairClient):
     def __init__(self, *, token_transport=None, **kwargs):
         super().__init__(**kwargs)
         self.token_transport = token_transport or diagnostic_transport
+        self.budget_diagnostics_enabled = False
+        self.last_budget_diagnostic = None
+        self._context_preflight = None
+
+    def budget_diagnostic(
+        self, key: str, body: dict, charged: int, reservation: int
+    ) -> None:
+        """Save exact admission arithmetic even when generation never starts."""
+        if not self.budget_diagnostics_enabled:
+            return
+        token_limit = self.settings.maximum_total_tokens
+        request_limit = self.settings.maximum_requests
+        reasons = []
+        if len(self.records) >= request_limit:
+            reasons.append("request_limit")
+        if charged + reservation > token_limit:
+            reasons.append("token_reservation")
+        diagnostic = {
+            "request_hash": key,
+            "status": "blocked" if reasons else "ready",
+            "blocking_reasons": reasons,
+            "charged_before_call": charged,
+            "active_token_ceiling": token_limit,
+            "available_before_reservation": max(0, token_limit - charged),
+            "request_bytes": reservation - self.settings.max_output_tokens,
+            "output_allowance": self.settings.max_output_tokens,
+            "reservation": reservation,
+            "reservation_shortfall": max(0, charged + reservation - token_limit),
+            "reservation_basis": "conservative_request_bytes_plus_output_allowance",
+            "requests_before_call": len(self.records),
+            "active_request_ceiling": request_limit,
+            "context_preflight": self._context_preflight,
+            "schema_name": body["response_format"]["json_schema"]["name"],
+            "interpretation": "Budget admission is separate from context capacity. "
+            "A blocked request starts no generation and consumes no reservation. "
+            "Reported usage replaces a started request's reservation; unknown "
+            "usage remains conservatively charged.",
+        }
+        atomic_json(self.directory / "budget_preflight" / f"{key}.json", diagnostic)
+        self.last_budget_diagnostic = diagnostic
 
     def call(self, *, system, user, response_model, step, attempt):
+        self.last_budget_diagnostic = None
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -38,6 +79,7 @@ class ConstructionClient(ServingTokenCounter, BudgetedRepairClient):
             "scientific_context_truncated": False,
             "status": "ready" if count <= limit else "context_limit_exceeded",
         }
+        self._context_preflight = audit
         key = content_hash([step, attempt, messages])
         atomic_json(self.directory / "preflight" / f"{key}.json", audit)
         if count > limit:

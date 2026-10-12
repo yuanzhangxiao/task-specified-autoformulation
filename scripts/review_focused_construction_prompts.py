@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 
 from autoformalism.research.construction_focus_review import render
-from autoformalism.search import construction_focus, construction_readable
+from autoformalism.search import (
+    construction_completion,
+    construction_focus,
+    construction_readable,
+)
 
 
 def main() -> None:
@@ -15,7 +19,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--policy",
-        choices=(construction_focus.POLICY, construction_readable.POLICY),
+        choices=(
+            construction_focus.POLICY,
+            construction_readable.POLICY,
+            construction_completion.POLICY,
+        ),
         default=construction_focus.POLICY,
     )
     args = parser.parse_args()

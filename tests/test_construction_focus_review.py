@@ -7,6 +7,7 @@ import pytest
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research import construction_focus_review as review
+from autoformalism.search import construction_completion as completion
 from autoformalism.search import construction_focus as focus
 from autoformalism.search import construction_readable as readable
 from tests.test_construction_comparison import source_fixture
@@ -20,6 +21,7 @@ from tests.test_phase_c_construction_baseline import tokenize
     [
         ("focused_prompt_confirmation", focus.POLICY),
         ("readable_prompt_confirmation", readable.POLICY),
+        ("completion_feedback_confirmation", completion.POLICY),
     ],
 )
 def test_focused_study_live_projection_reports_and_offline_review(

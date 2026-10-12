@@ -184,22 +184,24 @@ def test_launcher_does_not_install_or_launch_gpu_server():
     assert "--source" in shell and "--requests" in shell
 
 
+@pytest.mark.parametrize(
+    "study,policy",
+    [
+        ("readable_prompt_confirmation", "minimal-readable-construction-1"),
+        ("completion_feedback_confirmation", "minimal-completion-feedback-1"),
+    ],
+)
 def test_readable_five_seed_roster_is_frozen_and_old_plan_cannot_be_repurposed(
     tmp_path,
+    study,
+    policy,
 ):
     args = fixture(tmp_path)
-    plan = pilot.prepare(
-        *args, study="readable_prompt_confirmation", seeds=[0, 1, 2, 3, 4]
-    )
+    plan = pilot.prepare(*args, study=study, seeds=[0, 1, 2, 3, 4])
     assert len(plan["tasks"]) == 40
-    assert plan["config"]["bookkeeping_policy"] == "minimal-readable-construction-1"
+    assert plan["config"]["bookkeeping_policy"] == policy
     assert plan["config"]["repair_requests"] == 5
     assert pilot.verify(args[-1]) == plan
-    assert (
-        pilot.prepare(
-            *args, study="readable_prompt_confirmation", seeds=[0, 1, 2, 3, 4]
-        )
-        == plan
-    )
+    assert pilot.prepare(*args, study=study, seeds=[0, 1, 2, 3, 4]) == plan
     with pytest.raises(ValueError, match="frozen artifact differs"):
-        pilot.prepare(*args, study="readable_prompt_confirmation", seeds=[0])
+        pilot.prepare(*args, study=study, seeds=[0])

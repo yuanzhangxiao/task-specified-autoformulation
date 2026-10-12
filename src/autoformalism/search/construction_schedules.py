@@ -16,6 +16,7 @@ from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_checklist as checklist
+from autoformalism.search import construction_completion as completion_feedback
 from autoformalism.search import construction_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
@@ -443,13 +444,19 @@ def run(
     starting_draft: ledger.Draft | None = None,
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
-    focused_view = bookkeeping_policy in {focused.POLICY, readable.POLICY}
+    focused_view = bookkeeping_policy in {
+        focused.POLICY,
+        readable.POLICY,
+        completion_feedback.POLICY,
+    }
     if repair_requests is None:
         repair_requests = focused.REPAIR_REQUESTS if focused_view else 3
     draft, events, records = starting_draft or ledger.Draft(), [], []
     continuation = None
     last_edit_result = None
     original = client.settings
+    client.budget_diagnostics_enabled = bookkeeping_policy == completion_feedback.POLICY
+    budget_stop = None
     from autoformalism.search import construction_prompts as prompts
 
     bookkeeping.validate_policy(bookkeeping_policy, prompt_family)
@@ -462,6 +469,7 @@ def run(
         compact.POLICY,
         focused.POLICY,
         readable.POLICY,
+        completion_feedback.POLICY,
     }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
@@ -471,6 +479,7 @@ def run(
         compact.POLICY,
         focused.POLICY,
         readable.POLICY,
+        completion_feedback.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -480,6 +489,7 @@ def run(
         compact.POLICY,
         focused.POLICY,
         readable.POLICY,
+        completion_feedback.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -490,6 +500,7 @@ def run(
         compact.POLICY,
         focused.POLICY,
         readable.POLICY,
+        completion_feedback.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -635,7 +646,11 @@ def run(
             payload = compact.compact_payload(payload)
         if focused_view:
             presentation = (
-                readable if bookkeeping_policy == readable.POLICY else focused
+                completion_feedback
+                if bookkeeping_policy == completion_feedback.POLICY
+                else readable
+                if bookkeeping_policy == readable.POLICY
+                else focused
             )
             system = presentation.SYSTEM
             payload = presentation.payload(
@@ -651,6 +666,15 @@ def run(
             )
             if bookkeeping_policy == readable.POLICY and stage == "repair":
                 readable.repair_budget(payload, repair_requests, attempt)
+            if bookkeeping_policy == completion_feedback.POLICY and stage == "repair":
+                completion_feedback.repair_budget(
+                    payload,
+                    repair_requests,
+                    attempt,
+                    client.settings.maximum_total_tokens,
+                    sum(r["budget_charge"] for r in records),
+                    repair_tokens,
+                )
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -940,6 +964,7 @@ def run(
             continuation = None
         except (RepairBudgetExceeded, PromptPreflightError) as exc:
             ready, stop_reason = False, str(exc)
+            budget_stop = getattr(client, "last_budget_diagnostic", None)
         initial_check = assess_draft()
         initial = sealed_write(
             directory / "before_repair.json",
@@ -988,6 +1013,7 @@ def run(
                 )
             except (RepairBudgetExceeded, PromptPreflightError) as exc:
                 stop_reason = str(exc)
+                budget_stop = getattr(client, "last_budget_diagnostic", None)
                 break
             if accepted:
                 check = assess_draft()
@@ -1033,6 +1059,11 @@ def run(
             "ready_requested": ready,
             "before_repair": initial,
             "stop_reason": stop_reason,
+            **(
+                {"budget_stop": budget_stop}
+                if bookkeeping_policy == completion_feedback.POLICY
+                else {}
+            ),
             "event_count": len(events),
             "cost": _cost(sorted(records, key=lambda r: r["request_hash"])),
             **(

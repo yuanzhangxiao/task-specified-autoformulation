@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `minimal-completion-feedback-1` policy adds direct memory-assignment
+questions, exact equation/binding repair destinations, boundary/internal-flow
+choices, and separately recorded token-reservation diagnostics. It preserves the
+readable-v1 scientific checks, stage instructions, schemas and budgets. The prior
+Jetstream five-seed run reached 35/40 structural completions, not scientific
+recovery. A fresh 40-task confirmation reuses the same server; see
+`PHASE_C_COMPLETION_FEEDBACK.md`. No experiment is launched by the agent.
+
 The opt-in `minimal-readable-construction-1` policy removes synthetic function,
 coefficient and occurrence labels from the topology display, retains exact
 signs/conversions, and adds conditional role, cycle and process-reference feedback.

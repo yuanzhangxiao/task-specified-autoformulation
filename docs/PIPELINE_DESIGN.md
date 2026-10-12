@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+The opt-in `minimal-completion-feedback-1` presentation keeps scientific choices
+in structured proposer edits. Missing assignments, exact equation destinations
+and boundary/internal-flow alternatives are conditional feedback, not inferred
+runtime changes. Budget preflight records distinguish conservative request-byte
+reservation from serving-token context capacity without changing caps or charges.
+Resume reconstructs prompt budget values at each historical call position; cached
+future calls cannot alter replayed requests. See `PHASE_C_COMPLETION_FEEDBACK.md`.
+
 The opt-in `minimal-readable-construction-1` policy removes synthetic function,
 coefficient and occurrence labels from the topology display, retains exact
 signs/conversions, and adds conditional role, cycle and process-reference feedback.

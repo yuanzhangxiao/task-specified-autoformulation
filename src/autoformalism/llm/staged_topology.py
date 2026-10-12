@@ -112,6 +112,11 @@ class StagedTopologyClient:
         self.can_start = can_start
         self.records: list[dict[str, Any]] = []
 
+    def budget_diagnostic(
+        self, key: str, body: dict, charged: int, reservation: int
+    ) -> None:
+        """Optional observability hook; it must not change admission or charging."""
+
     def call(
         self,
         *,
@@ -165,10 +170,11 @@ class StagedTopologyClient:
             return record
         if not self.can_start():
             raise DeferredCall("allocation is draining before the next provider call")
-        if len(self.records) >= self.settings.maximum_requests:
-            raise ValueError("total provider request budget exhausted")
         charged = sum(item.get("budget_charge", 0) for item in self.records)
         reservation = len(json.dumps(body).encode()) + self.settings.max_output_tokens
+        self.budget_diagnostic(key, body, charged, reservation)
+        if len(self.records) >= self.settings.maximum_requests:
+            raise ValueError("total provider request budget exhausted")
         if charged + reservation > self.settings.maximum_total_tokens:
             raise ValueError("total token budget cannot accommodate the next request")
         record = {

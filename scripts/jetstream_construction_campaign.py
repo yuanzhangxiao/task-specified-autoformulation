@@ -31,6 +31,7 @@ def operation_identity() -> str:
         "scripts/jetstream_server_record.py",
         "scripts/jetstream/run_construction.sh",
         "scripts/jetstream/run_readable_construction.sh",
+        "scripts/jetstream/run_completion_construction.sh",
     )
     return content_hash(
         {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest() for name in names}
@@ -131,7 +132,11 @@ def prepare(
     seeds: list[int] | None = None,
 ) -> dict:
     """Freeze a distinct campaign; preserve the source and compatibility run."""
-    if study not in {"focused_prompt_confirmation", "readable_prompt_confirmation"}:
+    if study not in {
+        "focused_prompt_confirmation",
+        "readable_prompt_confirmation",
+        "completion_feedback_confirmation",
+    }:
         raise ValueError("unsupported Jetstream construction study")
     selected = list(campaign.sampling_seeds(study, [0] if seeds is None else seeds))
     evidence = compatibility(work, requests)
@@ -177,7 +182,11 @@ def verify(root: Path) -> dict:
         or execution["plan_sha256"] != plan["artifact_sha256"]
         or execution["operation_identity"] != operation_identity()
         or plan["study"]
-        not in {"focused_prompt_confirmation", "readable_prompt_confirmation"}
+        not in {
+            "focused_prompt_confirmation",
+            "readable_prompt_confirmation",
+            "completion_feedback_confirmation",
+        }
         or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
         or plan["config"]["serving_image_sha256"] != probe.IMAGE.split("sha256:")[1]
@@ -252,7 +261,11 @@ def main() -> None:
     parser.add_argument("--requests", type=Path)
     parser.add_argument(
         "--study",
-        choices=("focused_prompt_confirmation", "readable_prompt_confirmation"),
+        choices=(
+            "focused_prompt_confirmation",
+            "readable_prompt_confirmation",
+            "completion_feedback_confirmation",
+        ),
         default="focused_prompt_confirmation",
     )
     parser.add_argument("--seeds", nargs="+", type=int, default=[0])
