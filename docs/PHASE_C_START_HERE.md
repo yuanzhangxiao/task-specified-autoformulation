@@ -9,15 +9,20 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone (October 12): the [M28 common rollout adapter](PHASE_C_FITTING_ADAPTER.md)
+Current fitting milestone (October 12): [M29 public-request integration](PHASE_C_FITTING_PUBLIC_INTEGRATION.md)
+is implemented for an eleven-entry CPU-only Delta qualification: six available
+archived constructions, two construction failures retained in the denominator,
+and three known-structure controls. It generates training-only coordinates and
+restarts, preserves initializer/domain contracts, and uses guarded-only scaling.
+Experimental results are pending. The [M28 common rollout adapter](PHASE_C_FITTING_ADAPTER.md)
 packages the methods qualified through [M27](PHASE_C_FITTING_M27_RESULTS_2026-10-11.md)
 behind a training-only interface. It starts with guarded scaling, preserves
 verified incumbents, and tests bounded fixed-scaling fallback under the same
 search budget. The [completed M28 review](PHASE_C_FITTING_M28_RESULTS_2026-10-12.md)
 finds accurate recovery in all thirty fits and successful tighter replay of the
 flagged basin endpoint. Fixed-scaling fallback never activates; its empirical
-benefit is untested. A small integration qualification on frozen constructed
-models is recommended next. This remains opt-in and does not change construction
+benefit is untested. M29 qualifies the boundary on frozen constructed models.
+This remains opt-in and does not change construction
 or the production fitting dispatcher.
 
 The first executable step is the [construction baseline](PHASE_C_CONSTRUCTION_BASELINE.md):
