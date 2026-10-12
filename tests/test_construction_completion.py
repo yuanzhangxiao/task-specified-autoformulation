@@ -142,6 +142,36 @@ def test_shared_only_missing_entry_is_different_from_empty_assembled_rhs():
     assert deferred.assessment(brief(), context(), {}, changed, None)["eligible"]
 
 
+@pytest.mark.parametrize("stage", ["equations", "repair"])
+@pytest.mark.parametrize("local", [False, True])
+def test_process_owned_variable_never_requests_a_second_equation(stage, local):
+    declared = process()
+    if local:
+        declared.update(kind="influence", uses=[{"target": "y", "sign": "negative"}])
+    d = apply(
+        variables=[variable("x"), variable("y"), variable("p", "algebraic")],
+        processes=[declared],
+        equations=[equation("x", "u")],
+    )
+    before = deepcopy(d)
+    issues = packet(d, stage)["feedback"]["issues"]
+    destinations = [i for i in issues if i["code"] == "equation_destination"]
+    assert [i["exact_name"] for i in destinations] == ["y"]
+    assert ledger.pending(brief(), d)["equations_to_define"] == ["y"]
+    assert d == before
+    changed = apply(d, equations=[{"name": "y", "terms": []}])
+    assert deferred.assessment(brief(), context(), {}, changed, None)["eligible"]
+    # An incompatible extra definition still requires a proposer decision.
+    with pytest.raises(ValueError, match="runtime-generated definition"):
+        apply(changed, equations=[equation("p", "u")])
+    # Removing the process does not silently remove the variable declaration.
+    removed = apply(changed, remove_processes=["p"])
+    assert any(
+        i["code"] == "equation_destination" and i["exact_name"] == "p"
+        for i in packet(removed, stage)["feedback"]["issues"]
+    )
+
+
 @pytest.mark.parametrize(
     "uses",
     [

@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+Completion-feedback v1 finished 35/40 topologies, equal to readable-v1 overall.
+Inspection identified contradictory missing-equation feedback for variable-stage
+names later defined as processes. The correction excludes those process-owned
+definitions without changing acceptance or scientific choices; a fresh v2 output
+root preserves historical results. See `PHASE_C_COMPLETION_FEEDBACK.md` for the
+stage counts, seven affected requests and remaining scientific coverage gaps.
+
 The opt-in `minimal-completion-feedback-1` policy adds direct memory-assignment
 questions, exact equation/binding repair destinations, boundary/internal-flow
 choices, and separately recorded token-reservation diagnostics. It preserves the

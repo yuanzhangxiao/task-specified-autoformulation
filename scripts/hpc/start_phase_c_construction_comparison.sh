@@ -20,7 +20,7 @@ case "$AF_STUDY" in
   deferred_interaction_confirmation) AF_DEFAULT_ROOT=phase-c-minimal-deferred-v2 ;;
   focused_prompt_confirmation) AF_DEFAULT_ROOT=phase-c-focused-prompts-seeds5-v1 ;;
   readable_prompt_confirmation) AF_DEFAULT_ROOT=phase-c-readable-prompts-seeds5-v1 ;;
-  completion_feedback_confirmation) AF_DEFAULT_ROOT=phase-c-completion-feedback-seeds5-v1 ;;
+  completion_feedback_confirmation) AF_DEFAULT_ROOT=phase-c-completion-feedback-seeds5-v2 ;;
   *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
 esac
 export AF_OUTPUT_ROOT=${AF_COMPARISON_ROOT:-$AF_GROUP/$AF_DEFAULT_ROOT}

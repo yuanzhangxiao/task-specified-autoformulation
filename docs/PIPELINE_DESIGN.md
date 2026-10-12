@@ -1,5 +1,11 @@
 # Phase 1 Pipeline Design
 
+Equation-destination feedback follows definition ownership: a process declaration
+already defines its algebraic quantity even when that quantity was declared in the
+variable stage. It must not request a second ordinary equation for that name.
+Removing the process restores the equation obligation if the variable remains.
+This correction changes feedback only; historical assessments stay unchanged.
+
 The opt-in `minimal-completion-feedback-1` presentation keeps scientific choices
 in structured proposer edits. Missing assignments, exact equation destinations
 and boundary/internal-flow alternatives are conditional feedback, not inferred

@@ -8,6 +8,61 @@ verified Jetstream H100 server. It stops after topology. No interaction function
 fitting, critic, test access or automatic follow-up are included. Use a fresh root;
 historical campaigns remain tied to their original code.
 
+## Returned five-seed run and ownership correction
+
+The run at `0309cac` finished all 40 tasks: 24 complete before global repair and
+35 afterward, versus 25 and 35 in readable-v1. There were 183 measured requests,
+1,914,783 tokens, no budget stops, and one length-limited response. Episode token
+median/MAD was 43,255/13,515.5. Seven post-first-reply memory-assignment questions
+were resolved in the next reply. Variable stages completed in 39/40 episodes;
+shared-stage local checks completed in 32/39 reached episodes. These counts are
+declaration/structural checks, not scientific correctness.
+
+| Case | Readable-v1 final / 5 | Completion-v1 final / 5 |
+| --- | ---: | ---: |
+| T1-easy | 5 | 5 |
+| T1-hard | 5 | 5 |
+| T2-easy | 4 | 5 |
+| T2-hard | 4 | 4 |
+| CSTR | 4 | 2 |
+| Alien device | 5 | 5 |
+| Coupled basin | 3 | 4 |
+| Independent basin | 5 | 5 |
+
+The same cells, seeds, serving provenance and model/budget settings were verified.
+At matching case/seed positions, 32 passed both runs, two failed both, three
+improved and three worsened. These fresh samples do not identify prompt changes
+as the cause of each outcome. Every final assessment and all 183 request/event
+records were reproduced or verified offline without generation or fitting.
+
+Inspection found a feedback regression: `_empty_equations` treated a retained
+variable-stage declaration as requiring an ordinary equation even after a process
+declaration already owned its definition. Seven requests in T2-hard/seed 0 and
+CSTR/seed 0 consequently asked for `equations` entries that the duplicate-definition
+validator prohibited. The correction excludes process-owned names from this
+feedback. It does not relax the validator or normalize incompatible definitions.
+Deleting a process while retaining its variable declaration still requires an
+equation. Regression tests cover local and shared process definitions, both
+topology and repair stages, and removal transitions.
+
+Other failures remain: coupled-basin/seed 0 omitted its algebraic-readout feedback
+assignment; CSTR/seed 2 proposed a valid flow-classification change inside three
+transactions that also both replaced and removed `C`; CSTR/seed 4 changed process
+meanings/consumers and left an undefined jacket variable and composite balance.
+No partial transaction is salvaged or scientific edit inferred by this correction.
+
+The corrected launcher uses `completion-seeds5-v2`. Preserve v1 and inspect/resume
+it only with its original `0309cac` bundle. The policy label and scientific checks
+remain unchanged; source and execution digests distinguish the corrective commit.
+The correction removes exactly seven erroneous feedback items on saved inputs;
+it does not recover historical models or establish improved live completion.
+
+Scientific inspection remains necessary: CSTR/seed 1 passed the implemented graph
+checks with only jacket heat exchange, omitting feed and reaction contributions.
+Coupled-basin/seed 3 returned downstream outlet flow to upstream storage. Those
+public-science concerns are not resolved by this feedback correction, and changes
+to the scientific coverage contract need a separate, reviewed milestone.
+
 ## Evidence and scope
 
 The readable-prompt run reached 35/40 final structural completions (25/40 before
@@ -92,7 +147,7 @@ bash scripts/jetstream/run_completion_construction.sh run
 bash scripts/jetstream/run_completion_construction.sh status
 ```
 
-Default root: `/home/exouser/af-construction/completion-seeds5-v1`.
+Default root: `/home/exouser/af-construction/completion-seeds5-v2`.
 Default roster: eight cells × seeds 0–4, including both basins. A background worker
 has a three-hour window. If it drains with pending work, repeat `run` from the
 same bundle and root; per-episode budgets do not reset.
@@ -106,8 +161,8 @@ bash scripts/jetstream/run_completion_construction.sh inspect
 Download from the local Mac terminal:
 
 ```bash
-scp exouser@149.165.152.222:/home/exouser/af-construction/completion-seeds5-v1/inspection.tar.gz \
-  ~/Downloads/jetstream-completion-inspection.tar.gz
+scp exouser@149.165.152.222:/home/exouser/af-construction/completion-seeds5-v2/inspection.tar.gz \
+  ~/Downloads/jetstream-completion-v2-inspection.tar.gz
 ```
 
 Optional ACES launch uses a separate root after quota headroom is restored:
@@ -115,7 +170,7 @@ Optional ACES launch uses a separate root after quota headroom is restored:
 ```bash
 export AF_COMPARISON_STUDY=completion_feedback_confirmation
 export AF_COMPARISON_SEEDS='0 1 2 3 4'
-export AF_COMPARISON_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/phase-c-completion-feedback-seeds5-v1
+export AF_COMPARISON_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/phase-c-completion-feedback-seeds5-v2
 export AF_COMPARISON_SOURCE="$PWD/inputs/topology-source"
 bash scripts/hpc/start_phase_c_construction_comparison.sh run
 ```

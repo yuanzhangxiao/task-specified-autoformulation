@@ -79,6 +79,7 @@ def _binding_destination(
 def _empty_equations(brief: PublicScientificBrief, draft: ledger.Draft) -> list[dict]:
     """Point at the exact missing LHS without proposing a scientific dependency."""
     equations = {e.name: e for e in draft.equations}
+    process_definitions = {p.name for p in draft.processes}
     targets = {v.name for v in brief.public_variables if v.data_role == "target"}
     supplied_observations = {
         v.name for v in brief.public_variables if v.data_role == "auxiliary"
@@ -86,6 +87,11 @@ def _empty_equations(brief: PublicScientificBrief, draft: ledger.Draft) -> list[
     rows = []
     for variable in draft.variables:
         name = variable.name
+        # A variable-stage declaration may subsequently acquire a process-owned
+        # definition. The ledger assembles that RHS; asking for an ordinary
+        # equation here would contradict the duplicate-definition validator.
+        if name in process_definitions:
+            continue
         equation = equations.get(name)
         uses = [
             {"process": p.name, **u.model_dump(mode="json")}
