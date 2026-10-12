@@ -23,7 +23,13 @@ class ProfiledCoupled:
     """
 
     @timed("profile_structure")
-    def __init__(self, system: SymbolicODE, gains: tuple[str, ...] | None = None):
+    def __init__(
+        self,
+        system: SymbolicODE,
+        gains: tuple[str, ...] | None = None,
+        *,
+        active_parameters: frozenset[str] | None = None,
+    ):
         self.system = system
         n, p = system.state_count, len(system.names)
         t, x = ca.SX.sym("t"), ca.SX.sym("x", n)
@@ -52,6 +58,8 @@ class ProfiledCoupled:
                 and not ca.depends_on(a, theta[j])
             ):
                 eligible.append(name)
+        if active_parameters is not None:
+            eligible = [n for n in eligible if n in active_parameters]
         chosen = tuple(eligible) if gains is None else tuple(gains)
         if (
             not chosen
@@ -68,7 +76,7 @@ class ProfiledCoupled:
         g = theta[self.gain_indices]
         if ca.depends_on(ca.jacobian(source, g), g):
             raise ValueError("inner block is not jointly affine")
-        if not self.outer_indices:
+        if not self.outer_indices and active_parameters is None:
             raise ValueError("experiment requires at least one outer unknown")
         k, nb = len(chosen), len(self.outer_indices)
         b = ca.jacobian(forcing, g)

@@ -92,7 +92,8 @@ def prepare(inputs: Inputs, policy: Policy) -> dict:
         incumbent=inputs.incumbent if inputs.incumbent is not None else start,
         coordinates=training_coordinates(model, train, start),
     )
-    oracle, profile, routing = nonlinear_rollout.build(problem)
+    options = {"reduce_inactive": True} if policy.adapter.search.poor_fit else {}
+    oracle, profile, routing = nonlinear_rollout.build(problem, **options)
     starts = [
         start,
         *recovery_numerics.diverse_starts(
@@ -100,7 +101,7 @@ def prepare(inputs: Inputs, policy: Policy) -> dict:
         ),
     ]
     adapter.recovery.validate_starts(
-        oracle, profile, problem, starts, allow_incumbent=True
+        oracle, profile, problem, starts, allow_incumbent=True, **options
     )
     return {
         "problem": problem.model_dump(mode="json"),

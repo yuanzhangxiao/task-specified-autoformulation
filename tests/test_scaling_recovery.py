@@ -170,6 +170,50 @@ def test_restart_distinction_checks_outer_coordinates(small):
         fit.validate_starts(QuadraticOracle(), None, p, starts[1:])
 
 
+@pytest.mark.parametrize("matching_witness", [True, False])
+def test_stationary_poor_points_still_visit_distinct_starts(
+    small, monkeypatch, tmp_path, matching_witness
+):
+    p, starts = small
+    oracle = QuadraticOracle()
+    oracle.active_indices = (0, 1)
+    monkeypatch.setattr(
+        fit.rollout,
+        "build",
+        lambda *a, **kw: (
+            oracle,
+            None,
+            {"output_activity": {"inactive_parameters": []}},
+        ),
+    )
+    seen = []
+
+    def search(o, initial, *a, **kw):
+        seen.append(initial)
+        result = response(initial, 0.5, stop="stationary_poor_fit")
+        result["stationarity"] = {
+            "parameters_sha256": fit.public.content_sha256(
+                result["best"]["parameters"] if matching_witness else initial
+            )
+        }
+        return result
+
+    monkeypatch.setattr(fit.numerical, "search", search)
+    result = fit.run(
+        p, starts, fit.Policy(poor_fit={}), "adapter_guarded_only", tmp_path
+    )
+    assert seen == starts and result["blocks_used"] == 4
+    assert result["assessment"]["search_status"] == (
+        "stationary_poor_fit" if matching_witness else "further_search_needed"
+    )
+    assert not result["assessment"]["global_identifiability_certified"]
+    assert not result["accuracy_verified"]
+    assert all(
+        d["reason"] == "stationary_start_try_distinct_restart"
+        for d in result["decisions"]
+    )
+
+
 def test_joint_fallback_cannot_reset_block_call_or_time_budget(
     small, monkeypatch, tmp_path
 ):

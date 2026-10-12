@@ -9,6 +9,7 @@ from time import monotonic
 import numpy as np
 
 from autoformalism.fitting import confidence_checks as checks
+from autoformalism.fitting import output_activity
 from autoformalism.fitting import recovery_numerics as numerical
 from autoformalism.fitting.affine_profile import AffineProfile
 from autoformalism.fitting.affine_propagation import AffineRollouts
@@ -18,9 +19,9 @@ from autoformalism.fitting.profiled_output import ProfiledOutput, project
 class TerminalProfile:
     """Adapt exact terminal-output projection to the common recovery interface."""
 
-    def __init__(self, oracle):
+    def __init__(self, oracle, *, active_parameters=None):
         self.oracle = oracle
-        self.kernel = ProfiledOutput(oracle.system)
+        self.kernel = ProfiledOutput(oracle.system, active_parameters=active_parameters)
         self.outer = tuple(self.kernel.outer_indices)
         self.audit = self.kernel.audit
 
@@ -48,7 +49,7 @@ class TerminalProfile:
         return fitted, inner["residual"], inner["jacobian"], inner["audit"]
 
 
-def build(problem):
+def build(problem, *, reduce_inactive=False):
     """Use affine-block or terminal-output profiling when certified, else joint."""
     settings = checks.ConfidencePolicy()
     rejected = []
@@ -57,11 +58,24 @@ def build(problem):
     except ValueError as error:
         rejected.append({"kernel": "affine_rollout", "reason": str(error)})
         oracle = checks.Rollouts(problem, settings)
+    activity = output_activity.certificate(oracle.system) if reduce_inactive else None
+    active = frozenset(activity["active_parameters"]) if activity else None
+
+    def result(profile, route):
+        if activity:
+            oracle.active_indices = tuple(
+                i for i, n in enumerate(oracle.names) if n in active
+            )
+            route["output_activity"] = activity
+            if profile is not None:
+                profile = output_activity.ActiveProfile(profile, oracle.names, active)
+                route["certificate"] = profile.audit
+        return oracle, profile, route
+
     if isinstance(oracle, AffineRollouts):
         try:
-            profile = AffineProfile(oracle)
-            return (
-                oracle,
+            profile = AffineProfile(oracle, active_parameters=active)
+            return result(
                 profile,
                 {
                     "selected": "affine_profile",
@@ -72,9 +86,8 @@ def build(problem):
         except ValueError as error:
             rejected.append({"kernel": "affine_profile", "reason": str(error)})
     try:
-        profile = TerminalProfile(oracle)
-        return (
-            oracle,
+        profile = TerminalProfile(oracle, active_parameters=active)
+        return result(
             profile,
             {
                 "selected": "terminal_output_profile",
@@ -84,8 +97,7 @@ def build(problem):
         )
     except ValueError as error:
         rejected.append({"kernel": "terminal_output_profile", "reason": str(error)})
-    return (
-        oracle,
+    return result(
         None,
         {
             "selected": "joint_rollout",

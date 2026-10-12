@@ -31,7 +31,13 @@ class ProfiledOutput:
     supported. Bounds on g remain exactly those of the original fitter.
     """
 
-    def __init__(self, system: SymbolicODE, gains: tuple[str, ...] | None = None):
+    def __init__(
+        self,
+        system: SymbolicODE,
+        gains: tuple[str, ...] | None = None,
+        *,
+        active_parameters: frozenset[str] | None = None,
+    ):
         self.system = system
         n, p = system.state_count, len(system.names)
         t, x = ca.SX.sym("t"), ca.SX.sym("x", n)
@@ -62,6 +68,8 @@ class ProfiledOutput:
                 and not ca.depends_on(ca.vertcat(latent_rhs, a, initial), theta[j])
             ):
                 eligible.append(name)
+        if active_parameters is not None:
+            eligible = [n for n in eligible if n in active_parameters]
         chosen = tuple(eligible) if gains is None else tuple(gains)
         if (
             not chosen
@@ -80,7 +88,7 @@ class ProfiledOutput:
         if ca.depends_on(phi, g):
             raise ValueError("gain block is not jointly affine")
         c = ca.substitute(remainder, g, ca.SX.zeros(len(chosen)))
-        if not self.outer_indices:
+        if not self.outer_indices and active_parameters is None:
             raise ValueError("experiment requires at least one outer unknown")
         # Integrate latent states, the output at g=0, and one filtered feature/gain.
         m = len(self.latent)

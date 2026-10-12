@@ -9,7 +9,14 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone (October 12): [M29 public-request integration](PHASE_C_FITTING_PUBLIC_INTEGRATION.md)
+Current fitting milestone (October 12): [M30 stationary poor-fit qualification](PHASE_C_FITTING_STATIONARY.md)
+is implemented for a paired 22-entry CPU-only Delta study. It freezes certified
+output-inactive optimizer coordinates while preserving equations, solves fully
+profiled output problems directly, and distinguishes local stationary poor fits
+from accurate recovery. Legacy and updated arms share the M29 requests, raw starts
+and ceilings; remote results are pending. Production defaults remain unchanged.
+
+[M29 public-request integration](PHASE_C_FITTING_PUBLIC_INTEGRATION.md)
 is implemented for an eleven-entry CPU-only Delta qualification: six available
 archived constructions, two construction failures retained in the denominator,
 and three known-structure controls. It generates training-only coordinates and
@@ -19,7 +26,7 @@ recovery in all three known controls. The six available archived constructions
 remain poor or unavailable; missing dependencies and wrong physical signs are
 visible in their equations. An analytic basin check establishes its poor
 within-model optimum, while exposing redundant outer optimization after profiling.
-Next address output-inactive coordinates and stationary-poor-fit stopping under
+M30 addresses output-inactive coordinates and stationary-poor-fit stopping under
 matched budgets. These are September 30 constructions, not the latest constructor.
 The [M28 common rollout adapter](PHASE_C_FITTING_ADAPTER.md)
 packages the methods qualified through [M27](PHASE_C_FITTING_M27_RESULTS_2026-10-11.md)

@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 from autoformalism.benchmarks.audited_release import read_seal, seal
 from autoformalism.fitting import confidence_checks as checks
 from autoformalism.fitting import nonlinear_rollout as rollout
+from autoformalism.fitting import poor_fit as stationary
 from autoformalism.fitting import public_fitting as public
 from autoformalism.fitting import recovery_numerics as numerical
 from autoformalism.fitting.affine_propagation import numerically_verified
@@ -38,10 +39,11 @@ class Policy(StrictSchema):
     trajectory_nmse: float = Field(default=1e-11, gt=0, le=1e-5)
     scaling: RelativeScaling = Field(default_factory=RelativeScaling)
     objective_multiplier: float = Field(default=1, ge=1e-3, le=1e6)
+    poor_fit: stationary.Policy | None = None
 
     @model_validator(mode="after")
     def valid(self):
-        values = self.model_dump(exclude={"scaling"}).values()
+        values = self.model_dump(exclude={"scaling", "poor_fit"}).values()
         if (
             not np.isfinite(list(values)).all()
             or self.trajectory_nmse < self.target_nmse
@@ -64,15 +66,26 @@ def continuation_reason(value: dict, policy: Policy) -> str:
 
 
 def validate_starts(
-    oracle, profile, problem, starts: list[dict], *, allow_incumbent=False
+    oracle,
+    profile,
+    problem,
+    starts: list[dict],
+    *,
+    allow_incumbent=False,
+    reduce_inactive=False,
 ) -> None:
     """Check domains and genuinely distinct optimized coordinates before searching."""
     if starts[0] != problem.start or (
         not allow_incumbent and problem.incumbent != problem.start
     ):
         raise ValueError("recovery must begin at the original generic start")
+    full_vectors = [oracle.vector(s) for s in starts]
     indices = list(range(len(oracle.names))) if profile is None else list(profile.outer)
-    vectors = [oracle.vector(s)[indices] / oracle.units[indices] for s in starts]
+    if reduce_inactive:
+        indices = [i for i in indices if i in oracle.active_indices]
+        if not indices:
+            return  # A fully solved output problem has no distinct outer starts.
+    vectors = [v[indices] / oracle.units[indices] for v in full_vectors]
     if any(
         np.linalg.norm(a - b) <= 1e-8
         for i, a in enumerate(vectors)
@@ -112,8 +125,18 @@ def run(
             raise ValueError("scaling recovery resume identity differs")
         return saved
     began, cpu = monotonic(), process_time()
-    oracle, profile, route = rollout.build(problem)
-    validate_starts(oracle, profile, problem, starts, allow_incumbent=adapter)
+    options = {"reduce_inactive": True} if policy.poor_fit is not None else {}
+    oracle, profile, route = rollout.build(problem, **options)
+    validate_starts(
+        oracle, profile, problem, starts, allow_incumbent=adapter, **options
+    )
+    inactive = route.get("output_activity", {}).get("inactive_parameters", [])
+    fixed = {n: problem.incumbent[n] for n in inactive}
+    effective_starts = [s | fixed for s in starts]
+    exact_output_problem = policy.poor_fit is not None and (
+        not oracle.active_indices
+        or route.get("certificate", {}).get("fully_profiled_output", False)
+    )
     setup = folder / "setup"
     setup.mkdir(parents=True, exist_ok=True)
     seal(
@@ -126,6 +149,8 @@ def run(
     )
     operations, candidates, decisions, stops = [], [], [], []
     selected = None
+    solved_output = False
+    stationary_origins = set()
 
     def operation(name, point, seconds, work):
         op = checks.operation(folder / name, identity | {"point": point}, seconds, work)
@@ -197,6 +222,7 @@ def run(
                 scaling_policy=policy.scaling,
                 normalized_objective=True,
                 objective_multiplier=policy.objective_multiplier,
+                **({"poor_fit": policy.poor_fit} if policy.poor_fit else {}),
             )
 
         op = operation(
@@ -241,10 +267,10 @@ def run(
 
     if adapter and problem.incumbent != problem.start:
         inspect("incumbent/check", problem.incumbent)
-    inspect("original/check", starts[0])
+    inspect("original/check", effective_starts[0])
     blocks = 0
-    for index, start in enumerate(starts):
-        if reached():
+    for index, start in enumerate(effective_starts):
+        if reached() or solved_output:
             break
         point = None
         block_method = "guarded_relative" if adapter else method
@@ -256,10 +282,35 @@ def run(
                 name, start if point is None else point["parameters"], block_method
             )
             blocks += 1
+            if policy.poor_fit is not None and numerical.usable(point):
+                # A symbolic all-inner certificate still needs agreement between
+                # its numerical solve and independent original-equation rollouts.
+                reported = (value.get("best") or {}).get("training_nmse")
+                agrees = reported is not None and max(
+                    abs(reported - point[k])
+                    for k in ("training_nmse", "alternate_training_nmse")
+                ) <= max(1e-10, 1e-7 * abs(reported))
+                if (
+                    exact_output_problem
+                    and agrees
+                    and value.get("stop_reason") == "output_problem_solved"
+                ):
+                    solved_output = True
+                if (
+                    agrees
+                    and value.get("stop_reason") == "stationary_poor_fit"
+                    and (value.get("stationarity") or {}).get("parameters_sha256")
+                    == public.content_sha256(point["parameters"])
+                ):
+                    stationary_origins.add(point["origin"])
             reason = continuation_reason(value, policy)
             unvisited = len(starts) - index - 1
             if reached():
                 reason = "verified_target"
+            elif solved_output:
+                reason = "verified_output_problem_solved"
+            elif value.get("stop_reason") == "stationary_poor_fit":
+                reason = "stationary_start_try_distinct_restart"
             elif not numerical.usable(point):
                 reason = "unverified_branch"
             elif visit + 1 >= policy.maximum_consecutive_blocks:
@@ -318,6 +369,28 @@ def run(
             search_status="further_search_needed",
             recommended_action="diversify_or_extend_search",
         )
+        if solved_output:
+            assessment.update(
+                search_status="output_problem_solved",
+                recommended_action="review_equations",
+            )
+            assessment["reasons"].append(
+                "All output-active unknowns were solved by bounded profiling or "
+                "the output was fixed; independent rollout agrees. Remaining "
+                "error is not reduced by searching inactive parameters."
+            )
+        elif selected["origin"] in stationary_origins:
+            assessment.update(
+                search_status="stationary_poor_fit",
+                recommended_action="review_equations_or_new_starts",
+            )
+            assessment["reasons"].append(
+                "Local stationary-search evidence at the retained point; finite "
+                "distinct starts do not establish a global best fit."
+            )
+    if policy.poor_fit is not None:
+        assessment["output_activity"] = route.get("output_activity")
+        assessment["unestimated_parameters"] = fixed
     searches = [
         o
         for o in operations
@@ -338,6 +411,7 @@ def run(
         "assessment": assessment,
         "accuracy_verified": reached(),
         "routing": route,
+        **({"effective_starts": effective_starts} if policy.poor_fit else {}),
         "decisions": decisions,
         "blocks_used": blocks,
         "operations": operations,

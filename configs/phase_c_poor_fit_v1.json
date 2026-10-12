@@ -1,0 +1,50 @@
+{
+  "protocol": "phase-c-poor-fit-qualification-1",
+  "baseline": {
+    "protocol": "phase-c-public-fitting-integration-1",
+    "fitting": {
+      "protocol": "public-rollout-policy-1",
+      "allow_piecewise": true,
+      "adapter": {
+        "protocol": "rollout-fitting-adapter-1",
+        "strategy": "guarded_only",
+        "search": {
+          "restart_count": 3,
+          "maximum_blocks": 6,
+          "maximum_consecutive_blocks": 2,
+          "block_calls": 40,
+          "block_seconds": 800.0,
+          "progress_window": 10,
+          "minimum_relative_progress": 0.001,
+          "check_seconds": 180.0,
+          "sensitivity_seconds": 180.0,
+          "replay_seconds": 300.0,
+          "target_nmse": 1e-12,
+          "trajectory_nmse": 1e-11,
+          "scaling": {
+            "exponent": 0.5,
+            "relative_floor": 1e-6,
+            "minimum": 0.1,
+            "maximum": 10.0
+          },
+          "objective_multiplier": 1.0,
+          "poor_fit": null
+        }
+      }
+    },
+    "replay": {
+      "protocol": "verified-fixed-replay-1",
+      "initial_seconds": 300.0,
+      "retry_seconds": 300.0,
+      "agreement_limit": 0.0001
+    }
+  },
+  "handling": {
+    "minimum_nmse": 1e-6,
+    "gradient_tolerance": 1e-8,
+    "correlation_tolerance": 1e-8,
+    "loss_tolerance": 1e-10,
+    "step_tolerance": 1e-6,
+    "window": 5
+  }
+}

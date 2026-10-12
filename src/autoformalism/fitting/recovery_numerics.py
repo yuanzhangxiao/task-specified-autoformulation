@@ -5,6 +5,7 @@ from time import monotonic
 import numpy as np
 from scipy.optimize import least_squares
 
+from autoformalism.fitting import poor_fit as stationary
 from autoformalism.fitting.affine_propagation import (
     numerically_verified,
     verify_outputs,
@@ -122,6 +123,7 @@ def search(
     scaling_policy: RelativeScaling | None = None,
     normalized_objective=False,
     objective_multiplier: float | None = None,
+    poor_fit: stationary.Policy | None = None,
 ):
     """Joint or projected TRF; charge started attempts, distinguish completed calls."""
     if optimizer_scaling not in {"jacobian", "fixed_coordinates", "guarded_relative"}:
@@ -135,13 +137,22 @@ def search(
         raise ValueError("objective multiplier must be finite and positive")
     anchor = oracle.vector(start)
     free = list(range(len(anchor))) if profile is None else list(profile.outer)
+    if poor_fit is not None and profile is None:
+        free = list(getattr(oracle, "active_indices", free))
     units = oracle.units[free]
     count, best, cached, domain_events, projection = 0, None, None, [], None
     begun, trace, steps = monotonic(), [], []
     accepted = None
     scaling = {}
+    history, stationarity = [], None
 
     class Reached(Exception):
+        pass
+
+    class ExactOutput(Exception):
+        pass
+
+    class Stationary(Exception):
         pass
 
     def save():
@@ -157,7 +168,7 @@ def search(
         )
 
     def evaluate(q):
-        nonlocal count, best, cached, projection, accepted
+        nonlocal count, best, cached, projection, accepted, stationarity
         if cached is not None and np.array_equal(q, cached[0]):
             return cached[1:]
         if count >= calls or monotonic() >= deadline:
@@ -176,6 +187,7 @@ def search(
         save()
         if profile is None:
             r, j = oracle.evaluate(vector, deadline)
+            j = j[:, free]
         else:
             vector, r, j, projection = profile.evaluate(vector, deadline)
         value = float(np.mean(r * r))
@@ -200,7 +212,9 @@ def search(
                     "elapsed_seconds": monotonic() - begun,
                     "training_nmse": value,
                     "best_training_nmse": best["training_nmse"],
-                    "projected_gradient_inf": float(np.max(np.abs(projected))),
+                    "projected_gradient_inf": float(
+                        np.max(np.abs(projected), initial=0)
+                    ),
                     "active_outer_bounds": {
                         oracle.names[i]: "lower" if lower_active[k] else "upper"
                         for k, i in enumerate(free)
@@ -215,6 +229,23 @@ def search(
             accepted = cached
         if value <= target and (acceptable is None or acceptable(r)):
             raise Reached
+        if poor_fit is not None and free:
+            history.append(
+                stationary.sample(
+                    q,
+                    vector[free],
+                    r,
+                    j * units,
+                    oracle.lower[free],
+                    oracle.upper[free],
+                )
+            )
+            stationarity = stationary.witness(history, poor_fit, target)
+            if stationarity:
+                stationarity["parameters_sha256"] = content_sha256(
+                    oracle.parameters(vector)
+                )
+                raise Stationary
         return cached[1:]
 
     def callback(intermediate_result):
@@ -244,6 +275,9 @@ def search(
         save()
 
     try:
+        if not free and poor_fit is not None:
+            evaluate(np.zeros(0))
+            raise ExactOutput
         x_scale = "jac" if optimizer_scaling == "jacobian" else 1.0
         factor = multiplier
         if normalized_objective or optimizer_scaling == "guarded_relative":
@@ -280,6 +314,18 @@ def search(
         detail = {"message": solved.message, "optimality": float(solved.optimality)}
     except Reached:
         stop, detail = "numerical_target_reached", {}
+    except ExactOutput:
+        stop, detail = (
+            "output_problem_solved",
+            {
+                "solution_scope": "bounded_linear_profile"
+                if profile
+                else "fixed_output",
+                "independent_verification_required": True,
+            },
+        )
+    except Stationary:
+        stop, detail = "stationary_poor_fit", {"stationarity": stationarity}
     except (ValueError, TimeoutError, RuntimeError, ArithmeticError) as error:
         stop = (
             "budget_limited" if isinstance(error, TimeoutError) else "numerical_failure"

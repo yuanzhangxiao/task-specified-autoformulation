@@ -20,12 +20,12 @@ class AffineProfile:
     and forcing dependence on the nonlinear outer coefficients.
     """
 
-    def __init__(self, oracle):
+    def __init__(self, oracle, *, active_parameters=None):
         if oracle.audit.get("certificate") != "autonomous-affine-state-input-1":
             raise ValueError("requires certified affine state/input dynamics")
         self.oracle = oracle
         system = oracle.system
-        self.structure = ProfiledCoupled(system)
+        self.structure = ProfiledCoupled(system, active_parameters=active_parameters)
         self.inner = self.structure.gain_indices
         self.outer = self.structure.outer_indices
         n, p, m = system.state_count, len(system.names), len(system.inputs)
@@ -135,8 +135,11 @@ class AffineProfile:
                     )
                     extended = np.vstack([state, source, slope - zero])
                     dextended = np.concatenate([ds, dsource, dslope - dzero], axis=0)
-                    ds = np.einsum("ab,bkj->akj", matrix[:n], dextended) + np.stack(
-                        [(d @ extended)[:n] for d in dm], axis=-1
+                    ds = (
+                        np.einsum("ab,bkj->akj", matrix[:n], dextended)
+                        + np.stack([(d @ extended)[:n] for d in dm], axis=-1)
+                        if nb
+                        else np.zeros((n, k, 0))
                     )
                     state = (matrix @ extended)[:n]
                 ys.append(state[output].copy())

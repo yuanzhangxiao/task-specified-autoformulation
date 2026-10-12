@@ -20,7 +20,11 @@ class FittingAssessment(StrictSchema):
         "unavailable", "fit_usable_uncertainty_unresolved", "strictly_verified"
     ]
     search_status: Literal[
-        "target_reached", "further_search_needed", "verification_needed"
+        "target_reached",
+        "further_search_needed",
+        "verification_needed",
+        "stationary_poor_fit",
+        "output_problem_solved",
     ]
     parameter_information: Literal[
         "unavailable",
@@ -33,6 +37,8 @@ class FittingAssessment(StrictSchema):
         "diversify_or_extend_search",
         "assess_parameter_uncertainty",
         "retain_with_local_evidence",
+        "review_equations",
+        "review_equations_or_new_starts",
     ]
     training_nmse: float | None = None
     target_nmse: float = Field(gt=0)
@@ -44,6 +50,8 @@ class FittingAssessment(StrictSchema):
     global_identifiability_certified: Literal[False] = False
     coefficient_accuracy_available_to_fitter: Literal[False] = False
     profiles_minimized: Literal[False] = False
+    output_activity: dict | None = None
+    unestimated_parameters: dict[str, float] = Field(default_factory=dict)
 
 
 def assess(
