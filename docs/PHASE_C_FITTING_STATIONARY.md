@@ -5,6 +5,11 @@ This milestone is opt-in. Production fitting/construction defaults, historical
 results, public prompts, benchmark observations and model equations are unchanged.
 No experiments are launched by the agent; use the Delta commands below.
 
+The [completed M30 results review](PHASE_C_FITTING_M30_RESULTS_2026-10-12.md)
+verifies all 22 entries: the independent-basin optimizer defect is resolved and
+known controls retain accurate recovery. General stationary stopping has not
+demonstrated a whole-suite speedup.
+
 ## Changes and mathematical scope
 
 The recovery policy gains an optional `poor_fit` configuration. `null` retains
@@ -166,7 +171,7 @@ and hardware variation can still change the search path under identical ceilings
 
 The CSTR jacket sign and basin balance defects are not repaired by this milestone.
 Noisy observations, statistical thresholds, broader construction coverage and
-production promotion remain future work. Remote fitting results are pending.
+production promotion remain future work; see the completed results review above.
 
 ## Delta commands
 

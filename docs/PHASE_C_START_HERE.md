@@ -14,7 +14,12 @@ is implemented for a paired 22-entry CPU-only Delta study. It freezes certified
 output-inactive optimizer coordinates while preserving equations, solves fully
 profiled output problems directly, and distinguishes local stationary poor fits
 from accurate recovery. Legacy and updated arms share the M29 requests, raw starts
-and ceilings; remote results are pending. Production defaults remain unchanged.
+and ceilings. The [completed M30 review](PHASE_C_FITTING_M30_RESULTS_2026-10-12.md)
+confirms one-call independent-basin profiling (158 calls previously) with the same
+optimal output fit, and preserves accurate coefficient/initial recovery in all
+three known controls. General stationary stopping shows no broad speedup; total
+task time rises about 6%. Fresh current-construction coverage and compact
+training-only feedback are next. Production defaults remain unchanged.
 
 [M29 public-request integration](PHASE_C_FITTING_PUBLIC_INTEGRATION.md)
 is implemented for an eleven-entry CPU-only Delta qualification: six available
