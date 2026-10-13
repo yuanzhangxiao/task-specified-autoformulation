@@ -17,6 +17,11 @@ basin controls. It separates missing mechanisms in a candidate from contradictio
 of explicitly reviewed synthetic claim families; only the separate evaluator
 sees the latter certificates. Source/point identity, unknown costs and deterministic
 resume are retained. Current construction integration awaits executable equations.
+The [M31 result review](PHASE_C_FITTING_M31_RESULTS_2026-10-13.md) records all
+sixteen tasks and five passing synthetic controls. Full qualification fails
+because alien-device's new diagnostic times out; accurate basin/CSTR controls
+retain conservative piecewise-derivative uncertainty. Diagnostic checkpointing,
+cost control and piecewise sensitivity qualification are next, not refitting.
 
 Previous milestone: [M30 stationary poor-fit qualification](PHASE_C_FITTING_STATIONARY.md)
 is implemented for a paired 22-entry CPU-only Delta study. It freezes certified
