@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `minimal-public-coverage-1` policy focuses the shared/topology/repair
+prompts on public mechanisms and coherent use across balances. Exact failed-path
+destinations and duplicate-equation feedback are actionable; scientific choices
+remain proposer edits. Variable wording, scientific checks and budgets are held
+fixed. Completion-v2 reached 38/40 structural completions but retained scientific
+gaps. The next fresh eight-case, five-seed Jetstream confirmation is described in
+`PHASE_C_PUBLIC_COVERAGE_PROMPTS.md`; no live experiment is launched by the agent.
+
 Completion-feedback v1 finished 35/40 topologies, equal to readable-v1 overall.
 Inspection identified contradictory missing-equation feedback for variable-stage
 names later defined as processes. The correction excludes those process-owned

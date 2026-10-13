@@ -9,6 +9,7 @@ from autoformalism.llm.construction import ConstructionClient
 from autoformalism.llm.staged_topology import StagedModelSettings
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.search import construction_completion as completion
+from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_deferred as deferred
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_schedules as schedules
@@ -270,7 +271,10 @@ def test_started_requests_keep_existing_charging_and_cached_resume(tmp_path):
     assert restored.last_budget_diagnostic["blocking_reasons"] == ["request_limit"]
 
 
-def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(tmp_path):
+@pytest.mark.parametrize("policy", [completion.POLICY, coverage.POLICY])
+def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(
+    tmp_path, policy
+):
     calls = []
 
     def send(url, body, timeout):
@@ -303,7 +307,7 @@ def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(tm
             "joint_adaptive",
             prompt_family="minimal",
             process_question="dedicated",
-            bookkeeping_policy=completion.POLICY,
+            bookkeeping_policy=policy,
         )
 
     result = run()
@@ -318,8 +322,10 @@ def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(tm
     assert run() == result and len(calls) == 4
 
 
+@pytest.mark.parametrize("policy", [completion.POLICY, coverage.POLICY])
 def test_global_budget_prompt_replays_historical_charge_not_future_cached_calls(
     tmp_path,
+    policy,
 ):
     calls = []
 
@@ -350,7 +356,7 @@ def test_global_budget_prompt_replays_historical_charge_not_future_cached_calls(
             "joint_adaptive",
             prompt_family="minimal",
             process_question="dedicated",
-            bookkeeping_policy=completion.POLICY,
+            bookkeeping_policy=policy,
         )
 
     result = run()

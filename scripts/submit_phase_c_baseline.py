@@ -63,6 +63,7 @@ def submit(
         "focused_prompt_confirmation",
         "readable_prompt_confirmation",
         "completion_feedback_confirmation",
+        "public_coverage_confirmation",
     }
     if live_confirmation:
         construction_comparison.check_storage(root)

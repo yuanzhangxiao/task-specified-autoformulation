@@ -8,6 +8,7 @@ from pathlib import Path
 from autoformalism.research.construction_focus_review import render
 from autoformalism.search import (
     construction_completion,
+    construction_coverage,
     construction_focus,
     construction_readable,
 )
@@ -23,6 +24,7 @@ def main() -> None:
             construction_focus.POLICY,
             construction_readable.POLICY,
             construction_completion.POLICY,
+            construction_coverage.POLICY,
         ),
         default=construction_focus.POLICY,
     )

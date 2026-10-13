@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+Public-coverage prompting (`minimal-public-coverage-1`) asks the proposer to
+reconcile each required mechanism with the assembled topology. Conditional
+feedback preserves positive-path endpoints and alternative-memory quantifiers,
+distinguishes internal transfer from boundary exchange, and identifies duplicate
+topology keys without merging them. No new scientific predicate or inferred
+edit is introduced. Stage-specific instructions and exact feedback are shared
+by live requests and offline previews. See `PHASE_C_PUBLIC_COVERAGE_PROMPTS.md`.
+
 Equation-destination feedback follows definition ownership: a process declaration
 already defines its algebraic quantity even when that quantity was declared in the
 variable stage. It must not request a second ordinary equation for that name.

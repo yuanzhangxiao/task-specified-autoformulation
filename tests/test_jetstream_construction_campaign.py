@@ -189,6 +189,7 @@ def test_launcher_does_not_install_or_launch_gpu_server():
     [
         ("readable_prompt_confirmation", "minimal-readable-construction-1"),
         ("completion_feedback_confirmation", "minimal-completion-feedback-1"),
+        ("public_coverage_confirmation", "minimal-public-coverage-1"),
     ],
 )
 def test_readable_five_seed_roster_is_frozen_and_old_plan_cannot_be_repurposed(

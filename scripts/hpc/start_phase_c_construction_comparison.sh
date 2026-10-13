@@ -20,6 +20,7 @@ case "$AF_STUDY" in
   deferred_interaction_confirmation) AF_DEFAULT_ROOT=phase-c-minimal-deferred-v2 ;;
   focused_prompt_confirmation) AF_DEFAULT_ROOT=phase-c-focused-prompts-seeds5-v1 ;;
   readable_prompt_confirmation) AF_DEFAULT_ROOT=phase-c-readable-prompts-seeds5-v1 ;;
+  public_coverage_confirmation) AF_DEFAULT_ROOT=phase-c-public-coverage-seeds5-v1 ;;
   completion_feedback_confirmation) AF_DEFAULT_ROOT=phase-c-completion-feedback-seeds5-v2 ;;
   *) echo 'Unknown AF_COMPARISON_STUDY.' >&2; exit 2 ;;
 esac
@@ -33,7 +34,7 @@ case "${1:?Use run or inspect}" in
     export AF_IPC_TMP_ROOT=/tmp/phase-c-ipc-u.yx126462
     if [[ ! -f "$AF_OUTPUT_ROOT/plan.json" ]]; then
       AF_PREPARE_EXTRA=()
-      if [[ "$AF_STUDY" == focused_prompt_confirmation || "$AF_STUDY" == readable_prompt_confirmation || "$AF_STUDY" == completion_feedback_confirmation ]]; then
+      if [[ "$AF_STUDY" == focused_prompt_confirmation || "$AF_STUDY" == readable_prompt_confirmation || "$AF_STUDY" == completion_feedback_confirmation || "$AF_STUDY" == public_coverage_confirmation ]]; then
         read -r -a AF_SEEDS <<< "${AF_COMPARISON_SEEDS:-0 1 2 3 4}"
         AF_PREPARE_EXTRA+=(--seeds "${AF_SEEDS[@]}")
       fi
@@ -62,11 +63,11 @@ case "${1:?Use run or inspect}" in
     "$AF_PYTHON" "$AF_REPO_ROOT/scripts/phase_c_construction_comparison.py" report --root "$AF_OUTPUT_ROOT"
     cat "$AF_OUTPUT_ROOT/SUMMARY.md"
     AF_CONTENTS=(plan.json summary.json SUMMARY.md TOPOLOGY.html)
-    if [[ "$AF_STUDY" == variable_checklist_confirmation || "$AF_STUDY" == stage_check_confirmation || "$AF_STUDY" == deferred_interaction_confirmation || "$AF_STUDY" == focused_prompt_confirmation || "$AF_STUDY" == readable_prompt_confirmation || "$AF_STUDY" == completion_feedback_confirmation ]]; then
+    if [[ "$AF_STUDY" == variable_checklist_confirmation || "$AF_STUDY" == stage_check_confirmation || "$AF_STUDY" == deferred_interaction_confirmation || "$AF_STUDY" == focused_prompt_confirmation || "$AF_STUDY" == readable_prompt_confirmation || "$AF_STUDY" == completion_feedback_confirmation || "$AF_STUDY" == public_coverage_confirmation ]]; then
       cat "$AF_OUTPUT_ROOT/VARIABLES.md"
       AF_CONTENTS+=(VARIABLES.json VARIABLES.md)
     fi
-    if [[ "$AF_STUDY" == stage_check_confirmation || "$AF_STUDY" == deferred_interaction_confirmation || "$AF_STUDY" == focused_prompt_confirmation || "$AF_STUDY" == readable_prompt_confirmation || "$AF_STUDY" == completion_feedback_confirmation ]]; then
+    if [[ "$AF_STUDY" == stage_check_confirmation || "$AF_STUDY" == deferred_interaction_confirmation || "$AF_STUDY" == focused_prompt_confirmation || "$AF_STUDY" == readable_prompt_confirmation || "$AF_STUDY" == completion_feedback_confirmation || "$AF_STUDY" == public_coverage_confirmation ]]; then
       cat "$AF_OUTPUT_ROOT/SHARED_PROCESSES.md"
       AF_CONTENTS+=(SHARED_PROCESSES.json SHARED_PROCESSES.md)
     fi

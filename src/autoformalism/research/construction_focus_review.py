@@ -15,6 +15,7 @@ from autoformalism.research import construction_comparison as campaign
 from autoformalism.research.construction_deferred_review import marked_diff
 from autoformalism.search import construction_compact as compact
 from autoformalism.search import construction_completion as completion_feedback
+from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
@@ -32,10 +33,17 @@ def preview(
     budget_context: dict | None = None,
 ) -> dict:
     """Use the live projection on one actual historical predecessor, not a new chain."""
-    if policy not in {focused.POLICY, readable.POLICY, completion_feedback.POLICY}:
+    if policy not in {
+        focused.POLICY,
+        readable.POLICY,
+        completion_feedback.POLICY,
+        coverage.POLICY,
+    }:
         raise ValueError("unsupported preview policy")
     presentation = (
-        completion_feedback
+        coverage
+        if policy == coverage.POLICY
+        else completion_feedback
         if policy == completion_feedback.POLICY
         else readable
         if policy == readable.POLICY
@@ -61,7 +69,7 @@ def preview(
     if policy == readable.POLICY and event["stage"] == "repair":
         readable.repair_budget(new, focused.REPAIR_REQUESTS, event["attempt"])
     if (
-        policy == completion_feedback.POLICY
+        policy in {completion_feedback.POLICY, coverage.POLICY}
         and event["stage"] == "repair"
         and event.get("bookkeeping_policy") != policy
     ):
@@ -269,7 +277,9 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
     presentation = (
-        completion_feedback
+        coverage
+        if policy == coverage.POLICY
+        else completion_feedback
         if policy == completion_feedback.POLICY
         else readable
         if policy == readable.POLICY
@@ -284,6 +294,8 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         issues = p["feedback"]["issues"]
         for code, title in (
             ("confirm_memory_assignment", "Explicit memory-assignment confirmation"),
+            ("duplicate_equation_entries", "One topology entry per quantity"),
+            ("public_path", "Exact public pathway to repair"),
             ("equation_destination", "Exact quantity whose equation needs repair"),
             ("flow_classification_decision", "Boundary flow or internal transfer"),
             ("memory_driver_path", "Correct or explicitly withdraw a memory binding"),
@@ -314,7 +326,19 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
             f"<td>{row['revised_user_bytes']:,}</td></tr>"
         )
     body = (
-        "<p>Review version — no live test launched. All public science and "
+        (
+            '<section class="new"><h2>Public-coverage update</h2><p>'
+            "Updated shared-process, remaining-topology and repair instructions. "
+            "Variables, system instruction, editing contract and scientific checks "
+            "are unchanged. Review physical direction across related balances; "
+            "classification alone does not repair an incorrect effect. "
+            "Feedback names exact missing paths, distinguishes supplied observations "
+            "from modeled balances, and explains duplicate topology entries. "
+            "This is a prompt change, not a new scientific certificate.</p></section>"
+            if policy == coverage.POLICY
+            else ""
+        )
+        + "<p>Review version — no live test launched. All public science and "
         "training evidence are retained verbatim; exact accepted declarations "
         "remain in the runtime log. This projection changes how they are "
         "presented, not the scientific acceptance rules.</p>"

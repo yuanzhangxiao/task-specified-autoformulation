@@ -29,6 +29,7 @@ from autoformalism.research.construction_obligations import reviewed_contract
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_completion as completion_feedback
+from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_prompts as prompts
@@ -53,6 +54,7 @@ Study = Literal[
     "focused_prompt_confirmation",
     "readable_prompt_confirmation",
     "completion_feedback_confirmation",
+    "public_coverage_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -67,6 +69,7 @@ STUDIES = (
     "focused_prompt_confirmation",
     "readable_prompt_confirmation",
     "completion_feedback_confirmation",
+    "public_coverage_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
@@ -75,6 +78,7 @@ CHECKLIST_STUDIES = {
     "focused_prompt_confirmation": focused.POLICY,
     "readable_prompt_confirmation": readable.POLICY,
     "completion_feedback_confirmation": completion_feedback.POLICY,
+    "public_coverage_confirmation": coverage.POLICY,
 }
 SHARED_STAGE_STUDIES = (
     "stage_check_confirmation",
@@ -82,6 +86,7 @@ SHARED_STAGE_STUDIES = (
     "focused_prompt_confirmation",
     "readable_prompt_confirmation",
     "completion_feedback_confirmation",
+    "public_coverage_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -95,6 +100,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
         "focused_prompt_confirmation",
         "readable_prompt_confirmation",
         "completion_feedback_confirmation",
+        "public_coverage_confirmation",
     }:
         raise ValueError("explicit seeds require focused_prompt_confirmation")
     if (
@@ -168,6 +174,7 @@ def freeze(
             "focused_prompt_confirmation",
             "readable_prompt_confirmation",
             "completion_feedback_confirmation",
+            "public_coverage_confirmation",
         }
         or set(serving_environment) != {"platform", "serving_image_sha256"}
         or serving_environment["platform"] != "jetstream2-h100x1-docker"
@@ -216,6 +223,7 @@ def freeze(
                     "focused_prompt_confirmation",
                     "readable_prompt_confirmation",
                     "completion_feedback_confirmation",
+                    "public_coverage_confirmation",
                 }
                 else {}
             ),
@@ -288,6 +296,8 @@ def freeze(
                             if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
+                            else "coverage"
+                            if study == "public_coverage_confirmation"
                             else "completion"
                             if study == "completion_feedback_confirmation"
                             else "readable"
@@ -298,6 +308,7 @@ def freeze(
                                 "focused_prompt_confirmation",
                                 "readable_prompt_confirmation",
                                 "completion_feedback_confirmation",
+                                "public_coverage_confirmation",
                             }
                             else "clarity"
                         ),
@@ -398,6 +409,7 @@ def freeze(
                     "focused_prompt_confirmation",
                     "readable_prompt_confirmation",
                     "completion_feedback_confirmation",
+                    "public_coverage_confirmation",
                 }
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
@@ -597,11 +609,16 @@ def checked_records(
             == (
                 readable
                 if event.get("bookkeeping_policy")
-                in {readable.POLICY, completion_feedback.POLICY}
+                in {readable.POLICY, completion_feedback.POLICY, coverage.POLICY}
                 else focused
             ).model_view(ledger.Draft.model_validate(event["before"]))
             if event.get("bookkeeping_policy")
-            in {focused.POLICY, readable.POLICY, completion_feedback.POLICY}
+            in {
+                focused.POLICY,
+                readable.POLICY,
+                completion_feedback.POLICY,
+                coverage.POLICY,
+            }
             else displayed.get("current_draft", {}).get("declarations")
             == event["before"]
         )
@@ -946,7 +963,7 @@ def report(root: Path, plan: dict) -> dict:
             **(
                 {"budget_stop": (value or {}).get("budget_stop")}
                 if plan["config"].get("bookkeeping_policy")
-                == completion_feedback.POLICY
+                in {completion_feedback.POLICY, coverage.POLICY}
                 else {}
             ),
             "initial_clarifications": initial["assessment"].get(
@@ -1100,7 +1117,8 @@ def report(root: Path, plan: dict) -> dict:
                     if r.get("budget_stop")
                 ]
             }
-            if plan["config"].get("bookkeeping_policy") == completion_feedback.POLICY
+            if plan["config"].get("bookkeeping_policy")
+            in {completion_feedback.POLICY, coverage.POLICY}
             else {}
         ),
         "unmeasured_requests": sum(
@@ -1138,6 +1156,7 @@ def report(root: Path, plan: dict) -> dict:
             "focused_prompt_confirmation",
             "readable_prompt_confirmation",
             "completion_feedback_confirmation",
+            "public_coverage_confirmation",
         }
         else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
         "deferred to interaction and visible requirement status. Existing structural "
