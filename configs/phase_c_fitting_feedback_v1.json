@@ -1,0 +1,6 @@
+{
+  "protocol": "phase-c-fitting-feedback-qualification-1",
+  "feedback": {
+    "check_seconds": 180.0
+  }
+}

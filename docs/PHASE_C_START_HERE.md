@@ -9,7 +9,16 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone (October 12): [M30 stationary poor-fit qualification](PHASE_C_FITTING_STATIONARY.md)
+Current fitting milestone (October 13): [M31 fitting feedback](PHASE_C_FITTING_FEEDBACK.md)
+adds candidate-bound training-only diagnostics and advisory next actions, without
+changing the optimizer or revising specifications. A sixteen-task Delta CPU study
+replays eleven archived M30 entries without refitting and runs five small analytic
+basin controls. It separates missing mechanisms in a candidate from contradictions
+of explicitly reviewed synthetic claim families; only the separate evaluator
+sees the latter certificates. Source/point identity, unknown costs and deterministic
+resume are retained. Current construction integration awaits executable equations.
+
+Previous milestone: [M30 stationary poor-fit qualification](PHASE_C_FITTING_STATIONARY.md)
 is implemented for a paired 22-entry CPU-only Delta study. It freezes certified
 output-inactive optimizer coordinates while preserving equations, solves fully
 profiled output problems directly, and distinguishes local stationary poor fits

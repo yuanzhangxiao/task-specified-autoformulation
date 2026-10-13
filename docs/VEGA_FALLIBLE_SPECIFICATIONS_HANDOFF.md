@@ -1,6 +1,7 @@
 # Vega handoff for discovery under fallible scientific specifications
 
-Prepared 6 October 2026. Repository: `task-specified-autoformulation`.
+Prepared 6 October 2026; updated 13 October 2026 with M29/M30 fitting evidence
+and the M31 preparation boundary. Repository: `task-specified-autoformulation`.
 
 Vega will develop the research design for an Autoformalism extension that can
 assess and revise fallible scientific assumptions. Codex continues the Phase C
@@ -43,15 +44,34 @@ initial conditions can compensate for an incorrect model or input interpretation
 
 Phase C separates construction diagnosis from fitting diagnosis. It uses corrected
 public development assets and inspects equations and mechanism evidence alongside
-NMSE. The current narrow construction confirmation has six basin tasks across
-three construction schedules and stops before function generation or fitting.
-Its structural checks are not a scientific correctness certificate.
+NMSE. Construction confirmations still stop at topology, before function
+generation or fitting. Their structural checks are not a scientific correctness
+certificate. The six-basin-task confirmation described in the original handoff
+is historical; current construction policies and rosters are recorded separately.
 
 Orion's M13 fitting study is an especially relevant negative control: the same
 correct alien-device equations recover accurately from two generic starts and
 poorly from a third under the tested allowance. A fitting failure therefore cannot
 be treated as evidence that the scientific specification is impossible. Those
 are three starts on one problem, not three independent benchmarks.
+
+M29 and M30 extend this evidence through the public fitting-request adapter.
+Three known-structure controls recover accurately, while none of the available
+archived constructions becomes accurate. These are September 30 constructions,
+not outputs of the current topology work. In independent basin, an exact
+training-only optimum establishes that the candidate's restricted output equation
+cannot fit adequately; its omitted drainage remains a construction defect.
+M30 removes redundant optimization for that solved output problem without
+repairing its equations. The other cases retain missing output dependencies,
+scientifically wrong signs, unresolved searches or unavailable numerical rollouts.
+Those findings have different evidential strength and must remain separate.
+
+M30's local stationarity witnesses do not certify global optimality or physical
+adequacy, and a witness from another search branch cannot describe the retained
+parameter vector. The three accurate controls establish recovery on those
+controls, not arbitrary constructions or noisy data. General computational
+speedup also remains unproven: total recorded task time increased in the single
+paired run despite the independent-basin saving.
 
 Earlier input-pulse and trajectory defects also show why an apparent scientific
 contradiction may originate in data generation or an execution interface.
@@ -79,6 +99,26 @@ Successful fitting demonstrates that an adequate candidate was found. Failure
 to find one does not establish that none exists. A formal impossibility statement
 must name the model class, domains, tolerances and other limits of its certificate.
 
+Preserve three levels of evidence:
+
+1. **Candidate fit:** report what a specified search found for one executable
+   candidate and parameter vector. Exhausted search, numerical unavailability and
+   local stationarity do not establish the candidate's best achievable error.
+2. **Candidate equation adequacy:** an exact optimum or other bounded certificate
+   may establish that these equations cannot meet a stated error tolerance on
+   these observations. M29/M30 independent basin provides this narrow example.
+   It does not rule out another construction satisfying the original claims.
+3. **Claim-family incompatibility:** challenging a scientific claim requires
+   evidence concerning the declared family of models that preserve it, conditional
+   on qualified observations, input semantics, noise assumptions and scope.
+   Name the coverage and limits of any empirical comparison; only an appropriate
+   formal certificate licenses a bounded impossibility statement. Improving one
+   candidate after deleting a claim is insufficient to establish this level.
+
+An adequate, conforming model under the original claims is a counterexample to
+an accusation that those claims cannot explain the examined observations. Its
+existence still does not establish uniqueness or unrestricted physical truth.
+
 Do not assign physical truth probabilities from an LLM's self-reported confidence.
 Any proposed uncertainty measure must name its event, assumptions and calibration
 experiment. Candidate agreement alone is insufficient: all candidates may share
@@ -94,8 +134,10 @@ meaning, affected variables, scope, provenance, and evidence. Distinguish:
 3. Approximation assumptions, such as instantaneous equilibrium.
 4. User objectives, such as the required prediction target.
 
-Only explicitly designated hypotheses and approximations are eligible for
-automatic revision. Suspected measurement errors should trigger a documented
+In the proposed future study, only explicitly designated hypotheses and
+approximations would be eligible for automatic revision. Neither this handoff
+nor the Phase C preparation below authorizes automatic specification revision.
+Suspected measurement errors should trigger a documented
 interface diagnosis. They do not authorize rewriting observations or units.
 Prediction targets cannot disappear to improve apparent fit.
 
@@ -143,6 +185,13 @@ unexcited coupling should not be declared absent merely because no effect is
 visible. A difficult optimization start should have an independently established
 adequate solution to show why a failure verdict would be wrong.
 
+Pair a defective construction with an adequate, conforming witness under the
+same correct specification. Separately include a false revisable claim with a
+reviewed alternative and evidence that addresses the bounded claim-constrained
+family. This makes construction failure and scientific disagreement distinguishable
+without treating an improvement after claim deletion as proof. Retain ambiguous
+alternatives whose predictions separate only under a fresh intervention.
+
 Before live proposer experiments, require reference/oracle controls to establish
 the intended properties of each fixture. Independent integration and checked
 input semantics are necessary. Numerical replay agreement establishes numerical
@@ -162,6 +211,40 @@ uncertainty quantity. Also report mechanism behavior, NMSE, runtime, provider
 calls and tokens. Report failed and unavailable attempts explicitly. Preserve the
 project convention of median and unscaled MAD for predictive errors and mean and
 SD for compliance, with declared denominators and equal-case aggregation.
+
+## Phase C preparation while construction remains at topology
+
+M31 can prepare the fitting-to-construction evidence boundary before fresh
+function-stage candidates exist. This is a separate fitting qualification task;
+Vega's first milestone remains a read-only design assignment. The preparation
+should supply reusable evidence for later diagnosis without deciding claim truth
+or changing a candidate's equations, scientific signs or specification.
+
+- Define a typed evidence record bound to the exact candidate, retained parameter
+  vector, training problem, input and observation contracts, parameter bounds,
+  numerical environment and search budget. Attach branch-local certificates only
+  to the points they actually establish; preserve unavailable evidence explicitly.
+- Distinguish verified accurate fit, solved-but-poor output problem, local
+  stationarity, exhausted search and unavailable numerical rollout. Include
+  per-target training residuals, certified inactive parameters and missing output
+  paths. Report sensitivity on active unknowns, including latent initializer
+  coefficients, separately from certified inactive coordinates and exact symmetries.
+- Keep construction feedback training-only. Validation results, reference
+  coefficients, private oracle evidence and test data must not enter proposer
+  feedback or fitting decisions. Scientific sign/mechanism findings remain
+  separately sourced advisory evidence rather than optimizer certificates.
+- Use controlled synthetic fixtures to check evidence provenance, multi-output
+  dependencies, shared initializers, exact solved output problems, branch-local
+  stationarity and numerical failures. Verify deterministic resume and independent
+  replay without modifying benchmark releases or finalized prompts. Oracle controls
+  qualify diagnostic fixtures but remain outside the discovery interface.
+- Freeze the prospective qualification protocol now; evaluate fresh construction
+  coverage only after executable equations and observation maps are available.
+  Topology completion cannot itself support a numerical fit claim. More budget on
+  the same archived defective candidates is a low priority.
+
+The M31 contract is documented in `docs/PHASE_C_FITTING_FEEDBACK.md`. Treat it as
+preparation, not a completed fresh-construction experiment or production promotion.
 
 ## Other paper directions retained from the research discussion
 
@@ -227,6 +310,10 @@ Read `AGENTS.md`, `docs/PHASE_C_START_HERE.md`, relevant parts of
 - `docs/PHASE_C_CONSTRUCTION_COMPARISON.md`
 - `docs/PHASE_C_DATASET_READINESS.md`
 - `docs/PHASE_C_FITTING_M13_RESULTS_2026-10-06.md`
+- `docs/PHASE_C_FITTING_M29_RESULTS_2026-10-12.md`
+- `docs/PHASE_C_FITTING_M30_RESULTS_2026-10-12.md`
+- `docs/PHASE_C_FITTING_FEEDBACK.md` (M31 preparation contract; not an M31
+  results claim)
 
 Use these to identify reusable interfaces. Do not assume every historical
 discussion or diagnostic has been promoted into the production method.
@@ -236,7 +323,8 @@ Deliver within the first work package:
 1. A concise research design with a falsifiable central claim and a primary-source
    comparison against the closest prior work.
 2. A typed claim/evidence record proposal with examples of supported, challenged,
-   ambiguous and computationally unresolved outcomes.
+   ambiguous and computationally unresolved outcomes, preserving the three evidence
+   levels and reusing candidate-bound training-only fitting evidence where possible.
 3. The proposed diagnostic matrix, including oracle controls, observation
    assumptions, measurement semantics and intervention separation.
 4. A minimal implementation map: reusable components, proposed new files, tests,
