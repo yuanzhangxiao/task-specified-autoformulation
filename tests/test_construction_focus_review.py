@@ -9,6 +9,7 @@ from autoformalism.research import construction_comparison as campaign
 from autoformalism.research import construction_focus_review as review
 from autoformalism.search import construction_completion as completion
 from autoformalism.search import construction_coverage as coverage
+from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_focus as focus
 from autoformalism.search import construction_readable as readable
 from tests.test_construction_comparison import source_fixture
@@ -24,6 +25,7 @@ from tests.test_phase_c_construction_baseline import tokenize
         ("readable_prompt_confirmation", readable.POLICY),
         ("completion_feedback_confirmation", completion.POLICY),
         ("public_coverage_confirmation", coverage.POLICY),
+        ("coverage_decision_confirmation", decisions.POLICY),
     ],
 )
 def test_focused_study_live_projection_reports_and_offline_review(
@@ -31,7 +33,7 @@ def test_focused_study_live_projection_reports_and_offline_review(
 ):
     source_fixture(tmp_path)
     root = tmp_path / "study"
-    plan = campaign.freeze(tmp_path / "new", root, study=study)
+    plan = campaign.freeze(tmp_path / "new", root, study=study, seeds=[0])
     assert campaign.verify(root) == plan
     assert plan["config"]["repair_requests"] == 5
     assert plan["config"]["bookkeeping_policy"] == policy
@@ -100,6 +102,14 @@ def test_focused_study_live_projection_reports_and_offline_review(
     summary = review.render(root, output, policy)
     assert summary["requests"] == count and summary["llm_calls"] == 0
     assert "New model view" in (output / "request-000.html").read_text()
+    if policy == decisions.POLICY:
+        overview = (output / "PROMPTS.html").read_text()
+        first = (output / "request-000.html").read_text()
+        assert "Memory assignments and mechanism coverage" in overview
+        assert "Scientific review questions (non-gating)" in overview
+        assert "Memory assignments and structural checks" in first
+        assert "Memory-assignment choices" in first
+        assert "memory_assignment_rules" in first
     with pytest.raises(ValueError, match="must be empty"):
         review.render(root, output)
     with pytest.raises(ValueError, match="outside"):

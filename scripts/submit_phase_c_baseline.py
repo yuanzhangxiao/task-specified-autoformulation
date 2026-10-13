@@ -64,6 +64,7 @@ def submit(
         "readable_prompt_confirmation",
         "completion_feedback_confirmation",
         "public_coverage_confirmation",
+        "coverage_decision_confirmation",
     }
     if live_confirmation:
         construction_comparison.check_storage(root)

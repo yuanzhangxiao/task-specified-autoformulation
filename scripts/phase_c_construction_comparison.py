@@ -24,7 +24,7 @@ def main():
         "--seeds",
         type=int,
         nargs="+",
-        help="Sampling seeds for focused_prompt_confirmation (1-10 unique seeds)",
+        help="Sampling seeds for focused prompt studies (1-10 unique seeds)",
     )
     parser.add_argument("--bookkeeping-policy", choices=campaign.bookkeeping.POLICIES)
     parser.add_argument("--base-url")

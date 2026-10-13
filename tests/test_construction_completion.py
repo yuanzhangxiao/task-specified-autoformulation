@@ -10,6 +10,7 @@ from autoformalism.llm.staged_topology import StagedModelSettings
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.search import construction_completion as completion
 from autoformalism.search import construction_coverage as coverage
+from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_deferred as deferred
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_schedules as schedules
@@ -271,7 +272,9 @@ def test_started_requests_keep_existing_charging_and_cached_resume(tmp_path):
     assert restored.last_budget_diagnostic["blocking_reasons"] == ["request_limit"]
 
 
-@pytest.mark.parametrize("policy", [completion.POLICY, coverage.POLICY])
+@pytest.mark.parametrize(
+    "policy", [completion.POLICY, coverage.POLICY, decisions.POLICY]
+)
 def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(
     tmp_path, policy
 ):
@@ -322,7 +325,9 @@ def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(
     assert run() == result and len(calls) == 4
 
 
-@pytest.mark.parametrize("policy", [completion.POLICY, coverage.POLICY])
+@pytest.mark.parametrize(
+    "policy", [completion.POLICY, coverage.POLICY, decisions.POLICY]
+)
 def test_global_budget_prompt_replays_historical_charge_not_future_cached_calls(
     tmp_path,
     policy,

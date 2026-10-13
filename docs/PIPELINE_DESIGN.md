@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`minimal-public-coverage-2` presents memory assignment as a specific history
+claim, distinct from general mechanism coverage. Required and already-declared
+choices remain visible; optional claim withdrawal requires an explicit proposer
+edit. Non-gating scientific questions reference the single model view and public
+brief for every benchmark after variables, without inferring flow meanings,
+forcing related-target edges, or changing acceptance. No additional call is
+introduced. The frozen five-seed study and historical policy separation are
+documented in `PHASE_C_COVERAGE_DECISIONS.md`; prompts await user review.
+
 Public-coverage prompting (`minimal-public-coverage-1`) asks the proposer to
 reconcile each required mechanism with the assembled topology. Conditional
 feedback preserves positive-path endpoints and alternative-memory quantifiers,

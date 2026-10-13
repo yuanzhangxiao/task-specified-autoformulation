@@ -16,6 +16,7 @@ from autoformalism.research.construction_deferred_review import marked_diff
 from autoformalism.search import construction_compact as compact
 from autoformalism.search import construction_completion as completion_feedback
 from autoformalism.search import construction_coverage as coverage
+from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
@@ -38,10 +39,13 @@ def preview(
         readable.POLICY,
         completion_feedback.POLICY,
         coverage.POLICY,
+        decisions.POLICY,
     }:
         raise ValueError("unsupported preview policy")
     presentation = (
-        coverage
+        decisions
+        if policy == decisions.POLICY
+        else coverage
         if policy == coverage.POLICY
         else completion_feedback
         if policy == completion_feedback.POLICY
@@ -69,13 +73,13 @@ def preview(
     if policy == readable.POLICY and event["stage"] == "repair":
         readable.repair_budget(new, focused.REPAIR_REQUESTS, event["attempt"])
     if (
-        policy in {completion_feedback.POLICY, coverage.POLICY}
+        policy in {completion_feedback.POLICY, coverage.POLICY, decisions.POLICY}
         and event["stage"] == "repair"
         and event.get("bookkeeping_policy") != policy
     ):
         if budget_context is None:
             raise ValueError("historical repair preview requires budget accounting")
-        completion_feedback.repair_budget(
+        presentation.repair_budget(
             new,
             budget_context["maximum_calls"],
             event["attempt"],
@@ -215,10 +219,11 @@ def _page(title: str, content: str) -> str:
     )
 
 
-def _request_page(row: dict) -> str:
+def _request_page(row: dict, policy: str = focused.POLICY) -> str:
     p = json.loads(row["after"]["messages"][1]["content"])
     view = p["model_view"]
     lines = [r["topology"] for r in view["processes"] + view["balances"]]
+    decision_view = policy == decisions.POLICY
     body = (
         '<p><a href="PROMPTS.html">All stages and requests</a></p>'
         '<p><span class="badge">REVISED PREVIEW</span> Actual saved predecessor; '
@@ -236,13 +241,24 @@ def _request_page(row: dict) -> str:
         + "</section>"
         + '<section class="new" id="feedback"><h2>New feedback</h2>'
         + _block(p["feedback"])
-        + "<h3>Requirement checklist</h3>"
+        + (
+            "<h3>Memory assignments and structural checks</h3>"
+            "<p>These checks do not establish mechanism coverage. Scientific "
+            "review questions in the feedback are non-gating and require "
+            "proposer judgment.</p>"
+            if decision_view
+            else "<h3>Requirement checklist</h3>"
+        )
         + _block(p["requirements_checklist"])
         + "<h3>Eligible receivers</h3>"
         + _block(p["receiver_choices"])
         + "<h3>Previous edit receipt</h3>"
         + _block(p["previous_edit"])
-        + "<h3>Memory binding options</h3>"
+        + (
+            "<h3>Memory-assignment choices</h3>" + _block(p["memory_assignment_rules"])
+            if decision_view
+            else "<h3>Memory binding options</h3>"
+        )
         + _block(p["memory_binding_options"])
         + "</section><h2>Complete revised request</h2>"
         + "<p>Includes the full public brief, messages, output JSON schema and "
@@ -277,7 +293,9 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
     presentation = (
-        coverage
+        decisions
+        if policy == decisions.POLICY
+        else coverage
         if policy == coverage.POLICY
         else completion_feedback
         if policy == completion_feedback.POLICY
@@ -289,9 +307,16 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
     links, highlights = [], {}
     for i, row in enumerate(rows):
         name = f"request-{i:03d}.html"
-        (output / name).write_text(_request_page(row), encoding="utf-8")
+        (output / name).write_text(_request_page(row, policy), encoding="utf-8")
         p = json.loads(row["after"]["messages"][1]["content"])
         issues = p["feedback"]["issues"]
+        if policy == decisions.POLICY:
+            for key, title in (
+                ("memory_assignment_decisions", "Optional memory-assignment decision"),
+                ("scientific_review", "Scientific review questions (non-gating)"),
+            ):
+                if key not in highlights and p["feedback"].get(key):
+                    highlights[key] = f'<li><a href="{name}#feedback">{title}</a></li>'
         for code, title in (
             ("confirm_memory_assignment", "Explicit memory-assignment confirmation"),
             ("duplicate_equation_entries", "One topology entry per quantity"),
@@ -327,7 +352,16 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         )
     body = (
         (
-            '<section class="new"><h2>Public-coverage update</h2><p>'
+            '<section class="new"><h2>Memory assignments and mechanism coverage</h2>'
+            "<p>Memory assignments are explicit choices about dynamic storage; "
+            "they do not certify that a public mechanism is represented. "
+            "Review structural feedback alongside separate, non-gating scientific "
+            "questions. Optional assignments with missing paths have a single "
+            "coordinated decision; no edit or scientific interpretation is "
+            "chosen by the runtime. Existing schemas, acceptance checks and "
+            "budgets are retained.</p></section>"
+            if policy == decisions.POLICY
+            else '<section class="new"><h2>Public-coverage update</h2><p>'
             "Updated shared-process, remaining-topology and repair instructions. "
             "Variables, system instruction, editing contract and scientific checks "
             "are unchanged. Review physical direction across related balances; "
@@ -343,20 +377,41 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         "remain in the runtime log. This projection changes how they are "
         "presented, not the scientific acceptance rules.</p>"
         '<section class="new"><h2>Changes to review</h2><ul>'
-        "<li>Policy: " + html.escape(policy) + ".</li>"
-        "<li>One model view with joint arguments, signs, conversions and meanings; "
-        "no duplicate declaration JSON.</li><li>A compact edit receipt, "
-        "one requirement checklist and specific feedback with conditional "
-        "structured repair examples.</li><li>Internal bookkeeping labels and "
-        "interaction handoff instructions removed from the proposer request.</li>"
-        "<li>Memory assignment required is separate from whether a public "
-        "mechanism is required.</li><li>Provisional dependency observations "
-        "remain available when incomplete RHS entries block the final checks.</li>"
-        "</ul></section><h2>Start with these feedback examples</h2><ul>"
+        "<li>Policy: "
+        + html.escape(policy)
+        + ".</li>"
+        + (
+            "<li>Separate required memory choices from general mechanism coverage; "
+            "show only required or already assigned memory options.</li>"
+            "<li>Ask one explicit decision for each failing optional assignment; "
+            "path repair is conditional on retaining that assignment.</li>"
+            "<li>Ask about positive-rate meanings, signed uses and related "
+            "balances across benchmarks, without inferring scientific edits.</li>"
+            "<li>The existing model view, public evidence, schema, checks and "
+            "call limits are preserved.</li>"
+            if policy == decisions.POLICY
+            else "<li>One model view with joint arguments, signs, conversions "
+            "and meanings; "
+            "no duplicate declaration JSON.</li><li>A compact edit receipt, "
+            "one requirement checklist and specific feedback with conditional "
+            "structured repair examples.</li><li>Internal bookkeeping labels and "
+            "interaction handoff instructions removed from the proposer request.</li>"
+            "<li>Memory assignment required is separate from whether a public "
+            "mechanism is required.</li><li>Provisional dependency observations "
+            "remain available when incomplete RHS entries block the final checks.</li>"
+        )
+        + "</ul></section><h2>Start with these feedback examples</h2><ul>"
         + "".join(highlights.values())
         + "</ul>"
         + "<h2>System instruction (every call)</h2>"
         + _block(presentation.SYSTEM)
+        + (
+            '<section class="new"><h2>Memory-assignment rule (every call)</h2>'
+            + _block(decisions.MEMORY_RULES)
+            + "</section>"
+            if policy == decisions.POLICY
+            else ""
+        )
         + "<h2>Stage instructions</h2>"
         + "".join(
             f"<h3>{title}</h3>" + _block(presentation.stage_text(stage))
@@ -384,7 +439,12 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         + "</table><h2>Offline audit</h2>"
         + _block(summary)
     )
-    (output / "PROMPTS.html").write_text(_page("Focused construction prompts", body))
+    title = (
+        "Memory assignments and mechanism coverage prompts"
+        if policy == decisions.POLICY
+        else "Focused construction prompts"
+    )
+    (output / "PROMPTS.html").write_text(_page(title, body))
     (output / "PROMPTS.json").write_text(json.dumps(rows, indent=2) + "\n")
     (output / "SUMMARY.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary

@@ -33,6 +33,7 @@ def operation_identity() -> str:
         "scripts/jetstream/run_readable_construction.sh",
         "scripts/jetstream/run_completion_construction.sh",
         "scripts/jetstream/run_coverage_construction.sh",
+        "scripts/jetstream/run_decision_construction.sh",
     )
     return content_hash(
         {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest() for name in names}
@@ -138,9 +139,10 @@ def prepare(
         "readable_prompt_confirmation",
         "completion_feedback_confirmation",
         "public_coverage_confirmation",
+        "coverage_decision_confirmation",
     }:
         raise ValueError("unsupported Jetstream construction study")
-    selected = list(campaign.sampling_seeds(study, [0] if seeds is None else seeds))
+    selected = list(campaign.sampling_seeds(study, seeds))
     evidence = compatibility(work, requests)
     old = sealed_read(source / "plan.json")
     validate_settings(old["config"])
@@ -189,6 +191,7 @@ def verify(root: Path) -> dict:
             "readable_prompt_confirmation",
             "completion_feedback_confirmation",
             "public_coverage_confirmation",
+            "coverage_decision_confirmation",
         }
         or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
@@ -269,10 +272,11 @@ def main() -> None:
             "readable_prompt_confirmation",
             "completion_feedback_confirmation",
             "public_coverage_confirmation",
+            "coverage_decision_confirmation",
         ),
         default="focused_prompt_confirmation",
     )
-    parser.add_argument("--seeds", nargs="+", type=int, default=[0])
+    parser.add_argument("--seeds", nargs="+", type=int)
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
         if args.command == "run":

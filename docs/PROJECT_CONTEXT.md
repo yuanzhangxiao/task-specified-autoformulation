@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `minimal-public-coverage-2` revision is ready for prompt review. It
+separates memory-state assignments from mechanism coverage, offers conditional
+withdrawal for failed optional claims (including provisional paths), and asks
+generic scientific questions about local/shared process meanings and related
+balances. Scientific checks, schemas, public evidence and budgets are unchanged;
+the questions do not constitute verification. Coverage-v1 finished 38/40
+structural topologies but retained scientific gaps. No new live run is launched.
+See `PHASE_C_COVERAGE_DECISIONS.md` for evidence and the marked offline review.
+
 The opt-in `minimal-public-coverage-1` policy focuses the shared/topology/repair
 prompts on public mechanisms and coherent use across balances. Exact failed-path
 destinations and duplicate-equation feedback are actionable; scientific choices
