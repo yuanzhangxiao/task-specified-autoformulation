@@ -34,6 +34,7 @@ def operation_identity() -> str:
         "scripts/jetstream/run_completion_construction.sh",
         "scripts/jetstream/run_coverage_construction.sh",
         "scripts/jetstream/run_decision_construction.sh",
+        "scripts/jetstream/run_edit_feedback_construction.sh",
     )
     return content_hash(
         {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest() for name in names}
@@ -140,6 +141,7 @@ def prepare(
         "completion_feedback_confirmation",
         "public_coverage_confirmation",
         "coverage_decision_confirmation",
+        "edit_feedback_confirmation",
     }:
         raise ValueError("unsupported Jetstream construction study")
     selected = list(campaign.sampling_seeds(study, seeds))
@@ -192,6 +194,7 @@ def verify(root: Path) -> dict:
             "completion_feedback_confirmation",
             "public_coverage_confirmation",
             "coverage_decision_confirmation",
+            "edit_feedback_confirmation",
         }
         or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
@@ -273,6 +276,7 @@ def main() -> None:
             "completion_feedback_confirmation",
             "public_coverage_confirmation",
             "coverage_decision_confirmation",
+            "edit_feedback_confirmation",
         ),
         default="focused_prompt_confirmation",
     )

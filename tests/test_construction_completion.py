@@ -12,6 +12,7 @@ from autoformalism.search import construction_completion as completion
 from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_deferred as deferred
+from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_schedules as schedules
 from tests.test_construction_ledger import (
@@ -273,7 +274,8 @@ def test_started_requests_keep_existing_charging_and_cached_resume(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "policy", [completion.POLICY, coverage.POLICY, decisions.POLICY]
+    "policy",
+    [completion.POLICY, coverage.POLICY, decisions.POLICY, edit_feedback.POLICY],
 )
 def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(
     tmp_path, policy
@@ -326,7 +328,8 @@ def test_live_binding_confirmation_uses_existing_repair_allowance_and_resumes(
 
 
 @pytest.mark.parametrize(
-    "policy", [completion.POLICY, coverage.POLICY, decisions.POLICY]
+    "policy",
+    [completion.POLICY, coverage.POLICY, decisions.POLICY, edit_feedback.POLICY],
 )
 def test_global_budget_prompt_replays_historical_charge_not_future_cached_calls(
     tmp_path,

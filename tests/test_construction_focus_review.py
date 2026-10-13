@@ -10,6 +10,7 @@ from autoformalism.research import construction_focus_review as review
 from autoformalism.search import construction_completion as completion
 from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
+from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_focus as focus
 from autoformalism.search import construction_readable as readable
 from tests.test_construction_comparison import source_fixture
@@ -26,6 +27,7 @@ from tests.test_phase_c_construction_baseline import tokenize
         ("completion_feedback_confirmation", completion.POLICY),
         ("public_coverage_confirmation", coverage.POLICY),
         ("coverage_decision_confirmation", decisions.POLICY),
+        ("edit_feedback_confirmation", edit_feedback.POLICY),
     ],
 )
 def test_focused_study_live_projection_reports_and_offline_review(
@@ -110,6 +112,10 @@ def test_focused_study_live_projection_reports_and_offline_review(
         assert "Memory assignments and structural checks" in first
         assert "Memory-assignment choices" in first
         assert "memory_assignment_rules" in first
+    if policy == edit_feedback.POLICY:
+        overview = (output / "PROMPTS.html").read_text()
+        assert "Structural edit feedback" in overview
+        assert "Memory-assignment rule (every call)" in overview
     with pytest.raises(ValueError, match="must be empty"):
         review.render(root, output)
     with pytest.raises(ValueError, match="outside"):
@@ -121,3 +127,80 @@ def test_review_escapes_untrusted_prose():
     rendered = review._block({"scientific_role": hostile})
     assert "<script>" not in rendered and "&lt;script&gt;" in rendered
     assert "<script>" not in review._page(hostile, rendered)
+
+
+def test_edit_preview_reconstructs_actual_rejected_decisions_receipt(tmp_path):
+    source_fixture(tmp_path)
+    source = tmp_path / "historical"
+    plan = campaign.freeze(
+        tmp_path / "new", source, study="coverage_decision_confirmation", seeds=[0]
+    )
+    task = plan["tasks"][0]
+    calls = []
+
+    def send(url, body, timeout):
+        p = json.loads(body["messages"][1]["content"])
+        calls.append(p)
+        targets = [
+            v["name"]
+            for v in p["public_brief"]["public_variables"]
+            if v["data_role"] == "target"
+        ]
+        driver = next(
+            v["name"]
+            for v in p["public_brief"]["public_variables"]
+            if v["data_role"] == "external_input"
+        )
+        edit = {**p["response_template"], "stage_complete": True}
+        if p["stage"] == "variables":
+            edit["variables"] = [variable(n) for n in [*targets, "m"]]
+            edit["mechanism_bindings"] = [
+                {"requirement_id": r["id"], "memory_states": ["m"]}
+                for r in p["public_brief"]["requirements"]
+                if r["requires_dynamic_memory"]
+            ]
+        elif p["stage"] == "shared_laws":
+            edit["processes"] = [
+                {
+                    "name": "p",
+                    "depends_on": ["m"],
+                    "scientific_meaning": "A retained memory-dependent effect",
+                    "kind": "influence",
+                    "uses": [{"target": targets[0], "sign": "positive"}],
+                }
+            ]
+        elif len(calls) == 3:
+            edit["remove_equations"] = ["p"]
+        else:
+            edit["equations"] = [equation(n, "m", n) for n in targets] + [
+                equation("m", driver, "m")
+            ]
+        return response(edit)
+
+    outcome = campaign.propose(
+        source, plan, task, "http://offline", transport=send, token_transport=tokenize
+    )
+    assert outcome["status"] == "topology_complete"
+    directory = source / "results" / task["task_id"] / "construction/events"
+    rejected = sealed_read(directory / "002.json")
+    successor = sealed_read(directory / "003.json")
+    assert rejected["accepted"] is False
+    assert rejected["before"] == rejected["after"] == successor["before"]
+    original_files = {p: p.read_bytes() for p in source.rglob("*") if p.is_file()}
+    count = len(calls)
+    summary, rows = review.inspect(source, edit_feedback.POLICY)
+    assert summary["llm_calls"] == 0 and len(calls) == count
+    revised = json.loads(rows[3]["after"]["messages"][1]["content"])
+    issue = next(
+        i
+        for i in revised["feedback"]["issues"]
+        if i["code"] == "process_edit_destination"
+    )
+    assert issue["name"] == "p" and issue["attempted_field"] == "remove_equations"
+    assert revised["model_view"] == edit_feedback.model_view(
+        campaign.ledger.Draft.model_validate(successor["before"])
+    )
+    assert rows[3]["after"]["response_format"] == rows[3]["before"]["response_format"]
+    assert original_files == {
+        p: p.read_bytes() for p in source.rglob("*") if p.is_file()
+    }

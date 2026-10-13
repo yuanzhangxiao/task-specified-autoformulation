@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+The opt-in `minimal-edit-feedback-1` presentation distinguishes ordinary equation
+entries, process-owned definitions, supplied-only inputs, and observations that
+may explicitly be modeled. Rejected-only additions are never treated as retained
+declarations to delete. Duplicate receiver guidance does not infer cancellation
+or scientific edits. The runtime validators and previous prompt policies are
+unchanged; offline previews reconstruct actual retained predecessors and edit
+receipts. See `PHASE_C_EDIT_FEEDBACK.md` for the review and remaining science gaps.
+
 `minimal-public-coverage-2` presents memory assignment as a specific history
 claim, distinct from general mechanism coverage. Required and already-declared
 choices remain visible; optional claim withdrawal requires an explicit proposer

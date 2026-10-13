@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`minimal-edit-feedback-1` adds conditional guidance for all undeclared equation
+LHSs, duplicate process receivers, and rejected process deletion/replacement
+edits. It preserves the decisions policy's scientific checks, stage instructions
+and budgets. Decisions-v2 completed 37/40 structural topologies; the new feedback
+has only been tested offline. The updated marked prompt review and a separate
+public-requirement gap inventory are in `PHASE_C_EDIT_FEEDBACK.md`. No new live
+experiment or stronger scientific acceptance gate is launched in this milestone.
+
 The opt-in `minimal-public-coverage-2` revision is ready for prompt review. It
 separates memory-state assignments from mechanism coverage, offers conditional
 withdrawal for failed optional claims (including provisional paths), and asks

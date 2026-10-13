@@ -31,6 +31,7 @@ from autoformalism.search import construction_bookkeeping as bookkeeping
 from autoformalism.search import construction_completion as completion_feedback
 from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
+from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_prompts as prompts
@@ -57,6 +58,7 @@ Study = Literal[
     "completion_feedback_confirmation",
     "public_coverage_confirmation",
     "coverage_decision_confirmation",
+    "edit_feedback_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -73,6 +75,7 @@ STUDIES = (
     "completion_feedback_confirmation",
     "public_coverage_confirmation",
     "coverage_decision_confirmation",
+    "edit_feedback_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
@@ -83,6 +86,7 @@ CHECKLIST_STUDIES = {
     "completion_feedback_confirmation": completion_feedback.POLICY,
     "public_coverage_confirmation": coverage.POLICY,
     "coverage_decision_confirmation": decisions.POLICY,
+    "edit_feedback_confirmation": edit_feedback.POLICY,
 }
 SHARED_STAGE_STUDIES = (
     "stage_check_confirmation",
@@ -92,6 +96,7 @@ SHARED_STAGE_STUDIES = (
     "completion_feedback_confirmation",
     "public_coverage_confirmation",
     "coverage_decision_confirmation",
+    "edit_feedback_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -100,7 +105,7 @@ BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
 def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
     """Validate a frozen seed roster; historical studies keep their old rosters."""
     if seeds is None:
-        if study == "coverage_decision_confirmation":
+        if study in {"coverage_decision_confirmation", "edit_feedback_confirmation"}:
             return (0, 1, 2, 3, 4)
         return (0, 1) if study == "comparison" else (0,)
     if study not in {
@@ -109,6 +114,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
         "completion_feedback_confirmation",
         "public_coverage_confirmation",
         "coverage_decision_confirmation",
+        "edit_feedback_confirmation",
     }:
         raise ValueError("explicit seeds require focused_prompt_confirmation")
     if (
@@ -175,7 +181,10 @@ def freeze(
     """Freeze public construction tasks and any explicitly selected saved repairs."""
     if study not in STUDIES:
         raise ValueError("unknown construction study")
-    if study == "coverage_decision_confirmation" and seeds is None:
+    if (
+        study in {"coverage_decision_confirmation", "edit_feedback_confirmation"}
+        and seeds is None
+    ):
         seeds = list(sampling_seeds(study, None))
     selected_seeds = sampling_seeds(study, seeds)
     if serving_environment is not None and (
@@ -186,6 +195,7 @@ def freeze(
             "completion_feedback_confirmation",
             "public_coverage_confirmation",
             "coverage_decision_confirmation",
+            "edit_feedback_confirmation",
         }
         or set(serving_environment) != {"platform", "serving_image_sha256"}
         or serving_environment["platform"] != "jetstream2-h100x1-docker"
@@ -236,6 +246,7 @@ def freeze(
                     "completion_feedback_confirmation",
                     "public_coverage_confirmation",
                     "coverage_decision_confirmation",
+                    "edit_feedback_confirmation",
                 }
                 else {}
             ),
@@ -308,6 +319,8 @@ def freeze(
                             if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
+                            else "edit_feedback"
+                            if study == "edit_feedback_confirmation"
                             else "decisions"
                             if study == "coverage_decision_confirmation"
                             else "coverage"
@@ -324,6 +337,7 @@ def freeze(
                                 "completion_feedback_confirmation",
                                 "public_coverage_confirmation",
                                 "coverage_decision_confirmation",
+                                "edit_feedback_confirmation",
                             }
                             else "clarity"
                         ),
@@ -426,6 +440,7 @@ def freeze(
                     "completion_feedback_confirmation",
                     "public_coverage_confirmation",
                     "coverage_decision_confirmation",
+                    "edit_feedback_confirmation",
                 }
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
@@ -623,7 +638,9 @@ def checked_records(
         displayed_matches = (
             displayed.get("model_view")
             == (
-                decisions
+                edit_feedback
+                if event.get("bookkeeping_policy") == edit_feedback.POLICY
+                else decisions
                 if event.get("bookkeeping_policy") == decisions.POLICY
                 else readable
                 if event.get("bookkeeping_policy")
@@ -637,6 +654,7 @@ def checked_records(
                 completion_feedback.POLICY,
                 coverage.POLICY,
                 decisions.POLICY,
+                edit_feedback.POLICY,
             }
             else displayed.get("current_draft", {}).get("declarations")
             == event["before"]
@@ -982,7 +1000,12 @@ def report(root: Path, plan: dict) -> dict:
             **(
                 {"budget_stop": (value or {}).get("budget_stop")}
                 if plan["config"].get("bookkeeping_policy")
-                in {completion_feedback.POLICY, coverage.POLICY, decisions.POLICY}
+                in {
+                    completion_feedback.POLICY,
+                    coverage.POLICY,
+                    decisions.POLICY,
+                    edit_feedback.POLICY,
+                }
                 else {}
             ),
             "initial_clarifications": initial["assessment"].get(
@@ -1137,7 +1160,12 @@ def report(root: Path, plan: dict) -> dict:
                 ]
             }
             if plan["config"].get("bookkeeping_policy")
-            in {completion_feedback.POLICY, coverage.POLICY, decisions.POLICY}
+            in {
+                completion_feedback.POLICY,
+                coverage.POLICY,
+                decisions.POLICY,
+                edit_feedback.POLICY,
+            }
             else {}
         ),
         "unmeasured_requests": sum(
@@ -1177,6 +1205,7 @@ def report(root: Path, plan: dict) -> dict:
             "completion_feedback_confirmation",
             "public_coverage_confirmation",
             "coverage_decision_confirmation",
+            "edit_feedback_confirmation",
         }
         else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
         "deferred to interaction and visible requirement status. Existing structural "

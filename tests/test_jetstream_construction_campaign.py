@@ -191,6 +191,7 @@ def test_launcher_does_not_install_or_launch_gpu_server():
         ("completion_feedback_confirmation", "minimal-completion-feedback-1"),
         ("public_coverage_confirmation", "minimal-public-coverage-1"),
         ("coverage_decision_confirmation", "minimal-public-coverage-2"),
+        ("edit_feedback_confirmation", "minimal-edit-feedback-1"),
     ],
 )
 def test_readable_five_seed_roster_is_frozen_and_old_plan_cannot_be_repurposed(
@@ -209,9 +210,17 @@ def test_readable_five_seed_roster_is_frozen_and_old_plan_cannot_be_repurposed(
         pilot.prepare(*args, study=study, seeds=[0])
 
 
-def test_decision_study_defaults_to_fresh_five_seed_roster_with_fixed_budgets(tmp_path):
+@pytest.mark.parametrize(
+    "study,suffix",
+    [
+        ("coverage_decision_confirmation", "_minimal_decisions"),
+        ("edit_feedback_confirmation", "_minimal_edit_feedback"),
+    ],
+)
+def test_decision_study_defaults_to_fresh_five_seed_roster_with_fixed_budgets(
+    tmp_path, study, suffix
+):
     args = fixture(tmp_path)
-    study = "coverage_decision_confirmation"
     plan = pilot.prepare(*args, study=study)
     control = pilot.campaign.freeze(
         args[0],
@@ -227,7 +236,7 @@ def test_decision_study_defaults_to_fresh_five_seed_roster_with_fixed_budgets(tm
     assert len(plan["tasks"]) == len(direct["tasks"]) == 40
     assert plan["sampling_seeds"] == direct["sampling_seeds"] == [0, 1, 2, 3, 4]
     assert all(t["arm"] == "full" for t in plan["tasks"])
-    assert all(t["task_id"].endswith("_minimal_decisions") for t in plan["tasks"])
+    assert all(t["task_id"].endswith(suffix) for t in plan["tasks"])
     assert not any("starting_checkpoint" in t for t in plan["tasks"])
     assert plan["cells"] == control["cells"]
     assert {k for k in plan["config"] if plan["config"][k] != control["config"][k]} == {
