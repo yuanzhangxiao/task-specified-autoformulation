@@ -1,0 +1,7 @@
+{
+  "search_seconds": 30,
+  "verification_seconds": 15,
+  "maximum_calls": 100,
+  "restart_count": 1,
+  "random_seed": 20261014
+}

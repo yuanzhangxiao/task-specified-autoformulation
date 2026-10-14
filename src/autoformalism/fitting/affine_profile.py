@@ -20,10 +20,11 @@ class AffineProfile:
     and forcing dependence on the nonlinear outer coefficients.
     """
 
-    def __init__(self, oracle, *, active_parameters=None):
+    def __init__(self, oracle, *, active_parameters=None, projector=None):
         if oracle.audit.get("certificate") != "autonomous-affine-state-input-1":
             raise ValueError("requires certified affine state/input dynamics")
         self.oracle = oracle
+        self.projector = projector
         system = oracle.system
         self.structure = ProfiledCoupled(system, active_parameters=active_parameters)
         self.inner = self.structure.gain_indices
@@ -157,13 +158,14 @@ class AffineProfile:
             derivatives.append(derivative)
             offset_derivatives.append(offset_derivative)
         time_check()
-        result = project(
+        result = (self.projector or project)(
             np.vstack(designs),
             np.concatenate(offsets),
             np.concatenate(derivatives),
             np.vstack(offset_derivatives),
             oracle.lower[self.inner],
             oracle.upper[self.inner],
+            **({"deadline": deadline} if self.projector is not None else {}),
         )
         time_check()
         fitted = vector.copy()

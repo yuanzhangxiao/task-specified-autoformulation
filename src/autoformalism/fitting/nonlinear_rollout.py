@@ -19,8 +19,9 @@ from autoformalism.fitting.profiled_output import ProfiledOutput, project
 class TerminalProfile:
     """Adapt exact terminal-output projection to the common recovery interface."""
 
-    def __init__(self, oracle, *, active_parameters=None):
+    def __init__(self, oracle, *, active_parameters=None, projector=None):
         self.oracle = oracle
+        self.projector = projector
         self.kernel = ProfiledOutput(oracle.system, active_parameters=active_parameters)
         self.outer = tuple(self.kernel.outer_indices)
         self.audit = self.kernel.audit
@@ -41,13 +42,14 @@ class TerminalProfile:
             offsets.append(b)
             derivatives.append(da)
             offset_derivatives.append(db)
-        inner = project(
+        inner = (self.projector or project)(
             np.concatenate(designs),
             np.concatenate(offsets),
             np.concatenate(derivatives),
             np.concatenate(offset_derivatives),
             o.lower[k.gain_indices],
             o.upper[k.gain_indices],
+            **({"deadline": deadline} if self.projector is not None else {}),
         )
         fitted = vector.copy()
         fitted[k.gain_indices] = inner["gains"]

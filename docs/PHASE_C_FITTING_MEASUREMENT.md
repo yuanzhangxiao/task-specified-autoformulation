@@ -1,7 +1,7 @@
 # M34: fixed-noise measurement fitting
 
 Implemented 14 October 2026 for a CPU-only qualification on small synthetic
-controls. Remote results are pending. This is the first numerical increment of
+controls. The 36-attempt Delta qualification is complete. This is the first numerical increment of
 the [noise-aware design](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md), separate from the
 submitted M33 diagnostic supplement. Existing benchmark releases, public prompts,
 clean fitting interfaces and production defaults remain unchanged.
@@ -96,9 +96,21 @@ prepare/fit/completed-resume/report smoke also passed. Changed-file Ruff and
 shell syntax checks pass. Repository-wide Ruff reports 37 pre-existing errors
 in unrelated analysis files. A broader pytest run was stopped after 382 passes
 and three optional-Torch skips; it is not a complete repository-suite result.
-The Delta qualification remains pending.
+The completed Delta plan
+`d8b86345e1587034a9e324c3dfb80f001d902f70ee669009c81d1b7eda9f7990`
+passes all 36 independent solver and analytic-rollout objective checks. All 30
+applicable analytic-optimum checks pass; the six nonlinear-rate fits have no
+analytic-optimum certificate. All 18 direct/profiled objective pairs agree
+(maximum difference approximately `2.31e-13`). Cost accounting is complete.
+Summed recorded fitting wall time is 70.92 seconds for direct fitting and 42.16
+seconds for profiling, including setup and verification, not queue time.
+The multi-output case uses joint fallback, so these results do not qualify
+multi-output profiling. The restrictive-bound control reaches its constrained
+optimum while retaining high residual error. A noisy optimum can differ from
+the generating coefficients: the largest nonlinear-rate error is about 13.4%,
+despite agreement between optimizers. Truth is evaluator-only.
 
-## Why Huber is deferred
+## Why Huber is a separate increment
 
 Squared loss gives a residual of ten standard deviations one hundred times the
 loss of a one-standard-deviation residual. A few erroneous readings can therefore
@@ -110,7 +122,8 @@ That inner problem is no longer one ordinary least-squares solve; it needs a
 qualified convex solver or converged reweighting. A large residual can also come
 from a missing mechanism or incorrect initialization. Downweighting it does not
 diagnose a faulty sensor. First qualify the Gaussian objective here; qualify
-robust fitting and its distinct interpretation in the next increment.
+robust fitting and its distinct interpretation in
+[M35](PHASE_C_FITTING_ROBUST_MEASUREMENT.md).
 
 ## Delta launch
 

@@ -1,8 +1,10 @@
 # Preparation: noise-aware fitting and conditional parameter evidence
 
-Status: implementation design, 13 October 2026. No new fitter, experiment,
-benchmark release or production default is introduced by this document.
-M33 is submitted separately; its numerical results are pending.
+Status: implementation design, 13 October 2026; implementation links updated
+14 October. [M34](PHASE_C_FITTING_MEASUREMENT.md) has qualified the fixed-noise
+measurement contract. [M35](PHASE_C_FITTING_ROBUST_MEASUREMENT.md) implements the
+bounded Huber qualification below; its remote results are pending. This roadmap
+does not itself change a benchmark release or production default.
 
 Companion designs: [measurement evidence](PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md)
 and [controlled diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md).
