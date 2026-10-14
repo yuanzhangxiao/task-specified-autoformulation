@@ -157,3 +157,91 @@ the directly reported failures. Focused ownership and routing tests also passed.
 Ruff passes on every changed Python file; repository-wide Ruff still reports 37
 pre-existing findings in untracked `analysis/claude` scripts. No unrelated files
 were changed to silence those findings.
+
+## Live confirmation: 2026-10-13
+
+The `phase-c-ownership-feedback-e867372` inspection contains all 40 terminal
+episodes: eight Full cases, seeds 0–4, ending after topology. Its plan identity
+is `dd2ed5be34a26b5988c77e51c1ff1bd63646643bf97fed5d1e064de7a82c0c1a`.
+The supplied archive SHA-256 is
+`707fe7937ecd265b17758e93c929c3a5d1d4f65fb5676b78d20eaee44777b937`.
+
+| Checkpoint or cost | Previous edit feedback | Ownership feedback |
+| --- | ---: | ---: |
+| Variable stages complete | 40/40 | 40/40 |
+| Shared-process stages complete | 35/40 | 37/40 |
+| Whole topology ready before global repair | 27/40 | 25/40 |
+| Whole topology ready after global repair | 39/40 | 39/40 |
+| Physical requests | 163 | 160 |
+| Observed total tokens | 1,786,222 | 1,764,729 |
+| Episode tokens: median [unscaled MAD] | 35,212 [10,698.5] | 36,305 [10,472] |
+| Requests with unmeasured usage | 0 | 0 |
+
+Stage completion certifies the implemented checks, not scientific correctness.
+An empty shared-process decision is permitted. The pre-global checkpoint includes
+local stage retries. The prior source is `401a995`; the new source is `e867372`.
+Scientific rules, public cases, schemas and request budgets are unchanged.
+
+The corrected ownership feedback was exercised **zero times**. The previously
+blocked T2-hard seed 0 completed without its earlier collision, while Alien-device
+seed 1 became incomplete. All 40 first-variable requests, including seeds, are
+identical across runs, but 17 responses differ. T2-hard seed 0 diverges at an
+identical shared-stage request before the correction could be shown. These
+outcomes do not isolate an effect of the patch.
+
+### Reply metadata entering the model
+
+Alien-device seed 1 already contains the input-to-memory-to-output path, but its
+ordinary-topology reply adds an empty equation named `stage_complete`. Both
+repair requests display the correct `remove_equations` option. The proposer
+instead requests removal of a nonexistent variable; its next reply includes the
+correct equation removal but repeats the invalid variable removal. Atomic
+validation rejects both transactions, and the two-unchanged-repairs stop applies.
+It does not exhaust the five-repair limit. Applying only the equation removal
+passes the existing structural checks in an offline hypothetical edit; the saved
+campaign and its 39/40 result remain unchanged.
+
+T1-hard seed 1 exposes the opposite failure: a process named `stage_complete`,
+explicitly described as a completion placeholder, is accepted and contributes to
+the glucose balance. This is a protocol/model separation error that does not
+require fitting to identify. A narrow next correction should recognize reply
+control fields and give removal feedback in the correct retained namespace.
+The valid deletion hint was already present in the blocked example; its absence
+must not be claimed as the cause.
+
+### Scientific findings and next milestone
+
+All ten T2 final models leave insulin dependent only on insulin itself and/or
+external insulin. The public training packet includes two trajectories with
+equal initial insulin and zero external insulin throughout, but different later
+insulin readings. Under shared deterministic, well-posed laws and parameters,
+and the prescribed observed-state initialization, these isolated subsystems
+cannot reproduce both histories exactly. This conditional witness neither
+identifies a unique missing edge nor measures achievable NMSE. None of the five
+seeds in either T2 case resolves this particular gap.
+
+All five coupled-basin topologies retain two dynamic storage coordinates and
+transfer uses with negative upstream and positive downstream signs. This is
+useful structural evidence; functions, initialization and conversions remain
+unassessed. A null conversion is unknown, not a verified unit conversion.
+Similarly, matching arguments do not establish duplicate physical effects, and
+the differential type of a rate-valued quantity is not inherently invalid.
+
+After the narrow metadata correction, proceed with the benchmark-general
+training highlights and conditional model/data diagnostics in
+`PHASE_C_TRAJECTORY_COMPATIBILITY.md`. Increasing the structural completion rate
+alone would miss the principal remaining limitations.
+
+### Inspection verification
+
+The audit validates all 243 current and 246 previous sealed JSON artifacts,
+reconciles the raw usage, and recomputes all 160 combined pre-global/final
+assessments across the two runs. All match. The 160 current edit transactions
+also replay exactly (153 accepted, seven rejected). One output-length-limited
+response recovered through its local retry. No token-admission stop was recorded.
+
+The local review is `output/ownership-analysis-20261013/REPORT.html`, with all
+40 equation histories, complete requests, feedback, replies and audit JSON files.
+Sixty relevant tests passed; repository-wide Ruff reports the same 37 unrelated
+findings in untracked `analysis/claude` scripts. Inspection made no runtime or
+benchmark edits, LLM calls, optimizer calls, rollouts or test-data access.
