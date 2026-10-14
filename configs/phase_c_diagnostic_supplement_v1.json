@@ -1,0 +1,8 @@
+{
+  "protocol": "phase-c-diagnostic-supplement-1",
+  "target": "archive__control_cstr_hard",
+  "supplement": {
+    "extra_seconds": 1200,
+    "per_call_seconds": 120
+  }
+}

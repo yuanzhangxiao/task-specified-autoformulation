@@ -383,7 +383,9 @@ def _base_diagnostics(problem, selected, operations):
     return Diagnostics.model_validate(vars(diagnostic))
 
 
-def _assessment(problem, selected, policy, operations, diagnostics):
+def _assessment(
+    problem, selected, policy, operations, diagnostics, *, perturbation_plan=None
+):
     a, b, j = (_value(operations, k) for k in ("primary", "alternate", "sensitivity"))
     if not (
         a
@@ -399,8 +401,12 @@ def _assessment(problem, selected, policy, operations, diagnostics):
         a["metadata"]["activity"]["active_parameters"],
         np.array(j["jacobian"]),
     )
-    plan = piecewise.perturbation_plan(
-        oracle, vector, active, policy.piecewise, jacobian=jacobian
+    plan = (
+        piecewise.perturbation_plan(
+            oracle, vector, active, policy.piecewise, jacobian=jacobian
+        )
+        if perturbation_plan is None
+        else perturbation_plan
     )
     evaluations = {}
     for item in plan:
@@ -426,10 +432,13 @@ def _assessment(problem, selected, policy, operations, diagnostics):
         branch_summary=piecewise.BranchSummary.model_validate(
             a["metadata"]["branch_summary"]
         ),
+        frozen_plan=plan,
     )
 
 
-def _assemble(problem, fit, backend, policy, binding, operations):
+def _assemble(
+    problem, fit, backend, policy, binding, operations, *, perturbation_plan=None
+):
     if fit.parameters is None:
         diagnostics = SimpleNamespace(
             **Diagnostics(
@@ -443,7 +452,12 @@ def _assemble(problem, fit, backend, policy, binding, operations):
             **_base_diagnostics(problem, backend["selected"], operations).__dict__
         )
         result = _assessment(
-            problem, backend["selected"], policy, operations, diagnostics
+            problem,
+            backend["selected"],
+            policy,
+            operations,
+            diagnostics,
+            perturbation_plan=perturbation_plan,
         )
         diagnostics.piecewise_assessment = result
         if result:
@@ -558,7 +572,9 @@ def _assemble(problem, fit, backend, policy, binding, operations):
     )
 
 
-def _validate_operations(problem, fit, backend, policy, binding, operations):
+def _validate_operations(
+    problem, fit, backend, policy, binding, operations, *, perturbation_plan=None
+):
     """Derive every stage identity and allowance from the frozen diagnostic plan."""
     expected_keys = []
 
@@ -577,9 +593,69 @@ def _validate_operations(problem, fit, backend, policy, binding, operations):
         }
         if operations[key]["identity"] != expected:
             raise ValueError("diagnostic stage metadata differs from frozen plan")
-        charge = operations[key]["budget_charge_seconds"]
+        operation = operations[key]
+        charge = operation["budget_charge_seconds"]
         if not np.isfinite(charge) or charge < 0:
             raise ValueError("invalid diagnostic budget charge")
+        if operation.get("budget_restarted") is not False:
+            raise ValueError("diagnostic stage budget was restarted")
+        if operation["status"] == "interrupted":
+            if (
+                operation["value"] is not None
+                or operation["accounting_complete"] is not False
+                or any(
+                    operation[field] is not None
+                    for field in ("wall_seconds", "cpu_seconds", "calls")
+                )
+                or charge != allowance
+            ):
+                raise ValueError("interrupted diagnostic accounting differs")
+        else:
+            if (
+                operation["status"] not in {"complete", "unavailable"}
+                or operation["accounting_complete"] is not True
+                or operation["calls"] not in (0, 1)
+                or any(
+                    not isinstance(operation[field], (int, float))
+                    or not np.isfinite(operation[field])
+                    or operation[field] < 0
+                    for field in ("wall_seconds", "cpu_seconds")
+                )
+                or charge != operation["wall_seconds"]
+            ):
+                raise ValueError("diagnostic stage accounting differs")
+            if operation["status"] == "complete":
+                value = operation["value"]
+                if (
+                    not isinstance(value, dict)
+                    or operation["calls"] != 1
+                    or operation["progress"].get("calls_completed") != 1
+                ):
+                    raise ValueError(
+                        "complete diagnostic stage lacks completed evidence"
+                    )
+                residual = np.asarray(value["residual"], dtype=float)
+                if (
+                    residual.ndim != 1
+                    or not len(residual)
+                    or not np.isfinite(residual).all()
+                ):
+                    raise ValueError("invalid saved diagnostic residual")
+                if sensitivities:
+                    jacobian = np.asarray(value["jacobian"], dtype=float)
+                    if (
+                        jacobian.shape != (len(residual), len(parameters))
+                        or not np.isfinite(jacobian).all()
+                    ):
+                        raise ValueError("invalid saved diagnostic Jacobian")
+                elif value["jacobian"] is not None:
+                    raise ValueError(
+                        "output-only diagnostic unexpectedly contains Jacobian"
+                    )
+            elif operation["value"] is not None or not operation.get("error"):
+                raise ValueError(
+                    "unavailable diagnostic stage contains completed evidence"
+                )
 
     if fit.parameters is not None:
         expect("primary", fit.parameters, "DOP853", False, policy.primary_seconds)
@@ -602,12 +678,18 @@ def _validate_operations(problem, fit, backend, policy, binding, operations):
             if base.active_sensitivity and a["metadata"]["has_piecewise"]:
                 oracle = _proxy(problem, a["metadata"])
                 vector = np.array([fit.parameters[n] for n in oracle.names])
-                plan = piecewise.perturbation_plan(
-                    oracle,
-                    vector,
-                    a["metadata"]["activity"]["active_parameters"],
-                    policy.piecewise,
-                    jacobian=np.array(_value(operations, "sensitivity")["jacobian"]),
+                plan = (
+                    piecewise.perturbation_plan(
+                        oracle,
+                        vector,
+                        a["metadata"]["activity"]["active_parameters"],
+                        policy.piecewise,
+                        jacobian=np.array(
+                            _value(operations, "sensitivity")["jacobian"]
+                        ),
+                    )
+                    if perturbation_plan is None
+                    else perturbation_plan
                 )
                 charged = 0.0
                 for item in plan:
@@ -635,51 +717,9 @@ def _validate_operations(problem, fit, backend, policy, binding, operations):
 
 def completed(folder: Path, *, runtime=False):
     """Reassemble the packet from sealed stages without rerunning integrations."""
-    saved = FeedbackPacket.model_validate(read_seal(folder / "result.json"))
-    context = read_seal(folder / "context.json")
-    if set(context) != {"problem", "fit", "backend", "policy"}:
-        raise ValueError("unexpected diagnostic context fields")
-    problem = training_problem(context["problem"])
-    fit, backend = adapter.FitResult.model_validate(context["fit"]), context["backend"]
-    policy = Policy.model_validate(context["policy"])
-    legacy.validate_evidence(problem, fit, backend)
-    expected = _binding(
-        problem,
-        fit,
-        policy,
-        source=saved.identity.source_sha256,
-        runtime=saved.identity.runtime_sha256,
-    )
-    if saved.identity != expected or saved.identity.model_dump(
-        mode="json"
-    ) != read_seal(folder / "identity.json"):
-        raise ValueError("staged feedback identity differs")
-    if runtime and (
-        saved.identity.source_sha256 != public._source_identity()
-        or saved.identity.runtime_sha256 != public.content_sha256(public._runtime())
-    ):
-        raise ValueError("staged feedback runtime/source differs")
-    manifest = read_seal(folder / "stages.json")
-    operations = {}
-    for key, digest in manifest:
-        if key in operations or not all(part.isidentifier() for part in key.split("/")):
-            raise ValueError("invalid diagnostic stage key")
-        stage_path = folder / "stages" / key
-        op = read_seal(stage_path / "record.json")
-        if {k: v for k, v in op.items() if k != "progress"} != read_seal(
-            stage_path / "result.json"
-        ):
-            raise ValueError("diagnostic stage progress envelope differs")
-        if public.content_sha256(op) != digest or any(
-            op["identity"].get(k) != v
-            for k, v in saved.identity.model_dump(mode="json").items()
-        ):
-            raise ValueError("diagnostic stage identity differs")
-        operations[key] = op
-    _validate_operations(problem, fit, backend, policy, saved.identity, operations)
-    if _assemble(problem, fit, backend, policy, saved.identity, operations) != saved:
-        raise ValueError("staged feedback evidence differs")
-    return saved
+    from autoformalism.fitting.portable_feedback import load_snapshot
+
+    return load_snapshot(folder, runtime=runtime).packet
 
 
 def _binding(problem, fit, policy, *, source=None, runtime=None):
@@ -705,7 +745,9 @@ def _binding(problem, fit, policy, *, source=None, runtime=None):
     )
 
 
-def run(problem, fit, backend, folder: Path, policy: Policy | None = None):
+def run(
+    problem, fit: adapter.FitResult, backend, folder: Path, policy: Policy | None = None
+):
     """Durably evaluate an unchanged fit; each interrupted stage keeps its charge."""
     policy = policy or Policy()
     legacy.validate_evidence(problem, fit, backend)
@@ -724,7 +766,13 @@ def run(problem, fit, backend, folder: Path, policy: Policy | None = None):
         )
         if (folder / "result.json").exists():
             return completed(folder)
-        operations, oracle = {}, None
+        from autoformalism.fitting.portable_feedback import (
+            freeze_plan,
+            save_environment,
+        )
+
+        save_environment(folder)
+        operations, oracle, plan = {}, None, ()
 
         def stage(key, parameters, method, sensitivities, seconds, metadata=False):
             def evaluate(deadline, checkpoint):
@@ -759,6 +807,7 @@ def run(problem, fit, backend, folder: Path, policy: Policy | None = None):
                 "absolute_tolerance": policy.absolute_tolerance,
             }
             path = folder / "stages" / key
+            save_environment(path)
             op = checks.operation(path, stage_identity, seconds, evaluate)
             # Keep the progress snapshot in a second sealed envelope; raw operation
             # remains immutable under the common operation-resume contract.
@@ -810,14 +859,14 @@ def run(problem, fit, backend, folder: Path, policy: Policy | None = None):
                 if base.active_sensitivity and a["metadata"]["has_piecewise"]:
                     proxy = _proxy(problem, a["metadata"])
                     vector = np.array([fit.parameters[n] for n in proxy.names])
-                    plan = piecewise.perturbation_plan(
+                    plan = freeze_plan(
+                        folder,
+                        binding,
                         proxy,
                         vector,
                         a["metadata"]["activity"]["active_parameters"],
                         policy.piecewise,
-                        jacobian=np.array(
-                            _value(operations, "sensitivity")["jacobian"]
-                        ),
+                        np.array(_value(operations, "sensitivity")["jacobian"]),
                     )
                     for item in plan:
                         if not item.in_domain:
@@ -841,7 +890,15 @@ def run(problem, fit, backend, folder: Path, policy: Policy | None = None):
                                 False,
                                 min(policy.perturbation_seconds, remaining),
                             )
-        packet = _assemble(problem, fit, backend, policy, binding, operations)
+        packet = _assemble(
+            problem,
+            fit,
+            backend,
+            policy,
+            binding,
+            operations,
+            perturbation_plan=plan,
+        )
         seal(
             folder / "stages.json",
             [[key, public.content_sha256(op)] for key, op in operations.items()],

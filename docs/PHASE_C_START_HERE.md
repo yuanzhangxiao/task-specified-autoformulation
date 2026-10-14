@@ -9,7 +9,14 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone (October 13): [M32 staged feedback](PHASE_C_FITTING_STAGED_FEEDBACK.md)
+Current fitting milestone (October 13): [M33 diagnostic supplement](PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md)
+fixes portable verification of SVD-derived evidence, freezes executed probe plans,
+and adds a separately budgeted continuation of CSTR's unfinished diagnostics.
+All 23 M32 outcomes are audited without refitting; completed CSTR evaluations are
+reused with their original identities and costs. The new CPU-only experiment
+adds at most 1,200 seconds of diagnostic allowance. Remote results are pending.
+
+Previous milestone: [M32 staged feedback](PHASE_C_FITTING_STAGED_FEEDBACK.md)
 adds durable independent diagnostic stages and nearby-rollout qualification of
 piecewise sensitivities. A 23-task Delta CPU study rechecks 16 frozen M31 entries
 without refitting and adds seven small diagnostic controls. Fitted models,

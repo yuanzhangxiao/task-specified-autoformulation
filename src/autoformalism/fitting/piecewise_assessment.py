@@ -215,6 +215,7 @@ def perturbation_plan(
     policy: PiecewiseAssessmentPolicy,
     *,
     jacobian: np.ndarray | None = None,
+    weak_direction: Sequence[float] | None = None,
 ) -> tuple[Perturbation, ...]:
     """Enumerate every active axis, including initializers, without running solves.
 
@@ -242,16 +243,24 @@ def perturbation_plan(
             scaled = j[:, indices] * units[indices]
         if not np.isfinite(scaled).all():
             raise ValueError("nonfinite scaled joint Jacobian")
-        # Full V is needed only when there are fewer residuals than columns.
-        # A tall residual Jacobian must not allocate an unused quadratic-size U.
-        _, _, vh = np.linalg.svd(
-            scaled, full_matrices=scaled.shape[0] < scaled.shape[1]
-        )
-        weak = vh[-1].copy()
-        if weak[int(np.argmax(np.abs(weak)))] < 0:
-            weak *= -1
-        d = np.zeros(len(names))
-        d[indices] = weak
+        if weak_direction is None:
+            # A tall Jacobian must not allocate an unused quadratic-size U.
+            _, _, vh = np.linalg.svd(
+                scaled, full_matrices=scaled.shape[0] < scaled.shape[1]
+            )
+            weak = vh[-1].copy()
+            if weak[int(np.argmax(np.abs(weak)))] < 0:
+                weak *= -1
+            d = np.zeros(len(names))
+            d[indices] = weak
+        else:
+            # Archived directions are experimental inputs, not fresh SVD choices.
+            d = np.asarray(weak_direction, dtype=float)
+            if d.shape != (len(names),) or not np.isfinite(d).all():
+                raise ValueError("invalid frozen weak direction")
+            if any(d[i] != 0 for i in range(len(names)) if i not in indices):
+                raise ValueError("frozen weak direction contains inactive coordinates")
+            validate_weak_direction(scaled, d[indices])
         directions.append(("weak_joint", None, d))
     points = []
     for direction_number, (label, parameter, d) in enumerate(directions):
@@ -294,6 +303,34 @@ def perturbation_plan(
                     )
                 )
     return tuple(points)
+
+
+def validate_weak_direction(
+    matrix: np.ndarray, direction: np.ndarray, *, reduced_spectrum: bool = False
+) -> None:
+    """Check a unit vector against the weakest singular subspace, not one basis.
+
+    The residual allowance is a backward-error bound scaled by matrix size and
+    the largest singular value. Exact/near nullspaces may rotate across LAPACK
+    builds; a direction outside that subspace still fails.
+    """
+    singular = np.linalg.svd(matrix, compute_uv=False)
+    tolerance = max(1e-14, 128 * np.finfo(float).eps * max(matrix.shape) * singular[0])
+    smallest = (
+        0.0
+        if matrix.shape[0] < matrix.shape[1] and not reduced_spectrum
+        else singular[-1]
+    )
+    if not np.isfinite(direction).all() or abs(np.linalg.norm(direction) - 1) > 1e-10:
+        raise ValueError("frozen weak direction must be a finite unit vector")
+    if abs(np.linalg.norm(matrix @ direction) - smallest) > tolerance:
+        raise ValueError("frozen weak direction is outside the weakest subspace")
+    if singular[0] > 0:
+        normalized = matrix / singular[0]
+        eigen_residual = normalized.T @ (normalized @ direction)
+        eigen_residual -= (smallest / singular[0]) ** 2 * direction
+        if np.linalg.norm(eigen_residual) > 4 * tolerance / singular[0]:
+            raise ValueError("frozen weak direction is outside the weakest subspace")
 
 
 def _rms(values: np.ndarray) -> float:
@@ -390,10 +427,15 @@ def assess_derivatives(
     *,
     base_alternate_residual: Sequence[float] | np.ndarray | None = None,
     branch_summary: BranchSummary | None = None,
+    frozen_plan: tuple[Perturbation, ...] | None = None,
 ) -> PiecewiseAssessmentResult:
     """Assess complete saved perturbations; missing evidence never earns support."""
     _, units, _, _, active = _coordinates(oracle, vector, active)
-    plan = perturbation_plan(oracle, vector, active, policy, jacobian=jacobian)
+    plan = (
+        perturbation_plan(oracle, vector, active, policy, jacobian=jacobian)
+        if frozen_plan is None
+        else frozen_plan
+    )
     base = _residual(base_residual)
     j = np.asarray(jacobian, dtype=float)
     if j.shape != (len(base), len(oracle.names)) or not np.isfinite(j).all():
