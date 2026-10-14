@@ -25,6 +25,7 @@ from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
+from autoformalism.search import construction_protocol as protocol_feedback
 from autoformalism.search import construction_readable as readable
 from autoformalism.search import construction_repair_fidelity as fidelity
 from autoformalism.search import construction_stage_checks as stage_checks
@@ -440,7 +441,7 @@ def run(
     policy: Policy,
     *,
     repair_requests: int | None = None,
-    repair_tokens: int = 131072,
+    repair_tokens: int | None = None,
     graph_contract: PublicGraphContract | None = None,
     process_question: ProcessQuestion = "integrated",
     prompt_family: str | None = None,
@@ -456,9 +457,22 @@ def run(
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }
     if repair_requests is None:
-        repair_requests = focused.REPAIR_REQUESTS if focused_view else 3
+        repair_requests = (
+            protocol_feedback.REPAIR_REQUESTS
+            if bookkeeping_policy == protocol_feedback.POLICY
+            else focused.REPAIR_REQUESTS
+            if focused_view
+            else 3
+        )
+    if repair_tokens is None:
+        repair_tokens = (
+            protocol_feedback.REPAIR_TOKENS
+            if bookkeeping_policy == protocol_feedback.POLICY
+            else 131072
+        )
     draft, events, records = starting_draft or ledger.Draft(), [], []
     continuation = None
     last_edit_result = None
@@ -469,6 +483,7 @@ def run(
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }
     budget_stop = None
     from autoformalism.search import construction_prompts as prompts
@@ -488,6 +503,7 @@ def run(
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
@@ -502,6 +518,7 @@ def run(
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -516,6 +533,7 @@ def run(
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -531,6 +549,7 @@ def run(
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -676,7 +695,9 @@ def run(
             payload = compact.compact_payload(payload)
         if focused_view:
             presentation = (
-                ownership_feedback
+                protocol_feedback
+                if bookkeeping_policy == protocol_feedback.POLICY
+                else ownership_feedback
                 if bookkeeping_policy == ownership_feedback.POLICY
                 else edit_feedback
                 if bookkeeping_policy == edit_feedback.POLICY
@@ -712,6 +733,7 @@ def run(
                     decisions.POLICY,
                     edit_feedback.POLICY,
                     ownership_feedback.POLICY,
+                    protocol_feedback.POLICY,
                 }
                 and stage == "repair"
             ):
@@ -747,6 +769,8 @@ def run(
             )
             patch = ledger.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
+            if bookkeeping_policy == protocol_feedback.POLICY:
+                protocol_feedback.controls.validate_patch(patch, brief=brief)
             if improved_bookkeeping or minimal_clarity:
                 conflicts = bookkeeping.definition_conflicts(draft, patch)
             if compact_feedback:
@@ -1040,6 +1064,7 @@ def run(
         repair_limit = repair_requests if variables_finished else 0
         stagnant = 0
         previous_stagnation = None
+        repair_checkpoints = []
         for attempt in range(repair_limit):
             if check["eligible"] and ready:
                 break
@@ -1055,6 +1080,7 @@ def run(
                 "last_edit_result": diagnostic,
                 "clarification_requests": check["clarification_requests"],
             }
+            before_repair_edit = draft
             try:
                 accepted, complete, diagnostic = request(
                     "repair", None, feedback, attempt
@@ -1066,7 +1092,60 @@ def run(
             if accepted:
                 check = assess_draft()
                 ready = complete
-            if focused_view:
+            if bookkeeping_policy == protocol_feedback.POLICY:
+                if attempt + 1 in (5, 10):
+                    repair_checkpoints.append(
+                        {
+                            "repair_calls": attempt + 1,
+                            "draft": draft.model_dump(mode="json"),
+                            "assessment": check,
+                            "ready_requested": ready,
+                            "requests_cumulative": len(records),
+                            "budget_charge_cumulative": sum(
+                                r["budget_charge"] for r in records
+                            ),
+                        }
+                    )
+                signature = content_hash(
+                    protocol_feedback.repair_signature(
+                        draft, last_edit_result, check["errors"]
+                    )
+                )
+                unchanged = protocol_feedback.substantive(
+                    draft.model_dump(mode="json")
+                ) == (
+                    protocol_feedback.substantive(
+                        before_repair_edit.model_dump(mode="json")
+                    )
+                )
+                stagnant = (
+                    (stagnant + 1 if signature == previous_stagnation else 1)
+                    if unchanged
+                    else 0
+                )
+                previous_stagnation = signature
+                continuation = (
+                    {
+                        "no_progress": bool(stagnant),
+                        "repeated_semantic_attempts": stagnant,
+                        "instruction": "The last reply made no substantive "
+                        "topology change. "
+                        "Use the exact retained category/removal key in the feedback; "
+                        "a different structured alternative may still be tried. "
+                        "Rewording descriptions does not reset the repetition counter.",
+                    }
+                    if stagnant
+                    else None
+                )
+                if stagnant >= protocol_feedback.REPEATED_REPAIRS and not (
+                    check["eligible"] and ready
+                ):
+                    stop_reason = (
+                        "three consecutive semantically repeated repairs "
+                        "made no topology progress"
+                    )
+                    break
+            elif focused_view:
                 signature = content_hash(
                     {
                         "draft": draft.model_dump(mode="json"),
@@ -1116,7 +1195,13 @@ def run(
                     decisions.POLICY,
                     edit_feedback.POLICY,
                     ownership_feedback.POLICY,
+                    protocol_feedback.POLICY,
                 }
+                else {}
+            ),
+            **(
+                {"repair_checkpoints": repair_checkpoints}
+                if bookkeeping_policy == protocol_feedback.POLICY
                 else {}
             ),
             "event_count": len(events),

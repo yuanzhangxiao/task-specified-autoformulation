@@ -36,6 +36,7 @@ from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
 from autoformalism.search import construction_prompts as prompts
+from autoformalism.search import construction_protocol as protocol_feedback
 from autoformalism.search import construction_readable as readable
 from autoformalism.search import construction_schedules as schedules
 from autoformalism.search.public_graph_obligations import PublicGraphContract
@@ -61,6 +62,7 @@ Study = Literal[
     "coverage_decision_confirmation",
     "edit_feedback_confirmation",
     "ownership_feedback_confirmation",
+    "protocol_clarity_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -79,6 +81,7 @@ STUDIES = (
     "coverage_decision_confirmation",
     "edit_feedback_confirmation",
     "ownership_feedback_confirmation",
+    "protocol_clarity_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
@@ -91,6 +94,7 @@ CHECKLIST_STUDIES = {
     "coverage_decision_confirmation": decisions.POLICY,
     "edit_feedback_confirmation": edit_feedback.POLICY,
     "ownership_feedback_confirmation": ownership_feedback.POLICY,
+    "protocol_clarity_confirmation": protocol_feedback.POLICY,
 }
 SHARED_STAGE_STUDIES = (
     "stage_check_confirmation",
@@ -102,6 +106,7 @@ SHARED_STAGE_STUDIES = (
     "coverage_decision_confirmation",
     "edit_feedback_confirmation",
     "ownership_feedback_confirmation",
+    "protocol_clarity_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -114,6 +119,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
             "coverage_decision_confirmation",
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
+            "protocol_clarity_confirmation",
         }:
             return (0, 1, 2, 3, 4)
         return (0, 1) if study == "comparison" else (0,)
@@ -125,6 +131,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
         "coverage_decision_confirmation",
         "edit_feedback_confirmation",
         "ownership_feedback_confirmation",
+        "protocol_clarity_confirmation",
     }:
         raise ValueError("explicit seeds require focused_prompt_confirmation")
     if (
@@ -137,17 +144,28 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
     return tuple(seeds)
 
 
-class Config(baseline.Config):
-    """Identical total budgets, with a reserved bounded repair allowance per arm."""
+class ConstructionModelSettings(baseline.StagedModelSettings):
+    """Permit the explicit extra repair calls without changing transport defaults."""
 
+    maximum_requests: int = Field(default=64, ge=1, le=133)
+
+
+class Config(baseline.Config):
+    """Versioned budgets with an explicit repair reserve for each study."""
+
+    model_settings: ConstructionModelSettings
     protocol: Literal["phase-c-construction-comparison-10"] = PROTOCOL
     platform: Literal["aces-h100x1", "jetstream2-h100x1-docker"] = "aces-h100x1"
-    repair_requests: int = Field(default=3, ge=1, le=5)
+    repair_requests: int = Field(default=3, ge=1, le=10)
     repair_tokens: int = Field(default=131072, ge=256)
     bookkeeping_policy: bookkeeping.Policy = "legacy"
 
     @model_validator(mode="after")
     def positive_initial_budget(self):
+        if (
+            self.repair_requests > 5 or self.model_settings.maximum_requests > 128
+        ) and self.bookkeeping_policy != protocol_feedback.POLICY:
+            raise ValueError("extended repair requires the protocol clarity policy")
         if (
             self.model_settings.maximum_requests <= self.repair_requests
             or self.model_settings.maximum_total_tokens <= self.repair_tokens + 256
@@ -197,6 +215,7 @@ def freeze(
             "coverage_decision_confirmation",
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
+            "protocol_clarity_confirmation",
         }
         and seeds is None
     ):
@@ -212,6 +231,7 @@ def freeze(
             "coverage_decision_confirmation",
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
+            "protocol_clarity_confirmation",
         }
         or set(serving_environment) != {"platform", "serving_image_sha256"}
         or serving_environment["platform"] != "jetstream2-h100x1-docker"
@@ -264,7 +284,27 @@ def freeze(
                     "coverage_decision_confirmation",
                     "edit_feedback_confirmation",
                     "ownership_feedback_confirmation",
+                    "protocol_clarity_confirmation",
                 }
+                else {}
+            ),
+            **(
+                {
+                    "repair_requests": protocol_feedback.REPAIR_REQUESTS,
+                    "repair_tokens": protocol_feedback.REPAIR_TOKENS,
+                    "model_settings": {
+                        **old["config"]["model_settings"],
+                        "maximum_requests": old["config"]["model_settings"][
+                            "maximum_requests"
+                        ]
+                        + 5,
+                        "maximum_total_tokens": old["config"]["model_settings"][
+                            "maximum_total_tokens"
+                        ]
+                        + 131072,
+                    },
+                }
+                if study == "protocol_clarity_confirmation"
                 else {}
             ),
             **({"wall_seconds": 10800} if study != "comparison" else {}),
@@ -336,6 +376,8 @@ def freeze(
                             if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
+                            else "protocol_clarity"
+                            if study == "protocol_clarity_confirmation"
                             else "ownership_feedback"
                             if study == "ownership_feedback_confirmation"
                             else "edit_feedback"
@@ -358,6 +400,7 @@ def freeze(
                                 "coverage_decision_confirmation",
                                 "edit_feedback_confirmation",
                                 "ownership_feedback_confirmation",
+                                "protocol_clarity_confirmation",
                             }
                             else "clarity"
                         ),
@@ -462,6 +505,7 @@ def freeze(
                     "coverage_decision_confirmation",
                     "edit_feedback_confirmation",
                     "ownership_feedback_confirmation",
+                    "protocol_clarity_confirmation",
                 }
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
@@ -659,7 +703,9 @@ def checked_records(
         displayed_matches = (
             displayed.get("model_view")
             == (
-                ownership_feedback
+                protocol_feedback
+                if event.get("bookkeeping_policy") == protocol_feedback.POLICY
+                else ownership_feedback
                 if event.get("bookkeeping_policy") == ownership_feedback.POLICY
                 else edit_feedback
                 if event.get("bookkeeping_policy") == edit_feedback.POLICY
@@ -679,6 +725,7 @@ def checked_records(
                 decisions.POLICY,
                 edit_feedback.POLICY,
                 ownership_feedback.POLICY,
+                protocol_feedback.POLICY,
             }
             else displayed.get("current_draft", {}).get("declarations")
             == event["before"]
@@ -1030,6 +1077,7 @@ def report(root: Path, plan: dict) -> dict:
                     decisions.POLICY,
                     edit_feedback.POLICY,
                     ownership_feedback.POLICY,
+                    protocol_feedback.POLICY,
                 }
                 else {}
             ),
@@ -1191,6 +1239,7 @@ def report(root: Path, plan: dict) -> dict:
                 decisions.POLICY,
                 edit_feedback.POLICY,
                 ownership_feedback.POLICY,
+                protocol_feedback.POLICY,
             }
             else {}
         ),
@@ -1220,7 +1269,8 @@ def report(root: Path, plan: dict) -> dict:
         if plan.get("study") == "refinement_confirmation"
         else f"Eight fresh minimal cases, Full/seeds {seed_roster}: "
         "one model view, specific "
-        "feedback, bounded local recovery and up to five global repairs. "
+        "feedback, bounded local recovery and up to "
+        f"{plan['config']['repair_requests']} global repairs. "
         "Existing scientific acceptance checks remain. Provisional paths are "
         "advisory. Inspect VARIABLES.md and SHARED_PROCESSES.md. "
         "Not a matched-budget ranking against earlier policies."
@@ -1233,6 +1283,7 @@ def report(root: Path, plan: dict) -> dict:
             "coverage_decision_confirmation",
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
+            "protocol_clarity_confirmation",
         }
         else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
         "deferred to interaction and visible requirement status. Existing structural "

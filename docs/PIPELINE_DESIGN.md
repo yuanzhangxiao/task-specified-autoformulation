@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+The opt-in `minimal-protocol-clarity-1` policy separates reply controls from
+scientific names before transactional application. It presents memory assignment
+as differential history-coordinate selection, distinct from mechanism coverage.
+Its repair reserve grows from five to ten requests while initial construction
+allowances stay fixed; semantic repetition and checkpoints are deterministic on
+resume. `topology_compatibility.py` separately consumes sealed complete training
+evidence for three conditional diagnostics, with unknown assumptions deferred.
+It is not wired into construction eligibility or live feedback. See
+`PHASE_C_PROTOCOL_CLARITY.md` for the review and qualification scope.
+
 `minimal-edit-feedback-2` qualifies inherited process-definition advice against
 the retained variable type. A rejected instantaneous process declaration cannot
 replace a differential state's ODE or create a process key for deletion. Explicit

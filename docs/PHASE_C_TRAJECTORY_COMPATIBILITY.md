@@ -4,6 +4,11 @@ Design review, 2026-10-13, based on source `e867372`. These are proposed feature
 not implemented prompts, gates or budget changes. This supersedes the preliminary
 evidence proposal in `PHASE_C_OWNERSHIP_FEEDBACK.md`.
 
+Implementation update, 2026-10-14: the user selected only three narrow diagnostics
+for initial offline qualification. They and a separate prompt/repair policy are
+implemented in `PHASE_C_PROTOCOL_CLARITY.md`. The wider highlights and remaining
+diagnostics below are still proposals; no new live compatibility gate is enabled.
+
 ## Decision
 
 Provide factual training highlights from the first construction request. After

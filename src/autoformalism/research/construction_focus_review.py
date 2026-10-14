@@ -22,6 +22,7 @@ from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
+from autoformalism.search import construction_protocol as protocol_feedback
 from autoformalism.search import construction_readable as readable
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 
@@ -44,10 +45,13 @@ def preview(
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }:
         raise ValueError("unsupported preview policy")
     presentation = (
-        ownership_feedback
+        protocol_feedback
+        if policy == protocol_feedback.POLICY
+        else ownership_feedback
         if policy == ownership_feedback.POLICY
         else edit_feedback
         if policy == edit_feedback.POLICY
@@ -88,12 +92,22 @@ def preview(
             decisions.POLICY,
             edit_feedback.POLICY,
             ownership_feedback.POLICY,
+            protocol_feedback.POLICY,
         }
         and event["stage"] == "repair"
         and event.get("bookkeeping_policy") != policy
     ):
         if budget_context is None:
             raise ValueError("historical repair preview requires budget accounting")
+        if policy == protocol_feedback.POLICY:
+            budget_context = {
+                **budget_context,
+                "maximum_calls": protocol_feedback.REPAIR_REQUESTS,
+                "repair_tokens": protocol_feedback.REPAIR_TOKENS,
+                "ceiling": budget_context["ceiling"]
+                + protocol_feedback.REPAIR_TOKENS
+                - budget_context["repair_tokens"],
+            }
         presentation.repair_budget(
             new,
             budget_context["maximum_calls"],
@@ -184,6 +198,14 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
                     previous["rejected_reply"] = visible_response(record)
     before = sum(r["saved_user_bytes"] for r in requests)
     after = sum(r["revised_user_bytes"] for r in requests)
+    message_bytes = {
+        key: sum(
+            len(m["content"].encode("utf-8"))
+            for row in requests
+            for m in row[key]["messages"]
+        )
+        for key in ("before", "after")
+    }
     return {
         "policy": policy,
         "source_identity": plan["artifact_sha256"],
@@ -192,17 +214,36 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
         "saved_user_bytes": before,
         "revised_user_bytes": after,
         "user_byte_reduction_fraction": 1 - after / before if before else None,
+        "saved_system_and_user_bytes": message_bytes["before"],
+        "revised_system_and_user_bytes": message_bytes["after"],
         "size_unit": "UTF-8 bytes, not model tokens; output schema unchanged",
         "scope": "Counterfactual requests on each actual saved predecessor. "
         "Historical replies are not replies to these prompts. "
         "No new construction chain or scientific improvement is inferred.",
         "new_schedule": {
             "additional_variable_recovery_calls": focused.LOCAL_RECOVERY_REQUESTS,
-            "maximum_global_repair_calls": focused.REPAIR_REQUESTS,
-            "stop_after_identical_no_progress_repairs": 2,
+            "maximum_global_repair_calls": protocol_feedback.REPAIR_REQUESTS
+            if policy == protocol_feedback.POLICY
+            else focused.REPAIR_REQUESTS,
+            "stop_after_identical_no_progress_repairs": (
+                protocol_feedback.REPEATED_REPAIRS
+                if policy == protocol_feedback.POLICY
+                else 2
+            ),
+            **(
+                {
+                    "repair_tokens": protocol_feedback.REPAIR_TOKENS,
+                    "overall_calls": 133,
+                    "overall_token_budget": 655360,
+                    "repetition": "same semantic draft and rejected alternative; "
+                    "descriptions do not reset",
+                }
+                if policy == protocol_feedback.POLICY
+                else {}
+            ),
             "note": "Successful variable recovery resumes shared/topology stages; "
             "exhaustion stops incomplete. Success stops repair early. "
-            "Existing overall request/token caps still apply.",
+            "The frozen policy's overall request/token caps still apply.",
         },
         "llm_calls": 0,
         "optimizer_calls": 0,
@@ -242,6 +283,7 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
         decisions.POLICY,
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
+        protocol_feedback.POLICY,
     }
     body = (
         '<p><a href="PROMPTS.html">All stages and requests</a></p>'
@@ -274,7 +316,21 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
         + "<h3>Previous edit receipt</h3>"
         + _block(p["previous_edit"])
         + (
-            "<h3>Memory-assignment choices</h3>" + _block(p["memory_assignment_rules"])
+            (
+                "<h3>Memory-state assignments</h3>"
+                if policy == protocol_feedback.POLICY
+                else "<h3>Memory-assignment choices</h3>"
+            )
+            + _block(
+                p.get(
+                    "memory_state_assignments",
+                    p.get(
+                        "memory_assignment_rules",
+                        "No additional assignment instruction is needed "
+                        "for this request.",
+                    ),
+                )
+            )
             if decision_view
             else "<h3>Memory binding options</h3>"
         )
@@ -312,7 +368,9 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
     presentation = (
-        ownership_feedback
+        protocol_feedback
+        if policy == protocol_feedback.POLICY
+        else ownership_feedback
         if policy == ownership_feedback.POLICY
         else edit_feedback
         if policy == edit_feedback.POLICY
@@ -337,6 +395,7 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
             decisions.POLICY,
             edit_feedback.POLICY,
             ownership_feedback.POLICY,
+            protocol_feedback.POLICY,
         }:
             for key, title in (
                 ("memory_assignment_decisions", "Optional memory-assignment decision"),
@@ -360,12 +419,24 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
                 ),
                 ("duplicate_receiver", "One signed use per process receiver"),
             )
-            if policy in {edit_feedback.POLICY, ownership_feedback.POLICY}
+            if policy
+            in {
+                edit_feedback.POLICY,
+                ownership_feedback.POLICY,
+                protocol_feedback.POLICY,
+            }
             else ()
         )
         ownership_examples = (
-            (("state_process_ownership", "Preserve state and process ownership"),)
-            if policy == ownership_feedback.POLICY
+            (
+                ("state_process_ownership", "Preserve state and process ownership"),
+                (
+                    "reply_control_is_not_quantity",
+                    "Reply control is not a scientific quantity",
+                ),
+                ("removal_namespace_mismatch", "Use the retained entry category"),
+            )
+            if policy in {ownership_feedback.POLICY, protocol_feedback.POLICY}
             else ()
         )
         for code, title in (
@@ -439,6 +510,22 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
             "from modeled balances, and explains duplicate topology entries. "
             "This is a prompt change, not a new scientific certificate.</p></section>"
             if policy == coverage.POLICY
+            else ""
+        )
+        + (
+            "<section class='new'><h2>Protocol clarity and bounded repair</h2>"
+            "<p>Short dictionary; memory-state assignments separated from "
+            "mechanism coverage. "
+            "Control fields are excluded from scientific declarations. "
+            "Retained categories guide deletions. "
+            "Ten global repairs with three semantic repetitions stopping early; "
+            "initial construction allowance unchanged. "
+            "The three topology/data diagnostics are qualified offline and "
+            "are not enabled in this pilot.</p>"
+            + _block(protocol_feedback.DICTIONARY)
+            + _block(protocol_feedback.MEMORY_RULE)
+            + "</section>"
+            if policy == protocol_feedback.POLICY
             else ""
         )
         + "<p>Review version — no live test launched. All public science and "

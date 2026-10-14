@@ -36,6 +36,7 @@ def operation_identity() -> str:
         "scripts/jetstream/run_decision_construction.sh",
         "scripts/jetstream/run_edit_feedback_construction.sh",
         "scripts/jetstream/run_ownership_feedback_construction.sh",
+        "scripts/jetstream/run_protocol_clarity_construction.sh",
     )
     return content_hash(
         {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest() for name in names}
@@ -120,6 +121,10 @@ def validate_settings(config: dict) -> None:
         "maximum_total_tokens": 524288,
         "attempts_per_step": 3,
     }
+    if config.get("bookkeeping_policy") == "minimal-protocol-clarity-1":
+        expected.update(maximum_requests=133, maximum_total_tokens=655360)
+        if config.get("repair_requests") != 10 or config.get("repair_tokens") != 262144:
+            raise ValueError("protocol clarity repair allowance differs")
     if any(settings.get(k) != v for k, v in expected.items()):
         raise ValueError("construction settings differ from the reviewed ACES pilot")
     if config["served_context_tokens"] != 32768:
@@ -144,6 +149,7 @@ def prepare(
         "coverage_decision_confirmation",
         "edit_feedback_confirmation",
         "ownership_feedback_confirmation",
+        "protocol_clarity_confirmation",
     }:
         raise ValueError("unsupported Jetstream construction study")
     selected = list(campaign.sampling_seeds(study, seeds))
@@ -198,6 +204,7 @@ def verify(root: Path) -> dict:
             "coverage_decision_confirmation",
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
+            "protocol_clarity_confirmation",
         }
         or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
@@ -281,6 +288,7 @@ def main() -> None:
             "coverage_decision_confirmation",
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
+            "protocol_clarity_confirmation",
         ),
         default="focused_prompt_confirmation",
     )

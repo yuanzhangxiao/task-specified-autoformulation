@@ -13,6 +13,7 @@ from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_focus as focus
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
+from autoformalism.search import construction_protocol as protocol
 from autoformalism.search import construction_readable as readable
 from tests.test_construction_comparison import source_fixture
 from tests.test_construction_ledger import equation, variable
@@ -30,6 +31,7 @@ from tests.test_phase_c_construction_baseline import tokenize
         ("coverage_decision_confirmation", decisions.POLICY),
         ("edit_feedback_confirmation", edit_feedback.POLICY),
         ("ownership_feedback_confirmation", ownership_feedback.POLICY),
+        ("protocol_clarity_confirmation", protocol.POLICY),
     ],
 )
 def test_focused_study_live_projection_reports_and_offline_review(
@@ -39,7 +41,7 @@ def test_focused_study_live_projection_reports_and_offline_review(
     root = tmp_path / "study"
     plan = campaign.freeze(tmp_path / "new", root, study=study, seeds=[0])
     assert campaign.verify(root) == plan
-    assert plan["config"]["repair_requests"] == 5
+    assert plan["config"]["repair_requests"] == (10 if policy == protocol.POLICY else 5)
     assert plan["config"]["bookkeeping_policy"] == policy
     assert len(plan["tasks"]) == 8
     requests = []
