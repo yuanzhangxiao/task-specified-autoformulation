@@ -1,5 +1,11 @@
 # Autoformalism Phase 1 Implementation Context
 
+`PHASE_C_TRAJECTORY_COMPATIBILITY.md` is a design review for general training
+highlights and staged model/data compatibility questions. It distinguishes
+observations, conditional model-class conflicts and fitted discrepancies, with
+explicit counterexamples and unavailable assumptions. These features and the
+proposed repair extension are not implemented or enabled by this documentation.
+
 `minimal-edit-feedback-2` corrects contradictory state/process collision advice
 using retained ownership and identifies rejected-only process removals. The v1
 live run completed 39/40 structural topologies, with scientific gaps remaining.

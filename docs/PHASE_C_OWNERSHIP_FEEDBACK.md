@@ -39,13 +39,18 @@ The runtime does not reinterpret a rejected reply as an accepted model.
 
 ## Initial training highlights: proposed design
 
+The benchmark-general follow-up is
+[`PHASE_C_TRAJECTORY_COMPATIBILITY.md`](PHASE_C_TRAJECTORY_COMPATIBILITY.md),
+which assigns proposed checks to stages and makes their assumptions explicit.
+
 The existing `training_observations` packet already describes sampled extrema,
 bounded trajectory paths, initial ranges and input changes. It gives individual
 trajectory statistics, without a concise cross-trajectory observation list.
 
 A short, deterministic list at the start of the packet could foreground:
 
-1. Sampled peak times and their difference, when the events are well defined.
+1. Per-channel sampled extrema and locations, without selecting causal peak
+   pairings or a delay interpretation.
 2. Changes that continue after an input pulse ends.
 3. Contrasting responses across trajectories with explicitly identified matching
    inputs or initial observations.
