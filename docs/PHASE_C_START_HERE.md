@@ -14,7 +14,13 @@ adds durable independent diagnostic stages and nearby-rollout qualification of
 piecewise sensitivities. A 23-task Delta CPU study rechecks 16 frozen M31 entries
 without refitting and adds seven small diagnostic controls. Fitted models,
 benchmark data and production fitting defaults remain unchanged. Qualification
-is pending the Delta run; local support never certifies global identifiability.
+passes in the [M32 result review](PHASE_C_FITTING_M32_RESULTS_2026-10-13.md):
+all twelve controls behave as expected, alien's timeout is resolved, and basin's
+piecewise sensitivity is supported. CSTR preserves accurate replay but exhausts
+its perturbation allowance before checking both hidden initials and the weakest
+joint direction. Portable inspection also needs a fix for exact recomputation of
+SVD-derived evidence across numerical environments. Local support never certifies
+global identifiability; completion of those checks is next, not refitting.
 
 Previous milestone: [M31 fitting feedback](PHASE_C_FITTING_FEEDBACK.md)
 adds candidate-bound training-only diagnostics and advisory next actions, without
