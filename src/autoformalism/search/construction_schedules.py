@@ -27,8 +27,10 @@ from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
 from autoformalism.search import construction_protocol as protocol_feedback
 from autoformalism.search import construction_readable as readable
+from autoformalism.search import construction_realizations as realization_prompts
 from autoformalism.search import construction_repair_fidelity as fidelity
 from autoformalism.search import construction_stage_checks as stage_checks
+from autoformalism.search import mechanism_realizations as realizations
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.staged_topology import content_hash
 
@@ -246,7 +248,10 @@ def validate_scope(
         or patch.remove_processes
     ):
         raise ValueError(
-            "variable stage permits variable and memory-binding edits only"
+            "variable stage permits variables, realizations and applicable "
+            "feedback-coordinate edits only"
+            if isinstance(patch, realizations.DraftPatch)
+            else "variable stage permits variable and memory-binding edits only"
         )
     if stage in {"relationships", "shared_laws"} and (
         patch.equations or patch.remove_equations
@@ -387,6 +392,13 @@ def uncommitted_edits(raw: object, draft: ledger.Draft) -> list[dict]:
         ("feedback_bindings", "target", "remove_feedback_bindings"),
         ("overlap_confirmations", "overlap_id", "remove_overlap_confirmations"),
     )
+    if isinstance(draft, realizations.Draft):
+        fields = tuple(
+            ("mechanism_realizations", key, "remove_realizations")
+            if field == "mechanism_bindings"
+            else (field, key, removal)
+            for field, key, removal in fields
+        )
     result = []
     for field, key, removal in fields:
         current = {
@@ -458,11 +470,13 @@ def run(
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }
     if repair_requests is None:
         repair_requests = (
             protocol_feedback.REPAIR_REQUESTS
-            if bookkeeping_policy == protocol_feedback.POLICY
+            if bookkeeping_policy
+            in {protocol_feedback.POLICY, realization_prompts.POLICY}
             else focused.REPAIR_REQUESTS
             if focused_view
             else 3
@@ -470,10 +484,14 @@ def run(
     if repair_tokens is None:
         repair_tokens = (
             protocol_feedback.REPAIR_TOKENS
-            if bookkeeping_policy == protocol_feedback.POLICY
+            if bookkeeping_policy
+            in {protocol_feedback.POLICY, realization_prompts.POLICY}
             else 131072
         )
-    draft, events, records = starting_draft or ledger.Draft(), [], []
+    realization_policy = bookkeeping_policy == realization_prompts.POLICY
+    draft_api = realizations if realization_policy else ledger
+    declaration_checks_api = realizations if realization_policy else checklist
+    draft, events, records = starting_draft or draft_api.Draft(), [], []
     continuation = None
     last_edit_result = None
     original = client.settings
@@ -484,6 +502,7 @@ def run(
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }
     budget_stop = None
     from autoformalism.search import construction_prompts as prompts
@@ -504,6 +523,7 @@ def run(
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
@@ -519,6 +539,7 @@ def run(
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -534,6 +555,7 @@ def run(
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -550,6 +572,7 @@ def run(
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -668,7 +691,7 @@ def run(
                         draft
                     )
         if variable_checks:
-            payload["variable_checklist"] = checklist.variable_checklist(
+            payload["variable_checklist"] = declaration_checks_api.variable_checklist(
                 brief, draft, target_definitions, graph_contract
             )
             if stage == "variables":
@@ -695,7 +718,9 @@ def run(
             payload = compact.compact_payload(payload)
         if focused_view:
             presentation = (
-                protocol_feedback
+                realization_prompts
+                if realization_policy
+                else protocol_feedback
                 if bookkeeping_policy == protocol_feedback.POLICY
                 else ownership_feedback
                 if bookkeeping_policy == ownership_feedback.POLICY
@@ -734,6 +759,7 @@ def run(
                     edit_feedback.POLICY,
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
+                    realization_prompts.POLICY,
                 }
                 and stage == "repair"
             ):
@@ -745,6 +771,8 @@ def run(
                     sum(r["budget_charge"] for r in records),
                     repair_tokens,
                 )
+        if realization_policy:
+            response_model = realization_prompts.response_model(stage)
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -760,31 +788,34 @@ def run(
         completion = None
         try:
             raw = visible_response(record)
-            normalized, normalizations = ledger.normalize_reply(
+            normalized, normalizations = draft_api.normalize_reply(
                 brief,
                 raw,
                 graph_contract=graph_contract,
                 draft=draft,
                 ignore_definition_description=improved_bookkeeping,
             )
-            patch = ledger.DraftPatch.model_validate(normalized)
+            patch = draft_api.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
-            if bookkeeping_policy == protocol_feedback.POLICY:
+            if bookkeeping_policy in {
+                protocol_feedback.POLICY,
+                realization_prompts.POLICY,
+            }:
                 protocol_feedback.controls.validate_patch(patch, brief=brief)
             if improved_bookkeeping or minimal_clarity:
                 conflicts = bookkeeping.definition_conflicts(draft, patch)
             if compact_feedback:
                 name_conflicts = compact.naming_conflicts(brief, draft, patch)
-            candidate = ledger.apply_patch(brief, draft, patch)
-            candidate, consumer_log = handoff.normalize_consumers(
-                candidate, patch, draft
-            )
+            candidate = draft_api.apply_patch(brief, draft, patch)
+            candidate, consumer_log = (
+                realizations if realization_policy else handoff
+            ).normalize_consumers(candidate, patch, draft)
             normalizations.extend(consumer_log)
             draft = candidate
             accepted, complete = True, patch.stage_complete
             if completion_check and stage == "variables" and complete:
                 completion = (
-                    checklist.variable_checklist(
+                    declaration_checks_api.variable_checklist(
                         brief, draft, target_definitions, graph_contract
                     )
                     if variable_checks
@@ -793,7 +824,7 @@ def run(
                 complete = completion["status"] == "ready"
             if local_stage_checks and stage == "shared_laws":
                 completion = stage_checks.shared_checklist(brief, draft)
-                declaration_checks = checklist.variable_checklist(
+                declaration_checks = declaration_checks_api.variable_checklist(
                     brief, draft, target_definitions, graph_contract
                 )
                 completion["variable_blocking_items"] = declaration_checks[
@@ -821,11 +852,13 @@ def run(
             "stage_complete": complete,
             "before": before.model_dump(mode="json"),
             "after": draft.model_dump(mode="json"),
-            "pending_after": ledger.pending(brief, draft),
+            "pending_after": draft_api.pending(brief, draft),
             **(
                 {
-                    "variable_checklist_after": checklist.variable_checklist(
-                        brief, draft, target_definitions, graph_contract
+                    "variable_checklist_after": (
+                        declaration_checks_api.variable_checklist(
+                            brief, draft, target_definitions, graph_contract
+                        )
                     )
                 }
                 if variable_checks
@@ -859,6 +892,10 @@ def run(
                 else {}
             ),
         }
+        if realization_policy and accepted and event.get("repair_receipt") is not None:
+            event["repair_receipt"]["committed_edits"] = realizations.edit_effects(
+                before, draft
+            )
         sealed_write(directory / "events" / f"{len(events):03d}.json", event)
         events.append(event)
         last_edit_result = {
@@ -870,7 +907,13 @@ def run(
             **({"no_progress": draft == before} if focused_view else {}),
             "normalizations": normalizations,
             "error": error,
-            "edit_effects": handoff.edit_effects(before, draft) if accepted else None,
+            "edit_effects": (
+                realizations.edit_effects(before, draft)
+                if realization_policy
+                else handoff.edit_effects(before, draft)
+            )
+            if accepted
+            else None,
             "delivery": delivery_feedback(record),
             **(
                 {"variable_checklist": event["variable_checklist_after"]}
@@ -898,7 +941,22 @@ def run(
 
     def assess_draft() -> dict:
         """Recheck declarations after later edits as well as on stage completion."""
-        if defer_interaction:
+        if realization_policy:
+            check = realizations.assess(
+                brief,
+                context,
+                target_definitions,
+                draft,
+                graph_contract=graph_contract,
+                clarify_overlaps=False,
+            )
+            check["interaction_review_handoff"] = deferred.interaction_handoff(
+                brief, draft
+            )
+            check["mechanism_realization_handoff"] = realizations.final_handoff(
+                draft, check
+            )
+        elif defer_interaction:
             check = deferred.assessment(
                 brief, context, target_definitions, draft, graph_contract
             )
@@ -915,7 +973,7 @@ def run(
                 clarify_overlaps=True,
             )
         if variable_checks:
-            values = checklist.variable_checklist(
+            values = declaration_checks_api.variable_checklist(
                 brief, draft, target_definitions, graph_contract
             )
             check["variable_checklist"] = values
@@ -941,7 +999,7 @@ def run(
     def stage(name: str) -> tuple[bool, str | None]:
         nonlocal continuation
         while True:
-            work = ledger.pending(brief, draft)
+            work = draft_api.pending(brief, draft)
             focus = None
             if name == "equations" and policy != "joint_adaptive":
                 if not work["equations_to_define"]:
@@ -1092,7 +1150,10 @@ def run(
             if accepted:
                 check = assess_draft()
                 ready = complete
-            if bookkeeping_policy == protocol_feedback.POLICY:
+            if bookkeeping_policy in {
+                protocol_feedback.POLICY,
+                realization_prompts.POLICY,
+            }:
                 if attempt + 1 in (5, 10):
                     repair_checkpoints.append(
                         {
@@ -1107,9 +1168,9 @@ def run(
                         }
                     )
                 signature = content_hash(
-                    protocol_feedback.repair_signature(
-                        draft, last_edit_result, check["errors"]
-                    )
+                    (
+                        realization_prompts if realization_policy else protocol_feedback
+                    ).repair_signature(draft, last_edit_result, check["errors"])
                 )
                 unchanged = protocol_feedback.substantive(
                     draft.model_dump(mode="json")
@@ -1196,12 +1257,14 @@ def run(
                     edit_feedback.POLICY,
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
+                    realization_prompts.POLICY,
                 }
                 else {}
             ),
             **(
                 {"repair_checkpoints": repair_checkpoints}
-                if bookkeeping_policy == protocol_feedback.POLICY
+                if bookkeeping_policy
+                in {protocol_feedback.POLICY, realization_prompts.POLICY}
                 else {}
             ),
             "event_count": len(events),

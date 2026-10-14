@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`minimal-mechanism-realizations-1` uses a versioned draft/response schema containing
+one general realization record per public requirement. Components reference public
+sources, generated variables or shared processes; memory selections are an optional
+subset constrained by explicit public history requirements. The adapter preserves
+existing compilation/path predicates and keeps full records through transactions,
+normalization, receipts, reports and resume. Local contributions are referenced by
+their generated variable. Behavior remains unverified; later function/fitting
+consumers are not extended in this milestone. See `PHASE_C_MECHANISM_REALIZATIONS.md`.
+
 The opt-in `minimal-protocol-clarity-1` policy separates reply controls from
 scientific names before transactional application. It presents memory assignment
 as differential history-coordinate selection, distinct from mechanism coverage.

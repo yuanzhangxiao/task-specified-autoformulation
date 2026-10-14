@@ -9,7 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from autoformalism.expressions import ValidationContext
-from autoformalism.llm.staged_topology import visible_response
+from autoformalism.llm.staged_topology import strict_provider_schema, visible_response
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research.construction_deferred_review import marked_diff
@@ -20,10 +20,11 @@ from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
-from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
 from autoformalism.search import construction_protocol as protocol_feedback
 from autoformalism.search import construction_readable as readable
+from autoformalism.search import construction_realizations as realization_prompts
+from autoformalism.search import mechanism_realizations as realizations
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 
 
@@ -46,10 +47,13 @@ def preview(
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }:
         raise ValueError("unsupported preview policy")
     presentation = (
-        protocol_feedback
+        realization_prompts
+        if policy == realization_prompts.POLICY
+        else protocol_feedback
         if policy == protocol_feedback.POLICY
         else ownership_feedback
         if policy == ownership_feedback.POLICY
@@ -67,6 +71,11 @@ def preview(
     )
     old = compact.expand_payload(json.loads(body["messages"][1]["content"]))
     brief = campaign.contract.visible_brief(cell, task)
+    before_draft = realizations.load_draft(event["before"])
+    if policy == realization_prompts.POLICY and not isinstance(
+        before_draft, realizations.Draft
+    ):
+        before_draft = realizations.from_legacy(before_draft)
     new = (
         old
         if event.get("bookkeeping_policy") == policy
@@ -76,7 +85,7 @@ def preview(
             ValidationContext.model_validate(cell["context"]),
             campaign.contract.target_definitions(cell),
             old["public_brief"],
-            ledger.Draft.model_validate(event["before"]),
+            before_draft,
             PublicGraphContract.model_validate(cell["public_graph_contract"]),
             last or old.get("last_edit_result"),
             old.get("feedback", {}).get("continuation"),
@@ -93,13 +102,14 @@ def preview(
             edit_feedback.POLICY,
             ownership_feedback.POLICY,
             protocol_feedback.POLICY,
+            realization_prompts.POLICY,
         }
         and event["stage"] == "repair"
         and event.get("bookkeeping_policy") != policy
     ):
         if budget_context is None:
             raise ValueError("historical repair preview requires budget accounting")
-        if policy == protocol_feedback.POLICY:
+        if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}:
             budget_context = {
                 **budget_context,
                 "maximum_calls": protocol_feedback.REPAIR_REQUESTS,
@@ -121,6 +131,13 @@ def preview(
         {"role": "system", "content": presentation.SYSTEM},
         {"role": "user", "content": json.dumps(new, sort_keys=True)},
     ]
+    if policy == realization_prompts.POLICY:
+        schema = realization_prompts.response_model(event["stage"])
+        proposed["response_format"]["json_schema"] = {
+            "name": schema.__name__,
+            "strict": True,
+            "schema": strict_provider_schema(schema.model_json_schema()),
+        }
     return {
         "task": task["task_id"],
         "event": event["index"],
@@ -181,9 +198,13 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
                 "status": "accepted" if event["accepted"] else "rejected",
                 "transaction_applied": event["accepted"],
                 "error": event["error"],
-                "edit_effects": handoff.edit_effects(
-                    ledger.Draft.model_validate(event["before"]),
-                    ledger.Draft.model_validate(event["after"]),
+                "edit_effects": (
+                    realizations.edit_effects
+                    if "mechanism_realizations" in event["before"]
+                    else handoff.edit_effects
+                )(
+                    realizations.load_draft(event["before"]),
+                    realizations.load_draft(event["after"]),
                 )
                 if event["accepted"]
                 else None,
@@ -216,18 +237,20 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
         "user_byte_reduction_fraction": 1 - after / before if before else None,
         "saved_system_and_user_bytes": message_bytes["before"],
         "revised_system_and_user_bytes": message_bytes["after"],
-        "size_unit": "UTF-8 bytes, not model tokens; output schema unchanged",
+        "size_unit": "UTF-8 bytes, not model tokens; new realization schema"
+        if policy == realization_prompts.POLICY
+        else "UTF-8 bytes, not model tokens; output schema unchanged",
         "scope": "Counterfactual requests on each actual saved predecessor. "
         "Historical replies are not replies to these prompts. "
         "No new construction chain or scientific improvement is inferred.",
         "new_schedule": {
             "additional_variable_recovery_calls": focused.LOCAL_RECOVERY_REQUESTS,
             "maximum_global_repair_calls": protocol_feedback.REPAIR_REQUESTS
-            if policy == protocol_feedback.POLICY
+            if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
             else focused.REPAIR_REQUESTS,
             "stop_after_identical_no_progress_repairs": (
                 protocol_feedback.REPEATED_REPAIRS
-                if policy == protocol_feedback.POLICY
+                if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
                 else 2
             ),
             **(
@@ -238,7 +261,7 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
                     "repetition": "same semantic draft and rejected alternative; "
                     "descriptions do not reset",
                 }
-                if policy == protocol_feedback.POLICY
+                if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
                 else {}
             ),
             "note": "Successful variable recovery resumes shared/topology stages; "
@@ -284,6 +307,7 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
         edit_feedback.POLICY,
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
+        realization_prompts.POLICY,
     }
     body = (
         '<p><a href="PROMPTS.html">All stages and requests</a></p>'
@@ -318,7 +342,7 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
         + (
             (
                 "<h3>Memory-state assignments</h3>"
-                if policy == protocol_feedback.POLICY
+                if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
                 else "<h3>Memory-assignment choices</h3>"
             )
             + _block(
@@ -361,6 +385,12 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
 
 def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
     """Write a fresh escaped HTML review; never overwrite a saved campaign."""
+    if policy == realization_prompts.POLICY:
+        from autoformalism.research.mechanism_realization_review import (
+            render as render_realizations,
+        )
+
+        return render_realizations(source, output)
     source, output = source.resolve(), output.resolve()
     if output == source or source in output.parents:
         raise ValueError("review must be outside the historical campaign")
@@ -368,7 +398,9 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
     presentation = (
-        protocol_feedback
+        realization_prompts
+        if policy == realization_prompts.POLICY
+        else protocol_feedback
         if policy == protocol_feedback.POLICY
         else ownership_feedback
         if policy == ownership_feedback.POLICY
@@ -396,6 +428,7 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
             edit_feedback.POLICY,
             ownership_feedback.POLICY,
             protocol_feedback.POLICY,
+            realization_prompts.POLICY,
         }:
             for key, title in (
                 ("memory_assignment_decisions", "Optional memory-assignment decision"),
@@ -424,6 +457,7 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
                 edit_feedback.POLICY,
                 ownership_feedback.POLICY,
                 protocol_feedback.POLICY,
+                realization_prompts.POLICY,
             }
             else ()
         )

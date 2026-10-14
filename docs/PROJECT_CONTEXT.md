@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+`minimal-mechanism-realizations-1` records proposer-selected components for every
+public mechanism, including algebraic and mixed realizations. Optional memory
+states live inside the same record. Declaration, structural and behavioral status
+remain separate; no scientific association is inferred by the runtime. Historical
+policies and public evidence are unchanged. The new prompts and five-seed study
+are ready for review, with no live confirmation launched. See
+`PHASE_C_MECHANISM_REALIZATIONS.md` for the contract, scope and preview command.
+
 `minimal-protocol-clarity-1` adds a short dictionary, conditional memory-state
 assignment guidance, reply-control namespace checks and wrong-category deletion
 feedback. Its fresh five-seed confirmation preserves initial construction

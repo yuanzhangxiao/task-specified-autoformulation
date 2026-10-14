@@ -9,13 +9,13 @@ from pathlib import Path
 from autoformalism.llm.staged_topology import visible_response
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research import construction_comparison as campaign
-from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import mechanism_realizations as realizations
 from autoformalism.search.construction_feedback import variable_completion
 
 
 def facts(brief, draft: dict) -> dict:
     """Report declaration and consumer facts, never a scientific correctness score."""
-    value = ledger.Draft.model_validate(draft)
+    value = realizations.load_draft(draft)
     required = {r.id for r in brief.requirements if r.requires_dynamic_memory}
     bound = {b.requirement_id for b in value.mechanism_bindings}
     return {
@@ -40,7 +40,11 @@ def facts(brief, draft: dict) -> dict:
             )
         ],
         "equations": draft["equations"],
-        "mechanism_bindings": draft["mechanism_bindings"],
+        **(
+            {"mechanism_realizations": draft["mechanism_realizations"]}
+            if "mechanism_realizations" in draft
+            else {"mechanism_bindings": draft["mechanism_bindings"]}
+        ),
         "feedback_bindings": draft["feedback_bindings"],
     }
 

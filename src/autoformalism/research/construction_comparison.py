@@ -38,7 +38,9 @@ from autoformalism.search import construction_ownership_feedback as ownership_fe
 from autoformalism.search import construction_prompts as prompts
 from autoformalism.search import construction_protocol as protocol_feedback
 from autoformalism.search import construction_readable as readable
+from autoformalism.search import construction_realizations as realization_prompts
 from autoformalism.search import construction_schedules as schedules
+from autoformalism.search import mechanism_realizations as realizations
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_topology import content_hash
@@ -63,6 +65,7 @@ Study = Literal[
     "edit_feedback_confirmation",
     "ownership_feedback_confirmation",
     "protocol_clarity_confirmation",
+    "mechanism_realization_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -82,6 +85,7 @@ STUDIES = (
     "edit_feedback_confirmation",
     "ownership_feedback_confirmation",
     "protocol_clarity_confirmation",
+    "mechanism_realization_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
@@ -95,6 +99,7 @@ CHECKLIST_STUDIES = {
     "edit_feedback_confirmation": edit_feedback.POLICY,
     "ownership_feedback_confirmation": ownership_feedback.POLICY,
     "protocol_clarity_confirmation": protocol_feedback.POLICY,
+    "mechanism_realization_confirmation": realization_prompts.POLICY,
 }
 SHARED_STAGE_STUDIES = (
     "stage_check_confirmation",
@@ -107,6 +112,7 @@ SHARED_STAGE_STUDIES = (
     "edit_feedback_confirmation",
     "ownership_feedback_confirmation",
     "protocol_clarity_confirmation",
+    "mechanism_realization_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -120,6 +126,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
+            "mechanism_realization_confirmation",
         }:
             return (0, 1, 2, 3, 4)
         return (0, 1) if study == "comparison" else (0,)
@@ -132,6 +139,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
         "edit_feedback_confirmation",
         "ownership_feedback_confirmation",
         "protocol_clarity_confirmation",
+        "mechanism_realization_confirmation",
     }:
         raise ValueError("explicit seeds require focused_prompt_confirmation")
     if (
@@ -164,7 +172,10 @@ class Config(baseline.Config):
     def positive_initial_budget(self):
         if (
             self.repair_requests > 5 or self.model_settings.maximum_requests > 128
-        ) and self.bookkeeping_policy != protocol_feedback.POLICY:
+        ) and self.bookkeeping_policy not in {
+            protocol_feedback.POLICY,
+            realization_prompts.POLICY,
+        }:
             raise ValueError("extended repair requires the protocol clarity policy")
         if (
             self.model_settings.maximum_requests <= self.repair_requests
@@ -216,6 +227,7 @@ def freeze(
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
+            "mechanism_realization_confirmation",
         }
         and seeds is None
     ):
@@ -232,6 +244,7 @@ def freeze(
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
+            "mechanism_realization_confirmation",
         }
         or set(serving_environment) != {"platform", "serving_image_sha256"}
         or serving_environment["platform"] != "jetstream2-h100x1-docker"
@@ -285,6 +298,7 @@ def freeze(
                     "edit_feedback_confirmation",
                     "ownership_feedback_confirmation",
                     "protocol_clarity_confirmation",
+                    "mechanism_realization_confirmation",
                 }
                 else {}
             ),
@@ -304,7 +318,11 @@ def freeze(
                         + 131072,
                     },
                 }
-                if study == "protocol_clarity_confirmation"
+                if study
+                in {
+                    "protocol_clarity_confirmation",
+                    "mechanism_realization_confirmation",
+                }
                 else {}
             ),
             **({"wall_seconds": 10800} if study != "comparison" else {}),
@@ -376,6 +394,8 @@ def freeze(
                             if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
+                            else "mechanism_realizations"
+                            if study == "mechanism_realization_confirmation"
                             else "protocol_clarity"
                             if study == "protocol_clarity_confirmation"
                             else "ownership_feedback"
@@ -401,6 +421,7 @@ def freeze(
                                 "edit_feedback_confirmation",
                                 "ownership_feedback_confirmation",
                                 "protocol_clarity_confirmation",
+                                "mechanism_realization_confirmation",
                             }
                             else "clarity"
                         ),
@@ -506,6 +527,7 @@ def freeze(
                     "edit_feedback_confirmation",
                     "ownership_feedback_confirmation",
                     "protocol_clarity_confirmation",
+                    "mechanism_realization_confirmation",
                 }
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
@@ -684,12 +706,21 @@ def checked_records(
     """Do not accept a resumed result without its exact cached call evidence."""
     records = _cache_records(directory / "calls", identity)
     by_hash = {r["request_hash"]: r for r in records}
+    before_path = directory / "construction/before_repair.json"
+    before = sealed_read(before_path) if before_path.exists() else None
+    empty = ledger.Draft().model_dump(mode="json")
+    if (
+        starting_draft is None
+        and before is not None
+        and before["event_count"] == 0
+        and "mechanism_realizations" in before["draft"]
+    ):
+        # A first-call preflight stop has no event carrying the policy. Read only
+        # the explicit schema, then still require its exact empty transaction prefix.
+        realizations.load_draft(before["draft"])
+        empty = realizations.Draft().model_dump(mode="json")
     drafts, used = (
-        [
-            starting_draft
-            if starting_draft is not None
-            else ledger.Draft().model_dump(mode="json")
-        ],
+        [starting_draft if starting_draft is not None else empty],
         [],
     )
     for index, path in enumerate(
@@ -699,11 +730,19 @@ def checked_records(
         record = by_hash.get(event["request_hash"])
         if record is None or content_hash(record) != event["record_sha256"]:
             raise ValueError("missing or changed construction call records")
+        if (
+            index == 0
+            and starting_draft is None
+            and event.get("bookkeeping_policy") == realization_prompts.POLICY
+        ):
+            drafts[0] = realizations.Draft().model_dump(mode="json")
         displayed = json.loads(record["request"]["body"]["messages"][1]["content"])
         displayed_matches = (
             displayed.get("model_view")
             == (
-                protocol_feedback
+                realization_prompts
+                if event.get("bookkeeping_policy") == realization_prompts.POLICY
+                else protocol_feedback
                 if event.get("bookkeeping_policy") == protocol_feedback.POLICY
                 else ownership_feedback
                 if event.get("bookkeeping_policy") == ownership_feedback.POLICY
@@ -715,7 +754,7 @@ def checked_records(
                 if event.get("bookkeeping_policy")
                 in {readable.POLICY, completion_feedback.POLICY, coverage.POLICY}
                 else focused
-            ).model_view(ledger.Draft.model_validate(event["before"]))
+            ).model_view(realizations.load_draft(event["before"]))
             if event.get("bookkeeping_policy")
             in {
                 focused.POLICY,
@@ -726,6 +765,7 @@ def checked_records(
                 edit_feedback.POLICY,
                 ownership_feedback.POLICY,
                 protocol_feedback.POLICY,
+                realization_prompts.POLICY,
             }
             else displayed.get("current_draft", {}).get("declarations")
             == event["before"]
@@ -733,17 +773,15 @@ def checked_records(
         if (
             path.name != f"{index:03d}.json"
             or event["index"] != index
-            or ledger.Draft.model_validate(event["before"])
-            != ledger.Draft.model_validate(drafts[-1])
+            or realizations.load_draft(event["before"])
+            != realizations.load_draft(drafts[-1])
             or not displayed_matches
             or event["request_hash"] in used
         ):
             raise ValueError("construction transaction chain differs")
         drafts.append(event["after"])
         used.append(event["request_hash"])
-    before_path = directory / "construction/before_repair.json"
-    if before_path.exists():
-        before = sealed_read(before_path)
+    if before is not None:
         index = before["event_count"]
         if (
             index >= len(drafts)
@@ -1078,6 +1116,7 @@ def report(root: Path, plan: dict) -> dict:
                     edit_feedback.POLICY,
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
+                    realization_prompts.POLICY,
                 }
                 else {}
             ),
@@ -1240,6 +1279,7 @@ def report(root: Path, plan: dict) -> dict:
                 edit_feedback.POLICY,
                 ownership_feedback.POLICY,
                 protocol_feedback.POLICY,
+                realization_prompts.POLICY,
             }
             else {}
         ),
@@ -1284,6 +1324,7 @@ def report(root: Path, plan: dict) -> dict:
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
+            "mechanism_realization_confirmation",
         }
         else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
         "deferred to interaction and visible requirement status. Existing structural "

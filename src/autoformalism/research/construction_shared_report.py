@@ -5,8 +5,8 @@ from pathlib import Path
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.research.construction_contract import visible_brief
-from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_stage_checks as checks
+from autoformalism.search import mechanism_realizations as realizations
 
 
 def report(root: Path, plan: dict) -> dict:
@@ -25,7 +25,7 @@ def report(root: Path, plan: dict) -> dict:
 
         def snapshot(draft: dict | None, public=brief) -> dict | None:
             return (
-                checks.shared_checklist(public, ledger.Draft.model_validate(draft))
+                checks.shared_checklist(public, realizations.load_draft(draft))
                 if draft is not None
                 else None
             )

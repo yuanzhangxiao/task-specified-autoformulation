@@ -121,7 +121,10 @@ def validate_settings(config: dict) -> None:
         "maximum_total_tokens": 524288,
         "attempts_per_step": 3,
     }
-    if config.get("bookkeeping_policy") == "minimal-protocol-clarity-1":
+    if config.get("bookkeeping_policy") in {
+        "minimal-protocol-clarity-1",
+        "minimal-mechanism-realizations-1",
+    }:
         expected.update(maximum_requests=133, maximum_total_tokens=655360)
         if config.get("repair_requests") != 10 or config.get("repair_tokens") != 262144:
             raise ValueError("protocol clarity repair allowance differs")
@@ -150,6 +153,7 @@ def prepare(
         "edit_feedback_confirmation",
         "ownership_feedback_confirmation",
         "protocol_clarity_confirmation",
+        "mechanism_realization_confirmation",
     }:
         raise ValueError("unsupported Jetstream construction study")
     selected = list(campaign.sampling_seeds(study, seeds))
@@ -205,6 +209,7 @@ def verify(root: Path) -> dict:
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
+            "mechanism_realization_confirmation",
         }
         or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
@@ -289,6 +294,7 @@ def main() -> None:
             "edit_feedback_confirmation",
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
+            "mechanism_realization_confirmation",
         ),
         default="focused_prompt_confirmation",
     )

@@ -68,6 +68,7 @@ def submit(
         "edit_feedback_confirmation",
         "ownership_feedback_confirmation",
         "protocol_clarity_confirmation",
+        "mechanism_realization_confirmation",
     }
     if live_confirmation:
         construction_comparison.check_storage(root)

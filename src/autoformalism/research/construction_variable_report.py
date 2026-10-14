@@ -6,7 +6,7 @@ from pathlib import Path
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.search import construction_checklist as checklist
-from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import mechanism_realizations as realizations
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 
 
@@ -32,8 +32,12 @@ def report(root: Path, plan: dict) -> dict:
         graph = PublicGraphContract.model_validate(cell["public_graph_contract"])
         definitions = target_definitions(cell)
         final_checks = (
-            checklist.variable_checklist(
-                brief, ledger.Draft.model_validate(final["draft"]), definitions, graph
+            (
+                realizations
+                if "mechanism_realizations" in final["draft"]
+                else checklist
+            ).variable_checklist(
+                brief, realizations.load_draft(final["draft"]), definitions, graph
             )
             if final
             else None
@@ -91,7 +95,10 @@ def report(root: Path, plan: dict) -> dict:
             ),
         }
     value = {
-        "policy": checklist.POLICY,
+        "policy": plan["config"].get("bookkeeping_policy", checklist.POLICY)
+        if plan["config"].get("bookkeeping_policy")
+        == "minimal-mechanism-realizations-1"
+        else checklist.POLICY,
         "plan_sha256": plan["artifact_sha256"],
         "planned_tasks": len(rows),
         "checkpoints": checkpoints,
