@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`minimal-edit-feedback-2` qualifies inherited process-definition advice against
+the retained variable type. A rejected instantaneous process declaration cannot
+replace a differential state's ODE or create a process key for deletion. Explicit
+scientific representation changes remain proposer transactions. This changes
+presentation only, preserving historical prompt policies and acceptance rules.
+`PHASE_C_OWNERSHIP_FEEDBACK.md` separately proposes training-only factual highlights
+and conditional candidate-sufficiency diagnostics; those features are not wired
+into live construction or used as acceptance gates.
+
 The opt-in `minimal-edit-feedback-1` presentation distinguishes ordinary equation
 entries, process-owned definitions, supplied-only inputs, and observations that
 may explicitly be modeled. Rejected-only additions are never treated as retained

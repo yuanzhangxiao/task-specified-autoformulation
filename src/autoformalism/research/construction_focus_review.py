@@ -21,6 +21,7 @@ from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import construction_ownership_feedback as ownership_feedback
 from autoformalism.search import construction_readable as readable
 from autoformalism.search.public_graph_obligations import PublicGraphContract
 
@@ -42,10 +43,13 @@ def preview(
         coverage.POLICY,
         decisions.POLICY,
         edit_feedback.POLICY,
+        ownership_feedback.POLICY,
     }:
         raise ValueError("unsupported preview policy")
     presentation = (
-        edit_feedback
+        ownership_feedback
+        if policy == ownership_feedback.POLICY
+        else edit_feedback
         if policy == edit_feedback.POLICY
         else decisions
         if policy == decisions.POLICY
@@ -83,6 +87,7 @@ def preview(
             coverage.POLICY,
             decisions.POLICY,
             edit_feedback.POLICY,
+            ownership_feedback.POLICY,
         }
         and event["stage"] == "repair"
         and event.get("bookkeeping_policy") != policy
@@ -233,7 +238,11 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
     p = json.loads(row["after"]["messages"][1]["content"])
     view = p["model_view"]
     lines = [r["topology"] for r in view["processes"] + view["balances"]]
-    decision_view = policy in {decisions.POLICY, edit_feedback.POLICY}
+    decision_view = policy in {
+        decisions.POLICY,
+        edit_feedback.POLICY,
+        ownership_feedback.POLICY,
+    }
     body = (
         '<p><a href="PROMPTS.html">All stages and requests</a></p>'
         '<p><span class="badge">REVISED PREVIEW</span> Actual saved predecessor; '
@@ -303,7 +312,9 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
     presentation = (
-        edit_feedback
+        ownership_feedback
+        if policy == ownership_feedback.POLICY
+        else edit_feedback
         if policy == edit_feedback.POLICY
         else decisions
         if policy == decisions.POLICY
@@ -322,7 +333,11 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         (output / name).write_text(_request_page(row, policy), encoding="utf-8")
         p = json.loads(row["after"]["messages"][1]["content"])
         issues = p["feedback"]["issues"]
-        if policy in {decisions.POLICY, edit_feedback.POLICY}:
+        if policy in {
+            decisions.POLICY,
+            edit_feedback.POLICY,
+            ownership_feedback.POLICY,
+        }:
             for key, title in (
                 ("memory_assignment_decisions", "Optional memory-assignment decision"),
                 ("scientific_review", "Scientific review questions (non-gating)"),
@@ -345,10 +360,16 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
                 ),
                 ("duplicate_receiver", "One signed use per process receiver"),
             )
-            if policy == edit_feedback.POLICY
+            if policy in {edit_feedback.POLICY, ownership_feedback.POLICY}
+            else ()
+        )
+        ownership_examples = (
+            (("state_process_ownership", "Preserve state and process ownership"),)
+            if policy == ownership_feedback.POLICY
             else ()
         )
         for code, title in (
+            *ownership_examples,
             *edit_examples,
             ("confirm_memory_assignment", "Explicit memory-assignment confirmation"),
             ("duplicate_equation_entries", "One topology entry per quantity"),
@@ -384,7 +405,15 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         )
     body = (
         (
-            '<section class="new"><h2>Structural edit feedback</h2><p>'
+            '<section class="new"><h2>State/process ownership correction</h2><p>'
+            "Review corrected ownership guidance against each actual saved "
+            "predecessor and its previous edit receipt, including rejected edits. "
+            "The feedback coordinates state and process naming choices without "
+            "choosing the scientific representation. Stage instructions, model "
+            "view, public evidence, schemas, checks and budgets retain the "
+            "previous edit-feedback policy.</p></section>"
+            if policy == ownership_feedback.POLICY
+            else '<section class="new"><h2>Structural edit feedback</h2><p>'
             "Review concrete edit guidance against each actual saved predecessor "
             "and its previous edit receipt. Invalid replies remain rejected, and "
             "the runtime does not infer or apply scientific corrections. The "
@@ -421,7 +450,16 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         + html.escape(policy)
         + ".</li>"
         + (
-            "<li>Group undeclared equation names with their supplied roles and "
+            "<li>Replace contradictory state/process correction advice with "
+            "one coordinated ownership decision for each affected name.</li>"
+            "<li>Qualify replacement/removal guidance using the actual retained "
+            "declarations and previous rejected transaction.</li>"
+            "<li>Retain complete compiler evidence, memory-assignment decisions "
+            "and non-gating scientific questions.</li>"
+            "<li>Stages, public evidence, schema, checks and budgets "
+            "are unchanged.</li>"
+            if policy == ownership_feedback.POLICY
+            else "<li>Group undeclared equation names with their supplied roles and "
             "explicit editing choices.</li>"
             "<li>Use the previous rejected transaction to name process-owned "
             "definitions and replacement/removal conflicts.</li>"
@@ -459,7 +497,8 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
             '<section class="new"><h2>Memory-assignment rule (every call)</h2>'
             + _block(decisions.MEMORY_RULES)
             + "</section>"
-            if policy in {decisions.POLICY, edit_feedback.POLICY}
+            if policy
+            in {decisions.POLICY, edit_feedback.POLICY, ownership_feedback.POLICY}
             else ""
         )
         + "<h2>Stage instructions</h2>"
@@ -490,7 +529,9 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         + _block(summary)
     )
     title = (
-        "Structural edit feedback prompts"
+        "State/process ownership correction prompts"
+        if policy == ownership_feedback.POLICY
+        else "Structural edit feedback prompts"
         if policy == edit_feedback.POLICY
         else "Memory assignments and mechanism coverage prompts"
         if policy == decisions.POLICY

@@ -192,6 +192,7 @@ def test_launcher_does_not_install_or_launch_gpu_server():
         ("public_coverage_confirmation", "minimal-public-coverage-1"),
         ("coverage_decision_confirmation", "minimal-public-coverage-2"),
         ("edit_feedback_confirmation", "minimal-edit-feedback-1"),
+        ("ownership_feedback_confirmation", "minimal-edit-feedback-2"),
     ],
 )
 def test_readable_five_seed_roster_is_frozen_and_old_plan_cannot_be_repurposed(
@@ -215,6 +216,7 @@ def test_readable_five_seed_roster_is_frozen_and_old_plan_cannot_be_repurposed(
     [
         ("coverage_decision_confirmation", "_minimal_decisions"),
         ("edit_feedback_confirmation", "_minimal_edit_feedback"),
+        ("ownership_feedback_confirmation", "_minimal_ownership_feedback"),
     ],
 )
 def test_decision_study_defaults_to_fresh_five_seed_roster_with_fixed_budgets(

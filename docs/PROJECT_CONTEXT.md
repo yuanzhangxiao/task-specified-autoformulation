@@ -1,12 +1,21 @@
 # Autoformalism Phase 1 Implementation Context
 
+`minimal-edit-feedback-2` corrects contradictory state/process collision advice
+using retained ownership and identifies rejected-only process removals. The v1
+live run completed 39/40 structural topologies, with scientific gaps remaining.
+Scientific checks, public evidence and budgets are unchanged. Concise initial
+training highlights and candidate-specific dependence diagnostics are proposed
+separately, not implemented as new gates. See `PHASE_C_OWNERSHIP_FEEDBACK.md` for
+the marked prompt review, evidence and optional fresh confirmation.
+
 `minimal-edit-feedback-1` adds conditional guidance for all undeclared equation
 LHSs, duplicate process receivers, and rejected process deletion/replacement
 edits. It preserves the decisions policy's scientific checks, stage instructions
-and budgets. Decisions-v2 completed 37/40 structural topologies; the new feedback
-has only been tested offline. The updated marked prompt review and a separate
-public-requirement gap inventory are in `PHASE_C_EDIT_FEEDBACK.md`. No new live
-experiment or stronger scientific acceptance gate is launched in this milestone.
+and budgets. Decisions-v2 completed 37/40 structural topologies; the subsequent
+edit-feedback confirmation completed 39/40, with scientific gaps remaining.
+The original prompt review and public-requirement gap inventory are recorded in
+`PHASE_C_EDIT_FEEDBACK.md`; the follow-up is in `PHASE_C_OWNERSHIP_FEEDBACK.md`.
+Neither completion count establishes scientific accuracy or a causal prompt effect.
 
 The opt-in `minimal-public-coverage-2` revision is ready for prompt review. It
 separates memory-state assignments from mechanism coverage, offers conditional

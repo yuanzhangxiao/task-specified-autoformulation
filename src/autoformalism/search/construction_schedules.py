@@ -24,6 +24,7 @@ from autoformalism.search import construction_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ledger as ledger
+from autoformalism.search import construction_ownership_feedback as ownership_feedback
 from autoformalism.search import construction_readable as readable
 from autoformalism.search import construction_repair_fidelity as fidelity
 from autoformalism.search import construction_stage_checks as stage_checks
@@ -454,6 +455,7 @@ def run(
         coverage.POLICY,
         decisions.POLICY,
         edit_feedback.POLICY,
+        ownership_feedback.POLICY,
     }
     if repair_requests is None:
         repair_requests = focused.REPAIR_REQUESTS if focused_view else 3
@@ -466,6 +468,7 @@ def run(
         coverage.POLICY,
         decisions.POLICY,
         edit_feedback.POLICY,
+        ownership_feedback.POLICY,
     }
     budget_stop = None
     from autoformalism.search import construction_prompts as prompts
@@ -484,6 +487,7 @@ def run(
         coverage.POLICY,
         decisions.POLICY,
         edit_feedback.POLICY,
+        ownership_feedback.POLICY,
     }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
@@ -497,6 +501,7 @@ def run(
         coverage.POLICY,
         decisions.POLICY,
         edit_feedback.POLICY,
+        ownership_feedback.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -510,6 +515,7 @@ def run(
         coverage.POLICY,
         decisions.POLICY,
         edit_feedback.POLICY,
+        ownership_feedback.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -524,6 +530,7 @@ def run(
         coverage.POLICY,
         decisions.POLICY,
         edit_feedback.POLICY,
+        ownership_feedback.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -669,7 +676,9 @@ def run(
             payload = compact.compact_payload(payload)
         if focused_view:
             presentation = (
-                edit_feedback
+                ownership_feedback
+                if bookkeeping_policy == ownership_feedback.POLICY
+                else edit_feedback
                 if bookkeeping_policy == edit_feedback.POLICY
                 else decisions
                 if bookkeeping_policy == decisions.POLICY
@@ -702,6 +711,7 @@ def run(
                     coverage.POLICY,
                     decisions.POLICY,
                     edit_feedback.POLICY,
+                    ownership_feedback.POLICY,
                 }
                 and stage == "repair"
             ):
@@ -1105,6 +1115,7 @@ def run(
                     coverage.POLICY,
                     decisions.POLICY,
                     edit_feedback.POLICY,
+                    ownership_feedback.POLICY,
                 }
                 else {}
             ),

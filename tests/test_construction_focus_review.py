@@ -12,6 +12,7 @@ from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_focus as focus
+from autoformalism.search import construction_ownership_feedback as ownership_feedback
 from autoformalism.search import construction_readable as readable
 from tests.test_construction_comparison import source_fixture
 from tests.test_construction_ledger import equation, variable
@@ -28,6 +29,7 @@ from tests.test_phase_c_construction_baseline import tokenize
         ("public_coverage_confirmation", coverage.POLICY),
         ("coverage_decision_confirmation", decisions.POLICY),
         ("edit_feedback_confirmation", edit_feedback.POLICY),
+        ("ownership_feedback_confirmation", ownership_feedback.POLICY),
     ],
 )
 def test_focused_study_live_projection_reports_and_offline_review(
@@ -116,6 +118,13 @@ def test_focused_study_live_projection_reports_and_offline_review(
         overview = (output / "PROMPTS.html").read_text()
         assert "Structural edit feedback" in overview
         assert "Memory-assignment rule (every call)" in overview
+    if policy == ownership_feedback.POLICY:
+        overview = (output / "PROMPTS.html").read_text()
+        first = (output / "request-000.html").read_text()
+        assert "State/process ownership correction" in overview
+        assert "Memory-assignment rule (every call)" in overview
+        assert "Actual saved predecessor" in first
+        assert "Marked changes: red removed, green added" in first
     with pytest.raises(ValueError, match="must be empty"):
         review.render(root, output)
     with pytest.raises(ValueError, match="outside"):
@@ -129,12 +138,20 @@ def test_review_escapes_untrusted_prose():
     assert "<script>" not in review._page(hostile, rendered)
 
 
-def test_edit_preview_reconstructs_actual_rejected_decisions_receipt(tmp_path):
+@pytest.mark.parametrize(
+    "source_study,presentation,attempted_name",
+    [
+        ("coverage_decision_confirmation", edit_feedback, "p"),
+        ("coverage_decision_confirmation", ownership_feedback, "p"),
+        ("edit_feedback_confirmation", ownership_feedback, "m"),
+    ],
+)
+def test_edit_preview_reconstructs_actual_rejected_predecessor_receipt(
+    tmp_path, source_study, presentation, attempted_name
+):
     source_fixture(tmp_path)
     source = tmp_path / "historical"
-    plan = campaign.freeze(
-        tmp_path / "new", source, study="coverage_decision_confirmation", seeds=[0]
-    )
+    plan = campaign.freeze(tmp_path / "new", source, study=source_study, seeds=[0])
     task = plan["tasks"][0]
     calls = []
 
@@ -170,7 +187,18 @@ def test_edit_preview_reconstructs_actual_rejected_decisions_receipt(tmp_path):
                 }
             ]
         elif len(calls) == 3:
-            edit["remove_equations"] = ["p"]
+            if attempted_name == "p":
+                edit["remove_equations"] = ["p"]
+            else:
+                edit["processes"] = [
+                    {
+                        "name": "m",
+                        "depends_on": ["m"],
+                        "scientific_meaning": "A conflicting name for the effect",
+                        "kind": "influence",
+                        "uses": [{"target": targets[0], "sign": "positive"}],
+                    }
+                ]
         else:
             edit["equations"] = [equation(n, "m", n) for n in targets] + [
                 equation("m", driver, "m")
@@ -188,16 +216,30 @@ def test_edit_preview_reconstructs_actual_rejected_decisions_receipt(tmp_path):
     assert rejected["before"] == rejected["after"] == successor["before"]
     original_files = {p: p.read_bytes() for p in source.rglob("*") if p.is_file()}
     count = len(calls)
-    summary, rows = review.inspect(source, edit_feedback.POLICY)
+    summary, rows = review.inspect(source, presentation.POLICY)
     assert summary["llm_calls"] == 0 and len(calls) == count
     revised = json.loads(rows[3]["after"]["messages"][1]["content"])
-    issue = next(
-        i
-        for i in revised["feedback"]["issues"]
-        if i["code"] == "process_edit_destination"
-    )
-    assert issue["name"] == "p" and issue["attempted_field"] == "remove_equations"
-    assert revised["model_view"] == edit_feedback.model_view(
+    if attempted_name == "p":
+        issue = next(
+            i
+            for i in revised["feedback"]["issues"]
+            if i["code"] == "process_edit_destination"
+        )
+        assert issue["name"] == "p" and issue["attempted_field"] == "remove_equations"
+    else:
+        issue = next(
+            i
+            for i in revised["feedback"]["issues"]
+            if i["code"] == "state_process_ownership"
+        )
+        assert issue["name"] == "m"
+        assert issue["retained_owner"] == "differential_state"
+        assert issue["attempted_process_addition"]
+        assert not issue["process_retained"]
+        # The retained state and rejected same-name process are different objects.
+        assert not any(p["name"] == "m" for p in successor["before"]["processes"])
+        assert any(v["name"] == "m" for v in successor["before"]["variables"])
+    assert revised["model_view"] == presentation.model_view(
         campaign.ledger.Draft.model_validate(successor["before"])
     )
     assert rows[3]["after"]["response_format"] == rows[3]["before"]["response_format"]
