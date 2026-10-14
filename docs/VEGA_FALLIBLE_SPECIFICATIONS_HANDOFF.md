@@ -1,7 +1,7 @@
 # Vega handoff: fallible scientific specifications and imperfect data
 
-Prepared 6 October 2026; updated 13 October 2026 with M32 evidence and the
-user-approved broader scope of noisy and erroneous data.
+Prepared 6 October 2026; updated 13 October 2026 with M32 evidence, the submitted
+M33 qualification, and three preparation designs for noisy and erroneous data.
 Repository: `task-specified-autoformulation`. The existing filename and work
 directory are retained so earlier handoffs remain discoverable.
 
@@ -95,12 +95,14 @@ These are limits of the assessment, not proofs of unidentifiability. The archive
 constructed models are unchanged. See the
 [M32 review](PHASE_C_FITTING_M32_RESULTS_2026-10-13.md).
 
-Portable inspection currently needs a fix for exact comparison of recomputed
-SVD summaries across numerical environments. Preserve sealed Jacobians and the
-actual perturbation plan; distinguish numerical/subspace equivalence from exact
-artifact identity. Neither local rank nor the now stronger fitting backend
-establishes correctness under an uncertain observation model. Noise-aware
-calibration, robust fitting and data-fault attribution remain unqualified.
+[M33](PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md) implements portable verification
+of SVD-derived evidence and a separately budgeted CSTR diagnostic supplement.
+It preserves sealed Jacobians and actual perturbation plans, distinguishing
+numerical/subspace equivalence from exact artifact identity. The user has
+submitted its qualification; remote results remain pending. Neither local rank
+nor the stronger fitting backend establishes correctness under an uncertain
+observation model. Noise-aware calibration, robust fitting and data-fault
+attribution remain unqualified.
 
 Earlier input-pulse and trajectory defects also show why an apparent scientific
 contradiction may originate in data generation or an execution interface.
@@ -305,11 +307,35 @@ function-stage candidates exist. The broader research scope changes the evidence
 we should preserve; it does not redirect Phase C into an unrestricted noisy-data
 discovery project. Vega's first milestone remains a read-only design assignment.
 
-**Immediate fitting work:** finish portable numerical-evidence verification and
-the separately budgeted CSTR supplement recommended in the
-[M32 review](PHASE_C_FITTING_M32_RESULTS_2026-10-13.md). Preserve completed
-evaluations, failed attempts and exact retained models. Then qualify fresh
-construction requests when executable functions and observation maps exist.
+**Immediate fitting work:** review the submitted
+[M33 qualification](PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md) when results arrive.
+Preserve completed evaluations, failed attempts and exact retained models.
+Qualify fresh construction requests when executable functions and observation
+maps exist.
+
+**The three preparation designs are now recorded:**
+
+| Design | Concrete deliverable and boundary |
+| --- | --- |
+| [Measurement evidence contract](PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md) | Typed raw-data, units, input, initial-observation and uncertainty provenance; trace each residual to its reading; preserve historical request identities. |
+| [Noise-aware fitting](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md) | Fixed known-sigma Gaussian objective, eligible uncertain initials, weighted affine profiling, then separately qualified robust/nuisance extensions. Numerical scales are not measurement uncertainty. |
+| [Controlled diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md) | A finite basin catalog with two claim packets and four observation conditions; incorrect constructions, mixed causes, exact ambiguity and computational failure controls; staged budgets and locked evaluation. |
+
+These are implementation designs, not implemented fitting capabilities or new
+results. The key initial-value correction is conceptual: a noisy first target
+reading cannot also be treated as an exact initial state. Start with known
+prepared initials; qualify a shared uncertain preparation only when the public
+protocol justifies sharing. Do not introduce per-trajectory initial inference or
+use held-out observations retrospectively.
+
+The recommended next coded milestone is P1/P2 in the fitting design: opt-in
+measurement/objective records, fixed positive diagonal sigma, and consistent
+weighting in joint rollout and certified affine profiling. Keep existing clean
+interfaces unchanged. Robust fitting, drift hypotheses and the full study follow
+their own qualification gates; no new campaign is launched by these documents.
+Vega can reuse and critique these designs rather than reconstructing the fitting
+interfaces. Novelty analysis and broader scientific action selection remain part
+of Vega's research-design assignment.
 
 **Design now, add incrementally in separately reviewed milestones:** extend the
 evidence contract with the following proposed fields. These are not all
@@ -442,6 +468,10 @@ Read `AGENTS.md`, `docs/PHASE_C_START_HERE.md`, relevant parts of
 - `docs/PHASE_C_FITTING_M31_RESULTS_2026-10-13.md`
 - `docs/PHASE_C_FITTING_STAGED_FEEDBACK.md`
 - `docs/PHASE_C_FITTING_M32_RESULTS_2026-10-13.md`
+- `docs/PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md`
+- `docs/PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md`
+- `docs/PHASE_C_NOISE_AWARE_FITTING_DESIGN.md`
+- `docs/PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md`
 
 Use these to identify reusable interfaces. Do not assume every historical
 discussion or diagnostic has been promoted into the production method.

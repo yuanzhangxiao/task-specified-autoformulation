@@ -16,6 +16,17 @@ All 23 M32 outcomes are audited without refitting; completed CSTR evaluations ar
 reused with their original identities and costs. The new CPU-only experiment
 adds at most 1,200 seconds of diagnostic allowance. Remote results are pending.
 
+While M33 runs, three **design-only** research preparations are recorded:
+[measurement/residual provenance](PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md),
+[noise-aware fitting](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md), and a
+[controlled specification/data diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md).
+They distinguish measurement noise from numerical tolerances, handle noisy
+initial observations explicitly, and preserve ambiguous explanations. The next
+proposed implementation is fixed-sigma fitting with existing rollout/profiling;
+robust fitting and the broader study are later gated increments. No production
+defaults or benchmark assets change. See the updated
+[Vega handoff](VEGA_FALLIBLE_SPECIFICATIONS_HANDOFF.md#phase-c-preparation-while-construction-remains-at-topology).
+
 Previous milestone: [M32 staged feedback](PHASE_C_FITTING_STAGED_FEEDBACK.md)
 adds durable independent diagnostic stages and nearby-rollout qualification of
 piecewise sensitivities. A 23-task Delta CPU study rechecks 16 frozen M31 entries
