@@ -1,7 +1,8 @@
-# Literature survey of fallible scientific specifications and GEMOT integration
+# Literature survey of fallible scientific specifications and GEMOT collaboration
 
-Prepared by Vega, 13 October 2026, Hawaii. Research assessment and proposed next
-milestone; no implementation or experimental result is claimed.
+Prepared by Vega, 13 October 2026, Hawaii; revised 14 October to reflect the
+intended collaboration with GEMOT's authors. Research assessment and proposed
+next milestone; no implementation or experimental result is claimed.
 
 ## Assessment
 
@@ -20,11 +21,17 @@ improvement in fit. This is a proposed contribution, not a confirmed novelty cla
 the surveyed work does not establish this entire capability under the handoff's
 combined evaluation conditions, but that does not prove that no prior system does.
 
-GEMOT is both a close comparator and a plausible host for this capability. The
-strongest additional comparators are Model Discovery Agent, EvoSCM, AI-Hilbert,
-POPPER, statistical model criticism, and classical diagnosis/model invalidation.
-The paper should acknowledge these together, rather than positioning itself only
-against symbolic regression with fixed assumptions.
+The intended collaboration with GEMOT's authors gives this project a concrete
+scientific setting. Their biological expertise can guide realistic scenarios,
+measurement assumptions and feasible experiments; Vega's primary responsibility
+is the diagnostic methodology and its evaluation. GEMOT provides relevant prior
+work and a potential shared modeling platform. A paired study within that platform
+would measure the value of the added methodology, not rank the two teams.
+
+The novelty assessment still requires comparison with Model Discovery Agent,
+EvoSCM, AI-Hilbert, POPPER, statistical model criticism, and classical
+diagnosis/model invalidation. Biological relevance strengthens the research
+question and evaluation; it does not by itself establish a new algorithm.
 
 ## Scope and source coverage
 
@@ -51,7 +58,7 @@ Abstract-only or limited-access sources are identified. No external implementati
 was executed, no source repository was audited, and no benchmark test data were
 opened. Absence statements concern demonstrated evidence in the inspected paper.
 
-## GEMOT and the boundary it leaves open
+## GEMOT as a foundation for joint research
 
 [de Pomereu, Snelling and Fröhlich, GEMOT](https://www.biorxiv.org/content/10.64898/2026.09.26.754619v1.full)
 is a September 28, 2026 preprint. It combines agent judgment, Antimony model
@@ -70,10 +77,10 @@ and leaves experimental design unimplemented. Code is withheld until publication
 These details are supported by Sections 2–3, Appendices A.3–A.4 and B.7, and the
 reproducibility statement.
 
-My assessment: the useful extension is **adjudicating explicitly fallible
-contracts**, with measured error rates for the resulting accusations. Simply
-adding residual checks, latent states, readout flexibility, or careful numerical
-caveats would not establish a distinct contribution.
+The proposed joint extension is **adjudicating explicitly fallible contracts**
+in biologically meaningful settings. Existing capabilities should be credited
+and reused; new work should establish when a revision or follow-up experiment
+is supported, and measure errors in those decisions.
 
 ## Closest scientific discovery systems
 
@@ -234,13 +241,69 @@ noise laws and input/timing faults need separately qualified procedures. Known-s
 Gaussian attribution is therefore an initial increment, not a solution to the
 entire eight-condition study. Its conservatism and power must also be measured.
 
-## How to combine Vega with GEMOT
+## Proposed collaboration and biological case selection
+
+The shared question is: **When a mechanistic model disagrees with biological
+measurements, what evidence warrants revising the biology, revising the measurement
+interpretation, or collecting additional evidence?** The collaboration should
+shape this question before the benchmark is frozen, so the method addresses
+decisions that matter in actual biological modeling.
+
+The following division of work is proposed for discussion; it does not record
+commitments already made by GEMOT's authors.
+
+| Work | Proposed lead and joint contribution |
+| --- | --- |
+| Scientific cases and consequences | GEMOT collaborators identify meaningful competing biological explanations, plausible acquisition limitations, and consequences of a wrong revision. Vega helps turn these into testable questions. |
+| Measurement and intervention semantics | GEMOT collaborators review assay interpretation, preparation, input records, feasible measurements and intervention costs. Both teams agree which assumptions may vary and what evidence could settle them. |
+| Diagnostic methodology | Vega develops the claim/observation representation, evidence requirements, attribution and abstention rules, uncertainty treatment and computational safeguards. Biological review checks that formal claims preserve their intended meaning. |
+| Evaluation and interpretation | Both teams choose acceptance criteria and interpret scientific outcomes. Vega implements matched baselines, reproducible evaluation and error accounting; collaborators assess biological relevance and proposed next actions. |
+
+For each candidate case, jointly prepare a short case packet containing the
+scientific question, competing mechanisms, observed and latent quantities,
+readout interpretation, uncertain inputs/initials, plausible error magnitudes,
+available follow-up actions and their costs. Include raw-data provenance and the
+independent evidence, if any, that could establish a disputed explanation.
+Preserve disagreement between experts as uncertainty where evidence cannot settle it.
+
+Possible discussion prompts include a feedback explanation versus an uncertain
+readout delay, an omitted biological process versus a measurement artifact, or a
+response change versus uncertainty in the delivered perturbation. These are
+candidate contrasts for collaborators to assess, not established properties of
+any GEMOT dataset. Select cases because both explanations and a consequential
+decision are credible, rather than because a chosen method can separate them.
+
+Use three levels of evidence:
+
+1. **Mathematical qualification.** Retain the small basin/affine controls to check
+   the procedure and its stated guarantees. They establish technical behavior.
+2. **Biologically grounded controlled cases.** With collaborator review, construct
+   synthetic or semi-synthetic variants of a selected biological model. Keep
+   disturbance labels private and preserve plausible scales and observation
+   constraints. Known injected causes support error-rate evaluation, conditional
+   on the simulator and injection design.
+3. **Empirical biological cases.** Use suitable existing data and, where feasible,
+   independently collected follow-up evidence. Assess whether conclusions and
+   proposed actions are useful. An accepted model or expert preference alone is
+   insufficient to label the true cause; unresolved cases retain that status.
+
+Begin biological case selection alongside mathematical qualification. Confirm
+scenario assumptions and splits before evaluating the method; reserve independent
+cases or interventions for final assessment. This prevents one collaboratively
+developed example from serving as both the method's design target and its sole
+validation. A prospective laboratory experiment is an optional later milestone,
+not a prerequisite or an assumed collaborator commitment.
+
+## Methodology and software integration
 
 I recommend an **attribution layer around a mechanistic proposer and numerical
 evaluator**, with a stable interface that can later accept either Autoformalism or
 GEMOT candidates. This is a proposed integration; software compatibility remains
-unverified. Begin with the existing project interfaces and a finite catalog, so
-the scientific result does not depend on obtaining external code.
+unverified. Use the existing project interfaces for the first finite-catalog
+qualification while developing biological cases with collaborators. Shared case
+design can proceed before software integration. The latter needs an agreed
+interface and access to a suitable implementation through collaboration or public
+release; public availability is not a prerequisite for the collaboration itself.
 
 | Proposed component | Responsibility and evidence boundary |
 | --- | --- |
@@ -281,10 +344,15 @@ should retain `specification_verdict=not_assessed`; the new attribution layer ow
 scoped claim conclusions. A backend-specific packet must never be promoted into
 a stronger common label merely to make adapters appear interchangeable.
 
-The first combined study would hold the candidate pool and evidence interface
-fixed while varying the attribution policy. Later experiments could vary the
-proposer to test whether benefits transfer across construction systems. Comparing
-both changes at once would confound better proposals with better diagnosis.
+The first methodology study would hold the candidate pool and evidence interface
+fixed while varying the attribution policy. A later, jointly agreed GEMOT study
+could compare its existing workflow with the same workflow plus attribution,
+using matched data and total budgets. This within-platform ablation asks whether
+the added method changes conclusions or next actions usefully. It must also
+include conventional joint diagnosis with the same hypothesis access; a larger
+catalog alone is not evidence for a better decision procedure. Later experiments
+could vary the proposer to test transfer across construction systems. Changing
+both proposal and attribution policies at once would confound their effects.
 
 ## Examples that distinguish explanation from convenient repair
 
@@ -345,10 +413,11 @@ frozen predecessor or authorization to launch it:
    structural ambiguity. Keep the one-state success claim appropriately narrow.
 
 Useful comparisons are the existing four arms plus the conventional joint
-diagnosis baseline and always-abstain/wording-only controls. An agentic
-GEMOT-like refinement or MDA/EvoSCM-style policy is a later comparator; a
-reimplementation must be labeled inspired by the paper unless it reproduces
-the authors' method faithfully. A CriticAL-style discrepancy screen separates
+diagnosis baseline and always-abstain/wording-only controls. The proposed GEMOT
+collaboration would add a within-platform ablation, with its scope agreed jointly.
+MDA/EvoSCM-style policies are later external comparators; a reimplementation must
+be labeled inspired by the paper unless it reproduces the authors' method
+faithfully. A CriticAL-style discrepancy screen separates
 detecting mismatch from localizing it. Formal model invalidation is a benchmark
 oracle or baseline only on its supported mathematical class.
 
@@ -370,7 +439,8 @@ external software availability remain future planning items.
 ## Recommendation and unresolved choices
 
 Proceed with the narrow study, with **conditional diagnostic reliability** as the
-central result. Treat a later full discovery/action system as a second stage.
+central methodological result, and develop its biological cases jointly with
+GEMOT's authors. Treat a later full discovery/action system as a second stage.
 Before claiming a methodological advance, decide whether the paper contributes
 a new attribution algorithm, a rigorous diagnostic benchmark, or both. The first
 Gaussian confidence-set construction is a strong baseline but too elementary
@@ -388,10 +458,15 @@ defect size, admissible observation alternatives, treatment of unknown noise,
 repair preference versus evidence, and sequential error accounting. Formalized
 claim meaning must be reviewed before testing; later natural-language
 misinterpretation is a separate source of failure. External integration needs
-released code, dependency/license review and semantic adapter qualification.
+an accessible implementation, agreed usage terms and semantic adapter qualification.
+Joint planning also needs a suitable biological case, documented measurement
+semantics, feasible follow-up actions and clarity about independently available
+validation evidence.
 
 No result here establishes field validity, unrestricted scientific truth,
 calibrated probabilities for LLM beliefs, or novelty against all literature.
-The concrete next research deliverable is a diagnostic decision specification
-with the elementary baseline, matched comparator contracts and acceptance gates,
-followed by the separately scoped implementation milestone.
+The next research deliverables are a diagnostic decision specification with the
+elementary baseline, matched comparator contracts and acceptance gates, and a
+proposed biological case packet developed with collaborators. The former supports
+the bounded implementation milestone; the latter determines which biological
+extension would be scientifically useful and what evidence it would require.
