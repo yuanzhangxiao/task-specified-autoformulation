@@ -9,20 +9,29 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone (October 13): [M33 diagnostic supplement](PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md)
+Current fitting milestone (October 14): [M34 fixed-noise measurement fitting](PHASE_C_FITTING_MEASUREMENT.md)
+implements an opt-in raw-reading contract, known diagonal measurement uncertainty,
+explicit prepared/shared initials and consistent weighted rollout/profiling.
+The CPU qualification has 36 attempts on six small synthetic cases. Independent
+original-equation rollouts govern retention; interrupted searches preserve their
+budget charge. Huber loss, estimated noise, calibrated confidence and fault
+attribution remain deferred. Remote results are pending; benchmark assets and
+production defaults remain unchanged.
+
+Separately submitted: [M33 diagnostic supplement](PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md)
 fixes portable verification of SVD-derived evidence, freezes executed probe plans,
 and adds a separately budgeted continuation of CSTR's unfinished diagnostics.
 All 23 M32 outcomes are audited without refitting; completed CSTR evaluations are
 reused with their original identities and costs. The new CPU-only experiment
 adds at most 1,200 seconds of diagnostic allowance. Remote results are pending.
 
-While M33 runs, three **design-only** research preparations are recorded:
+The three research preparation designs remain the broader roadmap:
 [measurement/residual provenance](PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md),
 [noise-aware fitting](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md), and a
 [controlled specification/data diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md).
 They distinguish measurement noise from numerical tolerances, handle noisy
 initial observations explicitly, and preserve ambiguous explanations. The next
-proposed implementation is fixed-sigma fitting with existing rollout/profiling;
+implementation is the limited fixed-sigma M34 qualification above;
 robust fitting and the broader study are later gated increments. No production
 defaults or benchmark assets change. See the updated
 [Vega handoff](VEGA_FALLIBLE_SPECIFICATIONS_HANDOFF.md#phase-c-preparation-while-construction-remains-at-topology).

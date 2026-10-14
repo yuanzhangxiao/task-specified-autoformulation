@@ -103,6 +103,26 @@ class Rollouts:
     def parameters(self, x: np.ndarray) -> dict:
         return dict(zip(self.names, x.tolist(), strict=True))
 
+    def residual_transform(self, row, residual, jacobian):
+        """Apply historical channel scales; observation adapters may override."""
+        scales = np.array([self.scales[c] for c in self.system.channels])
+        return (
+            (residual / scales).ravel(),
+            (jacobian / scales[None, :, None]).reshape(-1, len(self.names))
+            if jacobian is not None
+            else None,
+        )
+
+    def profile_transform(
+        self, row, design, offset, d_design, d_offset, *, observations=None
+    ):
+        """Normalize every affine basis component before bounded projection."""
+        scale = self.scales[self.system.channels[0]]
+        normalized_offset = offset / scale
+        if observations is not None:
+            normalized_offset = normalized_offset - observations / scale
+        return design / scale, normalized_offset, d_design / scale, d_offset / scale
+
     def evaluate(self, x, deadline, *, jacobian=True, method=None):
         """A failed trajectory is unavailable, never a residual penalty or zero J."""
         self.vector(self.parameters(x))
@@ -112,15 +132,15 @@ class Rollouts:
             else self.settings
         )
         residuals, jacobians = [], []
-        scales = np.array([self.scales[c] for c in self.system.channels])
         for row in self.train.trajectories:
             y, j, _, _ = symbolic_rollout(
                 self.system, row, x, settings, deadline, sensitivities=jacobian
             )
             observed = np.column_stack([row.targets[c] for c in self.system.channels])
-            residuals.append(((y - observed) / scales).ravel())
+            residual, derivative = self.residual_transform(row, y - observed, j)
+            residuals.append(residual)
             if jacobian:
-                jacobians.append((j / scales[None, :, None]).reshape(-1, len(x)))
+                jacobians.append(derivative)
         return np.concatenate(residuals), np.vstack(jacobians) if jacobian else None
 
 

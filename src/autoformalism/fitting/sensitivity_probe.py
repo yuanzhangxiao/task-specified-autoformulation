@@ -38,12 +38,21 @@ from autoformalism.rebuttal.fitter_diagnostic import _finite_payload, write_json
 
 
 @dataclass
+class ExplicitInitialization:
+    """Opt-in all-state boundaries, independent of observed first readings."""
+
+    exact_values: Mapping[str, Mapping[str, float]]
+    shared_parameters: Mapping[str, str]
+
+
+@dataclass
 class SymbolicODE:
     """Expand processes before differentiating both dynamics and observations."""
 
     model: CompiledModel
     allow_piecewise: bool = False
     solver_jacobian_format: str = "dense"
+    initialization_override: ExplicitInitialization | None = None
 
     @timed("symbolic_model_build")
     def __post_init__(self) -> None:
@@ -68,7 +77,7 @@ class SymbolicODE:
             for name, item in initials.items()
             if item.initialization_range is not None
         )
-        if fitted_initials:
+        if fitted_initials and self.initialization_override is None:
             raise SensitivityContractError(
                 "sensitivity probe does not yet optimize fitted initial states: "
                 f"{fitted_initials}"
@@ -95,7 +104,48 @@ class SymbolicODE:
         self.initial_function = self.initial_jacobian = None
         self.initial_symbols = ()
         self.initial_parameter_names = ()
-        if self.model.validated.context.fitted_initialization:
+        if self.initialization_override is not None:
+            override = self.initialization_override
+            exact, shared = set(override.exact_values), set(override.shared_parameters)
+            if exact & shared or exact | shared != set(self.model.state_names):
+                raise SensitivityContractError(
+                    "explicit boundaries must cover all states once"
+                )
+            if not set(override.shared_parameters.values()) <= set(self.names):
+                raise SensitivityContractError(
+                    "shared boundaries require global parameters"
+                )
+            if any(
+                not np.isfinite(value)
+                for values in override.exact_values.values()
+                for value in values.values()
+            ):
+                raise SensitivityContractError("explicit boundaries must be finite")
+            self._fixed_initial = None
+            self.initial_symbols = tuple(sorted(exact))
+            self.initial_parameter_names = tuple(
+                name
+                for name in self.names
+                if name in override.shared_parameters.values()
+            )
+            known = ca.SX.sym("explicit_boundary", len(self.initial_symbols))
+            initial_expr = ca.vertcat(
+                *[
+                    theta[self.names.index(override.shared_parameters[name])]
+                    if name in shared
+                    else known[self.initial_symbols.index(name)]
+                    for name in self.model.state_names
+                ]
+            )
+            self.initial_function = ca.Function(
+                "explicit_initial_state", [theta, known], [initial_expr]
+            )
+            self.initial_jacobian = ca.Function(
+                "explicit_initial_jacobian",
+                [theta, known],
+                [ca.jacobian(initial_expr, theta)],
+            )
+        elif self.model.validated.context.fitted_initialization:
             direct = self.model.direct_state_observation_channels
             expressions = {
                 name: expr
@@ -220,6 +270,9 @@ class SymbolicODE:
             ),
             "division_policy": "existing_production_guard_unchanged",
         }
+        if self.initialization_override is not None:
+            self.audit["initialization_override"] = "explicit-all-state-boundaries"
+            self.audit["initial_readings_used_as_boundaries"] = False
 
     @property
     def initial(self) -> np.ndarray:
@@ -234,6 +287,15 @@ class SymbolicODE:
         self, trajectory: Trajectory, theta: np.ndarray | None = None
     ) -> np.ndarray:
         """Resolve a physical boundary using frozen globals and initial data only."""
+        if self.initialization_override is not None:
+            if theta is None and self.initial_parameter_names:
+                raise SensitivityContractError(
+                    "shared boundaries require parameter values"
+                )
+            values = theta if theta is not None else np.zeros(len(self.names))
+            return np.asarray(
+                self.initial_function(values, self._initial_data(trajectory))
+            ).ravel()
         parameters = (
             dict(zip(self.names, theta, strict=True)) if theta is not None else {}
         )
@@ -254,18 +316,33 @@ class SymbolicODE:
         """Return the same causal boundary as an optimization expression."""
         if self.initial_function is None:
             return ca.DM(self.initial_for(trajectory))
-        known = _known_initial_values(self.model, trajectory)
-        return self.initial_function(theta, [known[n] for n in self.initial_symbols])
+        return self.initial_function(theta, self._initial_data(trajectory))
 
     def initial_sensitivity(self, trajectory: Trajectory, theta) -> np.ndarray:
         """Seed S(0)=dI/dtheta, including shared initial values and map parameters."""
         if self.initial_jacobian is None:
             return np.zeros((self.state_count, len(self.names)))
-        known = _known_initial_values(self.model, trajectory)
         return np.asarray(
-            self.initial_jacobian(theta, [known[n] for n in self.initial_symbols]),
+            self.initial_jacobian(theta, self._initial_data(trajectory)),
             dtype=float,
         )
+
+    def _initial_data(self, trajectory: Trajectory) -> list[float]:
+        """Resolve exact boundaries separately from legacy causal initial data."""
+        if self.initialization_override is not None:
+            try:
+                return [
+                    self.initialization_override.exact_values[name][
+                        trajectory.trajectory_id
+                    ]
+                    for name in self.initial_symbols
+                ]
+            except KeyError as error:
+                raise SensitivityContractError(
+                    "missing explicit trajectory boundary"
+                ) from error
+        known = _known_initial_values(self.model, trajectory)
+        return [known[n] for n in self.initial_symbols]
 
 
 class SymbolicRolloutFailure(ValueError):

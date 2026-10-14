@@ -28,13 +28,19 @@ class TerminalProfile:
     def evaluate(self, vector, deadline):
         o, k = self.oracle, self.kernel
         designs, offsets, derivatives, offset_derivatives = [], [], [], []
-        scale = o.scales[o.system.channels[0]]
         for row in o.train.trajectories:
             a, b, da, db, _ = k.trajectory(row, vector, o.settings, deadline)
-            designs.append(a / scale)
-            offsets.append((b - row.targets[o.system.channels[0]]) / scale)
-            derivatives.append(da / scale)
-            offset_derivatives.append(db / scale)
+            a, b, da, db = o.profile_transform(
+                row,
+                a,
+                b - row.targets[o.system.channels[0]],
+                da,
+                db,
+            )
+            designs.append(a)
+            offsets.append(b)
+            derivatives.append(da)
+            offset_derivatives.append(db)
         inner = project(
             np.concatenate(designs),
             np.concatenate(offsets),

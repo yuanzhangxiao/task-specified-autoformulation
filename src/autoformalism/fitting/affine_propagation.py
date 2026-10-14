@@ -19,6 +19,10 @@ class AffineRollouts(checks.Rollouts):
 
     def __init__(self, problem, policy):
         super().__init__(problem, policy)
+        self._build_affine_generator()
+
+    def _build_affine_generator(self):
+        """Certify an initialized oracle without changing its observation contract."""
         s = self.system
         n, m, p = s.state_count, len(s.inputs), len(self.names)
         t, x = ca.SX.sym("t"), ca.SX.sym("x", n)
@@ -67,7 +71,6 @@ class AffineRollouts(checks.Rollouts):
             else None
         )
         transitions, residuals, jacobians = {}, [], []
-        scales = np.array([self.scales[c] for c in s.channels])
         for row in self.train.trajectories:
             forcing = trajectory_forcing(s.model, row)
             inputs = np.array(
@@ -107,11 +110,14 @@ class AffineRollouts(checks.Rollouts):
                     _, _, hx, ht = s.local(t, state, x, inputs[i])
                     gradients.append(np.asarray(hx) @ derivative + np.asarray(ht))
             observed = np.column_stack([row.targets[c] for c in s.channels])
-            residuals.append(((np.array(outputs) - observed) / scales).ravel())
+            residual, derivative = self.residual_transform(
+                row,
+                np.array(outputs) - observed,
+                np.array(gradients) if jacobian else None,
+            )
+            residuals.append(residual)
             if jacobian:
-                jacobians.append(
-                    (np.array(gradients) / scales[None, :, None]).reshape(-1, p)
-                )
+                jacobians.append(derivative)
         r = np.concatenate(residuals)
         j = np.vstack(jacobians) if jacobian else None
         if not np.isfinite(r).all() or (j is not None and not np.isfinite(j).all()):

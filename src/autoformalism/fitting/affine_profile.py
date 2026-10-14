@@ -97,7 +97,6 @@ class AffineProfile:
         designs, offsets, derivatives, offset_derivatives = [], [], [], []
         output = self.structure.output
         channel = oracle.system.channels[0]
-        scale = oracle.scales[channel]
         for row, initializer in zip(
             oracle.train.trajectories, self.initializers, strict=True
         ):
@@ -144,11 +143,19 @@ class AffineProfile:
                     state = (matrix @ extended)[:n]
                 ys.append(state[output].copy())
                 js.append(ds[output].copy())
-            ys, js = np.asarray(ys) / scale, np.asarray(js) / scale
-            designs.append(ys[:, 1:])
-            offsets.append(ys[:, 0] - np.asarray(row.targets[channel]) / scale)
-            derivatives.append(js[:, 1:])
-            offset_derivatives.append(js[:, 0])
+            ys, js = np.asarray(ys), np.asarray(js)
+            design, offset, derivative, offset_derivative = oracle.profile_transform(
+                row,
+                ys[:, 1:],
+                ys[:, 0],
+                js[:, 1:],
+                js[:, 0],
+                observations=np.asarray(row.targets[channel]),
+            )
+            designs.append(design)
+            offsets.append(offset)
+            derivatives.append(derivative)
+            offset_derivatives.append(offset_derivative)
         time_check()
         result = project(
             np.vstack(designs),
