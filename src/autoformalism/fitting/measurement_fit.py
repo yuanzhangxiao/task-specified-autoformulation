@@ -560,7 +560,7 @@ def _loss_evidence(evidence, loss):
         "objective_definition": loss.model_dump(mode="json"),
         "objective_value": sum(row["objective_contribution"] or 0 for row in rows),
         "downweighted_readings": sum(
-            row["working_weight"] is not None and row["working_weight"] < 1
+            bool(row["working_weight"] is not None and row["working_weight"] < 1)
             for row in rows
         ),
         "downweighting_interpretation": (

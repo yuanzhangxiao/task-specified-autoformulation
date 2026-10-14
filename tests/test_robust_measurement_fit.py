@@ -67,6 +67,11 @@ def test_explicit_gaussian_preserves_m34_numerical_result(policy, tmp_path, stra
     assert "objective_definition" not in legacy["identity"]
     assert "objective_value" not in legacy
     assert explicit["identity"] != legacy["identity"]
+    # First-run CLI output must serialize identically to the sealed resume;
+    # summing NumPy boolean weights must not leak a NumPy integer into JSON.
+    assert json.loads(json.dumps(explicit, allow_nan=False)) == read_seal(
+        tmp_path / "explicit/result.json"
+    )
 
 
 def test_huber_retention_can_prefer_a_larger_gaussian_quadratic(
@@ -157,6 +162,9 @@ def test_direct_and_profiled_huber_fit_agree_without_gaussian_claims(
     loss = robust.Loss(kind="huber")
     direct = fit.run(problem, policy, tmp_path / "direct", strategy="direct", loss=loss)
     profiled = fit.run(problem, policy, tmp_path / "profiled", loss=loss)
+    assert json.loads(json.dumps(profiled, allow_nan=False)) == read_seal(
+        tmp_path / "profiled/result.json"
+    )
     assert direct["status"] == profiled["status"] == "complete"
     assert profiled["objective_value"] == pytest.approx(
         direct["objective_value"], abs=2e-6
