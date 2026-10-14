@@ -1,0 +1,1455 @@
+{
+  "$defs": {
+    "Binding": {
+      "additionalProperties": false,
+      "description": "Hashes bind all evidence to one retained vector and training problem.",
+      "properties": {
+        "problem_sha256": {
+          "title": "Problem Sha256",
+          "type": "string"
+        },
+        "request_sha256": {
+          "title": "Request Sha256",
+          "type": "string"
+        },
+        "candidate_sha256": {
+          "title": "Candidate Sha256",
+          "type": "string"
+        },
+        "training_sha256": {
+          "title": "Training Sha256",
+          "type": "string"
+        },
+        "parameters_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parameters Sha256"
+        },
+        "fit_sha256": {
+          "title": "Fit Sha256",
+          "type": "string"
+        },
+        "backend_sha256": {
+          "title": "Backend Sha256",
+          "type": "string"
+        },
+        "fitting_policy_sha256": {
+          "title": "Fitting Policy Sha256",
+          "type": "string"
+        },
+        "feedback_policy_sha256": {
+          "title": "Feedback Policy Sha256",
+          "type": "string"
+        },
+        "diagnostic_allowance_seconds": {
+          "title": "Diagnostic Allowance Seconds",
+          "type": "number"
+        },
+        "source_sha256": {
+          "title": "Source Sha256",
+          "type": "string"
+        },
+        "runtime_sha256": {
+          "title": "Runtime Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "problem_sha256",
+        "request_sha256",
+        "candidate_sha256",
+        "training_sha256",
+        "parameters_sha256",
+        "fit_sha256",
+        "backend_sha256",
+        "fitting_policy_sha256",
+        "feedback_policy_sha256",
+        "diagnostic_allowance_seconds",
+        "source_sha256",
+        "runtime_sha256"
+      ],
+      "title": "Binding",
+      "type": "object"
+    },
+    "BranchActivity": {
+      "additionalProperties": false,
+      "description": "Activity of one primitive or one binary fold at saved output samples.",
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "location": {
+          "title": "Location",
+          "type": "string"
+        },
+        "expression": {
+          "title": "Expression",
+          "type": "string"
+        },
+        "primitive": {
+          "enum": [
+            "abs",
+            "min",
+            "max"
+          ],
+          "title": "Primitive",
+          "type": "string"
+        },
+        "fold": {
+          "title": "Fold",
+          "type": "integer"
+        },
+        "samples": {
+          "title": "Samples",
+          "type": "integer"
+        },
+        "minimum_absolute_margin": {
+          "title": "Minimum Absolute Margin",
+          "type": "number"
+        },
+        "minimum_scaled_margin": {
+          "title": "Minimum Scaled Margin",
+          "type": "number"
+        },
+        "near_tie_samples": {
+          "title": "Near Tie Samples",
+          "type": "integer"
+        },
+        "left_or_positive_samples": {
+          "title": "Left Or Positive Samples",
+          "type": "integer"
+        },
+        "right_or_negative_samples": {
+          "title": "Right Or Negative Samples",
+          "type": "integer"
+        },
+        "sampled_activity_changes": {
+          "title": "Sampled Activity Changes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "location",
+        "expression",
+        "primitive",
+        "fold",
+        "samples",
+        "minimum_absolute_margin",
+        "minimum_scaled_margin",
+        "near_tie_samples",
+        "left_or_positive_samples",
+        "right_or_negative_samples",
+        "sampled_activity_changes"
+      ],
+      "title": "BranchActivity",
+      "type": "object"
+    },
+    "BranchSummary": {
+      "additionalProperties": false,
+      "description": "Margins at observations and causal initial maps, never between them.",
+      "properties": {
+        "status": {
+          "default": "complete",
+          "enum": [
+            "complete",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "sample_scope": {
+          "const": "stored_output_states_and_causal_initial_maps",
+          "default": "stored_output_states_and_causal_initial_maps",
+          "title": "Sample Scope",
+          "type": "string"
+        },
+        "branches": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BranchActivity"
+          },
+          "title": "Branches",
+          "type": "array"
+        },
+        "trajectory_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Trajectory Ids",
+          "type": "array"
+        },
+        "near_tie_samples": {
+          "default": 0,
+          "title": "Near Tie Samples",
+          "type": "integer"
+        },
+        "sampled_activity_changes": {
+          "default": 0,
+          "title": "Sampled Activity Changes",
+          "type": "integer"
+        },
+        "between_sample_behavior_certified": {
+          "const": false,
+          "default": false,
+          "title": "Between Sample Behavior Certified",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "title": "BranchSummary",
+      "type": "object"
+    },
+    "Dependency": {
+      "additionalProperties": false,
+      "description": "Syntactic output reachability is not required-mechanism certification.",
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "states": {
+          "items": {
+            "type": "string"
+          },
+          "title": "States",
+          "type": "array"
+        },
+        "parameters": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
+        "external_inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "External Inputs",
+          "type": "array"
+        },
+        "auxiliaries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Auxiliaries",
+          "type": "array"
+        },
+        "fixed_covariates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fixed Covariates",
+          "type": "array"
+        },
+        "initial_parameters": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Initial Parameters",
+          "type": "array"
+        },
+        "initial_data_sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Initial Data Sources",
+          "type": "array"
+        },
+        "scope": {
+          "const": "syntactic_output_dependency",
+          "default": "syntactic_output_dependency",
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "states",
+        "parameters",
+        "external_inputs",
+        "auxiliaries",
+        "fixed_covariates",
+        "initial_parameters",
+        "initial_data_sources"
+      ],
+      "title": "Dependency",
+      "type": "object"
+    },
+    "DiagnosticCost": {
+      "additionalProperties": false,
+      "properties": {
+        "wall_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Wall Seconds"
+        },
+        "cpu_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cpu Seconds"
+        },
+        "budget_charge_seconds": {
+          "title": "Budget Charge Seconds",
+          "type": "number"
+        },
+        "calls": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Calls"
+        },
+        "accounting_complete": {
+          "title": "Accounting Complete",
+          "type": "boolean"
+        },
+        "optimization_calls": {
+          "const": 0,
+          "default": 0,
+          "title": "Optimization Calls",
+          "type": "integer"
+        },
+        "calls_completed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Calls Completed"
+        },
+        "stages_completed": {
+          "title": "Stages Completed",
+          "type": "integer"
+        },
+        "stages_unavailable": {
+          "title": "Stages Unavailable",
+          "type": "integer"
+        },
+        "bookkeeping_excluded": {
+          "const": true,
+          "default": true,
+          "title": "Bookkeeping Excluded",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "wall_seconds",
+        "cpu_seconds",
+        "budget_charge_seconds",
+        "calls",
+        "accounting_complete",
+        "calls_completed",
+        "stages_completed",
+        "stages_unavailable"
+      ],
+      "title": "DiagnosticCost",
+      "type": "object"
+    },
+    "Diagnostics": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "unavailable",
+            "interrupted",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Sha256"
+        },
+        "solver_agreement": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Solver Agreement"
+        },
+        "strict_sensitivity_verification": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strict Sensitivity Verification"
+        },
+        "retained_metrics_reproduced": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retained Metrics Reproduced"
+        },
+        "replay_training_nmse": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replay Training Nmse"
+        },
+        "replay_alternate_training_nmse": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replay Alternate Training Nmse"
+        },
+        "replay_worst_trajectory_nmse": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replay Worst Trajectory Nmse"
+        },
+        "replay_solver_loss_discrepancy": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replay Solver Loss Discrepancy"
+        },
+        "replay_solver_prediction_discrepancy": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replay Solver Prediction Discrepancy"
+        },
+        "residuals": {
+          "items": {
+            "$ref": "#/$defs/Residual"
+          },
+          "title": "Residuals",
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/Dependency"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "active_sensitivity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LocalSensitivity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sensitivity_status": {
+          "default": "not_verified",
+          "enum": [
+            "available",
+            "unavailable",
+            "not_applicable",
+            "not_verified"
+          ],
+          "title": "Sensitivity Status",
+          "type": "string"
+        },
+        "derivative_scope": {
+          "default": "not_checked",
+          "enum": [
+            "smooth_local",
+            "piecewise_branch_convention",
+            "not_checked",
+            "piecewise_numerically_supported"
+          ],
+          "title": "Derivative Scope",
+          "type": "string"
+        },
+        "inactive_parameters": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Inactive Parameters",
+          "type": "array"
+        },
+        "disconnected_states": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Disconnected States",
+          "type": "array"
+        },
+        "output_status": {
+          "enum": [
+            "verified",
+            "unverified",
+            "unavailable",
+            "skipped"
+          ],
+          "title": "Output Status",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/StageRecord"
+          },
+          "title": "Stages",
+          "type": "array"
+        },
+        "piecewise_assessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PiecewiseAssessmentResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "status",
+        "output_status"
+      ],
+      "title": "Diagnostics",
+      "type": "object"
+    },
+    "DirectionAssessment": {
+      "additionalProperties": false,
+      "description": "Finite evidence for one axis or the optionally checked weak direction.",
+      "properties": {
+        "direction": {
+          "title": "Direction",
+          "type": "string"
+        },
+        "parameter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parameter"
+        },
+        "initial_parameter": {
+          "title": "Initial Parameter",
+          "type": "boolean"
+        },
+        "direction_vector": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Direction Vector",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "supported",
+            "unsupported_kink",
+            "numerical_noise",
+            "infeasible_direction",
+            "derivative_mismatch",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "ad_derivative_rms": {
+          "title": "Ad Derivative Rms",
+          "type": "number"
+        },
+        "steps": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StepAssessment"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "converged_across_steps": {
+          "default": false,
+          "title": "Converged Across Steps",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "direction",
+        "parameter",
+        "initial_parameter",
+        "direction_vector",
+        "status",
+        "reason",
+        "ad_derivative_rms"
+      ],
+      "title": "DirectionAssessment",
+      "type": "object"
+    },
+    "FitCost": {
+      "additionalProperties": false,
+      "description": "Unknown usage stays unknown; interrupted operations retain their charge.",
+      "properties": {
+        "blocks_used": {
+          "title": "Blocks Used",
+          "type": "integer"
+        },
+        "maximum_search_calls": {
+          "title": "Maximum Search Calls",
+          "type": "integer"
+        },
+        "search_calls_started": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Search Calls Started"
+        },
+        "search_calls_completed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Search Calls Completed"
+        },
+        "search_budget_charge_seconds": {
+          "title": "Search Budget Charge Seconds",
+          "type": "number"
+        },
+        "wall_seconds": {
+          "title": "Wall Seconds",
+          "type": "number"
+        },
+        "cpu_seconds": {
+          "title": "Cpu Seconds",
+          "type": "number"
+        },
+        "budget_charge_seconds": {
+          "title": "Budget Charge Seconds",
+          "type": "number"
+        },
+        "accounting_complete": {
+          "title": "Accounting Complete",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "blocks_used",
+        "maximum_search_calls",
+        "search_calls_started",
+        "search_calls_completed",
+        "search_budget_charge_seconds",
+        "wall_seconds",
+        "cpu_seconds",
+        "budget_charge_seconds",
+        "accounting_complete"
+      ],
+      "title": "FitCost",
+      "type": "object"
+    },
+    "LocalSensitivity": {
+      "additionalProperties": false,
+      "description": "Active coefficients and initializer parameters jointly, in fixed units.",
+      "properties": {
+        "parameters": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
+        "units": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Units",
+          "type": "array"
+        },
+        "singular_values": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Singular Values",
+          "type": "array"
+        },
+        "rank": {
+          "title": "Rank",
+          "type": "integer"
+        },
+        "parameter_count": {
+          "title": "Parameter Count",
+          "type": "integer"
+        },
+        "condition_number": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Condition Number"
+        },
+        "column_norms": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Column Norms",
+          "type": "array"
+        },
+        "weak_direction": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Weak Direction",
+          "type": "object"
+        },
+        "initials_included": {
+          "const": true,
+          "title": "Initials Included",
+          "type": "boolean"
+        },
+        "global_identifiability_certified": {
+          "const": false,
+          "default": false,
+          "title": "Global Identifiability Certified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "parameters",
+        "units",
+        "singular_values",
+        "rank",
+        "parameter_count",
+        "condition_number",
+        "column_norms",
+        "weak_direction",
+        "initials_included"
+      ],
+      "title": "LocalSensitivity",
+      "type": "object"
+    },
+    "PiecewiseAssessmentResult": {
+      "additionalProperties": false,
+      "description": "Local numerical qualification only; not calibrated confidence.",
+      "properties": {
+        "status": {
+          "enum": [
+            "supported",
+            "unsupported_kink",
+            "numerical_noise",
+            "infeasible_direction",
+            "derivative_mismatch",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "active_parameters": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Active Parameters",
+          "type": "array"
+        },
+        "initial_parameters_checked": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Initial Parameters Checked",
+          "type": "array"
+        },
+        "checked_direction_scope": {
+          "enum": [
+            "coordinate_axes",
+            "coordinate_axes_and_weak_joint"
+          ],
+          "title": "Checked Direction Scope",
+          "type": "string"
+        },
+        "perturbations_required": {
+          "title": "Perturbations Required",
+          "type": "integer"
+        },
+        "perturbations_available": {
+          "title": "Perturbations Available",
+          "type": "integer"
+        },
+        "directions": {
+          "items": {
+            "$ref": "#/$defs/DirectionAssessment"
+          },
+          "title": "Directions",
+          "type": "array"
+        },
+        "branch_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BranchSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supported_classical": {
+          "const": false,
+          "default": false,
+          "title": "Supported Classical",
+          "type": "boolean"
+        },
+        "supported_global": {
+          "const": false,
+          "default": false,
+          "title": "Supported Global",
+          "type": "boolean"
+        },
+        "calibrated_confidence_claimed": {
+          "const": false,
+          "default": false,
+          "title": "Calibrated Confidence Claimed",
+          "type": "boolean"
+        },
+        "solver_discrepancy_is_rigorous_error_bound": {
+          "const": false,
+          "default": false,
+          "title": "Solver Discrepancy Is Rigorous Error Bound",
+          "type": "boolean"
+        },
+        "limitation": {
+          "default": "Finite local numerical evidence at the declared optimizer-unit steps and checked directions only. Independent-solver discrepancies give an empirical noise floor, not a rigorous integration error bound. Stored samples do not certify branch behavior between samples.",
+          "title": "Limitation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "active_parameters",
+        "initial_parameters_checked",
+        "checked_direction_scope",
+        "perturbations_required",
+        "perturbations_available",
+        "directions"
+      ],
+      "title": "PiecewiseAssessmentResult",
+      "type": "object"
+    },
+    "Residual": {
+      "additionalProperties": false,
+      "description": "Compact per-target summaries, without individual samples or causal claims.",
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "sample_count": {
+          "title": "Sample Count",
+          "type": "integer"
+        },
+        "normalization_scale": {
+          "title": "Normalization Scale",
+          "type": "number"
+        },
+        "primary_nmse": {
+          "title": "Primary Nmse",
+          "type": "number"
+        },
+        "alternate_nmse": {
+          "title": "Alternate Nmse",
+          "type": "number"
+        },
+        "mean_normalized_residual": {
+          "title": "Mean Normalized Residual",
+          "type": "number"
+        },
+        "worst_trajectory": {
+          "title": "Worst Trajectory",
+          "type": "string"
+        },
+        "worst_trajectory_nmse": {
+          "title": "Worst Trajectory Nmse",
+          "type": "number"
+        },
+        "maximum_absolute_normalized_residual": {
+          "title": "Maximum Absolute Normalized Residual",
+          "type": "number"
+        },
+        "maximum_residual_trajectory": {
+          "title": "Maximum Residual Trajectory",
+          "type": "string"
+        },
+        "maximum_residual_time": {
+          "title": "Maximum Residual Time",
+          "type": "number"
+        },
+        "residual_convention": {
+          "const": "prediction_minus_observation",
+          "default": "prediction_minus_observation",
+          "title": "Residual Convention",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "sample_count",
+        "normalization_scale",
+        "primary_nmse",
+        "alternate_nmse",
+        "mean_normalized_residual",
+        "worst_trajectory",
+        "worst_trajectory_nmse",
+        "maximum_absolute_normalized_residual",
+        "maximum_residual_trajectory",
+        "maximum_residual_time"
+      ],
+      "title": "Residual",
+      "type": "object"
+    },
+    "SearchWitness": {
+      "additionalProperties": false,
+      "description": "A particular saved operation, never a solver's unbound status message.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "restricted_output_optimum",
+            "local_stationarity",
+            "improvement"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation": {
+          "title": "Operation",
+          "type": "string"
+        },
+        "operation_sha256": {
+          "title": "Operation Sha256",
+          "type": "string"
+        },
+        "parameters_sha256": {
+          "title": "Parameters Sha256",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "fixed_candidate_output",
+            "retained_point_local_search"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "specification_incompatibility_certified": {
+          "const": false,
+          "default": false,
+          "title": "Specification Incompatibility Certified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "operation",
+        "operation_sha256",
+        "parameters_sha256",
+        "scope"
+      ],
+      "title": "SearchWitness",
+      "type": "object"
+    },
+    "StageRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "unavailable",
+            "interrupted"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "title": "Artifact Sha256",
+          "type": "string"
+        },
+        "parameters_sha256": {
+          "title": "Parameters Sha256",
+          "type": "string"
+        },
+        "solver": {
+          "enum": [
+            "DOP853",
+            "Radau"
+          ],
+          "title": "Solver",
+          "type": "string"
+        },
+        "sensitivities": {
+          "title": "Sensitivities",
+          "type": "boolean"
+        },
+        "allowance_seconds": {
+          "title": "Allowance Seconds",
+          "type": "number"
+        },
+        "relative_tolerance": {
+          "title": "Relative Tolerance",
+          "type": "number"
+        },
+        "absolute_tolerance": {
+          "title": "Absolute Tolerance",
+          "type": "number"
+        },
+        "wall_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Wall Seconds"
+        },
+        "cpu_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cpu Seconds"
+        },
+        "budget_charge_seconds": {
+          "title": "Budget Charge Seconds",
+          "type": "number"
+        },
+        "calls_started": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Calls Started"
+        },
+        "calls_completed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Calls Completed"
+        },
+        "accounting_complete": {
+          "title": "Accounting Complete",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "progress": {
+          "additionalProperties": true,
+          "title": "Progress",
+          "type": "object"
+        }
+      },
+      "required": [
+        "key",
+        "status",
+        "artifact_sha256",
+        "parameters_sha256",
+        "solver",
+        "sensitivities",
+        "allowance_seconds",
+        "relative_tolerance",
+        "absolute_tolerance",
+        "wall_seconds",
+        "cpu_seconds",
+        "budget_charge_seconds",
+        "calls_started",
+        "calls_completed",
+        "accounting_complete"
+      ],
+      "title": "StageRecord",
+      "type": "object"
+    },
+    "StepAssessment": {
+      "additionalProperties": false,
+      "description": "RMS residual-space derivative comparisons in fixed optimizer units.",
+      "properties": {
+        "step": {
+          "title": "Step",
+          "type": "number"
+        },
+        "central_error": {
+          "title": "Central Error",
+          "type": "number"
+        },
+        "forward_error": {
+          "title": "Forward Error",
+          "type": "number"
+        },
+        "backward_error": {
+          "title": "Backward Error",
+          "type": "number"
+        },
+        "one_sided_disagreement": {
+          "title": "One Sided Disagreement",
+          "type": "number"
+        },
+        "agreement_tolerance": {
+          "title": "Agreement Tolerance",
+          "type": "number"
+        },
+        "derivative_noise_floor": {
+          "title": "Derivative Noise Floor",
+          "type": "number"
+        },
+        "minimum_signal_to_noise": {
+          "title": "Minimum Signal To Noise",
+          "type": "number"
+        },
+        "noise_resolved": {
+          "title": "Noise Resolved",
+          "type": "boolean"
+        },
+        "central_agrees": {
+          "title": "Central Agrees",
+          "type": "boolean"
+        },
+        "one_sided_agrees": {
+          "title": "One Sided Agrees",
+          "type": "boolean"
+        },
+        "sides_agree": {
+          "title": "Sides Agree",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "step",
+        "central_error",
+        "forward_error",
+        "backward_error",
+        "one_sided_disagreement",
+        "agreement_tolerance",
+        "derivative_noise_floor",
+        "minimum_signal_to_noise",
+        "noise_resolved",
+        "central_agrees",
+        "one_sided_agrees",
+        "sides_agree"
+      ],
+      "title": "StepAssessment",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "protocol": {
+      "const": "fitting-feedback-2",
+      "default": "fitting-feedback-2",
+      "title": "Protocol",
+      "type": "string"
+    },
+    "identity": {
+      "$ref": "#/$defs/Binding"
+    },
+    "diagnosis": {
+      "enum": [
+        "accurate_local_evidence",
+        "accurate_ambiguity",
+        "accurate_unresolved",
+        "solved_restricted_problem_poor_fit",
+        "stationary_poor_fit",
+        "search_improving",
+        "search_incomplete",
+        "rollout_unverified"
+      ],
+      "title": "Diagnosis",
+      "type": "string"
+    },
+    "recommended_action": {
+      "enum": [
+        "retain_with_local_evidence",
+        "assess_parameter_uncertainty",
+        "review_equations",
+        "review_equations_or_new_starts",
+        "continue_fitting",
+        "diversify_or_extend_search",
+        "verify_numerics"
+      ],
+      "title": "Recommended Action",
+      "type": "string"
+    },
+    "fit_quality": {
+      "title": "Fit Quality",
+      "type": "string"
+    },
+    "historical_fit_quality": {
+      "title": "Historical Fit Quality",
+      "type": "string"
+    },
+    "parameter_information": {
+      "title": "Parameter Information",
+      "type": "string"
+    },
+    "training_nmse": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Training Nmse"
+    },
+    "target_nmse": {
+      "title": "Target Nmse",
+      "type": "number"
+    },
+    "worst_trajectory_target_nmse": {
+      "title": "Worst Trajectory Target Nmse",
+      "type": "number"
+    },
+    "search_witness": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SearchWitness"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "diagnostics": {
+      "$ref": "#/$defs/Diagnostics"
+    },
+    "cost": {
+      "$ref": "#/$defs/DiagnosticCost"
+    },
+    "historical_fit_cost": {
+      "$ref": "#/$defs/FitCost"
+    },
+    "specification_verdict": {
+      "const": "not_assessed",
+      "default": "not_assessed",
+      "title": "Specification Verdict",
+      "type": "string"
+    },
+    "automatic_specification_revision_allowed": {
+      "const": false,
+      "default": false,
+      "title": "Automatic Specification Revision Allowed",
+      "type": "boolean"
+    },
+    "confidence_probability": {
+      "default": null,
+      "title": "Confidence Probability",
+      "type": "null"
+    },
+    "profiles_minimized": {
+      "const": false,
+      "default": false,
+      "title": "Profiles Minimized",
+      "type": "boolean"
+    },
+    "scientific_correctness_certified": {
+      "const": false,
+      "default": false,
+      "title": "Scientific Correctness Certified",
+      "type": "boolean"
+    },
+    "validation_used": {
+      "const": false,
+      "default": false,
+      "title": "Validation Used",
+      "type": "boolean"
+    },
+    "test_data_opened": {
+      "const": false,
+      "default": false,
+      "title": "Test Data Opened",
+      "type": "boolean"
+    },
+    "parameters_changed": {
+      "const": false,
+      "default": false,
+      "title": "Parameters Changed",
+      "type": "boolean"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "historical_search_witness": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SearchWitness"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "identity",
+    "diagnosis",
+    "recommended_action",
+    "fit_quality",
+    "historical_fit_quality",
+    "parameter_information",
+    "training_nmse",
+    "target_nmse",
+    "worst_trajectory_target_nmse",
+    "search_witness",
+    "diagnostics",
+    "cost",
+    "historical_fit_cost",
+    "limitations"
+  ],
+  "title": "FeedbackPacket",
+  "type": "object"
+}

@@ -9,7 +9,14 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone (October 13): [M31 fitting feedback](PHASE_C_FITTING_FEEDBACK.md)
+Current fitting milestone (October 13): [M32 staged feedback](PHASE_C_FITTING_STAGED_FEEDBACK.md)
+adds durable independent diagnostic stages and nearby-rollout qualification of
+piecewise sensitivities. A 23-task Delta CPU study rechecks 16 frozen M31 entries
+without refitting and adds seven small diagnostic controls. Fitted models,
+benchmark data and production fitting defaults remain unchanged. Qualification
+is pending the Delta run; local support never certifies global identifiability.
+
+Previous milestone: [M31 fitting feedback](PHASE_C_FITTING_FEEDBACK.md)
 adds candidate-bound training-only diagnostics and advisory next actions, without
 changing the optimizer or revising specifications. A sixteen-task Delta CPU study
 replays eleven archived M30 entries without refitting and runs five small analytic

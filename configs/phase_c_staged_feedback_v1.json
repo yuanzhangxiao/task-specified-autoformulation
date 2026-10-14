@@ -1,0 +1,12 @@
+{
+  "protocol": "phase-c-staged-feedback-qualification-1",
+  "feedback": {
+    "primary_seconds": 120.0,
+    "alternate_seconds": 360.0,
+    "sensitivity_seconds": 180.0,
+    "perturbation_seconds": 120.0,
+    "perturbation_total_seconds": 1800.0,
+    "relative_tolerance": 1e-12,
+    "absolute_tolerance": 1e-14
+  }
+}

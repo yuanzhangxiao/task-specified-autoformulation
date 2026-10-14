@@ -431,7 +431,7 @@ def search_witness(backend, parameters):
     return min(found, key=lambda w: priority[w.kind]) if found else None
 
 
-def classify(fit, backend, diagnostics):
+def classify(fit, backend, diagnostics, *, derivative_qualified=False):
     """A deterministic action contract, conditional on numerical evidence only."""
     selected = backend["selected"]
     information = "unavailable"
@@ -439,7 +439,7 @@ def classify(fit, backend, diagnostics):
     if (
         diagnostics.strict_sensitivity_verification
         and sensitivity
-        and diagnostics.derivative_scope == "smooth_local"
+        and (diagnostics.derivative_scope == "smooth_local" or derivative_qualified)
     ):
         alternatives = [
             o["value"]
