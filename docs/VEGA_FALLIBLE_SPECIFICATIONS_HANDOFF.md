@@ -1,10 +1,13 @@
-# Vega handoff for discovery under fallible scientific specifications
+# Vega handoff: fallible scientific specifications and imperfect data
 
-Prepared 6 October 2026; updated 13 October 2026 with M29/M30 fitting evidence
-and the M31 preparation boundary. Repository: `task-specified-autoformulation`.
+Prepared 6 October 2026; updated 13 October 2026 with M32 evidence and the
+user-approved broader scope of noisy and erroneous data.
+Repository: `task-specified-autoformulation`. The existing filename and work
+directory are retained so earlier handoffs remain discoverable.
 
 Vega will develop the research design for an Autoformalism extension that can
-assess and revise fallible scientific assumptions. Codex continues the Phase C
+assess fallible scientific assumptions together with imperfect observations and
+input records. Codex continues the Phase C
 construction runtime; Orion continues fitting and benchmark qualification. This
 handoff assigns a bounded first milestone. It does not start an agent, a campaign,
 or a change to the production method.
@@ -14,14 +17,22 @@ or a change to the production method.
 The current framework constructs a dynamical model that conforms to a supplied
 task specification. In open scientific discovery, some scientific assumptions
 in that specification may be wrong, approximate, or insufficiently supported.
-The next system should identify which claims the evidence supports, which claims
-are challenged, and which additional evidence would resolve uncertainty.
+Observations and recorded interventions can also contain noise, calibration
+errors, missing values, timing errors, or incorrect input magnitudes. The next
+system should identify which claims and measurement assumptions the evidence
+supports or challenges, and which additional evidence would resolve uncertainty.
 
 The initial paper question is:
 
-> Can a system identify and minimally revise an incorrect scientific assumption
-> while preserving correct assumptions and distinguishing scientific disagreement
-> from insufficient observations, construction failures, and fitting failures?
+> When a dynamical model disagrees with observations, can a system distinguish
+> fallible scientific assumptions, observation/input defects, inadequate candidate
+> equations, and computational failure; make minimal supported revisions; and
+> abstain or seek new evidence when the explanations are indistinguishable?
+
+Causes are not mutually exclusive. A false assumption and a faulty sensor may
+coexist. The intended contribution is reliable diagnosis and choice of the next
+scientific action under partial observability, not merely adding a robust loss
+or allowing the system to rewrite whichever evidence is inconvenient.
 
 The first milestone is a design and diagnostic specification, not an unrestricted
 search algorithm. Start with a small, explicitly bounded model family and
@@ -73,10 +84,52 @@ controls, not arbitrary constructions or noisy data. General computational
 speedup also remains unproven: total recorded task time increased in the single
 paired run despite the independent-basin saving.
 
+M31/M32 add a candidate-bound, training-only fitting-feedback interface. M32
+accounts for all 23 tasks, with twelve passing synthetic diagnostic controls.
+The known-structure alien-device and coupled-basin controls now have supported
+local sensitivity evidence. CSTR preserves accurate output replay and passes
+seven coefficient directions, but exhausts the diagnostic allowance before
+qualifying its two hidden initials and weakest joint direction. A real kink and
+a bound-limited control correctly withhold stronger derivative conclusions.
+These are limits of the assessment, not proofs of unidentifiability. The archived
+constructed models are unchanged. See the
+[M32 review](PHASE_C_FITTING_M32_RESULTS_2026-10-13.md).
+
+Portable inspection currently needs a fix for exact comparison of recomputed
+SVD summaries across numerical environments. Preserve sealed Jacobians and the
+actual perturbation plan; distinguish numerical/subspace equivalence from exact
+artifact identity. Neither local rank nor the now stronger fitting backend
+establishes correctness under an uncertain observation model. Noise-aware
+calibration, robust fitting and data-fault attribution remain unqualified.
+
 Earlier input-pulse and trajectory defects also show why an apparent scientific
 contradiction may originate in data generation or an execution interface.
 Historical releases stay frozen. New diagnosis experiments need isolated,
 qualified inputs and explicit provenance.
+
+## Distinguish noise, defects, and model discrepancy
+
+| Source of disagreement | Interpretation and candidate response |
+| --- | --- |
+| Ordinary measurement noise | Correct measurements with finite precision; use a declared stochastic or bounded-error observation model. Nonzero residuals are expected. |
+| Sparse erroneous readings | Possible outliers or transcription faults; investigate provenance and a bounded contamination model. A large residual alone is not an outlier label. |
+| Systematic observation defect | Sensor bias/gain, saturation, wrong units or channel identity; compare explicit calibration hypotheses and independent calibration evidence. |
+| Input/time/initialization defect | The applied intervention may differ from its log; timestamps, pulse duration, or initial observations may be wrong. Output-only robust loss need not repair this. |
+| Scientific/model discrepancy | An incorrect claim, approximation or candidate equation may explain systematic error even when measurements are sound. |
+| Numerical/search failure | Inaccurate integration, derivative uncertainty, initialization failure or exhausted optimization remains a separate cause. |
+
+These are hypotheses to investigate, not classifications inferred directly from
+residual shape. For example, if `x' = a*u - b*x`, `x(0)=0`, and a sensor reports
+`y = s*x`, then `y' = (s*a)*u - b*y`. Without calibration or another informative
+measurement, the physical gain `a` and sensor gain `s` cannot be separated: the
+observations depend on them only through their product. Fitting more accurately cannot resolve this
+ambiguity. A timing offset can likewise mimic an apparent response delay over
+some protocols; test distinguishability rather than assume it.
+
+Retain competing explanations and identify the measurement that could separate
+them: sensor calibration, repeated measurements, a second channel, an independent
+input log, or a discriminating intervention. Changing the input schedule cannot
+break every ambiguity (including the gain-product example above).
 
 ## Outcomes and evidence requirements
 
@@ -93,6 +146,7 @@ conditions; it cannot establish unrestricted truth.
 | Supported within scope | Provide a satisfying model and its tested consequences, without claiming uniqueness or universal correctness. |
 | Underdetermined | Exhibit unresolved alternatives or a documented evidence gap, and identify a potentially discriminating measurement or intervention. |
 | Computationally unresolved | Preserve construction, fitting, numerical or budget failures separately from scientific verdicts. |
+| Observation/input explanation unresolved | State the competing physical and measurement hypotheses; do not turn a residual anomaly into a confirmed data error. |
 
 Different claims in the same specification can receive different outcomes.
 Successful fitting demonstrates that an adequate candidate was found. Failure
@@ -115,9 +169,19 @@ Preserve three levels of evidence:
    formal certificate licenses a bounded impossibility statement. Improving one
    candidate after deleting a claim is insufficient to establish this level.
 
-An adequate, conforming model under the original claims is a counterexample to
-an accusation that those claims cannot explain the examined observations. Its
-existence still does not establish uniqueness or unrestricted physical truth.
+Each level is conditional on a stated data/observation contract. For a simple
+example, a nondecreasing model cannot explain a measured decline greater than
+`2*epsilon` between two times when each reading has a certified absolute error
+bound `epsilon`. Under unbounded Gaussian noise, the same decline is not an
+absolute impossibility: it supports a statistical test only under specified
+noise assumptions and a calibrated decision procedure. Near-zero NMSE thresholds
+from noiseless Phase C controls must not become noisy-data rejection thresholds.
+
+An adequate, conforming model under the original claims and a stated observation
+contract is a counterexample to an accusation that those claims cannot explain
+the examined observations under that contract. Its existence still does not
+establish uniqueness, correctness of the observation contract, or unrestricted
+physical truth.
 
 Do not assign physical truth probabilities from an LLM's self-reported confidence.
 Any proposed uncertainty measure must name its event, assumptions and calibration
@@ -134,26 +198,39 @@ meaning, affected variables, scope, provenance, and evidence. Distinguish:
 3. Approximation assumptions, such as instantaneous equilibrium.
 4. User objectives, such as the required prediction target.
 
-In the proposed future study, only explicitly designated hypotheses and
-approximations would be eligible for automatic revision. Neither this handoff
-nor the Phase C preparation below authorizes automatic specification revision.
-Suspected measurement errors should trigger a documented
-interface diagnosis. They do not authorize rewriting observations or units.
-Prediction targets cannot disappear to improve apparent fit.
+In the proposed future study, only explicitly designated scientific hypotheses,
+approximations, and separately designated observation/input-error hypotheses
+would be eligible for revision. Prediction targets and user objectives remain
+fixed. Preserve raw readings, timestamps, units and input logs immutably; a
+proposed calibration, mask or correction is a separate versioned interpretation
+with its own assumptions, cost and evidence. Neither this handoff nor Phase C
+preparation authorizes automatic data cleaning or specification revision.
 
 A conceptual formulation is
 
 \[
-p(\mathcal M,C'\mid D,C_0)
+p(\mathcal M,C',\psi,Z\mid D_{\rm raw},C_0,H_0)
 \propto
-p(D\mid\mathcal M)\,p(\mathcal M\mid C')\,p(C'\mid C_0),
+p(D_{\rm raw}\mid\mathcal M,Z,\psi)\,
+p(Z\mid\psi,H_0)\,p(\psi\mid H_0)\,
+p(\mathcal M\mid C')\,p(C'\mid C_0),
 \]
 
-where \(C_0\) is the original specification and \(C'\) a revision. This is a
-proposed research formulation, not a claim that the current pipeline optimizes
-this posterior. Model complexity and revision costs must prevent arbitrary
-models or deletion of every inconvenient claim from becoming trivial solutions.
-Vega should propose concrete operational alternatives to exact posterior inference.
+where \(C_0\) is the original specification, \(C'\) a revision, \(H_0\) the
+recorded measurement/input contract, and \(\mathcal M\) includes equations,
+parameters and initial conditions. \(\psi\) selects a bounded observation/error
+model; optional \(Z\) contains uncertain true inputs, true sampling times or
+contamination indicators. For exact public inputs those components of \(Z\)
+remain fixed. Ordinary latent ODE states remain in \(\mathcal M\), not an
+unrestricted per-sample data correction. All likelihoods compare predictions
+with the immutable raw records through the declared observation model.
+
+This is a proposed research formulation, not implemented posterior inference.
+Model complexity, claim revision, calibration and contamination costs must
+prevent arbitrary explanations. Do not allow free offsets for every observation,
+unbounded noise inflation, unlimited discarded points or deletion of all claims.
+Vega should propose operational alternatives and examine sensitivity to these
+penalties; a preferred posterior explanation is conditional on its priors.
 
 Start with a bounded revision vocabulary: retain, relax a stated tolerance,
 restrict an applicability domain, remove a revisable claim, or substitute one
@@ -163,22 +240,25 @@ fresh interventions for evaluating the resulting scientific conclusions.
 
 ## First diagnostic study
 
-Design an initial matrix with three candidate families: coupled storage basins,
-a thermal system, and a mechanical oscillator. These are proposed new diagnostic
-fixtures; inspect existing assets and coordinate with Orion before choosing their
-actual equations. Do not alter existing benchmark data or finalized prompts.
+Start with one tractable basin family and a small factorial diagnostic design:
+correct versus one false revisable claim, crossed with four data conditions:
+clean, declared ordinary measurement noise, sparse outliers, and one reviewed
+systematic timing or calibration defect. This gives eight condition types,
+including simultaneous specification/data defects. Predeclare disturbance sizes
+and replicate seeds; eight types do not mean eight statistical samples. Include
+conditions in which observation error obscures evidence for the false claim.
 
-For each family, specify the following six conditions where they are meaningful.
-The proposed maximum is 18 conditions, not an authorized production campaign.
+Add a small set of targeted controls for an exact observation/parameter ambiguity,
+a difficult fitting start with a known adequate solution, and a limited-regime
+approximation. Introduce thermal and mechanical fixtures only after this pilot
+can separate recoverable from intrinsically ambiguous cases. This replaces the
+earlier proposed 18-condition breadth-first plan; it is still a design, not an
+authorized campaign or permission to change benchmark data/finalized prompts.
 
-| Condition | What the evaluation must distinguish |
-| --- | --- |
-| Correct and identifiable | Preserve the correct claims and recover their testable consequences. |
-| One false scientific claim | Localize the offending claim rather than broadly discarding the specification. |
-| Approximation with a limited regime | Identify where it ceases to be adequate. |
-| Observationally ambiguous alternatives | Abstain or return alternatives until discriminating evidence is available. |
-| Correct structure with difficult fitting | Report computational uncertainty rather than a false scientific accusation. |
-| Input or observation-interface defect | Diagnose the interface issue separately from an incorrect physical mechanism. |
+Generate disturbances only in isolated derived development fixtures. Keep clean
+reference trajectories, corruption masks, true calibration and random seeds
+evaluator-only. The discovery interface receives the deliberately available
+measurement contract, without hidden fault labels or a clean companion trace.
 
 Include at least one logical contradiction as a small formal fixture. An
 unexcited coupling should not be declared absent merely because no effect is
@@ -198,60 +278,96 @@ input semantics are necessary. Numerical replay agreement establishes numerical
 consistency, not scientific truth. Keep private reference evidence outside the
 discovery interface and disclose assisted/oracle experiments separately.
 
-Compare fixed-specification construction, unconstrained relaxation, and a bounded
-claim-revision method under matched declared budgets. A fitting-only control is
-needed to identify improvements obtainable without revising the specification.
-Vega should identify the smallest defensible baseline set, rather than propose a
-Cartesian sweep of all models, prompts and search strategies.
+Compare fixed-claim fitting, bounded claim revision, observation-error/robust
+fitting with fixed claims, and bounded joint diagnosis under matched declared
+budgets. Include an oracle-known observation correction as a separately labeled
+oracle reference control when informative. A permissive relaxation method is optional
+as a failure demonstration, not a substitute for these matched controls. Robust
+loss reduces outlier influence; it does not establish which readings are wrong.
+Do not select whichever loss or noise scale makes a preferred hypothesis win.
 
-Primary endpoints are false accusation of correct claims, localization of false
-claims, appropriate abstention, revision size, and prediction of fresh
-interventions. Calibration or coverage is an endpoint only after defining the
-uncertainty quantity. Also report mechanism behavior, NMSE, runtime, provider
+Primary endpoints are false accusations of correct claims and sound data,
+localization of claim/data defects (allowing both), appropriate abstention,
+revision/correction size, and prediction of fresh interventions. Report defect
+localization only where designed to be distinguishable. Score raw-observation
+likelihood and clean physical prediction separately; clean truth is evaluator-only
+in synthetic studies. Never silently score a cleaned trace against itself.
+Calibration or coverage requires a defined uncertainty event and independent
+replication. Also report mechanism behavior, NMSE, runtime, provider
 calls and tokens. Report failed and unavailable attempts explicitly. Preserve the
 project convention of median and unscaled MAD for predictive errors and mean and
 SD for compliance, with declared denominators and equal-case aggregation.
 
 ## Phase C preparation while construction remains at topology
 
-M31 can prepare the fitting-to-construction evidence boundary before fresh
-function-stage candidates exist. This is a separate fitting qualification task;
-Vega's first milestone remains a read-only design assignment. The preparation
-should supply reusable evidence for later diagnosis without deciding claim truth
-or changing a candidate's equations, scientific signs or specification.
+M31/M32 already supply reusable candidate-bound diagnostics before fresh
+function-stage candidates exist. The broader research scope changes the evidence
+we should preserve; it does not redirect Phase C into an unrestricted noisy-data
+discovery project. Vega's first milestone remains a read-only design assignment.
 
-- Define a typed evidence record bound to the exact candidate, retained parameter
-  vector, training problem, input and observation contracts, parameter bounds,
-  numerical environment and search budget. Attach branch-local certificates only
-  to the points they actually establish; preserve unavailable evidence explicitly.
-- Distinguish verified accurate fit, solved-but-poor output problem, local
-  stationarity, exhausted search and unavailable numerical rollout. Include
-  per-target training residuals, certified inactive parameters and missing output
-  paths. Report sensitivity on active unknowns, including latent initializer
-  coefficients, separately from certified inactive coordinates and exact symmetries.
-- Keep construction feedback training-only. Validation results, reference
-  coefficients, private oracle evidence and test data must not enter proposer
-  feedback or fitting decisions. Scientific sign/mechanism findings remain
-  separately sourced advisory evidence rather than optimizer certificates.
-- Use controlled synthetic fixtures to check evidence provenance, multi-output
-  dependencies, shared initializers, exact solved output problems, branch-local
-  stationarity and numerical failures. Verify deterministic resume and independent
-  replay without modifying benchmark releases or finalized prompts. Oracle controls
-  qualify diagnostic fixtures but remain outside the discovery interface.
-- Freeze the prospective qualification protocol now; evaluate fresh construction
-  coverage only after executable equations and observation maps are available.
-  Topology completion cannot itself support a numerical fit claim. More budget on
-  the same archived defective candidates is a low priority.
+**Immediate fitting work:** finish portable numerical-evidence verification and
+the separately budgeted CSTR supplement recommended in the
+[M32 review](PHASE_C_FITTING_M32_RESULTS_2026-10-13.md). Preserve completed
+evaluations, failed attempts and exact retained models. Then qualify fresh
+construction requests when executable functions and observation maps exist.
 
-The M31 contract is documented in `docs/PHASE_C_FITTING_FEEDBACK.md`. Treat it as
-preparation, not a completed fresh-construction experiment or production promotion.
+**Design now, add incrementally in separately reviewed milestones:** extend the
+evidence contract with the following proposed fields. These are not all
+implemented by M32.
+
+| Evidence group | What to preserve and why |
+| --- | --- |
+| Data/experiment identity | Immutable raw-data hash; channel units and calibration; timestamps/time base; intervention interpolation and pulse semantics; initial-observation contract; missing/censored readings and acquisition provenance. |
+| Uncertainty assumptions | Per-channel noise/error model, covariance or error bounds when justified, source of each estimate, and known/estimated/unavailable status. Solver tolerances are not measurement uncertainty. |
+| Objective identity | Loss, noise scale, normalization, weights/masks and estimation split. A changed objective is a new experiment, not a transparent resume of the previous optimum. |
+| Residual evidence | Raw as well as standardized/weighted residual summaries by target and trajectory; temporal correlation, repeatability, pulse-aligned errors and localized large residuals. Preserve exact sample references in artifacts, with compact proposer summaries. These are observations, not fault verdicts. |
+| Joint uncertainty | Physical coefficients, latent initials and any permitted observation/input nuisance parameters assessed together. Declared calibration bounds and priors remain visible; do not freeze an uncertain nuisance quantity merely to manufacture parameter confidence. |
+| Diagnostic execution | Point-bound stationarity, qualified derivative scope, missing probes, actual perturbation vectors, numerical-library/BLAS provenance, and separate fitting/diagnostic costs. |
+| Interpretation | Evidence level, assumptions required for a stronger claim, unresolved alternatives and potentially discriminating measurements. Keep fitter `specification_verdict=not_assessed`; no automatic data-error verdict either. |
+
+For a declared nonsingular covariance `Sigma`, a possible noise-aware diagnostic
+uses the whitened residual `r_w = Sigma^(-1/2) * (prediction - observation)` and
+the joint Jacobian with respect to coefficients, initials and eligible nuisance
+parameters. This is a proposed interface, not a qualified M32 noise model.
+Prediction error should be interpreted against a justified noise scale and
+residual adequacy, rather than the existing near-zero noiseless thresholds.
+Residual-estimated noise can absorb missing mechanisms, so document its source
+and compare against replicate/calibration evidence when available. Gaussian
+likelihood, bounded-error checks and robust losses require different uncertainty
+interpretations; full rank alone provides no calibrated confidence level.
+
+Qualify noise-aware fitting on known equations first. In a later isolated pilot,
+compare ordinary/weighted least squares, bounded robust fitting, and an explicitly
+specified observation-error model. Existing coefficient profiling is reusable
+only when its conditional subproblem remains appropriate: fixed Gaussian weights
+preserve linear least squares, whereas Huber-type loss requires a different
+convex inner solve for affine coefficients. Unknown timing, inputs or calibration
+can introduce new nonlinearities and confounding. Keep all nuisance-search,
+diagnostic and optional profile-minimization overhead visible.
+
+Noise realizations, outlier locations and clean companion trajectories belong to
+isolated derived fixtures; do not modify Phase C benchmark releases or finalized
+prompts. Construction feedback remains training-only, with validation/reference/
+test evidence excluded. Any later development-level protocol selection must stay
+outside per-candidate fitter/proposer feedback, with a fresh evaluation set.
+Oracle controls qualify fixtures but never supply hidden corrections to discovery.
+Process noise and a move from ODEs to stochastic dynamics remain a separate future
+scope decision.
+
+The reusable implemented boundaries are documented in
+[M31 feedback](PHASE_C_FITTING_FEEDBACK.md) and
+[M32 staged diagnostics](PHASE_C_FITTING_STAGED_FEEDBACK.md). Proposed extensions
+above do not change production fitting, permit data edits, or establish fresh
+construction success. High NMSE alone still cannot determine whether the next
+action should revise equations, question a claim, recalibrate a sensor or refit.
 
 ## Other paper directions retained from the research discussion
 
 These are follow-on ideas, not concurrent assignments for Vega.
 
 **Choosing the next scientific action.** Decide whether to refit, revise a claim,
-ask a scientist, obtain another measurement, run an intervention, or change the
+ask a scientist, check an input log, recalibrate a sensor, obtain a repeat or new
+measurement, run an intervention, or change the
 representation. For an accumulator versus a decaying memory, a pulse followed by
 observation may resolve uncertainty more efficiently than additional equation
 repair. Evaluate information gained and reliable conclusions per total cost.
@@ -282,6 +398,16 @@ explicit costs. This is a longer-term project.
 
 The following are starting points, not an exhaustive novelty review.
 
+- [Brynjarsdottir and O'Hagan, model discrepancy](https://www.tonyohagan.co.uk/academic/pdf/simmach.pdf)
+  examines how physical parameters can be confounded with model inadequacy and
+  how ignoring discrepancy can yield biased, overconfident inferences. Distinguish
+  physical discrepancy from measurement error; flexible residual corrections
+  alone do not establish either mechanism recovery or scientific novelty.
+- [SciPy's robust least-squares documentation](https://docs.scipy.org/doc/scipy-1.16.2/reference/generated/scipy.optimize.least_squares.html)
+  provides a mature baseline for reducing outlier influence. Robust optimization
+  by itself neither localizes true data faults nor decides which scientific
+  claims should be revised. Vega should extend the primary-source review to
+  errors-in-variables identification, fault diagnosis and robust system discovery.
 - [AI-Hilbert](https://www.nature.com/articles/s41467-024-50074-w) combines data
   and mathematical background knowledge and addresses inconsistent or incomplete
   theories. Revising scientific assumptions alone is not a new contribution.
@@ -312,8 +438,10 @@ Read `AGENTS.md`, `docs/PHASE_C_START_HERE.md`, relevant parts of
 - `docs/PHASE_C_FITTING_M13_RESULTS_2026-10-06.md`
 - `docs/PHASE_C_FITTING_M29_RESULTS_2026-10-12.md`
 - `docs/PHASE_C_FITTING_M30_RESULTS_2026-10-12.md`
-- `docs/PHASE_C_FITTING_FEEDBACK.md` (M31 preparation contract; not an M31
-  results claim)
+- `docs/PHASE_C_FITTING_FEEDBACK.md`
+- `docs/PHASE_C_FITTING_M31_RESULTS_2026-10-13.md`
+- `docs/PHASE_C_FITTING_STAGED_FEEDBACK.md`
+- `docs/PHASE_C_FITTING_M32_RESULTS_2026-10-13.md`
 
 Use these to identify reusable interfaces. Do not assume every historical
 discussion or diagnostic has been promoted into the production method.
@@ -322,11 +450,13 @@ Deliver within the first work package:
 
 1. A concise research design with a falsifiable central claim and a primary-source
    comparison against the closest prior work.
-2. A typed claim/evidence record proposal with examples of supported, challenged,
-   ambiguous and computationally unresolved outcomes, preserving the three evidence
-   levels and reusing candidate-bound training-only fitting evidence where possible.
-3. The proposed diagnostic matrix, including oracle controls, observation
-   assumptions, measurement semantics and intervention separation.
+2. A typed claim/observation/evidence record proposal with supported, challenged,
+   ambiguous, mixed-cause and computationally unresolved examples, preserving the
+   three evidence levels and reusing training-only fitting evidence. Identify
+   which fields exist today and which require future implementation.
+3. The narrow diagnostic matrix, with matched clean/noisy/defective observations,
+   repeat seeds, oracle controls, a provably confounded example, and a justified
+   calibration or intervention that can resolve at least one ambiguous case.
 4. A minimal implementation map: reusable components, proposed new files, tests,
    and estimated CPU/GPU/provider-call budgets with assumptions.
 5. A short recommendation on whether the study is worth implementing, including
@@ -344,9 +474,11 @@ Return a compact completion record with deliverable paths, sources, assumptions,
 unresolved questions and measured usage if available. Do not create new agent
 threads or send messages to other chats solely because this document names them.
 
-The milestone succeeds when the proposed study could distinguish an incorrect
-scientific assumption from a correct assumption that the current solver cannot
-fit. A plan that equates high NMSE with a false specification is not acceptable.
+The milestone succeeds when the proposed study could separate scientific,
+measurement and computational explanations where evidence permits, recognize
+mixed causes, and abstain when they are observationally indistinguishable. A plan
+that equates high NMSE with a false specification, or treats improved fit after
+discarding readings as proof of erroneous data, is not acceptable.
 
 ## Allocation planning context
 
