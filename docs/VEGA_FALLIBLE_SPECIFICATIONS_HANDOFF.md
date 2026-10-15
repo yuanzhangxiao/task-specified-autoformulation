@@ -135,6 +135,16 @@ seconds (27.1% additional), with all 1,200 calls accounted. The next research
 design should include such overhead and qualify practical uncertainty on noisy,
 near-confounded cases before offering a numerical confidence level.
 
+The next bounded implementation is
+[M39 practical uncertainty](PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md): five input
+separations, three known-noise levels and five paired noise seeds on one affine
+physical/sensor/initial-value family. It compares nuisance-reoptimized gain
+profiles with frozen-nuisance slices, preserving domain-assisted bounds and exact
+confounding. Objective-rise support sets have no assigned confidence percentage.
+This qualification prepares useful uncertainty feedback while Astra completes
+interaction construction; it does not launch the broader model/data attribution
+study or alter the clean benchmark measurement contract.
+
 Earlier input-pulse and trajectory defects also show why an apparent scientific
 contradiction may originate in data generation or an execution interface.
 Historical releases stay frozen. New diagnosis experiments need isolated,

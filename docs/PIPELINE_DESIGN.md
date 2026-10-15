@@ -1,5 +1,21 @@
 # Phase 1 Pipeline Design
 
+M39 adds an opt-in practical-profile diagnostic for certified globally affine
+Gaussian observation problems. It verifies a retained endpoint against the
+bounded own-loss optimum, reoptimizes all other coordinates along a target
+profile, and reports objective-rise support with nuisance-bound activity and
+absolute conditional information. Unknown diagnostic work never becomes zero
+cost or a completed range. This isolated near-confounding study has no automatic
+fault attribution or effect on production fitting/selection. See
+`PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md`.
+
+M38's `interaction_mismatches` and `interaction_advice` projections add descriptive
+response differences and conditional investigations to the verified M37 packet.
+They preserve all targets, point-bound search evidence and candidate dependencies;
+equation references remain navigation rather than edit permission or fault
+localization. No model is executed or revised by the draft layer. See
+`PHASE_C_FITTING_FEEDBACK_DRAFTS.md`.
+
 The opt-in `minimal-evidence-feedback-2` milestone preserves initial requests and
 scientific checks while separating repair records, model errors, advisory decisions
 and completion. Semantic question identities avoid prose-triggered re-questioning;

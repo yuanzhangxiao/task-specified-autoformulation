@@ -21,6 +21,14 @@ revision/refit experiment remain pending; this is not a completed live integrati
 The specification and measurement contract remain fixed; broader sensor/specification diagnosis is
 future work.
 
+While awaiting executable construction laws, the separate
+[M39 practical-uncertainty qualification](PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md)
+prepares a 150-task Delta CPU study of increasingly similar inputs and known
+measurement noise. It compares nuisance-aware profiles with frozen-nuisance
+slices, retaining exact confounding and domain-induced limits. These are
+objective-rise support sets, not calibrated confidence intervals; no production
+or benchmark contracts change.
+
 Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
 compares fixed calibration with one bounded shared observation trend, preserving
 the physical ODE and raw readings. Its 144-attempt CPU qualification includes

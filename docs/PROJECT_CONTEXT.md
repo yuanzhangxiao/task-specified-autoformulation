@@ -1,5 +1,20 @@
 # Autoformalism Phase 1 Implementation Context
 
+M39 prepares an isolated 150-task Delta CPU practical-uncertainty qualification:
+five input separations, three known noise levels and five paired seeds, each
+fitted by direct and affine-profiled rollout. Bounded Gaussian gain profiles
+reoptimize shared initials and sensor drift; frozen-nuisance slices expose the
+cost of ignoring compensation. Support ranges distinguish data information
+from parameter-domain limits and carry no confidence probability. Existing
+benchmark and production fitting contracts remain fixed. See
+`PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md`; cluster results are pending.
+
+M38 now turns verified M37 packets into measured discrepancies and conditional,
+testable feedback drafts, with alternative explanations and stage boundaries.
+It is qualified on four saved controls and performs no new fitting or LLM calls.
+Constructor edit binding and live revision/refit qualification remain pending.
+See `PHASE_C_FITTING_FEEDBACK_DRAFTS.md`.
+
 The opt-in `minimal-evidence-feedback-2` milestone preserves initial requests and
 scientific checks while separating repair records, model errors, advisory decisions
 and completion. Semantic question identities avoid prose-triggered re-questioning;
