@@ -82,7 +82,9 @@ full plan, each target's pick is recovered by running it:
    - A rollout cannot see later rows or another trajectory, whatever the program does. Observed targets after the first row are never sent to the process.
    - The error is the shared evaluator's: per trajectory, the mean over targets of the mean squared error scaled by the training standard deviation, averaged over trajectories.
    - Every roster cell's grid is uniform and the same in training and validation: 1 for Dalla Man, 0.1 for the CSTR and the alien device, 4 for detention. A split on another grid is refused.
-6. **Look-ahead, recorded.** The program's output on the training table is compared with its output when later rows are removed, cutting mid-way through each trajectory and after it. The largest change is recorded, and whether it exceeds rounding. It chooses nothing. How a report treats such a pick is decided before the test data open.
+6. **Look-ahead, recorded.** The program's output on the training table is compared with its output when later rows are removed, cutting mid-way through each trajectory and after it. The largest change is recorded, and whether it exceeds rounding. It chooses nothing.
+   - Decided by the user on 2026-10-15: a pick this check flags is reported as a failure of LLM-SR, because a model cannot use future rows. It counts as a failure whatever its rollout error, and nothing is rerun or reselected.
+   - The first such pick was task 5 of the full run (T2 easy, seed 1). Its dI/dt program begins with `np.gradient(I, edge_order=2)`, a central difference that reads the next row. Removing later rows changed its output by up to 93%. Its validation rollout also failed at the first row, where `np.gradient` needs three rows and the rollout has one, so the task sealed as `rollout_failed`.
 
 Why the coefficients come from running the program, not from reading it: in the
 pilot, filters were often guarded by a branch on a coefficient, such as
