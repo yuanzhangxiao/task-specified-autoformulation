@@ -21,6 +21,7 @@ from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_evidence as evidence_feedback
+from autoformalism.search import construction_evidence_repair as evidence_repair
 from autoformalism.search import construction_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
@@ -489,7 +490,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }
     if repair_requests is None:
         repair_requests = (
@@ -498,7 +499,7 @@ def run(
             in {
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }
             else focused.REPAIR_REQUESTS
             if focused_view
@@ -511,16 +512,19 @@ def run(
             in {
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }
             else 131072
         )
-    evidence_policy = bookkeeping_policy == evidence_feedback.POLICY
+    evidence_policy = bookkeeping_policy in evidence_repair.POLICIES
+    repair_feedback_v2 = bookkeeping_policy == evidence_repair.POLICY
     realization_policy = (
         evidence_policy or bookkeeping_policy == realization_prompts.POLICY
     )
     draft_api = (
-        evidence_feedback
+        evidence_repair
+        if repair_feedback_v2
+        else evidence_feedback
         if evidence_policy
         else realizations
         if realization_policy
@@ -566,7 +570,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }
     budget_stop = None
     from autoformalism.search import construction_prompts as prompts
@@ -588,7 +592,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
@@ -605,7 +609,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -622,7 +626,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -640,7 +644,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -786,7 +790,9 @@ def run(
             payload = compact.compact_payload(payload)
         if focused_view:
             presentation = (
-                evidence_feedback
+                evidence_repair
+                if repair_feedback_v2
+                else evidence_feedback
                 if evidence_policy
                 else realization_prompts
                 if realization_policy
@@ -824,6 +830,11 @@ def run(
                         "compatibility_questions": advisory_state()["pending_questions"]
                         if stage == "repair"
                         else [],
+                        **(
+                            {"compatibility_state": advisory_state()}
+                            if repair_feedback_v2 and stage == "repair"
+                            else {}
+                        ),
                     }
                     if evidence_policy
                     else {}
@@ -841,7 +852,7 @@ def run(
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
-                    evidence_feedback.POLICY,
+                    *evidence_repair.POLICIES,
                 }
                 and stage == "repair"
             ):
@@ -892,7 +903,7 @@ def run(
             if bookkeeping_policy in {
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }:
                 protocol_feedback.controls.validate_patch(patch, brief=brief)
             if improved_bookkeeping or minimal_clarity:
@@ -933,7 +944,26 @@ def run(
             error = str(exc)[:6000]
             if conflicts and "runtime-generated definition" in error:
                 error += ": " + ", ".join(c["process"] for c in conflicts)
+        required_predicates_lost = []
+        if repair_feedback_v2 and accepted and draft != before:
+            checks = [
+                draft_api.assess(
+                    brief,
+                    context,
+                    target_definitions,
+                    value,
+                    graph_contract=graph_contract,
+                    boundary_contract=boundary_contract,
+                )
+                for value in (before, draft)
+            ]
+            required_predicates_lost = evidence_repair.lost_required_predicates(*checks)
         event = {
+            **(
+                {"required_predicates_lost": required_predicates_lost}
+                if repair_feedback_v2
+                else {}
+            ),
             **({"name_conflicts": name_conflicts} if compact_feedback else {}),
             "index": len(events),
             "stage": stage,
@@ -1004,6 +1034,15 @@ def run(
         sealed_write(directory / "events" / f"{len(events):03d}.json", event)
         events.append(event)
         last_edit_result = {
+            **(
+                {
+                    "stage_complete": complete,
+                    "compatibility_decisions": submitted_decisions if accepted else [],
+                    "required_predicates_lost": required_predicates_lost,
+                }
+                if repair_feedback_v2
+                else {}
+            ),
             **({"name_conflicts": name_conflicts} if compact_feedback else {}),
             "status": "accepted" if accepted else "rejected",
             "rejected_reply": None if accepted else raw,
@@ -1115,7 +1154,19 @@ def run(
         topology = realizations.project(draft)
         cache_key = content_hash(topology.model_dump(mode="json"))
         if cache_key not in compatibility_cache:
-            computed = construction_training.compatibility_feedback(topology, evidence)
+            computed = construction_training.compatibility_feedback(
+                topology,
+                evidence,
+                **(
+                    {
+                        "identity_policy": (
+                            construction_training.SEMANTIC_QUESTION_IDENTITY
+                        )
+                    }
+                    if repair_feedback_v2
+                    else {}
+                ),
+            )
             compatibility_cache[cache_key] = computed
         report = compatibility_cache[cache_key]
         questions = report["advisory_questions"]
@@ -1311,7 +1362,7 @@ def run(
             if bookkeeping_policy in {
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }:
                 if attempt + 1 in (5, 10):
                     repair_checkpoints.append(
@@ -1367,6 +1418,15 @@ def run(
                     if stagnant
                     else None
                 )
+                if repair_feedback_v2 and continuation is not None:
+                    continuation["instruction"] = (
+                        "The last reply made no substantive declaration or advisory "
+                        "progress. Follow the repair_work status: record corrections "
+                        "do not require equation changes. Answer pending scientific "
+                        "questions or explicitly finish when ready; use topology edits "
+                        "when scientifically justified. Rewording descriptions does "
+                        "not reset the repetition counter."
+                    )
                 if stagnant >= protocol_feedback.REPEATED_REPAIRS and not (
                     completion_ready(check)
                 ):
@@ -1427,7 +1487,7 @@ def run(
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
-                    evidence_feedback.POLICY,
+                    *evidence_repair.POLICIES,
                 }
                 else {}
             ),
@@ -1437,7 +1497,7 @@ def run(
                 in {
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
-                    evidence_feedback.POLICY,
+                    *evidence_repair.POLICIES,
                 }
                 else {}
             ),

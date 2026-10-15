@@ -44,7 +44,7 @@ def complete_evidence():
     ).model_dump(mode="json")
 
 
-def execute(root, send, evidence=None):
+def execute(root, send, evidence=None, *, policy=core.POLICY):
     client = ConstructionClient(
         settings=StagedModelSettings(maximum_requests=128, maximum_total_tokens=524288),
         directory=root / "calls",
@@ -64,7 +64,7 @@ def execute(root, send, evidence=None):
         "joint_adaptive",
         prompt_family="minimal",
         process_question="dedicated",
-        bookkeeping_policy=core.POLICY,
+        bookkeeping_policy=policy,
         training_evidence=complete_evidence() if evidence is None else evidence,
     )
 

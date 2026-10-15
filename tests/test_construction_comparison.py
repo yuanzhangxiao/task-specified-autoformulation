@@ -182,7 +182,7 @@ def test_comparison_submission_has_no_fit_and_resumes_receipts(
     source_fixture(tmp_path)
     root = tmp_path / "comparison"
     evidence_options = {}
-    if study == "evidence_feedback_confirmation":
+    if study in {"evidence_feedback_confirmation", "evidence_repair_confirmation"}:
         from tests.test_construction_evidence_integration import training_bundle
 
         evidence_path = tmp_path / "training.json"

@@ -12,6 +12,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research import construction_focus_review as review
 from autoformalism.search import construction_evidence as prompts
+from autoformalism.search import construction_evidence_repair as repaired_prompts
 from autoformalism.search.topology_compatibility import EvidenceContract, build_evidence
 from scripts import jetstream_construction_campaign as jetstream
 from tests.test_construction_comparison import source_fixture
@@ -134,24 +135,40 @@ def test_freeze_rejects_wrong_split_roster_context_and_content(tmp_path, corrupt
     assert not (tmp_path / "study/plan.json").exists()
 
 
-def test_jetstream_new_study_default_roster_and_explicit_evidence(tmp_path):
+@pytest.mark.parametrize(
+    "study,policy",
+    [
+        (STUDY, prompts.POLICY),
+        ("evidence_repair_confirmation", repaired_prompts.POLICY),
+    ],
+)
+def test_jetstream_new_study_default_roster_and_explicit_evidence(
+    tmp_path, study, policy
+):
     args = jetstream_fixture(tmp_path)
     path = tmp_path / "training.json"
     training_bundle(args[0], path)
-    plan = jetstream.prepare(*args, study=STUDY, training_evidence=path)
+    plan = jetstream.prepare(*args, study=study, training_evidence=path)
     assert len(plan["tasks"]) == 40
-    assert plan["config"]["bookkeeping_policy"] == prompts.POLICY
+    assert plan["config"]["bookkeeping_policy"] == policy
     jetstream.validate_settings(plan["config"])
     assert jetstream.verify(args[-1]) == plan
-    assert jetstream.prepare(*args, study=STUDY, training_evidence=path) == plan
+    assert jetstream.prepare(*args, study=study, training_evidence=path) == plan
 
 
-def test_mocked_all_cases_reports_preview_and_cached_resume(tmp_path):
+@pytest.mark.parametrize(
+    "study,policy",
+    [
+        (STUDY, prompts.POLICY),
+        ("evidence_repair_confirmation", repaired_prompts.POLICY),
+    ],
+)
+def test_mocked_all_cases_reports_preview_and_cached_resume(tmp_path, study, policy):
     source_fixture(tmp_path)
     source, root = tmp_path / "new", tmp_path / "study"
     path = tmp_path / "training.json"
     training_bundle(source, path)
-    plan = campaign.freeze(source, root, study=STUDY, seeds=[0], training_evidence=path)
+    plan = campaign.freeze(source, root, study=study, seeds=[0], training_evidence=path)
     bodies = []
 
     def send(url, body, timeout):
@@ -224,11 +241,11 @@ def test_mocked_all_cases_reports_preview_and_cached_resume(tmp_path):
         root / "results" / task["task_id"] / "construction/events/000.json"
     )
     projected = review.preview(
-        plan["cells"][task["benchmark_id"]], task, event, bodies[0], prompts.POLICY
+        plan["cells"][task["benchmark_id"]], task, event, bodies[0], policy
     )
     assert projected["after"] == bodies[0]
     path.unlink()
-    summary = review.render(root, tmp_path / "review", prompts.POLICY)
+    summary = review.render(root, tmp_path / "review", policy)
     assert summary["requests"] == count and summary["llm_calls"] == 0
     assert summary["new_schedule"]["maximum_global_repair_calls"] == 10
     text = (tmp_path / "review/PROMPTS.html").read_text()

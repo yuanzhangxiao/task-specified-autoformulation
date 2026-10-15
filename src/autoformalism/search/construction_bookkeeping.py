@@ -17,7 +17,9 @@ from autoformalism.search.construction_deferred import POLICY as DEFERRED_POLICY
 from autoformalism.search.construction_edit_feedback import (
     POLICY as EDIT_FEEDBACK_POLICY,
 )
-from autoformalism.search.construction_evidence import POLICY as EVIDENCE_POLICY
+from autoformalism.search.construction_evidence_repair import (
+    POLICIES as EVIDENCE_POLICIES,
+)
 from autoformalism.search.construction_focus import POLICY as FOCUSED_POLICY
 from autoformalism.search.construction_ownership_feedback import (
     POLICY as OWNERSHIP_FEEDBACK_POLICY,
@@ -47,6 +49,7 @@ Policy = Literal[
     "minimal-protocol-clarity-1",
     "minimal-mechanism-realizations-1",
     "minimal-evidence-feedback-1",
+    "minimal-evidence-feedback-2",
 ]
 POLICY = "current-bookkeeping-1"
 FEEDBACK_POLICY = "current-bookkeeping-2"
@@ -71,7 +74,7 @@ POLICIES = (
     OWNERSHIP_FEEDBACK_POLICY,
     PROTOCOL_POLICY,
     REALIZATION_POLICY,
-    EVIDENCE_POLICY,
+    *EVIDENCE_POLICIES,
 )
 
 EDITING = """Only current_draft.declarations contains editable records. The other
@@ -111,7 +114,7 @@ def validate_policy(policy: str, prompt_family: str | None = None) -> None:
         OWNERSHIP_FEEDBACK_POLICY,
         PROTOCOL_POLICY,
         REALIZATION_POLICY,
-        EVIDENCE_POLICY,
+        *EVIDENCE_POLICIES,
     }:
         if prompt_family != "minimal":
             raise ValueError("minimal clarity requires minimal prompts")

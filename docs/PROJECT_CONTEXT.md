@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `minimal-evidence-feedback-2` milestone preserves initial requests and
+scientific checks while separating repair records, model errors, advisory decisions
+and completion. Semantic question identities avoid prose-triggered re-questioning;
+exact boundary selectors and changed-public-check receipts retain proposer ownership.
+Structural acceptance is not scientific correctness, and failed scientific repair
+is not automatically a scientific regression. See `PHASE_C_EVIDENCE_REPAIR.md`.
+
 M37 adds an opt-in offline training-only fitting-to-interaction evidence adapter.
 It verifies saved numerical stages, preserves all output targets, summarizes
 response shapes and exposes complete laws/consumers for advisory hypotheses.

@@ -1,5 +1,12 @@
 # Phase 1 Pipeline Design
 
+The opt-in `minimal-evidence-feedback-2` milestone preserves initial requests and
+scientific checks while separating repair records, model errors, advisory decisions
+and completion. Semantic question identities avoid prose-triggered re-questioning;
+exact boundary selectors and changed-public-check receipts retain proposer ownership.
+Structural acceptance is not scientific correctness, and failed scientific repair
+is not automatically a scientific regression. See `PHASE_C_EVIDENCE_REPAIR.md`.
+
 M37's `interaction_feedback` adapter projects verified M32/M33 snapshots into a
 bounded training-only request, with all-target response summaries and point-bound
 search/parameter information. Its equation references identify laws, not inferred

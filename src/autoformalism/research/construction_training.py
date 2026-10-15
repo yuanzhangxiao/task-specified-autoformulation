@@ -36,6 +36,8 @@ from autoformalism.staged_topology import content_hash
 
 BUNDLE_PROTOCOL = "construction-training-evidence-bundle-1"
 FEEDBACK_PROTOCOL = "construction-training-advice-1"
+HISTORICAL_QUESTION_IDENTITY = "full-draft-1"
+SEMANTIC_QUESTION_IDENTITY = "diagnostic-semantics-2"
 
 
 def load_evidence(raw: dict) -> TrainingCompatibilityEvidence:
@@ -181,14 +183,87 @@ def initial_highlights(
     return "\n".join(lines)
 
 
+def _diagnostic_topology(draft: Draft, scope: tuple[str, ...]) -> dict:
+    """Project a diagnostic's ancestors without explanatory prose or edit records.
+
+    Keep kinds, signs, conversion text and contribution multiplicity even where
+    the present theorem only needs dependence. Reordering declarations is not a
+    scientific edit. A process's consumers outside this diagnostic's subsystem
+    do not affect its question; its complete declaration remains in provenance.
+    """
+    names = set(scope)
+
+    def ordered(values: list[dict]) -> list[dict]:
+        return sorted(values, key=lambda item: json.dumps(item, sort_keys=True))
+
+    return {
+        "variables": ordered(
+            [
+                {"name": item.name, "definition": item.definition}
+                for item in draft.variables
+                if item.name in names
+            ]
+        ),
+        "equations": ordered(
+            [
+                {
+                    "name": item.name,
+                    "terms": ordered(
+                        [
+                            {
+                                "sources": sorted(term.sources),
+                                "outer_weight_sign": term.outer_weight_sign.value,
+                            }
+                            for term in item.terms
+                        ]
+                    ),
+                }
+                for item in draft.equations
+                if item.name in names
+            ]
+        ),
+        "processes": ordered(
+            [
+                {
+                    "name": item.name,
+                    "depends_on": sorted(item.depends_on),
+                    "kind": item.kind,
+                    "uses": ordered(
+                        [
+                            use.model_dump(mode="json")
+                            for use in item.uses
+                            if use.target in names
+                        ]
+                    ),
+                }
+                for item in draft.processes
+                if item.name in names
+            ]
+        ),
+    }
+
+
 def compatibility_feedback(
-    draft: Draft, evidence: TrainingCompatibilityEvidence
+    draft: Draft,
+    evidence: TrainingCompatibilityEvidence,
+    *,
+    identity_policy: str = HISTORICAL_QUESTION_IDENTITY,
 ) -> dict:
     """Give candidate-specific questions with witnesses and explicit hypotheses.
 
     Retaining a deliberate approximation is an allowed scientific decision. A
     structural acceptance gate must never consume the conditional-conflict count.
+    The historical identity remains the default for exact replay. Opt-in semantic
+    identities preserve an answer across prose or independent-subsystem edits,
+    while retaining the full draft hash separately for artifact provenance.
     """
+    if identity_policy not in {
+        HISTORICAL_QUESTION_IDENTITY,
+        SEMANTIC_QUESTION_IDENTITY,
+    }:
+        raise ValueError(
+            f"unsupported compatibility identity policy: {identity_policy}"
+        )
     report = diagnose(draft, evidence)
     questions = []
     for row in report.diagnostics:
@@ -209,15 +284,24 @@ def compatibility_feedback(
                 "inapplicable hypothesis, or retain an intended approximation."
             ),
         }
-        value["question_id"] = content_hash(
-            {
+        if identity_policy == HISTORICAL_QUESTION_IDENTITY:
+            identity = {
                 "evidence_sha256": report.evidence_sha256,
                 "topology_sha256": report.topology_sha256,
                 "diagnostic": row.model_dump(mode="json"),
             }
-        )[:20]
+        else:
+            semantic_hash = content_hash(_diagnostic_topology(draft, row.scope))
+            value["semantic_topology_sha256"] = semantic_hash
+            identity = {
+                "policy": identity_policy,
+                "evidence_sha256": report.evidence_sha256,
+                "semantic_topology_sha256": semantic_hash,
+                "diagnostic": row.model_dump(mode="json"),
+            }
+        value["question_id"] = content_hash(identity)[:20]
         questions.append(value)
-    return {
+    feedback = {
         "protocol": FEEDBACK_PROTOCOL,
         "evidence_sha256": report.evidence_sha256,
         "topology_sha256": report.topology_sha256,
@@ -226,6 +310,9 @@ def compatibility_feedback(
         "counts": dict(Counter(row.status for row in report.diagnostics)),
         "full_report": report.model_dump(mode="json"),
     }
+    if identity_policy != HISTORICAL_QUESTION_IDENTITY:
+        feedback["question_identity_policy"] = identity_policy
+    return feedback
 
 
 def _recorded_value(item, name: str, index: int, time_symbol: str) -> float:

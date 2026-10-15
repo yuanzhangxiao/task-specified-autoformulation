@@ -40,6 +40,7 @@ from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_evidence as evidence_feedback
+from autoformalism.search import construction_evidence_repair as evidence_repair
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_ledger as ledger
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
@@ -75,6 +76,7 @@ Study = Literal[
     "protocol_clarity_confirmation",
     "mechanism_realization_confirmation",
     "evidence_feedback_confirmation",
+    "evidence_repair_confirmation",
 ]
 STUDIES = (
     "comparison",
@@ -96,6 +98,7 @@ STUDIES = (
     "protocol_clarity_confirmation",
     "mechanism_realization_confirmation",
     "evidence_feedback_confirmation",
+    "evidence_repair_confirmation",
 )
 CHECKLIST_STUDIES = {
     "variable_checklist_confirmation": bookkeeping.CHECKLIST_POLICY,
@@ -111,6 +114,7 @@ CHECKLIST_STUDIES = {
     "protocol_clarity_confirmation": protocol_feedback.POLICY,
     "mechanism_realization_confirmation": realization_prompts.POLICY,
     "evidence_feedback_confirmation": evidence_feedback.POLICY,
+    "evidence_repair_confirmation": evidence_repair.POLICY,
 }
 SHARED_STAGE_STUDIES = (
     "stage_check_confirmation",
@@ -125,6 +129,7 @@ SHARED_STAGE_STUDIES = (
     "protocol_clarity_confirmation",
     "mechanism_realization_confirmation",
     "evidence_feedback_confirmation",
+    "evidence_repair_confirmation",
 )
 BASIN_STUDIES = ("basin_confirmation", "shared_law_comparison")
 BASIN_CASES = tuple(topology_confirmation.phase_c_inputs.basin.BASINS)
@@ -140,6 +145,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
             "evidence_feedback_confirmation",
+            "evidence_repair_confirmation",
         }:
             return (0, 1, 2, 3, 4)
         return (0, 1) if study == "comparison" else (0,)
@@ -154,6 +160,7 @@ def sampling_seeds(study: str, seeds: list[int] | None) -> tuple[int, ...]:
         "protocol_clarity_confirmation",
         "mechanism_realization_confirmation",
         "evidence_feedback_confirmation",
+        "evidence_repair_confirmation",
     }:
         raise ValueError("explicit seeds require focused_prompt_confirmation")
     if (
@@ -189,7 +196,7 @@ class Config(baseline.Config):
         ) and self.bookkeeping_policy not in {
             protocol_feedback.POLICY,
             realization_prompts.POLICY,
-            evidence_feedback.POLICY,
+            *evidence_repair.POLICIES,
         }:
             raise ValueError("extended repair requires the protocol clarity policy")
         if (
@@ -264,7 +271,9 @@ def freeze(
     """Freeze public construction tasks and any explicitly selected saved repairs."""
     if study not in STUDIES:
         raise ValueError("unknown construction study")
-    if (training_evidence is not None) != (study == "evidence_feedback_confirmation"):
+    if (training_evidence is not None) != (
+        study in {"evidence_feedback_confirmation", "evidence_repair_confirmation"}
+    ):
         raise ValueError("evidence feedback requires explicit training evidence only")
     if (
         study
@@ -275,6 +284,7 @@ def freeze(
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
             "evidence_feedback_confirmation",
+            "evidence_repair_confirmation",
         }
         and seeds is None
     ):
@@ -293,6 +303,7 @@ def freeze(
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
             "evidence_feedback_confirmation",
+            "evidence_repair_confirmation",
         }
         or set(serving_environment) != {"platform", "serving_image_sha256"}
         or serving_environment["platform"] != "jetstream2-h100x1-docker"
@@ -348,6 +359,7 @@ def freeze(
                     "protocol_clarity_confirmation",
                     "mechanism_realization_confirmation",
                     "evidence_feedback_confirmation",
+                    "evidence_repair_confirmation",
                 }
                 else {}
             ),
@@ -372,6 +384,7 @@ def freeze(
                     "protocol_clarity_confirmation",
                     "mechanism_realization_confirmation",
                     "evidence_feedback_confirmation",
+                    "evidence_repair_confirmation",
                 }
                 else {}
             ),
@@ -454,6 +467,8 @@ def freeze(
                             if study == "deferred_interaction_confirmation"
                             else "stage_checks"
                             if study == "stage_check_confirmation"
+                            else "evidence_repair"
+                            if study == "evidence_repair_confirmation"
                             else "evidence_feedback"
                             if study == "evidence_feedback_confirmation"
                             else "mechanism_realizations"
@@ -485,6 +500,7 @@ def freeze(
                                 "protocol_clarity_confirmation",
                                 "mechanism_realization_confirmation",
                                 "evidence_feedback_confirmation",
+                                "evidence_repair_confirmation",
                             }
                             else "clarity"
                         ),
@@ -592,6 +608,7 @@ def freeze(
                     "protocol_clarity_confirmation",
                     "mechanism_realization_confirmation",
                     "evidence_feedback_confirmation",
+                    "evidence_repair_confirmation",
                 }
                 else ("all-eight-cases-seed0-full-two-prompt-families-1")
                 if study == "prompt_comparison"
@@ -644,7 +661,7 @@ def verify(root: Path) -> dict:
         else None,
     )
     for name, cell in plan["cells"].items():
-        if config.bookkeeping_policy == evidence_feedback.POLICY:
+        if config.bookkeeping_policy in evidence_repair.POLICIES:
             complete = construction_training.load_evidence(cell["training_evidence"])
             if complete.context != ValidationContext.model_validate(cell["context"]):
                 raise ValueError("complete training evidence context differs")
@@ -822,18 +839,20 @@ def checked_records(
             index == 0
             and starting_draft is None
             and event.get("bookkeeping_policy")
-            in {realization_prompts.POLICY, evidence_feedback.POLICY}
+            in {realization_prompts.POLICY, *evidence_repair.POLICIES}
         ):
             drafts[0] = (
                 evidence_feedback.Draft()
-                if event.get("bookkeeping_policy") == evidence_feedback.POLICY
+                if event.get("bookkeeping_policy") in evidence_repair.POLICIES
                 else realizations.Draft()
             ).model_dump(mode="json")
         displayed = json.loads(record["request"]["body"]["messages"][1]["content"])
         displayed_matches = (
             displayed.get("model_view")
             == (
-                evidence_feedback
+                evidence_repair
+                if event.get("bookkeeping_policy") == evidence_repair.POLICY
+                else evidence_feedback
                 if event.get("bookkeeping_policy") == evidence_feedback.POLICY
                 else realization_prompts
                 if event.get("bookkeeping_policy") == realization_prompts.POLICY
@@ -861,7 +880,7 @@ def checked_records(
                 ownership_feedback.POLICY,
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }
             else displayed.get("current_draft", {}).get("declarations")
             == event["before"]
@@ -875,7 +894,7 @@ def checked_records(
             or event["request_hash"] in used
         ):
             raise ValueError("construction transaction chain differs")
-        if event.get("bookkeeping_policy") == evidence_feedback.POLICY:
+        if event.get("bookkeeping_policy") in evidence_repair.POLICIES:
             questions = displayed.get("compatibility_questions", [])
             if event.get("compatibility_questions") != questions:
                 raise ValueError(
@@ -973,7 +992,7 @@ def propose(root: Path, plan: dict, task: dict, base_url: str, **kwargs) -> dict
                         "training_evidence": cell["training_evidence"],
                         "boundary_contract": cell["boundary_contract"],
                     }
-                    if config.bookkeeping_policy == evidence_feedback.POLICY
+                    if config.bookkeeping_policy in evidence_repair.POLICIES
                     else {}
                 ),
             )
@@ -1240,7 +1259,7 @@ def report(root: Path, plan: dict) -> dict:
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
-                    evidence_feedback.POLICY,
+                    *evidence_repair.POLICIES,
                 }
                 else {}
             ),
@@ -1290,7 +1309,7 @@ def report(root: Path, plan: dict) -> dict:
             "repair_calls": sum(e["stage"] == "repair" for e in events),
             "scientific_adequacy": "requires independent equation inspection",
         }
-        if plan["config"].get("bookkeeping_policy") == evidence_feedback.POLICY:
+        if plan["config"].get("bookkeeping_policy") in evidence_repair.POLICIES:
             advice = (value or {}).get("assessment", {}).get("training_compatibility")
             row["training_compatibility"] = (
                 None
@@ -1421,7 +1440,7 @@ def report(root: Path, plan: dict) -> dict:
                 ownership_feedback.POLICY,
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }
             else {}
         ),
@@ -1437,7 +1456,7 @@ def report(root: Path, plan: dict) -> dict:
         "scientific_adequacy": "not_assessed",
         "automatic_followup": False,
     }
-    if plan["config"].get("bookkeeping_policy") == evidence_feedback.POLICY:
+    if plan["config"].get("bookkeeping_policy") in evidence_repair.POLICIES:
         advice = [
             r["training_compatibility"] for r in rows if r.get("training_compatibility")
         ]
@@ -1465,7 +1484,7 @@ def report(root: Path, plan: dict) -> dict:
                 "Structural completion does not imply all advice was answered; "
                 "see training_compatibility in summary.json."
             ]
-            if plan["config"].get("bookkeeping_policy") == evidence_feedback.POLICY
+            if plan["config"].get("bookkeeping_policy") in evidence_repair.POLICIES
             else []
         ),
         "",
@@ -1495,6 +1514,7 @@ def report(root: Path, plan: dict) -> dict:
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
             "evidence_feedback_confirmation",
+            "evidence_repair_confirmation",
         }
         else "Eight fresh minimal cases, Full/seed 0, with matching-driver questions "
         "deferred to interaction and visible requirement status. Existing structural "

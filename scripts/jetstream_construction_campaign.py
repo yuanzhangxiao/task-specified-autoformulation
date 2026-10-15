@@ -38,6 +38,7 @@ def operation_identity() -> str:
         "scripts/jetstream/run_ownership_feedback_construction.sh",
         "scripts/jetstream/run_protocol_clarity_construction.sh",
         "scripts/jetstream/run_evidence_feedback_construction.sh",
+        "scripts/jetstream/run_evidence_repair_construction.sh",
     )
     return content_hash(
         {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest() for name in names}
@@ -126,6 +127,7 @@ def validate_settings(config: dict) -> None:
         "minimal-protocol-clarity-1",
         "minimal-mechanism-realizations-1",
         "minimal-evidence-feedback-1",
+        "minimal-evidence-feedback-2",
     }:
         expected.update(maximum_requests=133, maximum_total_tokens=655360)
         if config.get("repair_requests") != 10 or config.get("repair_tokens") != 262144:
@@ -158,6 +160,7 @@ def prepare(
         "protocol_clarity_confirmation",
         "mechanism_realization_confirmation",
         "evidence_feedback_confirmation",
+        "evidence_repair_confirmation",
     }:
         raise ValueError("unsupported Jetstream construction study")
     selected = list(campaign.sampling_seeds(study, seeds))
@@ -216,6 +219,7 @@ def verify(root: Path) -> dict:
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
             "evidence_feedback_confirmation",
+            "evidence_repair_confirmation",
         }
         or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
@@ -303,6 +307,7 @@ def main() -> None:
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
             "evidence_feedback_confirmation",
+            "evidence_repair_confirmation",
         ),
         default="focused_prompt_confirmation",
     )

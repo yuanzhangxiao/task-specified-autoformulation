@@ -12,6 +12,7 @@ from autoformalism.search import (
     construction_decisions,
     construction_edit_feedback,
     construction_evidence,
+    construction_evidence_repair,
     construction_focus,
     construction_ownership_feedback,
     construction_protocol,
@@ -38,6 +39,7 @@ def main() -> None:
             construction_protocol.POLICY,
             construction_realizations.POLICY,
             construction_evidence.POLICY,
+            construction_evidence_repair.POLICY,
         ),
         default=construction_focus.POLICY,
     )

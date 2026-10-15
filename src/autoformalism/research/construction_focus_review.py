@@ -19,6 +19,7 @@ from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
 from autoformalism.search import construction_evidence as evidence_feedback
+from autoformalism.search import construction_evidence_repair as evidence_repair
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
@@ -49,11 +50,13 @@ def preview(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }:
         raise ValueError("unsupported preview policy")
     presentation = (
-        evidence_feedback
+        evidence_repair
+        if policy == evidence_repair.POLICY
+        else evidence_feedback
         if policy == evidence_feedback.POLICY
         else realization_prompts
         if policy == realization_prompts.POLICY
@@ -81,7 +84,7 @@ def preview(
     ):
         before_draft = realizations.from_legacy(before_draft)
     extra = {}
-    if policy == evidence_feedback.POLICY:
+    if policy in evidence_repair.POLICIES:
         if "training_evidence" not in cell or "boundary_contract" not in cell:
             raise ValueError(
                 "evidence feedback preview requires complete training evidence"
@@ -92,7 +95,17 @@ def preview(
             cell["training_evidence"]
         )
         advice = campaign.construction_training.compatibility_feedback(
-            evidence_feedback.project(before_draft), complete
+            evidence_feedback.project(before_draft),
+            complete,
+            **(
+                {
+                    "identity_policy": (
+                        campaign.construction_training.SEMANTIC_QUESTION_IDENTITY
+                    )
+                }
+                if policy == evidence_repair.POLICY
+                else {}
+            ),
         )
         extra = {
             "boundary_contract": evidence_feedback.BoundaryContract.model_validate(
@@ -133,7 +146,7 @@ def preview(
             ownership_feedback.POLICY,
             protocol_feedback.POLICY,
             realization_prompts.POLICY,
-            evidence_feedback.POLICY,
+            *evidence_repair.POLICIES,
         }
         and event["stage"] == "repair"
         and event.get("bookkeeping_policy") != policy
@@ -143,7 +156,7 @@ def preview(
         if policy in {
             protocol_feedback.POLICY,
             realization_prompts.POLICY,
-            evidence_feedback.POLICY,
+            *evidence_repair.POLICIES,
         }:
             budget_context = {
                 **budget_context,
@@ -166,7 +179,7 @@ def preview(
         {"role": "system", "content": presentation.SYSTEM},
         {"role": "user", "content": json.dumps(new, sort_keys=True)},
     ]
-    if policy in {realization_prompts.POLICY, evidence_feedback.POLICY}:
+    if policy in {realization_prompts.POLICY, *evidence_repair.POLICIES}:
         schema = presentation.response_model(event["stage"])
         proposed["response_format"]["json_schema"] = {
             "name": schema.__name__,
@@ -197,7 +210,7 @@ def inspect(
         raise ValueError("requires a public-only construction inspection")
     cells = plan["cells"]
     evidence_identity = plan.get("training_evidence_bundle_sha256")
-    if policy == evidence_feedback.POLICY:
+    if policy in evidence_repair.POLICIES:
         if training_evidence is not None:
             bundle = campaign.load_training_bundle(training_evidence, cells)
             evidence_identity = bundle["artifact_sha256"]
@@ -306,7 +319,7 @@ def inspect(
         "source_identity": plan["artifact_sha256"],
         **(
             {"training_evidence_bundle_sha256": evidence_identity}
-            if policy == evidence_feedback.POLICY
+            if policy in evidence_repair.POLICIES
             else {}
         ),
         "requests": len(requests),
@@ -317,7 +330,7 @@ def inspect(
         "saved_system_and_user_bytes": message_bytes["before"],
         "revised_system_and_user_bytes": message_bytes["after"],
         "size_unit": "UTF-8 bytes, not model tokens; new realization schema"
-        if policy in {realization_prompts.POLICY, evidence_feedback.POLICY}
+        if policy in {realization_prompts.POLICY, *evidence_repair.POLICIES}
         else "UTF-8 bytes, not model tokens; output schema unchanged",
         "scope": "Counterfactual requests on each actual saved predecessor. "
         "Historical replies are not replies to these prompts. "
@@ -329,7 +342,7 @@ def inspect(
             in {
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }
             else focused.REPAIR_REQUESTS,
             "stop_after_identical_no_progress_repairs": (
@@ -338,7 +351,7 @@ def inspect(
                 in {
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
-                    evidence_feedback.POLICY,
+                    *evidence_repair.POLICIES,
                 }
                 else 2
             ),
@@ -354,7 +367,7 @@ def inspect(
                 in {
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
-                    evidence_feedback.POLICY,
+                    *evidence_repair.POLICIES,
                 }
                 else {}
             ),
@@ -402,7 +415,7 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
-        evidence_feedback.POLICY,
+        *evidence_repair.POLICIES,
     }
     body = (
         '<p><a href="PROMPTS.html">All stages and requests</a></p>'
@@ -441,7 +454,7 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
                 in {
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
-                    evidence_feedback.POLICY,
+                    *evidence_repair.POLICIES,
                 }
                 else "<h3>Memory-assignment choices</h3>"
             )
@@ -491,8 +504,8 @@ def render(
     training_evidence: Path | None = None,
 ) -> dict:
     """Write a fresh escaped HTML review; never overwrite a saved campaign."""
-    if policy == evidence_feedback.POLICY:
-        return _render_evidence(source, output, training_evidence)
+    if policy in evidence_repair.POLICIES:
+        return _render_evidence(source, output, training_evidence, policy=policy)
     if training_evidence is not None:
         raise ValueError("training evidence preview requires the evidence policy")
     if policy == realization_prompts.POLICY:
@@ -508,7 +521,9 @@ def render(
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
     presentation = (
-        evidence_feedback
+        evidence_repair
+        if policy == evidence_repair.POLICY
+        else evidence_feedback
         if policy == evidence_feedback.POLICY
         else realization_prompts
         if policy == realization_prompts.POLICY
@@ -541,7 +556,7 @@ def render(
             ownership_feedback.POLICY,
             protocol_feedback.POLICY,
             realization_prompts.POLICY,
-            evidence_feedback.POLICY,
+            *evidence_repair.POLICIES,
         }:
             for key, title in (
                 ("memory_assignment_decisions", "Optional memory-assignment decision"),
@@ -571,7 +586,7 @@ def render(
                 ownership_feedback.POLICY,
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
-                evidence_feedback.POLICY,
+                *evidence_repair.POLICIES,
             }
             else ()
         )
@@ -779,17 +794,22 @@ def render(
 
 
 def _render_evidence(
-    source: Path, output: Path, training_evidence: Path | None
+    source: Path,
+    output: Path,
+    training_evidence: Path | None,
+    *,
+    policy: str = evidence_feedback.POLICY,
 ) -> dict:
     """Render prospective questions; saved replies are not their answers."""
+    presentation = (
+        evidence_repair if policy == evidence_repair.POLICY else evidence_feedback
+    )
     source, output = source.resolve(), output.resolve()
     if output == source or source in output.parents:
         raise ValueError("review must be outside the historical campaign")
     if output.exists() and any(output.iterdir()):
         raise ValueError("review output must be empty")
-    summary, rows = inspect(
-        source, evidence_feedback.POLICY, training_evidence=training_evidence
-    )
+    summary, rows = inspect(source, policy, training_evidence=training_evidence)
     summary["prospective_preview"] = (
         "Historical replies are not answers to the new compatibility questions. "
         "Only explicit retained realization/memory declarations are projected; "
@@ -824,6 +844,7 @@ def _render_evidence(
             )
             + "<h2>Feedback and separate status checks</h2>"
             + _block(packet["feedback"])
+            + (_block(packet["repair_work"]) if "repair_work" in packet else "")
             + _block(packet["requirements_checklist"])
             + "<h2>Previous edit receipt</h2>"
             + _block(packet["previous_edit"])
@@ -862,10 +883,10 @@ def _render_evidence(
         "to an advisory question does not establish scientific validity. "
         "The public brief and historical records are retained.</p>"
         + "<h2>System instruction</h2>"
-        + _block(evidence_feedback.SYSTEM)
+        + _block(presentation.SYSTEM)
         + "<h2>Stage instructions</h2>"
         + "".join(
-            f"<h3>{title}</h3>" + _block(evidence_feedback.stage_text(stage))
+            f"<h3>{title}</h3>" + _block(presentation.stage_text(stage))
             for stage, title in stages
         )
         + "<h2>Editing contract</h2>"
@@ -875,7 +896,7 @@ def _render_evidence(
         + "<h2>New response schemas</h2>"
         + "".join(
             f"<h3>{title}</h3>"
-            + _block(evidence_feedback.response_model(stage).model_json_schema())
+            + _block(presentation.response_model(stage).model_json_schema())
             for stage, title in stages
         )
         + "<h2>Bounded repair and preview scope</h2>"
