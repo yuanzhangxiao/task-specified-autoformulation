@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Freeze, preview, run and report a matched repair of saved topology drafts."""
+
+from __future__ import annotations
+
+import argparse
+import difflib
+import html
+import json
+import signal
+import time
+from pathlib import Path
+
+from autoformalism.fitting.public_fitting import _lock
+from autoformalism.llm.staged_topology import DeferredCall
+from autoformalism.rebuttal.prefit_replay import sealed_write
+from autoformalism.research import saved_topology_repair as campaign
+from autoformalism.research.actionable_repair_status import build_state
+from autoformalism.search import construction_actionable_repair as actionable
+from autoformalism.search import construction_evidence_repair as control
+from scripts.jetstream_construction_campaign import compatibility, live_server
+from scripts.jetstream_construction_probe import BASE_URL
+
+
+def preview(root: Path, output: Path) -> dict:
+    """Render the exact first request in each arm, including schema and feedback."""
+    plan = campaign.verify(root)
+    output.mkdir(parents=True, exist_ok=True)
+    rows, requests_by_source = [], {}
+    for task in plan["tasks"]:
+        start = plan["starts"][task["source_task"]]
+        problem = campaign.Problem(plan["cells"][task["benchmark_id"]], start["task"])
+        api = actionable if task["arm"] == "actionable" else control
+        state = (
+            build_state(
+                start["diagnostics"],
+                start["diagnostics"],
+                start["assessment"]["eligible"],
+            )
+            if api is actionable
+            else campaign.control_state(start["diagnostics"], {})
+        )
+        packet = campaign.make_packet(
+            api,
+            problem,
+            control.Draft.model_validate(start["draft"]),
+            None,
+            state,
+            None,
+            0,
+            0,
+        )
+        request = {
+            "system": api.SYSTEM,
+            "user": packet,
+            "response_schema": api.response_model("repair").model_json_schema(),
+        }
+        name = task["task_id"]
+        requests_by_source.setdefault(task["source_task"], {})[task["arm"]] = request
+        (output / f"{name}.json").write_text(json.dumps(request, indent=2) + "\n")
+        parts = [
+            f"<h1>{html.escape(name)}</h1>",
+            "<p>Actual first request from a frozen saved draft. "
+            "No generation performed.</p>",
+        ]
+        for label, value in request.items():
+            text = value if isinstance(value, str) else json.dumps(value, indent=2)
+            parts.append(f"<h2>{html.escape(label)}</h2><pre>{html.escape(text)}</pre>")
+        (output / f"{name}.html").write_text(
+            '<!doctype html><meta charset="utf-8"><style>'
+            "body{font:16px/1.5 system-ui;max-width:1100px;margin:40px auto}"
+            "pre{white-space:pre-wrap;overflow-wrap:anywhere;"
+            "background:#f1f5f9;padding:18px}</style>" + "\n".join(parts)
+        )
+        rows.append(f'<li><a href="{name}.html">{name}</a></li>')
+    comparisons = []
+    for number, (source, arms) in enumerate(requests_by_source.items()):
+        filename = f"changes-{number:02d}.html"
+        marked = difflib.HtmlDiff(wrapcolumn=100).make_file(
+            json.dumps(arms["control"], indent=2).splitlines(),
+            json.dumps(arms["actionable"], indent=2).splitlines(),
+            fromdesc="Existing feedback",
+            todesc="Actionable repair",
+            context=True,
+            numlines=3,
+        )
+        (output / filename).write_text(marked)
+        comparisons.append(f'<li><a href="{filename}">{html.escape(source)}</a></li>')
+    (output / "PROMPTS.html").write_text(
+        '<!doctype html><meta charset="utf-8"><title>Saved repair prompts</title>'
+        "<style>body{font:16px/1.6 system-ui;max-width:1000px;"
+        "margin:40px auto}</style><h1>Saved topology repair: paired prompts</h1>"
+        "<p>The control retains the old advisory completion rule. The actionable "
+        "arm requests concrete corrections and treats unsupported assumption "
+        "challenges as unresolved. Both begin with identical saved equations "
+        "and evidence.</p><p><strong>Changed:</strong> clear conditional conflicts "
+        "require edits; unsupported challenges remain unresolved; boundary "
+        "references use exact handles. Subsequent repeated replies receive an "
+        "explicit reminder about the unchanged condition. Initial construction "
+        "prompts are unchanged.</p><h2>Marked changes</h2><ul>"
+        + "\n".join(comparisons)
+        + "</ul><h2>Complete first requests</h2><ul>"
+        + "\n".join(rows)
+        + "</ul>"
+    )
+    return {
+        "requests_previewed": len(rows),
+        "llm_calls": 0,
+        "path": str(output / "PROMPTS.html"),
+    }
+
+
+def run(inputs: Path, root: Path, work: Path, requests: Path) -> dict:
+    """Reuse only the verified local server, with checkpoints and bounded resume."""
+    plan = campaign.verify(inputs)
+    provenance = compatibility(work, requests)
+    live_server()
+    sealed_write(
+        root / "plan.json", {k: v for k, v in plan.items() if k != "artifact_sha256"}
+    )
+    sealed_write(
+        root / "execution.json",
+        {
+            "protocol": campaign.PROTOCOL,
+            "plan_sha256": plan["artifact_sha256"],
+            "source_identity": plan["source_identity"],
+            "compatibility": provenance,
+            "base_url": BASE_URL,
+            "test_data_opened": False,
+            "automatic_followup": False,
+        },
+    )
+    draining = False
+    deadline = time.monotonic() + 10800
+
+    def stop(signum, frame):
+        nonlocal draining
+        draining = True
+
+    handlers = {
+        sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)
+    }
+    try:
+        for task in plan["tasks"]:
+            try:
+                campaign.run_episode(
+                    root,
+                    plan,
+                    task,
+                    base_url=BASE_URL,
+                    can_start=lambda: not draining
+                    and time.monotonic() + 200 < deadline,
+                )
+            except DeferredCall:
+                break
+            campaign.report(root, plan)
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+        summary = campaign.report(root, plan)
+    return summary
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("freeze", "preview", "run", "report"))
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--inputs", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--work", type=Path)
+    parser.add_argument("--requests", type=Path)
+    args = parser.parse_args()
+    with _lock(args.root / "campaign-lock"):
+        if args.command == "freeze":
+            if args.source is None:
+                parser.error("freeze requires --source")
+            plan = campaign.freeze(args.source, args.root)
+            value = {
+                "identity": plan["artifact_sha256"],
+                "saved_drafts": len(plan["starts"]),
+                "repair_episodes": len(plan["tasks"]),
+                "llm_calls": 0,
+            }
+        elif args.command == "preview":
+            if args.output is None:
+                parser.error("preview requires --output")
+            value = preview(args.root, args.output)
+        elif args.command == "run":
+            if any(x is None for x in (args.inputs, args.work, args.requests)):
+                parser.error("run requires --inputs, --work and --requests")
+            value = run(args.inputs, args.root, args.work, args.requests)
+        else:
+            value = campaign.report(args.root, campaign.verify(args.root))
+    print(json.dumps(value, indent=2))
+
+
+if __name__ == "__main__":
+    main()
