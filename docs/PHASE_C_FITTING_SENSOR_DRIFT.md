@@ -2,8 +2,8 @@
 
 Implemented as an opt-in qualification after
 [M35 robust measurement fitting](PHASE_C_FITTING_ROBUST_MEASUREMENT.md).
-The Delta experiment is prepared for user submission; no remote results are
-claimed. Benchmark data, finalized task prompts and production defaults stay
+The 144-attempt Delta qualification completed in the October 15 review.
+Benchmark data, finalized task prompts and production defaults stay
 unchanged. This milestone implements P4 of the
 [noise-aware design](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md), not the full
 specification/data diagnosis study.
@@ -125,6 +125,57 @@ independent endpoint prediction/objective checks without a global optimum claim.
 No held-out observations select endpoints. Diagnostics do not alter fit retention.
 Failed, missing and interrupted outcomes remain visible in all denominators and
 cost summaries.
+
+## Completed Delta qualification, 15 October 2026
+
+Review archive `review-20261015-064857.tar.gz`, plan
+`ce527d5817b7a8a80abcb57afa71a9528e3a002b80ea74aa798e524a5405c5b3`,
+was verified and its report reproduced locally. All 144 fits completed, all
+144 independent rollout/objective checks and derivative checks passed, and all
+120 applicable affine optimum checks passed. All 72 direct/profiled objective
+pairs agreed; the maximum absolute gap was `5.03e-12`. These are checks of the
+declared optimization problem, not 144 demonstrations of physical recovery.
+
+The following four rows are selected synthetic acquisition cases, not four
+benchmarks. Each uses `x' = g*u-k*x` and drifting noisy readings. The last two
+columns are median evaluator-only physical-trajectory RMSE over three seeds,
+using the Gaussian loss and profiled strategy. They are not training NMSE or
+scores available to the fitter.
+
+| Case | Unknown physical quantities | Ignore drift | Allow shared drift |
+| --- | --- | ---: | ---: |
+| `drift_exact` | Gain; decay and prepared initial value known | 0.1891 | 0.00100 |
+| `drift_shared_initial` | Gain and one shared initial value; decay known | 0.1956 | 0.01206 |
+| `drift_nonlinear_decay` | Gain and decay; initial value known | 0.1939 | 0.02036 |
+| `resolved_varied_input` | Gain with zero decay; differing known constant inputs | 0.1947 | 0.00348 |
+
+The other two cases were the clean negative control and the deliberately
+confounded constant-input control. All twelve shared-drift fits in the latter
+had joint rank one and zero physical information after nuisance projection.
+Ten received the summary label `local_rank_deficient`; two were labeled
+`boundary_limited` and also had rank deficiency. Reports should preserve both
+facts, rather than interpreting an exclusive headline label as their absence.
+All twelve corresponding varied-input fits had joint rank two and conditional
+physical rank one. Input variation resolved this particular ambiguity; it does
+not resolve arbitrary physical/calibration confounding.
+
+Ignoring drift can yield a locally full-rank fit to the wrong observation model.
+Huber alone did not remove the systematic trend. Conversely, adding a drift
+coordinate can slightly overfit a clean acquisition, and even a full-rank
+nonlinear fit retained appreciable coefficient error. No automatic observation
+hypothesis selection, fault diagnosis or confidence percentage is qualified.
+Three Gaussian profiles in the confounded control used the declared joint
+fallback, so the successful profiled arm is a portfolio result.
+
+Summed fitting CPU time was 195.14 seconds: 121.00 direct and 74.14 profiled.
+Separately reported diagnostics used 52.89 CPU seconds, an additional 27.1%,
+and 1,200 fully accounted calls. Summed fitting wall time was 599.56 seconds;
+diagnostic wall time was 193.25 seconds, an additional 32.2%. These sums exclude
+queue time and are not campaign elapsed time. No LLM or test data was used.
+
+The immediate follow-up is the current-paper
+[interaction feedback integration](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
+Near-confounding and statistical uncertainty calibration remain future work.
 
 ## Local verification
 

@@ -1,14 +1,15 @@
 # Vega handoff: fallible scientific specifications and imperfect data
 
-Prepared 6 October 2026; updated 13 October 2026 with M32 evidence, the submitted
-M33 qualification, and three preparation designs for noisy and erroneous data.
+Prepared 6 October 2026; updated 15 October 2026 with completed M34–M36
+measurement qualifications and the priority of connecting fitting evidence to
+the current paper's interaction/function stage.
 Repository: `task-specified-autoformulation`. The existing filename and work
 directory are retained so earlier handoffs remain discoverable.
 
 Vega will develop the research design for an Autoformalism extension that can
 assess fallible scientific assumptions together with imperfect observations and
-input records. Codex continues the Phase C
-construction runtime; Orion continues fitting and benchmark qualification. This
+input records. Astra leads the Phase C construction workstream; this fitting
+workstream continues numerical qualification and the feedback interface. This
 handoff assigns a bounded first milestone. It does not start an agent, a campaign,
 or a change to the production method.
 
@@ -99,10 +100,40 @@ constructed models are unchanged. See the
 of SVD-derived evidence and a separately budgeted CSTR diagnostic supplement.
 It preserves sealed Jacobians and actual perturbation plans, distinguishing
 numerical/subspace equivalence from exact artifact identity. The user has
-submitted its qualification; remote results remain pending. Neither local rank
-nor the stronger fitting backend establishes correctness under an uncertain
-observation model. Noise-aware calibration, robust fitting and data-fault
-attribution remain unqualified.
+submitted its qualification; its separate remote closeout is not established by
+the M36 archive. Neither local rank nor the stronger fitting backend establishes
+correctness under an uncertain observation model.
+
+M34–M36 now qualify bounded measurement extensions on isolated synthetic
+controls. They prepare the future research topic; they do not change Phase C
+benchmark observations or silently introduce sensor corrections into current
+model discovery.
+
+| Milestone | Completed evidence | Remaining boundary |
+| --- | --- | --- |
+| [M34: known-noise measurement fitting](PHASE_C_FITTING_MEASUREMENT.md) | 36/36 numerical replays, 30/30 applicable affine optimum checks, 18/18 direct/profiled objective agreements; explicit exact or shared uncertain initials | Fixed known diagonal noise; multi-output profiling remains unqualified and uses joint fallback |
+| [M35: fixed Huber loss](PHASE_C_FITTING_ROBUST_MEASUREMENT.md) | 96/96 numerical replays, 72/72 applicable affine optimum checks, 48/48 paired agreements; lower clean-trajectory error in all nine contaminated case/seed pairs | Robust weights are influence controls, not corruption labels; no calibrated robust confidence |
+| [M36: shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md) | 144/144 independent rollout/objective and derivative checks, 120/120 applicable affine optimum checks, 72/72 paired agreements; exact ambiguity and resolving-input controls | Small known equations; observation-hypothesis selection, broad fault attribution and statistical coverage are unqualified |
+
+In M36, `y(t)=x(t)+b*(t-t_ref)+epsilon(t)`: drift changes a sensor reading, not
+the physical ODE. With `x'=g*u`, known initial state and common constant input
+`u0`, the data constrain only `g*u0+b`. The full joint diagnostic detects this
+ambiguity; optimizing more accurately cannot separate the two. Differing known
+input levels across runs resolve this example. This result does not resolve
+the physical-gain/sensor-gain product ambiguity described below.
+
+All 72 no-drift fits had locally full-rank information, including fits to drifting
+readings. Thus rank is conditional on the assumed equations and observation
+contract, not a truth certificate. The drift-aware nonlinear controls also
+retained coefficient error despite full rank. Numerical reliability, local
+parameter information, practical precision and scientific correctness must be
+separate outputs. Preserve simultaneous flags such as rank deficiency and an
+active parameter bound, rather than hiding one behind a headline status.
+
+M36's separate diagnostics cost 52.89 CPU seconds against 195.14 fitting CPU
+seconds (27.1% additional), with all 1,200 calls accounted. The next research
+design should include such overhead and qualify practical uncertainty on noisy,
+near-confounded cases before offering a numerical confidence level.
 
 Earlier input-pulse and trajectory defects also show why an apparent scientific
 contradiction may originate in data generation or an execution interface.
@@ -302,40 +333,52 @@ SD for compliance, with declared denominators and equal-case aggregation.
 
 ## Phase C preparation while construction remains at topology
 
-M31/M32 already supply reusable candidate-bound diagnostics before fresh
-function-stage candidates exist. The broader research scope changes the evidence
-we should preserve; it does not redirect Phase C into an unrestricted noisy-data
-discovery project. Vega's first milestone remains a read-only design assignment.
+The heading is retained for existing links. Construction is approaching the
+interaction/function stage. **The immediate priority is now current-paper
+integration**, rather than another sensor-error experiment. M1–M30 provide the
+fitting portfolio; M31–M33 provide candidate-bound diagnostic infrastructure;
+M34–M36 add bounded measurement qualifications useful for future work. None of
+these establish reliable fitting or diagnosis for every newly proposed equation.
 
-**Immediate fitting work:** review the submitted
-[M33 qualification](PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md) when results arrive.
-Preserve completed evaluations, failed attempts and exact retained models.
-Qualify fresh construction requests when executable functions and observation
-maps exist.
+The [interaction feedback plan](PHASE_C_INTERACTION_FITTING_FEEDBACK.md) specifies
+the next bounded step: connect an executable candidate to the qualified fitter,
+then expose compact training-response mismatches, numerical/search status and
+conditional parameter information to a function proposer. A revision must state
+a testable hypothesis and an expected observable improvement. Preserve the
+incumbent, refit the child, and verify its complete rollout independently.
+Changes to source sets or latent inventory return to topology explicitly.
 
-**The three preparation designs are now recorded:**
+Existing topology evidence, historical response-window feedback and M31/M32
+packets are distinct interfaces. They are not yet connected for current
+constructions. In particular, the historical generic feedback route includes
+validation metrics; the new connection must explicitly enforce training-only
+disclosure. Validation is a separate frozen evaluator role and test data stay
+sealed. This is an interface qualification plan, not a completed live experiment.
+
+The public specification and measurement/input contract remain fixed in this
+current-paper loop. We do not add sensor drift, choose a new loss, relabel samples
+or relax scientific claims merely because a candidate fits poorly. The reusable
+lesson from M34–M36 is to declare assumptions and preserve ambiguity. Revision
+of those assumptions belongs to Vega's future study.
+
+**The three preparation designs now have different implementation status:**
 
 | Design | Concrete deliverable and boundary |
 | --- | --- |
-| [Measurement evidence contract](PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md) | Typed raw-data, units, input, initial-observation and uncertainty provenance; trace each residual to its reading; preserve historical request identities. |
-| [Noise-aware fitting](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md) | Fixed known-sigma Gaussian objective, eligible uncertain initials, weighted affine profiling, then separately qualified robust/nuisance extensions. Numerical scales are not measurement uncertainty. |
-| [Controlled diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md) | A finite basin catalog with two claim packets and four observation conditions; incorrect constructions, mixed causes, exact ambiguity and computational failure controls; staged budgets and locked evaluation. |
+| [Measurement evidence contract](PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md) | A bounded raw-reading, calibration, masking and preparation subset is implemented in M34; the broader provenance design remains a roadmap. |
+| [Noise-aware fitting](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md) | P1/P2 known-sigma objectives and weighted profiling, P3 fixed Huber, and P4 bounded shared drift are qualified by M34–M36. No general uncertainty calibration or noisy-input inference. |
+| [Controlled diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md) | Still a design: finite basin catalog, competing claim/data hypotheses, mixed causes and ambiguity controls. It has not been launched by completing M36. |
 
-These are implementation designs, not implemented fitting capabilities or new
-results. The key initial-value correction is conceptual: a noisy first target
-reading cannot also be treated as an exact initial state. Start with known
-prepared initials; qualify a shared uncertain preparation only when the public
-protocol justifies sharing. Do not introduce per-trajectory initial inference or
-use held-out observations retrospectively.
+The initial-value rule remains essential: a noisy first target reading cannot
+also be treated as an exact initial state. M34–M36 qualify prepared initials and
+explicitly shared unknown preparations, not arbitrary trajectory-specific initial
+inference. Do not use held-out observations retrospectively.
 
-The recommended next coded milestone is P1/P2 in the fitting design: opt-in
-measurement/objective records, fixed positive diagonal sigma, and consistent
-weighting in joint rollout and certified affine profiling. Keep existing clean
-interfaces unchanged. Robust fitting, drift hypotheses and the full study follow
-their own qualification gates; no new campaign is launched by these documents.
-Vega can reuse and critique these designs rather than reconstructing the fitting
-interfaces. Novelty analysis and broader scientific action selection remain part
-of Vega's research-design assignment.
+Vega can reuse the completed interfaces and controls rather than reconstructing
+them. Novelty analysis, practical uncertainty calibration, competing claim/data
+explanations and scientific action selection remain future research. Near-
+confounding experiments are deferred while the current interaction connection
+is qualified. No new numerical campaign or agent is launched by this handoff.
 
 **Design now, add incrementally in separately reviewed milestones:** extend the
 evidence contract with the following proposed fields. These are not all
@@ -469,6 +512,10 @@ Read `AGENTS.md`, `docs/PHASE_C_START_HERE.md`, relevant parts of
 - `docs/PHASE_C_FITTING_STAGED_FEEDBACK.md`
 - `docs/PHASE_C_FITTING_M32_RESULTS_2026-10-13.md`
 - `docs/PHASE_C_FITTING_DIAGNOSTIC_SUPPLEMENT.md`
+- `docs/PHASE_C_FITTING_MEASUREMENT.md`
+- `docs/PHASE_C_FITTING_ROBUST_MEASUREMENT.md`
+- `docs/PHASE_C_FITTING_SENSOR_DRIFT.md`
+- `docs/PHASE_C_INTERACTION_FITTING_FEEDBACK.md`
 - `docs/PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md`
 - `docs/PHASE_C_NOISE_AWARE_FITTING_DESIGN.md`
 - `docs/PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md`

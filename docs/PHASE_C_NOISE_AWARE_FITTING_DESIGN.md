@@ -1,10 +1,13 @@
 # Preparation: noise-aware fitting and conditional parameter evidence
 
-Status: implementation design, 13 October 2026; implementation links updated
-with M36. [M34](PHASE_C_FITTING_MEASUREMENT.md) has qualified the fixed-noise
+Status: implementation design, 13 October 2026; results updated 15 October 2026.
+[M34](PHASE_C_FITTING_MEASUREMENT.md) has qualified the fixed-noise
 measurement contract. [M35](PHASE_C_FITTING_ROBUST_MEASUREMENT.md) completed its
 96-attempt bounded Huber qualification. [M36](PHASE_C_FITTING_SENSOR_DRIFT.md)
-implements the bounded shared drift qualification; its remote results are pending. This roadmap
+completed its 144-attempt shared drift qualification, including exact ambiguity
+and resolving-input controls. P1–P4 below now have bounded qualification results;
+P5 remains a design. The immediate priority is
+[current-paper function feedback](PHASE_C_INTERACTION_FITTING_FEEDBACK.md). This roadmap
 does not itself change a benchmark release or production default.
 
 Companion designs: [measurement evidence](PHASE_C_MEASUREMENT_EVIDENCE_DESIGN.md)
@@ -12,15 +15,15 @@ and [controlled diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md).
 The broader research question is in the
 [Vega handoff](VEGA_FALLIBLE_SPECIFICATIONS_HANDOFF.md).
 
-## The next question
+## Original motivating question
 
 The M29–M33 backend can distinguish several numerical/search failures from an
 accurate fit on qualified examples. It cannot yet tell whether a residual is
 consistent with measurement uncertainty, nor whether an apparent parameter
 constraint survives uncertainty in initial observations or calibration.
 
-The proposed next step is to qualify these questions on fixed, known equations.
-The first implementation should add a **training-only observation objective and
+The initial step was to qualify these questions on fixed, known equations.
+M34 added a **training-only observation objective and
 an explicit initial-observation contract**, with fixed externally justified
 noise scales. Keep the current rollout/profiling portfolio, domain checks,
 checkpoint retention and independently verified predictions. A separate objective
@@ -264,11 +267,12 @@ studies are evaluator-only, never an incumbent-selection criterion.
 | P4: bounded measurement hypothesis | One shared sensor drift parameter, then its confounding control | Joint physical/initial/nuisance assessment; raw readings unchanged; identifiable and deliberately ambiguous examples |
 | P5: diagnosis study | Freeze the four-arm study and its calibration protocol | Oracle fixture checks, measured cost pilot, locked evaluation, all failures retained |
 
-P1/P2 are the recommended first coded milestone after this preparation. They do
-not wait for fresh construction functions, and do not replace M33. P3–P5 are
-subsequent milestones; the broad study must not launch just because this design
-lists it. No LLM is needed for these stages. Use small local analytical unit
-controls and Delta CPUs for measured fitting experiments.
+P1/P2 were qualified in M34, P3 in M35, and P4 in M36. The broader P5 study has
+not been launched; completion of those controls does not authorize it. The next
+current-paper milestone connects existing fitting evidence to fresh function
+proposals. Statistical uncertainty calibration and broader noisy-data diagnosis
+remain future work. These numerical controls required no LLM, used small local
+analytical tests and Delta CPUs, and did not replace M33's separate diagnostics.
 
 Tests must include negative sigma/nonfinite values, missing unit/noise provenance,
 mask or objective changes on resume, double-counted initial observations,

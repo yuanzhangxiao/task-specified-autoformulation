@@ -9,13 +9,26 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone: [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
+Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
+Construction is approaching executable function forms. Qualify a training-only
+connection to the existing fitter and diagnostics, then compare bounded function
+revisions against an unchanged-model refit control. This is a design and next
+milestone, not a completed integration or new campaign. The specification and
+measurement contract remain fixed; broader sensor/specification diagnosis is
+future work.
+
+Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
 compares fixed calibration with one bounded shared observation trend, preserving
 the physical ODE and raw readings. Its 144-attempt CPU qualification includes
 exact/shared initials, nonlinear decay, exact gain/drift ambiguity and input
 variation that separates the two effects. Separately budgeted finite-difference
 and joint/nuisance information checks report local ambiguity without calibrated
-confidence or fault attribution. Remote results are pending.
+confidence or fault attribution. All 144 independent rollout/objective and
+derivative checks, all 120 applicable affine optimum checks and all 72 paired
+objective comparisons pass. The constant-input ambiguity is detected; different
+known inputs resolve that particular ambiguity. Local full rank under a wrong
+observation model does not establish physical correctness. Separate diagnostics
+add 27.1% to recorded fitting CPU time.
 
 Completed [M35 robust measurement qualification](PHASE_C_FITTING_ROBUST_MEASUREMENT.md)
 compares fixed-threshold Huber and Gaussian objectives on paired clean/outlier
@@ -50,9 +63,10 @@ The three research preparation designs remain the broader roadmap:
 [noise-aware fitting](PHASE_C_NOISE_AWARE_FITTING_DESIGN.md), and a
 [controlled specification/data diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md).
 They distinguish measurement noise from numerical tolerances, handle noisy
-initial observations explicitly, and preserve ambiguous explanations. The next
-implementation is the limited shared sensor-drift M36 qualification above;
-the broader diagnosis study remains a later gated increment. No production
+initial observations explicitly, and preserve ambiguous explanations. Their
+bounded fitting increments are qualified through M36; the broader diagnosis
+study and practical uncertainty calibration remain later gated increments.
+Current function-stage feedback takes priority. No production
 defaults or benchmark assets change. See the updated
 [Vega handoff](VEGA_FALLIBLE_SPECIFICATIONS_HANDOFF.md#phase-c-preparation-while-construction-remains-at-topology).
 
