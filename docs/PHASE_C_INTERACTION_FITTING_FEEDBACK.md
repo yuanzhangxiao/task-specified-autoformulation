@@ -2,7 +2,9 @@
 
 Design recorded 15 October 2026. The first
 [offline adapter and synthetic qualification (M37)](PHASE_C_FITTING_INTERACTION_ADAPTER.md)
-are implemented. Current-constructor function binding, model edits and the live
+are implemented. The [M38 discrepancy extraction and conditional draft](PHASE_C_FITTING_FEEDBACK_DRAFTS.md)
+now adds competing explanations, predicted observable improvements and
+disconfirmation criteria to those verified packets. Current-constructor function binding, model edits and the live
 paired experiment below remain later milestones. The public
 specification, observations, input semantics and observation/initialization
 contract stay fixed. Revising scientific claims or sensor assumptions belongs to

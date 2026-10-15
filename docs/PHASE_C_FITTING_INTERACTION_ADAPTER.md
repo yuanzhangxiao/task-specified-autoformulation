@@ -5,6 +5,9 @@ qualification. It does not launch proposals, change functions or run a benchmark
 campaign. The public specification, benchmark data and fitting defaults are fixed.
 The broader integration plan is in
 [interaction fitting feedback](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
+The subsequent [M38 discrepancy extractor and readable draft](PHASE_C_FITTING_FEEDBACK_DRAFTS.md)
+consume this verified packet, adding conditional investigations and explicit
+tests of their predicted improvement without executing a proposal.
 
 ## What the adapter provides
 

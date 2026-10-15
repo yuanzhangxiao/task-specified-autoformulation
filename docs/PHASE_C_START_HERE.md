@@ -10,9 +10,12 @@ New to the compute platforms? Start with the
 pinned deliveries, submission, inspection and recovery.
 
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
-The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) now translates
-verified fitting diagnostics into bounded all-target response summaries and an
-advisory function-hypothesis request. Astra's supplied 40/40 topology report has
+The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) translates
+verified fitting diagnostics into bounded all-target response summaries. The
+[M38 feedback draft](PHASE_C_FITTING_FEEDBACK_DRAFTS.md) adds measured discrepancies,
+conditional investigations, competing explanations, testable predictions and
+stage-routing limits. It is qualified on four saved controls with no new fitting
+or LLM calls. Astra's supplied 40/40 topology report has
 no executable functions yet. Current-constructor edit binding and a paired
 revision/refit experiment remain pending; this is not a completed live integration.
 The specification and measurement contract remain fixed; broader sensor/specification diagnosis is
