@@ -9,14 +9,25 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
-Current fitting milestone (October 14): [M35 robust measurement qualification](PHASE_C_FITTING_ROBUST_MEASUREMENT.md)
+Current fitting milestone: [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
+compares fixed calibration with one bounded shared observation trend, preserving
+the physical ODE and raw readings. Its 144-attempt CPU qualification includes
+exact/shared initials, nonlinear decay, exact gain/drift ambiguity and input
+variation that separates the two effects. Separately budgeted finite-difference
+and joint/nuisance information checks report local ambiguity without calibrated
+confidence or fault attribution. Remote results are pending.
+
+Completed [M35 robust measurement qualification](PHASE_C_FITTING_ROBUST_MEASUREMENT.md)
 compares fixed-threshold Huber and Gaussian objectives on paired clean/outlier
 controls and incorrect-equation/restrictive-bound controls. It preserves raw
 residuals, independent rollout verification and matched search ceilings. Robust
 affine profiling requires a certified inner optimum and qualified local
 derivatives; failed profiles fall back within the same budget. Downweighting is
-not a data-error diagnosis. The CPU qualification is pending; no benchmark or
-production default changes.
+not a data-error diagnosis. All 96 fits pass numerical verification, all 72
+applicable affine optimum checks pass, and all 48 paired objectives agree.
+Huber reduces clean-trajectory error in all nine contaminated case/seed pairs,
+without uniformly improving individual coefficients. No benchmark or production
+default changes.
 
 Completed [M34 fixed-noise measurement fitting](PHASE_C_FITTING_MEASUREMENT.md)
 implements an opt-in raw-reading contract, known diagonal measurement uncertainty,
@@ -40,7 +51,7 @@ The three research preparation designs remain the broader roadmap:
 [controlled specification/data diagnosis study](PHASE_C_SPEC_DATA_DIAGNOSTIC_STUDY.md).
 They distinguish measurement noise from numerical tolerances, handle noisy
 initial observations explicitly, and preserve ambiguous explanations. The next
-implementation is the limited fixed-sigma robust M35 qualification above;
+implementation is the limited shared sensor-drift M36 qualification above;
 the broader diagnosis study remains a later gated increment. No production
 defaults or benchmark assets change. See the updated
 [Vega handoff](VEGA_FALLIBLE_SPECIFICATIONS_HANDOFF.md#phase-c-preparation-while-construction-remains-at-topology).

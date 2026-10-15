@@ -16,6 +16,7 @@ from scipy.optimize import lsq_linear, minimize
 
 from autoformalism.fitting import measurement_rollout, profiled_output
 from autoformalism.schemas.measurement_fitting import MeasurementProblem
+from autoformalism.schemas.sensor_drift import DriftProblem
 
 
 class Loss(BaseModel):
@@ -377,8 +378,12 @@ class RobustProfile:
         return fitted, q, chain[:, None] * derivative, audit
 
 
-def build(problem: MeasurementProblem, loss: Loss) -> tuple:
+def build(problem: MeasurementProblem | DriftProblem, loss: Loss) -> tuple:
     """Reuse M34 certificates and attach the requested fixed optimization loss."""
+    if isinstance(problem, DriftProblem):
+        from autoformalism.fitting.sensor_drift import build as build_drift
+
+        return build_drift(problem, loss)
     oracle, profile, route = measurement_rollout.build(problem)
     if profile is not None:
         if loss.kind == "huber":

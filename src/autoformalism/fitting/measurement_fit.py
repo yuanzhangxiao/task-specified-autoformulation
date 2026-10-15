@@ -24,6 +24,7 @@ from autoformalism.fitting import robust_measurement as robust
 from autoformalism.fitting.optimizer_scaling import RelativeScaling
 from autoformalism.schemas.base import FiniteFloat, StrictSchema
 from autoformalism.schemas.measurement_fitting import MeasurementProblem
+from autoformalism.schemas.sensor_drift import DriftProblem
 
 
 class Policy(StrictSchema):
@@ -315,7 +316,7 @@ def _cost(operations, setup_seconds):
 
 
 def run(
-    problem: MeasurementProblem,
+    problem: MeasurementProblem | DriftProblem,
     policy: Policy,
     folder: Path,
     *,
@@ -323,9 +324,15 @@ def run(
     loss: robust.Loss | None = None,
 ) -> dict:
     """Fit only training readings; resume stages without resetting their budgets."""
-    if not isinstance(problem, MeasurementProblem) or not isinstance(policy, Policy):
+    if not isinstance(problem, (MeasurementProblem, DriftProblem)) or not isinstance(
+        policy, Policy
+    ):
         raise TypeError("typed measurement problem and policy required")
-    problem = MeasurementProblem.model_validate(problem.model_dump(mode="json"))
+    drift_problem = isinstance(problem, DriftProblem)
+    problem_type = DriftProblem if drift_problem else MeasurementProblem
+    problem = problem_type.model_validate(problem.model_dump(mode="json"))
+    if drift_problem and loss is None:
+        loss = robust.Loss(kind="gaussian")
     policy = Policy.model_validate(policy.model_dump(mode="json"))
     if strategy not in {"direct", "profiled"}:
         raise ValueError("unsupported measurement fitting strategy")
@@ -349,6 +356,8 @@ def run(
             protocol="robust-measurement-fitting-execution-1",
             objective_definition=loss.model_dump(mode="json"),
         )
+    if drift_problem:
+        identity["protocol"] = "sensor-drift-fitting-execution-1"
     with public._lock(folder):
         seal(folder / "identity.json", identity)
         output = folder / "result.json"
@@ -476,8 +485,11 @@ def run(
 
         evidence = None
         if selected:
-            evidence = oracle.residual_evidence(
-                np.asarray(selected["standardized_residuals"])
+            residual = np.asarray(selected["standardized_residuals"])
+            evidence = (
+                oracle.prediction_evidence(residual, selected["parameters"])
+                if drift_problem
+                else oracle.residual_evidence(residual)
             )
             if loss is not None:
                 evidence = _loss_evidence(evidence, loss)
@@ -534,6 +546,23 @@ def run(
                     if loss.kind == "gaussian"
                     else None
                 ),
+            )
+        if drift_problem:
+            parameters = result["parameters"]
+            result.update(
+                protocol="sensor-drift-fit-result-1",
+                physical_parameters=(
+                    {name: parameters[name] for name in problem.base.start}
+                    if parameters is not None
+                    else None
+                ),
+                observation_nuisance_parameters=(
+                    {problem.drift.name: parameters[problem.drift.name]}
+                    if parameters is not None
+                    else None
+                ),
+                observation_model=problem.drift.model_dump(mode="json"),
+                raw_readings_modified=False,
             )
         seal(output, result)
         return result

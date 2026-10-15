@@ -2,7 +2,7 @@
 
 Implemented 14 October 2026 as an opt-in continuation of
 [M34 fixed-noise fitting](PHASE_C_FITTING_MEASUREMENT.md). The 96-attempt Delta
-qualification is prepared but has not been launched. M34 fixtures, campaigns,
+qualification completed on Delta in the October 15 review. M34 fixtures, campaigns,
 benchmark data, finalized prompts and production defaults are unchanged.
 
 ## Objective and interpretation
@@ -118,7 +118,43 @@ inputs, evaluator isolation, loss identities, failed denominators, terminal and
 interrupted resume, copied backend/evaluator rejection, scheduler receipts and
 shell/CLI entry points. An actual shared-initial contaminated Huber profile also
 passed the full prepare/verify/run/identical completed-resume/report workflow.
-Remote numerical results remain pending.
+Remote numerical results are recorded below.
+
+## Delta qualification results
+
+The review `review-20261015-001905.tar.gz` binds commit
+`03e8b2b2b697d7512e5d7afe52b2b5f60d403ea1` and plan
+`e40ea0c2543386e15b1be63b681781e2d35a13ada6834fee3685bc4f90be63ee`.
+All 96 attempts completed and passed independent rollout and analytic prediction
+checks. All 72 applicable affine own-loss optimum checks passed. All 48
+direct/profiled pairs agreed, with maximum objective difference 2.93e-11 and
+parameter difference 1.91e-8. Recomputed saved-residual objectives differed by at
+most 2.84e-14. One Gaussian nonlinear restart exhausted its allowance; the
+verified first-start endpoint was retained. No profile fallback occurred, so
+these remote cases do not exercise the fallback tests.
+
+Median noise-free prediction RMSE across three seeds, using the profiled arms:
+
+| Contaminated case | Gaussian | Huber |
+| --- | ---: | ---: |
+| Exact preparation | 0.05202 | 0.001008 |
+| Shared unknown initial | 0.05819 | 0.008593 |
+| Unknown nonlinear decay | 0.05401 | 0.009162 |
+
+Noise-free trajectories were evaluator-only. All nine contaminated case/seed
+combinations improved prediction RMSE with Huber; clean noisy cases did not
+uniformly favor either loss. Individual coefficients need not improve: nonlinear
+decay error increased from 1.46% to 5.08% at seed 0 and from 9.42% to 13.27% at
+seed 1. The wrong-bound and wrong-dynamics controls retained substantial mismatch.
+Huber downweighted 46–48/50 readings under the incorrect bound without any added
+outliers; downweighting cannot establish data faults.
+
+Across 24 Huber fits, profiling reduced search calls from 930 to 256, recorded
+CPU time from 42.64 to 28.87 seconds, and summed stage wall time from 148.99 to
+81.30 seconds. Robust inner solves consumed 0.86 seconds, included in those
+totals. These are small controls, not full benchmark or calibrated-confidence
+results. The next bounded experiment is
+[M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md).
 
 Final targeted verification: 360 measurement, robust-fitting, profiling and legacy
 adapter tests passed. Changed-file Ruff, shell syntax and whitespace checks pass.
