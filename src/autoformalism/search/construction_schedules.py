@@ -20,6 +20,7 @@ from autoformalism.search import construction_completion as completion_feedback
 from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
+from autoformalism.search import construction_evidence as evidence_feedback
 from autoformalism.search import construction_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
@@ -443,6 +444,21 @@ def repair_issue_groups(errors: list[dict]) -> dict:
     }
 
 
+def validate_advisory_decisions(decisions, questions: list[dict]) -> list[dict]:
+    """Accept dispositions only for questions actually displayed in this request."""
+    allowed = {q["question_id"] for q in questions}
+    rows = [d.model_dump(mode="json") for d in decisions]
+    ids = [d["question_id"] for d in rows]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate compatibility decision question_id")
+    if set(ids) - allowed:
+        raise ValueError(
+            "compatibility_decisions must cite a question_id displayed in this "
+            "repair request; do not invent questions or reuse obsolete IDs"
+        )
+    return rows
+
+
 def run(
     brief: PublicScientificBrief,
     context: ValidationContext,
@@ -459,6 +475,8 @@ def run(
     prompt_family: str | None = None,
     bookkeeping_policy: bookkeeping.Policy = "legacy",
     starting_draft: ledger.Draft | None = None,
+    training_evidence: dict | None = None,
+    boundary_contract=None,
 ) -> dict:
     """Replay cached transactions, then spend only remaining budget."""
     focused_view = bookkeeping_policy in {
@@ -471,12 +489,17 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }
     if repair_requests is None:
         repair_requests = (
             protocol_feedback.REPAIR_REQUESTS
             if bookkeeping_policy
-            in {protocol_feedback.POLICY, realization_prompts.POLICY}
+            in {
+                protocol_feedback.POLICY,
+                realization_prompts.POLICY,
+                evidence_feedback.POLICY,
+            }
             else focused.REPAIR_REQUESTS
             if focused_view
             else 3
@@ -485,11 +508,51 @@ def run(
         repair_tokens = (
             protocol_feedback.REPAIR_TOKENS
             if bookkeeping_policy
-            in {protocol_feedback.POLICY, realization_prompts.POLICY}
+            in {
+                protocol_feedback.POLICY,
+                realization_prompts.POLICY,
+                evidence_feedback.POLICY,
+            }
             else 131072
         )
-    realization_policy = bookkeeping_policy == realization_prompts.POLICY
-    draft_api = realizations if realization_policy else ledger
+    evidence_policy = bookkeeping_policy == evidence_feedback.POLICY
+    realization_policy = (
+        evidence_policy or bookkeeping_policy == realization_prompts.POLICY
+    )
+    draft_api = (
+        evidence_feedback
+        if evidence_policy
+        else realizations
+        if realization_policy
+        else ledger
+    )
+    evidence = None
+    highlights = None
+    advisory_answers = {}
+    compatibility_cache = {}
+    if evidence_policy:
+        from autoformalism.research import construction_training
+
+        if training_evidence is None:
+            raise ValueError(
+                "evidence feedback requires complete sealed training evidence"
+            )
+        evidence = construction_training.load_evidence(training_evidence)
+        if evidence.context != context:
+            raise ValueError(
+                "training evidence context differs from construction context"
+            )
+        highlights = construction_training.initial_highlights(evidence)
+        if isinstance(boundary_contract, dict):
+            boundary_contract = evidence_feedback.BoundaryContract.model_validate(
+                boundary_contract
+            )
+        if boundary_contract is not None:
+            boundary_contract.validate_public(brief)
+    elif training_evidence is not None or boundary_contract is not None:
+        raise ValueError(
+            "training/boundary evidence requires the evidence feedback policy"
+        )
     declaration_checks_api = realizations if realization_policy else checklist
     draft, events, records = starting_draft or draft_api.Draft(), [], []
     continuation = None
@@ -503,6 +566,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }
     budget_stop = None
     from autoformalism.search import construction_prompts as prompts
@@ -524,6 +588,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }
     local_stage_checks = bookkeeping_policy == stage_checks.POLICY or defer_interaction
     variable_checks = bookkeeping_policy in {
@@ -540,6 +605,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }
     minimal_clarity = bookkeeping_policy in {
         bookkeeping.MINIMAL_POLICY,
@@ -556,6 +622,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }
     improved_bookkeeping = bookkeeping_policy not in {
         "legacy",
@@ -573,6 +640,7 @@ def run(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }
     specific_feedback = bookkeeping_policy in {
         bookkeeping.FEEDBACK_POLICY,
@@ -718,7 +786,9 @@ def run(
             payload = compact.compact_payload(payload)
         if focused_view:
             presentation = (
-                realization_prompts
+                evidence_feedback
+                if evidence_policy
+                else realization_prompts
                 if realization_policy
                 else protocol_feedback
                 if bookkeeping_policy == protocol_feedback.POLICY
@@ -747,6 +817,17 @@ def run(
                 graph_contract,
                 last_edit_result,
                 continuation,
+                **(
+                    {
+                        "boundary_contract": boundary_contract,
+                        "training_highlights": highlights,
+                        "compatibility_questions": advisory_state()["pending_questions"]
+                        if stage == "repair"
+                        else [],
+                    }
+                    if evidence_policy
+                    else {}
+                ),
             )
             if bookkeeping_policy == readable.POLICY and stage == "repair":
                 readable.repair_budget(payload, repair_requests, attempt)
@@ -760,6 +841,7 @@ def run(
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
+                    evidence_feedback.POLICY,
                 }
                 and stage == "repair"
             ):
@@ -772,7 +854,7 @@ def run(
                     repair_tokens,
                 )
         if realization_policy:
-            response_model = realization_prompts.response_model(stage)
+            response_model = draft_api.response_model(stage)
         record = client.call(
             system=system,
             user=json.dumps(payload, sort_keys=True),
@@ -786,6 +868,12 @@ def run(
         normalizations, conflicts = [], []
         name_conflicts = []
         completion = None
+        submitted_decisions = []
+        asked_questions = (
+            advisory_state()["pending_questions"]
+            if evidence_policy and stage == "repair"
+            else []
+        )
         try:
             raw = visible_response(record)
             normalized, normalizations = draft_api.normalize_reply(
@@ -797,9 +885,14 @@ def run(
             )
             patch = draft_api.DraftPatch.model_validate(normalized)
             validate_scope(policy, stage, focus, patch, draft)
+            if evidence_policy:
+                submitted_decisions = validate_advisory_decisions(
+                    patch.compatibility_decisions, asked_questions
+                )
             if bookkeeping_policy in {
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
+                evidence_feedback.POLICY,
             }:
                 protocol_feedback.controls.validate_patch(patch, brief=brief)
             if improved_bookkeeping or minimal_clarity:
@@ -808,10 +901,13 @@ def run(
                 name_conflicts = compact.naming_conflicts(brief, draft, patch)
             candidate = draft_api.apply_patch(brief, draft, patch)
             candidate, consumer_log = (
-                realizations if realization_policy else handoff
+                draft_api if realization_policy else handoff
             ).normalize_consumers(candidate, patch, draft)
             normalizations.extend(consumer_log)
             draft = candidate
+            if evidence_policy:
+                for decision in submitted_decisions:
+                    advisory_answers[decision["question_id"]] = decision
             accepted, complete = True, patch.stage_complete
             if completion_check and stage == "variables" and complete:
                 completion = (
@@ -855,6 +951,15 @@ def run(
             "pending_after": draft_api.pending(brief, draft),
             **(
                 {
+                    "compatibility_questions": asked_questions,
+                    "compatibility_decisions": submitted_decisions if accepted else [],
+                    "training_evidence_sha256": evidence.sha256,
+                }
+                if evidence_policy
+                else {}
+            ),
+            **(
+                {
                     "variable_checklist_after": (
                         declaration_checks_api.variable_checklist(
                             brief, draft, target_definitions, graph_contract
@@ -893,7 +998,7 @@ def run(
             ),
         }
         if realization_policy and accepted and event.get("repair_receipt") is not None:
-            event["repair_receipt"]["committed_edits"] = realizations.edit_effects(
+            event["repair_receipt"]["committed_edits"] = draft_api.edit_effects(
                 before, draft
             )
         sealed_write(directory / "events" / f"{len(events):03d}.json", event)
@@ -908,7 +1013,7 @@ def run(
             "normalizations": normalizations,
             "error": error,
             "edit_effects": (
-                realizations.edit_effects(before, draft)
+                draft_api.edit_effects(before, draft)
                 if realization_policy
                 else handoff.edit_effects(before, draft)
             )
@@ -942,18 +1047,19 @@ def run(
     def assess_draft() -> dict:
         """Recheck declarations after later edits as well as on stage completion."""
         if realization_policy:
-            check = realizations.assess(
+            check = draft_api.assess(
                 brief,
                 context,
                 target_definitions,
                 draft,
                 graph_contract=graph_contract,
                 clarify_overlaps=False,
+                **({"boundary_contract": boundary_contract} if evidence_policy else {}),
             )
-            check["interaction_review_handoff"] = deferred.interaction_handoff(
-                brief, draft
-            )
-            check["mechanism_realization_handoff"] = realizations.final_handoff(
+            check["interaction_review_handoff"] = (
+                evidence_feedback if evidence_policy else deferred
+            ).interaction_handoff(brief, draft)
+            check["mechanism_realization_handoff"] = draft_api.final_handoff(
                 draft, check
             )
         elif defer_interaction:
@@ -994,7 +1100,53 @@ def run(
             # These rules already belong to final ledger validation. The new
             # view explains them locally without adding a scientific predicate.
             check["eligible"] &= check["shared_process_checklist"]["status"] == "ready"
+        if evidence_policy:
+            state = advisory_state()
+            check["training_compatibility"] = state
+            sealed_write(
+                directory / "compatibility" / f"{content_hash(state)}.json", state
+            )
         return check
+
+    def advisory_state() -> dict:
+        """Keep conditional data conflicts and answers outside eligibility."""
+        if not evidence_policy:
+            return {"pending_questions": []}
+        topology = realizations.project(draft)
+        cache_key = content_hash(topology.model_dump(mode="json"))
+        if cache_key not in compatibility_cache:
+            computed = construction_training.compatibility_feedback(topology, evidence)
+            compatibility_cache[cache_key] = computed
+        report = compatibility_cache[cache_key]
+        questions = report["advisory_questions"]
+        pending = [
+            q
+            for q in questions
+            if advisory_answers.get(q["question_id"], {}).get("disposition")
+            not in {"retain_approximation", "dispute_assumption"}
+        ]
+        return {
+            **report,
+            "pending_questions": pending,
+            "decisions": [
+                advisory_answers[q["question_id"]]
+                for q in questions
+                if q["question_id"] in advisory_answers
+            ],
+            "review_status": "unanswered"
+            if pending
+            else "addressed"
+            if questions
+            else "no_conflict_identified",
+            "scientific_correctness": "unverified",
+        }
+
+    def completion_ready(check: dict) -> bool:
+        return bool(
+            check["eligible"]
+            and ready
+            and not check.get("training_compatibility", {}).get("pending_questions")
+        )
 
     def stage(name: str) -> tuple[bool, str | None]:
         nonlocal continuation
@@ -1124,7 +1276,7 @@ def run(
         previous_stagnation = None
         repair_checkpoints = []
         for attempt in range(repair_limit):
-            if check["eligible"] and ready:
+            if completion_ready(check):
                 break
             feedback = {
                 "structural_failures": check["errors"],
@@ -1139,6 +1291,12 @@ def run(
                 "clarification_requests": check["clarification_requests"],
             }
             before_repair_edit = draft
+            pending_advice_before = {
+                q["question_id"]
+                for q in check.get("training_compatibility", {}).get(
+                    "pending_questions", []
+                )
+            }
             try:
                 accepted, complete, diagnostic = request(
                     "repair", None, feedback, attempt
@@ -1153,6 +1311,7 @@ def run(
             if bookkeeping_policy in {
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
+                evidence_feedback.POLICY,
             }:
                 if attempt + 1 in (5, 10):
                     repair_checkpoints.append(
@@ -1179,6 +1338,16 @@ def run(
                         before_repair_edit.model_dump(mode="json")
                     )
                 )
+                if evidence_policy and accepted:
+                    resolved = {
+                        decision["question_id"]
+                        for decision in events[-1]["compatibility_decisions"]
+                        if decision["disposition"]
+                        in {"retain_approximation", "dispute_assumption"}
+                    }
+                    if pending_advice_before & resolved:
+                        # A useful advisory answer need not edit the equations.
+                        unchanged = False
                 stagnant = (
                     (stagnant + 1 if signature == previous_stagnation else 1)
                     if unchanged
@@ -1199,7 +1368,7 @@ def run(
                     else None
                 )
                 if stagnant >= protocol_feedback.REPEATED_REPAIRS and not (
-                    check["eligible"] and ready
+                    completion_ready(check)
                 ):
                     stop_reason = (
                         "three consecutive semantically repeated repairs "
@@ -1231,7 +1400,7 @@ def run(
                     if stagnant
                     else None
                 )
-                if stagnant >= 2 and not (check["eligible"] and ready):
+                if stagnant >= 2 and not completion_ready(check):
                     stop_reason = (
                         "two consecutive global repairs made no draft progress"
                     )
@@ -1258,13 +1427,18 @@ def run(
                     ownership_feedback.POLICY,
                     protocol_feedback.POLICY,
                     realization_prompts.POLICY,
+                    evidence_feedback.POLICY,
                 }
                 else {}
             ),
             **(
                 {"repair_checkpoints": repair_checkpoints}
                 if bookkeeping_policy
-                in {protocol_feedback.POLICY, realization_prompts.POLICY}
+                in {
+                    protocol_feedback.POLICY,
+                    realization_prompts.POLICY,
+                    evidence_feedback.POLICY,
+                }
                 else {}
             ),
             "event_count": len(events),

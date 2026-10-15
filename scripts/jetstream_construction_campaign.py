@@ -37,6 +37,7 @@ def operation_identity() -> str:
         "scripts/jetstream/run_edit_feedback_construction.sh",
         "scripts/jetstream/run_ownership_feedback_construction.sh",
         "scripts/jetstream/run_protocol_clarity_construction.sh",
+        "scripts/jetstream/run_evidence_feedback_construction.sh",
     )
     return content_hash(
         {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest() for name in names}
@@ -124,6 +125,7 @@ def validate_settings(config: dict) -> None:
     if config.get("bookkeeping_policy") in {
         "minimal-protocol-clarity-1",
         "minimal-mechanism-realizations-1",
+        "minimal-evidence-feedback-1",
     }:
         expected.update(maximum_requests=133, maximum_total_tokens=655360)
         if config.get("repair_requests") != 10 or config.get("repair_tokens") != 262144:
@@ -142,6 +144,7 @@ def prepare(
     *,
     study: str = "focused_prompt_confirmation",
     seeds: list[int] | None = None,
+    training_evidence: Path | None = None,
 ) -> dict:
     """Freeze a distinct campaign; preserve the source and compatibility run."""
     if study not in {
@@ -154,6 +157,7 @@ def prepare(
         "ownership_feedback_confirmation",
         "protocol_clarity_confirmation",
         "mechanism_realization_confirmation",
+        "evidence_feedback_confirmation",
     }:
         raise ValueError("unsupported Jetstream construction study")
     selected = list(campaign.sampling_seeds(study, seeds))
@@ -165,6 +169,7 @@ def prepare(
         root,
         study=study,
         seeds=selected,
+        training_evidence=training_evidence,
         serving_environment={
             "platform": PLATFORM,
             "serving_image_sha256": probe.IMAGE.split("sha256:")[1],
@@ -210,6 +215,7 @@ def verify(root: Path) -> dict:
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
+            "evidence_feedback_confirmation",
         }
         or len(plan["tasks"]) != 8 * len(seeds)
         or plan["config"]["platform"] != PLATFORM
@@ -283,6 +289,7 @@ def main() -> None:
     parser.add_argument("--work", type=Path)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--requests", type=Path)
+    parser.add_argument("--training-evidence", type=Path)
     parser.add_argument(
         "--study",
         choices=(
@@ -295,6 +302,7 @@ def main() -> None:
             "ownership_feedback_confirmation",
             "protocol_clarity_confirmation",
             "mechanism_realization_confirmation",
+            "evidence_feedback_confirmation",
         ),
         default="focused_prompt_confirmation",
     )
@@ -311,6 +319,7 @@ def main() -> None:
                 args.root,
                 study=args.study,
                 seeds=args.seeds,
+                training_evidence=args.training_evidence,
             )
             result = run(args.root)
         else:

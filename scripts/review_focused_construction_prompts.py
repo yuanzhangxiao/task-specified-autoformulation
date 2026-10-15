@@ -11,6 +11,7 @@ from autoformalism.search import (
     construction_coverage,
     construction_decisions,
     construction_edit_feedback,
+    construction_evidence,
     construction_focus,
     construction_ownership_feedback,
     construction_protocol,
@@ -23,6 +24,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--training-evidence", type=Path)
     parser.add_argument(
         "--policy",
         choices=(
@@ -35,11 +37,22 @@ def main() -> None:
             construction_ownership_feedback.POLICY,
             construction_protocol.POLICY,
             construction_realizations.POLICY,
+            construction_evidence.POLICY,
         ),
         default=construction_focus.POLICY,
     )
     args = parser.parse_args()
-    print(json.dumps(render(args.source, args.output, args.policy), indent=2))
+    print(
+        json.dumps(
+            render(
+                args.source,
+                args.output,
+                args.policy,
+                training_evidence=args.training_evidence,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

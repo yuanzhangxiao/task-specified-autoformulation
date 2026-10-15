@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--repair-source", type=Path)
+    parser.add_argument("--training-evidence", type=Path)
     parser.add_argument("--study", choices=campaign.STUDIES)
     parser.add_argument(
         "--seeds",
@@ -45,6 +46,7 @@ def main():
             bookkeeping_policy=args.bookkeeping_policy or "legacy",
             repair_source=args.repair_source,
             seeds=args.seeds,
+            training_evidence=args.training_evidence,
         )
     else:
         if (
@@ -52,6 +54,7 @@ def main():
             or args.study
             or args.bookkeeping_policy
             or args.repair_source
+            or args.training_evidence
             or args.seeds is not None
         ):
             parser.error("public inputs and study are frozen by prepare")

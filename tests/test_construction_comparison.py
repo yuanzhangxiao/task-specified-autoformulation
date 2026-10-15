@@ -181,7 +181,14 @@ def test_comparison_submission_has_no_fit_and_resumes_receipts(
 ):
     source_fixture(tmp_path)
     root = tmp_path / "comparison"
-    campaign.freeze(tmp_path / "new", root, study=study)
+    evidence_options = {}
+    if study == "evidence_feedback_confirmation":
+        from tests.test_construction_evidence_integration import training_bundle
+
+        evidence_path = tmp_path / "training.json"
+        training_bundle(tmp_path / "new", evidence_path)
+        evidence_options["training_evidence"] = evidence_path
+    campaign.freeze(tmp_path / "new", root, study=study, **evidence_options)
     storage_checks = []
     monkeypatch.setattr(
         campaign, "check_storage", lambda path: storage_checks.append(path)

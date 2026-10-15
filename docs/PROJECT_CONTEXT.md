@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in `minimal-evidence-feedback-1` study adds provisional-to-final mechanism
+attribution checks, explicit public external-loss roles, compact complete-training
+highlights and qualified candidate-specific advisory questions. Structural
+eligibility and advisory dispositions remain separate. Previous policies and public
+artifacts are unchanged; the next confirmation uses eight cases and five seeds.
+See `PHASE_C_EVIDENCE_FEEDBACK.md` for assumptions, limits and artifact semantics.
+
 `minimal-mechanism-realizations-1` records proposer-selected components for every
 public mechanism, including algebraic and mixed realizations. Optional memory
 states live inside the same record. Declaration, structural and behavioral status

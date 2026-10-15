@@ -1,5 +1,12 @@
 # Phase 1 Pipeline Design
 
+The opt-in `minimal-evidence-feedback-1` study adds provisional-to-final mechanism
+attribution checks, explicit public external-loss roles, compact complete-training
+highlights and qualified candidate-specific advisory questions. Structural
+eligibility and advisory dispositions remain separate. Previous policies and public
+artifacts are unchanged; the next confirmation uses eight cases and five seeds.
+See `PHASE_C_EVIDENCE_FEEDBACK.md` for assumptions, limits and artifact semantics.
+
 `minimal-mechanism-realizations-1` uses a versioned draft/response schema containing
 one general realization record per public requirement. Components reference public
 sources, generated variables or shared processes; memory selections are an optional

@@ -124,6 +124,10 @@ def project(draft: Draft) -> ledger.Draft:
 
 def load_draft(raw: dict) -> Draft | ledger.Draft:
     """Read the declared artifact version; never silently migrate a saved draft."""
+    if "external_exchanges" in raw:
+        from autoformalism.search.construction_evidence import Draft as EvidenceDraft
+
+        return EvidenceDraft.model_validate(raw)
     if "mechanism_realizations" in raw:
         if "mechanism_bindings" in raw:
             raise ValueError("mixed historical and mechanism realization contracts")

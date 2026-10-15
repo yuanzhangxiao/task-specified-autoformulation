@@ -18,6 +18,7 @@ from autoformalism.search import construction_completion as completion_feedback
 from autoformalism.search import construction_coverage as coverage
 from autoformalism.search import construction_decisions as decisions
 from autoformalism.search import construction_edit_feedback as edit_feedback
+from autoformalism.search import construction_evidence as evidence_feedback
 from autoformalism.search import construction_focus as focused
 from autoformalism.search import construction_handoff as handoff
 from autoformalism.search import construction_ownership_feedback as ownership_feedback
@@ -48,10 +49,13 @@ def preview(
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }:
         raise ValueError("unsupported preview policy")
     presentation = (
-        realization_prompts
+        evidence_feedback
+        if policy == evidence_feedback.POLICY
+        else realization_prompts
         if policy == realization_prompts.POLICY
         else protocol_feedback
         if policy == protocol_feedback.POLICY
@@ -76,6 +80,31 @@ def preview(
         before_draft, realizations.Draft
     ):
         before_draft = realizations.from_legacy(before_draft)
+    extra = {}
+    if policy == evidence_feedback.POLICY:
+        if "training_evidence" not in cell or "boundary_contract" not in cell:
+            raise ValueError(
+                "evidence feedback preview requires complete training evidence"
+            )
+        if not isinstance(before_draft, evidence_feedback.Draft):
+            before_draft = evidence_feedback.from_legacy(before_draft)
+        complete = campaign.construction_training.load_evidence(
+            cell["training_evidence"]
+        )
+        advice = campaign.construction_training.compatibility_feedback(
+            evidence_feedback.project(before_draft), complete
+        )
+        extra = {
+            "boundary_contract": evidence_feedback.BoundaryContract.model_validate(
+                cell["boundary_contract"]
+            ),
+            "training_highlights": campaign.construction_training.initial_highlights(
+                complete
+            ),
+            "compatibility_questions": advice["advisory_questions"]
+            if event["stage"] == "repair"
+            else [],
+        }
     new = (
         old
         if event.get("bookkeeping_policy") == policy
@@ -89,6 +118,7 @@ def preview(
             PublicGraphContract.model_validate(cell["public_graph_contract"]),
             last or old.get("last_edit_result"),
             old.get("feedback", {}).get("continuation"),
+            **extra,
         )
     )
     if policy == readable.POLICY and event["stage"] == "repair":
@@ -103,13 +133,18 @@ def preview(
             ownership_feedback.POLICY,
             protocol_feedback.POLICY,
             realization_prompts.POLICY,
+            evidence_feedback.POLICY,
         }
         and event["stage"] == "repair"
         and event.get("bookkeeping_policy") != policy
     ):
         if budget_context is None:
             raise ValueError("historical repair preview requires budget accounting")
-        if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}:
+        if policy in {
+            protocol_feedback.POLICY,
+            realization_prompts.POLICY,
+            evidence_feedback.POLICY,
+        }:
             budget_context = {
                 **budget_context,
                 "maximum_calls": protocol_feedback.REPAIR_REQUESTS,
@@ -131,8 +166,8 @@ def preview(
         {"role": "system", "content": presentation.SYSTEM},
         {"role": "user", "content": json.dumps(new, sort_keys=True)},
     ]
-    if policy == realization_prompts.POLICY:
-        schema = realization_prompts.response_model(event["stage"])
+    if policy in {realization_prompts.POLICY, evidence_feedback.POLICY}:
+        schema = presentation.response_model(event["stage"])
         proposed["response_format"]["json_schema"] = {
             "name": schema.__name__,
             "strict": True,
@@ -150,7 +185,9 @@ def preview(
     }
 
 
-def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict]]:
+def inspect(
+    source: Path, policy: str = focused.POLICY, *, training_evidence: Path | None = None
+) -> tuple[dict, list[dict]]:
     """Check sealed event chains and retain all displayed public evidence verbatim."""
     plan = sealed_read(source / "plan.json")
     if (
@@ -158,6 +195,41 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
         or plan.get("test_data_opened") is not False
     ):
         raise ValueError("requires a public-only construction inspection")
+    cells = plan["cells"]
+    evidence_identity = plan.get("training_evidence_bundle_sha256")
+    if policy == evidence_feedback.POLICY:
+        if training_evidence is not None:
+            bundle = campaign.load_training_bundle(training_evidence, cells)
+            evidence_identity = bundle["artifact_sha256"]
+            if bundle.get("source_plan_sha256") != plan.get("source_plan_sha256"):
+                raise ValueError("preview training source plan differs")
+            if any(
+                "training_evidence" in cell
+                and cell["training_evidence"] != bundle["cells"][name]
+                for name, cell in cells.items()
+            ):
+                raise ValueError(
+                    "preview training evidence differs from frozen evidence"
+                )
+            cells = {
+                name: {**cell, "training_evidence": bundle["cells"][name]}
+                for name, cell in cells.items()
+            }
+        elif any("training_evidence" not in cell for cell in cells.values()):
+            raise ValueError(
+                "evidence feedback preview requires explicit training evidence"
+            )
+        cells = {
+            name: {
+                **cell,
+                "boundary_contract": campaign.reviewed_boundary_contract(
+                    name, campaign.contract.visible_brief(cell, {"arm": "full"})
+                ).model_dump(mode="json"),
+            }
+            for name, cell in cells.items()
+        }
+    elif training_evidence is not None:
+        raise ValueError("training evidence preview requires the evidence policy")
     requests = []
     for task in plan["tasks"]:
         name = task["task_id"]
@@ -177,7 +249,7 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
             record = by_hash[event["request_hash"]]
             requests.append(
                 preview(
-                    plan["cells"][task["benchmark_id"]],
+                    cells[task["benchmark_id"]],
                     task,
                     event,
                     record["request"]["body"],
@@ -199,7 +271,9 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
                 "transaction_applied": event["accepted"],
                 "error": event["error"],
                 "edit_effects": (
-                    realizations.edit_effects
+                    evidence_feedback.edit_effects
+                    if "external_exchanges" in event["before"]
+                    else realizations.edit_effects
                     if "mechanism_realizations" in event["before"]
                     else handoff.edit_effects
                 )(
@@ -230,6 +304,11 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
     return {
         "policy": policy,
         "source_identity": plan["artifact_sha256"],
+        **(
+            {"training_evidence_bundle_sha256": evidence_identity}
+            if policy == evidence_feedback.POLICY
+            else {}
+        ),
         "requests": len(requests),
         "tasks": len({r["task"] for r in requests}),
         "saved_user_bytes": before,
@@ -238,7 +317,7 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
         "saved_system_and_user_bytes": message_bytes["before"],
         "revised_system_and_user_bytes": message_bytes["after"],
         "size_unit": "UTF-8 bytes, not model tokens; new realization schema"
-        if policy == realization_prompts.POLICY
+        if policy in {realization_prompts.POLICY, evidence_feedback.POLICY}
         else "UTF-8 bytes, not model tokens; output schema unchanged",
         "scope": "Counterfactual requests on each actual saved predecessor. "
         "Historical replies are not replies to these prompts. "
@@ -246,11 +325,21 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
         "new_schedule": {
             "additional_variable_recovery_calls": focused.LOCAL_RECOVERY_REQUESTS,
             "maximum_global_repair_calls": protocol_feedback.REPAIR_REQUESTS
-            if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
+            if policy
+            in {
+                protocol_feedback.POLICY,
+                realization_prompts.POLICY,
+                evidence_feedback.POLICY,
+            }
             else focused.REPAIR_REQUESTS,
             "stop_after_identical_no_progress_repairs": (
                 protocol_feedback.REPEATED_REPAIRS
-                if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
+                if policy
+                in {
+                    protocol_feedback.POLICY,
+                    realization_prompts.POLICY,
+                    evidence_feedback.POLICY,
+                }
                 else 2
             ),
             **(
@@ -261,7 +350,12 @@ def inspect(source: Path, policy: str = focused.POLICY) -> tuple[dict, list[dict
                     "repetition": "same semantic draft and rejected alternative; "
                     "descriptions do not reset",
                 }
-                if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
+                if policy
+                in {
+                    protocol_feedback.POLICY,
+                    realization_prompts.POLICY,
+                    evidence_feedback.POLICY,
+                }
                 else {}
             ),
             "note": "Successful variable recovery resumes shared/topology stages; "
@@ -308,6 +402,7 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
         ownership_feedback.POLICY,
         protocol_feedback.POLICY,
         realization_prompts.POLICY,
+        evidence_feedback.POLICY,
     }
     body = (
         '<p><a href="PROMPTS.html">All stages and requests</a></p>'
@@ -342,7 +437,12 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
         + (
             (
                 "<h3>Memory-state assignments</h3>"
-                if policy in {protocol_feedback.POLICY, realization_prompts.POLICY}
+                if policy
+                in {
+                    protocol_feedback.POLICY,
+                    realization_prompts.POLICY,
+                    evidence_feedback.POLICY,
+                }
                 else "<h3>Memory-assignment choices</h3>"
             )
             + _block(
@@ -383,8 +483,18 @@ def _request_page(row: dict, policy: str = focused.POLICY) -> str:
     return _page(f"{row['task']} · {row['stage']} · turn {row['event']}", body)
 
 
-def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
+def render(
+    source: Path,
+    output: Path,
+    policy: str = focused.POLICY,
+    *,
+    training_evidence: Path | None = None,
+) -> dict:
     """Write a fresh escaped HTML review; never overwrite a saved campaign."""
+    if policy == evidence_feedback.POLICY:
+        return _render_evidence(source, output, training_evidence)
+    if training_evidence is not None:
+        raise ValueError("training evidence preview requires the evidence policy")
     if policy == realization_prompts.POLICY:
         from autoformalism.research.mechanism_realization_review import (
             render as render_realizations,
@@ -398,7 +508,9 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
         raise ValueError("review output must be empty")
     summary, rows = inspect(source, policy)
     presentation = (
-        realization_prompts
+        evidence_feedback
+        if policy == evidence_feedback.POLICY
+        else realization_prompts
         if policy == realization_prompts.POLICY
         else protocol_feedback
         if policy == protocol_feedback.POLICY
@@ -429,6 +541,7 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
             ownership_feedback.POLICY,
             protocol_feedback.POLICY,
             realization_prompts.POLICY,
+            evidence_feedback.POLICY,
         }:
             for key, title in (
                 ("memory_assignment_decisions", "Optional memory-assignment decision"),
@@ -458,6 +571,7 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
                 ownership_feedback.POLICY,
                 protocol_feedback.POLICY,
                 realization_prompts.POLICY,
+                evidence_feedback.POLICY,
             }
             else ()
         )
@@ -661,4 +775,130 @@ def render(source: Path, output: Path, policy: str = focused.POLICY) -> dict:
     (output / "PROMPTS.html").write_text(_page(title, body))
     (output / "PROMPTS.json").write_text(json.dumps(rows, indent=2) + "\n")
     (output / "SUMMARY.json").write_text(json.dumps(summary, indent=2) + "\n")
+    return summary
+
+
+def _render_evidence(
+    source: Path, output: Path, training_evidence: Path | None
+) -> dict:
+    """Render prospective questions; saved replies are not their answers."""
+    source, output = source.resolve(), output.resolve()
+    if output == source or source in output.parents:
+        raise ValueError("review must be outside the historical campaign")
+    if output.exists() and any(output.iterdir()):
+        raise ValueError("review output must be empty")
+    summary, rows = inspect(
+        source, evidence_feedback.POLICY, training_evidence=training_evidence
+    )
+    summary["prospective_preview"] = (
+        "Historical replies are not answers to the new compatibility questions. "
+        "Only explicit retained realization/memory declarations are projected; "
+        "no boundary exchange or scientific response is inferred. Complete sealed "
+        "training evidence supplies observations and conditional advisory questions."
+    )
+    output.mkdir(parents=True, exist_ok=True)
+    links = []
+    for index, row in enumerate(rows):
+        name = f"request-{index:03d}.html"
+        packet = json.loads(row["after"]["messages"][1]["content"])
+        content = (
+            '<p><a href="PROMPTS.html">All stages and requests</a></p>'
+            "<p><strong>Prospective preview.</strong> Actual saved predecessor; "
+            "no recorded reply answers these new compatibility questions.</p>"
+            "<h2>Current stage</h2>"
+            + _block(packet["stage_instructions"])
+            + "<h2>Current model and declared realizations</h2>"
+            + _block(packet["model_view"])
+            + "<h2>Training observations and conditional questions</h2>"
+            + _block(
+                {
+                    key: value
+                    for key, value in packet.items()
+                    if key
+                    in {
+                        "training_highlights",
+                        "compatibility_questions",
+                        "boundary_contract",
+                    }
+                }
+            )
+            + "<h2>Feedback and separate status checks</h2>"
+            + _block(packet["feedback"])
+            + _block(packet["requirements_checklist"])
+            + "<h2>Previous edit receipt</h2>"
+            + _block(packet["previous_edit"])
+            + "<h2>Response template</h2>"
+            + _block(packet["response_template"])
+            + "<details><summary>Complete revised request and output schema</summary>"
+            + _block(row["after"])
+            + "</details><details><summary>Marked changes from saved request</summary>"
+            + marked_diff(
+                json.dumps(row["before"], indent=2, sort_keys=True),
+                json.dumps(row["after"], indent=2, sort_keys=True),
+            )
+            + "</details>"
+        )
+        (output / name).write_text(
+            _page(f"{row['task']} · {row['stage']} · turn {row['event']}", content),
+            encoding="utf-8",
+        )
+        links.append(
+            f'<tr><td><a href="{name}">{html.escape(row["task"])}/{row["event"]:03d}'
+            f"</a></td><td>{html.escape(row['stage'])}</td>"
+            f"<td>{row['saved_user_bytes']:,}</td><td>{row['revised_user_bytes']:,}</td></tr>"
+        )
+    stages = (
+        ("variables", "1. Variables"),
+        ("shared_laws", "2. Shared processes"),
+        ("equations", "3. Remaining topology"),
+        ("repair", "4. Global repair"),
+    )
+    body = (
+        "<p><strong>Prospective prompt review; "
+        "no live confirmation launched.</strong></p>"
+        + _block(summary["prospective_preview"])
+        + "<p>Training observations, conditional compatibility advice and public "
+        "boundary obligations have separate meanings. A declaration or a response "
+        "to an advisory question does not establish scientific validity. "
+        "The public brief and historical records are retained.</p>"
+        + "<h2>System instruction</h2>"
+        + _block(evidence_feedback.SYSTEM)
+        + "<h2>Stage instructions</h2>"
+        + "".join(
+            f"<h3>{title}</h3>" + _block(evidence_feedback.stage_text(stage))
+            for stage, title in stages
+        )
+        + "<h2>Editing contract</h2>"
+        + _block(realization_prompts.EDITING)
+        + "<p>Stage-specific boundary rules and compatibility controls appear in "
+        "the complete request pages and new response schemas below.</p>"
+        + "<h2>New response schemas</h2>"
+        + "".join(
+            f"<h3>{title}</h3>"
+            + _block(evidence_feedback.response_model(stage).model_json_schema())
+            for stage, title in stages
+        )
+        + "<h2>Bounded repair and preview scope</h2>"
+        + _block(summary["new_schedule"])
+        + _block(summary["scope"])
+        + "<h2>Every historical request, re-presented</h2>"
+        + "<p>Sizes are UTF-8 user-message bytes, not model tokens. "
+        "Each page includes the complete request, new output schema "
+        "and marked changes.</p>"
+        + "<table><tr><th>Task / turn</th><th>Stage</th><th>Saved bytes</th>"
+        + "<th>Revised bytes</th></tr>"
+        + "".join(links)
+        + "</table><h2>Offline audit</h2>"
+        + _block(summary)
+    )
+    (output / "PROMPTS.html").write_text(
+        _page("Training evidence and boundary obligations — revised prompts", body),
+        encoding="utf-8",
+    )
+    (output / "PROMPTS.json").write_text(
+        json.dumps(rows, indent=2) + "\n", encoding="utf-8"
+    )
+    (output / "SUMMARY.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+    )
     return summary
