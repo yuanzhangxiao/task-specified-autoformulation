@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+M37 adds an opt-in offline training-only fitting-to-interaction evidence adapter.
+It verifies saved numerical stages, preserves all output targets, summarizes
+response shapes and exposes complete laws/consumers for advisory hypotheses.
+It performs no model edits or live calls. Current topology artifacts lack
+executable functions; authoritative constructor edit binding remains pending.
+See `PHASE_C_FITTING_INTERACTION_ADAPTER.md` for qualification and commands.
+
 The opt-in `minimal-evidence-feedback-1` study adds provisional-to-final mechanism
 attribution checks, explicit public external-loss roles, compact complete-training
 highlights and qualified candidate-specific advisory questions. Structural

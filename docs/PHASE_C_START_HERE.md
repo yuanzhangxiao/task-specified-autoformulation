@@ -10,11 +10,12 @@ New to the compute platforms? Start with the
 pinned deliveries, submission, inspection and recovery.
 
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
-Construction is approaching executable function forms. Qualify a training-only
-connection to the existing fitter and diagnostics, then compare bounded function
-revisions against an unchanged-model refit control. This is a design and next
-milestone, not a completed integration or new campaign. The specification and
-measurement contract remain fixed; broader sensor/specification diagnosis is
+The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) now translates
+verified fitting diagnostics into bounded all-target response summaries and an
+advisory function-hypothesis request. Astra's supplied 40/40 topology report has
+no executable functions yet. Current-constructor edit binding and a paired
+revision/refit experiment remain pending; this is not a completed live integration.
+The specification and measurement contract remain fixed; broader sensor/specification diagnosis is
 future work.
 
 Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)

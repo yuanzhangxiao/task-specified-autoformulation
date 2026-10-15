@@ -1,7 +1,9 @@
 # Phase C: numerical feedback for interaction proposals
 
-Design recorded 15 October 2026. This is the next current-paper integration
-priority, not a completed implementation or a launched experiment. The public
+Design recorded 15 October 2026. The first
+[offline adapter and synthetic qualification (M37)](PHASE_C_FITTING_INTERACTION_ADAPTER.md)
+are implemented. Current-constructor function binding, model edits and the live
+paired experiment below remain later milestones. The public
 specification, observations, input semantics and observation/initialization
 contract stay fixed. Revising scientific claims or sensor assumptions belongs to
 the [Vega research plan](VEGA_FALLIBLE_SPECIFICATIONS_HANDOFF.md).
@@ -53,8 +55,9 @@ contract. Preserve multiple flags: a bound can be active at a rank-deficient
 point. Local rank is neither calibrated confidence nor scientific correctness.
 Do not attach an incumbent's stationarity certificate to a different vector.
 
-Use a compact target overview plus, initially, up to two response windows per
-target under a fixed prompt-size allowance. Full arrays remain in hashed
+Use a compact target overview plus, initially, up to two response examples per
+target under a fixed prompt-size allowance. M37 describes early, middle and late
+windows within those selected trajectories. Full arrays remain in hashed
 artifacts. Record omitted windows and why examples were selected. Training
 responses with overlapping inputs, repeated peaks, a peak outside the recorded
 window, or a recovery not reached must retain their ambiguity flags; they must
@@ -95,10 +98,10 @@ ground-truth formula or declare one explanation uniquely correct. Likewise,
 insensitivity to a parameter is a diagnostic, not permission to prune a
 task-required mechanism.
 
-## Apply and evaluate revisions as complete candidates
+## Planned application and evaluation of revisions as complete candidates
 
-The first version permits one existing interaction or one shared-process law per
-visit. A shared law changes every consumer consistently. The proposer preserves
+The planned edit-enabled version permits one existing interaction or one shared
+process law per visit. A shared law changes every consumer consistently. The proposer preserves
 the declared source set, public mechanism obligations, outer topology signs,
 variable inventory, observation map and initialization contract. A missing
 dependency, state or necessary observation/initialization revision requires an
@@ -121,8 +124,11 @@ and deterministic resume histories remain explicit.
 
 ## First implementation milestone and experiment
 
-**First implement an offline adapter qualification.** Take one current topology
-after executable functions and observation/initialization maps are available.
+**M37 implements the offline adapter and small synthetic controls.** Astra's
+supplied topology report has no executable functions, so its models cannot yet
+be fitted. The first real-construction qualification remains pending. Take one
+current topology after executable functions and observation/initialization maps
+are available.
 Use a public basin case with complete required outlet coverage as the first
 integration target; that choice is provisional until the artifact is available.
 Run the current fitter and produce a bounded packet consumable by the function
