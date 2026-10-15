@@ -27,6 +27,7 @@ import os
 import resource
 import sys
 import time
+from itertools import pairwise
 
 import numpy as np
 import scipy
@@ -235,6 +236,116 @@ def _rollout(functions, request: dict) -> dict:
     return {"trajectories": results}
 
 
+def _alone(function, inputs: np.ndarray, params: np.ndarray) -> float:
+    """How far the output on each row alone strays from the whole table's.
+
+    A program of the current values gives each row the same output whether
+    or not the other rows are present. The largest difference is returned as
+    a fraction of the largest output; a NaN on one side only is infinite.
+    """
+    whole = np.array(_rows(function, inputs, params))
+    alone = np.array([
+        _rows(function, inputs[row : row + 1], params)[0]
+        for row in range(len(inputs))
+    ])
+    with np.errstate(invalid="ignore"):
+        same = (alone == whole) | (np.isnan(alone) & np.isnan(whole))
+        difference = np.where(same, 0.0, np.abs(alone - whole))
+    difference = np.where(np.isnan(difference), np.inf, difference)
+    largest = float(np.nanmax(np.abs(whole))) if whole.size else 0.0
+    scale = largest if math.isfinite(largest) and largest > 0.0 else 1.0
+    return float(np.max(difference, initial=0.0)) / scale
+
+
+def _solve(functions, request: dict) -> dict:
+    """Integrate programs of the current values as the shared evaluator would.
+
+    A diagnostic, not the sealed rollout. First each program must give every
+    row of the check table the same output alone as with the whole table; if
+    one does not, nothing is integrated. Each trajectory is then integrated
+    with ``solve_ivp`` from its first row, restarted wherever a supplied
+    channel's slope changes, the supplied channels interpolated linearly
+    between rows, as the shared evaluator integrates an equation. A
+    derivative that is not finite fails the trajectory, as it does there.
+    """
+    targets = list(request["target_columns"])
+    params = [np.asarray(item, dtype=float) for item in request["parameters"]]
+    check = np.asarray(request["check_inputs"], dtype=float)
+    alone: list[dict] = []
+    for function, vector in zip(functions, params, strict=True):
+        try:
+            alone.append({"change": _alone(function, check, vector), "error": None})
+        except Exception as exc:
+            alone.append({"change": None, "error": f"{type(exc).__name__}: {exc}"})
+    if any(
+        item["change"] is None or item["change"] > float(request["tolerance"])
+        for item in alone
+    ):
+        return {"alone": alone, "trajectories": None}
+    seconds = float(request["seconds_per_trajectory"])
+    maximum = request["max_step"]
+    results = []
+    for values, times in zip(request["trajectories"], request["times"], strict=True):
+        table = np.array(values, dtype=float)
+        grid = np.asarray(times, dtype=float)
+        supplied = [column for column in range(table.shape[1])
+                    if column not in targets]
+        deadline = time.monotonic() + seconds
+        row = table[0].copy()
+        calls = [0]
+
+        def derivative(when, state, table=table, grid=grid, supplied=supplied,
+                       row=row, deadline=deadline, calls=calls):
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"the integration ran past {seconds:g} s")
+            calls[0] += 1
+            for column in supplied:
+                row[column] = np.interp(when, grid, table[:, column])
+            row[targets] = state
+            value = np.array([
+                _rows(function, row[None, :], vector)[0]
+                for function, vector in zip(functions, params, strict=True)
+            ])
+            if not np.isfinite(value).all():
+                raise FloatingPointError("the derivative is not finite")
+            return value
+
+        boundaries = np.zeros(len(grid), dtype=bool)
+        boundaries[[0, -1]] = True
+        for column in supplied:
+            slopes = np.diff(table[:, column]) / np.diff(grid)
+            boundaries[1:-1] |= slopes[1:] != slopes[:-1]
+        indices = np.flatnonzero(boundaries)
+        states = np.empty((len(grid), len(targets)), dtype=float)
+        states[0] = table[0, targets]
+        start = 0
+        try:
+            for start, end in pairwise(indices):
+                solution = scipy.integrate.solve_ivp(
+                    derivative,
+                    (float(grid[start]), float(grid[end])),
+                    states[start],
+                    t_eval=grid[start : end + 1],
+                    method=request["method"],
+                    rtol=float(request["rtol"]),
+                    atol=float(request["atol"]),
+                    max_step=np.inf if maximum is None else float(maximum),
+                )
+                if not solution.success:
+                    raise RuntimeError(f"integration failed: {solution.message}")
+                states[start : end + 1] = solution.y.T
+            if not np.isfinite(states).all():
+                raise FloatingPointError("the state is not finite")
+        except Exception as exc:
+            results.append({"ok": False, "row": int(start), "rhs_calls": calls[0],
+                            "reason": f"{type(exc).__name__}: {exc}"})
+            continue
+        results.append(
+            {"ok": True, "predictions": states.tolist(), "rhs_calls": calls[0]}
+        )
+    return {"alone": alone, "trajectories": results}
+
+
 def main() -> None:
     """Read one request, run it, write one reply; nothing else is printed."""
     reply_stream = sys.stdout
@@ -258,6 +369,8 @@ def main() -> None:
             reply = _evaluate(function, request)
         elif mode == "rollout":
             reply = _rollout(functions, request)
+        elif mode == "solve":
+            reply = _solve(functions, request)
         else:
             raise ValueError(f"unknown mode {mode!r}")
     except BaseException as exc:

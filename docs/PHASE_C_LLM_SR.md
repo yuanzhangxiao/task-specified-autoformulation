@@ -96,6 +96,41 @@ Checks on the pilot's data (T1 easy, validation):
 - For the eight best pilot picks that are equations of the current values, the grid rollout and the shared evaluator's adaptive solver agreed within 2×10⁻⁵ to 3×10⁻³ relative.
 - The pilot's best program, a two-compartment filter of the meal series with a delay, rolled out with error 0.0017.
 
+### Solver check on the full run (2026-10-15)
+
+In the full run, none of the first 12 sealed tasks' picks became an equation.
+In 4 tasks, the picks use only the current row, but the reader refused how
+they were written: a parameter vector padded with `np.pad`, NaN guards,
+`np.broadcast_arrays`, comparisons in `np.where`. In substance they are ODEs.
+Like the picks that read the history, they were stepped along the data grid
+rather than given the shared evaluator's adaptive solver.
+
+`scripts/phase_c_llm_sr_solver_check.py` checks this on validation and changes
+no sealed result.
+- It first requires each program to give every training row the same output
+  alone as with the whole table.
+- It then integrates the picks with the shared evaluator's solver and settings
+  (`FitConfig`: RK45, rtol 1e-7, atol 1e-9, restarts where an input's slope
+  changes), in the worker's `solve` mode.
+- The rollout error is the same one the grid rollout reports.
+
+Run on the Mac against the frozen release (receipt `200deb42`), the check gave:
+- The grid rollout recomputed here equalled every sealed value exactly.
+- The four picks gave each row exactly the same output alone. The other seven
+  complete tasks' picks did not (1.2 to 12.8 times their largest output), and
+  neither did task 5's.
+
+| Task | Sealed grid rollout | Adaptive solver |
+|---|---|---|
+| 8, CSTR, seed 0 | 1.27e21 | 1.32e21 |
+| 9, CSTR, seed 1 | 0.620 | 2.87e20 |
+| 14, detention independent, seed 0 | 1.33e-4 | 9.22e-5 |
+| 15, detention independent, seed 1 | 2.75e-4 | 2.69e-4 |
+
+CSTR seed 0's model diverges either way. CSTR seed 1's does too when solved
+accurately: steps of 0.1 understate its fast growth. How to roll out such picks
+on test is to be decided before the test data open.
+
 A plan without `program_rollout`, such as the budget pilot and smokes v3 and v4,
 keeps the earlier recovery: the reader refits each pick without running it, and
 a pick that reads the history is refused as inexpressible.

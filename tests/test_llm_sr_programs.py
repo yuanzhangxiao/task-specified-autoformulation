@@ -427,3 +427,100 @@ def test_a_grid_must_be_uniform() -> None:
     )
     with pytest.raises(ValueError, match="different steps"):
         observation_step(mixed)
+
+
+# --- a diagnostic: the shared evaluator's solver for programs of the present -
+
+
+def _check_table(split: DatasetSplit) -> np.ndarray:
+    """The training table's rows over x and u, every target known."""
+    return np.vstack([
+        np.column_stack([trajectory.targets["x"], trajectory.external_inputs["u"]])
+        for trajectory in split.trajectories
+    ])
+
+
+def _stepped_splits(rows: int = 21, step: float = 0.1):
+    """Splits whose input steps up part-way, so the solver must restart there."""
+    inflow = np.where(np.arange(rows) >= 7, 1.0, 0.0)
+    train = DatasetSplit(
+        SplitName.TRAIN,
+        (_trajectory("a", 1.0, inflow, step), _trajectory("b", 2.0, inflow, step)),
+        "train",
+    )
+    validation = DatasetSplit(
+        SplitName.VALIDATION, (_trajectory("c", 1.5, inflow, step),), "val"
+    )
+    return train, validation
+
+
+@pytest.mark.parametrize(
+    ("body", "equation"),
+    [
+        ("return -params[0] * x", "-0.5 * x"),
+        ("p = np.pad(params, (0, 2))\nreturn p[1] * u - p[0] * x", "0.3 * u - 0.5 * x"),
+    ],
+)
+def test_the_solver_scores_a_program_of_the_present_as_its_equation(
+    body, equation
+) -> None:
+    """Same solver, settings, input interpolation and error as the evaluator's."""
+    train, validation = _stepped_splits()
+    program = check_program(_program(body), VARIABLES)
+    parameters = (0.5, 0.3) + (1.0,) * 8
+    score = programs.program_solver_rollout_error(
+        {"x": (program, parameters)}, VARIABLES, CONTEXT, train, validation,
+        _check_table(train),
+    )
+    assert score.failure is None
+    assert score.alone == {"x": 0.0}
+    assert score.rhs_calls > 0
+    shared = development_rollout_error({"x": equation}, CONTEXT, train, validation)
+    assert score.error == pytest.approx(shared, rel=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        (
+            "y = np.zeros_like(u)\n"
+            "for i in range(1, len(u)):\n"
+            "    y[i] = 0.8 * y[i - 1] + x[i - 1]\n"
+            "return y - x",
+            "x on one row differs by",
+        ),
+        ("return np.gradient(x)", "x cannot run on one row: ValueError"),
+    ],
+)
+def test_the_solver_refuses_a_program_that_reads_other_rows(body, reason) -> None:
+    train, validation = _splits()
+    program = check_program(_program(body), VARIABLES)
+    score = programs.program_solver_rollout_error(
+        {"x": (program, (1.0,) * 10)}, VARIABLES, CONTEXT, train, validation,
+        _check_table(train),
+    )
+    assert score.error is None
+    assert score.failure.startswith("reads rows besides the current one")
+    assert reason in score.failure
+
+
+def test_a_solver_failure_says_where_and_why() -> None:
+    train, validation = _splits()
+    program = check_program(_program("return x * np.nan"), VARIABLES)
+    score = programs.program_solver_rollout_error(
+        {"x": (program, (1.0,) * 10)}, VARIABLES, CONTEXT, train, validation,
+        _check_table(train),
+    )
+    assert score.error is None
+    assert score.failure.startswith("c, row 0: FloatingPointError")
+
+
+def test_the_solver_refuses_test_data() -> None:
+    train, validation = _splits()
+    program = check_program(_program("return -x"), VARIABLES)
+    test = DatasetSplit(SplitName.TEST, validation.trajectories, "test")
+    with pytest.raises(ValueError, match="never TEST"):
+        programs.program_solver_rollout_error(
+            {"x": (program, (1.0,) * 10)}, VARIABLES, CONTEXT, train, test,
+            _check_table(train),
+        )

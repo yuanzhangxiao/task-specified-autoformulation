@@ -46,6 +46,7 @@ from numpy.typing import NDArray
 
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler, Trajectory
 from autoformalism.expressions import ValidationContext
+from autoformalism.fitting.models import FitConfig
 from autoformalism.rebuttal.llm_sr_upstream import MAX_NPARAMS, InexpressibleProgram
 
 #: The script that runs a program, launched by path with the same interpreter.
@@ -550,24 +551,13 @@ def program_rollout_error(
     by the training standard deviation, averaged over trajectories. Only TRAIN
     and VALIDATION are accepted. ``seconds`` bounds each trajectory, as there.
     """
-    if train.name is not SplitName.TRAIN or evaluate.name not in {
-        SplitName.TRAIN,
-        SplitName.VALIDATION,
-    }:
-        raise ValueError("selection requires TRAIN and VALIDATION, never TEST")
-    if set(programs) != set(context.targets):
-        raise ValueError("one program per target is required")
+    scales = _development_scales(programs, context, train, evaluate)
     found = observation_step(evaluate)
     if not same_step(found, step):
         raise ValueError(
             f"the {evaluate.name.value} grid steps {found:g}, "
             f"the training grid {step:g}"
         )
-    scaling = TrainingScaler().fit(train).scales
-    scales = {
-        target: float(scaling[f"target:{target}"].standard_deviation)
-        for target in context.targets
-    }
     ordered = [programs[target] for target in context.targets]
     request = {
         "mode": "rollout",
@@ -588,10 +578,39 @@ def program_rollout_error(
         )
     except ProgramRefused as exc:
         return ProgramRolloutScore(None, str(exc))
+    return _scored(evaluate, reply["trajectories"], context.targets, scales)
+
+
+def _development_scales(
+    programs: Mapping[str, object],
+    context: ValidationContext,
+    train: DatasetSplit,
+    evaluate: DatasetSplit,
+) -> dict[str, float]:
+    """Each target's training standard deviation, for TRAIN and VALIDATION only."""
+    if train.name is not SplitName.TRAIN or evaluate.name not in {
+        SplitName.TRAIN,
+        SplitName.VALIDATION,
+    }:
+        raise ValueError("selection requires TRAIN and VALIDATION, never TEST")
+    if set(programs) != set(context.targets):
+        raise ValueError("one program per target is required")
+    scaling = TrainingScaler().fit(train).scales
+    return {
+        target: float(scaling[f"target:{target}"].standard_deviation)
+        for target in context.targets
+    }
+
+
+def _scored(
+    evaluate: DatasetSplit,
+    results: Sequence[dict],
+    targets: Sequence[str],
+    scales: Mapping[str, float],
+) -> ProgramRolloutScore:
+    """The shared evaluator's error over the worker's trajectories, or the failure."""
     squared: list[float] = []
-    for trajectory, result in zip(
-        evaluate.trajectories, reply["trajectories"], strict=True
-    ):
+    for trajectory, result in zip(evaluate.trajectories, results, strict=True):
         if not result["ok"]:
             return ProgramRolloutScore(
                 None,
@@ -602,7 +621,7 @@ def program_rollout_error(
             np.square(
                 (predictions[:, column] - trajectory.targets[target]) / scales[target]
             )
-            for column, target in enumerate(context.targets)
+            for column, target in enumerate(targets)
         ]
         if not all(np.isfinite(value).all() for value in errors):
             return ProgramRolloutScore(
@@ -610,3 +629,94 @@ def program_rollout_error(
             )
         squared.append(float(np.mean([np.mean(value) for value in errors])))
     return ProgramRolloutScore(float(np.mean(squared)) if squared else None)
+
+
+# --- a diagnostic: the shared evaluator's solver for programs of the present -
+
+
+@dataclass(frozen=True)
+class ProgramSolverScore:
+    """The adaptive solver's rollout error, or why there is none.
+
+    ``alone`` gives, per target, how far the program's output on a row alone
+    strays from its output with the whole training table, as a fraction of
+    its largest output; ``None`` when it could not run on one row.
+    """
+
+    error: float | None
+    failure: str | None
+    alone: dict[str, float | None]
+    rhs_calls: int | None = None
+
+
+def program_solver_rollout_error(
+    programs: Mapping[str, tuple[CheckedProgram, Sequence[float]]],
+    channels: Sequence[str],
+    context: ValidationContext,
+    train: DatasetSplit,
+    evaluate: DatasetSplit,
+    check_values: NDArray[np.float64],
+    *,
+    seconds: float = 60.0,
+    config: FitConfig | None = None,
+) -> ProgramSolverScore:
+    """The error the shared evaluator would give these programs as equations.
+
+    A diagnostic that changes no sealed result. A pick that reads only the
+    current row is an ODE in substance, which the reader may still fail to
+    turn into an equation (a padded parameter vector, a NaN guard); it is then
+    stepped along the grid like a program that reads the history. Here each
+    program must first give every row of ``check_values``, the training table,
+    the same output alone as with the whole table. If they all do, each
+    trajectory is integrated with the shared evaluator's solver and settings
+    (``FitConfig``), and scored as ``program_rollout_error`` scores.
+    """
+    scales = _development_scales(programs, context, train, evaluate)
+    settings = config or FitConfig()
+    ordered = [programs[target] for target in context.targets]
+    request = {
+        "mode": "solve",
+        "sources": [program.source for program, _ in ordered],
+        "names": [program.name for program, _ in ordered],
+        "parameters": [list(parameters) for _, parameters in ordered],
+        "check_inputs": np.asarray(check_values, dtype=float).tolist(),
+        "tolerance": LOOK_AHEAD_TOLERANCE,
+        "trajectories": [
+            trajectory_rows(trajectory, channels, context.targets).tolist()
+            for trajectory in evaluate.trajectories
+        ],
+        "times": [
+            np.asarray(trajectory.time, dtype=float).tolist()
+            for trajectory in evaluate.trajectories
+        ],
+        "target_columns": [list(channels).index(target) for target in context.targets],
+        "method": settings.integration_method,
+        "rtol": settings.relative_tolerance,
+        "atol": settings.absolute_tolerance,
+        "max_step": settings.maximum_integration_step,
+        "seconds_per_trajectory": seconds,
+    }
+    try:
+        reply = run_worker(
+            request, seconds=seconds * len(evaluate.trajectories) + 300.0
+        )
+    except ProgramRefused as exc:
+        return ProgramSolverScore(None, str(exc), {})
+    alone = {
+        target: item["change"]
+        for target, item in zip(context.targets, reply["alone"], strict=True)
+    }
+    if reply["trajectories"] is None:
+        reasons = []
+        for target, item in zip(context.targets, reply["alone"], strict=True):
+            if item["error"] is not None:
+                reasons.append(f"{target} cannot run on one row: {item['error']}")
+            elif item["change"] > LOOK_AHEAD_TOLERANCE:
+                change = item["change"]
+                reasons.append(f"{target} on one row differs by {change:.3g}")
+        return ProgramSolverScore(
+            None, "reads rows besides the current one: " + "; ".join(reasons), alone
+        )
+    score = _scored(evaluate, reply["trajectories"], context.targets, scales)
+    calls = sum(int(result["rhs_calls"]) for result in reply["trajectories"])
+    return ProgramSolverScore(score.error, score.failure, alone, calls)
