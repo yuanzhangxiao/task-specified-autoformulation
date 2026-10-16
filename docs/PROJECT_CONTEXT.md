@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in topology-initialization milestone adds explicit latent t0 dependencies
+at the saved topology boundary and enforces them in later analytic initialization.
+Joint repairs are atomic; matched-trajectory prefix witnesses survive topology and
+initialization edits. A 15-model saved confirmation is prepared, without fitting.
+An isolated post-fit helper can suggest investigating joint dependence from
+qualified training evidence, without automatic model growth. Historical policies
+remain unchanged. See `PHASE_C_INITIALIZATION_TOPOLOGY.md`.
+
 M40 prepares a diagnostic-only extension for M39's nine partial profiles,
 preserving all 150 fitted endpoints and original costs. The opt-in numerical
 path avoids nuisance solves for frozen-only points and measures numerical,

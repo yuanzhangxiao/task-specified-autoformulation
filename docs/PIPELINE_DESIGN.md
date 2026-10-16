@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`saved-topology-initialization-1` records initialization dependencies separately
+from RHS topology, with a frozen public t0-information contract. Its proposer
+handoff is checked atomically with later topology repairs, preserved in cached
+requests and consumed by causal initializer formula construction. Historical
+matched-prefix witnesses are rechecked on every edit; missing initializer choices
+cannot masquerade as completion. `interaction_dependency_advice` is an isolated
+opt-in post-fit investigation helper, not an automatic complexity rule. See
+`PHASE_C_INITIALIZATION_TOPOLOGY.md` and `PHASE_C_JOINT_DEPENDENCY_ADVICE.md`.
+
 M40's opt-in practical-profile execution separates frozen-slice evaluation from
 bounded nuisance optimization while retaining the M39 scientific policy. Its
 standalone supplement freezes saved source endpoints, preserves original costs,

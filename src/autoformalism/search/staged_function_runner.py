@@ -37,7 +37,11 @@ from autoformalism.search import function_dependencies as dependencies
 from autoformalism.search import process_assembly_contract as assembly
 from autoformalism.search import shared_process_contract as shared
 from autoformalism.search import signed_processes as signed
-from autoformalism.search.causal_initialization import construct_initializers
+from autoformalism.search.causal_initialization import (
+    _dependency_receipt,
+    construct_initializers,
+    validate_dependency_handoff,
+)
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_function_prompts import (
     render_equation_function_batch_system_prompt,
@@ -46,6 +50,10 @@ from autoformalism.search.staged_function_prompts import (
     render_interaction_function_user_prompt,
     render_latent_initial_system_prompt,
     render_latent_initial_user_prompt,
+)
+from autoformalism.search.topology_initialization import (
+    InitialInformationContract,
+    InitializerDependencyHandoff,
 )
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_functions import (
@@ -80,13 +88,45 @@ def run_staged_functions(
     generation_granularity: FunctionGenerationGranularity = "atomic_interaction",
     function_repair_policy: FunctionRepairPolicy = "legacy",
     initialization_policy: Literal["legacy", "causal_training"] = "legacy",
+    initial_information_contract: InitialInformationContract | None = None,
+    initializer_handoff: InitializerDependencyHandoff | None = None,
     training_evidence: TrainingEvidence | None = None,
     shared_process_guidance: bool = False,
     dependency_policy: str = "strict",
     assembly_policy: str = "legacy",
     function_delivery_policy: str = "legacy",
 ) -> dict[str, Any]:
-    """Assign functions; optional local source edits are checked transactions."""
+    """Assign functions; optional local source edits are checked transactions.
+
+    Source ``initial_information_contract`` and ``initializer_handoff`` metadata
+    opt into causal initialization and must agree with any explicit arguments.
+    """
+    source_initialization = any(
+        key in source for key in ("initial_information_contract", "initializer_handoff")
+    )
+    if source_initialization:
+        source_contract = InitialInformationContract.model_validate(
+            source.get("initial_information_contract")
+        )
+        source_handoff = InitializerDependencyHandoff.model_validate(
+            source.get("initializer_handoff")
+        )
+        for explicit, retained in (
+            (initial_information_contract, source_contract),
+            (initializer_handoff, source_handoff),
+        ):
+            if explicit is not None and explicit != retained:
+                raise ValueError(
+                    "initializer dependency arguments differ from source handoff"
+                )
+        initial_information_contract, initializer_handoff = (
+            source_contract,
+            source_handoff,
+        )
+        initialization_policy = "causal_training"
+    elif initial_information_contract is not None or initializer_handoff is not None:
+        if initialization_policy != "causal_training":
+            raise ValueError("initializer dependency handoff requires causal_training")
     identified = function_delivery_policy == "identified-function-delivery-1"
     if function_delivery_policy not in {"legacy", "identified-function-delivery-1"}:
         raise ValueError("unknown function delivery policy")
@@ -128,6 +168,18 @@ def run_staged_functions(
             "repair": function_repair_policy,
             "initialization": initialization_policy,
         }
+        if initial_information_contract is not None or initializer_handoff is not None:
+            if initial_information_contract is None or initializer_handoff is None:
+                raise ValueError(
+                    "initializer dependency contract and handoff must be "
+                    "supplied together"
+                )
+            contract["initial_information_contract"] = (
+                initial_information_contract.model_dump(mode="json")
+            )
+            contract["initializer_handoff"] = initializer_handoff.model_dump(
+                mode="json"
+            )
         if shared_process_guidance:
             contract["shared_process_guidance"] = True
         if flexible:
@@ -166,6 +218,17 @@ def run_staged_functions(
         raise ValueError(
             "source topology is incomplete or differs from its scientific declarations"
         )
+    validate_dependency_handoff(
+        context,
+        tuple(state.name for state in topology.states),
+        {state.name for state in topology.states if state.kind is StateKind.OBSERVED},
+        initial_information_contract,
+        initializer_handoff,
+        state_aliases=aliases,
+    )
+    initialization_dependency_contract = _dependency_receipt(
+        initial_information_contract, initializer_handoff, aliases
+    )
     commitment = topology_commitment_sha256(topology)
     draft = FunctionalDraft(topology_commitment_sha256=commitment)
     events: list[dict[str, Any]] = []
@@ -195,6 +258,15 @@ def run_staged_functions(
                 "provider_visible_accepted_functions": provider_accepted,
                 "batch_term_audits": batch_term_audits,
                 "events": events,
+                **(
+                    {
+                        "initialization_dependency_contract": (
+                            initialization_dependency_contract
+                        )
+                    }
+                    if initialization_dependency_contract
+                    else {}
+                ),
                 **(
                     {
                         "assembly_policy": assembly_policy,
@@ -234,13 +306,29 @@ def run_staged_functions(
                 system = assembly.prompt(system)
         for attempt in range(client.settings.attempts_per_step):
             rejected: object = None
-            record = client.call(
-                system=system,
-                user=dependencies.request_context(
+            user = (
+                dependencies.request_context(
                     render(diagnostic), brief, context, effective_source
                 )
                 if function_request
-                else render(diagnostic),
+                else render(diagnostic)
+            )
+            if initialization_dependency_contract:
+                heading, body = user.split("\n", 1)
+                packet = json.loads(body)
+                packet["initialization_dependency_contract"] = (
+                    initialization_dependency_contract
+                )
+                packet["initialization_scope"] = (
+                    "Topology initializer modes and t0 dependencies are retained. "
+                    "Dynamics RHS dependencies do not determine initialization. "
+                    "Executable initial formulas follow interaction construction. "
+                    "Any initializer dependency revision belongs explicitly upstream."
+                )
+                user = heading + "\n" + json.dumps(packet)
+            record = client.call(
+                system=system,
+                user=user,
                 response_model=model,
                 step=step,
                 attempt=attempt,
@@ -787,6 +875,9 @@ def run_staged_functions(
                 enriched,
                 client,
                 output / "initialization",
+                initial_information_contract=initial_information_contract,
+                initializer_handoff=initializer_handoff,
+                state_aliases=aliases,
             )
     except (ValueError, ModelValidationError) as exc:
         error = str(exc)[:6000]
@@ -836,6 +927,10 @@ def run_staged_functions(
     if initialization_policy == "causal_training":
         result["initialization_policy"] = initialization_policy
         result["initialization"] = initialization
+    if initialization_dependency_contract:
+        result["initialization_dependency_contract"] = (
+            initialization_dependency_contract
+        )
     if process_contract:
         result["shared_process_contract"] = process_contract
     if identified:

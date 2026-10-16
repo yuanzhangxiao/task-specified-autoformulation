@@ -27,6 +27,7 @@ from autoformalism.research import repair_stagnation
 from autoformalism.research.actionable_repair_status import build_state
 from autoformalism.search import construction_actionable_repair as actionable
 from autoformalism.search import construction_evidence_repair as control
+from autoformalism.search import construction_initialized_repair as initialized
 from autoformalism.search import construction_protocol as protocol
 from autoformalism.search import construction_stage_checks as checks
 from autoformalism.search import mechanism_realizations as realizations
@@ -37,6 +38,7 @@ from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "saved-topology-repair-comparison-1"
 PROTOCOL_V2 = "saved-topology-repair-feedback-2"
+PROTOCOL_INITIALIZATION = "saved-topology-initialization-1"
 ARMS = ("control", "actionable")
 REPO = Path(__file__).resolve().parents[3]
 MAX_CALLS = 10
@@ -277,7 +279,7 @@ def verify(root: Path) -> dict:
     """Require unchanged source and sealed public inputs before any call."""
     plan = sealed_read(root / "plan.json")
     if (
-        plan["protocol"] not in {PROTOCOL, PROTOCOL_V2}
+        plan["protocol"] not in {PROTOCOL, PROTOCOL_V2, PROTOCOL_INITIALIZATION}
         or plan["source_identity"] != source_identity()
         or plan["test_data_opened"] is not False
     ):
@@ -287,6 +289,13 @@ def verify(root: Path) -> dict:
         and plan.get("actionable_policy") != actionable.POLICY_V2
     ):
         raise ValueError("saved repair policy differs")
+    if plan["protocol"] == PROTOCOL_INITIALIZATION and (
+        plan.get("actionable_policy") != initialized.POLICY
+        or plan.get("initialization_calls_within_total_budget") != 3
+        or plan["settings"]["maximum_requests"] != MAX_CALLS
+        or plan["settings"]["maximum_total_tokens"] != MAX_TOKENS
+    ):
+        raise ValueError("initializer repair policy or allowance differs")
     return plan
 
 
@@ -359,10 +368,12 @@ def make_packet(
     charged: int,
     *,
     policy: str | None = None,
+    stage: str = "repair",
+    initialization=None,
 ) -> dict:
     """Use the same complete public context; never truncate scientific evidence."""
     packet = api.payload(
-        "repair",
+        stage,
         problem.brief,
         problem.context,
         problem.targets,
@@ -375,22 +386,28 @@ def make_packet(
         training_highlights=problem.highlights,
         compatibility_questions=state["pending_questions"],
         compatibility_state=state,
-        **({"repetition_feedback": repetition} if api is actionable else {}),
+        **(
+            {"repetition_feedback": repetition}
+            if api in {actionable, initialized}
+            else {}
+        ),
         **({"policy": policy} if api is actionable and policy is not None else {}),
         **(
             {"qualified_assessment": problem.assess(draft, qualified_memory=True)}
-            if api is actionable and policy == actionable.POLICY_V2
+            if api is initialized
+            or (api is actionable and policy == actionable.POLICY_V2)
             else {}
         ),
+        **(initialization.packet_arguments() if initialization is not None else {}),
     )
     control.repair_budget(packet, MAX_CALLS, count, MAX_TOKENS, charged, MAX_TOKENS)
     return packet
 
 
-def expected_request(client, api, packet: dict, index: int) -> dict:
+def expected_request(client, api, packet: dict, index: int, stage="repair") -> dict:
     """Verify resumed requests against exact settings, schema, seed and predecessor."""
-    schema = api.response_model("repair")
-    step = f"repair_{index:03d}"
+    schema = api.response_model(stage)
+    step = f"{stage}_{index:03d}"
     return {
         "protocol": "scientific-staged-topology-1",
         "namespace": client.namespace,
@@ -438,7 +455,15 @@ def run_episode(
     problem = Problem(plan["cells"][task["benchmark_id"]], start["task"])
     draft = control.Draft.model_validate(start["draft"])
     api = actionable if task["arm"] == "actionable" else control
-    v2 = plan.get("actionable_policy") == actionable.POLICY_V2 and api is actionable
+    initialization = None
+    if plan.get("protocol") == PROTOCOL_INITIALIZATION:
+        from autoformalism.research.initialized_topology_repair import Session
+
+        api = initialized
+        initialization = Session(problem, start)
+    v2 = initialization is not None or (
+        plan.get("actionable_policy") == actionable.POLICY_V2 and api is actionable
+    )
     answers, records, events = {}, [], []
     last, repetition = None, None
     unchanged = 0
@@ -449,13 +474,24 @@ def run_episode(
         raise ValueError("frozen starting assessment differs")
     if v2:
         check = problem.assess(draft, qualified_memory=True)
-    tracked = build_state(report, start["diagnostics"], check["eligible"], answers)
+    baseline = (
+        start["diagnostics"] if initialization is None else initialization.baseline
+    )
+    if initialization is not None:
+        report = initialization.diagnose(draft, baseline)
+    tracked = build_state(report, baseline, check["eligible"], answers)
     for index in range(MAX_CALLS):
         state = (
             build_state(report, tracked, check["eligible"], answers)
-            if api is actionable
+            if api is not control
             else control_state(report, answers)
         )
+        stage = "repair"
+        if initialization is not None:
+            state = initialization.state(
+                draft, report, tracked, check["eligible"], answers
+            )
+            stage = initialization.stage(draft)
         packet = make_packet(
             api,
             problem,
@@ -466,10 +502,12 @@ def run_episode(
             index,
             _cost(records)["budget_charge"],
             policy=plan.get("actionable_policy") if v2 else None,
+            stage=stage,
+            initialization=initialization,
         )
         event_path = directory / "events" / f"{index:03d}.json"
         prior = sealed_read(event_path) if event_path.exists() else None
-        request = expected_request(client, api, packet, index)
+        request = expected_request(client, api, packet, index, stage)
         if prior is not None:
             record = next(
                 (r for r in cached if r["request_hash"] == prior["request_hash"]), None
@@ -481,8 +519,8 @@ def run_episode(
                 record = client.call(
                     system=api.SYSTEM,
                     user=json.dumps(packet, sort_keys=True),
-                    response_model=api.response_model("repair"),
-                    step=f"repair_{index:03d}",
+                    response_model=api.response_model(stage),
+                    step=f"{stage}_{index:03d}",
                     attempt=index,
                 )
             except (RepairBudgetExceeded, PromptPreflightError) as exc:
@@ -492,6 +530,11 @@ def run_episode(
             raise ValueError("saved request differs from exact repair predecessor")
         records.append(record)
         before, before_check, before_report = draft, check, report
+        before_initialization = (
+            initialization.handoff if initialization is not None else None
+        )
+        if initialization is not None and stage == "initialization":
+            initialization.initialization_calls += 1
         raw, error, accepted, complete = None, None, False, False
         normalized = None
         normalizations, submitted = [], []
@@ -504,8 +547,11 @@ def run_episode(
                 draft=draft,
                 ignore_definition_description=True,
                 **(
-                    {"boundary_contract": problem.boundary} if api is actionable else {}
+                    {"boundary_contract": problem.boundary}
+                    if api is not control
+                    else {}
                 ),
+                **({"stage": stage} if initialization is not None else {}),
             )
             patch = api.DraftPatch.model_validate(normalized)
             submitted = validate_advisory_decisions(
@@ -515,6 +561,15 @@ def run_episode(
             candidate = api.apply_patch(problem.brief, draft, patch)
             candidate, consumer_log = api.normalize_consumers(candidate, patch, draft)
             normalizations.extend(consumer_log)
+            if initialization is not None:
+                next_handoff = initialized.changed_handoff(
+                    candidate,
+                    problem.evidence,
+                    initialization.contract,
+                    initialization.handoff,
+                    patch,
+                )
+                initialization.handoff = next_handoff
             draft = candidate
             answers.update({d["question_id"]: d for d in submitted})
             accepted, complete = True, patch.stage_complete
@@ -525,8 +580,16 @@ def run_episode(
             if v2
             else problem.assess(draft)
         )
-        report = problem.diagnose(draft)
+        report = (
+            problem.diagnose(draft)
+            if initialization is None
+            else initialization.diagnose(draft, tracked)
+        )
         after_state = build_state(report, tracked, check["eligible"], answers)
+        if initialization is not None:
+            after_state = initialization.state(
+                draft, report, tracked, check["eligible"], answers
+            )
         tracked = after_state
         scientific_signature = (
             repair_stagnation.model_signature if v2 else semantic_signature
@@ -534,6 +597,8 @@ def run_episode(
         same = scientific_signature(
             before, before_check, before_report
         ) == scientific_signature(draft, check, report)
+        if initialization is not None:
+            same &= before_initialization == initialization.handoff
         lost = control.lost_required_predicates(before_check, check) if accepted else []
         last = {
             "status": "accepted" if accepted else "rejected",
@@ -545,6 +610,18 @@ def run_episode(
             "edit_effects": control.edit_effects(before, draft) if accepted else None,
             "rejected_reply": raw if not accepted else None,
             "normalizations": normalizations,
+            **(
+                {
+                    "initialization_before": before_initialization.model_dump(
+                        mode="json"
+                    ),
+                    "initialization_after": initialization.handoff.model_dump(
+                        mode="json"
+                    ),
+                }
+                if initialization is not None
+                else {}
+            ),
         }
         progress = not same
         if api is control:
@@ -568,6 +645,16 @@ def run_episode(
             if v2
             else content_hash(control.repair_signature(draft, last, check["errors"]))
         )
+        if initialization is not None:
+            signature = content_hash(
+                [
+                    signature,
+                    initialization.handoff.model_dump(mode="json"),
+                    (normalized or raw or {}).get("initialization")
+                    if isinstance(normalized or raw, dict)
+                    else None,
+                ]
+            )
         unchanged = (
             (unchanged + 1 if signature == previous_signature else 1)
             if not progress
@@ -593,6 +680,22 @@ def run_episode(
                 "semantic_model_unchanged": same,
                 "consecutive_unchanged": unchanged,
                 "required_predicates_lost": lost,
+                **(
+                    {
+                        "stage": stage,
+                        "initial_information_contract": (
+                            initialization.contract.model_dump(mode="json")
+                        ),
+                        "initialization_before": before_initialization.model_dump(
+                            mode="json"
+                        ),
+                        "initialization_after": initialization.handoff.model_dump(
+                            mode="json"
+                        ),
+                    }
+                    if initialization is not None
+                    else {}
+                ),
             },
         )
         events.append(event)
@@ -639,15 +742,16 @@ def run_episode(
             stop = "completed_requested_work"
             break
         if (
-            api is actionable
+            api is not control
             and check["eligible"]
             and not after_state["actionable_questions"]
             and after_state["repair_status"] == "review_deferred"
             and complete
+            and (initialization is None or initialization.status(draft)["complete"])
         ):
             stop = "scientific_review_deferred"
             break
-        if unchanged >= 3:
+        if unchanged >= 3 and stage != "initialization":
             stop = "three_repeated_repairs"
             break
     all_records = _cache_records(directory / "calls", identity)
@@ -656,6 +760,10 @@ def run_episode(
     if len(list((directory / "events").glob("*.json"))) != len(events):
         raise ValueError("saved event tail differs")
     final_state = build_state(report, tracked, check["eligible"], answers)
+    if initialization is not None:
+        final_state = initialization.state(
+            draft, report, tracked, check["eligible"], answers
+        )
     return sealed_write(
         directory / "result.json",
         {
@@ -672,6 +780,11 @@ def run_episode(
             "optimizer_calls": 0,
             "test_data_opened": False,
             "scientific_accuracy_established": False,
+            **(
+                initialization.result(draft, check)
+                if initialization is not None
+                else {}
+            ),
         },
     )
 
@@ -696,6 +809,11 @@ def report(root: Path, plan: dict) -> dict:
         parts[2] = (
             "Fresh v2 repairs of the same frozen starts; historical controls "
             "are not rerun. No fitting or test access."
+        )
+    elif plan.get("protocol") == PROTOCOL_INITIALIZATION:
+        parts[2] = (
+            "Initialization dependencies and joint repairs of saved v2 final drafts; "
+            "historical parents have different budgets. No fitting or test access."
         )
     for task in plan["tasks"]:
         folder = root / "results" / task["task_id"]
@@ -728,7 +846,17 @@ def report(root: Path, plan: dict) -> dict:
             "stop_reason": value["stop_reason"] if value else None,
             "cost": _cost(records),
         }
-        if plan.get("protocol") == PROTOCOL_V2:
+        if plan.get("protocol") == PROTOCOL_INITIALIZATION:
+            row["initialization_complete"] = (
+                value["initialization_status"]["complete"] if value else None
+            )
+            row["initialization_unresolved_states"] = (
+                value["initialization_status"]["unresolved_states"] if value else None
+            )
+            row["interaction_source_available"] = (
+                value["interaction_source"] is not None if value else None
+            )
+        if plan.get("protocol") in {PROTOCOL_V2, PROTOCOL_INITIALIZATION}:
             row["diagnostic_status_counts"] = (
                 dict(
                     Counter(
@@ -755,6 +883,11 @@ def report(root: Path, plan: dict) -> dict:
                 "model": model,
                 "scientific_state": value["scientific_state"],
                 "structural_errors": value["assessment"]["errors"],
+                **(
+                    {"initialization_status": value["initialization_status"]}
+                    if plan.get("protocol") == PROTOCOL_INITIALIZATION
+                    else {}
+                ),
             }
             cards.append(
                 f"<details><summary>{html.escape(row['task'])}: "
@@ -762,7 +895,11 @@ def report(root: Path, plan: dict) -> dict:
                 f"{html.escape(json.dumps(details, indent=2))}</pre></details>"
             )
     groups = {}
-    for arm in ARMS if plan.get("protocol") != PROTOCOL_V2 else ("actionable",):
+    for arm in (
+        ("actionable",)
+        if plan.get("protocol") in {PROTOCOL_V2, PROTOCOL_INITIALIZATION}
+        else ARMS
+    ):
         selected = [r for r in rows if r["arm"] == arm]
         measured = [
             r["cost"]["observed_tokens"] for r in selected if r["status"] == "assessed"
@@ -800,6 +937,18 @@ def report(root: Path, plan: dict) -> dict:
         "optimizer_calls": 0,
         "test_data_opened": False,
         "automatic_followup": False,
+        **(
+            {
+                "initialization_complete": sum(
+                    r["initialization_complete"] is True for r in rows
+                ),
+                "interaction_sources_available": sum(
+                    r["interaction_source_available"] is True for r in rows
+                ),
+            }
+            if plan.get("protocol") == PROTOCOL_INITIALIZATION
+            else {}
+        ),
     }
     atomic_json(root / "summary.json", summary)
     (root / "SUMMARY.md").write_text("\n".join(parts) + "\n")

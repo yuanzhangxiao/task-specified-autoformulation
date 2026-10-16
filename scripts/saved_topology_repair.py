@@ -25,6 +25,10 @@ from scripts.jetstream_construction_probe import BASE_URL
 def preview(root: Path, output: Path) -> dict:
     """Render the exact first request in each arm, including schema and feedback."""
     plan = campaign.verify(root)
+    if plan["protocol"] == campaign.PROTOCOL_INITIALIZATION:
+        from autoformalism.research.initialized_topology_repair import preview as render
+
+        return render(plan, output)
     output.mkdir(parents=True, exist_ok=True)
     rows, requests_by_source = [], {}
     v2 = plan.get("actionable_policy") == actionable.POLICY_V2
@@ -194,7 +198,8 @@ def run(inputs: Path, root: Path, work: Path, requests: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=("freeze", "refreeze", "preview", "run", "report")
+        "command",
+        choices=("freeze", "refreeze", "initialize", "preview", "run", "report"),
     )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--source", type=Path)
@@ -204,12 +209,16 @@ def main() -> None:
     parser.add_argument("--requests", type=Path)
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
-        if args.command in {"freeze", "refreeze"}:
+        if args.command in {"freeze", "refreeze", "initialize"}:
             if args.source is None:
-                parser.error("freeze/refreeze requires --source")
+                parser.error("freeze/refreeze/initialize requires --source")
             freezer = (
                 campaign.refreeze if args.command == "refreeze" else campaign.freeze
             )
+            if args.command == "initialize":
+                from autoformalism.research.initialized_topology_repair import freeze
+
+                freezer = freeze
             plan = freezer(args.source, args.root)
             value = {
                 "identity": plan["artifact_sha256"],

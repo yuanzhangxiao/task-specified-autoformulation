@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from autoformalism.search.topology_compatibility import Witness
+from autoformalism.search.topology_initialization import ClosedWitnessRecheck
+
 _NO_COMPARISON = "no qualifying observed comparison"
 _EXPLICIT_TIME = "explicit time dependence is not autonomous"
 
@@ -24,6 +27,122 @@ def _actionable(question: dict) -> bool:
     return any(
         witness.get("error_intervals_disjoint") is True
         for witness in question.get("witnesses", ())
+    )
+
+
+def _prefix_resolution(
+    question: dict, diagnostic: dict | None, report: dict, previous: list[dict]
+) -> tuple[str, bool, str] | None:
+    """Resolve only complete, current checks of every retained paired witness.
+
+    Initializer dependencies may distinguish trajectories without changing the
+    topology's ancestor scope. The optional prefix receipt establishes that
+    distinction at each saved observation time. Missing or stale receipts cannot
+    fall back to a weaker whole-horizon comparison and erase an earlier conflict.
+    """
+    if (
+        question["property"] != "closed_subsystem"
+        or "saved_witness_recheck" not in report
+    ):
+        return None
+    unresolved = (
+        "deferred_after_revision",
+        False,
+        "Not every retained paired witness has a current, validated distinction "
+        "in initial information or forcing through its observation time.",
+    )
+    raw = report["saved_witness_recheck"]
+    if (
+        not isinstance(raw, dict)
+        or raw.get("protocol") != "closed-witness-prefix-recheck-1"
+    ):
+        return unresolved
+    try:
+        recheck = ClosedWitnessRecheck.model_validate(raw)
+    except (ValueError, TypeError):
+        return unresolved
+    full = report.get("full_report", {})
+    conditioned_evidence = report.get(
+        "initialization_evidence_sha256", report["evidence_sha256"]
+    )
+    if (
+        recheck.evidence_sha256 != conditioned_evidence
+        or full.get("evidence_sha256") != conditioned_evidence
+        or recheck.topology_sha256 != report.get("topology_sha256")
+        or full.get("topology_sha256") != report.get("topology_sha256")
+        or diagnostic is None
+        or diagnostic.get("status") not in {"deferred", "no_conflict_found"}
+        or set(diagnostic.get("unavailable", ())) - {_NO_COMPARISON}
+        or any(_key(row.model_dump()) == _key(question) for row in recheck.diagnostics)
+    ):
+        return unresolved
+
+    expected = set()
+    for old in previous:
+        if _key(old) != _key(question):
+            continue
+        identifier = old.get("question_id")
+        witnesses = old.get("witnesses")
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or not isinstance(witnesses, (list, tuple))
+            or not witnesses
+        ):
+            return unresolved
+        for value in witnesses:
+            try:
+                witness = Witness.model_validate(value)
+            except (ValueError, TypeError):
+                return unresolved
+            if (
+                any(
+                    len(values) != 2
+                    for values in (
+                        witness.trajectories,
+                        witness.sample_indices,
+                        witness.times,
+                        witness.observations,
+                    )
+                )
+                or witness.trajectories[0] == witness.trajectories[1]
+                or witness.times[0] != witness.times[1]
+                or any(index < 0 for index in witness.sample_indices)
+            ):
+                return unresolved
+            expected.add(
+                (
+                    identifier,
+                    witness.trajectories,
+                    witness.sample_indices,
+                    witness.times[0],
+                )
+            )
+    observed = set()
+    for check in recheck.checks:
+        if check.get("target") != question["target"]:
+            continue
+        if check.get("status") != "conditioning_distinction":
+            return unresolved
+        try:
+            coordinates = (
+                check["previous_question_id"],
+                tuple(check["trajectories"]),
+                tuple(check["sample_indices"]),
+                check["conditioning_end_time"],
+            )
+            observed.add(coordinates)
+        except (KeyError, TypeError):
+            return unresolved
+    if not expected or not expected <= observed:
+        return unresolved
+    return (
+        "conditioning_distinction_verified",
+        True,
+        "Every retained paired witness was rechecked against current initial "
+        "information and forcing through its observation time. Their conditioning "
+        "differs, removing this equality restriction even if the graph scope is "
+        "unchanged; the revised functions and predictive accuracy remain unverified.",
     )
 
 
@@ -153,7 +272,8 @@ def build_state(
                 "The current diagnostic still reports this conditional conflict.",
             )
         else:
-            status, resolved, reason = _resolution(old, diagnostic)
+            prefix = _prefix_resolution(old, diagnostic, report, previous)
+            status, resolved, reason = prefix or _resolution(old, diagnostic)
         outcomes.append(
             {
                 "target": key[0],

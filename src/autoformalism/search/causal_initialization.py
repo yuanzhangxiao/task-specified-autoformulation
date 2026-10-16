@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -15,6 +16,7 @@ from autoformalism.expressions import (
     ValidationContext,
     compile_candidate,
 )
+from autoformalism.expressions.parser import RestrictedParser
 from autoformalism.fitting.initialization import (
     InitialCausalMap,
     InitialMapParameter,
@@ -31,10 +33,16 @@ from autoformalism.llm.staged_topology import (
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.schemas.staged_functions import FunctionParameter
+from autoformalism.search.topology_compatibility import InitialRule
+from autoformalism.search.topology_initialization import (
+    InitialInformationContract,
+    InitializerDependencyHandoff,
+)
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "causal-initializer-construction-2"
 EXPRESSION_NORMALIZATION = "initial-assignment-normalization-1"
+DEPENDENCY_CONSUMPTION = "topology-initializer-formulas-1"
 
 
 class SharedBoundary(StrictSchema):
@@ -92,6 +100,163 @@ Declare every map-local parameter once with its qualitative role, and no unused
 parameters. Equation parameters are not implicitly available to the map.
 Return only the schema. Numerical guesses and parameter fitting belong to runtime.
 """
+
+HANDOFF_SYSTEM_PROMPT = """Construct the selected latent state's initial boundary.
+Its mode and initial public dependencies were explicitly chosen at topology and
+are fixed in selected_initializer_dependency. For shared_parameter, return
+shared_value with its qualitative parameter role. For common_map, return causal_map
+whose public symbols are exactly the declared arguments. Choose the scalar formula
+and map-local parameter roles here, never new dependencies or another mode.
+Each channel symbol denotes only its recorded value at t0; covariates and time
+also denote initial values. Parameters and the deterministic map are shared across
+trajectories, fitted on training and frozen for prediction. Observed state initials
+remain bound to their own recorded channels by runtime and are not requested here.
+The displayed state RHS is dynamics context, not an initializer formula or an
+assumption that the state begins at equilibrium. Do not copy it without scientific
+justification. An initializer-dependency change must be made explicitly upstream
+at topology and revalidated; this reply cannot revise that record.
+For causal_map supply only a scalar RHS, no assignment or derivative. Use +, -, *,
+/, integer-literal ** (absolute exponent at most 16), abs, exp, log, sigmoid,
+softplus, sqrt, tanh, min or max in the restricted grammar. Declare every local
+parameter once with its qualitative role and use each declared parameter.
+No future observations or input schedules, trajectory IDs, hidden quantities,
+generated-only states, indexing, attributes or arbitrary calls are available.
+Equation parameters are not implicitly available. Return only the supplied schema;
+numerical optimizer guesses and parameter fitting belong to runtime.
+"""
+
+
+def validate_dependency_handoff(
+    context: ValidationContext,
+    state_names: tuple[str, ...],
+    observed_states: set[str],
+    contract: InitialInformationContract | None,
+    handoff: InitializerDependencyHandoff | None,
+    *,
+    state_aliases: Mapping[str, str] | None = None,
+) -> InitializerDependencyHandoff | None:
+    """Validate complete executable choices and translate state names only.
+
+    Public arguments are recorded channels even when a generated state has the
+    same scientific name and receives a compiler alias. Missing/unknown records
+    never become inferred formulas. Runtime-observed states may omit their record.
+    """
+    if contract is None and handoff is None:
+        return None
+    if contract is None or handoff is None:
+        raise ValueError(
+            "INITIALIZER_DEPENDENCY_CONTRACT: supply contract and handoff together"
+        )
+    contract = InitialInformationContract.model_validate(
+        contract.model_dump(mode="json")
+    )
+    handoff = InitializerDependencyHandoff.model_validate(
+        handoff.model_dump(mode="json")
+    )
+    if contract.scope != "recorded_t0" or contract.shared_deterministic is not True:
+        raise ValueError(
+            "INITIALIZER_DEPENDENCY_CONTRACT: recorded-t0 shared deterministic "
+            "initial information must be established before formula construction"
+        )
+    public = (
+        set(context.targets) | set(context.forcing_channels) | {context.time_symbol}
+    )
+    if extra := set(contract.permitted_symbols) - public:
+        raise ValueError(
+            f"INITIALIZER_DEPENDENCY_SYMBOLS: unavailable t0 symbols {sorted(extra)}"
+        )
+    aliases = dict(state_aliases or {})
+    if len(set(aliases.values())) != len(aliases) or any(
+        name in state_names and name != alias for name, alias in aliases.items()
+    ):
+        raise ValueError("INITIALIZER_DEPENDENCY_ALIAS: ambiguous state aliases")
+    resolved = InitializerDependencyHandoff.model_validate(
+        {
+            "records": [
+                {
+                    "state": aliases.get(record.state, record.state),
+                    "rule": record.rule.model_dump(mode="json"),
+                }
+                for record in handoff.records
+            ]
+        }
+    )
+    records = {record.state: record.rule for record in resolved.records}
+    if stale := set(records) - set(state_names):
+        raise ValueError(
+            "INITIALIZER_DEPENDENCY_STALE: records are not differential states: "
+            f"{sorted(stale)}"
+        )
+    for name, rule in records.items():
+        if name in observed_states:
+            if rule.mode != "observed_initial":
+                raise ValueError(
+                    f"INITIALIZER_DEPENDENCY_OBSERVED: {name} is runtime-bound"
+                )
+        elif rule.mode not in {"shared_parameter", "common_map"}:
+            raise ValueError(
+                f"INITIALIZER_DEPENDENCY_UNRESOLVED: {name} needs an explicit "
+                "topology choice"
+            )
+        if extra := set(rule.arguments) - set(contract.permitted_symbols):
+            raise ValueError(
+                f"INITIALIZER_DEPENDENCY_SYMBOLS at initial:{name}: unavailable "
+                f"declared arguments {sorted(extra)}"
+            )
+    if missing := set(state_names) - observed_states - set(records):
+        raise ValueError(
+            "INITIALIZER_DEPENDENCY_MISSING: explicit topology records required "
+            f"for {sorted(missing)}"
+        )
+    return resolved
+
+
+def _dependency_receipt(
+    contract: InitialInformationContract | None,
+    handoff: InitializerDependencyHandoff | None,
+    state_aliases: Mapping[str, str] | None,
+) -> dict | None:
+    """Bind original scientific names and compiler translation to every artifact."""
+    if contract is None:
+        return None
+    if handoff is None:
+        raise ValueError("initializer dependency contract requires a handoff")
+    return {
+        "protocol": DEPENDENCY_CONSUMPTION,
+        "initial_information_contract": contract.model_dump(mode="json"),
+        "initializer_handoff": handoff.model_dump(mode="json"),
+        "state_aliases": dict(state_aliases or {}),
+    }
+
+
+def _validate_dependency_choice(
+    choice: InitializerChoice, state: str, rule: InitialRule
+) -> None:
+    """Reject mode or symbol edits; scientific revisions belong at topology."""
+    expected = "shared_value" if rule.mode == "shared_parameter" else "causal_map"
+    guidance = (
+        "Revise the topology initializer record explicitly upstream if a "
+        "dependency change is scientifically needed."
+    )
+    if choice.initial.mode != expected:
+        raise ValueError(
+            f"INITIALIZER_DEPENDENCY_MODE at initial:{state}: expected {expected}; "
+            f"received {choice.initial.mode}. {guidance}"
+        )
+    if isinstance(choice.initial, MappedBoundary):
+        parsed = RestrictedParser().parse(
+            choice.initial.expression, location=f"initial:{state}"
+        )
+        local = {p.name for p in choice.initial.parameters}
+        actual = parsed.symbols - local
+        declared = set(rule.arguments)
+        if actual != declared or local & declared:
+            raise ValueError(
+                f"INITIALIZER_DEPENDENCY_SYMBOLS at initial:{state}: "
+                f"declared={sorted(declared)}, added={sorted(actual - declared)}, "
+                f"missing={sorted(declared - actual)}, "
+                f"ambiguous={sorted(local & declared)}. {guidance}"
+            )
 
 
 def _normalize_choice(
@@ -200,6 +365,10 @@ def compile_initialization_result(
     candidate: CandidateModel,
     context: ValidationContext,
     result: dict,
+    *,
+    initial_information_contract: InitialInformationContract | None = None,
+    initializer_handoff: InitializerDependencyHandoff | None = None,
+    state_aliases: Mapping[str, str] | None = None,
 ) -> CompiledModel:
     """Reconstruct the artifact and reject changed or incomplete boundaries."""
     model = compile_candidate(candidate, context)
@@ -211,6 +380,62 @@ def compile_initialization_result(
     latent = set(model.state_names) - set(model.direct_state_observation_channels)
     if set(plan.rules) != latent:
         raise ValueError("initializer plan must cover every latent state exactly once")
+    receipt = result.get("initialization_dependency_contract")
+    if initial_information_contract is not None or initializer_handoff is not None:
+        validate_dependency_handoff(
+            context,
+            model.state_names,
+            set(model.direct_state_observation_channels),
+            initial_information_contract,
+            initializer_handoff,
+            state_aliases=state_aliases,
+        )
+        if receipt != _dependency_receipt(
+            initial_information_contract, initializer_handoff, state_aliases
+        ):
+            raise ValueError(
+                "initializer dependency artifact differs from requested handoff"
+            )
+    if receipt is not None:
+        contract = InitialInformationContract.model_validate(
+            receipt["initial_information_contract"]
+        )
+        handoff = InitializerDependencyHandoff.model_validate(
+            receipt["initializer_handoff"]
+        )
+        aliases = receipt["state_aliases"]
+        if receipt != _dependency_receipt(contract, handoff, aliases):
+            raise ValueError("initializer dependency artifact contract differs")
+        resolved = validate_dependency_handoff(
+            context,
+            model.state_names,
+            set(model.direct_state_observation_channels),
+            contract,
+            handoff,
+            state_aliases=aliases,
+        )
+        records = {record.state: record.rule for record in resolved.records}
+        for name, reply in plan.rules.items():
+            if isinstance(reply.initial, InitialValueGuess):
+                choice = InitializerChoice(
+                    initial=SharedBoundary(role=reply.initial.role)
+                )
+            elif isinstance(reply.initial, InitialCausalMap):
+                choice = InitializerChoice(
+                    initial=MappedBoundary(
+                        expression=reply.initial.expression,
+                        parameters=tuple(
+                            FunctionParameter(name=p.name, role=p.role)
+                            for p in reply.initial.parameters
+                        ),
+                    )
+                )
+            else:
+                raise ValueError(
+                    "INITIALIZER_DEPENDENCY_MODE: unsupported executable "
+                    "initialization mode"
+                )
+            _validate_dependency_choice(choice, name, records[name])
     compiled, guesses, audit = apply_initialization_plan(model, plan)
     if (
         result["candidate"] != compiled.validated.candidate.model_dump(mode="json")
@@ -228,11 +453,30 @@ def construct_initializers(
     public_brief: dict,
     client: StagedTopologyClient,
     output: Path,
+    *,
+    initial_information_contract: InitialInformationContract | None = None,
+    initializer_handoff: InitializerDependencyHandoff | None = None,
+    state_aliases: Mapping[str, str] | None = None,
 ) -> dict:
     """Cache bounded state-local choices; failed entries retain accepted siblings."""
     from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 
     model = compile_candidate(candidate, context)
+    resolved = validate_dependency_handoff(
+        context,
+        model.state_names,
+        set(model.direct_state_observation_channels),
+        initial_information_contract,
+        initializer_handoff,
+        state_aliases=state_aliases,
+    )
+    receipt = _dependency_receipt(
+        initial_information_contract, initializer_handoff, state_aliases
+    )
+    records = (
+        {record.state: record.rule for record in resolved.records} if resolved else {}
+    )
+    system = HANDOFF_SYSTEM_PROMPT if receipt else SYSTEM_PROMPT
     identity = content_hash(
         {
             "protocol": PROTOCOL,
@@ -241,11 +485,12 @@ def construct_initializers(
             "context": context.model_dump(mode="json"),
             "brief": public_brief,
             "runtime": runtime_source_hash(),
-            "system": SYSTEM_PROMPT,
+            "system": system,
             "schema": InitializerChoice.model_json_schema(),
             "client_namespace": client.namespace,
             "settings": client.settings.model_dump(mode="json"),
             "seed": client.seed,
+            **({"initialization_dependency_contract": receipt} if receipt else {}),
         }
     )
     path = output / "state.json"
@@ -255,6 +500,7 @@ def construct_initializers(
         "choices": {},
         "attempts": [],
         "status": "running",
+        **({"initialization_dependency_contract": receipt} if receipt else {}),
     }
     if path.exists():
         saved = json.loads(path.read_text())
@@ -265,7 +511,14 @@ def construct_initializers(
     _save(path, state)
     _restore_attempt_costs(client, state["attempts"])
     if state["status"] == "complete":
-        compile_initialization_result(candidate, context, state["result"])
+        compile_initialization_result(
+            candidate,
+            context,
+            state["result"],
+            initial_information_contract=initial_information_contract,
+            initializer_handoff=initializer_handoff,
+            state_aliases=state_aliases,
+        )
         return state["result"]
     allowed = sorted(
         set(context.targets) | set(context.forcing_channels) | {context.time_symbol}
@@ -291,15 +544,27 @@ def construct_initializers(
                         e.rhs for e in candidate.state_equations if e.state == name
                     ),
                 },
-                "allowed_initial_symbols": allowed,
+                "allowed_initial_symbols": sorted(records[name].arguments)
+                if receipt
+                else allowed,
                 "observed_initial_channels": dict(
                     model.direct_state_observation_channels
                 ),
                 "accepted_initializers": state["choices"],
                 "diagnostics": attempts[-1:] if attempts else [],
+                **(
+                    {
+                        "initialization_dependency_contract": receipt,
+                        "selected_initializer_dependency": records[name].model_dump(
+                            mode="json"
+                        ),
+                    }
+                    if receipt
+                    else {}
+                ),
             }
             record = client.call(
-                system=SYSTEM_PROMPT,
+                system=system,
                 user="Causal initialization\n" + json.dumps(payload),
                 response_model=InitializerChoice,
                 step=f"causal_initial_{name}",
@@ -320,6 +585,8 @@ def construct_initializers(
                         "expression"
                     ]
                     event["normalization"] = normalization
+                if receipt:
+                    _validate_dependency_choice(choice, name, records[name])
                 rule = _rule(choice)
                 rules = {**state["rules"], name: rule.model_dump(mode="json")}
                 plan = LatentInitializationPlan.model_validate({"rules": rules})
@@ -352,8 +619,16 @@ def construct_initializers(
         "audit": audit,
         "attempts": state["attempts"],
         "parameter_fitting_performed": False,
+        **({"initialization_dependency_contract": receipt} if receipt else {}),
     }
-    compile_initialization_result(candidate, context, result)
+    compile_initialization_result(
+        candidate,
+        context,
+        result,
+        initial_information_contract=initial_information_contract,
+        initializer_handoff=initializer_handoff,
+        state_aliases=state_aliases,
+    )
     state.update(status="complete", result=result)
     _save(path, state)
     return result
