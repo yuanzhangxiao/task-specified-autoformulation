@@ -10,8 +10,10 @@ AF_PROFILE_SOURCE=${AF_PROFILE_SOURCE:-/work/hdd/bibo/yxiao2/phase_c/practical-u
 [[ -x "$AF_PYTHON" ]] || { echo 'Set AF_PYTHON to the existing fitting environment.' >&2; exit 1; }
 [[ -f "$AF_PROFILE_SOURCE/plan.json" ]] || { echo "No M39 plan at $AF_PROFILE_SOURCE" >&2; exit 1; }
 cd "$AF_CODE"
+printf 'M40: checking code integrity in %s\n' "$AF_CODE"
 [[ ! -f SHA256SUMS ]] || sha256sum -c SHA256SUMS --quiet
-"$AF_PYTHON" scripts/submit_phase_c_practical_uncertainty_supplement.py \
+printf 'M40: loading Python dependencies; source=%s; output=%s\n' "$AF_PROFILE_SOURCE" "$AF_PROFILE_ROOT"
+"$AF_PYTHON" -u scripts/submit_phase_c_practical_uncertainty_supplement.py \
   --root "$AF_PROFILE_ROOT" --source "$AF_PROFILE_SOURCE" \
   --config "${AF_PROFILE_CONFIG:-$AF_CODE/configs/phase_c_practical_uncertainty_supplement_v1.json}" \
   --account "${AF_ACCOUNT:-bibo-delta-cpu}" --concurrency "${AF_CONCURRENCY:-2}"

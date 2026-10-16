@@ -82,6 +82,69 @@ submission command reuses confirmed receipts. If Slurm's reply is unconfirmed,
 inspect the saved intent and scheduler before recovery; do not delete receipts
 or resubmit blindly.
 
+## ACES fallback after the Delta storage outage
+
+On 16 October the Delta submission process waited for over two hours in
+`cl_sync_io_wait`, used about four CPU seconds, created no supplement root and
+had no matching Slurm accounting records. Delta's notice reported OST recovery.
+This is consistent with blocked filesystem access before submission, not a slow
+profile calculation. Interrupt that launcher before starting a replacement;
+delivery of the interrupt can be delayed while filesystem I/O is blocked.
+
+The ACES fallback imports the already downloaded M39 review archive. It preserves
+the exact plan, inputs and result JSON/JSONL bytes, including original costs.
+It prepares a new M40 plan on ACES, pinning that host's code and numerical runtime;
+it does not copy a locally prepared M40 plan or Delta scheduler receipts. Results
+and timing must be labeled ACES: these measurements cannot establish a Delta
+speedup. The nine-task roster, two-task concurrency, CPU resources and diagnostic
+policy are unchanged. No original fit is rerun.
+
+Upload `phase-c-fitting-m40-aces.tar.gz` to ACES home. It contains committed code
+and the historical source snapshot in separate directories, with file checksums.
+No access to Delta is required:
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
+mkdir -p "$AF_GROUP/repos" "$AF_GROUP/phase_c"
+AF_PACKAGE=$(mktemp -d "$AF_GROUP/repos/practical-uncertainty-m40.XXXXXX")
+printf 'Extracting into %s\n' "$AF_PACKAGE"
+tar -xzf "$HOME/phase-c-fitting-m40-aces.tar.gz" -C "$AF_PACKAGE"
+cd "$AF_PACKAGE"
+printf 'Checking transferred code and historical result bytes\n'
+sha256sum -c SHA256SUMS --quiet
+export AF_PROFILE_SOURCE="$AF_PACKAGE/m39-source"
+bash code/scripts/hpc/submit_phase_c_practical_uncertainty_supplement_aces.sh
+BASH
+```
+
+The ACES wrappers load the existing GCC/Python modules in both submission and
+workers, validate numerical imports, and retain the same prepare-stage tests.
+The launcher now prints checksum/import/preparation/submission milestones to
+distinguish these stages. Integrity checks remain mandatory; progress messages
+do not prove an I/O operation is advancing.
+
+After the jobs finish:
+
+```bash
+AF_ROOT=/scratch/group/p.nairr260351.000/u.yx126462/phase_c/practical-uncertainty-supplement-aces-v1
+AF_CODE=$(jq -er '.identity.repo' "$AF_ROOT/submission_manifest.json")
+bash "$AF_CODE/scripts/hpc/inspect_phase_c_practical_uncertainty_supplement_aces.sh" "$AF_ROOT"
+```
+
+The imported source and code paths must remain available for queued workers and
+resume. Use the recorded code directory for recovery, rather than extracting a
+second copy and changing an existing submission identity. Never delete receipts
+to retry an unconfirmed submission.
+
+Local fallback validation: all 82 relevant numerical, supplement and launcher
+tests pass, including 17 launch/receipt tests. The portable source audit verifies
+all 150 retained fits and selects exactly nine partial profiles from 3,842 exact
+historical files. Changed-file Ruff and shell syntax pass. Whole-checkout Ruff
+reports 37 pre-existing findings confined to `analysis/claude`; ACES runtime and
+scheduler execution remain to be qualified by the user-run preparation job.
+
 ## Exit criteria
 
 - All 150 source fits and their selection remain unchanged.
