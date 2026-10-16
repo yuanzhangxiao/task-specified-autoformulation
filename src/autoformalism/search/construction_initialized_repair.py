@@ -17,6 +17,7 @@ from autoformalism.search.causal_initialization import validate_dependency_hando
 from autoformalism.staged_topology import content_hash, lower_topology
 
 POLICY = "topology-initialization-repair-1"
+POLICY_V2 = "topology-initialization-repair-2"
 SYSTEM = previous.SYSTEM
 Draft = previous.Draft
 
@@ -90,9 +91,7 @@ def normalize_reply(brief, raw, *, stage="repair", **kwargs):
         # Handle normalization may simulate the topology-only transaction. Permit
         # an unchanged topology when the same reply changes initialization.
         legacy["stage_complete"] = True
-    value, log = previous.normalize_reply(
-        brief, legacy, **kwargs
-    )
+    value, log = previous.normalize_reply(brief, legacy, **kwargs)
     value["stage_complete"] = reply.stage_complete
     value["initialization"] = (
         reply.initialization.model_dump(mode="json") if reply.initialization else None
@@ -141,8 +140,10 @@ def qualify_completion(state, status):
     }
 
 
-def payload(stage, *args, evidence, initial_contract, handoff, **kwargs):
+def payload(stage, *args, evidence, initial_contract, handoff, policy=POLICY, **kwargs):
     """Present equations, initial conditions and existing conditional witnesses once."""
+    if policy not in {POLICY, POLICY_V2}:
+        raise ValueError("unknown initialization repair policy")
     kwargs["policy"] = previous.POLICY_V2
     packet = previous.payload("repair", *args, **kwargs)
     draft = args[4]
@@ -253,6 +254,34 @@ def payload(stage, *args, evidence, initial_contract, handoff, **kwargs):
                 "record. Other model conflicts are handled in joint repair.",
             }
         }
+    if policy == POLICY_V2:
+        from autoformalism.search.construction_feedback_projection import project
+
+        packet["stage_instructions"] += (
+            "\nOnly editable_states need proposer initializer records. Fixed observed "
+            "and measured initial rules are already supplied by the runtime; do not "
+            "replace them. If a reply is rejected, no edits commit. Retain valid "
+            "intended editable records when resubmitting the corrected transaction."
+        )
+        last = args[6] if len(args) > 6 else None
+        attempted = (last or {}).get("rejected_reply")
+        if isinstance(attempted, dict) and attempted.get("initialization"):
+            try:
+                parsed = initial.InitializerDependencyHandoff.model_validate(
+                    attempted["initialization"]
+                )
+                receipt = initial.rejected_handoff_feedback(
+                    draft, evidence, initial_contract, parsed
+                )
+            except (ValueError, TypeError) as exc:
+                receipt = {
+                    "transaction_committed": False,
+                    "schema_error": str(exc),
+                    "instruction": "Correct the initialization record using the "
+                    "displayed schema. No rejected edits were committed.",
+                }
+            packet["feedback"]["rejected_initialization"] = receipt
+        return project(packet, draft)
     return packet
 
 

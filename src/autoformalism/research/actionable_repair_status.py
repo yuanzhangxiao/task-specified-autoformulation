@@ -12,9 +12,11 @@ from copy import deepcopy
 
 from autoformalism.search.topology_compatibility import Witness
 from autoformalism.search.topology_initialization import ClosedWitnessRecheck
+from autoformalism.staged_topology import content_hash
 
 _NO_COMPARISON = "no qualifying observed comparison"
 _EXPLICIT_TIME = "explicit time dependence is not autonomous"
+ALL_SEEN_WITNESSES = "all-seen-witnesses-1"
 
 
 def _key(row: dict) -> tuple[str, str]:
@@ -28,6 +30,42 @@ def _actionable(question: dict) -> bool:
         witness.get("error_intervals_disjoint") is True
         for witness in question.get("witnesses", ())
     )
+
+
+def retain_witness_history(*histories: list[dict]) -> list[dict]:
+    """Retain every witnessed question, merging repeats without losing provenance.
+
+    A necessary-condition test can acquire a new sample pair after a topology
+    edit. Its target/property alone is therefore not a witness identity. Keep
+    distinct question IDs, and union complete witness records within each ID;
+    unchanged repeats do not grow the ledger. Question IDs and witness contents
+    remain runtime records, never replacements inferred from proposer prose.
+    Empty or malformed historical records are retained so later verification can
+    abstain instead of silently treating missing evidence as a resolved conflict.
+    """
+    records: dict[tuple, dict] = {}
+    for history in histories:
+        for question in history:
+            witnesses = question.get("witnesses")
+            valid_list = isinstance(witnesses, (list, tuple)) and bool(witnesses)
+            identity = (
+                *_key(question),
+                question.get("question_id"),
+                None if valid_list else content_hash(question),
+            )
+            if identity not in records:
+                records[identity] = deepcopy(question)
+                if valid_list:
+                    records[identity]["witnesses"] = []
+            if valid_list:
+                retained = records[identity]["witnesses"]
+                known = {content_hash(witness) for witness in retained}
+                for witness in witnesses:
+                    digest = content_hash(witness)
+                    if digest not in known:
+                        retained.append(deepcopy(witness))
+                        known.add(digest)
+    return list(records.values())
 
 
 def _prefix_resolution(
@@ -213,14 +251,20 @@ def build_state(
     baseline: dict | None,
     structural_eligible: bool,
     decisions: dict[str, dict] | None = None,
+    *,
+    witness_policy: str | None = None,
 ) -> dict:
     """Build an independent repair status from current and previously seen tests.
 
     Pass the previous returned state as ``baseline`` to retain conflicts first
     encountered during repair. A raw initial compatibility report is also valid.
     Question answers are receipts only. In particular, an approximation or an
-    unverified assumption dispute cannot clear a current or prior conflict.
+    unverified assumption dispute cannot clear a current or prior conflict. Opt
+    into ``ALL_SEEN_WITNESSES`` to retain new witnessed questions for an existing
+    target/property. Omitting it preserves historical checkpoint behavior.
     """
+    if witness_policy not in {None, ALL_SEEN_WITNESSES}:
+        raise ValueError("unsupported actionable witness policy")
     if baseline and baseline["evidence_sha256"] != report["evidence_sha256"]:
         raise ValueError("actionable repair evidence changed")
     answers = decisions or {}
@@ -230,9 +274,18 @@ def build_state(
             "tracked_conflicts", (baseline or {}).get("advisory_questions", ())
         )
     )
-    tracked = {_key(question): deepcopy(question) for question in previous}
-    for question in current:
-        tracked.setdefault(_key(question), deepcopy(question))
+    if witness_policy == ALL_SEEN_WITNESSES:
+        history = retain_witness_history(previous, current)
+        grouped: dict[tuple[str, str], list[dict]] = {}
+        for question in history:
+            grouped.setdefault(_key(question), []).append(question)
+        tracked = {key: questions[0] for key, questions in grouped.items()}
+    else:
+        tracked = {_key(question): deepcopy(question) for question in previous}
+        for question in current:
+            tracked.setdefault(_key(question), deepcopy(question))
+        history = [tracked[key] for key in sorted(tracked)]
+        grouped = {key: [question] for key, question in tracked.items()}
     current_by_key = {_key(question): question for question in current}
     diagnostics = {
         _key(row): row for row in report.get("full_report", {}).get("diagnostics", ())
@@ -273,7 +326,16 @@ def build_state(
             )
         else:
             prefix = _prefix_resolution(old, diagnostic, report, previous)
-            status, resolved, reason = prefix or _resolution(old, diagnostic)
+            # Prefix resolution already requires receipts for the whole group.
+            # For other properties, do not let a changed scope for the first
+            # record erase an unresolved restriction introduced by a later one.
+            resolutions = [
+                prefix or _resolution(question, diagnostic)
+                for question in grouped[key]
+            ]
+            status, resolved, reason = next(
+                (row for row in resolutions if not row[1]), resolutions[0]
+            )
         outcomes.append(
             {
                 "target": key[0],
@@ -281,7 +343,9 @@ def build_state(
                 "previous_question_id": old["question_id"],
                 "current_question_id": present["question_id"] if present else None,
                 "current_status": diagnostic["status"] if diagnostic else "unavailable",
-                "previously_actionable": _actionable(old),
+                "previously_actionable": any(
+                    _actionable(question) for question in grouped[key]
+                ),
                 "status": status,
                 "resolved": resolved,
                 "reason": reason,
@@ -304,7 +368,8 @@ def build_state(
         "pending_questions": pending,
         "actionable_questions": actionable,
         "uncertain_questions": uncertain,
-        "tracked_conflicts": [tracked[key] for key in sorted(tracked)],
+        "tracked_conflicts": history,
+        **({"witness_history_policy": witness_policy} if witness_policy else {}),
         "baseline_outcomes": outcomes,
         "decisions": [deepcopy(answers[key]) for key in sorted(answers)],
         "repair_status": status,

@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+`saved-topology-initialization-2` preserves every baseline/current-episode witness
+and uses verified serving-token reservations under unchanged caps. Its lossless
+structural feedback projection shares repeated details and qualifies consumer
+advice against retained uses. Reviewed public measured-initial identities have
+fixed dependencies and exact later formula lowering; other latent choices remain
+proposer-owned. Rejected transactions show valid intended sibling records but
+commit no partial edits. See `PHASE_C_INITIALIZATION_QUALIFICATION_V2.md`.
+
 `saved-topology-initialization-1` records initialization dependencies separately
 from RHS topology, with a frozen public t0-information contract. Its proposer
 handoff is checked atomically with later topology repairs, preserved in cached

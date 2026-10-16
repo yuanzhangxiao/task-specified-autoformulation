@@ -10,7 +10,11 @@ from collections import Counter
 from pathlib import Path
 
 from autoformalism.expressions import ValidationContext
-from autoformalism.llm.construction import ConstructionClient, PromptPreflightError
+from autoformalism.llm.construction import (
+    MEASURED_RESERVATION,
+    ConstructionClient,
+    PromptPreflightError,
+)
 from autoformalism.llm.staged_topology import (
     StagedModelSettings,
     atomic_json,
@@ -39,6 +43,8 @@ from autoformalism.staged_topology import content_hash
 PROTOCOL = "saved-topology-repair-comparison-1"
 PROTOCOL_V2 = "saved-topology-repair-feedback-2"
 PROTOCOL_INITIALIZATION = "saved-topology-initialization-1"
+PROTOCOL_INITIALIZATION_V2 = "saved-topology-initialization-2"
+INITIALIZATION_PROTOCOLS = {PROTOCOL_INITIALIZATION, PROTOCOL_INITIALIZATION_V2}
 ARMS = ("control", "actionable")
 REPO = Path(__file__).resolve().parents[3]
 MAX_CALLS = 10
@@ -279,7 +285,7 @@ def verify(root: Path) -> dict:
     """Require unchanged source and sealed public inputs before any call."""
     plan = sealed_read(root / "plan.json")
     if (
-        plan["protocol"] not in {PROTOCOL, PROTOCOL_V2, PROTOCOL_INITIALIZATION}
+        plan["protocol"] not in {PROTOCOL, PROTOCOL_V2, *INITIALIZATION_PROTOCOLS}
         or plan["source_identity"] != source_identity()
         or plan["test_data_opened"] is not False
     ):
@@ -289,13 +295,23 @@ def verify(root: Path) -> dict:
         and plan.get("actionable_policy") != actionable.POLICY_V2
     ):
         raise ValueError("saved repair policy differs")
-    if plan["protocol"] == PROTOCOL_INITIALIZATION and (
-        plan.get("actionable_policy") != initialized.POLICY
+    if plan["protocol"] in INITIALIZATION_PROTOCOLS and (
+        plan.get("actionable_policy")
+        != (
+            initialized.POLICY_V2
+            if plan["protocol"] == PROTOCOL_INITIALIZATION_V2
+            else initialized.POLICY
+        )
         or plan.get("initialization_calls_within_total_budget") != 3
         or plan["settings"]["maximum_requests"] != MAX_CALLS
         or plan["settings"]["maximum_total_tokens"] != MAX_TOKENS
     ):
         raise ValueError("initializer repair policy or allowance differs")
+    if plan["protocol"] == PROTOCOL_INITIALIZATION_V2 and (
+        plan.get("budget_reservation_policy") != MEASURED_RESERVATION
+        or plan.get("witness_policy") != "all-seen-witnesses-1"
+    ):
+        raise ValueError("initializer qualification policy differs")
     return plan
 
 
@@ -412,6 +428,7 @@ def expected_request(client, api, packet: dict, index: int, stage="repair") -> d
         "protocol": "scientific-staged-topology-1",
         "namespace": client.namespace,
         "settings": client.settings.model_dump(mode="json"),
+        **client.request_policy(),
         "body": {
             "model": client.settings.model,
             "messages": [
@@ -448,6 +465,11 @@ def run_episode(
         namespace=identity,
         seed=task["seed"],
         base_url=base_url,
+        **(
+            {"reservation_policy": MEASURED_RESERVATION}
+            if plan.get("protocol") == PROTOCOL_INITIALIZATION_V2
+            else {}
+        ),
         **client_kwargs,
     )
     client.budget_diagnostics_enabled = True
@@ -456,11 +478,11 @@ def run_episode(
     draft = control.Draft.model_validate(start["draft"])
     api = actionable if task["arm"] == "actionable" else control
     initialization = None
-    if plan.get("protocol") == PROTOCOL_INITIALIZATION:
+    if plan.get("protocol") in INITIALIZATION_PROTOCOLS:
         from autoformalism.research.initialized_topology_repair import Session
 
         api = initialized
-        initialization = Session(problem, start)
+        initialization = Session(problem, start, policy=plan["actionable_policy"])
     v2 = initialization is not None or (
         plan.get("actionable_policy") == actionable.POLICY_V2 and api is actionable
     )
@@ -480,6 +502,10 @@ def run_episode(
     if initialization is not None:
         report = initialization.diagnose(draft, baseline)
     tracked = build_state(report, baseline, check["eligible"], answers)
+    if initialization is not None:
+        tracked = initialization.state(
+            draft, report, baseline, check["eligible"], answers
+        )
     for index in range(MAX_CALLS):
         state = (
             build_state(report, tracked, check["eligible"], answers)
@@ -562,6 +588,9 @@ def run_episode(
             candidate, consumer_log = api.normalize_consumers(candidate, patch, draft)
             normalizations.extend(consumer_log)
             if initialization is not None:
+                initialized.initial.validate_public_bindings(
+                    candidate, problem.brief.scientific_context, initialization.contract
+                )
                 next_handoff = initialized.changed_handoff(
                     candidate,
                     problem.evidence,
@@ -810,7 +839,7 @@ def report(root: Path, plan: dict) -> dict:
             "Fresh v2 repairs of the same frozen starts; historical controls "
             "are not rerun. No fitting or test access."
         )
-    elif plan.get("protocol") == PROTOCOL_INITIALIZATION:
+    elif plan.get("protocol") in INITIALIZATION_PROTOCOLS:
         parts[2] = (
             "Initialization dependencies and joint repairs of saved v2 final drafts; "
             "historical parents have different budgets. No fitting or test access."
@@ -846,7 +875,7 @@ def report(root: Path, plan: dict) -> dict:
             "stop_reason": value["stop_reason"] if value else None,
             "cost": _cost(records),
         }
-        if plan.get("protocol") == PROTOCOL_INITIALIZATION:
+        if plan.get("protocol") in INITIALIZATION_PROTOCOLS:
             row["initialization_complete"] = (
                 value["initialization_status"]["complete"] if value else None
             )
@@ -856,7 +885,7 @@ def report(root: Path, plan: dict) -> dict:
             row["interaction_source_available"] = (
                 value["interaction_source"] is not None if value else None
             )
-        if plan.get("protocol") in {PROTOCOL_V2, PROTOCOL_INITIALIZATION}:
+        if plan.get("protocol") in {PROTOCOL_V2, *INITIALIZATION_PROTOCOLS}:
             row["diagnostic_status_counts"] = (
                 dict(
                     Counter(
@@ -885,7 +914,7 @@ def report(root: Path, plan: dict) -> dict:
                 "structural_errors": value["assessment"]["errors"],
                 **(
                     {"initialization_status": value["initialization_status"]}
-                    if plan.get("protocol") == PROTOCOL_INITIALIZATION
+                    if plan.get("protocol") in INITIALIZATION_PROTOCOLS
                     else {}
                 ),
             }
@@ -897,7 +926,7 @@ def report(root: Path, plan: dict) -> dict:
     groups = {}
     for arm in (
         ("actionable",)
-        if plan.get("protocol") in {PROTOCOL_V2, PROTOCOL_INITIALIZATION}
+        if plan.get("protocol") in {PROTOCOL_V2, *INITIALIZATION_PROTOCOLS}
         else ARMS
     ):
         selected = [r for r in rows if r["arm"] == arm]
@@ -946,7 +975,7 @@ def report(root: Path, plan: dict) -> dict:
                     r["interaction_source_available"] is True for r in rows
                 ),
             }
-            if plan.get("protocol") == PROTOCOL_INITIALIZATION
+            if plan.get("protocol") in INITIALIZATION_PROTOCOLS
             else {}
         ),
     }

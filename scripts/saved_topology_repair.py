@@ -25,7 +25,7 @@ from scripts.jetstream_construction_probe import BASE_URL
 def preview(root: Path, output: Path) -> dict:
     """Render the exact first request in each arm, including schema and feedback."""
     plan = campaign.verify(root)
-    if plan["protocol"] == campaign.PROTOCOL_INITIALIZATION:
+    if plan["protocol"] in campaign.INITIALIZATION_PROTOCOLS:
         from autoformalism.research.initialized_topology_repair import preview as render
 
         return render(plan, output)
@@ -199,7 +199,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("freeze", "refreeze", "initialize", "preview", "run", "report"),
+        choices=(
+            "freeze",
+            "refreeze",
+            "initialize",
+            "refine-initialization",
+            "preview",
+            "run",
+            "report",
+        ),
     )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--source", type=Path)
@@ -207,11 +215,17 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--work", type=Path)
     parser.add_argument("--requests", type=Path)
+    parser.add_argument("--measured-bindings", type=Path)
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
-        if args.command in {"freeze", "refreeze", "initialize"}:
+        if args.command in {
+            "freeze",
+            "refreeze",
+            "initialize",
+            "refine-initialization",
+        }:
             if args.source is None:
-                parser.error("freeze/refreeze/initialize requires --source")
+                parser.error("freezing a plan requires --source")
             freezer = (
                 campaign.refreeze if args.command == "refreeze" else campaign.freeze
             )
@@ -219,7 +233,17 @@ def main() -> None:
                 from autoformalism.research.initialized_topology_repair import freeze
 
                 freezer = freeze
-            plan = freezer(args.source, args.root)
+            if args.command == "refine-initialization":
+                from autoformalism.research.initialized_topology_repair import refine
+
+                bindings = (
+                    json.loads(args.measured_bindings.read_text())
+                    if args.measured_bindings
+                    else None
+                )
+                plan = refine(args.source, args.root, bindings)
+            else:
+                plan = freezer(args.source, args.root)
             value = {
                 "identity": plan["artifact_sha256"],
                 "saved_drafts": len(plan["starts"]),

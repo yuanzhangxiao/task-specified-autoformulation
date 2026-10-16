@@ -57,6 +57,123 @@ class InitialInformationContract(StrictSchema):
         return self
 
 
+class MeasuredInitialBinding(StrictSchema):
+    """Reviewed identity between a declared state and a public initial reading.
+
+    This runtime-owned record is not inferred from names or proposer prose.
+    Different coordinates/units need an explicit transformation and are outside
+    this narrow identity-binding contract.
+    """
+
+    state: Identifier
+    source: Identifier
+    relationship: Literal["same_quantity_same_units"] = "same_quantity_same_units"
+    public_context_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    public_excerpt: str = Field(min_length=1, max_length=8000)
+    variable_declaration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provenance: str = Field(min_length=1, max_length=4000)
+
+
+class MeasuredInitialInformationContract(InitialInformationContract):
+    """Opt-in public identity bindings; v1 serialization remains unchanged."""
+
+    protocol: Literal["recorded-t0-initial-information-2"] = (
+        "recorded-t0-initial-information-2"
+    )
+    measured_initial_bindings: tuple[MeasuredInitialBinding, ...] = Field(
+        default=(), max_length=256
+    )
+
+    @model_validator(mode="after")
+    def distinct_bindings(self):
+        """Reject competing declarations instead of choosing one silently."""
+        states = [binding.state for binding in self.measured_initial_bindings]
+        if len(states) != len(set(states)):
+            raise ValueError("measured initial bindings must name distinct states")
+        return self
+
+
+def validate_information_contract(value) -> InitialInformationContract:
+    """Revalidate a versioned runtime contract without changing historical data."""
+    raw = value.model_dump(mode="json") if isinstance(value, StrictSchema) else value
+    schema = (
+        MeasuredInitialInformationContract
+        if isinstance(raw, dict)
+        and raw.get("protocol") == "recorded-t0-initial-information-2"
+        else InitialInformationContract
+    )
+    return schema.model_validate(raw)
+
+
+def measured_bindings(contract) -> tuple[MeasuredInitialBinding, ...]:
+    """Return only explicitly attested identity bindings, never inferred matches."""
+    return getattr(
+        validate_information_contract(contract), "measured_initial_bindings", ()
+    )
+
+
+def validate_public_bindings(draft: Draft, scientific_context: str, contract) -> None:
+    """Fail closed when a reviewed public excerpt or state declaration changes."""
+    variables = {variable.name: variable for variable in draft.variables}
+    for binding in measured_bindings(contract):
+        if (
+            binding.public_context_sha256 != content_hash(scientific_context)
+            or binding.public_excerpt not in scientific_context
+        ):
+            raise ValueError(
+                "MEASURED_INITIAL_PUBLIC_SOURCE: reviewed public text differs"
+            )
+        variable = variables.get(binding.state)
+        if (
+            variable is None
+            or variable.definition != "differential"
+            or content_hash(variable.model_dump(mode="json"))
+            != binding.variable_declaration_sha256
+        ):
+            raise ValueError(
+                f"MEASURED_INITIAL_STATE_CHANGED: {binding.state} no longer matches "
+                "its reviewed differential declaration; explicit contract review is "
+                "required before changing that coordinate or interpretation"
+            )
+
+
+def fixed_rules(draft, evidence, contract) -> dict[str, InitialRule]:
+    """Keep recorded runtime initials plus explicit measured identity dependencies."""
+    states = {variable.name: variable for variable in draft.variables}
+    rules = dict(evidence.contract.initial_rules)
+    for binding in measured_bindings(contract):
+        variable = states.get(binding.state)
+        if (
+            variable is None
+            or variable.definition != "differential"
+            or content_hash(variable.model_dump(mode="json"))
+            != binding.variable_declaration_sha256
+        ):
+            raise ValueError(
+                f"MEASURED_INITIAL_STATE_CHANGED: {binding.state} no longer matches "
+                "its reviewed differential declaration; revise the runtime binding "
+                "explicitly rather than silently dropping it"
+            )
+        if binding.source not in contract.permitted_symbols:
+            raise ValueError(
+                f"MEASURED_INITIAL_SOURCE_UNAVAILABLE: {binding.source} is not "
+                "permitted recorded initial information"
+            )
+        rule = InitialRule(mode="common_map", arguments=(binding.source,))
+        previous_rule = rules.get(binding.state)
+        if (
+            previous_rule is not None
+            and previous_rule.mode != "unknown"
+            and previous_rule != rule
+        ):
+            raise ValueError(
+                f"MEASURED_INITIAL_FIXED_CONFLICT: {binding.state} already has "
+                "a different runtime initial rule"
+            )
+        rules[binding.state] = rule
+    return rules
+
+
 class InitializerDependencyRecord(StrictSchema):
     """One state-local declaration using the existing initial-rule vocabulary."""
 
@@ -293,9 +410,7 @@ def _validated(
 ) -> tuple[InitialInformationContract, InitializerDependencyHandoff]:
     """Check seals, runtime ownership and stale records without changing inputs."""
     validate_evidence(evidence)
-    contract = InitialInformationContract.model_validate(
-        contract.model_dump(mode="json")
-    )
+    contract = validate_information_contract(contract)
     handoff = InitializerDependencyHandoff.model_validate(
         (handoff or InitializerDependencyHandoff()).model_dump(mode="json")
     )
@@ -307,12 +422,13 @@ def _validated(
     if invalid := permitted - public:
         raise ValueError(f"unavailable initial information: {sorted(invalid)}")
     states = {v.name for v in draft.variables if v.definition == "differential"}
+    frozen_rules = fixed_rules(draft, evidence, contract)
     for record in handoff.records:
         if record.state not in states:
             raise ValueError(
                 f"stale initializer record: {record.state} is not a differential state"
             )
-        frozen = evidence.contract.initial_rules.get(record.state)
+        frozen = frozen_rules.get(record.state)
         if frozen is not None and frozen.mode != "unknown":
             if record.rule != frozen:
                 raise ValueError(f"runtime initialization is fixed for {record.state}")
@@ -342,7 +458,7 @@ def _rules(
     handoff: InitializerDependencyHandoff,
 ) -> tuple[dict[str, InitialRule], list[str]]:
     """Keep known runtime rules and add only supported explicit declarations."""
-    rules = dict(evidence.contract.initial_rules)
+    rules = fixed_rules(draft, evidence, contract)
     if not _unavailable(contract, family=False):
         rules.update({record.state: record.rule for record in handoff.records})
     unresolved = sorted(
@@ -410,13 +526,13 @@ def request(
     contract, handoff = _validated(draft, evidence, contract, handoff)
     _, unresolved = _rules(draft, evidence, contract, handoff)
     differential = {v.name for v in draft.variables if v.definition == "differential"}
-    return {
+    result = {
         "protocol": PROTOCOL,
         "original_evidence_sha256": evidence.sha256,
         "runtime_initial_information": contract.model_dump(mode="json"),
         "fixed_runtime_rules": {
             name: rule.model_dump(mode="json")
-            for name, rule in sorted(evidence.contract.initial_rules.items())
+            for name, rule in sorted(fixed_rules(draft, evidence, contract).items())
             if name in differential and rule.mode != "unknown"
         },
         "retained_handoff": handoff.model_dump(mode="json"),
@@ -436,6 +552,80 @@ def request(
         ),
         "response_template": InitializerDependencyHandoff().model_dump(mode="json"),
         "response_schema": InitializerDependencyHandoff.model_json_schema(),
+    }
+    if isinstance(contract, MeasuredInitialInformationContract):
+        result["instruction"] = result["instruction"].replace(
+            "No formula is selected or evaluated here;",
+            "No formula is selected or evaluated for editable initializers here; "
+            "displayed runtime identity formulas are already fixed;",
+        )
+        result["editable_states"] = sorted(
+            differential - set(result["fixed_runtime_rules"])
+        )
+        result["measured_initial_values"] = [
+            {
+                "state": binding.state,
+                "source": binding.source,
+                "initial_equation": f"{binding.state}(t0) = {binding.source}",
+                "interpretation": "Direct measured initial value in the same "
+                "quantity and units; identity is fixed, not a learned map.",
+            }
+            for binding in contract.measured_initial_bindings
+        ]
+        result["instruction"] += (
+            " Return records only for editable_states. Fixed runtime initials "
+            "remain present without repeating them. Measured identity bindings "
+            "cannot become a fitted shared value or another learned map."
+        )
+    return result
+
+
+def rejected_handoff_feedback(draft, evidence, contract, attempted) -> dict:
+    """Expose valid intended sibling edits without committing a rejected reply.
+
+    Each returned suggestion was checked in isolation against the retained
+    topology. The next full handoff is still validated atomically; this receipt
+    does not establish combined completeness or scientific correctness.
+    """
+    contract = validate_information_contract(contract)
+    attempted = InitializerDependencyHandoff.model_validate(
+        attempted.model_dump(mode="json")
+    )
+    frozen = {
+        name: rule
+        for name, rule in fixed_rules(draft, evidence, contract).items()
+        if rule.mode != "unknown"
+    }
+    valid, invalid, fixed = [], [], []
+    for record in attempted.records:
+        try:
+            _validated(
+                draft,
+                evidence,
+                contract,
+                InitializerDependencyHandoff(records=(record,)),
+            )
+        except ValueError as exc:
+            invalid.append({"state": record.state, "error": str(exc)})
+        else:
+            if record.state in frozen:
+                fixed.append(record.state)
+            else:
+                valid.append(record.model_dump(mode="json"))
+    return {
+        "transaction_committed": False,
+        "valid_intended_editable_records": valid,
+        "invalid_records": invalid,
+        "unnecessary_fixed_records": fixed,
+        "instruction": "No part of the rejected reply was committed. Preserve "
+        "these valid intended editable records if still scientifically intended, "
+        "correct the invalid records, omit fixed runtime records, and resubmit "
+        "the complete intended editable handoff. Do not replace valid scientific "
+        "choices merely because an unrelated record failed. These isolated checks "
+        "use the retained topology. A newly intended state absent from that "
+        "topology must be resubmitted together with its initializer in a joint "
+        "topology repair; absence from the retained topology does not by itself "
+        "make that intended initializer scientifically invalid.",
     }
 
 

@@ -37,6 +37,8 @@ from autoformalism.search.topology_compatibility import InitialRule
 from autoformalism.search.topology_initialization import (
     InitialInformationContract,
     InitializerDependencyHandoff,
+    measured_bindings,
+    validate_information_contract,
 )
 from autoformalism.staged_topology import content_hash
 
@@ -147,9 +149,7 @@ def validate_dependency_handoff(
         raise ValueError(
             "INITIALIZER_DEPENDENCY_CONTRACT: supply contract and handoff together"
         )
-    contract = InitialInformationContract.model_validate(
-        contract.model_dump(mode="json")
-    )
+    contract = validate_information_contract(contract)
     handoff = InitializerDependencyHandoff.model_validate(
         handoff.model_dump(mode="json")
     )
@@ -182,6 +182,24 @@ def validate_dependency_handoff(
         }
     )
     records = {record.state: record.rule for record in resolved.records}
+    for binding in measured_bindings(contract):
+        state = aliases.get(binding.state, binding.state)
+        if state not in state_names:
+            raise ValueError(
+                f"MEASURED_INITIAL_STATE_CHANGED: {binding.state} is not a "
+                "retained differential state"
+            )
+        expected = InitialRule(mode="common_map", arguments=(binding.source,))
+        if state in observed_states:
+            raise ValueError(
+                f"MEASURED_INITIAL_FIXED_CONFLICT: {binding.state} also has an "
+                "observed-state runtime initializer"
+            )
+        if state not in records or records[state] != expected:
+            raise ValueError(
+                f"MEASURED_INITIAL_DEPENDENCY: {binding.state} must retain the "
+                f"runtime identity dependency on {binding.source}"
+            )
     if stale := set(records) - set(state_names):
         raise ValueError(
             "INITIALIZER_DEPENDENCY_STALE: records are not differential states: "
@@ -257,6 +275,27 @@ def _validate_dependency_choice(
                 f"missing={sorted(declared - actual)}, "
                 f"ambiguous={sorted(local & declared)}. {guidance}"
             )
+
+
+def _validate_measured_choice(choice: InitializerChoice, state: str, source: str):
+    """An attested measurement is an identity, never an arbitrary learned map."""
+    valid = isinstance(choice.initial, MappedBoundary)
+    if valid:
+        expression = RestrictedParser().parse(
+            choice.initial.expression, location=f"initial:{state}"
+        )
+        parsed = ast.parse(choice.initial.expression.strip(), mode="eval").body
+        valid = (
+            not choice.initial.parameters
+            and expression.symbols == {source}
+            and isinstance(parsed, ast.Name)
+            and parsed.id == source
+        )
+    if not valid:
+        raise ValueError(
+            f"MEASURED_INITIAL_IDENTITY at initial:{state}: fixed measured "
+            f"initial value is {source}; no fitted coefficients or other formula"
+        )
 
 
 def _normalize_choice(
@@ -397,7 +436,7 @@ def compile_initialization_result(
                 "initializer dependency artifact differs from requested handoff"
             )
     if receipt is not None:
-        contract = InitialInformationContract.model_validate(
+        contract = validate_information_contract(
             receipt["initial_information_contract"]
         )
         handoff = InitializerDependencyHandoff.model_validate(
@@ -415,6 +454,10 @@ def compile_initialization_result(
             state_aliases=aliases,
         )
         records = {record.state: record.rule for record in resolved.records}
+        measured = {
+            aliases.get(binding.state, binding.state): binding.source
+            for binding in measured_bindings(contract)
+        }
         for name, reply in plan.rules.items():
             if isinstance(reply.initial, InitialValueGuess):
                 choice = InitializerChoice(
@@ -436,6 +479,8 @@ def compile_initialization_result(
                     "initialization mode"
                 )
             _validate_dependency_choice(choice, name, records[name])
+            if name in measured:
+                _validate_measured_choice(choice, name, measured[name])
     compiled, guesses, audit = apply_initialization_plan(model, plan)
     if (
         result["candidate"] != compiled.validated.candidate.model_dump(mode="json")
@@ -475,6 +520,14 @@ def construct_initializers(
     )
     records = (
         {record.state: record.rule for record in resolved.records} if resolved else {}
+    )
+    measured = (
+        {
+            (state_aliases or {}).get(binding.state, binding.state): binding.source
+            for binding in measured_bindings(initial_information_contract)
+        }
+        if initial_information_contract is not None
+        else {}
     )
     system = HANDOFF_SYSTEM_PROMPT if receipt else SYSTEM_PROMPT
     identity = content_hash(
@@ -532,6 +585,18 @@ def construct_initializers(
     )
     for name in model.state_names:
         if name in model.direct_state_observation_channels or name in state["rules"]:
+            continue
+        if name in measured:
+            # The public relationship fixes this identity. No scientific formula
+            # choice, coefficient, or provider request is needed.
+            choice = InitializerChoice(
+                initial=MappedBoundary(expression=measured[name])
+            )
+            _validate_dependency_choice(choice, name, records[name])
+            _validate_measured_choice(choice, name, measured[name])
+            state["rules"][name] = _rule(choice).model_dump(mode="json")
+            state["choices"][name] = choice.model_dump(mode="json")
+            _save(path, state)
             continue
         attempts = [a for a in state["attempts"] if a["state"] == name]
         for attempt in range(len(attempts), client.settings.attempts_per_step):

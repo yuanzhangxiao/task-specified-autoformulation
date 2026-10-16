@@ -275,6 +275,48 @@ def _specific_issue(
     return row
 
 
+def qualified_consumer_feedback(issue: dict, draft: ledger.Draft) -> dict:
+    """Qualify process-reference advice against actual uses, for opt-in callers.
+
+    Historical payloads deliberately retain their old text for exact replay.
+    This helper changes guidance only, never a declaration or an acceptance rule.
+    """
+    row = deepcopy(issue)
+    if row.get("code") != "process_consumer_decision":
+        return row
+    process = next((p for p in draft.processes if p.name == row.get("process")), None)
+    if process is None:
+        raise ValueError("consumer feedback must reference a retained process")
+    uses = [
+        u.model_dump(mode="json") for u in process.uses if u.target == row["target"]
+    ]
+    row["declared_uses_for_target"] = uses
+    row["existing_contribution"] = [{"process": process.name, **use} for use in uses]
+    if uses:
+        row["decision"] = (
+            f"The RHS of {row['target']} already includes {process.name} through "
+            "uses. Does the local term mean that same additive contribution plus "
+            "other effects, or a distinct composite function? If additive, retain "
+            "the intended use and only other effects as local processes. If a "
+            "composite function is intended, explicitly coordinate its dependencies "
+            "and whether the direct use remains intended. The runtime cannot split "
+            "a joint function into a sum for you."
+        )
+    else:
+        row["decision"] = (
+            f"No signed use of {process.name} targets {row['target']}; the local "
+            "term references its value as a function argument. If the same law "
+            "should contribute additively, add the intended signed use and fixed "
+            "conversion in the process's complete uses list, preserving other "
+            "intended uses; replace the local term with only the other intended "
+            "effects. If a distinct composite law is intended, explicitly declare "
+            "that representation and its dependencies. Do not remove the physical "
+            "effect merely to remove this reference. The runtime cannot split a "
+            "joint function into a sum or choose a sign for you."
+        )
+    return row
+
+
 def _conversion_feedback(last: dict | None) -> list[dict]:
     """Explain a rejected conversion without interpreting or executing provider text."""
     if not last or "invalid fixed conversion" not in (last.get("error") or ""):

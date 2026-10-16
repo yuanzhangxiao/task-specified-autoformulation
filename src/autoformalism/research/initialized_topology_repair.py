@@ -9,12 +9,94 @@ from pathlib import Path
 
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import initialization_handoff_audit as audit
-from autoformalism.research.actionable_repair_status import build_state
+from autoformalism.research.actionable_repair_status import (
+    ALL_SEEN_WITNESSES,
+    build_state,
+)
 from autoformalism.search import construction_initialized_repair as api
 from autoformalism.search import topology_initialization as initial
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "saved-topology-initialization-1"
+PROTOCOL_V2 = "saved-topology-initialization-2"
+
+
+def refine(source: Path, destination: Path, bindings: dict | None = None) -> dict:
+    """Repeat the same pre-initialization starts with versioned runtime fixes.
+
+    Bindings are reviewed public identities, never extracted by name or inferred
+    from data. Historical results and plans are read-only.
+    """
+    from autoformalism.llm.construction import MEASURED_RESERVATION
+    from autoformalism.research import saved_topology_repair as saved
+
+    if (
+        source.resolve() == destination.resolve()
+        or source.resolve() in destination.resolve().parents
+    ):
+        raise ValueError("write the new plan outside its historical source")
+    parent = sealed_read(source / "plan.json")
+    if (
+        parent.get("protocol") != PROTOCOL
+        or parent.get("actionable_policy") != api.POLICY
+        or parent.get("test_data_opened") is not False
+        or parent["settings"]["maximum_requests"] != saved.MAX_CALLS
+        or parent["settings"]["maximum_total_tokens"] != saved.MAX_TOKENS
+    ):
+        raise ValueError("requires the original public-only initializer plan")
+    bindings = bindings or {}
+    if set(bindings) - set(parent["starts"]):
+        raise ValueError("measured binding refers to an unknown starting draft")
+    starts = {}
+    for task in parent["tasks"]:
+        name = audit._name(task["source_task"])
+        audit._name(task["task_id"])
+        if name in starts:
+            raise ValueError("one confirmation episode per starting draft required")
+        original = parent["starts"][name]
+        problem = saved.Problem(parent["cells"][task["benchmark_id"]], original["task"])
+        draft = api.Draft.model_validate(original["draft"])
+        if (
+            problem.assess(draft) != original["assessment"]
+            or problem.diagnose(draft) != original["diagnostics"]
+        ):
+            raise ValueError("historical starting evidence differs")
+        contract = initial.MeasuredInitialInformationContract.model_validate(
+            {
+                **original["initial_information_contract"],
+                "protocol": "recorded-t0-initial-information-2",
+                "measured_initial_bindings": bindings.get(name, []),
+            }
+        )
+        initial.validate_public_bindings(
+            draft, problem.brief.scientific_context, contract
+        )
+        api.handoff_status(
+            draft, problem.evidence, contract, initial.InitializerDependencyHandoff()
+        )
+        starts[name] = {
+            **original,
+            "initial_information_contract": contract.model_dump(mode="json"),
+        }
+    if set(starts) != set(parent["starts"]):
+        raise ValueError("confirmation must retain every original starting draft")
+    return sealed_write(
+        destination / "plan.json",
+        {
+            **{k: v for k, v in parent.items() if k != "artifact_sha256"},
+            "protocol": PROTOCOL_V2,
+            "actionable_policy": api.POLICY_V2,
+            "source_identity": saved.source_identity(),
+            "historical_initialization_plan_sha256": parent["artifact_sha256"],
+            "witness_policy": ALL_SEEN_WITNESSES,
+            "budget_reservation_policy": MEASURED_RESERVATION,
+            "starts": starts,
+            "reviewed_measured_bindings_sha256": content_hash(bindings),
+            "selection": "All original pre-initialization starts, seeds and maximum "
+            "budgets, with explicit measured-initial bindings and runtime fixes. "
+            "Historical final drafts are not used as new starts; no score selection.",
+        },
+    )
 
 
 def freeze(source: Path, destination: Path) -> dict:
@@ -81,10 +163,25 @@ def freeze(source: Path, destination: Path) -> dict:
 class Session:
     """Keep the runtime contract, proposer choices and saved witnesses separate."""
 
-    def __init__(self, problem, start):
+    def __init__(self, problem, start, *, policy=api.POLICY):
         self.problem = problem
-        self.contract = initial.InitialInformationContract.model_validate(
+        if policy not in {api.POLICY, api.POLICY_V2}:
+            raise ValueError("unknown initializer session policy")
+        self.policy = policy
+        self.contract = initial.validate_information_contract(
             start["initial_information_contract"]
+        )
+        expected_contract = (
+            "recorded-t0-initial-information-2"
+            if policy == api.POLICY_V2
+            else "recorded-t0-initial-information-1"
+        )
+        if self.contract.protocol != expected_contract:
+            raise ValueError("initializer policy and information contract differ")
+        initial.validate_public_bindings(
+            api.Draft.model_validate(start["draft"]),
+            problem.brief.scientific_context,
+            self.contract,
         )
         self.handoff = initial.InitializerDependencyHandoff()
         self.baseline = start.get("previous_conflicts", start["diagnostics"])
@@ -109,13 +206,27 @@ class Session:
         )
 
     def status(self, draft):
+        initial.validate_public_bindings(
+            draft, self.problem.brief.scientific_context, self.contract
+        )
         return api.handoff_status(
             draft, self.problem.evidence, self.contract, self.handoff
         )
 
     def state(self, draft, report, tracked, eligible, answers):
         return api.qualify_completion(
-            build_state(report, tracked, eligible, answers), self.status(draft)
+            build_state(
+                report,
+                tracked,
+                eligible,
+                answers,
+                **(
+                    {"witness_policy": ALL_SEEN_WITNESSES}
+                    if self.policy == api.POLICY_V2
+                    else {}
+                ),
+            ),
+            self.status(draft),
         )
 
     def stage(self, draft):
@@ -129,6 +240,7 @@ class Session:
             "evidence": self.problem.evidence,
             "initial_contract": self.contract,
             "handoff": self.handoff,
+            **({"policy": self.policy} if self.policy == api.POLICY_V2 else {}),
         }
 
     def result(self, draft, check):
@@ -158,7 +270,7 @@ def preview(plan: dict, output: Path) -> dict:
         start = plan["starts"][task["source_task"]]
         problem = saved.Problem(plan["cells"][task["benchmark_id"]], start["task"])
         draft = api.Draft.model_validate(start["draft"])
-        session = Session(problem, start)
+        session = Session(problem, start, policy=plan["actionable_policy"])
         report = session.diagnose(draft, session.baseline)
         check = problem.assess(draft, qualified_memory=True)
         state = session.state(draft, report, session.baseline, check["eligible"], {})
@@ -190,11 +302,37 @@ def preview(plan: dict, output: Path) -> dict:
             0,
             policy=previous.POLICY_V2,
         )
+        if plan["protocol"] == PROTOCOL_V2:
+            old_contract = {
+                key: value
+                for key, value in start["initial_information_contract"].items()
+                if key != "measured_initial_bindings"
+            }
+            old_contract["protocol"] = "recorded-t0-initial-information-1"
+            old_session = Session(
+                problem, {**start, "initial_information_contract": old_contract}
+            )
+            old_report = old_session.diagnose(draft, old_session.baseline)
+            old_state = old_session.state(
+                draft, old_report, old_session.baseline, check["eligible"], {}
+            )
+            old = saved.make_packet(
+                api,
+                problem,
+                draft,
+                None,
+                old_state,
+                None,
+                0,
+                0,
+                stage="repair",
+                initialization=old_session,
+            )
         diff = difflib.HtmlDiff(wrapcolumn=100).make_file(
             json.dumps(old, indent=2).splitlines(),
             json.dumps(packets["repair"], indent=2).splitlines(),
-            fromdesc="Previous repair policy on the same saved model",
-            todesc="Initialization-aware repair on the same saved model",
+            fromdesc="Previous policy on the same saved model",
+            todesc=plan["actionable_policy"],
             context=True,
             numlines=2,
         )
@@ -237,16 +375,24 @@ def preview(plan: dict, output: Path) -> dict:
             + "\n"
         )
         links.append(
-            f'<li>{html.escape(task["task_id"])}: '
+            f"<li>{html.escape(task['task_id'])}: "
             f'<a href="request-{number:02d}.html">requests</a> · '
             f'<a href="changes-{number:02d}.html">marked repair changes</a></li>'
         )
     (output / "PROMPTS.html").write_text(
         '<!doctype html><meta charset="utf-8">'
-        '<title>Initialization topology prompts</title>'
+        "<title>Initialization topology prompts</title>"
         "<style>body{font:16px/1.6 system-ui;max-width:1050px;margin:35px auto}</style>"
         "<h1>Initial dependencies at the topology boundary</h1>"
-        "<p>New: choose shared initial values or permitted initial-measurement "
+        + (
+            "<p>V2: repeated structural detail is displayed once; every distinct "
+            "trajectory witness is retained. Reviewed direct initial measurements "
+            "are fixed identities, not fitted values. Serving-token reservations "
+            "replace byte estimates; all maximum budgets remain unchanged.</p>"
+            if plan["protocol"] == PROTOCOL_V2
+            else ""
+        )
+        + "<p>New: choose shared initial values or permitted initial-measurement "
         "dependencies "
         "before interaction formulas. Dependencies are distinct from ODE arguments. "
         "Missing choices remain unfinished. Joint repairs validate both records "

@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in initializer qualification v2 addresses repeated structural feedback,
+byte-based over-reservation and lost intermediate trajectory witnesses. Reviewed
+direct initial measurements remain fixed identities through interaction lowering;
+rejected replies expose valid intended sibling records without partial commits.
+The confirmation uses the same 15 pre-initialization starts/seeds/maximum budgets
+as v1 in a separate campaign. Historical policies and benchmarks are unchanged.
+See `PHASE_C_INITIALIZATION_QUALIFICATION_V2.md`; live results are pending.
+
 The opt-in topology-initialization milestone adds explicit latent t0 dependencies
 at the saved topology boundary and enforces them in later analytic initialization.
 Joint repairs are atomic; matched-trajectory prefix witnesses survive topology and

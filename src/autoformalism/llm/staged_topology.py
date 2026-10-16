@@ -117,6 +117,17 @@ class StagedTopologyClient:
     ) -> None:
         """Optional observability hook; it must not change admission or charging."""
 
+    def request_policy(self) -> dict:
+        """Bind opt-in admission policies without changing historical identities."""
+        return {}
+
+    def budget_reservation(self, body: dict) -> tuple[int, str]:
+        """Reserve an unknown physical outcome before starting generation."""
+        return (
+            len(json.dumps(body).encode()) + self.settings.max_output_tokens,
+            "conservative_request_bytes_plus_output_allowance",
+        )
+
     def call(
         self,
         *,
@@ -154,6 +165,7 @@ class StagedTopologyClient:
             "namespace": self.namespace,
             "settings": self.settings.model_dump(mode="json"),
             "body": body,
+            **self.request_policy(),
         }
         key = content_hash(identity)
         path = self.directory / f"{key}.json"
@@ -171,7 +183,7 @@ class StagedTopologyClient:
         if not self.can_start():
             raise DeferredCall("allocation is draining before the next provider call")
         charged = sum(item.get("budget_charge", 0) for item in self.records)
-        reservation = len(json.dumps(body).encode()) + self.settings.max_output_tokens
+        reservation, reservation_basis = self.budget_reservation(body)
         self.budget_diagnostic(key, body, charged, reservation)
         if len(self.records) >= self.settings.maximum_requests:
             raise ValueError("total provider request budget exhausted")
@@ -185,7 +197,7 @@ class StagedTopologyClient:
             "step": step,
             "attempt": attempt,
             "budget_charge": reservation,
-            "budget_charge_basis": "conservative_request_bytes_plus_output_allowance",
+            "budget_charge_basis": reservation_basis,
             "observed_total_tokens": None,
         }
         atomic_json(path, record)

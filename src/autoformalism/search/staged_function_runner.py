@@ -54,6 +54,7 @@ from autoformalism.search.staged_function_prompts import (
 from autoformalism.search.topology_initialization import (
     InitialInformationContract,
     InitializerDependencyHandoff,
+    validate_information_contract,
 )
 from autoformalism.search.training_evidence import TrainingEvidence, evidence_brief
 from autoformalism.staged_functions import (
@@ -105,7 +106,7 @@ def run_staged_functions(
         key in source for key in ("initial_information_contract", "initializer_handoff")
     )
     if source_initialization:
-        source_contract = InitialInformationContract.model_validate(
+        source_contract = validate_information_contract(
             source.get("initial_information_contract")
         )
         source_handoff = InitializerDependencyHandoff.model_validate(
