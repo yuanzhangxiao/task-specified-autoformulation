@@ -28,8 +28,9 @@ inputs and known measurement noise. Proper profiles widen before rank is lost;
 141 complete and 9 reach their wall limit. Frozen-nuisance slices understate the
 ambiguity. Exact confounding and domain-induced limits remain explicit. These are
 objective-rise support sets, not calibrated confidence intervals; no production
-or benchmark contracts change. Next complete the 9 partial diagnostics with
-separate accounting and investigate their wall/CPU disparity.
+or benchmark contracts change. The [M40 supplement](PHASE_C_FITTING_PROFILE_SUPPLEMENT.md)
+is ready to complete the nine partial diagnostics with separate accounting and
+investigate their wall/CPU disparity; no fitted parameters change.
 
 Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
 compares fixed calibration with one bounded shared observation trend, preserving

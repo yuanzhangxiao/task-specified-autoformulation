@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+M40 prepares a diagnostic-only extension for M39's nine partial profiles,
+preserving all 150 fitted endpoints and original costs. The opt-in numerical
+path avoids nuisance solves for frozen-only points and measures numerical,
+progress-callback and durable journal time. A separately budgeted 90-second
+attempt does not erase prior work or allow silent retries after interruption.
+No fitting/benchmark/construction defaults change. See
+`PHASE_C_FITTING_PROFILE_SUPPLEMENT.md`; Delta completion is pending.
+
 The opt-in saved-repair v2 milestone improves mechanism-record feedback, removes
 contradictory completion advice, and counts scientific repetition independently
 of reply-control toggles. It qualifies explicitly required memory paths against

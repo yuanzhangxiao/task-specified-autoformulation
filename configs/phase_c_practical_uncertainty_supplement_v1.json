@@ -1,0 +1,9 @@
+{
+  "protocol": "phase-c-practical-uncertainty-supplement-policy-1",
+  "maximum_seconds": 90.0,
+  "selection": "incomplete_profiles",
+  "execution": {
+    "protocol": "practical-profile-execution-2",
+    "mode": "separate-exact-target-caches"
+  }
+}

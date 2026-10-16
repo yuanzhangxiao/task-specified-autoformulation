@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+M40's opt-in practical-profile execution separates frozen-slice evaluation from
+bounded nuisance optimization while retaining the M39 scientific policy. Its
+standalone supplement freezes saved source endpoints, preserves original costs,
+and selects incomplete diagnostics for a separately journaled allowance.
+Timing distinguishes computation from progress persistence; interrupted work
+cannot silently reset. This remains synthetic diagnostic qualification, with
+no production fitting or construction change. See
+`PHASE_C_FITTING_PROFILE_SUPPLEMENT.md`.
+
 Saved actionable repair v2 retains scientific assignments in proposer edits.
 Feedback locates inconsistent memory/component records and explains qualified
 same-initial/same-forcing conflicts. Scientific repetition ignores completion

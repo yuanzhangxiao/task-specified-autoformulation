@@ -392,3 +392,285 @@ def test_revalidation_prevents_untyped_hidden_evaluator_fields():
     payload["truth"] = {"g": 1.3}
     with pytest.raises(ValidationError):
         MeasurementProblem.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "separation,drift_bounds",
+    [(0.5, None), (0.02, None), (0.0, None), (0.0, (-0.03, 0.03))],
+)
+def test_opt_in_exact_mode_caches_preserve_support_and_reduce_bounded_solves(
+    separation,
+    drift_bounds,
+):
+    value = problem(separation, drift_bounds=drift_bounds)
+    fitted = endpoint(value)
+    legacy = profile.evaluate(value, fitted, deadline=monotonic() + 20)
+    ledger = []
+    efficient = profile.evaluate(
+        value,
+        fitted,
+        deadline=monotonic() + 20,
+        execution=profile.ExecutionPolicy(),
+        save=ledger.append,
+    )
+    assert efficient["status"] == legacy["status"] == "complete"
+    assert efficient["supports"] == legacy["supports"]
+    assert efficient["curvature"] == legacy["curvature"]
+    assert efficient["endpoint_sha256"] == legacy["endpoint_sha256"]
+    assert efficient["policy"] == legacy["policy"] == profile.POLICY
+    assert efficient["protocol"] == legacy["protocol"] == profile.PROTOCOL
+    assert efficient["solve_calls"] < legacy["solve_calls"]
+    assert efficient["calls"] == efficient["completed_calls"]
+    assert efficient["calls"] == sum(
+        efficient[name] for name in ("solve_calls", "rollout_calls", "frozen_calls")
+    )
+    assert efficient["frozen_calls"] == efficient["frozen_nodes_completed"]
+    assert efficient["solve_calls"] == efficient["nodes_completed"] + 1
+    assert all(count > 0 for count in efficient["cache_reuses"].values())
+    assert "execution" not in legacy and "timing" not in legacy
+    assert "frozen_nodes" not in legacy
+    assert all("profiled_objective" not in node for node in efficient["frozen_nodes"])
+    assert all("solver_audit" in node for node in efficient["nodes"])
+    starts = [row["event"] for row in ledger if row["event"]["status"] == "started"]
+    assert len(starts) == efficient["calls"] + 1
+    for frozen in efficient["frozen_nodes"]:
+        assert frozen["mode"] == "frozen"
+        for name in efficient["nuisance_names"]:
+            assert frozen["parameters"][name] == fitted["parameters"][name]
+    assert efficient["timing"]["save_callback_calls"] == len(ledger)
+    if drift_bounds is not None:
+        assert efficient["curvature"]["conditional_information"] == 0
+        for support in efficient["supports"]:
+            interval = support["profiled"]
+            assert interval["classification"] == "nuisance_domain_assisted"
+            assert not interval["domain_clipped"]
+            assert interval["width"] < 0.2
+            for side in ("left", "right"):
+                assert interval[side]["status"] == "threshold_crossed"
+                assert interval[side]["nuisance_active_bounds"]
+
+
+def test_exact_target_cache_does_not_round_adjacent_values_or_confuse_curves(
+    monkeypatch,
+):
+    value = problem()
+    fitted = endpoint(value)
+    original = profile.brentq
+    requests = []
+
+    def probing_root(function, left, right, **kwargs):
+        point = left + (right - left) / 3
+        adjacent = np.nextafter(point, right)
+        requests.extend([point, adjacent])
+        assert function(point) == function(point)
+        function(adjacent)
+        return original(function, left, right, **kwargs)
+
+    monkeypatch.setattr(profile, "brentq", probing_root)
+    result = profile.evaluate(
+        value, fitted, deadline=monotonic() + 20, execution=profile.ExecutionPolicy()
+    )
+    assert result["status"] == "complete"
+    nodes = {node["value"]: node for node in result["nodes"]}
+    assert len(nodes) == len(result["nodes"])
+    assert requests[0] != requests[1]
+    assert requests[0] in nodes and requests[1] in nodes
+    assert (
+        nodes[requests[0]]["profiled_objective"]
+        < nodes[requests[0]]["frozen_objective"]
+    )
+
+
+class SimulatedClock:
+    """Advance deterministic elapsed and CPU counters only in instrumented work."""
+
+    def __init__(self):
+        self.wall, self.cpu = monotonic(), 20.0
+
+    def advance(self, wall, cpu):
+        self.wall += wall
+        self.cpu += cpu
+
+    def patch(self, monkeypatch):
+        monkeypatch.setattr(profile, "monotonic", lambda: self.wall)
+        monkeypatch.setattr(profile, "process_time", lambda: self.cpu)
+
+
+def test_opt_in_timing_separates_numerical_and_all_callback_costs(monkeypatch):
+    value = problem()
+    fitted = endpoint(value)
+    clock, ledger = SimulatedClock(), []
+    clock.patch(monkeypatch)
+    original = profile._solve
+
+    def solve(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        finally:
+            clock.advance(0.25, 0.125)
+
+    def save(row):
+        ledger.append(row)
+        clock.advance(0.2, 0.05)
+
+    monkeypatch.setattr(profile, "_solve", solve)
+    result = profile.evaluate(
+        value,
+        fitted,
+        deadline=clock.wall + 1000,
+        policy=profile.Policy(maximum_calls=5),
+        execution=profile.ExecutionPolicy(),
+        save=save,
+    )
+    timing = result["timing"]
+    assert result["status"] == "partial"
+    assert timing["numerical_wall_seconds"] == pytest.approx(1.0)
+    assert timing["numerical_cpu_seconds"] == pytest.approx(0.5)
+    assert timing["save_callback_wall_seconds"] == pytest.approx(0.2 * len(ledger))
+    assert timing["save_callback_cpu_seconds"] == pytest.approx(0.05 * len(ledger))
+    assert timing["orchestration_wall_seconds"] == pytest.approx(0, abs=1e-10)
+    assert timing["orchestration_cpu_seconds"] == pytest.approx(0, abs=1e-10)
+    assert timing["total_wall_seconds"] == pytest.approx(1.0 + 0.2 * len(ledger))
+    assert timing["total_cpu_seconds"] == pytest.approx(0.5 + 0.05 * len(ledger))
+    assert timing["save_callback_calls"] == len(ledger)
+    assert ledger[-1]["timing"]["save_callback_calls"] == len(ledger) - 1
+    assert timing["numerical_by_kind"]["solve"]["started"] == result["solve_calls"]
+    assert result["elapsed_seconds"] == timing["total_wall_seconds"]
+
+
+def test_failed_numerical_operation_keeps_wall_cpu_and_iteration_cost(monkeypatch):
+    value = problem()
+    fitted = endpoint(value)
+    clock = SimulatedClock()
+    clock.patch(monkeypatch)
+
+    def failed_solve(*args, **kwargs):
+        clock.advance(2.0, 0.5)
+        raise profile._SolveFailure("synthetic inner failure", 7)
+
+    monkeypatch.setattr(profile, "_solve", failed_solve)
+    result = profile.evaluate(
+        value, fitted, deadline=clock.wall + 1000, execution=profile.ExecutionPolicy()
+    )
+    timing = result["timing"]
+    assert result["status"] == "unqualified"
+    assert result["calls"] == result["completed_calls"] == 2
+    assert result["failed_calls"] == 1 and result["inner_iterations"] == 7
+    assert timing["numerical_operations_failed"] == 1
+    assert timing["numerical_wall_seconds"] == pytest.approx(2.0)
+    assert timing["numerical_cpu_seconds"] == pytest.approx(0.5)
+    assert timing["save_callback_calls"] == 0
+    assert timing["numerical_by_kind"]["solve"]["failed"] == 1
+
+
+@pytest.mark.parametrize(
+    "failure_phase", ["diagnostic", "affine_design", "global_optimum", "terminal"]
+)
+def test_failed_save_is_timed_and_cannot_start_unjournaled_work(
+    monkeypatch, failure_phase
+):
+    value = problem()
+    fitted = endpoint(value)
+    clock, ledger = SimulatedClock(), []
+    clock.patch(monkeypatch)
+
+    def save(row):
+        ledger.append(row)
+        clock.advance(0.2, 0.05)
+        event = row["event"]
+        terminal = event["phase"] == "diagnostic" and event["status"] == "complete"
+        if (failure_phase == "terminal" and terminal) or (
+            failure_phase != "terminal" and event["phase"] == failure_phase
+        ):
+            raise OSError("synthetic persistence failure")
+
+    result = profile.evaluate(
+        value,
+        fitted,
+        deadline=clock.wall + 1000,
+        execution=profile.ExecutionPolicy(),
+        save=save,
+    )
+    timing = result["timing"]
+    assert result["status"] == (
+        "partial" if failure_phase == "terminal" else "unqualified"
+    )
+    assert "save callback failed" in result["reason"]
+    assert not result["journal_persistence_complete"]
+    assert timing["save_callback_failures"] == 1
+    assert timing["save_callback_calls"] == len(ledger)
+    assert timing["save_callback_wall_seconds"] == pytest.approx(0.2 * len(ledger))
+    assert timing["save_callback_cpu_seconds"] == pytest.approx(0.05 * len(ledger))
+    if failure_phase != "terminal":
+        assert ("rollout" in timing["numerical_by_kind"]) == (
+            failure_phase == "global_optimum"
+        )
+        assert "solve" not in timing["numerical_by_kind"]
+        assert result["inner_iterations_complete"]
+        assert result["calls"] == result["completed_calls"]
+        assert result["supports"] == []
+
+
+def test_slow_start_save_exhausts_allowance_before_numerical_work(monkeypatch):
+    value = problem()
+    fitted = endpoint(value)
+    clock = SimulatedClock()
+    clock.patch(monkeypatch)
+
+    def save(row):
+        if row["event"]["phase"] == "affine_design":
+            clock.advance(2, 0.01)
+
+    result = profile.evaluate(
+        value,
+        fitted,
+        deadline=clock.wall + 1,
+        execution=profile.ExecutionPolicy(),
+        save=save,
+    )
+    assert result["status"] == "partial"
+    assert result["calls"] == result["completed_calls"] == 1
+    assert result["failed_calls"] == 1
+    assert "rollout" not in result["timing"]["numerical_by_kind"]
+    assert result["timing"]["save_callback_wall_seconds"] >= 2
+    assert result["supports"] == []
+
+
+def test_final_save_cost_is_included_in_opt_in_wall_allowance(monkeypatch):
+    value = problem()
+    fitted = endpoint(value)
+    clock = SimulatedClock()
+    clock.patch(monkeypatch)
+
+    def save(row):
+        if (
+            row["event"]["phase"] == "diagnostic"
+            and row["event"]["status"] == "complete"
+        ):
+            clock.advance(2, 0.01)
+
+    result = profile.evaluate(
+        value,
+        fitted,
+        deadline=clock.wall + 1,
+        execution=profile.ExecutionPolicy(),
+        save=save,
+    )
+    assert result["status"] == "partial"
+    assert result["reason"] == "practical profile wall allowance exhausted during save"
+    assert result["calls"] == result["completed_calls"]
+    assert len(result["supports"]) == len(profile.POLICY["thresholds"])
+    assert result["timing"]["save_callback_wall_seconds"] == pytest.approx(2)
+    assert result["elapsed_seconds"] == pytest.approx(2)
+
+
+def test_opt_in_execution_policy_is_strict_and_does_not_expand_m39_policy():
+    assert profile.EXECUTION_POLICY == {
+        "protocol": "practical-profile-execution-2",
+        "mode": "separate-exact-target-caches",
+    }
+    assert "execution" not in profile.POLICY
+    with pytest.raises(ValidationError):
+        profile.ExecutionPolicy(mode="round-nearby-targets")
+    with pytest.raises(ValidationError):
+        profile.Policy(execution=profile.EXECUTION_POLICY)

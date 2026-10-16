@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from time import monotonic
+from time import monotonic, process_time
 from typing import Literal
 
 import numpy as np
@@ -54,6 +54,106 @@ class Policy(StrictSchema):
 
 
 POLICY = Policy().model_dump(mode="json")
+
+
+class ExecutionPolicy(StrictSchema):
+    """Opt in to M40 execution changes without changing M39 numerical policy."""
+
+    protocol: Literal["practical-profile-execution-2"] = "practical-profile-execution-2"
+    mode: Literal["separate-exact-target-caches"] = "separate-exact-target-caches"
+
+
+EXECUTION_POLICY = ExecutionPolicy().model_dump(mode="json")
+
+
+class _SaveFailure(RuntimeError):
+    """Stop further numerical work when a durable progress callback fails."""
+
+
+class _Timing:
+    """Disjoint numerical/callback timers, including exceptions and final saves."""
+
+    def __init__(self, wall: float, cpu: float):
+        self.wall, self.cpu = wall, cpu
+        self.kinds: dict[str, dict] = {}
+        self.save_wall = self.save_cpu = 0.0
+        self.save_calls = self.save_failures = 0
+
+    def numerical(self, kind: str, function):
+        record = self.kinds.setdefault(
+            kind,
+            {
+                "started": 0,
+                "completed": 0,
+                "failed": 0,
+                "wall_seconds": 0.0,
+                "cpu_seconds": 0.0,
+            },
+        )
+        record["started"] += 1
+        wall, cpu = monotonic(), process_time()
+        try:
+            value = function()
+        except BaseException:
+            record["failed"] += 1
+            raise
+        else:
+            record["completed"] += 1
+            return value
+        finally:
+            record["wall_seconds"] += monotonic() - wall
+            record["cpu_seconds"] += process_time() - cpu
+
+    def callback(self, function):
+        self.save_calls += 1
+        wall, cpu = monotonic(), process_time()
+        try:
+            function()
+        except Exception as error:
+            self.save_failures += 1
+            raise _SaveFailure(
+                f"practical profile save callback failed: {error}"
+            ) from error
+        finally:
+            self.save_wall += monotonic() - wall
+            self.save_cpu += process_time() - cpu
+
+    def snapshot(self) -> dict:
+        wall, cpu = monotonic() - self.wall, process_time() - self.cpu
+        numerical_wall = sum(row["wall_seconds"] for row in self.kinds.values())
+        numerical_cpu = sum(row["cpu_seconds"] for row in self.kinds.values())
+        other_wall = max(0.0, wall - numerical_wall - self.save_wall)
+        other_cpu = max(0.0, cpu - numerical_cpu - self.save_cpu)
+        return {
+            "protocol": "practical-profile-timing-1",
+            "numerical_wall_seconds": numerical_wall,
+            "numerical_cpu_seconds": numerical_cpu,
+            "save_callback_wall_seconds": self.save_wall,
+            "save_callback_cpu_seconds": self.save_cpu,
+            "orchestration_wall_seconds": other_wall,
+            "orchestration_cpu_seconds": other_cpu,
+            "total_wall_seconds": wall,
+            "total_cpu_seconds": cpu,
+            "unattributed_non_cpu_wall_seconds": max(0.0, wall - cpu),
+            "orchestration_non_cpu_wall_seconds": max(0.0, other_wall - other_cpu),
+            "save_callback_calls": self.save_calls,
+            "save_callback_failures": self.save_failures,
+            "numerical_operations_started": sum(
+                row["started"] for row in self.kinds.values()
+            ),
+            "numerical_operations_completed": sum(
+                row["completed"] for row in self.kinds.values()
+            ),
+            "numerical_operations_failed": sum(
+                row["failed"] for row in self.kinds.values()
+            ),
+            "numerical_by_kind": deepcopy(self.kinds),
+            "scope": (
+                "process CPU and monotonic wall; disjoint timers include failures. "
+                "Wall minus CPU cannot distinguish scheduler wait from blocking. "
+                "Progress snapshots exclude the currently executing save callback."
+            ),
+        }
 
 
 class _SolveFailure(ValueError):
@@ -230,6 +330,7 @@ def evaluate(
     policy: Policy | None = None,
     deadline: float,
     save: Callable[[dict], None] | None = None,
+    execution: ExecutionPolicy | None = None,
 ) -> dict:
     """Qualify a retained optimum, profile nuisances, and locate bounded support.
 
@@ -237,6 +338,12 @@ def evaluate(
     next operation. Completed nodes survive a partial result; incomplete support
     brackets never produce a width. The caller owns durable journal persistence.
     """
+    invocation_wall, invocation_cpu = monotonic(), process_time()
+    if execution is not None:
+        if not isinstance(execution, ExecutionPolicy):
+            raise TypeError("typed practical profile execution policy required")
+        execution = ExecutionPolicy.model_validate(execution.model_dump(mode="json"))
+    timing = _Timing(invocation_wall, invocation_cpu) if execution is not None else None
     if not isinstance(problem, (MeasurementProblem, DriftProblem)):
         raise TypeError("typed public measurement or sensor drift problem required")
     problem = type(problem).model_validate(problem.model_dump(mode="json"))
@@ -276,25 +383,50 @@ def evaluate(
             "bounded Gaussian objective-rise support; no coverage probability"
         ),
     }
-    save = save or (lambda _: None)
+    if execution is not None:
+        result.update(
+            execution=execution.model_dump(mode="json"),
+            frozen_calls=0,
+            frozen_nodes_completed=0,
+            frozen_nodes=[],
+            cache_reuses={"profiled": 0, "frozen": 0},
+            journal_persistence_complete=True,
+        )
 
     def persist(event):
-        save(
-            {
-                key: result[key]
-                for key in (
-                    "calls",
-                    "completed_calls",
-                    "solve_calls",
-                    "rollout_calls",
-                    "failed_calls",
-                    "inner_iterations",
-                    "inner_iterations_complete",
-                    "nodes_completed",
-                )
-            }
-            | {"event": deepcopy(event)}
-        )
+        if save is None or (execution and not result["journal_persistence_complete"]):
+            return
+        snapshot = {
+            key: result[key]
+            for key in (
+                "calls",
+                "completed_calls",
+                "solve_calls",
+                "rollout_calls",
+                "failed_calls",
+                "inner_iterations",
+                "inner_iterations_complete",
+                "nodes_completed",
+            )
+        } | {"event": deepcopy(event)}
+        if timing is None:
+            save(snapshot)
+        else:
+            snapshot.update(
+                execution=result["execution"],
+                timing=timing.snapshot(),
+                frozen_calls=result["frozen_calls"],
+                frozen_nodes_completed=result["frozen_nodes_completed"],
+                cache_reuses=dict(result["cache_reuses"]),
+            )
+            try:
+                timing.callback(lambda: save(snapshot))
+            except _SaveFailure:
+                result["journal_persistence_complete"] = False
+                raise
+
+    def numerical(kind, function):
+        return function() if timing is None else timing.numerical(kind, function)
 
     def check():
         if monotonic() >= deadline:
@@ -307,10 +439,19 @@ def evaluate(
         result["calls"] += 1
         result[f"{kind}_calls"] += 1
         event = {"phase": phase, "point": point, "status": "started"}
-        persist(event)
+        if execution is None:
+            persist(event)
         iterations_recorded = False
+        numerical_entered = False
         try:
-            value = function()
+            if execution is not None:
+                persist(event)
+                if monotonic() >= deadline:
+                    raise TimeoutError(
+                        "practical profile allowance exhausted during save"
+                    )
+            numerical_entered = True
+            value = numerical(kind, function)
             if kind == "solve":
                 result["inner_iterations"] += value[1]["iterations"]
                 iterations_recorded = True
@@ -321,7 +462,7 @@ def evaluate(
         except (ValueError, RuntimeError, TimeoutError, np.linalg.LinAlgError) as error:
             if kind == "solve" and isinstance(error, _SolveFailure):
                 result["inner_iterations"] += error.iterations
-            elif kind == "solve" and not iterations_recorded:
+            elif kind == "solve" and numerical_entered and not iterations_recorded:
                 result["inner_iterations_complete"] = False
             result["completed_calls"] += 1
             result["failed_calls"] += 1
@@ -331,13 +472,19 @@ def evaluate(
         persist(event | {"status": "completed"})
         return value
 
-    persist({"phase": "diagnostic", "status": "started"})
+    if execution is None:
+        persist({"phase": "diagnostic", "status": "started"})
     qualified = False
     try:
+        if execution is not None:
+            persist({"phase": "diagnostic", "status": "started"})
         check()
         _endpoint_identity(problem, endpoint)
-        optimizer, profile, route = robust_measurement.build(
-            problem, robust_measurement.Loss(kind="gaussian")
+        optimizer, profile, route = numerical(
+            "setup",
+            lambda: robust_measurement.build(
+                problem, robust_measurement.Loss(kind="gaussian")
+            ),
         )
         oracle = optimizer.base
         if (
@@ -434,7 +581,9 @@ def evaluate(
                 "within declared tolerance"
             )
         qualified = True
-        result["curvature"] = _curvature(design, target_index, policy)
+        result["curvature"] = numerical(
+            "curvature", lambda: _curvature(design, target_index, policy)
+        )
         result["parameter_order"], result["nuisance_names"] = names, nuisance_names
         result["retained_parameters"] = dict(endpoint["parameters"])
         result["domain"] = [float(lower[target_index]), float(upper[target_index])]
@@ -444,11 +593,33 @@ def evaluate(
         result["objective_rise_reference"] = (
             "independently certified bounded global Gaussian optimum"
         )
-        cache = {}
+        cache, frozen_cache = {}, {}
+
+        def frozen_values(value: float) -> dict:
+            """Evaluate the retained-nuisance slice; never imply an inner optimum."""
+            frozen = vector.copy()
+            frozen[target_index] = value
+            frozen_residual = design @ frozen + offset
+            objective = float(frozen_residual @ frozen_residual / 2)
+            if not np.isfinite(objective) or objective < base_objective - tolerance:
+                raise ValueError(
+                    "frozen slice contradicts the certified global optimum"
+                )
+            return {
+                "value": value,
+                "mode": "frozen",
+                "parameters": oracle.parameters(frozen),
+                "frozen_objective": objective,
+                "frozen_rise": max(0.0, objective - base_objective),
+            }
 
         def node(value: float, phase: str = "grid") -> dict:
             value = float(value)
             if value in cache:
+                if execution:
+                    if monotonic() >= deadline:
+                        raise TimeoutError("practical profile wall allowance exhausted")
+                    result["cache_reuses"]["profiled"] += 1
                 return cache[value]
             nuisance_values, inner = call(
                 phase,
@@ -463,10 +634,20 @@ def evaluate(
             )
             fitted = vector.copy()
             fitted[target_index], fitted[nuisance] = value, nuisance_values
-            frozen = vector.copy()
-            frozen[target_index] = value
-            frozen_residual = design @ frozen + offset
-            frozen_objective = float(frozen_residual @ frozen_residual / 2)
+            if execution:
+                if value in frozen_cache:
+                    result["cache_reuses"]["frozen"] += 1
+                    frozen_entry = frozen_cache[value]
+                else:
+                    frozen_entry = numerical(
+                        "frozen_with_profile", lambda: frozen_values(value)
+                    )
+                frozen_objective = frozen_entry["frozen_objective"]
+            else:
+                frozen = vector.copy()
+                frozen[target_index] = value
+                frozen_residual = design @ frozen + offset
+                frozen_objective = float(frozen_residual @ frozen_residual / 2)
             if min(inner["objective"], frozen_objective) < base_objective - tolerance:
                 raise ValueError(
                     "profile node contradicts the certified global optimum"
@@ -493,9 +674,35 @@ def evaluate(
                     "profiled nuisance objective exceeds feasible frozen slice"
                 )
             cache[value] = entry
+            if execution:
+                # This same-point arithmetic was already performed above. It is
+                # evidence only for the frozen curve, not a second inner solve.
+                frozen_cache[value] = frozen_entry
             result["nodes"].append(entry)
             result["nodes_completed"] += 1
             persist({"phase": phase, "status": "node_completed", "node": entry})
+            return entry
+
+        def curve_node(value: float, mode: str, phase: str = "grid") -> dict:
+            """Cache exact floating target values separately for the two curves."""
+            if execution is None or mode == "profiled":
+                return node(value, phase)
+            value = float(value)
+            if value in frozen_cache:
+                if monotonic() >= deadline:
+                    raise TimeoutError("practical profile wall allowance exhausted")
+                result["cache_reuses"]["frozen"] += 1
+                return frozen_cache[value]
+            entry = call(
+                phase + "_frozen",
+                lambda: frozen_values(value),
+                point=value,
+                kind="frozen",
+            ) | {"phase": phase}
+            frozen_cache[value] = entry
+            result["frozen_nodes"].append(entry)
+            result["frozen_nodes_completed"] += 1
+            persist({"phase": phase, "status": "frozen_node_completed", "node": entry})
             return entry
 
         # The retained point is first so an interrupted grid never silently uses
@@ -509,16 +716,17 @@ def evaluate(
             node(value)
 
         def support_end(bound: float, threshold: float, mode: str) -> dict:
-            endpoint_node = node(bound)
+            endpoint_node = curve_node(bound, mode)
             key = mode + "_rise"
             crossed = endpoint_node[key] > threshold
             if crossed:
-                if node(center)[key] > threshold:
+                if curve_node(center, mode)[key] > threshold:
                     raise ValueError(
                         "retained point lies outside declared objective-rise threshold"
                     )
                 value = brentq(
-                    lambda point: node(point, "threshold_crossing")[key] - threshold,
+                    lambda point: curve_node(point, mode, "threshold_crossing")[key]
+                    - threshold,
                     min(bound, center),
                     max(bound, center),
                     xtol=policy.root_relative_tolerance
@@ -526,7 +734,7 @@ def evaluate(
                     rtol=4 * np.finfo(float).eps,
                     maxiter=100,
                 )
-                endpoint_node = node(value, "threshold_crossing")
+                endpoint_node = curve_node(value, mode, "threshold_crossing")
             active = (
                 endpoint_node["nuisance_active_bounds"]
                 if mode == "profiled"
@@ -594,7 +802,21 @@ def evaluate(
         result["reason"] = str(error)
     result["elapsed_seconds"] = monotonic() - started
     result["accounting_complete"] = result["calls"] == result["completed_calls"]
-    persist(
-        {"phase": "diagnostic", "status": result["status"], "reason": result["reason"]}
-    )
+    try:
+        persist(
+            {
+                "phase": "diagnostic",
+                "status": result["status"],
+                "reason": result["reason"],
+            }
+        )
+    except _SaveFailure as error:
+        result["status"] = "partial" if qualified else "unqualified"
+        result["reason"] = str(error)
+    if timing is not None:
+        if monotonic() >= deadline and result["status"] == "complete":
+            result["status"] = "partial"
+            result["reason"] = "practical profile wall allowance exhausted during save"
+        result["timing"] = timing.snapshot()
+        result["elapsed_seconds"] = result["timing"]["total_wall_seconds"]
     return result

@@ -150,6 +150,13 @@ have no assigned confidence percentage. This prepares uncertainty feedback while
 Astra completes interaction construction; it does not launch the broader model/data attribution
 study or alter the clean benchmark measurement contract.
 
+The [M40 diagnostic supplement](PHASE_C_FITTING_PROFILE_SUPPLEMENT.md) now prepares
+completion of those nine partial profiles from the saved endpoints, with a new
+90-second allowance and original costs preserved. It removes unnecessary nuisance
+solves for frozen-only points and measures persistence time separately. Returned
+cluster timing/completion evidence remains pending; no new fit or nonlinear
+qualification is claimed.
+
 Earlier input-pulse and trajectory defects also show why an apparent scientific
 contradiction may originate in data generation or an execution interface.
 Historical releases stay frozen. New diagnosis experiments need isolated,

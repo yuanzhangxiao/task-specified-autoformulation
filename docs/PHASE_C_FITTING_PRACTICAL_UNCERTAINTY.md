@@ -7,6 +7,73 @@ automatic model/data attribution, confidence percentages, benchmark changes or
 production fitting defaults. The M37/M38 training-feedback interface remains
 available for the current paper.
 
+## Plain-language interpretation
+
+This is a deliberately simple sensor experiment, not another Dalla Man or CSTR
+benchmark. An input makes a physical quantity increase at rate `g*u`, while the
+sensor may acquire an additional linear drift `b*t`. We estimate three unknowns:
+the physical response strength `g`, one shared initial value `x0`, and the drift
+rate `b`. Their predicted sensor reading is `x0 + (g*u + b)*t`.
+
+We repeat the experiment at three constant input levels. **Input separation**
+`delta` specifies how different they are: `[1-delta, 1, 1+delta]`. A separation
+of 0.5 gives `[0.5, 1, 1.5]`; 0.005 gives `[0.995, 1, 1.005]`. Different inputs
+help distinguish the physical response from a common sensor drift. Subtracting
+two observed slopes removes `b`, leaving `g*(u_2-u_1)`. Dividing by a very small
+input difference amplifies the effect of measurement noise.
+
+**Practical uncertainty** asks how precisely these noisy observations determine
+a parameter. It is distinct from numerical optimization failure: an optimizer
+can find the best possible fit, yet many rather different gains fit almost as
+well. For any nonzero separation this example has three independent parameter
+directions (full rank), but the gain becomes increasingly weakly determined.
+At zero separation there is exact ambiguity: only `g+b`, not the two separately,
+can be identified from these experiments.
+
+**Noise level** `sigma` is the known standard deviation of independent Gaussian
+measurement errors in the synthetic acquisition. The comparison uses five noise
+draws, both fitting strategies, five separations and three noise levels:
+`5*2*5*3 = 150` fits. Each fit sees 51 readings across three trajectories.
+
+A **parameter profile** asks a sequence of counterfactual fitting questions:
+"If the gain were fixed to this value, how well could we fit by changing the
+initial value and sensor drift?" Those other unknowns are called **nuisance
+parameters** here only because gain is the parameter under investigation; they
+remain meaningful parts of the model. Reoptimizing them is essential. Holding
+them fixed answers the narrower question "what if only the gain changed?" and
+can conceal compensating parameter changes.
+
+The **objective** is half the sum of squared reading errors, with each error
+divided by its known noise standard deviation. Smaller is better. An
+**objective-rise support set** contains gains whose best achievable objective
+is no more than a chosen amount `c` above the overall minimum. We examine
+`c=0.5` and `c=2`. These tolerances are units of the fitting objective, not
+percentages of parameter error or confidence probabilities. The **profile support
+width** is the largest supported gain minus the smallest, in gain units. A wider
+range means less precise determination under this model, noise and domain
+contract. If a range reaches a declared bound, that bound may be what stops it;
+it does not mean the observations supplied the limit.
+
+**Clean reading RMSE** compares the fitted sensor prediction with the synthetic
+sensor reading before random noise was added. "Clean" removes the random noise,
+not the sensor drift: the reference is `x0 + (g*u+b)*t`. **Physical RMSE** instead
+compares the inferred underlying quantity with `x0+g*u*t`. RMSE means the square
+root of the average squared difference, in output units. Both clean references
+are evaluator-only, and neither is available for fitting or selection. These
+scores are on the controlled acquisition schedules, not held-out test estimates.
+
+The returned fixed-noise results show nearly unchanged clean-reading RMSE while
+gain error and proper profile widths increase. Thus an excellent predicted
+sensor curve need not imply a precise physical gain. The profile exposes this
+from the noisy public observations alone. Ground truth is used afterward to
+check that interpretation, not to choose a parameter estimate.
+
+Finally, **profiled fitting** and **post-fit uncertainty profiling** are different
+uses of the same mathematical idea. The former efficiently eliminates eligible
+linear unknowns while finding the best fit. The latter deliberately holds one
+parameter at alternative values to measure how much the fit can deteriorate.
+Both direct and profiled fitting receive the same post-fit diagnostic here.
+
 ## Question and controlled experiment
 
 Can fitted parameters become unreliable even when the sensitivity matrix remains
