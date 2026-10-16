@@ -191,8 +191,111 @@ bash "$AF_CODE/scripts/hpc/inspect_phase_c_practical_uncertainty_delta.sh" "$AF_
 ```
 
 The inspector reports all planned tasks and writes a portable review archive.
-The full 150-task cluster qualification remains pending until the user returns
-results.
+The 150-task cluster run has returned; the review below distinguishes complete
+fits from nine incomplete diagnostic profiles.
+
+## Delta results, reviewed 15 October 2026
+
+Source archive: `review-20261016-021339.tar.gz` (UTC filename), SHA-256
+`ee5ac2c8c8a0499679b1d6305c249ff2a8685a5d9491fea74c84ef6da9a2fb65`.
+Execution commit: `6c467ad7b877ed64f4a9caa5a5b2207dd9fb483b`.
+Plan: `6bc5c0e385d13728fd1d93df642ae898bda2351a2685d714a37028a30316d9f2`.
+Delta jobs: prepare `22930374`, array `22930375`, report `22930376`.
+
+All seals, frozen acquisition checks, nested endpoints and the reproduced summary
+agree. No new fitting, integration, test access or LLM calls were performed in
+this review.
+
+Review verification also reran 149 profile/fixture tests successfully and
+`git diff --check`. Whole-repository Ruff reports 37 unrelated findings in
+`analysis/claude`; this review changes documentation only.
+
+- All **150/150 fits** pass independent numerical and analytic objective checks.
+  All retained endpoints meet the independently computed bounded global optimum;
+  the maximum absolute objective gap is `7.18e-13`.
+- All **75/75 direct/profiled-policy pairs** agree in objective, with maximum
+  difference `2.48e-12`. At exact confounding, the profiled policy rejects a
+  rank-deficient inner design and safely falls back to joint fitting. Its 30
+  rejected profiling attempts (two starts for each of 15 cases) explain the
+  recorded started/completed search-call difference; they are not missing costs.
+- All **150/150** conditional and frozen information checks match the analytic
+  design. Completed interior support widths match their analytic reference
+  within `1.1e-9` relative error.
+- **141/150 profiles complete; 9/150 are partial.** All nine stop at their
+  30-second wall allowance. The three recorded failed profile operations are
+  deadline overruns, not failed KKT or solver-optimality checks. Partial profiles
+  stay excluded from summary widths, even if one threshold completed.
+
+### Practical uncertainty while the design is still full rank
+
+At fixed `sigma=0.01`, every direct/profiled profile completes for all five seeds.
+The following table uses the direct arm, objective rise `c=0.5`, and medians over
+the same five noise draws. The generating gain `1.3` is evaluator-only.
+
+| Input separation | Joint rank | Absolute gain error | Relative gain error | Proper support width | Frozen-nuisance width | Clean reading RMSE |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.5 | 3/3 | 0.001422 | 0.109% | 0.002925 | 0.001106 | 0.002610 |
+| 0.1 | 3/3 | 0.007109 | 0.547% | 0.014625 | 0.001190 | 0.002610 |
+| 0.02 | 3/3 | 0.035544 | 2.734% | 0.073127 | 0.001194 | 0.002610 |
+| 0.005 | 3/3 | 0.142175 | 10.937% | 0.292509 | 0.001194 | 0.002610 |
+| 0 | 2/3 | Not identifiable individually | Not an identifiable recovery error | 2.950000 | 0.001194 | 0.002227 |
+
+Reducing input contrast by 100-fold widens the proper support by 100-fold while
+all nonzero designs remain full rank. The best fit to sensor readings is nearly
+unchanged. The equations explain this directly: each reading slope is `g*u_r+b`.
+When all `u_r` are close to one, changing `g` and compensating with `b` leaves
+nearly the same observations. Freezing `b` suppresses that compensation and
+manufactures an unjustifiably narrow slice. At zero contrast the complete gain
+domain `[0.05,3]` remains supported; lowering noise cannot resolve this exact
+gain/drift ambiguity.
+
+Noise strengthens the same pattern. For the all-complete direct groups at
+`delta=0.1`, increasing sigma from `0.01` to `0.05` multiplies support width and
+median gain error by five. At `delta=0.005, sigma=0.05`, median relative gain error
+is 54.68%, while the complete support ranges touch the gain domain. Their finite
+width is therefore not purely data-determined. In the particularly incomplete
+`delta=0.02, sigma=0.2` profiled group, widths use only two of five seeds; it must
+not be used as an unqualified five-seed trend comparison.
+
+These results qualify useful **uncertainty diagnostics**, not an improvement in
+point estimation or calibrated coverage. They demonstrate that a solved fitting
+problem can still leave the physical coefficient poorly determined. The proper
+profile detects this using only the public acquisition, without knowing the
+generating gain. It should prevent overconfident coefficient interpretation or
+premature equation criticism in later feedback.
+
+### Diagnostic cost and next bounded step
+
+| Stage | Total recorded CPU seconds | Sum of attempt wall seconds |
+| --- | --- | --- |
+| Fitting, including verification | 58.261 | 826.039 |
+| Separate practical profiles | 48.799 | 952.932 |
+| Retrospective evaluator | 0.405 | 25.362 |
+
+Profile overhead is **83.8% of fitting CPU time** in this deliberately tiny
+problem. Median profile CPU time is 0.324 seconds; median elapsed time is 2.540
+seconds. All 22,893 diagnostic calls have recorded completion, including the
+deadline failures; wall/CPU cost accounting is complete even though nine profiles
+are not. Wall totals above are sums across attempts, not campaign makespan or
+scheduler wait time.
+
+The nine partial profiles used only 0.144–0.431 CPU seconds while consuming
+30.16–31.24 wall seconds. This points to waiting rather than expensive numerical
+optimization. Frequent durable writes on shared storage are a plausible cause,
+but there is no per-operation I/O timing here to establish it conclusively.
+
+Next: preserve all 150 fitted endpoints, instrument diagnostic compute versus
+journal/wait time, and complete the nine profiles under a separately recorded
+diagnostic extension. Avoid resetting or overwriting their consumed allowances.
+Reduce unnecessary profile solves and journal traffic without losing started-work
+accounting. After this completion check, extend practical-uncertainty qualification
+to a small nonlinear block, where global inner optimality is no longer automatic.
+No new benchmark run or parameter refit is needed for the present nine diagnostics.
+
+Reviewed artifacts and a three-panel explanatory figure are under
+`output/phase-c-practical-uncertainty-m39-delta-review/`. The figure uses only the
+25 complete direct profiles at fixed `sigma=0.01`; its numerical source is
+`plot-data.json`. Generated artifacts remain uncommitted.
 
 ## Local qualification, 15 October 2026
 

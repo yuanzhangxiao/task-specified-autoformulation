@@ -23,11 +23,13 @@ future work.
 
 While awaiting executable construction laws, the separate
 [M39 practical-uncertainty qualification](PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md)
-prepares a 150-task Delta CPU study of increasingly similar inputs and known
-measurement noise. It compares nuisance-aware profiles with frozen-nuisance
-slices, retaining exact confounding and domain-induced limits. These are
+returned 150 checked fits and 75 agreeing method pairs across increasingly similar
+inputs and known measurement noise. Proper profiles widen before rank is lost;
+141 complete and 9 reach their wall limit. Frozen-nuisance slices understate the
+ambiguity. Exact confounding and domain-induced limits remain explicit. These are
 objective-rise support sets, not calibrated confidence intervals; no production
-or benchmark contracts change.
+or benchmark contracts change. Next complete the 9 partial diagnostics with
+separate accounting and investigate their wall/CPU disparity.
 
 Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
 compares fixed calibration with one bounded shared observation trend, preserving

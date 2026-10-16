@@ -1,13 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
-M39 prepares an isolated 150-task Delta CPU practical-uncertainty qualification:
+M39 returned an isolated 150-task Delta CPU practical-uncertainty qualification:
 five input separations, three known noise levels and five paired seeds, each
 fitted by direct and affine-profiled rollout. Bounded Gaussian gain profiles
 reoptimize shared initials and sensor drift; frozen-nuisance slices expose the
 cost of ignoring compensation. Support ranges distinguish data information
 from parameter-domain limits and carry no confidence probability. Existing
-benchmark and production fitting contracts remain fixed. See
-`PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md`; cluster results are pending.
+benchmark and production fitting contracts remain fixed. All 150 fits and 75 paired
+objectives qualify; 141 profiles complete and 9 hit wall limits. Full-rank cases
+show widening parameter uncertainty despite stable measured prediction error.
+Profiles add 83.8% fitting CPU overhead in this tiny control; diagnostic completion
+and I/O timing precede nonlinear expansion. See
+`PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md` for results and remaining limits.
 
 M38 now turns verified M37 packets into measured discrepancies and conditional,
 testable feedback drafts, with alternative explanations and stage boundaries.

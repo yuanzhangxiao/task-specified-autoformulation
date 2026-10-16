@@ -135,14 +135,19 @@ seconds (27.1% additional), with all 1,200 calls accounted. The next research
 design should include such overhead and qualify practical uncertainty on noisy,
 near-confounded cases before offering a numerical confidence level.
 
-The next bounded implementation is
-[M39 practical uncertainty](PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md): five input
-separations, three known-noise levels and five paired noise seeds on one affine
-physical/sensor/initial-value family. It compares nuisance-reoptimized gain
+[M39 practical uncertainty](PHASE_C_FITTING_PRACTICAL_UNCERTAINTY.md) qualifies
+five input separations, three known-noise levels and five paired noise seeds on
+one affine physical/sensor/initial-value family. It compares nuisance-reoptimized gain
 profiles with frozen-nuisance slices, preserving domain-assisted bounds and exact
-confounding. Objective-rise support sets have no assigned confidence percentage.
-This qualification prepares useful uncertainty feedback while Astra completes
-interaction construction; it does not launch the broader model/data attribution
+confounding. The returned run verifies all 150 fit endpoints and 75 method pairs;
+141 profiles complete and 9 hit their separate wall allowance. Proper support
+widens while the joint design remains full rank and measured prediction error
+stays nearly unchanged. This separates practical uncertainty from fitting failure.
+Profiles add 48.80 CPU seconds to 58.26 fitting CPU seconds (83.8% overhead in this
+tiny control). Diagnostic completion and wall/I/O timing are next; nonlinear
+profiles and calibrated coverage remain unqualified. Objective-rise support sets
+have no assigned confidence percentage. This prepares uncertainty feedback while
+Astra completes interaction construction; it does not launch the broader model/data attribution
 study or alter the clean benchmark measurement contract.
 
 Earlier input-pulse and trajectory defects also show why an apparent scientific
