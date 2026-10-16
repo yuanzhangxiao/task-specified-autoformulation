@@ -646,7 +646,12 @@ def report(root: Path, plan: dict) -> dict:
                 r["structural_eligible"] is True for r in selected
             ),
             "scientific_status_counts": dict(
-                Counter(r["scientific_status"] for r in selected)
+                Counter(
+                    "not_assessed"
+                    if r["scientific_status"] is None
+                    else r["scientific_status"]
+                    for r in selected
+                )
             ),
             "median_tokens": median,
             "unscaled_mad_tokens": statistics.median(abs(x - median) for x in measured)

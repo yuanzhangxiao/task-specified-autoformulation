@@ -220,6 +220,75 @@ def test_report_separates_ended_control_from_scientific_resolution(tmp_path, set
     assert result["physical_requests"] == 1
 
 
+def test_report_writes_mixed_assessed_pending_and_partial_tasks_in_each_arm(
+    tmp_path, setup
+):
+    plan, templates, _ = setup
+    plan["tasks"] = [
+        {**task, "task_id": f"{task['arm']}_{status}"}
+        for task in templates
+        for status in ("assessed", "pending", "partial")
+    ]
+    previous = campaign.report(tmp_path, plan)
+    summary_path = tmp_path / "summary.json"
+    assert summary_path.is_file()
+
+    def finish(url, body, timeout):
+        packet = json.loads(body["messages"][1]["content"])
+        edit = {**packet["response_template"], "stage_complete": True}
+        edit["equations"] = [equation("y", "u", "t")]
+        return response(edit)
+
+    for task in plan["tasks"]:
+        if task["task_id"].endswith("_assessed"):
+            execute(tmp_path, plan, task, finish)
+        elif task["task_id"].endswith("_partial"):
+            calls = []
+
+            def partial(url, body, timeout, calls=calls):
+                calls.append(body)
+                packet = json.loads(body["messages"][1]["content"])
+                edit = {**packet["response_template"], "stage_complete": False}
+                return response(edit)
+
+            with pytest.raises(DeferredCall):
+                execute(
+                    tmp_path,
+                    plan,
+                    task,
+                    partial,
+                    can_start=lambda calls=calls: not calls,
+                )
+            assert len(calls) == 1
+
+    result = campaign.report(tmp_path, plan)
+    persisted = json.loads(summary_path.read_text())
+    assert persisted == result
+    assert persisted != previous
+    assert not list(tmp_path.glob("summary.json.*.tmp"))
+    assert result["physical_requests"] == 4
+    assert result["observed_tokens"] == 400
+    for arm in campaign.ARMS:
+        assert result["groups"][arm]["status_counts"] == {
+            "assessed": 1,
+            "pending": 1,
+            "partial": 1,
+        }
+        assert result["groups"][arm]["scientific_status_counts"] == {
+            "checks_clear": 1,
+            "not_assessed": 2,
+        }
+    for row in persisted["rows"]:
+        if row["status"] == "assessed":
+            assert row["scientific_status"] == "checks_clear"
+        else:
+            assert row["scientific_status"] is None
+            assert row["structural_eligible"] is None
+            assert row["cost"]["physical_requests"] == (row["status"] == "partial")
+    assert campaign.report(tmp_path, plan) == result
+    assert json.loads(summary_path.read_text()) == persisted
+
+
 @pytest.mark.parametrize("arm", campaign.ARMS)
 def test_distinct_rejected_alternatives_are_not_three_repeated_attempts(
     tmp_path, setup, arm

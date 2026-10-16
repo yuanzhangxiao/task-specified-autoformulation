@@ -113,3 +113,33 @@ uncertainty/deferred transitions, repeated versus different attempts, cached
 resume, interrupted budgets, stale handles and foreign/tampered artifacts.
 Live results are pending; this milestone makes no claim that the revised feedback
 improves scientific recovery.
+
+## Reporting recovery for the 3404d29 bundle
+
+The original report failed when an arm contained both an assessed episode and a
+pending or interrupted episode: its scientific-status counter mixed strings and
+`None` keys, which JSON cannot sort. Episode checkpoints precede reporting and
+remain reusable. The fixed aggregate uses `not_assessed` for unfinished episodes;
+their per-row scientific status and structural eligibility remain null. The
+regression test covers assessed, pending and interrupted episodes in each arm.
+
+Do not edit the frozen bundle or reset the campaign. Its source identity is part
+of the experiment. The standalone `scripts/recover_saved_topology_report.py`
+helper validates that original bundle and its sealed plan before importing it.
+It applies only a scoped reporting-counter adapter, records a separate recovery
+receipt, and uses the original worker with its existing locks, cache and budget.
+The original source, prompts, plan, results and call records are preserved.
+
+Run the helper from outside the original bundle, using its existing environment:
+
+```bash
+"$HOME/af-construction/venv/bin/python" /path/to/recover_saved_topology_report.py report \
+  --bundle "$HOME/phase-c-actionable-repair-3404d29" \
+  --root "$HOME/af-construction/saved-actionable-repair-v1" \
+  --work "$HOME/af-construction"
+```
+
+Use `run` with the same arguments to resume remaining episodes, or `inspect` to
+refresh reports and package the results. `report` and `inspect` make no model or
+network calls. Use this helper for recovery rather than the old launcher, whose
+reporting code remains intentionally unchanged.
