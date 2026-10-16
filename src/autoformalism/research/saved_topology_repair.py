@@ -23,6 +23,7 @@ from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.research import construction_comparison as campaign
 from autoformalism.research import construction_training as training
+from autoformalism.research import repair_stagnation
 from autoformalism.research.actionable_repair_status import build_state
 from autoformalism.search import construction_actionable_repair as actionable
 from autoformalism.search import construction_evidence_repair as control
@@ -35,6 +36,7 @@ from autoformalism.search.training_evidence import TrainingEvidence, evidence_br
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "saved-topology-repair-comparison-1"
+PROTOCOL_V2 = "saved-topology-repair-feedback-2"
 ARMS = ("control", "actionable")
 REPO = Path(__file__).resolve().parents[3]
 MAX_CALLS = 10
@@ -83,7 +85,7 @@ class Problem:
         )
         self.highlights = training.initial_highlights(self.evidence)
 
-    def assess(self, draft: control.Draft) -> dict:
+    def assess(self, draft: control.Draft, *, qualified_memory: bool = False) -> dict:
         """Reproduce the full scientific-structure checks used by construction."""
         result = control.assess(
             self.brief,
@@ -110,6 +112,16 @@ class Problem:
         result["eligible"] &= variables["status"] == "ready"
         result["shared_process_checklist"] = checks.shared_checklist(self.brief, draft)
         result["eligible"] &= result["shared_process_checklist"]["status"] == "ready"
+        if qualified_memory:
+            result = realizations.qualify_required_memory_paths(
+                self.brief, draft, result
+            )
+            result["mechanism_realization_handoff"] = control.final_handoff(
+                draft, result
+            )
+            result["mechanism_realization_handoff"][
+                "required_memory_path_qualification"
+            ] = result["required_memory_path_qualification"]
         return result
 
     def diagnose(self, draft: control.Draft) -> dict:
@@ -211,15 +223,70 @@ def freeze(source: Path, destination: Path) -> dict:
     )
 
 
+def refreeze(source: Path, destination: Path) -> dict:
+    """Start a separate v2 repair on the same frozen starts, without historical calls.
+
+    This is a fresh bounded qualification, not a budget reset or continuation of
+    the original campaign. Original assessments and data remain in the plan.
+    """
+    parent = sealed_read(source / "plan.json")
+    if parent["protocol"] != PROTOCOL or parent.get("test_data_opened") is not False:
+        raise ValueError("requires an original public-only saved repair plan")
+    tasks = [task for task in parent["tasks"] if task["arm"] == "actionable"]
+    if len(tasks) != len(parent["starts"]) or {t["source_task"] for t in tasks} != set(
+        parent["starts"]
+    ):
+        raise ValueError("original starts must have exactly one actionable task each")
+    settings = StagedModelSettings.model_validate(parent["settings"])
+    if (
+        settings.maximum_requests != MAX_CALLS
+        or settings.maximum_total_tokens != MAX_TOKENS
+    ):
+        raise ValueError("original repair allowances differ")
+    for task in tasks:
+        if Path(task["task_id"]).name != task["task_id"] or task["task_id"] in {
+            ".",
+            "..",
+        }:
+            raise ValueError("unsafe source task")
+        start = parent["starts"][task["source_task"]]
+        problem = Problem(parent["cells"][task["benchmark_id"]], start["task"])
+        draft = control.Draft.model_validate(start["draft"])
+        if (
+            problem.assess(draft) != start["assessment"]
+            or problem.diagnose(draft) != start["diagnostics"]
+        ):
+            raise ValueError("historical start assessment differs")
+    return sealed_write(
+        destination / "plan.json",
+        {
+            **{k: v for k, v in parent.items() if k != "artifact_sha256"},
+            "protocol": PROTOCOL_V2,
+            "actionable_policy": actionable.POLICY_V2,
+            "source_identity": source_identity(),
+            "historical_repair_plan_sha256": parent["artifact_sha256"],
+            "tasks": tasks,
+            "selection": "Same saved starts as the original paired repair; fresh v2 "
+            "actionable episodes only. Historical arms are not rerun "
+            "or equal-cost controls.",
+        },
+    )
+
+
 def verify(root: Path) -> dict:
     """Require unchanged source and sealed public inputs before any call."""
     plan = sealed_read(root / "plan.json")
     if (
-        plan["protocol"] != PROTOCOL
+        plan["protocol"] not in {PROTOCOL, PROTOCOL_V2}
         or plan["source_identity"] != source_identity()
         or plan["test_data_opened"] is not False
     ):
         raise ValueError("saved repair execution identity differs")
+    if (
+        plan["protocol"] == PROTOCOL_V2
+        and plan.get("actionable_policy") != actionable.POLICY_V2
+    ):
+        raise ValueError("saved repair policy differs")
     return plan
 
 
@@ -282,7 +349,16 @@ def semantic_signature(draft: control.Draft, check: dict, report: dict) -> str:
 
 
 def make_packet(
-    api, problem: Problem, draft, last, state, repetition, count: int, charged: int
+    api,
+    problem: Problem,
+    draft,
+    last,
+    state,
+    repetition,
+    count: int,
+    charged: int,
+    *,
+    policy: str | None = None,
 ) -> dict:
     """Use the same complete public context; never truncate scientific evidence."""
     packet = api.payload(
@@ -300,6 +376,12 @@ def make_packet(
         compatibility_questions=state["pending_questions"],
         compatibility_state=state,
         **({"repetition_feedback": repetition} if api is actionable else {}),
+        **({"policy": policy} if api is actionable and policy is not None else {}),
+        **(
+            {"qualified_assessment": problem.assess(draft, qualified_memory=True)}
+            if api is actionable and policy == actionable.POLICY_V2
+            else {}
+        ),
     )
     control.repair_budget(packet, MAX_CALLS, count, MAX_TOKENS, charged, MAX_TOKENS)
     return packet
@@ -356,6 +438,7 @@ def run_episode(
     problem = Problem(plan["cells"][task["benchmark_id"]], start["task"])
     draft = control.Draft.model_validate(start["draft"])
     api = actionable if task["arm"] == "actionable" else control
+    v2 = plan.get("actionable_policy") == actionable.POLICY_V2 and api is actionable
     answers, records, events = {}, [], []
     last, repetition = None, None
     unchanged = 0
@@ -364,6 +447,8 @@ def run_episode(
     check, report = problem.assess(draft), problem.diagnose(draft)
     if check != start["assessment"] or report != start["diagnostics"]:
         raise ValueError("frozen starting assessment differs")
+    if v2:
+        check = problem.assess(draft, qualified_memory=True)
     tracked = build_state(report, start["diagnostics"], check["eligible"], answers)
     for index in range(MAX_CALLS):
         state = (
@@ -380,6 +465,7 @@ def run_episode(
             repetition,
             index,
             _cost(records)["budget_charge"],
+            policy=plan.get("actionable_policy") if v2 else None,
         )
         event_path = directory / "events" / f"{index:03d}.json"
         prior = sealed_read(event_path) if event_path.exists() else None
@@ -407,6 +493,7 @@ def run_episode(
         records.append(record)
         before, before_check, before_report = draft, check, report
         raw, error, accepted, complete = None, None, False, False
+        normalized = None
         normalizations, submitted = [], []
         try:
             raw = visible_response(record)
@@ -433,12 +520,20 @@ def run_episode(
             accepted, complete = True, patch.stage_complete
         except (ValueError, TypeError, KeyError) as exc:
             error = str(exc)[:6000]
-        check, report = problem.assess(draft), problem.diagnose(draft)
+        check = (
+            problem.assess(draft, qualified_memory=True)
+            if v2
+            else problem.assess(draft)
+        )
+        report = problem.diagnose(draft)
         after_state = build_state(report, tracked, check["eligible"], answers)
         tracked = after_state
-        same = semantic_signature(
+        scientific_signature = (
+            repair_stagnation.model_signature if v2 else semantic_signature
+        )
+        same = scientific_signature(
             before, before_check, before_report
-        ) == semantic_signature(draft, check, report)
+        ) == scientific_signature(draft, check, report)
         lost = control.lost_required_predicates(before_check, check) if accepted else []
         last = {
             "status": "accepted" if accepted else "rejected",
@@ -466,7 +561,13 @@ def run_episode(
             progress |= bool(
                 resolved & {q["question_id"] for q in state["pending_questions"]}
             )
-        signature = content_hash(control.repair_signature(draft, last, check["errors"]))
+        signature = (
+            repair_stagnation.attempt_signature(
+                draft, check, report, error=error, normalized=normalized, raw=raw
+            )
+            if v2
+            else content_hash(control.repair_signature(draft, last, check["errors"]))
+        )
         unchanged = (
             (unchanged + 1 if signature == previous_signature else 1)
             if not progress
@@ -519,6 +620,13 @@ def run_episode(
             if unchanged
             else None
         )
+        if v2 and repetition:
+            repetition["continuation"]["instruction"] = (
+                "The retained model and unresolved obligations have not changed. "
+                "Completion toggles, descriptions, and redundant restatements do not "
+                "reset this counter. Correct the displayed record or propose a "
+                "different scientific edit; finish only when repair_work allows it."
+            )
         if api is control:
             done = (
                 check["eligible"]
@@ -584,6 +692,11 @@ def report(root: Path, plan: dict) -> dict:
         ],
     )
     cards = []
+    if plan.get("protocol") == PROTOCOL_V2:
+        parts[2] = (
+            "Fresh v2 repairs of the same frozen starts; historical controls "
+            "are not rerun. No fitting or test access."
+        )
     for task in plan["tasks"]:
         folder = root / "results" / task["task_id"]
         records = _cache_records(folder / "calls", namespace(plan, task))
@@ -615,6 +728,21 @@ def report(root: Path, plan: dict) -> dict:
             "stop_reason": value["stop_reason"] if value else None,
             "cost": _cost(records),
         }
+        if plan.get("protocol") == PROTOCOL_V2:
+            row["diagnostic_status_counts"] = (
+                dict(
+                    Counter(
+                        d["status"]
+                        for d in value["scientific_state"]["full_report"]["diagnostics"]
+                    )
+                )
+                if value
+                else None
+            )
+            row["checks_clear_scope"] = (
+                "No tracked repair obligation remains; deferred or inapplicable "
+                "diagnostics are not scientific passes."
+            )
         rows.append(row)
         parts.append(
             f"| {row['task']} | {row['arm']} | {row['structural_eligible']} "
@@ -634,7 +762,7 @@ def report(root: Path, plan: dict) -> dict:
                 f"{html.escape(json.dumps(details, indent=2))}</pre></details>"
             )
     groups = {}
-    for arm in ARMS:
+    for arm in ARMS if plan.get("protocol") != PROTOCOL_V2 else ("actionable",):
         selected = [r for r in rows if r["arm"] == arm]
         measured = [
             r["cost"]["observed_tokens"] for r in selected if r["status"] == "assessed"
@@ -659,7 +787,7 @@ def report(root: Path, plan: dict) -> dict:
             else None,
         }
     summary = {
-        "protocol": PROTOCOL,
+        "protocol": plan.get("protocol", PROTOCOL),
         "plan_sha256": plan["artifact_sha256"],
         "planned_episodes": len(rows),
         "groups": groups,

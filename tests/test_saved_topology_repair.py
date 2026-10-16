@@ -193,6 +193,144 @@ def test_cached_response_tampering_is_rejected(tmp_path, setup):
         execute(tmp_path, plan, tasks[1], send)
 
 
+def test_v2_completion_toggles_and_full_restatements_share_repetition_counter(
+    tmp_path, setup
+):
+    plan, tasks, _ = setup
+    plan["actionable_policy"] = campaign.actionable.POLICY_V2
+    packets = []
+
+    def send(url, body, timeout):
+        packet = json.loads(body["messages"][1]["content"])
+        packets.append(packet)
+        edit = {**packet["response_template"], "stage_complete": len(packets) % 2 == 1}
+        if len(packets) % 2 == 0:
+            edit["equations"] = [equation("y", "u")]
+        return response(edit)
+
+    result = execute(tmp_path, plan, tasks[1], send)
+    assert result["event_count"] == 3
+    assert result["stop_reason"] == "three_repeated_repairs"
+    assert result["scientific_state"]["repair_status"] == "repair_required"
+    assert (
+        execute(tmp_path, plan, tasks[1], lambda *args: pytest.fail("new call"))
+        == result
+    )
+    assert [
+        sealed_read(tmp_path / f"results/actionable/events/{i:03d}.json")[
+            "consecutive_unchanged"
+        ]
+        for i in range(3)
+    ] == [1, 2, 3]
+
+
+def test_v2_distinct_rejected_scientific_alternatives_can_continue(tmp_path, setup):
+    plan, tasks, _ = setup
+    plan["actionable_policy"] = campaign.actionable.POLICY_V2
+    calls = []
+
+    def send(url, body, timeout):
+        packet = json.loads(body["messages"][1]["content"])
+        calls.append(packet)
+        edit = {**packet["response_template"], "stage_complete": True}
+        if len(calls) < 4:
+            edit["mechanism_realizations"] = [
+                {
+                    "requirement_id": "mechanism",
+                    "components": ["y"],
+                    "memory_states": [f"alternative_{len(calls)}"],
+                }
+            ]
+        else:
+            edit["equations"] = [equation("y", "u", "t")]
+        return response(edit)
+
+    result = execute(tmp_path, plan, tasks[1], send)
+    assert result["event_count"] == 4
+    assert result["stop_reason"] == "completed_requested_work"
+    assert result["scientific_state"]["repair_status"] == "checks_clear"
+
+
+def test_v2_record_repetition_ignores_completion_and_explanation(tmp_path, setup):
+    plan, tasks, _ = setup
+    plan["actionable_policy"] = campaign.actionable.POLICY_V2
+    calls = []
+
+    def send(url, body, timeout):
+        packet = json.loads(body["messages"][1]["content"])
+        calls.append(packet)
+        edit = {**packet["response_template"], "stage_complete": len(calls) % 2 == 0}
+        edit["mechanism_realizations"] = [
+            {
+                "requirement_id": "mechanism",
+                "components": ["y"],
+                "memory_states": ["z"],
+            }
+        ]
+        return response(edit)
+
+    result = execute(tmp_path, plan, tasks[1], send)
+    assert result["event_count"] == 3
+    assert result["stop_reason"] == "three_repeated_repairs"
+
+
+def test_refreeze_keeps_starts_seeds_and_budget_and_preserves_original_plan(
+    tmp_path, setup, monkeypatch
+):
+    from autoformalism.rebuttal.prefit_replay import sealed_write
+
+    plan, _, _ = setup
+    source, destination = tmp_path / "old", tmp_path / "new"
+    parent = sealed_write(
+        source / "plan.json",
+        {
+            **{k: v for k, v in plan.items() if k != "artifact_sha256"},
+            "protocol": campaign.PROTOCOL,
+            "test_data_opened": False,
+        },
+    )
+    before = (source / "plan.json").read_bytes()
+    monkeypatch.setattr(campaign, "source_identity", lambda: "test-source")
+    frozen = campaign.refreeze(source, destination)
+    assert frozen["starts"] == parent["starts"]
+    assert frozen["settings"] == parent["settings"]
+    assert frozen["tasks"] == [parent["tasks"][1]]
+    assert frozen["historical_repair_plan_sha256"] == parent["artifact_sha256"]
+    assert campaign.verify(destination) == frozen
+    assert (source / "plan.json").read_bytes() == before
+    summary = campaign.report(destination, frozen)
+    assert summary["protocol"] == campaign.PROTOCOL_V2
+    assert list(summary["groups"]) == ["actionable"]
+
+
+def test_v2_memory_handoff_uses_qualified_eligibility():
+    from autoformalism.expressions import ValidationContext
+    from tests import test_required_memory_path_qualification as memory
+
+    problem = object.__new__(campaign.Problem)
+    problem.brief = memory.public()
+    problem.context = ValidationContext(
+        targets=("y", "I"), auxiliaries=("a", "b"), external_inputs=("u",)
+    )
+    problem.targets = {}
+    brief_hash = content_hash(problem.brief.model_dump(mode="json"))
+    problem.graph = PublicGraphContract(
+        source_brief_sha256=brief_hash, deferred_scientific_checks=()
+    )
+    problem.boundary = core.BoundaryContract(source_brief_sha256=brief_hash)
+    draft = core.Draft.model_validate(memory.draft().model_dump(mode="json"))
+    old = problem.assess(draft)
+    new = problem.assess(draft, qualified_memory=True)
+    assert (
+        old["eligible"]
+        and old["mechanism_realization_handoff"]["structurally_eligible"]
+    )
+    assert not new["eligible"]
+    handoff = new["mechanism_realization_handoff"]
+    assert not handoff["structurally_eligible"]
+    assert handoff["required_memory_path_qualification"]["status"] == "failed"
+
+
 def test_report_separates_ended_control_from_scientific_resolution(tmp_path, setup):
     plan, tasks, _ = setup
     task = tasks[0]

@@ -7,6 +7,7 @@ it never declares that a scientific mechanism has been verified.
 
 from __future__ import annotations
 
+from collections import deque
 from copy import deepcopy
 
 from pydantic import Field, create_model, model_validator
@@ -669,6 +670,179 @@ def assess(
     result["eligible"] = result["eligible"] and not result["errors"]
     result["behavior_status"] = "unverified"
     result["scope"] = SCOPE
+    return result
+
+
+def _memory_target_witness(
+    graph: dict[str, set[str]],
+    memory: str,
+    target: str,
+    excluded_intermediate: frozenset[str] = frozenset(),
+) -> list[str] | None:
+    """Find a deterministic path without excluding a legitimate final target.
+
+    Exclusions apply only to intermediate nodes. In particular, a requirement
+    for delayed self-feedback y -> memory -> y may end at its own public driver.
+    """
+    queue = deque([(memory, [memory])])
+    visited = {memory}
+    while queue:
+        node, path = queue.popleft()
+        for destination in sorted(graph.get(node, ())):
+            if destination == target:
+                return [*path, destination]
+            if destination not in visited and destination not in excluded_intermediate:
+                visited.add(destination)
+                queue.append((destination, [*path, destination]))
+    return None
+
+
+def qualify_required_memory_paths(
+    brief: PublicScientificBrief, draft: Draft, assessment: dict
+) -> dict:
+    """Opt in to history-to-effect qualification beyond current public drivers.
+
+    Historical assessment is unchanged unless a caller explicitly invokes this
+    helper. A required history mechanism must have, for each target, a route from
+    at least one selected memory that does not merely return through a current
+    driver before reaching that target. This is a qualified structural reading of
+    an explicit memory requirement, not a universal restriction on feedback or a
+    proof of function-level delayed behavior. Existing driver-to-memory checks and
+    the collective selected-memory quantifier remain unchanged.
+    """
+    result = deepcopy(assessment)
+    outgoing: dict[str, set[str]] = {}
+    for equation in assessment["equations"]:
+        for term in equation["terms"]:
+            for source in term["sources"]:
+                outgoing.setdefault(source, set()).add(equation["name"])
+    records = {r.requirement_id: r for r in draft.mechanism_realizations}
+    definitions = {v.name: v.definition for v in draft.variables}
+    rows = []
+    scope = (
+        "Explicit required-memory realization only. The assigned history must "
+        "reach the required effect beyond merely regenerating its current public "
+        "drivers. Driver nodes are excluded only as intermediate nodes after "
+        "memory; target endpoints, other feedback cycles and parallel direct "
+        "effects remain allowed. Function-level delay and scientific correctness "
+        "remain unverified."
+    )
+    for requirement in brief.requirements:
+        if not requirement.requires_dynamic_memory:
+            continue
+        record = records.get(requirement.id)
+        states = record.memory_states if record is not None else ()
+        drivers = frozenset(requirement.drivers)
+        row = {
+            "requirement": requirement.id,
+            "public_requirement": requirement.public_requirement,
+            "drivers": list(requirement.drivers),
+            "targets": list(requirement.targets),
+            "selected_memory_states": list(states),
+            "target_checks": [],
+            "scope": scope,
+        }
+        if assessment["graph_check_status"] != "assessed":
+            row["status"] = "unavailable_graph"
+        elif not requirement.drivers or not requirement.targets:
+            row["status"] = "unresolved_public_endpoints"
+        elif not states or any(
+            definitions.get(state) != "differential"
+            or state in drivers
+            or state in requirement.targets
+            for state in states
+        ):
+            row["status"] = "unavailable_memory_declaration"
+        else:
+            for target in requirement.targets:
+                witnesses = []
+                for state in states:
+                    ordinary = _memory_target_witness(outgoing, state, target)
+                    qualified = _memory_target_witness(outgoing, state, target, drivers)
+                    witnesses.append(
+                        {
+                            "memory": state,
+                            "ordinary_path": ordinary,
+                            "qualified_path": qualified,
+                            "intermediate_current_drivers": [
+                                node
+                                for node in (ordinary or [])[1:-1]
+                                if node in drivers
+                            ],
+                        }
+                    )
+                target_row = {
+                    "target": target,
+                    "passed": any(w["qualified_path"] for w in witnesses),
+                    "memory_witnesses": witnesses,
+                    "quantifier": "at least one selected memory per target",
+                }
+                row["target_checks"].append(target_row)
+                if target_row["passed"] or not any(
+                    witness["ordinary_path"] for witness in witnesses
+                ):
+                    continue  # Ordinary missing paths already have exact feedback.
+                result["errors"].append(
+                    {
+                        "code": "required_memory_path_revisits_driver",
+                        "requirement": requirement.id,
+                        "public_requirement": requirement.public_requirement,
+                        "target": target,
+                        "drivers": list(requirement.drivers),
+                        "memories": list(states),
+                        "memory_witnesses": witnesses,
+                        "excluded_intermediate_current_drivers": sorted(drivers),
+                        "field_to_edit": "equations/processes/mechanism_realizations",
+                        "action": (
+                            "The displayed memory-to-target routes return through "
+                            "current public driver quantities. Such feedback may "
+                            "change those drivers, but does not identify a separate "
+                            "history effect beyond their current values. For this "
+                            "explicit required-memory mechanism, choose an intended "
+                            "route from a selected memory to the target that does "
+                            "not revisit a current driver before the target."
+                        ),
+                        "repair_options": [
+                            "If the selected memory is intended, revise the "
+                            "appropriate local/shared process dependencies so its "
+                            "history affects the required target through the "
+                            "scientifically intended mechanism. No particular "
+                            "direct edge, sign or textbook equation is prescribed.",
+                            "If another generated differential component carries "
+                            "the required history, replace the complete realization "
+                            "record with that intended assignment and coordinate "
+                            "its actual topology. Keep other intended components.",
+                            "Preserve valid driver generation and feedback. Do not "
+                            "delete the driver, withdraw mandatory memory, or merely "
+                            "rename a process to make the path appear different.",
+                        ],
+                        "scope": scope,
+                    }
+                )
+            row["status"] = (
+                "passed" if all(t["passed"] for t in row["target_checks"]) else "failed"
+            )
+        rows.append(row)
+    failed = any(row["status"] == "failed" for row in rows)
+    result["required_memory_path_qualification"] = {
+        "policy": "current-driver-conditioned-memory-path-1",
+        "status": "failed"
+        if failed
+        else "passed"
+        if rows and all(row["status"] == "passed" for row in rows)
+        else "unavailable"
+        if rows
+        else "not_applicable",
+        "checks": rows,
+        "scope": scope,
+    }
+    by_requirement = {row["requirement"]: row["status"] for row in rows}
+    for row in result["mechanism_realization_checks"]:
+        if row["requirement"] in by_requirement:
+            row["required_memory_path_qualification_status"] = by_requirement[
+                row["requirement"]
+            ]
+    result["eligible"] = result["eligible"] and not failed
     return result
 
 

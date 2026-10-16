@@ -27,15 +27,20 @@ def preview(root: Path, output: Path) -> dict:
     plan = campaign.verify(root)
     output.mkdir(parents=True, exist_ok=True)
     rows, requests_by_source = [], {}
+    v2 = plan.get("actionable_policy") == actionable.POLICY_V2
     for task in plan["tasks"]:
         start = plan["starts"][task["source_task"]]
         problem = campaign.Problem(plan["cells"][task["benchmark_id"]], start["task"])
         api = actionable if task["arm"] == "actionable" else control
+        draft = control.Draft.model_validate(start["draft"])
+        check = (
+            problem.assess(draft, qualified_memory=True) if v2 else start["assessment"]
+        )
         state = (
             build_state(
                 start["diagnostics"],
                 start["diagnostics"],
-                start["assessment"]["eligible"],
+                check["eligible"],
             )
             if api is actionable
             else campaign.control_state(start["diagnostics"], {})
@@ -43,12 +48,13 @@ def preview(root: Path, output: Path) -> dict:
         packet = campaign.make_packet(
             api,
             problem,
-            control.Draft.model_validate(start["draft"]),
+            draft,
             None,
             state,
             None,
             0,
             0,
+            policy=plan.get("actionable_policy") if v2 else None,
         )
         request = {
             "system": api.SYSTEM,
@@ -57,6 +63,18 @@ def preview(root: Path, output: Path) -> dict:
         }
         name = task["task_id"]
         requests_by_source.setdefault(task["source_task"], {})[task["arm"]] = request
+        if v2:
+            old_state = build_state(
+                start["diagnostics"],
+                start["diagnostics"],
+                start["assessment"]["eligible"],
+            )
+            requests_by_source[task["source_task"]]["control"] = {
+                **request,
+                "user": campaign.make_packet(
+                    actionable, problem, draft, None, old_state, None, 0, 0
+                ),
+            }
         (output / f"{name}.json").write_text(json.dumps(request, indent=2) + "\n")
         parts = [
             f"<h1>{html.escape(name)}</h1>",
@@ -79,25 +97,37 @@ def preview(root: Path, output: Path) -> dict:
         marked = difflib.HtmlDiff(wrapcolumn=100).make_file(
             json.dumps(arms["control"], indent=2).splitlines(),
             json.dumps(arms["actionable"], indent=2).splitlines(),
-            fromdesc="Existing feedback",
-            todesc="Actionable repair",
+            fromdesc="Actionable v1" if v2 else "Existing feedback",
+            todesc="Actionable v2" if v2 else "Actionable repair",
             context=True,
             numlines=3,
         )
         (output / filename).write_text(marked)
         comparisons.append(f'<li><a href="{filename}">{html.escape(source)}</a></li>')
+    introduction = (
+        "V2 uses the same frozen starting drafts, public evidence, seeds and maximum "
+        "budgets. Only the revised actionable arm runs; historical arms are retained "
+        "separately. Marked comparisons show v1 versus v2 first requests. New feedback "
+        "locates inconsistent mechanism records, explains unchanged closed-subsystem "
+        "restrictions, and forbids completion as a substitute for unresolved repair. "
+        "Required-memory paths are qualified against returning through their driver. "
+        "Initial construction prompts are unchanged."
+        if v2
+        else "The control retains the old advisory completion rule. The actionable "
+        "arm requests concrete corrections and treats unsupported assumption "
+        "challenges as unresolved. Both begin with identical saved equations "
+        "and evidence. Changed: clear conditional conflicts require edits; unsupported "
+        "challenges remain unresolved; boundary references use exact handles. Initial "
+        "construction prompts are unchanged."
+    )
     (output / "PROMPTS.html").write_text(
         '<!doctype html><meta charset="utf-8"><title>Saved repair prompts</title>'
         "<style>body{font:16px/1.6 system-ui;max-width:1000px;"
-        "margin:40px auto}</style><h1>Saved topology repair: paired prompts</h1>"
-        "<p>The control retains the old advisory completion rule. The actionable "
-        "arm requests concrete corrections and treats unsupported assumption "
-        "challenges as unresolved. Both begin with identical saved equations "
-        "and evidence.</p><p><strong>Changed:</strong> clear conditional conflicts "
-        "require edits; unsupported challenges remain unresolved; boundary "
-        "references use exact handles. Subsequent repeated replies receive an "
-        "explicit reminder about the unchanged condition. Initial construction "
-        "prompts are unchanged.</p><h2>Marked changes</h2><ul>"
+        "margin:40px auto}</style><h1>Saved topology repair: "
+        + ("v2 feedback" if v2 else "paired prompts")
+        + "</h1><p>"
+        + html.escape(introduction)
+        + "</p><h2>Marked changes</h2><ul>"
         + "\n".join(comparisons)
         + "</ul><h2>Complete first requests</h2><ul>"
         + "\n".join(rows)
@@ -121,7 +151,7 @@ def run(inputs: Path, root: Path, work: Path, requests: Path) -> dict:
     sealed_write(
         root / "execution.json",
         {
-            "protocol": campaign.PROTOCOL,
+            "protocol": plan["protocol"],
             "plan_sha256": plan["artifact_sha256"],
             "source_identity": plan["source_identity"],
             "compatibility": provenance,
@@ -163,7 +193,9 @@ def run(inputs: Path, root: Path, work: Path, requests: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("freeze", "preview", "run", "report"))
+    parser.add_argument(
+        "command", choices=("freeze", "refreeze", "preview", "run", "report")
+    )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--inputs", type=Path)
@@ -172,10 +204,13 @@ def main() -> None:
     parser.add_argument("--requests", type=Path)
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
-        if args.command == "freeze":
+        if args.command in {"freeze", "refreeze"}:
             if args.source is None:
-                parser.error("freeze requires --source")
-            plan = campaign.freeze(args.source, args.root)
+                parser.error("freeze/refreeze requires --source")
+            freezer = (
+                campaign.refreeze if args.command == "refreeze" else campaign.freeze
+            )
+            plan = freezer(args.source, args.root)
             value = {
                 "identity": plan["artifact_sha256"],
                 "saved_drafts": len(plan["starts"]),

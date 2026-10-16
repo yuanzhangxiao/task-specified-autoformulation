@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in saved-repair v2 milestone improves mechanism-record feedback, removes
+contradictory completion advice, and counts scientific repetition independently
+of reply-control toggles. It qualifies explicitly required memory paths against
+returning through the current driver while preserving legitimate feedback loops.
+The separate 15-start confirmation preserves prior drafts, evidence and budgets;
+historical policies remain unchanged. See `PHASE_C_REPAIR_BOOKKEEPING_V2.md` for
+the arity/coupling audit, scope and launch commands.
+
 M39 returned an isolated 150-task Delta CPU practical-uncertainty qualification:
 five input separations, three known noise levels and five paired seeds, each
 fitted by direct and affine-profiled rollout. Bounded Gaussian gain profiles

@@ -6,9 +6,12 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
+from autoformalism.expressions import ValidationContext
 from autoformalism.search import construction_actionable_repair as prompts
 from autoformalism.search import construction_evidence as core
 from autoformalism.search import construction_evidence_repair as previous
+from autoformalism.search import mechanism_realizations
+from autoformalism.staged_topology import content_hash
 from tests.test_construction_evidence import apply, assess, boundary, choice, draft
 from tests.test_construction_ledger import context, equation, process, variable
 from tests.test_construction_realizations import public
@@ -357,3 +360,315 @@ def test_repetition_receipt_does_not_reintroduce_historical_completion_advice():
     assert "completion_example" not in p["feedback"]
     assert p["feedback"]["continuation"]["repeated_semantic_attempts"] == 2
     assert repetition == saved
+
+
+@pytest.mark.parametrize(
+    ("stage", "historical_hash"),
+    [
+        (
+            "variables",
+            "911dbb44b9f8ad7cf20f04e6e34d3bf088861a11fe5ded2ca3c5cbd07f88eb12",
+        ),
+        (
+            "shared_laws",
+            "582b63c071ba4778a595edea231c45541a7a42a94bcc2be58a367f313e934420",
+        ),
+        (
+            "equations",
+            "2005f9c388ca6219a3b436947a04da3a656a402327e701e371905289a20ddba7",
+        ),
+        ("repair", "9cf5e4f0c99c4ba79cba0edde59d713ea05c3aed4447f81c924b04f91da4b108"),
+    ],
+)
+def test_v2_is_opt_in_and_historical_payloads_are_unchanged(stage, historical_hash):
+    value = packet(draft(), stage=stage)
+    assert content_hash(value) == historical_hash
+    assert packet(draft(), stage=stage, policy=prompts.POLICY) == value
+    # No v2 repair-specific condition occurs in this complete fixture.
+    assert packet(draft(), stage=stage, policy=prompts.POLICY_V2) == value
+    with pytest.raises(ValueError, match="unknown saved actionable repair policy"):
+        packet(draft(), stage=stage, policy="unregistered")
+
+
+def rejected_memory_record():
+    """An intended memory variable is omitted from its own realization record."""
+    return {
+        "status": "rejected",
+        "transaction_applied": False,
+        "error": "memory_states must be a subset of components",
+        "rejected_reply": raw_reply(
+            mechanism_realizations=[
+                {
+                    "requirement_id": "effect",
+                    "components": ["u"],
+                    "memory_states": ["y"],
+                }
+            ]
+        ),
+    }
+
+
+def test_v2_subset_feedback_identifies_exact_conditional_record_without_edit():
+    d, last = draft(), rejected_memory_record()
+    saved_last, saved_draft = deepcopy(last), d.model_dump(mode="json")
+    old = packet(d, last=last)
+    new = packet(d, last=last, policy=prompts.POLICY_V2)
+    matches = [
+        row
+        for row in new["feedback"]["issues"]
+        if row["code"] == "memory_state_not_in_components"
+    ]
+    assert len(matches) == 1
+    issue = matches[0]
+    assert issue["requirement_id"] == "effect"
+    assert issue["rejected_record_index"] == 0
+    assert issue["missing_from_components"] == ["y"]
+    assert issue["record_if_assignment_is_intended"] == {
+        "requirement_id": "effect",
+        "components": ["u", "y"],
+        "memory_states": ["y"],
+    }
+    assert "Otherwise explicitly correct the memory assignment" in issue["action"]
+    assert "no edit has been applied" in issue["scope"]
+    assert "Omitted realization records stay unchanged" in issue["scope"]
+    assert new["model_view"] == old["model_view"]
+    assert new["requirements_checklist"] == old["requirements_checklist"]
+    assert new["public_brief"] == old["public_brief"]
+    assert not any(
+        row["code"] == "memory_state_not_in_components"
+        for row in old["feedback"]["issues"]
+    )
+    assert d.model_dump(mode="json") == saved_draft and last == saved_last
+    # The schema continues rejecting the original; feedback does not normalize it.
+    with pytest.raises(ValidationError, match="must be a subset"):
+        prompts.response_model("repair").model_validate(last["rejected_reply"])
+
+
+@pytest.mark.parametrize("raw", [None, [], {"mechanism_realizations": "invalid"}])
+def test_v2_subset_feedback_handles_missing_or_wrong_shape_rejected_text(raw):
+    last = rejected_memory_record()
+    last["rejected_reply"] = raw
+    p = packet(draft(), last=last, policy=prompts.POLICY_V2)
+    assert not any(
+        row["code"] == "memory_state_not_in_components"
+        for row in p["feedback"]["issues"]
+    )
+
+
+def test_v2_does_not_suggest_record_repair_for_an_accepted_transaction():
+    last = {
+        **rejected_memory_record(),
+        "transaction_applied": True,
+        "status": "accepted",
+    }
+    assert prompts._memory_record_issues(last) == []
+
+
+@pytest.mark.parametrize("status", ["repair_required", "review_deferred"])
+def test_v2_noop_error_cannot_suggest_finishing_unresolved_work(status):
+    error = "no draft change; make an explicit edit or finish this stage"
+    last = {
+        "status": "rejected",
+        "transaction_applied": False,
+        "error": error,
+        "rejected_reply": raw_reply(stage_complete=False),
+    }
+    repetitions = {"previous_error": error, "previous_reply": last["rejected_reply"]}
+    state = {"completion_allowed": False, "repair_status": status}
+    kwargs = {
+        "last": last,
+        "repetition_feedback": repetitions,
+        "compatibility_state": state,
+    }
+    old = packet(draft(), **kwargs)
+    new = packet(draft(), policy=prompts.POLICY_V2, **kwargs)
+    assert "or finish this stage" in json.dumps(old)
+    assert "or finish this stage" not in json.dumps(new)
+    assert "Finishing does not resolve" in new["previous_edit"]["error"]
+    assert (
+        "Uncertain evidence alone does not require a model edit"
+        in (
+            new["feedback"]["repeated_repair_feedback"]["observations"][
+                "previous_error"
+            ]
+        )
+    )
+    assert last["error"] == repetitions["previous_error"] == error
+
+
+def test_v2_noop_keeps_completion_available_when_checks_are_clear():
+    error = "no draft change; make an explicit edit or finish this stage"
+    last = {"status": "rejected", "transaction_applied": False, "error": error}
+    p = packet(
+        draft(),
+        last=last,
+        policy=prompts.POLICY_V2,
+        compatibility_state={
+            "completion_allowed": True,
+            "repair_status": "checks_clear",
+        },
+    )
+    assert p["previous_edit"]["error"] == error
+
+
+def closed_question():
+    """A generic matched-conditioning witness, without benchmark-specific names."""
+    return {
+        "question_id": "closed",
+        "target": "y",
+        "property": "closed_subsystem",
+        "repair_status": "repair_required",
+        "assumptions": ["Shared deterministic laws have unique solutions."],
+        "conditioning": {
+            "matched_initial_information": {"a": {"y": 0}, "b": {"y": 0}},
+            "matched_complete_forcing_channels": ["u"],
+        },
+        "witnesses": [
+            {
+                "trajectories": ["a", "b"],
+                "times": [3.0, 3.0],
+                "observations": [10.0, 20.0],
+                "error_intervals_disjoint": True,
+            }
+        ],
+    }
+
+
+def test_v2_closed_subsystem_feedback_preserves_witness_and_scientific_ownership():
+    question = closed_question()
+    saved = deepcopy(question)
+    old = packet(draft(), compatibility_questions=[question])
+    new = packet(draft(), compatibility_questions=[question], policy=prompts.POLICY_V2)
+    displayed = new["compatibility_questions"][0]
+    reason = displayed.pop("why_this_still_conflicts")
+    assert displayed == old["compatibility_questions"][0]
+    assert reason["witness_reference"] == "witnesses[0]"
+    assert "a: y(3.0)=10.0; b: y(3.0)=20.0" in reason["observed_difference"]
+    assert "self-only decay" in reason["invariant"]
+    assert "shared constant production term" in reason["invariant"]
+    assert "matched permitted initial information" in reason["invariant"]
+    assert "does not select a new dependence" in reason["repair_choice"]
+    assert "fit quality remain unverified" in reason["repair_choice"]
+    assert question == saved
+
+
+@pytest.mark.parametrize(
+    "variation", ["uncertain", "challenged", "no_bounds", "no_initials"]
+)
+def test_v2_does_not_promote_unqualified_closed_comparisons(variation):
+    question = closed_question()
+    if variation == "uncertain":
+        question["repair_status"] = "uncertainty_limited"
+    elif variation == "challenged":
+        question["repair_status"] = "assumption_challenged"
+    elif variation == "no_bounds":
+        question["witnesses"][0]["error_intervals_disjoint"] = None
+    else:
+        del question["conditioning"]["matched_initial_information"]
+    p = packet(draft(), compatibility_questions=[question], policy=prompts.POLICY_V2)
+    assert "why_this_still_conflicts" not in p["compatibility_questions"][0]
+
+
+def qualified_packet(*, corrected=False, policy=prompts.POLICY_V2, stage="repair"):
+    """Exercise an actual qualified assessment, not a fabricated eligibility flag."""
+    from tests.test_required_memory_path_qualification import draft as memory_draft
+    from tests.test_required_memory_path_qualification import public as memory_public
+
+    b = memory_public()
+    d = core.Draft.model_validate(memory_draft().model_dump(mode="json"))
+    if corrected:
+        d = core.apply_patch(
+            b,
+            d,
+            core.DraftPatch(equations=[equation("y", "I", "X")], stage_complete=True),
+        )
+    c = ValidationContext(
+        targets=("y", "I"), auxiliaries=("a", "b"), external_inputs=("u",)
+    )
+    original = core.assess(b, c, {}, d)
+    assert original["eligible"]
+    assessment = mechanism_realizations.qualify_required_memory_paths(b, d, original)
+    saved = deepcopy(assessment)
+    args = (stage, b, c, {}, b.model_dump(mode="json"), d, None)
+    packet = prompts.payload(*args, policy=policy, qualified_assessment=assessment)
+    assert assessment == saved
+    return packet, assessment, prompts.payload(*args, policy=policy)
+
+
+def test_v2_qualified_cycle_failure_has_exact_witness_and_consistent_work_status():
+    p, assessment, unqualified = qualified_packet()
+    feedback = p["feedback"]
+    assert (
+        feedback["required_memory_path_qualification"]
+        == (assessment["required_memory_path_qualification"])
+    )
+    work = feedback["repair_work"]
+    assert work["structural_eligibility"] is False
+    assert work["mode"] == "repair_required"
+    issue = next(
+        row
+        for row in feedback["issues"]
+        if row["code"] == "required_memory_path_revisits_driver"
+    )
+    assert issue["memory_witnesses"][0]["ordinary_path"] == ["X", "I", "y"]
+    assert issue["memory_witnesses"][0]["qualified_path"] is None
+    correction = next(
+        row
+        for row in work["model_or_structural_corrections"]
+        if row["code"] == issue["code"]
+    )
+    assert correction["memories"] == ["X"]
+    assert feedback["issues"][correction["feedback_issue_indices"][0]] == issue
+    checklist = {row["id"]: row for row in p["requirements_checklist"]}
+    assert checklist["structural_validity"]["status"] == "failed"
+    mechanism = checklist["mechanism_realization:history_effect"]
+    assert mechanism["status"] == mechanism["structural_status"] == "failed"
+    assert mechanism["required_memory_path_qualification_status"] == "failed"
+    assert p["model_view"] == unqualified["model_view"]
+    assert p["public_brief"] == unqualified["public_brief"]
+
+
+def test_v2_qualified_history_path_can_pass_without_extra_repair():
+    p, assessment, _ = qualified_packet(corrected=True)
+    assert assessment["eligible"]
+    work = p["feedback"]["repair_work"]
+    assert work["structural_eligibility"] is True
+    assert work["mode"] == "recheck_completion"
+    assert not any(
+        row["code"] == "required_memory_path_revisits_driver"
+        for row in p["feedback"]["issues"]
+    )
+    record = next(
+        row
+        for row in p["requirements_checklist"]
+        if row["id"] == "mechanism_realization:history_effect"
+    )
+    assert record["status"] == "passed"
+    assert record["required_memory_path_qualification_status"] == "passed"
+
+
+@pytest.mark.parametrize("stage", ["variables", "shared_laws", "equations", "repair"])
+def test_qualified_assessment_cannot_change_historical_requests(stage):
+    p, _, unchanged = qualified_packet(policy=prompts.POLICY, stage=stage)
+    assert p == unchanged
+
+
+def test_v2_runtime_structural_failure_cannot_appear_as_completion_only():
+    p = packet(
+        draft(),
+        policy=prompts.POLICY_V2,
+        compatibility_state={
+            "repair_status": "structurally_blocked",
+            "completion_allowed": False,
+        },
+    )
+    assert p["feedback"]["repair_work"]["mode"] == "repair_required"
+    assert p["feedback"]["repair_work"]["structural_eligibility"] is False
+    assert (
+        next(
+            row
+            for row in p["requirements_checklist"]
+            if row["id"] == "structural_validity"
+        )["status"]
+        == "failed"
+    )

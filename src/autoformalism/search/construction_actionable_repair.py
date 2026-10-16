@@ -19,6 +19,8 @@ from autoformalism.search import construction_realizations as declarations
 from autoformalism.staged_topology import content_hash
 
 POLICY = "saved-actionable-topology-repair-1"
+POLICY_V2 = "saved-actionable-topology-repair-2"
+POLICIES = (POLICY, POLICY_V2)
 SYSTEM = previous.SYSTEM
 Draft = core.Draft
 BoundaryContract = core.BoundaryContract
@@ -256,6 +258,183 @@ def _question_view(question: dict) -> dict:
     return row
 
 
+def _memory_record_issues(last: dict | None) -> list[dict]:
+    """Locate rejected subset mistakes without choosing a scientific assignment."""
+    if (
+        not last
+        or last.get("transaction_applied")
+        or not isinstance(last.get("rejected_reply"), dict)
+    ):
+        return []
+    if "memory_states must be a subset of components" not in str(last.get("error")):
+        return []
+    records = last["rejected_reply"].get("mechanism_realizations", [])
+    if not isinstance(records, list):
+        return []
+    issues = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        components, memory = record.get("components"), record.get("memory_states")
+        if not isinstance(components, list) or not isinstance(memory, list):
+            continue
+        if not all(isinstance(name, str) for name in [*components, *memory]):
+            continue
+        missing = list(dict.fromkeys(name for name in memory if name not in components))
+        if not missing:
+            continue
+        issues.append(
+            {
+                "code": "memory_state_not_in_components",
+                "requirement_id": record.get("requirement_id"),
+                "rejected_record_index": index,
+                "components": deepcopy(components),
+                "memory_states": deepcopy(memory),
+                "missing_from_components": missing,
+                "action": "This record selects memory states absent from its own "
+                "components list. If that assignment is intended, include those "
+                "same states in components, preserving the other intended "
+                "components. Otherwise explicitly correct the memory assignment. "
+                "Do not delete model states or processes to fix this record.",
+                "record_if_assignment_is_intended": {
+                    "requirement_id": record.get("requirement_id"),
+                    "components": [*components, *missing],
+                    "memory_states": deepcopy(memory),
+                },
+                "scope": "Conditional record example only; no edit has been "
+                "applied. Omitted realization records stay unchanged. Correcting "
+                "this record does not resolve separate topology/data conflicts.",
+            }
+        )
+    return issues
+
+
+def _closed_subsystem_reason(question: dict) -> dict | None:
+    """Explain a qualified equality witness without inventing a missing edge."""
+    conditioning = question.get("conditioning") or {}
+    if (
+        question.get("property") != "closed_subsystem"
+        or question.get("repair_status") != "actionable_conflict"
+        or not conditioning.get("matched_initial_information")
+        or "matched_complete_forcing_channels" not in conditioning
+    ):
+        return None
+    for index, witness in enumerate(question.get("witnesses", [])):
+        if witness.get("error_intervals_disjoint") is not True:
+            continue
+        values = [witness.get(key) for key in ("trajectories", "times", "observations")]
+        if not all(isinstance(value, list) and len(value) == 2 for value in values):
+            continue
+        trajectories, times, observations = values
+        target = question.get("target")
+        return {
+            "witness_reference": f"witnesses[{index}]",
+            "observed_difference": (
+                f"{trajectories[0]}: {target}({times[0]})={observations[0]}; "
+                f"{trajectories[1]}: {target}({times[1]})={observations[1]}. "
+                "The displayed observation-error intervals are disjoint."
+            ),
+            "invariant": "Under the displayed unique-solution and shared-law "
+            "assumptions, matched permitted initial information and complete "
+            "forcing require the same subsystem trajectory. Adding self-only "
+            "decay, a shared constant production term, or other terms depending "
+            "only on these same subsystem states and matched forcing cannot "
+            "create a distinction between these trajectories.",
+            "repair_choice": "Identify a scientifically justified distinction "
+            "missing from this subsystem, or support a specific assumption "
+            "challenge with evidence. The runtime does not select a new "
+            "dependence or initialization rule; revised functions and fit "
+            "quality remain unverified.",
+        }
+    return None
+
+
+def _qualified_memory_feedback(packet: dict, assessment: dict | None) -> None:
+    """Display the caller's qualified checks without recomputing scientific edits."""
+    if assessment is None:
+        return
+    qualification = assessment["required_memory_path_qualification"]
+    feedback = packet["feedback"]
+    feedback["required_memory_path_qualification"] = deepcopy(qualification)
+    work = feedback["repair_work"]
+    work["structural_eligibility"] = bool(assessment["eligible"])
+    for issue in assessment["errors"]:
+        if issue["code"] != "required_memory_path_revisits_driver":
+            continue
+        if issue not in feedback["issues"]:
+            feedback["issues"].append(deepcopy(issue))
+        summary = previous._issue_summary(issue, feedback)
+        if summary not in work["model_or_structural_corrections"]:
+            work["model_or_structural_corrections"].append(summary)
+    statuses = {row["requirement"]: row["status"] for row in qualification["checks"]}
+    for row in packet["requirements_checklist"]:
+        if row["id"] == "structural_validity":
+            row["status"] = "passed" if assessment["eligible"] else "failed"
+        status = statuses.get(row.get("requirement"))
+        if status is not None and row["id"].startswith("mechanism_realization:"):
+            row["required_memory_path_qualification_status"] = status
+            if status == "failed":
+                row["status"] = row["structural_status"] = "failed"
+
+
+def _v2_feedback(
+    packet: dict,
+    last: dict | None,
+    qualified_assessment: dict | None,
+    compatibility_state: dict | None,
+) -> None:
+    """Refine only the opt-in repair view; never modify a draft or raw receipt."""
+    _qualified_memory_feedback(packet, qualified_assessment)
+    feedback = packet["feedback"]
+    issues = _memory_record_issues(last)
+    if issues:
+        feedback["issues"].extend(issues)
+        feedback["repair_work"]["record_corrections"].extend(
+            {
+                "code": row["code"],
+                "id": row["requirement_id"],
+                "missing_from_components": row["missing_from_components"],
+            }
+            for row in issues
+        )
+    work = feedback["repair_work"]
+    if (compatibility_state or {}).get("repair_status") == "structurally_blocked":
+        work["structural_eligibility"] = False
+        for row in packet["requirements_checklist"]:
+            if row["id"] == "structural_validity":
+                row["status"] = "failed"
+    if not work["structural_eligibility"]:
+        work["mode"] = "repair_required"
+    unresolved = (
+        work.get("runtime_revalidation", {}).get("completion_allowed") is False
+        or work["mode"] != "recheck_completion"
+    )
+    if unresolved:
+        old = "no draft change; make an explicit edit or finish this stage"
+        new = (
+            "No model change was applied. Finishing does not resolve the "
+            "displayed errors or unresolved assessments. Follow repair_work: "
+            "provide a different justified edit for a concrete error, or "
+            "support an assumption challenge with evidence. Uncertain evidence "
+            "alone does not require a model edit."
+        )
+        locations = [
+            (packet.get("previous_edit") or {}, "error"),
+            (
+                feedback.get("repeated_repair_feedback", {}).get("observations", {}),
+                "previous_error",
+            ),
+            *((row, "message") for row in feedback["issues"]),
+        ]
+        for container, key in locations:
+            if isinstance(container.get(key), str):
+                container[key] = container[key].replace(old, new)
+    for question in packet.get("compatibility_questions", []):
+        reason = _closed_subsystem_reason(question)
+        if reason is not None:
+            question["why_this_still_conflicts"] = reason
+
+
 def payload(
     stage,
     brief,
@@ -272,8 +451,12 @@ def payload(
     compatibility_questions=(),
     compatibility_state=None,
     repetition_feedback=None,
+    policy=POLICY,
+    qualified_assessment=None,
 ):
     """Render concrete repair work with qualified evidence and exact edit handles."""
+    if policy not in POLICIES:
+        raise ValueError(f"unknown saved actionable repair policy: {policy}")
     packet = previous.payload(
         stage,
         brief,
@@ -427,4 +610,6 @@ def payload(
                     "displayed equation's term positions. Select a current "
                     "contribution_handle; the runtime performs the exact mapping.",
                 }
+    if policy == POLICY_V2:
+        _v2_feedback(packet, last, qualified_assessment, compatibility_state)
     return packet

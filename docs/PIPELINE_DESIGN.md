@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+Saved actionable repair v2 retains scientific assignments in proposer edits.
+Feedback locates inconsistent memory/component records and explains qualified
+same-initial/same-forcing conflicts. Scientific repetition ignores completion
+flags and prose, but retains distinct rejected alternatives. A separately gated
+required-memory qualification checks memory-to-target paths without revisiting
+current drivers as intermediate nodes; delayed self-feedback endpoints and
+other cycles remain legal. Historical checks and initial construction prompts
+are unchanged. See `PHASE_C_REPAIR_BOOKKEEPING_V2.md`.
+
 M39 adds an opt-in practical-profile diagnostic for certified globally affine
 Gaussian observation problems. It verifies a retained endpoint against the
 bounded own-loss optimum, reoptimizes all other coordinates along a target
