@@ -250,6 +250,7 @@ def test_launcher_checks_real_imports_and_stops_if_module_cannot_repair(
         "AF_TEST_HEALTH": health,
         "AF_TEST_READY": "1" if health == "healthy" else "0",
         "AF_PYTHON": str(python),
+        "AF_GCCCORE_MODULE": "GCCcore/test-version",
         "AF_PYTHON_MODULE": "Python/test-version",
         "AF_REPO_ROOT": str(adapter.REPO),
         "AF_GROUP": str(tmp_path),
@@ -274,7 +275,7 @@ def test_launcher_checks_real_imports_and_stops_if_module_cannot_repair(
     if health == "healthy":
         assert not any(c.startswith("module ") for c in calls)
     else:
-        assert calls[1] == "module load Python/test-version"
+        assert calls[1] == "module load GCCcore/test-version Python/test-version"
     if health in {"healthy", "repairable"}:
         assert result.returncode == (73 if worker else 0), result.stderr
         if worker:

@@ -98,10 +98,13 @@ request another allocation against the same checkpoint and remaining budgets.
 
 The login and batch launchers test the worker's complete import chain with
 `--help` before accessing campaign files or starting a server. On failure they
-load `AF_PYTHON_MODULE` (default `Python/3.11.5`) and repeat the check with errors
-visible. A small `ssl,pydantic,numpy` probe is insufficient: on ACES it passed
+load `AF_GCCCORE_MODULE` (default `GCCcore/13.2.0`) followed by
+`AF_PYTHON_MODULE` (default `Python/3.11.5`) and repeat the check with errors
+visible. Lmod requires the GCCcore prerequisite before exposing this Python
+module. A small `ssl,pydantic,numpy` probe is insufficient: on ACES it passed
 while pandas/ctypes could not load the Python module's `libffi.so.8` dependency.
-For the already uploaded `d84a35d` bundle, load `Python/3.11.5` in the login shell,
+For the already uploaded `d84a35d` bundle, run
+`module load GCCcore/13.2.0 Python/3.11.5` in the login shell,
 check `import ctypes, pandas`, and rerun its original launcher. The existing
 submission exports that module environment into the batch job. This workaround
 does not edit the frozen source or any saved scientific artifact.

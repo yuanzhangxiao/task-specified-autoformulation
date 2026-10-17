@@ -8,7 +8,7 @@ AF_CLI="$AF_REPO_ROOT/scripts/saved_initialization_aces.py"
 # Check the complete import chain before starting a server or reading artifacts.
 if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
   echo 'Python worker imports failed; loading the Python module and its library dependencies.' >&2
-  module load "${AF_PYTHON_MODULE:-Python/3.11.5}"
+  module load "${AF_GCCCORE_MODULE:-GCCcore/13.2.0}" "${AF_PYTHON_MODULE:-Python/3.11.5}"
   "$AF_PYTHON" "$AF_CLI" --help >/dev/null
 fi
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 OMP_NUM_THREADS=8
