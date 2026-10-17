@@ -25,9 +25,10 @@ from autoformalism.rebuttal.llm_ode_driver import build_searcher
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     CACHING_ENDPOINTS,
     OUTAGE_PATIENCE_SECONDS,
-    check_served_model,
+    llm_ode_selection_settings,
     resolve_endpoint,
     served_model_ids,
+    wait_for_served_model,
 )
 from autoformalism.rebuttal.prefit_replay import sealed_read
 
@@ -50,7 +51,11 @@ def _searcher(
 
     `patience_seconds` is how long a search waits out an endpoint that keeps
     failing, and `bypass_cache` whether it asks for fresh answers instead of
-    stored ones; both follow the endpoint kind, not the plan.
+    stored ones; both follow the endpoint kind, not the plan. How long a
+    selection rollout may take and how many processes score the systems
+    follow the plan's declared selection. Every request names the plan's
+    model, so the endpoint must serve it; an endpoint that cannot list its
+    models is asked again for as long as a search would wait for it.
     """
     checkout = os.environ.get("AF_LLM_ODE_ROOT")
     if not checkout:
@@ -70,11 +75,16 @@ def _searcher(
         # Upstream names the first model a server lists; a gateway lists several.
         model=model,
         bypass_cache=bypass_cache,
+        **llm_ode_selection_settings(sealed["plan"]),
     )
 
     def checked(**kwargs) -> dict:
-        # Every request names the plan's model, so the endpoint must serve it.
-        check_served_model(served_model_ids(base_url), model)
+        wait_for_served_model(
+            base_url,
+            model,
+            patience_seconds=patience_seconds,
+            list_models=served_model_ids,
+        )
         return search(**kwargs)
 
     return checked

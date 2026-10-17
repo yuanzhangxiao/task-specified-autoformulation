@@ -20,12 +20,16 @@ Two departures from upstream are deliberate and declared in the campaign plan:
   targets are predicted, so only the targets are searched. The supplied
   channels remain variables every equation may use; searching their own
   equations would spend calls on equations the evaluation never reads.
-* Upstream selects by rolling out its own ``System`` and sorting on
-  ``mse_train_val``. Its ``System`` integrates every variable as a state, which
-  would reinterpret our supplied auxiliaries as free states. Selection here
-  uses the same quantity -- development rollout error -- computed by our
-  evaluator, which holds the auxiliaries to their observed values. Upstream's
-  ``evaluate_system`` also reports test error; it is never called.
+* Upstream selects by rolling out its own ``System`` from the training initial
+  state over the whole training trajectory, the part its equations were
+  fitted on and the validation part after it, and sorting on that error in
+  the data's own units, ``mse_train_val``. Its ``System`` integrates every
+  variable as a state, which would reinterpret our supplied auxiliaries as
+  free states. Selection here ranks the same product of frontiers by the same
+  quantity over every development trajectory, training and validation, rolled
+  out by our evaluator, which holds the supplied channels to their observed
+  values. Upstream's ``evaluate_system`` also reports test error; it is never
+  called.
 
 Each request is upstream's own: the same call, prompt and output limit. Two
 details of how it reaches a shared gateway are not upstream's, and neither
@@ -39,18 +43,25 @@ marks as replayed is logged as a cache hit.
 
 from __future__ import annotations
 
+import functools
 import logging
+import math
+import multiprocessing
 import time
-from collections.abc import Iterator
+from collections import Counter
+from collections.abc import Iterator, Mapping
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
+from dataclasses import dataclass, fields
+from itertools import product
 from pathlib import Path
 from time import monotonic
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import openai
 
-from autoformalism.data import DatasetSplit, SplitName, TrainingScaler
+from autoformalism.data import DatasetSplit, SplitName, TrainingScaler, Trajectory
 from autoformalism.expressions import (
     ModelValidationError,
     ValidationContext,
@@ -58,11 +69,12 @@ from autoformalism.expressions import (
     compile_candidate,
 )
 from autoformalism.fitting import FitConfig, simulate_trajectory
+from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
 from autoformalism.rebuttal.llm_call_log import CallLog
 from autoformalism.rebuttal.llm_ode_campaign import (
+    SELECTION_METRIC,
     CellArrays,
-    select_system,
     specification_block,
 )
 from autoformalism.rebuttal.llm_ode_upstream import (
@@ -131,12 +143,6 @@ def _server_failure(exc: Exception) -> bool:
     return False
 
 
-#: Upstream assembles systems from the full Cartesian product of the
-#: per-variable Pareto frontiers, so the frontiers are used whole. When the
-#: product exceeds the campaign's cap the task records that refusal rather
-#: than ranking a subset and reporting it as a completed search.
-
-
 def development_rollout_error(
     equations: dict[str, str],
     context: ValidationContext,
@@ -202,6 +208,318 @@ def development_rollout_error(
             return None
         squared.append(float(np.mean([np.mean(value) for value in errors])))
     return float(np.mean(squared)) if squared else None
+
+
+@dataclass(frozen=True)
+class SystemScore:
+    """What rolling one assembled system out over the development data found.
+
+    A ``scored`` system carries the error selection ranks by and, for the
+    record, its normalized error on each split, as ``development_rollout_error``
+    computes it. A ``pruned`` one had already exceeded the error of a system
+    that finished, so it could not have been chosen.
+    """
+
+    status: Literal["scored", "pruned", "rollout_failed", "inexpressible"]
+    equations: dict[str, str] | None = None
+    train_val_rollout_mse: float | None = None
+    training_rollout_error: float | None = None
+    validation_rollout_error: float | None = None
+    functions: tuple[str, ...] = ()
+    message: str | None = None
+
+    def record(self, system: tuple[str, ...]) -> dict:
+        """One line of the task's record of every system it scored."""
+        return {
+            "system": list(system),
+            "status": self.status,
+            "equations": self.equations,
+            SELECTION_METRIC: self.train_val_rollout_mse,
+            "training_rollout_error": self.training_rollout_error,
+            "validation_rollout_error": self.validation_rollout_error,
+            "functions": list(self.functions),
+            "message": self.message,
+        }
+
+
+def _target_scales(train: DatasetSplit, targets: tuple[str, ...]) -> dict[str, float]:
+    """Each target's training standard deviation, the evaluator's scale."""
+    scaling = TrainingScaler().fit(train).scales
+    return {
+        target: float(scaling[f"target:{target}"].standard_deviation)
+        for target in targets
+    }
+
+
+def score_system(
+    system: tuple[str, ...],
+    development: tuple[DatasetSplit, DatasetSplit],
+    context: ValidationContext,
+    channels: tuple[str, ...],
+    *,
+    seconds: float,
+    bound: Any = None,
+) -> SystemScore:
+    """Roll one assembled system out over every development trajectory.
+
+    Its ``train_val_rollout_mse`` is what LLM-ODE's released code ranks by:
+    each trajectory, training and validation, is rolled out from its own
+    first values, and the targets' squared errors are averaged over every
+    trajectory and time point in the data's own units. A rollout that fails,
+    or takes longer than ``seconds``, leaves the system unscored. ``bound``,
+    a shared value, holds the lowest error a system has finished with; a
+    system whose squared errors so far already exceed it is stopped, since it
+    could not be chosen. The bound only ever holds a finished system's error,
+    so stopping early changes no choice.
+    """
+    train, validation = development
+    if (
+        train.name is not SplitName.TRAIN
+        or validation.name is not SplitName.VALIDATION
+    ):
+        raise ValueError("selection requires TRAIN and VALIDATION, never TEST")
+    targets = tuple(context.targets)
+    try:
+        equations = to_state_equations(system, channels, targets)
+    except InexpressibleEquation as exc:
+        return SystemScore("inexpressible", functions=exc.functions, message=str(exc))
+    except ValueError as exc:  # a variable beyond the channels
+        return SystemScore(
+            "inexpressible", functions=("unknown_variable",), message=str(exc)
+        )
+    try:
+        compiled = compile_candidate(
+            equation_candidate("llm_ode", equations, context),
+            context,
+            validator=baseline_validator(),
+        )
+    except ModelValidationError as exc:
+        # What the baseline grammar still refuses (a comparison, an undefined
+        # name) is counted, not allowed to end a search already paid for.
+        return SystemScore(
+            "inexpressible",
+            equations=equations,
+            functions=tuple(sorted({item.code for item in exc.diagnostics})),
+            message=str(exc),
+        )
+    except Exception as exc:  # one odd system must not lose the search
+        return SystemScore(
+            "inexpressible",
+            equations=equations,
+            functions=(type(exc).__name__,),
+            message=str(exc),
+        )
+    scales = _target_scales(train, targets)
+    points = len(targets) * sum(
+        len(trajectory.time)
+        for split in development
+        for trajectory in split.trajectories
+    )
+    total = 0.0
+    normalized: dict[SplitName, list[float]] = {
+        split.name: [] for split in development
+    }
+    for split in development:
+        for trajectory in split.trajectories:
+            try:
+                simulation = simulate_trajectory(
+                    compiled,
+                    trajectory,
+                    {},
+                    {},
+                    FitConfig(),
+                    deadline=monotonic() + seconds,
+                    reset_observed_states=False,
+                )
+            except TimeoutError:
+                # The simulator raises past its deadline rather than failing.
+                return SystemScore(
+                    "rollout_failed",
+                    equations=equations,
+                    message=f"{trajectory.trajectory_id}: over {seconds:g} seconds",
+                )
+            except Exception as exc:  # one odd system must not lose the search
+                return SystemScore(
+                    "rollout_failed",
+                    equations=equations,
+                    message=f"{trajectory.trajectory_id}: {type(exc).__name__}: {exc}",
+                )
+            if not simulation.success:
+                return SystemScore(
+                    "rollout_failed",
+                    equations=equations,
+                    message=f"{trajectory.trajectory_id}: {simulation.message}",
+                )
+            residuals = [
+                np.asarray(simulation.predictions[target], dtype=float)
+                - np.asarray(trajectory.targets[target], dtype=float)
+                for target in targets
+            ]
+            squared = sum(float(np.sum(np.square(value))) for value in residuals)
+            if not math.isfinite(squared):
+                return SystemScore(
+                    "rollout_failed",
+                    equations=equations,
+                    message=f"{trajectory.trajectory_id}: a nonfinite error",
+                )
+            total += squared
+            normalized[split.name].append(
+                float(
+                    np.mean(
+                        [
+                            np.mean(np.square(value / scales[target]))
+                            for target, value in zip(targets, residuals, strict=True)
+                        ]
+                    )
+                )
+            )
+            # Squared errors only add, so the error so far never exceeds the
+            # final one: past the bound, the system cannot be the lowest.
+            if bound is not None and total / points > bound.value:
+                return SystemScore("pruned", equations=equations)
+    value = total / points
+    if bound is not None:
+        with bound.get_lock():
+            bound.value = min(bound.value, value)
+    return SystemScore(
+        "scored",
+        equations=equations,
+        train_val_rollout_mse=value,
+        training_rollout_error=float(np.mean(normalized[SplitName.TRAIN])),
+        validation_rollout_error=float(np.mean(normalized[SplitName.VALIDATION])),
+    )
+
+
+#: One scoring process's development data, set once when the process starts.
+_SCORING: dict[str, Any] = {}
+
+
+def _portable(development: tuple[DatasetSplit, ...]) -> tuple:
+    """The development splits as plain values a new process can receive.
+
+    A trajectory keeps its channels in read-only mappings, which do not
+    pickle, so each is sent as a dict and frozen again on arrival.
+    """
+    return tuple(
+        (
+            split.name,
+            split.fingerprint,
+            tuple(
+                {
+                    field.name: (
+                        dict(value) if isinstance(value, Mapping) else value
+                    )
+                    for field in fields(trajectory)
+                    for value in (getattr(trajectory, field.name),)
+                }
+                for trajectory in split.trajectories
+            ),
+        )
+        for split in development
+    )
+
+
+def _rebuilt(portable: tuple) -> tuple[DatasetSplit, ...]:
+    """The splits `_portable` sent, as the same frozen objects."""
+    return tuple(
+        DatasetSplit(name, tuple(Trajectory(**item) for item in rows), fingerprint)
+        for name, fingerprint, rows in portable
+    )
+
+
+def _start_scoring(
+    development: tuple,
+    context: ValidationContext,
+    channels: tuple[str, ...],
+    seconds: float,
+    bound: Any,
+) -> None:
+    """Hold one task's development data in a scoring process."""
+    _SCORING.update(
+        development=_rebuilt(development),
+        context=context,
+        channels=channels,
+        seconds=seconds,
+        bound=bound,
+    )
+
+
+def _score_in_pool(system: tuple[str, ...]) -> SystemScore:
+    """Score one system in a process `_start_scoring` prepared."""
+    return score_system(
+        system,
+        _SCORING["development"],
+        _SCORING["context"],
+        _SCORING["channels"],
+        seconds=_SCORING["seconds"],
+        bound=_SCORING["bound"],
+    )
+
+
+def rank_systems(
+    frontiers: tuple[tuple[str, ...], ...],
+    development: tuple[DatasetSplit, DatasetSplit],
+    context: ValidationContext,
+    channels: tuple[str, ...],
+    *,
+    seconds: float,
+    workers: int = 1,
+) -> tuple[list[tuple[str, ...]], list[SystemScore]]:
+    """Score every system in the product of the frontiers, in product order.
+
+    As upstream's driver does, the whole product is scored: there is no cap,
+    so a long search is never lost to the size of what it found. ``workers``
+    processes share the work, as upstream's 30 do; they are started afresh,
+    so none inherits the search's state.
+    """
+    systems = list(product(*frontiers))
+    spawn = multiprocessing.get_context("spawn")
+    bound = spawn.Value("d", math.inf)
+    started = monotonic()
+
+    def progress(results) -> list[SystemScore]:
+        """Collect the scores in order, with about ten progress lines."""
+        scores: list[SystemScore] = []
+        for score in results:
+            scores.append(score)
+            if len(scores) % max(1, len(systems) // 10) == 0:
+                LOGGER.info(
+                    "scored %d of %d systems after %.1fs",
+                    len(scores),
+                    len(systems),
+                    monotonic() - started,
+                )
+        return scores
+
+    if workers == 1 or len(systems) == 1:
+        return systems, progress(
+            score_system(
+                system, development, context, channels, seconds=seconds, bound=bound
+            )
+            for system in systems
+        )
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=spawn,
+        initializer=_start_scoring,
+        initargs=(_portable(development), context, channels, seconds, bound),
+    ) as pool:
+        return systems, progress(pool.map(_score_in_pool, systems))
+
+
+def best_system(scores: list[SystemScore]) -> int | None:
+    """The system with the lowest error, the first of any tie.
+
+    Upstream sorts on the error alone and leaves ties in no set order; taking
+    the first in product order, best derivative fits first, makes it fixed.
+    """
+    best: int | None = None
+    lowest = math.inf
+    for index, score in enumerate(scores):
+        value = score.train_val_rollout_mse
+        if score.status == "scored" and value is not None and value < lowest:
+            best, lowest = index, value
+    return best
 
 
 def _stop_reason(response: Any) -> str | None:
@@ -313,6 +631,7 @@ def build_searcher(
     islands: int,
     config: dict | None = None,
     seconds_per_rollout: float = 60.0,
+    workers: int = 1,
     patience_seconds: float = DEFAULT_PATIENCE_SECONDS,
     model: str | None = None,
     bypass_cache: bool = False,
@@ -321,7 +640,9 @@ def build_searcher(
 
     ``model``, when given, is named in every request in place of the first
     model the server lists; ``bypass_cache`` asks a caching gateway for fresh
-    answers. Without them the requests are exactly upstream's.
+    answers. Without them the requests are exactly upstream's. Selection
+    gives each development rollout ``seconds_per_rollout`` and scores the
+    systems in ``workers`` processes.
     """
     modules = load_upstream(upstream_root)
     import llmode.llmode as upstream_module  # imported after load_upstream
@@ -427,29 +748,6 @@ def build_searcher(
                 "error": error or "a target produced an empty Pareto frontier",
                 "accounting": {"llm_queries": calls, "scored_systems": 0},
             }
-
-        inexpressible = 0
-        operators: set[str] = set()
-        expressible: dict[tuple[str, ...], tuple[dict[str, str], float]] = {}
-        scored = 0
-
-        def score(combination: tuple[str, ...]) -> float | None:
-            """Convert, roll out on development data, and count what we cannot read."""
-            nonlocal inexpressible, scored
-            try:
-                equations = to_state_equations(combination, train.channels, targets)
-                value = development_rollout_error(
-                    equations, context, *development, seconds=seconds_per_rollout
-                )
-            except InexpressibleEquation as exc:
-                inexpressible += 1
-                operators.update(exc.functions)
-                return None
-            scored += 1
-            if value is not None:
-                expressible[combination] = (equations, value)
-            return value
-
         accounting = {
             "llm_queries": calls,
             # The shared rule, so this campaign is comparable with D3's.
@@ -458,43 +756,125 @@ def build_searcher(
             "frontier_sizes": [len(frontier) for frontier in frontiers],
             "search_error": error,
         }
-        try:
-            best = select_system(tuple(frontiers), score)
-        except ValueError as exc:
-            return {
-                "status": "product_too_large",
-                "error": str(exc),
-                "accounting": accounting,
-            }
-        accounting |= {
-            "scored_systems": scored,
-            "inexpressible_systems": inexpressible,
-            "inexpressible_operators": sorted(operators),
+        return _select(
+            frontiers,
+            development,
+            context,
+            train.channels,
+            directory,
+            accounting,
+            error,
+            seconds=seconds_per_rollout,
+            workers=workers,
+        )
+
+    @functools.wraps(search)
+    def logged(**kwargs) -> dict:
+        with _upstream_log(kwargs["directory"] / "llm_ode.log"):
+            return search(**kwargs)
+
+    return logged
+
+
+@contextmanager
+def _upstream_log(path: Path) -> Iterator[None]:
+    """Log as upstream's ``main.py`` does: everything at INFO, to ``llm_ode.log``.
+
+    Upstream's client logs every prompt it sends and every reply it gets
+    there. Without it a campaign keeps each call's usage and why it ended,
+    but not what was asked or answered.
+    """
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    root = logging.getLogger()
+    level = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+    try:
+        yield
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(level)
+        handler.close()
+
+
+def _select(
+    frontiers: list[tuple[str, ...]],
+    development: tuple[DatasetSplit, DatasetSplit],
+    context: ValidationContext,
+    channels: tuple[str, ...],
+    directory: Path,
+    accounting: dict,
+    error: str | None,
+    *,
+    seconds: float,
+    workers: int,
+) -> dict:
+    """Choose the system as upstream's driver does, and record every one scored.
+
+    ``systems.json`` takes the place of the table upstream writes after its
+    final iteration: each system, how it fared, and its error.
+    """
+    started = monotonic()
+    systems, scores = rank_systems(
+        tuple(frontiers),
+        development,
+        context,
+        channels,
+        seconds=seconds,
+        workers=workers,
+    )
+    atomic_json(
+        directory / "systems.json",
+        {
+            "selection_metric": SELECTION_METRIC,
+            "systems": [
+                score.record(system)
+                for system, score in zip(systems, scores, strict=True)
+            ],
+        },
+    )
+    counts = Counter(score.status for score in scores)
+    operators = sorted(
+        {
+            name
+            for score in scores
+            if score.status == "inexpressible"
+            for name in score.functions
         }
-        if best is None:
-            return {
-                "status": "inexpressible" if scored == 0 else "rollout_failed",
-                "error": (
-                    f"every candidate used {', '.join(sorted(operators))}, which "
-                    "the restricted grammar does not approve"
-                    if scored == 0
-                    else "no candidate completed a development rollout"
-                ),
-                "accounting": accounting,
-            }
-        equations, validation_error = expressible[best]
+    )
+    accounting = {
+        **accounting,
+        "systems": len(scores),
+        "scored_systems": counts["scored"],
+        "pruned_systems": counts["pruned"],
+        "failed_systems": counts["rollout_failed"],
+        "inexpressible_systems": counts["inexpressible"],
+        "inexpressible_operators": operators,
+        "selection_seconds": round(monotonic() - started, 1),
+    }
+    best = best_system(scores)
+    if best is None:
+        refused = counts["inexpressible"] == len(scores)
         return {
-            "status": "complete",
-            "error": error,
-            "equations": equations,
-            "training_rollout_error": development_rollout_error(
-                equations, context, development[0], development[0],
-                seconds=seconds_per_rollout,
+            "status": "inexpressible" if refused else "rollout_failed",
+            "error": (
+                f"every candidate used {', '.join(operators)}, which the "
+                "restricted grammar does not approve"
+                if refused
+                else "no candidate completed a development rollout"
             ),
-            # Reuse the recorded score; re-scoring would repeat the rollout
-            # and count the same system twice in the accounting.
-            "development_rollout_error": validation_error,
             "accounting": accounting,
         }
-
-    return search
+    chosen = scores[best]
+    return {
+        "status": "complete",
+        "error": error,
+        "equations": chosen.equations,
+        SELECTION_METRIC: chosen.train_val_rollout_mse,
+        # Recorded beside the selection, from the same rollouts; neither
+        # chooses anything.
+        "training_rollout_error": chosen.training_rollout_error,
+        "development_rollout_error": chosen.validation_rollout_error,
+        "accounting": accounting,
+    }

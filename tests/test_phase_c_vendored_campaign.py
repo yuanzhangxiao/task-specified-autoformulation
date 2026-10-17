@@ -72,6 +72,15 @@ UPSTREAM = {
 }
 
 
+#: How an LLM-ODE plan chooses its system: the rule in the released code.
+SELECTION = {
+    "rule": "released_code_train_val_rollout_mse",
+    "seconds_per_trajectory": 30.0,
+    "workers": 8,
+    "rationale": "The rule in LLM-ODE's released code, on development data.",
+}
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -174,6 +183,8 @@ def _payload(release: Path, method: str = "llm_sr", **overrides) -> dict:
         "test_data_opened": False,
         "private_reference_opened": False,
     }
+    if not searched:
+        payload["system_selection"] = SELECTION
     payload.update(overrides)
     return payload
 
@@ -686,6 +697,106 @@ def test_the_v5_smoke_is_the_full_plan_on_the_pilots_cell_and_t2_hard():
     assert (v4["regression_table"]["row_order"], v4["program_rollout"]) == (
         "shuffled", None,
     )
+
+
+@pytest.mark.parametrize(
+    ("method", "overrides", "message"),
+    [
+        ("llm_ode", {"system_selection": None}, "declares how its system is chosen"),
+        ("llm_sr", {"system_selection": SELECTION}, "for LLM-ODE only"),
+        (
+            "llm_ode",
+            {"system_selection": {**SELECTION, "seconds_per_trajectory": 600.0}},
+            "less than or equal to 300",
+        ),
+        ("llm_ode", {"system_selection": {**SELECTION, "workers": 0}}, "greater than"),
+        (
+            "llm_ode",
+            {"system_selection": {**SELECTION, "rule": "validation_rollout_nmse"}},
+            "released_code_train_val_rollout_mse",
+        ),
+    ],
+)
+def test_an_llm_ode_plan_declares_how_its_system_is_chosen(
+    tmp_path, method, overrides, message
+):
+    payload = _payload(_release(tmp_path / "release"), method, **overrides)
+    with pytest.raises(ValueError, match=message):
+        PhaseCVendoredCampaignPlan.model_validate(payload)
+
+
+def test_the_llm_ode_selection_is_frozen_reported_and_read(tmp_path):
+    _, _, sealed = _frozen(tmp_path, "llm_ode")
+    assert vendored.llm_ode_selection_settings(sealed["plan"]) == {
+        "seconds_per_rollout": 30.0,
+        "workers": 8,
+    }
+    assert any(
+        note.startswith("the system is chosen by the rule in LLM-ODE's released code")
+        for note in sealed["reporting_qualifications"]
+    )
+    with pytest.raises(ValueError, match="declares no system selection"):
+        vendored.llm_ode_selection_settings({"system_selection": None})
+
+
+def _ode_plans() -> dict[str, dict]:
+    configs = REPO / "configs"
+    return {
+        name: load_phase_c_vendored_plan(
+            configs / f"phase_c_llm_ode_{name}.json"
+        ).model_dump(mode="json")
+        for name in (
+            "hosted_120b_v1",
+            "smoke_v1",
+            "published_prompt_hosted_120b_v1",
+            "published_prompt_smoke_v1",
+        )
+    }
+
+
+def test_the_llm_ode_plans_run_the_published_search_on_the_roster():
+    """The full plans: the published budget, upstream's settings, every cell."""
+    plans = _ode_plans()
+    roster = json.loads(
+        (REPO / "configs" / "phase_c_public_baseline_delta_cpu_v1.json").read_text()
+    )
+    llm_sr = load_phase_c_vendored_plan(
+        REPO / "configs" / "phase_c_llm_sr_hosted_120b_v1.json"
+    ).model_dump(mode="json")
+    for name in ("hosted_120b_v1", "published_prompt_hosted_120b_v1"):
+        full = plans[name]
+        assert full["cells"] == roster["cells"] == llm_sr["cells"]
+        assert full["repetitions"] == [0, 1]
+        assert full["budget"]["declared"] == full["budget"]["published_default"] == 200
+        assert full["endpoint"] == "jetstream2_hosted"
+        assert full["model"] == "gpt-oss-120b"
+        assert full["islands"] == 4
+        assert full["upstream"]["commit"] == UPSTREAM["llm_ode"]["commit"]
+        assert full["derivative_provenance"] == "upstream_findiff_fourth_order"
+        assert full["system_selection"]["rule"] == "released_code_train_val_rollout_mse"
+    # The two campaigns differ in the prompt alone.
+    given, published = plans["hosted_120b_v1"], plans["published_prompt_hosted_120b_v1"]
+    assert {key for key in given if given[key] != published[key]} == {
+        "prompt_policy",
+        "scope_note",
+    }
+    assert given["prompt_policy"]["supplies_public_task_specification"] is True
+    assert published["prompt_policy"]["supplies_public_task_specification"] is False
+    assert published["prompt_policy"]["upstream_withholds_specification"] is True
+
+
+def test_each_llm_ode_smoke_is_its_full_plan_on_one_seed_and_a_short_search():
+    plans = _ode_plans()
+    scope = {"status", "budget", "scope_note", "repetitions"}
+    for smoke, full in (
+        ("smoke_v1", "hosted_120b_v1"),
+        ("published_prompt_smoke_v1", "published_prompt_hosted_120b_v1"),
+    ):
+        smoke, full = plans[smoke], plans[full]
+        assert {key for key in smoke if smoke[key] != full[key]} <= scope
+        assert smoke["repetitions"] == [0]
+        assert smoke["budget"]["declared"] == 20
+        assert smoke["cells"] == full["cells"]
 
 
 # --- running and resuming ----------------------------------------------------
@@ -1239,6 +1350,37 @@ def test_the_llm_ode_cli_names_the_plans_model_to_a_vllm_it_serves(
     cli.main()
     assert seen["model"] == "served-model"
     assert seen["bypass_cache"] is False  # a vLLM we serve replays nothing
+
+
+def test_the_llm_ode_cli_waits_for_the_model_list_and_sends_the_selection(
+    tmp_path, monkeypatch
+):
+    """D3 lost two tasks to one slow model list at their start."""
+    import sys
+
+    from scripts import phase_c_llm_ode as cli
+
+    _, root, _ = _frozen(tmp_path, "llm_ode")
+    seen: dict = {}
+    monkeypatch.setenv("AF_LLM_ODE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AF_ENDPOINT_KIND", "vm_local_vllm")
+    monkeypatch.setenv("AF_VLLM_BASE_URL", "http://127.0.0.1:8000")
+
+    def build(**kwargs):
+        seen.update(kwargs)
+        return _complete([])
+
+    monkeypatch.setattr(cli, "build_searcher", build)
+    pauses = _patient_clock(monkeypatch)
+    slow = vendored.ModelListUnavailable("cannot list the models: timed out")
+    monkeypatch.setattr(cli, "served_model_ids", _answers(slow, ("served-model",)))
+    monkeypatch.setattr(
+        sys, "argv", ["cli.py", "run", "--root", str(root), "--index", "0"]
+    )
+    cli.main()
+    assert pauses == [60.0]
+    assert (seen["seconds_per_rollout"], seen["workers"]) == (30.0, 8)
+    assert (root / "results" / "0" / "result.json").exists()
 
 
 def test_the_llm_sr_cli_sends_what_the_plan_declares(tmp_path, monkeypatch):

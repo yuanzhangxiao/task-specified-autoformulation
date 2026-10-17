@@ -17,9 +17,13 @@ rather than hidden here:
   derivatives are estimated within each trajectory and the rows stacked. The
   regression is pointwise, so stacking is sound; differentiating across a
   join would not be.
-* Upstream's selection hands its evaluator the sealed test trajectory. Ours
-  cannot see it, so selection uses the same rule -- product of the per-variable
-  Pareto frontiers, ranked by rolled-out error -- over development data only.
+* Upstream's selection rolls each assembled system out over its one training
+  trajectory, the part the equations were fitted on and the validation part
+  after it, and ranks by that error; the test error it computes beside it is
+  only reported. A cell has many trajectories, so selection uses the same rule
+  -- the product of the per-variable Pareto frontiers, ranked by the rollout
+  error in the data's own units -- over every development trajectory, and the
+  test error is never computed.
 * Upstream's systems are autonomous: every variable is a state and nothing
   forces them. A cell supplies auxiliaries, measured inputs and fixed
   covariates over the horizon, so all of them are variables to the search
@@ -32,7 +36,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from itertools import product
 from pathlib import Path
 from typing import Protocol
 
@@ -63,6 +66,11 @@ from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
 
 #: Upstream differentiates with findiff at fourth order; keep that choice.
 DERIVATIVE_ACCURACY = 4
+
+#: What LLM-ODE's released code ranks its systems by, its ``mse_train_val``:
+#: the error of a rollout over the training trajectory, the part the equations
+#: were fitted on and the validation part after it, in the data's own units.
+SELECTION_METRIC = "train_val_rollout_mse"
 
 
 class SearcherFactory(Protocol):
@@ -336,39 +344,6 @@ def phase_c_rows(
     return receipt, rows
 
 
-def select_system(
-    frontiers: tuple[tuple[str, ...], ...],
-    score: Callable[[tuple[str, ...]], float | None],
-    *,
-    maximum_combinations: int = 10_000,
-) -> tuple[str, ...] | None:
-    """Rank the product of per-variable frontiers, as upstream's driver does.
-
-    Upstream sorts assembled systems by their rolled-out error and keeps the
-    best. The cap exists because the product grows multiplicatively and a
-    truncated search would otherwise be reported as a completed one.
-    """
-    if not frontiers or any(not item for item in frontiers):
-        return None
-    total = 1
-    for item in frontiers:
-        total *= len(item)
-    if total > maximum_combinations:
-        raise ValueError(
-            f"{total} assembled systems exceed the {maximum_combinations} cap; "
-            "record the truncation rather than silently ranking a subset"
-        )
-    best: tuple[str, ...] | None = None
-    best_score = np.inf
-    for combination in product(*frontiers):
-        value = score(combination)
-        if value is None or not np.isfinite(value):
-            continue
-        if value < best_score:
-            best_score, best = float(value), combination
-    return best
-
-
 PROTOCOL = "phase-b-llm-ode-campaign-1"
 PHASE_C_PROTOCOL = "phase-c-llm-ode-campaign-1"
 
@@ -587,7 +562,7 @@ def _search_and_seal(
             selected_hyperparameters={
                 "iterations": int(sealed["plan"]["budget"]["declared"]),
                 "n_islands": int(sealed["search_config"]["n_islands"]),
-                "selection": "development_rollout_error",
+                "selection": SELECTION_METRIC,
             },
             selection_payload={
                 "candidate": equation_candidate(
@@ -620,11 +595,13 @@ def _search_and_seal(
             "status": outcome["status"],
             "error": outcome.get("error"),
             "equations": outcome.get("equations"),
+            SELECTION_METRIC: outcome.get(SELECTION_METRIC),
+            # The normalized validation error, recorded; it chooses nothing.
             "development_rollout_error": outcome.get("development_rollout_error"),
             "accounting": outcome.get("accounting", {}),
             "test_data_opened": False,
             "private_reference_opened": False,
-            "selection_metric": "development_rollout_error",
+            "selection_metric": SELECTION_METRIC,
         },
     )
 

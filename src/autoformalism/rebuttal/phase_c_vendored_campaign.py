@@ -10,7 +10,9 @@ for. The plan names the model; nothing here chooses one. An LLM-SR plan may
 also declare how LLM-SR is adapted to a reasoning model, that it takes the
 regression table the PySR baseline fits, how a selected program that reads the
 history is run, and the settings its paper states where the released code
-differs; a report must then state each.
+differs; a report must then state each. An LLM-ODE plan declares how its
+system is chosen, by the rule in its released code, and a report states that
+too.
 """
 
 from __future__ import annotations
@@ -396,6 +398,60 @@ class PaperSettings(BaseModel):
         )
 
 
+class SystemSelection(BaseModel):
+    """LLM-ODE's system chosen by the rule its released code applies.
+
+    Their driver (``LlmOde._store_results`` at 31667d9) assembles every system
+    in the product of the per-variable Pareto frontiers, rolls each out from
+    the training initial state over the whole training trajectory, the part
+    its equations were fitted on and the validation part after it, and keeps
+    the one with the lowest mean squared error in the data's own units. The
+    test error it computes beside it is only reported. Here every development
+    trajectory, training and validation, is rolled out from its own first
+    values by the shared evaluator, the supplied channels held to their
+    observations, and the targets' squared errors are pooled over every
+    trajectory and time point, as theirs are pooled over every variable and
+    time point. A system whose rollout of a trajectory fails, or takes longer
+    than ``seconds_per_trajectory``, cannot be chosen, as their two-second
+    limit leaves it; ``workers`` processes score the systems, as their 30 do.
+    The paper's knee rule (Eq. 2) is not in the released code.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rule: Literal["released_code_train_val_rollout_mse"]
+    #: At most the frozen evaluator's 300 seconds for a test trajectory, so a
+    #: system chosen here can be rolled out there.
+    seconds_per_trajectory: float = Field(gt=0.0, le=300.0)
+    workers: int = Field(ge=1, le=64)
+    rationale: str = Field(min_length=1)
+
+    def qualification(self) -> str:
+        """The statement a report of an LLM-ODE campaign carries."""
+        return (
+            "the system is chosen by the rule in LLM-ODE's released code: every "
+            "system in the product of the per-target Pareto frontiers is rolled "
+            "out over every development trajectory, training and validation, and "
+            "the one with the lowest mean squared error of the targets, in their "
+            "own units, is kept; the paper's knee rule (Eq. 2) is not in that code"
+        )
+
+
+def llm_ode_selection_settings(plan: dict) -> dict[str, float | int]:
+    """The rollout limit and scoring processes a sealed LLM-ODE plan declares."""
+    declared = plan.get("system_selection")
+    if declared is None:
+        raise ValueError(
+            "this plan declares no system selection; an LLM-ODE plan must, so "
+            "freeze a new one"
+        )
+    selection = SystemSelection.model_validate(declared)
+    return {
+        "seconds_per_rollout": selection.seconds_per_trajectory,
+        "workers": selection.workers,
+    }
+
+
 def llm_sr_recovery_settings(plan: dict) -> dict[str, bool]:
     """Whether a sealed LLM-SR plan runs a selected program that reads the history."""
     return {"program_rollout": plan.get("program_rollout") is not None}
@@ -451,6 +507,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
     program_rollout: ProgramRollout | None = None
     #: LLM-SR only; absent means their code's own settings.
     paper_settings: PaperSettings | None = None
+    #: LLM-ODE only, and required there: how its system is chosen.
+    system_selection: SystemSelection | None = None
     cells: tuple[PhaseCBaselineCell, ...] = Field(min_length=1)
     repetitions: tuple[int, ...] = Field(min_length=1)
     execution_semantics: Literal["continuous_ode_free_rollout"]
@@ -497,6 +555,11 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             raise ValueError(
                 "a regression table, a program rollout and the paper's settings "
                 "are declared for LLM-SR only"
+            )
+        if (self.method == "llm_ode") != (self.system_selection is not None):
+            raise ValueError(
+                "an LLM-ODE plan declares how its system is chosen, and a system "
+                "selection is declared for LLM-ODE only"
             )
         in_time_order = (
             self.regression_table is not None
@@ -549,6 +612,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             notes.append(self.program_rollout.qualification())
         if self.paper_settings is not None:
             notes.append(self.paper_settings.qualification())
+        if self.system_selection is not None:
+            notes.append(self.system_selection.qualification())
         return tuple(notes)
 
 

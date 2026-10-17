@@ -134,6 +134,34 @@ def _arrays(channels: tuple[str, ...]) -> CellArrays:
     )
 
 
+def _scoring(monkeypatch, error=lambda equations: 0.5) -> None:
+    """Stand in for the development rollouts: `error` gives a system's error.
+
+    `error` returns None for a system whose rollout fails and may raise
+    InexpressibleEquation for one the grammar refuses, as the real scorer
+    finds them. The searcher passes no development data, so none is read.
+    """
+
+    def score(system, development, context, channels, *, seconds, bound=None):
+        targets = channels[: len(system)]
+        try:
+            equations = driver.to_state_equations(system, channels, targets)
+            value = error(equations)
+        except driver.InexpressibleEquation as exc:
+            return driver.SystemScore("inexpressible", functions=exc.functions)
+        if value is None:
+            return driver.SystemScore("rollout_failed", equations=equations)
+        return driver.SystemScore(
+            "scored",
+            equations=equations,
+            train_val_rollout_mse=value,
+            training_rollout_error=value / 2,
+            validation_rollout_error=value,
+        )
+
+    monkeypatch.setattr(driver, "score_system", score)
+
+
 def test_the_driver_accepts_exactly_what_the_campaign_passes(monkeypatch) -> None:
     """The searcher and the caller must not drift apart.
 
@@ -157,10 +185,12 @@ def test_the_driver_accepts_exactly_what_the_campaign_passes(monkeypatch) -> Non
     )
 
 
-def test_every_target_is_stepped_for_the_declared_iterations(monkeypatch) -> None:
+def test_every_target_is_stepped_for_the_declared_iterations(
+    monkeypatch, tmp_path: Path
+) -> None:
     """Upstream advances all equations once per iteration; so must we."""
     _install_fake_upstream(monkeypatch, {"y": ["x_0"], "w": ["x_1"]})
-    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 0.5)
+    _scoring(monkeypatch, lambda equations: 0.5)
     search = driver.build_searcher(
         upstream_root=Path("/nonexistent"),
         base_url="http://127.0.0.1:1/v1",
@@ -172,7 +202,7 @@ def test_every_target_is_stepped_for_the_declared_iterations(monkeypatch) -> Non
         validation=_arrays(("y", "w")),
         targets=("y", "w"),
         prompt="",
-        directory=Path("/tmp"),
+        directory=tmp_path,
         development=(object(), object()),
         context=object(),
     )
@@ -181,11 +211,13 @@ def test_every_target_is_stepped_for_the_declared_iterations(monkeypatch) -> Non
     assert outcome["accounting"]["llm_queries"] == 7
 
 
-def test_the_specification_is_installed_and_then_removed(monkeypatch) -> None:
+def test_the_specification_is_installed_and_then_removed(
+    monkeypatch, tmp_path: Path
+) -> None:
     """A leaked patch would silently alter any later search in the process."""
     module, _ = _install_fake_upstream(monkeypatch, {"y": ["x_0"]})
     original = module.generate_prompt
-    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 1.0)
+    _scoring(monkeypatch, lambda equations: 1.0)
     seen: list[str] = []
 
     class _Recording(_FakeSearcher):
@@ -205,7 +237,7 @@ def test_the_specification_is_installed_and_then_removed(monkeypatch) -> None:
         validation=_arrays(("y",)),
         targets=("y",),
         prompt="\n\nTask specification: recover dy/dt.",
-        directory=Path("/tmp"),
+        directory=tmp_path,
         development=(object(), object()),
         context=object(),
     )
@@ -213,7 +245,7 @@ def test_the_specification_is_installed_and_then_removed(monkeypatch) -> None:
 
 
 def test_an_inexpressible_sweep_is_reported_with_the_operator_named(
-    monkeypatch,
+    monkeypatch, tmp_path: Path
 ) -> None:
     """The cost of our restricted grammar must be countable, not estimated.
 
@@ -223,7 +255,7 @@ def test_an_inexpressible_sweep_is_reported_with_the_operator_named(
     _install_fake_upstream(
         monkeypatch, {"y": ["besselj(x_0)", "besselj(x_0) + x_0"]}
     )
-    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 0.1)
+    _scoring(monkeypatch, lambda equations: 0.1)
     search = driver.build_searcher(
         upstream_root=Path("/nonexistent"),
         base_url="http://127.0.0.1:1/v1",
@@ -235,7 +267,7 @@ def test_an_inexpressible_sweep_is_reported_with_the_operator_named(
         validation=_arrays(("y",)),
         targets=("y",),
         prompt="",
-        directory=Path("/tmp"),
+        directory=tmp_path,
         development=(object(), object()),
         context=object(),
     )
@@ -246,13 +278,23 @@ def test_an_inexpressible_sweep_is_reported_with_the_operator_named(
     assert "besselj" in outcome["error"]
 
 
-def test_an_exploding_product_is_recorded_rather_than_truncated(monkeypatch) -> None:
-    """Ranking a subset and calling it the search would overstate the method."""
+def test_a_large_product_is_scored_whole_as_upstream_scores_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Upstream has no cap; the old one would have lost a finished search.
+
+    30 x 30 x 12 systems exceed the 10,000 the adapter used to refuse past.
+    """
+    sizes = {"a": 30, "b": 30, "c": 12}
     wide = {
-        name: [f"x_0 + {index}" for index in range(30)] for name in ("a", "b", "c")
+        name: [f"x_0 + {index}" for index in range(size)]
+        for name, size in sizes.items()
     }
     _install_fake_upstream(monkeypatch, wide)
-    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 1.0)
+    # The last system in product order is the best one.
+    _scoring(
+        monkeypatch, lambda equations: 2.0 - float(equations["c"].split()[-1]) / 11
+    )
     search = driver.build_searcher(
         upstream_root=Path("/nonexistent"),
         base_url="http://127.0.0.1:1/v1",
@@ -264,12 +306,20 @@ def test_an_exploding_product_is_recorded_rather_than_truncated(monkeypatch) -> 
         validation=_arrays(("a", "b", "c")),
         targets=("a", "b", "c"),
         prompt="",
-        directory=Path("/tmp"),
+        directory=tmp_path,
         development=(object(), object()),
         context=object(),
     )
-    assert outcome["status"] == "product_too_large"
-    assert "exceed the" in outcome["error"]
+    assert outcome["status"] == "complete"
+    assert outcome["accounting"]["systems"] == 30 * 30 * 12
+    assert outcome["accounting"]["scored_systems"] == 30 * 30 * 12
+    # Best derivative fits first, so the first of the tied best systems is
+    # the one built from each frontier's first equation.
+    assert outcome["equations"] == {"a": "a + 29", "b": "a + 29", "c": "a + 11"}
+    assert outcome["train_val_rollout_mse"] == 1.0
+    record = json.loads((tmp_path / "systems.json").read_text())
+    assert record["selection_metric"] == "train_val_rollout_mse"
+    assert len(record["systems"]) == 30 * 30 * 12
 
 
 def test_selection_refuses_a_held_out_split() -> None:
@@ -307,10 +357,12 @@ def test_an_interpreter_older_than_upstream_requires_is_refused() -> None:
         llm_ode_upstream.load_upstream(Path("/nonexistent"))
 
 
-def test_a_search_that_never_produces_a_candidate_stops_early(monkeypatch) -> None:
+def test_a_search_that_never_produces_a_candidate_stops_early(
+    monkeypatch, tmp_path: Path
+) -> None:
     """Whatever the cause, an empty search must not spend the allocation."""
     _install_fake_upstream(monkeypatch, {"y": []})
-    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 1.0)
+    _scoring(monkeypatch, lambda equations: 1.0)
     search = driver.build_searcher(
         upstream_root=Path("/nonexistent"),
         base_url="http://127.0.0.1:1/v1",
@@ -322,7 +374,7 @@ def test_a_search_that_never_produces_a_candidate_stops_early(monkeypatch) -> No
         validation=_arrays(("y",)),
         targets=("y",),
         prompt="",
-        directory=Path("/tmp"),
+        directory=tmp_path,
         development=(object(), object()),
         context=object(),
     )
@@ -354,16 +406,18 @@ def test_what_the_baseline_grammar_still_refuses_is_named() -> None:
     assert refused.value.functions == ("UNSUPPORTED_SYNTAX",)
 
 
-def test_a_refused_system_is_counted_and_the_search_is_kept(monkeypatch) -> None:
+def test_a_refused_system_is_counted_and_the_search_is_kept(
+    monkeypatch, tmp_path: Path
+) -> None:
     """One unreadable frontier member used to discard all 18 paid-for searches."""
     _install_fake_upstream(monkeypatch, {"y": ["x_0*(x_0 > 1)", "x_0"]})
 
-    def rollout(equations, *args, **kwargs):
+    def rollout(equations):
         if ">" in equations["y"]:
             raise driver.InexpressibleEquation(equations["y"], ("UNSUPPORTED_SYNTAX",))
         return 0.3
 
-    monkeypatch.setattr(driver, "development_rollout_error", rollout)
+    _scoring(monkeypatch, rollout)
     search = driver.build_searcher(
         upstream_root=Path("/nonexistent"),
         base_url="http://127.0.0.1:1/v1",
@@ -375,7 +429,7 @@ def test_a_refused_system_is_counted_and_the_search_is_kept(monkeypatch) -> None
         validation=_arrays(("y",)),
         targets=("y",),
         prompt="",
-        directory=Path("/tmp"),
+        directory=tmp_path,
         development=(object(), object()),
         context=object(),
     )
@@ -385,6 +439,231 @@ def test_a_refused_system_is_counted_and_the_search_is_kept(monkeypatch) -> None
     assert outcome["accounting"]["inexpressible_systems"] == 1
     assert outcome["accounting"]["inexpressible_operators"] == ["UNSUPPORTED_SYNTAX"]
     assert outcome["accounting"]["scored_systems"] == 1
+
+
+# --- choosing the system as the released code does ----------------------------
+
+
+def _cell(targets: dict[str, tuple[float, float]], train=(1.0, 3.0), validation=(1.5,)):
+    """Targets decaying as size * start * exp(-rate t), and an input left at zero.
+
+    Returns the development splits, the context and the channels, in the
+    order upstream's variables x_0, x_1, ... name them.
+    """
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from autoformalism.baselines.core import baseline_validation_context
+    from autoformalism.data import DatasetSplit, SplitName, Trajectory
+    from autoformalism.data.models import DevelopmentDataset, TierRoles
+
+    time = np.linspace(0.0, 3.0, 31)
+
+    def trajectory(identifier: str, start: float) -> Trajectory:
+        return Trajectory(
+            trajectory_id=identifier,
+            time=time,
+            targets={
+                name: size * start * np.exp(-rate * time)
+                for name, (size, rate) in targets.items()
+            },
+            auxiliaries={},
+            external_inputs={"inflow": np.zeros_like(time)},
+            fixed_covariates={},
+            derivatives={},
+        )
+
+    splits = tuple(
+        DatasetSplit(
+            name,
+            tuple(trajectory(f"{name.value}_{i}", s) for i, s in enumerate(starts)),
+            name.value,
+        )
+        for name, starts in (
+            (SplitName.TRAIN, train),
+            (SplitName.VALIDATION, validation),
+        )
+    )
+    context = baseline_validation_context(
+        DevelopmentDataset(
+            benchmark_id="toy",
+            tier="easy",
+            roles=TierRoles(targets=tuple(targets), auxiliaries=()),
+            train=splits[0],
+            validation=splits[1],
+        ),
+        SimpleNamespace(
+            external_inputs=("inflow",),
+            fixed_covariates=(),
+            one_step_target_history=False,
+        ),
+    )
+    return splits, context, (*targets, "inflow")
+
+
+#: Exact on the validation trajectory, which stays below 1.5, and wrong on the
+#: training one that starts at 3; against a system slightly wrong everywhere.
+EXACT_ON_VALIDATION = "-x_0 - 0.5*Abs(x_0 - 1.5) - 0.5*(x_0 - 1.5)"
+SLIGHTLY_WRONG = "-0.97*x_0"
+
+
+def test_the_system_is_ranked_over_training_and_validation_not_validation_alone():
+    """Upstream's mse_train_val covers the fitted part of the trajectory too.
+
+    The adapter used to rank by the validation error alone, which picks the
+    other system here.
+    """
+    development, context, channels = _cell({"h": (1.0, 1.0)})
+    systems, scores = driver.rank_systems(
+        ((EXACT_ON_VALIDATION, SLIGHTLY_WRONG),),
+        development,
+        context,
+        channels,
+        seconds=30.0,
+    )
+    exact, slight = scores
+    assert exact.status == slight.status == "scored"
+    assert exact.validation_rollout_error < slight.validation_rollout_error
+    assert slight.train_val_rollout_mse < exact.train_val_rollout_mse
+    assert systems[driver.best_system(scores)] == (SLIGHTLY_WRONG,)
+
+
+def test_the_error_is_pooled_over_targets_in_their_own_units():
+    """As upstream pools over its variables: a large target counts for more."""
+    import numpy as np
+
+    from autoformalism.rebuttal.llm_ode_upstream import to_state_equations
+
+    development, context, channels = _cell({"a": (100.0, 1.0), "b": (0.1, 2.0)})
+    score = driver.score_system(
+        ("-0.5*x_0", "-2*x_1"), development, context, channels, seconds=30.0
+    )
+    assert score.status == "scored"
+    time = development[0].trajectories[0].time
+    starts = (1.0, 3.0, 1.5)
+    # b is exact, so only a's raw error is left, averaged over both targets.
+    expected = np.mean(
+        [
+            np.mean(np.square(100.0 * s * (np.exp(-0.5 * time) - np.exp(-time)))) / 2
+            for s in starts
+        ]
+    )
+    assert score.train_val_rollout_mse == pytest.approx(expected, rel=1e-5)
+    # The normalized errors recorded beside it are the evaluator's.
+    equations = to_state_equations(("-0.5*x_0", "-2*x_1"), channels, ("a", "b"))
+    assert score.equations == equations
+    assert score.validation_rollout_error == driver.development_rollout_error(
+        equations, context, *development
+    )
+    assert score.training_rollout_error == driver.development_rollout_error(
+        equations, context, development[0], development[0]
+    )
+
+
+def test_a_system_stopped_early_could_not_have_been_chosen():
+    """Stopping past the bound saves rollouts and changes no choice."""
+    development, context, channels = _cell({"h": (1.0, 1.0)})
+    frontier = ("-0.5*x_0", "-0.97*x_0", "-2*x_0", "-x_0", "-0.99*x_0", "-3*x_0")
+    systems, scores = driver.rank_systems(
+        (frontier,), development, context, channels, seconds=30.0
+    )
+    full = [
+        driver.score_system(system, development, context, channels, seconds=30.0)
+        for system in systems
+    ]
+    assert all(score.status == "scored" for score in full)
+    assert driver.best_system(scores) == driver.best_system(full) == 3
+    pruned = [index for index, score in enumerate(scores) if score.status == "pruned"]
+    assert pruned  # the bound was used
+    lowest = full[3].train_val_rollout_mse
+    assert all(full[index].train_val_rollout_mse > lowest for index in pruned)
+    for score, unpruned in zip(scores, full, strict=True):
+        if score.status == "scored":
+            assert score == unpruned
+
+
+def test_scoring_in_several_processes_chooses_what_one_process_chooses():
+    development, context, channels = _cell({"a": (10.0, 1.0), "b": (1.0, 2.0)})
+    frontiers = (("-0.5*x_0", "-x_0", "-0.9*x_0"), ("-2*x_1", "-x_1"))
+    one = driver.rank_systems(frontiers, development, context, channels, seconds=30.0)
+    two = driver.rank_systems(
+        frontiers, development, context, channels, seconds=30.0, workers=2
+    )
+    assert one[0] == two[0]
+    assert driver.best_system(one[1]) == driver.best_system(two[1]) == 2 * 1 + 0
+    best = driver.best_system(one[1])
+    assert one[1][best] == two[1][best]
+
+
+def test_a_rollout_over_its_limit_leaves_the_system_unchosen():
+    """The simulator raises past its deadline; that must not end the search."""
+    development, context, channels = _cell({"h": (1.0, 1.0)})
+    score = driver.score_system(
+        ("-x_0",), development, context, channels, seconds=1e-9
+    )
+    assert score.status == "rollout_failed"
+    assert "over 1e-09 seconds" in score.message
+    _, scores = driver.rank_systems(
+        (("-x_0",),), development, context, channels, seconds=1e-9
+    )
+    assert driver.best_system(scores) is None
+
+
+def test_selection_never_rolls_out_test_data():
+    from dataclasses import replace
+
+    from autoformalism.data import SplitName
+
+    (train, validation), context, channels = _cell({"h": (1.0, 1.0)})
+    held_out = replace(validation, name=SplitName.TEST)
+    with pytest.raises(ValueError, match="never TEST"):
+        driver.score_system(
+            ("-x_0",), (train, held_out), context, channels, seconds=30.0
+        )
+
+
+def test_a_system_the_grammar_refuses_is_counted_not_scored():
+    development, context, channels = _cell({"h": (1.0, 1.0)})
+    refused = driver.score_system(
+        ("-0.4*x_0**0.73*(x_0 > 1.0)",), development, context, channels, seconds=30.0
+    )
+    assert refused.status == "inexpressible"
+    assert refused.functions == ("UNSUPPORTED_SYNTAX",)
+    beyond = driver.score_system(
+        ("-x_7",), development, context, channels, seconds=30.0
+    )
+    assert beyond.status == "inexpressible"
+    assert beyond.functions == ("unknown_variable",)
+
+
+def test_the_search_logs_as_upstream_logs_and_then_stops(monkeypatch, tmp_path: Path):
+    """Upstream's main.py logs every prompt and reply to llm_ode.log at INFO."""
+    import logging
+
+    _install_fake_upstream(monkeypatch, {"y": ["x_0"]})
+    _scoring(monkeypatch)
+    search = driver.build_searcher(
+        upstream_root=Path("/nonexistent"),
+        base_url="http://127.0.0.1:1/v1",
+        iterations=10,
+        islands=1,
+    )
+    level = logging.getLogger().level
+    handlers = list(logging.getLogger().handlers)
+    search(
+        train=_arrays(("y",)),
+        validation=_arrays(("y",)),
+        targets=("y",),
+        prompt="",
+        directory=tmp_path,
+        development=(object(), object()),
+        context=object(),
+    )
+    lines = (tmp_path / "llm_ode.log").read_text().splitlines()
+    assert any(" INFO iteration 10 of 10 after " in line for line in lines)
+    assert logging.getLogger().level == level
+    assert logging.getLogger().handlers == handlers
 
 
 # --- a failing endpoint --------------------------------------------------------
@@ -462,7 +741,7 @@ def _install_endpoint(monkeypatch, replies, requests: list | None = None) -> _Cl
             }
         ),
     )
-    monkeypatch.setattr(driver, "development_rollout_error", lambda *a, **k: 0.5)
+    _scoring(monkeypatch, lambda equations: 0.5)
     clock = _Clock()
     monkeypatch.setattr(driver, "_clock", clock)
     monkeypatch.setattr(driver, "_pause", clock.pause)

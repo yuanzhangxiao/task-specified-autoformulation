@@ -1,0 +1,84 @@
+{
+  "schema_version": "phase-c-vendored-campaign-plan-1",
+  "status": "frozen_before_calls",
+  "development_only": true,
+  "release_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "method": "llm_ode",
+  "upstream": {
+    "repository": "https://github.com/gryaklab/llm-ode",
+    "commit": "31667d9ac948e8f411cd2f07726d7744784b5d5a",
+    "license": "MIT",
+    "search_modified": false
+  },
+  "budget": {
+    "unit": "iterations",
+    "published_default": 200,
+    "declared": 20,
+    "rationale": "A smoke test, not a result: the full plan's search on every roster cell for 20 iterations and one seed, 20 x 4 x 11 = 880 requests. It checks the hosted route, how often a reply reaches the 1,024-token limit, how many reply lines upstream can read, the conversion of the chosen system to the evaluator's grammar, the selection's time and the sealed result, and it measures the time an iteration takes in each cell. Twenty iterations include four of upstream's trim-and-mix steps."
+  },
+  "prompt_policy": {
+    "supplies_public_task_specification": true,
+    "upstream_withholds_specification": true,
+    "description": "Declared adaptation, decided on 2026-10-17. LLM-ODE's paper withholds variable meanings and system descriptions to limit recall of memorized equations (Sec. 4.1). Every other method compared here, our own included, is given the public task description, so this campaign gives it to LLM-ODE too: the description's public sections, the variables' names and the target of each search are appended to every prompt. Upstream's instructions, examples, operators, fitting and selection are unchanged. The campaign phase_c_llm_ode_published_prompt_hosted_120b_v1 runs the prompt as published."
+  },
+  "islands": 4,
+  "scope_note": "Smoke test of phase_c_llm_ode_hosted_120b_v1: every roster cell, one seed, 20 iterations. Its models are never reported.",
+  "endpoint": "jetstream2_hosted",
+  "model": "gpt-oss-120b",
+  "system_selection": {
+    "rule": "released_code_train_val_rollout_mse",
+    "seconds_per_trajectory": 30.0,
+    "workers": 8,
+    "rationale": "The rule in LLM-ODE's released code, decided on 2026-10-17. Their driver (llmode.LlmOde._store_results at 31667d9) scores every system in the product of the per-variable Pareto frontiers by the mean squared error, in the data's own units, of a rollout from the training initial state over the whole training trajectory (t from 0 to 10: the half its equations were fitted on and the half it validates on), sorts on it, and lists the test error beside it without using it. Here the rollout covers every development trajectory, training and validation (16 and 4, or 6 and 3 in the basin cells), each from its own first values, with the shared evaluator's solver (RK45, rtol 1e-7, atol 1e-9) and the supplied channels held to their observations; the targets' squared errors are pooled over every trajectory and time point. In the two- and three-target cells a target with larger values counts for more, as upstream's variables do. The paper's rule (Eq. 2, the knee of the systems' complexity-error front subject to T >= h * T_max with h = 0.1 and T = -MSE) is not in the released code, and as written it cannot be met: with T <= 0 it asks for an error below a tenth of the best. Upstream gives each rollout 2 seconds, with looser tolerances, on 100-point trajectories; here a rollout may take 30 seconds per trajectory, a tenth of the frozen evaluator's 300, and a system whose rollout fails or takes longer cannot be chosen, as there. The product is scored whole, as upstream has no cap. A system whose squared errors so far already exceed the lowest error a system has finished with is stopped there, which changes no choice. Eight processes score the systems, where upstream uses 30, and a tie goes to the first system in product order, best derivative fits first."
+  },
+  "cells": [
+    {
+      "benchmark_id": "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
+      "tier": "easy",
+      "public_prompt_sha256": "03367bc88a0cda7478961c0209a2ac354fc9a4bed644c8709dcba7c23dd5574b"
+    },
+    {
+      "benchmark_id": "phase_c_dalla_man_t1_canonical_named_hard_rates_v1",
+      "tier": "hard",
+      "public_prompt_sha256": "2587c4207eb96349c1e5a35fea88a86728113e13b3b309697b00172233ff856a"
+    },
+    {
+      "benchmark_id": "phase_c_dalla_man_t2_canonical_named_easy_rates_v1",
+      "tier": "easy",
+      "public_prompt_sha256": "0977074f7c5ce540cc9de8e982e405041027bda17d77978c2b47c3dd0f17d3e9"
+    },
+    {
+      "benchmark_id": "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
+      "tier": "hard",
+      "public_prompt_sha256": "ea8b212bdb021267b57c2bc40423a3c24bcd9d45877b7457027d896040eeb383"
+    },
+    {
+      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1",
+      "tier": "easy",
+      "public_prompt_sha256": "70fd22109db442ca16eae824b3851ab5c178180eeb935273bb9037dc88a36034"
+    },
+    {
+      "benchmark_id": "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
+      "tier": "easy",
+      "public_prompt_sha256": "8af1e2e7bd089bbe4786eb5f5d25abb6b87e6c751eb440636713dee5e857f881"
+    },
+    {
+      "benchmark_id": "phase_c_detention_coupled_noise0_v1",
+      "tier": "fixed",
+      "public_prompt_sha256": "10406a7fcced1a5d92f8c42856c646805d96f15e891234e06e806efe327e38d9"
+    },
+    {
+      "benchmark_id": "phase_c_detention_independent_noise0_v1",
+      "tier": "fixed",
+      "public_prompt_sha256": "5235aeb88574cd7cc92214bbd2a570d28ddb6206b66a62e10379a2c56a884415"
+    }
+  ],
+  "repetitions": [
+    0
+  ],
+  "execution_semantics": "continuous_ode_free_rollout",
+  "derivative_provenance": "upstream_findiff_fourth_order",
+  "test_data_opened": false,
+  "private_reference_opened": false
+}
