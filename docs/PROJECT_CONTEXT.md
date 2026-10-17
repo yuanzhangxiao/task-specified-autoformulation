@@ -22,7 +22,10 @@ path avoids nuisance solves for frozen-only points and measures numerical,
 progress-callback and durable journal time. A separately budgeted 90-second
 attempt does not erase prior work or allow silent retries after interruption.
 No fitting/benchmark/construction defaults change. See
-`PHASE_C_FITTING_PROFILE_SUPPLEMENT.md`; Delta completion is pending.
+`PHASE_C_FITTING_PROFILE_SUPPLEMENT.md`. The ACES fallback completed all nine
+extensions, yielding 150/150 complete profiles with unchanged fitted endpoints.
+It added 1.698 CPU / 5.485 summed diagnostic wall seconds; persistence dominates
+the measured interval. No Delta speedup or nonlinear-profile qualification is claimed.
 
 The opt-in saved-repair v2 milestone improves mechanism-record feedback, removes
 contradictory completion advice, and counts scientific repetition independently

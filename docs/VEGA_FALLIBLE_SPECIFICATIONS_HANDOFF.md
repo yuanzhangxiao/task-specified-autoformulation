@@ -144,18 +144,24 @@ confounding. The returned run verifies all 150 fit endpoints and 75 method pairs
 widens while the joint design remains full rank and measured prediction error
 stays nearly unchanged. This separates practical uncertainty from fitting failure.
 Profiles add 48.80 CPU seconds to 58.26 fitting CPU seconds (83.8% overhead in this
-tiny control). Diagnostic completion and wall/I/O timing are next; nonlinear
+tiny control). M40 completes the outstanding diagnostics below; nonlinear
 profiles and calibrated coverage remain unqualified. Objective-rise support sets
 have no assigned confidence percentage. This prepares uncertainty feedback while
 Astra completes interaction construction; it does not launch the broader model/data attribution
 study or alter the clean benchmark measurement contract.
 
-The [M40 diagnostic supplement](PHASE_C_FITTING_PROFILE_SUPPLEMENT.md) now prepares
-completion of those nine partial profiles from the saved endpoints, with a new
-90-second allowance and original costs preserved. It removes unnecessary nuisance
-solves for frozen-only points and measures persistence time separately. Returned
-cluster timing/completion evidence remains pending; no new fit or nonlinear
-qualification is claimed.
+The [M40 diagnostic supplement](PHASE_C_FITTING_PROFILE_SUPPLEMENT.md) completed
+all nine partial profiles on ACES from the unchanged saved endpoints, yielding
+150/150 complete selected profiles with original costs preserved. Independent
+interior-width calculations agree to `1.10e-9` relative error. The extension adds
+1.698 CPU / 5.485 summed diagnostic wall seconds; persistence callbacks consume
+87% of the separately instrumented interval. Import and full job overhead are
+outside these totals, and no cross-host speedup is claimed. Combined diagnostic
+CPU overhead is 86.7% of fitting CPU in this small affine control. This strengthens
+the distinction between accurate sensor prediction and uncertain physical
+parameters. Nonlinear nuisance-profile reliability is the next proposed
+qualification; no new fitting, nonlinear validation, calibrated confidence or
+automatic model/data attribution is claimed.
 
 Earlier input-pulse and trajectory defects also show why an apparent scientific
 contradiction may originate in data generation or an execution interface.

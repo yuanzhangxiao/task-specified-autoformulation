@@ -29,8 +29,11 @@ inputs and known measurement noise. Proper profiles widen before rank is lost;
 ambiguity. Exact confounding and domain-induced limits remain explicit. These are
 objective-rise support sets, not calibrated confidence intervals; no production
 or benchmark contracts change. The [M40 supplement](PHASE_C_FITTING_PROFILE_SUPPLEMENT.md)
-is ready to complete the nine partial diagnostics with separate accounting and
-investigate their wall/CPU disparity; no fitted parameters change.
+completed all nine partial diagnostics on ACES, yielding 150/150 complete
+profiles with separate accounting and unchanged fitted parameters. The extension
+added 1.698 CPU / 5.485 summed diagnostic wall seconds; persistence dominates
+the measured interval. Nonlinear nuisance-profile reliability is the next
+proposed qualification; calibrated confidence remains outside the result.
 
 Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
 compares fixed calibration with one bounded shared observation trend, preserving
