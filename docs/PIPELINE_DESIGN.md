@@ -17,6 +17,13 @@ cannot masquerade as completion. `interaction_dependency_advice` is an isolated
 opt-in post-fit investigation helper, not an automatic complexity rule. See
 `PHASE_C_INITIALIZATION_TOPOLOGY.md` and `PHASE_C_JOINT_DEPENDENCY_ADVICE.md`.
 
+M41 adds an isolated nonlinear-nuisance diagnostic qualification while preserving
+production fitting. A fixed linear state equation has an unknown decay rate;
+gain profiles conditionally solve initial/drift coordinates and check the rate
+search against a separate low-dimensional numerical reference. Fitted endpoints
+are sealed before diagnostics and evaluator-only truth never selects solutions.
+See `PHASE_C_FITTING_NONLINEAR_PRACTICAL_UNCERTAINTY.md`; Delta results are pending.
+
 M40's opt-in practical-profile execution separates frozen-slice evaluation from
 bounded nuisance optimization while retaining the M39 scientific policy. Its
 standalone supplement freezes saved source endpoints, preserves original costs,

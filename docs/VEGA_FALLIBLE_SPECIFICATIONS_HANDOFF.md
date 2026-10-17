@@ -150,6 +150,16 @@ have no assigned confidence percentage. This prepares uncertainty feedback while
 Astra completes interaction construction; it does not launch the broader model/data attribution
 study or alter the clean benchmark measurement contract.
 
+The [M41 nonlinear-nuisance qualification](PHASE_C_FITTING_NONLINEAR_PRACTICAL_UNCERTAINTY.md)
+is the next isolated diagnostic step: an unknown decay rate makes the observation
+prediction nonlinear in the parameters. Proper gain profiles reoptimize rate,
+shared preparation and sensor drift, checked against a separate bounded rate
+scan. A mismatch flags unresolved optimization instead of weak information or a
+model/data fault. Identical input schedules need not imply nonidentifiability
+when informative transients remain. The 36-task Delta campaign is prepared;
+results and any calibrated coverage claims remain pending. Current construction
+integration continues through the existing M37/M38 interfaces.
+
 The [M40 diagnostic supplement](PHASE_C_FITTING_PROFILE_SUPPLEMENT.md) completed
 all nine partial profiles on ACES from the unchanged saved endpoints, yielding
 150/150 complete selected profiles with original costs preserved. Independent
