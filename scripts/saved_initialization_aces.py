@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import signal
 import tarfile
 import time
@@ -18,6 +19,7 @@ from autoformalism.llm.staged_topology import DeferredCall
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import saved_topology_repair as campaign
 from autoformalism.staged_topology import content_hash
+from scripts import harmony_vocab
 
 REPO = Path(__file__).resolve().parents[1]
 PROTOCOL = "saved-topology-initialization-3"
@@ -29,6 +31,7 @@ ENTRYPOINTS = (
     "scripts/submit_saved_initialization_aces.py",
     "scripts/hpc/run_saved_initialization_aces.sh",
     "scripts/hpc/start_saved_initialization_aces.sh",
+    "scripts/harmony_vocab.py",
 )
 
 
@@ -54,18 +57,32 @@ def verify_inputs(root: Path) -> dict:
         or plan.get("automatic_followup") is not False
     ):
         raise ValueError("requires the bounded ACES initializer-v3 retest")
+    if plan.get("provider_recovery_policy"):
+        from autoformalism.research.initialization_provider_recovery import (
+            validate_plan,
+        )
+
+        validate_plan(plan)
     return plan
 
 
 def execution_identity(plan: dict, image_sha256: str) -> dict:
     """Keep ACES caches separate and pin every serving-relevant launcher option."""
+    if (
+        plan.get("provider_recovery_policy")
+        and image_sha256 != plan["recovery_source"]["execution"]["image_sha256"]
+    ):
+        raise ValueError("recovery requires the original serving image")
     return {
-        "protocol": "aces-saved-initialization-execution-1",
+        "protocol": "aces-saved-initialization-execution-2",
         "plan_sha256": plan["artifact_sha256"],
         "platform": PLATFORM,
         "model": MODEL,
         "model_revision": REVISION,
         "image_sha256": image_sha256,
+        "harmony_vocabulary": harmony_vocab.verify(
+            Path(os.environ.get("AF_HARMONY_ASSETS", REPO / "assets/harmony"))
+        ),
         "entrypoint_sha256": {name: file_hash(REPO / name) for name in ENTRYPOINTS},
         "served_context_tokens": 32768,
         "tensor_parallel_size": 1,
@@ -81,6 +98,7 @@ def execution_identity(plan: dict, image_sha256: str) -> dict:
 def prepare(inputs: Path, root: Path, image: Path) -> dict:
     """Freeze the imported plan and backend identity without a generation call."""
     plan = verify_inputs(inputs)
+    execution = execution_identity(plan, file_hash(image))
     if (root / "results").exists() and not (root / "execution.json").exists():
         raise ValueError(
             "existing results lack ACES execution identity; use a fresh root"
@@ -88,9 +106,7 @@ def prepare(inputs: Path, root: Path, image: Path) -> dict:
     sealed_write(
         root / "plan.json", {k: v for k, v in plan.items() if k != "artifact_sha256"}
     )
-    return sealed_write(
-        root / "execution.json", execution_identity(plan, file_hash(image))
-    )
+    return sealed_write(root / "execution.json", execution)
 
 
 def verify(root: Path) -> tuple[dict, dict]:
@@ -123,6 +139,19 @@ def bind_server(root: Path, runtime_record: Path, base_url: str) -> None:
         or runtime.get("vllm") != "0.27.1"
     ):
         raise ValueError("runtime needs one working H100 and vLLM 0.27.1")
+    harmony = runtime.get("harmony", {})
+    if (
+        harmony.get("protocol") != harmony_vocab.PROTOCOL
+        or harmony.get("filename") != harmony_vocab.VOCAB_FILENAME
+        or harmony.get("sha256") != harmony_vocab.VOCAB_SHA256
+        or harmony.get("harmony_render_passed") is not True
+        or not isinstance(harmony.get("openai_harmony"), str)
+        or not harmony["openai_harmony"]
+        or type(harmony.get("rendered_tokens")) is not int
+        or harmony["rendered_tokens"] <= 0
+        or harmony.get("generation_requests") != 0
+    ):
+        raise ValueError("runtime requires the pinned offline Harmony render preflight")
     with urlopen(base_url.rstrip("/") + "/v1/models", timeout=15) as response:
         served = json.load(response)
     if MODEL not in [row.get("id") for row in served.get("data", [])]:
@@ -147,7 +176,7 @@ def run(root: Path, base_url: str, runtime_record: Path, seconds: int = 9000) ->
     try:
         for task in plan["tasks"]:
             try:
-                campaign.run_episode(
+                outcome = campaign.run_episode(
                     root,
                     plan,
                     task,
@@ -158,6 +187,8 @@ def run(root: Path, base_url: str, runtime_record: Path, seconds: int = 9000) ->
             except DeferredCall:
                 break
             campaign.report(root, plan)
+            if outcome and outcome.get("status") == "provider_unavailable":
+                break
     finally:
         for sig, handler in handlers.items():
             signal.signal(sig, handler)
@@ -204,16 +235,24 @@ def inspect(root: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=("prepare", "verify", "run", "report", "inspect")
+        "command",
+        choices=("prepare", "freeze-recovery", "verify", "run", "report", "inspect"),
     )
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--inputs", type=Path)
+    parser.add_argument("--source", type=Path)
     parser.add_argument("--image", type=Path)
     parser.add_argument("--base-url")
     parser.add_argument("--runtime-record", type=Path)
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
-        if args.command == "prepare":
+        if args.command == "freeze-recovery":
+            if args.source is None:
+                parser.error("freeze-recovery requires --source")
+            from autoformalism.research.initialization_provider_recovery import freeze
+
+            result = freeze(args.source, args.root)
+        elif args.command == "prepare":
             if args.inputs is None or args.image is None:
                 parser.error("prepare requires --inputs and --image")
             result = prepare(args.inputs, args.root, args.image)
@@ -231,6 +270,12 @@ def main() -> None:
                 else execution
             )
     print(json.dumps(result, indent=2))
+    if args.command == "run" and any(
+        row.get("status") == "provider_unavailable" for row in result.get("rows", [])
+    ):
+        parser.exit(
+            1, "Provider unavailable; saved report retained, no automatic retry.\n"
+        )
 
 
 if __name__ == "__main__":

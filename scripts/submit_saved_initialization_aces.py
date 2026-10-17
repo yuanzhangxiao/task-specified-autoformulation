@@ -84,7 +84,13 @@ def submit(root: Path, wave: str) -> dict:
             **identity,
             "jobs": {"propose": job},
             "maximum_cases": len(plan["tasks"]),
-            "maximum_generation_requests": len(plan["tasks"]) * 10,
+            "maximum_generation_requests": sum(
+                10
+                - plan.get("inherited_provider_outcomes", {})
+                .get(task["task_id"], {})
+                .get("physical_request_offset", 0)
+                for task in plan["tasks"]
+            ),
             "automatic_followup": False,
             "test_data_opened": False,
         }

@@ -331,6 +331,12 @@ def verify(root: Path) -> dict:
             or not 1 <= len(plan["tasks"]) <= 3
         ):
             raise ValueError("focused initializer retest policy differs")
+    if "provider_recovery_policy" in plan:
+        from autoformalism.research.initialization_provider_recovery import (
+            validate_plan,
+        )
+
+        validate_plan(plan)
     return plan
 
 
@@ -495,8 +501,28 @@ def run_episode(
     directory = root / "results" / task["task_id"]
     identity = namespace(plan, task)
     cached = _cache_records(directory / "calls", identity)
+    recovery = plan.get("provider_recovery_policy") is not None
+    inherited_cost, offset = _cost([]), 0
+    settings = StagedModelSettings.model_validate(plan["settings"])
+    if recovery:
+        from autoformalism.research.initialization_provider_recovery import (
+            cumulative_cost,
+            validate_plan,
+        )
+
+        validate_plan(plan)
+        predecessor = plan["inherited_provider_outcomes"][task["task_id"]]
+        inherited_cost = predecessor["cost"]
+        offset = predecessor["physical_request_offset"]
+        settings = StagedModelSettings.model_validate(
+            {
+                **plan["settings"],
+                "maximum_requests": MAX_CALLS - offset,
+                "maximum_total_tokens": MAX_TOKENS - inherited_cost["budget_charge"],
+            }
+        )
     client = ConstructionClient(
-        settings=StagedModelSettings.model_validate(plan["settings"]),
+        settings=settings,
         directory=directory / "calls",
         namespace=identity,
         seed=task["seed"],
@@ -546,7 +572,7 @@ def run_episode(
         tracked = initialization.state(
             draft, report, baseline, check["eligible"], answers
         )
-    for index in range(MAX_CALLS):
+    for index in range(offset, MAX_CALLS):
         state = (
             build_state(report, tracked, check["eligible"], answers)
             if api is not control
@@ -566,7 +592,7 @@ def run_episode(
             state,
             repetition,
             index,
-            _cost(records)["budget_charge"],
+            inherited_cost["budget_charge"] + _cost(records)["budget_charge"],
             policy=plan.get("actionable_policy") if v2 else None,
             stage=stage,
             initialization=initialization,
@@ -599,6 +625,40 @@ def run_episode(
         before_initialization = (
             initialization.handoff if initialization is not None else None
         )
+        if recovery and record["status"] != "responded":
+            event = sealed_write(
+                event_path,
+                {
+                    "identity": identity,
+                    "index": index,
+                    "request_hash": record["request_hash"],
+                    "record_sha256": content_hash(record),
+                    "before": draft.model_dump(mode="json"),
+                    "after": draft.model_dump(mode="json"),
+                    "accepted": False,
+                    "stage_complete": False,
+                    "error": None,
+                    "transport_status": record["status"],
+                    "transport_error": record.get("error"),
+                    "scientific_reply_received": False,
+                    "structural_assessment": check,
+                    "scientific_state": state,
+                    "semantic_model_unchanged": True,
+                    "consecutive_unchanged": unchanged,
+                    "retained_last_edit": last,
+                    "retained_repetition_feedback": repetition,
+                    "stage": stage,
+                    "initialization_before": initialization.handoff.model_dump(
+                        mode="json"
+                    ),
+                    "initialization_after": initialization.handoff.model_dump(
+                        mode="json"
+                    ),
+                },
+            )
+            events.append(event)
+            stop = "provider_unavailable"
+            break
         if initialization is not None and stage == "initialization":
             initialization.initialization_calls += 1
         raw, error, accepted, complete = None, None, False, False
@@ -844,11 +904,33 @@ def run_episode(
             "scientific_state": final_state,
             "stop_reason": stop,
             "event_count": len(events),
-            "cost": _cost(all_records),
-            "status": "assessed",
+            "cost": cumulative_cost(inherited_cost, _cost(all_records))
+            if recovery
+            else _cost(all_records),
+            "status": "provider_unavailable"
+            if recovery and stop == "provider_unavailable"
+            else "assessed",
             "optimizer_calls": 0,
             "test_data_opened": False,
             "scientific_accuracy_established": False,
+            **(
+                {
+                    "provider_recovery_policy": plan["provider_recovery_policy"],
+                    "physical_request_offset": offset,
+                    "inherited_cost": inherited_cost,
+                    "new_cost": _cost(all_records),
+                    "cumulative_cost": cumulative_cost(
+                        inherited_cost, _cost(all_records)
+                    ),
+                    "provider_availability": "unavailable"
+                    if stop == "provider_unavailable"
+                    else "responded"
+                    if any(r["status"] == "responded" for r in records)
+                    else "not_attempted",
+                }
+                if recovery
+                else {}
+            ),
             **(
                 initialization.result(draft, check)
                 if initialization is not None
@@ -860,6 +942,15 @@ def run_episode(
 
 def report(root: Path, plan: dict) -> dict:
     """Report structural and scientific outcomes separately, including partial cost."""
+    recovery = plan.get("provider_recovery_policy") is not None
+    if recovery:
+        from autoformalism.research.initialization_provider_recovery import (
+            cumulative_cost,
+            cumulative_costs,
+            validate_plan,
+        )
+
+        validate_plan(plan)
     rows, parts = (
         [],
         [
@@ -884,9 +975,26 @@ def report(root: Path, plan: dict) -> dict:
             "Initialization dependencies and joint repairs of saved v2 final drafts; "
             "historical parents have different budgets. No fitting or test access."
         )
+    if recovery:
+        parts[2] = (
+            "Provider recovery retains every failed attempt and its reservation "
+            "within the original 10-call / 262,144-token allowance."
+        )
+        parts[5] = (
+            "| Task | Arm | Structure | Scientific checks | Availability | "
+            "Inherited calls | New calls | Total calls | Charged tokens |"
+        )
+        parts[6] = "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |"
     for task in plan["tasks"]:
         folder = root / "results" / task["task_id"]
         records = _cache_records(folder / "calls", namespace(plan, task))
+        new_cost = _cost(records)
+        inherited_cost = (
+            plan["inherited_provider_outcomes"][task["task_id"]]["cost"]
+            if recovery
+            else _cost([])
+        )
+        total_cost = cumulative_cost(inherited_cost, new_cost) if recovery else new_cost
         value = (
             sealed_read(folder / "result.json")
             if (folder / "result.json").exists()
@@ -901,20 +1009,42 @@ def report(root: Path, plan: dict) -> dict:
                 or value["source_draft_sha256"] != expected_draft
             ):
                 raise ValueError("result identity differs")
-            if value["cost"] != _cost(records):
+            if value["cost"] != total_cost or (
+                recovery
+                and (
+                    value["inherited_cost"] != inherited_cost
+                    or value["new_cost"] != new_cost
+                    or value["cumulative_cost"] != total_cost
+                )
+            ):
                 raise ValueError("result accounting differs")
         row = {
             "task": task["task_id"],
             "arm": task["arm"],
             "source_task": task["source_task"],
-            "status": "assessed" if value else "partial" if records else "pending",
+            "status": value["status"]
+            if value and recovery
+            else "assessed"
+            if value
+            else "partial"
+            if records
+            else "pending",
             "structural_eligible": value["assessment"]["eligible"] if value else None,
             "scientific_status": value["scientific_state"]["repair_status"]
             if value
             else None,
             "stop_reason": value["stop_reason"] if value else None,
-            "cost": _cost(records),
+            "cost": total_cost,
         }
+        if recovery:
+            row.update(
+                inherited_cost=inherited_cost,
+                new_cost=new_cost,
+                cumulative_cost=total_cost,
+                provider_availability=value["provider_availability"]
+                if value
+                else "pending",
+            )
         if plan.get("protocol") in INITIALIZATION_PROTOCOLS:
             row["initialization_complete"] = (
                 value["initialization_status"]["complete"] if value else None
@@ -943,8 +1073,17 @@ def report(root: Path, plan: dict) -> dict:
         rows.append(row)
         parts.append(
             f"| {row['task']} | {row['arm']} | {row['structural_eligible']} "
-            f"| {row['scientific_status']} | {row['cost']['physical_requests']} "
-            f"| {row['cost']['observed_tokens']} |"
+            f"| {row['scientific_status']} | "
+            + (
+                f"{row['provider_availability']} | "
+                f"{inherited_cost['physical_requests']} | "
+                f"{new_cost['physical_requests']} | "
+                f"{total_cost['physical_requests']} | "
+                f"{total_cost['budget_charge']} |"
+                if recovery
+                else f"{row['cost']['physical_requests']} | "
+                f"{row['cost']['observed_tokens']} |"
+            )
         )
         if value:
             model = control.model_view(control.Draft.model_validate(value["draft"]))
@@ -952,6 +1091,16 @@ def report(root: Path, plan: dict) -> dict:
                 "model": model,
                 "scientific_state": value["scientific_state"],
                 "structural_errors": value["assessment"]["errors"],
+                **(
+                    {
+                        "provider_availability": row["provider_availability"],
+                        "inherited_cost": inherited_cost,
+                        "new_cost": new_cost,
+                        "cumulative_cost": total_cost,
+                    }
+                    if recovery
+                    else {}
+                ),
                 **(
                     {"initialization_status": value["initialization_status"]}
                     if plan.get("protocol") in INITIALIZATION_PROTOCOLS
@@ -1006,6 +1155,16 @@ def report(root: Path, plan: dict) -> dict:
         "optimizer_calls": 0,
         "test_data_opened": False,
         "automatic_followup": False,
+        **(
+            {
+                "provider_recovery_policy": plan["provider_recovery_policy"],
+                "inherited_cost": cumulative_costs([r["inherited_cost"] for r in rows]),
+                "new_cost": cumulative_costs([r["new_cost"] for r in rows]),
+                "cumulative_cost": cumulative_costs([r["cost"] for r in rows]),
+            }
+            if recovery
+            else {}
+        ),
         **(
             {
                 "initialization_complete": sum(

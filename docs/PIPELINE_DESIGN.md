@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+`aces-provider-recovery-1` adds a bounded operational continuation to initializer
+v3. Sealed predecessor failures remain in cumulative accounting; unchanged starts,
+initializers, witnesses and scientific receipts are preserved. New provider
+failures terminate availability without advancing scientific repetition. The
+ACES execution identity binds an offline Harmony vocabulary and CPU-render
+preflight in addition to CUDA and model provenance. See
+`PHASE_C_INITIALIZATION_PROVIDER_RECOVERY.md`.
+
 `saved-topology-initialization-3` separates initial algebraic readout dependencies
 from later differential RHS dependencies when rechecking retained witnesses.
 Feedback-first stateless requests retain complete scientific context and use

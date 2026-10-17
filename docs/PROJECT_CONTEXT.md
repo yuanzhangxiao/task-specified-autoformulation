@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The initializer-v3 ACES retest returned nine provider failures and no responses;
+its three models are unchanged. An operational recovery bundles the verified
+Harmony vocabulary and checks CPU chat rendering before submission. A separate
+hash-bound continuation retains failed-call reservations and the original caps;
+provider unavailability is separated from scientific repeated repairs. Scientific
+prompts, checks and benchmarks are unchanged. See
+`PHASE_C_INITIALIZATION_PROVIDER_RECOVERY.md`; live confirmation remains pending.
+
 The opt-in initializer v3 milestone fixes initial-time witness conditioning and
 focuses repair presentation. Three explicitly selected saved T2-easy cases retain
 their models, initializer choices and witnesses for a separately budgeted ACES

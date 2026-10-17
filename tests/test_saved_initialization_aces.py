@@ -16,6 +16,15 @@ from scripts import submit_saved_initialization_aces as scheduler
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        adapter.harmony_vocab,
+        "verify",
+        lambda path: {
+            "protocol": adapter.harmony_vocab.PROTOCOL,
+            "filename": adapter.harmony_vocab.VOCAB_FILENAME,
+            "sha256": adapter.harmony_vocab.VOCAB_SHA256,
+        },
+    )
     plan = {
         "protocol": adapter.PROTOCOL,
         "execution_platform": adapter.PLATFORM,
@@ -83,6 +92,15 @@ def runtime_record(tmp_path):
                 "gpu_name": "NVIDIA H100 80GB HBM3",
                 "vllm": "0.27.1",
                 "driver": "fixed-driver",
+                "harmony": {
+                    "protocol": adapter.harmony_vocab.PROTOCOL,
+                    "filename": adapter.harmony_vocab.VOCAB_FILENAME,
+                    "sha256": adapter.harmony_vocab.VOCAB_SHA256,
+                    "openai_harmony": "fixed-version",
+                    "rendered_tokens": 8,
+                    "harmony_render_passed": True,
+                    "generation_requests": 0,
+                },
             }
         )
     )
@@ -143,6 +161,71 @@ def test_run_preserves_plan_caps_and_reports_on_deferral(setup, tmp_path, monkey
     assert called == plan["tasks"][:2]
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("sha256", "wrong"),
+        ("rendered_tokens", 0),
+        ("harmony_render_passed", False),
+        ("generation_requests", 1),
+    ],
+)
+def test_missing_or_invalid_harmony_receipt_blocks_generation(
+    setup, tmp_path, monkeypatch, field, value
+):
+    _, root, _ = setup
+    path = runtime_record(tmp_path)
+    record = json.loads(path.read_text())
+    record["harmony"][field] = value
+    path.write_text(json.dumps(record))
+    monkeypatch.setattr(adapter, "urlopen", lambda *a, **k: pytest.fail("no HTTP"))
+    with pytest.raises(ValueError, match="Harmony render preflight"):
+        adapter.bind_server(root, path, "http://127.0.0.1:8000")
+
+
+def test_asset_verification_failure_precedes_plan_write(setup, tmp_path, monkeypatch):
+    _, _, image = setup
+
+    def missing(path):
+        raise ValueError("Missing bundled Harmony vocabulary")
+
+    monkeypatch.setattr(adapter.harmony_vocab, "verify", missing)
+    fresh = tmp_path / "fresh"
+    with pytest.raises(ValueError, match="Missing bundled"):
+        adapter.prepare(tmp_path, fresh, image)
+    assert not fresh.exists()
+
+
+def test_recovery_cannot_switch_serving_image(setup, tmp_path, monkeypatch):
+    plan, _, image = setup
+    plan["provider_recovery_policy"] = "aces-provider-recovery-1"
+    plan["recovery_source"] = {"execution": {"image_sha256": adapter.file_hash(image)}}
+    monkeypatch.setattr(adapter, "verify_inputs", lambda _: plan)
+    fresh = tmp_path / "recovery"
+    image.write_bytes(b"a different image")
+    with pytest.raises(ValueError, match="original serving image"):
+        adapter.prepare(tmp_path, fresh, image)
+    assert not fresh.exists()
+
+
+def test_provider_failure_stops_other_cases_without_generation(
+    setup, tmp_path, monkeypatch
+):
+    plan, root, _ = setup
+    path = runtime_record(tmp_path)
+    models(monkeypatch)
+    called = []
+
+    def episode(directory, current, task, **kwargs):
+        called.append(task)
+        return {"status": "provider_unavailable"}
+
+    monkeypatch.setattr(adapter.campaign, "run_episode", episode)
+    monkeypatch.setattr(adapter.campaign, "report", lambda *args: {"stopped": True})
+    assert adapter.run(root, "http://127.0.0.1:8000", path) == {"stopped": True}
+    assert called == plan["tasks"][:1]
+
+
 def scheduler_setup(setup, monkeypatch):
     _, root, image = setup
     for key, value in {
@@ -183,6 +266,18 @@ def test_uncertain_submission_is_not_retried(setup, monkeypatch):
     )
     with pytest.raises(ValueError, match="outcome needs inspection"):
         scheduler.submit(root, "focused-1")
+
+
+def test_recovery_submission_advertises_only_remaining_calls(setup, monkeypatch):
+    plan, _, _ = setup
+    root = scheduler_setup(setup, monkeypatch)
+    execution = sealed_read(root / "execution.json")
+    plan["inherited_provider_outcomes"] = {
+        task["task_id"]: {"physical_request_offset": 3} for task in plan["tasks"]
+    }
+    monkeypatch.setattr(scheduler.campaign, "verify", lambda _: (plan, execution))
+    monkeypatch.setattr(scheduler, "submit_job", lambda *args: "1234")
+    assert scheduler.submit(root, "recovery-1")["maximum_generation_requests"] == 21
 
 
 def test_shell_launchers_parse():
