@@ -5,14 +5,17 @@ export AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 [[ -d "$AF_GROUP" ]] || { echo 'Run this command on ACES, with AF_GROUP set to your writable scratch directory.' >&2; exit 2; }
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
-# An inherited working Python needs no repeated module reset. Load its base only if needed.
-if ! "$AF_PYTHON" -c 'import ssl, pydantic, numpy' >/dev/null 2>&1; then
-  module load Python/3.11.5
-fi
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
+AF_CLI="$AF_REPO_ROOT/scripts/saved_initialization_aces.py"
+# Probe the real import chain: numpy can import while pandas/ctypes lacks libffi.
+# --help imports the worker without reading a plan, submitting, or making calls.
+if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
+  echo 'Python worker imports failed; loading the Python module and its library dependencies.' >&2
+  module load "${AF_PYTHON_MODULE:-Python/3.11.5}"
+  "$AF_PYTHON" "$AF_CLI" --help >/dev/null
+fi
 export AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-$AF_GROUP/phase-c-initialization-focused-v3}
 AF_INPUTS=${AF_INITIALIZATION_INPUTS:-$AF_REPO_ROOT/inputs/saved-initialization-v3}
-AF_CLI="$AF_REPO_ROOT/scripts/saved_initialization_aces.py"
 case "${1:?Use run, status, or inspect}" in
   run)
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}

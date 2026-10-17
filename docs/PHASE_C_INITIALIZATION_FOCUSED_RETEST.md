@@ -96,6 +96,16 @@ and `AF_OUTPUT_ROOT`. Submission receipts make repeating `run` idempotent.
 After an interrupted allocation, inspect its logs and use a new `AF_WAVE` to
 request another allocation against the same checkpoint and remaining budgets.
 
+The login and batch launchers test the worker's complete import chain with
+`--help` before accessing campaign files or starting a server. On failure they
+load `AF_PYTHON_MODULE` (default `Python/3.11.5`) and repeat the check with errors
+visible. A small `ssl,pydantic,numpy` probe is insufficient: on ACES it passed
+while pandas/ctypes could not load the Python module's `libffi.so.8` dependency.
+For the already uploaded `d84a35d` bundle, load `Python/3.11.5` in the login shell,
+check `import ctypes, pandas`, and rerun its original launcher. The existing
+submission exports that module environment into the batch job. This workaround
+does not edit the frozen source or any saved scientific artifact.
+
 Results default to `phase-c-initialization-focused-v3` under the group directory.
 `inspect` writes `inspection.tar.gz` there. No serving equivalence to the former
 Jetstream VM is assumed; this retest records the ACES environment independently.

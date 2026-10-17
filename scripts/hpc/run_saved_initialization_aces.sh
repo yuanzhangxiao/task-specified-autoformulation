@@ -3,13 +3,16 @@
 set -euo pipefail
 : "${AF_REPO_ROOT:?}" "${AF_OUTPUT_ROOT:?}" "${AF_PYTHON:?}" "${AF_VLLM_IMAGE:?}" "${AF_HF_HOME:?}" "${SLURM_JOB_ID:?}"
 [[ "${1:-propose}" == propose ]] || exit 2
-if ! "$AF_PYTHON" -c 'import ssl, pydantic, numpy' >/dev/null 2>&1; then
-  module load Python/3.11.5
-fi
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
+AF_CLI="$AF_REPO_ROOT/scripts/saved_initialization_aces.py"
+# Check the complete import chain before starting a server or reading artifacts.
+if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
+  echo 'Python worker imports failed; loading the Python module and its library dependencies.' >&2
+  module load "${AF_PYTHON_MODULE:-Python/3.11.5}"
+  "$AF_PYTHON" "$AF_CLI" --help >/dev/null
+fi
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 OMP_NUM_THREADS=8
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}" no_proxy="127.0.0.1,localhost"
-AF_CLI="$AF_REPO_ROOT/scripts/saved_initialization_aces.py"
 "$AF_PYTHON" "$AF_CLI" verify --root "$AF_OUTPUT_ROOT"
 AF_EXPECTED_IMAGE=$("$AF_PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["image_sha256"])' "$AF_OUTPUT_ROOT/execution.json")
 AF_ACTUAL_IMAGE=$(sha256sum "$AF_VLLM_IMAGE")

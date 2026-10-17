@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import subprocess
 import tarfile
 from copy import deepcopy
@@ -202,3 +203,85 @@ def test_inspection_includes_report_and_actual_group_counts(setup, monkeypatch):
         assert archive.extractfile("REPORT.html").read() == (
             b"<p>Saved episode results</p>"
         )
+
+
+@pytest.mark.parametrize("worker", [False, True])
+@pytest.mark.parametrize("health", ["healthy", "repairable", "broken", "module_failed"])
+def test_launcher_checks_real_imports_and_stops_if_module_cannot_repair(
+    tmp_path, worker, health
+):
+    """A numpy-only probe may pass even when pandas cannot import ctypes/libffi."""
+    python = tmp_path / "python"
+    python.write_text(
+        "#!/bin/bash\n"
+        'printf "python %s\\n" "$*" >> "$AF_TEST_LOG"\n'
+        '[[ "$1" != -c ]] || exit 0\n'
+        '[[ "$PYTHONPATH" == "$AF_REPO_ROOT:$AF_REPO_ROOT/src" ]] || exit 91\n'
+        'if [[ "$2" == --help ]]; then\n'
+        '  [[ "${AF_TEST_READY:-}" != 1 ]] || exit 0\n'
+        "  echo 'ImportError: libffi.so.8' >&2\n"
+        "  exit 1\n"
+        "fi\n"
+        # The batch test deliberately stops at verify, before touching any GPU.
+        '[[ "$2" != verify ]] || exit 73\n'
+        "exit 92\n"
+    )
+    python.chmod(0o755)
+    modules = tmp_path / "modules.sh"
+    modules.write_text(
+        "module() {\n"
+        '  printf "module %s\\n" "$*" >> "$AF_TEST_LOG"\n'
+        '  [[ "$AF_TEST_HEALTH" != module_failed ]] || return 1\n'
+        '  if [[ "$AF_TEST_HEALTH" == repairable ]]; then\n'
+        "    export AF_TEST_READY=1\n"
+        "  fi\n"
+        "}\n"
+    )
+    squeue = tmp_path / "squeue"
+    squeue.write_text("#!/bin/bash\nexit 0\n")
+    squeue.chmod(0o755)
+    log = tmp_path / "calls.log"
+    output = tmp_path / "results"
+    env = {
+        **os.environ,
+        "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+        "BASH_ENV": str(modules),
+        "AF_TEST_LOG": str(log),
+        "AF_TEST_HEALTH": health,
+        "AF_TEST_READY": "1" if health == "healthy" else "0",
+        "AF_PYTHON": str(python),
+        "AF_PYTHON_MODULE": "Python/test-version",
+        "AF_REPO_ROOT": str(adapter.REPO),
+        "AF_GROUP": str(tmp_path),
+        "AF_OUTPUT_ROOT": str(output),
+        "AF_VLLM_IMAGE": "/unused/image.sif",
+        "AF_HF_HOME": "/unused/cache",
+        "SLURM_JOB_ID": "test-job",
+    }
+    script = "run" if worker else "start"
+    result = subprocess.run(
+        [
+            "bash",
+            str(adapter.REPO / f"scripts/hpc/{script}_saved_initialization_aces.sh"),
+            "propose" if worker else "status",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    calls = log.read_text().splitlines()
+    assert calls[0].endswith("saved_initialization_aces.py --help")
+    if health == "healthy":
+        assert not any(c.startswith("module ") for c in calls)
+    else:
+        assert calls[1] == "module load Python/test-version"
+    if health in {"healthy", "repairable"}:
+        assert result.returncode == (73 if worker else 0), result.stderr
+        if worker:
+            assert " verify --root " in calls[-1]
+    else:
+        assert result.returncode == 1
+        assert not any(" verify " in c or " prepare " in c for c in calls)
+        if health == "broken":
+            assert "ImportError: libffi.so.8" in result.stderr
+    assert not output.exists()
