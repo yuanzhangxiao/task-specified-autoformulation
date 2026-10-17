@@ -89,9 +89,16 @@ def _handoff(folder, task, draft, evidence):
     return initial.InitializerDependencyHandoff.model_validate(raw["handoff"])
 
 
-def _preserve_witnesses(report, draft, evidence, previous_questions):
+def _preserve_witnesses(
+    report, draft, evidence, previous_questions, *, initial_time_policy=None
+):
     """Merge causal-prefix rechecks before computing repair completion status."""
-    recheck = initial.recheck_closed_witnesses(draft, evidence, previous_questions)
+    recheck = initial.recheck_closed_witnesses(
+        draft,
+        evidence,
+        previous_questions,
+        **({"initial_time_policy": initial_time_policy} if initial_time_policy else {}),
+    )
     report["saved_witness_recheck"] = recheck.model_dump(mode="json")
     diagnostics = report["full_report"]["diagnostics"]
     questions = report["advisory_questions"]
@@ -117,6 +124,28 @@ def _preserve_witnesses(report, draft, evidence, previous_questions):
             "compared only through each saved witness time. Forcing differences "
             "after that time cannot explain the earlier observation."
         )
+        if initial_time_policy and all(
+            all(
+                time
+                == next(
+                    t.time[0] for t in evidence.trajectories if t.trajectory_id == name
+                )
+                for name, time in zip(w.trajectories, w.times, strict=True)
+            )
+            for w in row.witnesses
+        ):
+            conditioning["comparison"] = (
+                "At the common initial instant, compare the displayed state "
+                "initializer information and instantaneous supplied readings. "
+                "Differential RHS arguments do not change those initial values. "
+                "Repair the readout/initial dependency if justified, or identify "
+                "an inapplicable stated assumption with evidence."
+            )
+            conditioning["initial_time_policy"] = initial_time_policy
+            conditioning["matched_instantaneous_channels"] = conditioning.pop(
+                "matched_complete_forcing_channels", []
+            )
+            conditioning.pop("interpolation", None)
         questions.append(
             {
                 "target": row.target,
@@ -155,7 +184,14 @@ def _preserve_witnesses(report, draft, evidence, previous_questions):
 
 
 def qualified_feedback(
-    draft, evidence, contract, handoff, *, family=False, previous_questions=()
+    draft,
+    evidence,
+    contract,
+    handoff,
+    *,
+    family=False,
+    previous_questions=(),
+    initial_time_policy=None,
 ):
     """Keep immutable data identity separate from the initializer hypothesis hash.
 
@@ -176,7 +212,13 @@ def qualified_feedback(
         derived,
         identity_policy=training.SEMANTIC_QUESTION_IDENTITY,
     )
-    _preserve_witnesses(report, draft, derived, previous_questions)
+    _preserve_witnesses(
+        report,
+        draft,
+        derived,
+        previous_questions,
+        initial_time_policy=initial_time_policy,
+    )
     report["initialization_evidence_sha256"] = report["evidence_sha256"]
     report["evidence_sha256"] = evidence.sha256
     report["initialization_qualification"] = {

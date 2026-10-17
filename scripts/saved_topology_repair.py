@@ -204,6 +204,7 @@ def main() -> None:
             "refreeze",
             "initialize",
             "refine-initialization",
+            "focus-initialization",
             "preview",
             "run",
             "report",
@@ -216,6 +217,7 @@ def main() -> None:
     parser.add_argument("--work", type=Path)
     parser.add_argument("--requests", type=Path)
     parser.add_argument("--measured-bindings", type=Path)
+    parser.add_argument("--task", action="append", default=[])
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
         if args.command in {
@@ -223,6 +225,7 @@ def main() -> None:
             "refreeze",
             "initialize",
             "refine-initialization",
+            "focus-initialization",
         }:
             if args.source is None:
                 parser.error("freezing a plan requires --source")
@@ -233,7 +236,11 @@ def main() -> None:
                 from autoformalism.research.initialized_topology_repair import freeze
 
                 freezer = freeze
-            if args.command == "refine-initialization":
+            if args.command == "focus-initialization":
+                from autoformalism.research.initialization_focused_retest import freeze
+
+                plan = freeze(args.source, args.root, args.task)
+            elif args.command == "refine-initialization":
                 from autoformalism.research.initialized_topology_repair import refine
 
                 bindings = (

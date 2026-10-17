@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+`saved-topology-initialization-3` separates initial algebraic readout dependencies
+from later differential RHS dependencies when rechecking retained witnesses.
+Feedback-first stateless requests retain complete scientific context and use
+losslessly counted identical prior records. The bounded ACES retest freezes
+selected final drafts and rejected receipts; historical call costs remain separate
+from new allowances. Source, serving image and runtime provenance bind resume.
+See `PHASE_C_INITIALIZATION_FOCUSED_RETEST.md`.
+
 `saved-topology-initialization-2` preserves every baseline/current-episode witness
 and uses verified serving-token reservations under unchanged caps. Its lossless
 structural feedback projection shares repeated details and qualifies consumer

@@ -44,7 +44,12 @@ PROTOCOL = "saved-topology-repair-comparison-1"
 PROTOCOL_V2 = "saved-topology-repair-feedback-2"
 PROTOCOL_INITIALIZATION = "saved-topology-initialization-1"
 PROTOCOL_INITIALIZATION_V2 = "saved-topology-initialization-2"
-INITIALIZATION_PROTOCOLS = {PROTOCOL_INITIALIZATION, PROTOCOL_INITIALIZATION_V2}
+PROTOCOL_INITIALIZATION_V3 = "saved-topology-initialization-3"
+INITIALIZATION_PROTOCOLS = {
+    PROTOCOL_INITIALIZATION,
+    PROTOCOL_INITIALIZATION_V2,
+    PROTOCOL_INITIALIZATION_V3,
+}
 ARMS = ("control", "actionable")
 REPO = Path(__file__).resolve().parents[3]
 MAX_CALLS = 10
@@ -298,7 +303,9 @@ def verify(root: Path) -> dict:
     if plan["protocol"] in INITIALIZATION_PROTOCOLS and (
         plan.get("actionable_policy")
         != (
-            initialized.POLICY_V2
+            initialized.POLICY_V3
+            if plan["protocol"] == PROTOCOL_INITIALIZATION_V3
+            else initialized.POLICY_V2
             if plan["protocol"] == PROTOCOL_INITIALIZATION_V2
             else initialized.POLICY
         )
@@ -307,11 +314,23 @@ def verify(root: Path) -> dict:
         or plan["settings"]["maximum_total_tokens"] != MAX_TOKENS
     ):
         raise ValueError("initializer repair policy or allowance differs")
-    if plan["protocol"] == PROTOCOL_INITIALIZATION_V2 and (
+    if plan["protocol"] in {
+        PROTOCOL_INITIALIZATION_V2,
+        PROTOCOL_INITIALIZATION_V3,
+    } and (
         plan.get("budget_reservation_policy") != MEASURED_RESERVATION
         or plan.get("witness_policy") != "all-seen-witnesses-1"
     ):
         raise ValueError("initializer qualification policy differs")
+    if plan["protocol"] == PROTOCOL_INITIALIZATION_V3:
+        from autoformalism.search.topology_initialization import INITIAL_TIME_POLICY
+
+        if (
+            plan.get("initial_time_policy") != INITIAL_TIME_POLICY
+            or plan.get("execution_platform") != "aces-h100x1"
+            or not 1 <= len(plan["tasks"]) <= 3
+        ):
+            raise ValueError("focused initializer retest policy differs")
     return plan
 
 
@@ -417,7 +436,24 @@ def make_packet(
         **(initialization.packet_arguments() if initialization is not None else {}),
     )
     control.repair_budget(packet, MAX_CALLS, count, MAX_TOKENS, charged, MAX_TOKENS)
+    if initialization is not None and initialization.policy == initialized.POLICY_V3:
+        from autoformalism.search.construction_initialization_focus import project
+
+        packet = project(packet, draft)
+        packet["prompt_policy"] = initialized.POLICY_V3
     return packet
+
+
+def request_system(api, packet: dict) -> str:
+    """Select versioned instructions without changing older cached requests."""
+    return api.system_for(packet) if api is initialized else api.SYSTEM
+
+
+def request_user(packet: dict) -> str:
+    """Preserve the focused policy's feedback-first ordering in actual requests."""
+    return json.dumps(
+        packet, sort_keys=packet.get("prompt_policy") != initialized.POLICY_V3
+    )
 
 
 def expected_request(client, api, packet: dict, index: int, stage="repair") -> dict:
@@ -432,8 +468,8 @@ def expected_request(client, api, packet: dict, index: int, stage="repair") -> d
         "body": {
             "model": client.settings.model,
             "messages": [
-                {"role": "system", "content": api.SYSTEM},
-                {"role": "user", "content": json.dumps(packet, sort_keys=True)},
+                {"role": "system", "content": request_system(api, packet)},
+                {"role": "user", "content": request_user(packet)},
             ],
             "stream": False,
             "reasoning_effort": client.settings.reasoning_effort,
@@ -467,7 +503,8 @@ def run_episode(
         base_url=base_url,
         **(
             {"reservation_policy": MEASURED_RESERVATION}
-            if plan.get("protocol") == PROTOCOL_INITIALIZATION_V2
+            if plan.get("protocol")
+            in {PROTOCOL_INITIALIZATION_V2, PROTOCOL_INITIALIZATION_V3}
             else {}
         ),
         **client_kwargs,
@@ -488,6 +525,9 @@ def run_episode(
     )
     answers, records, events = {}, [], []
     last, repetition = None, None
+    if plan.get("protocol") == PROTOCOL_INITIALIZATION_V3:
+        last = start.get("last_edit")
+        repetition = start.get("repetition_feedback")
     unchanged = 0
     previous_signature = None
     stop = "repair_budget_exhausted"
@@ -543,8 +583,8 @@ def run_episode(
         else:
             try:
                 record = client.call(
-                    system=api.SYSTEM,
-                    user=json.dumps(packet, sort_keys=True),
+                    system=request_system(api, packet),
+                    user=request_user(packet),
                     response_model=api.response_model(stage),
                     step=f"{stage}_{index:03d}",
                     attempt=index,

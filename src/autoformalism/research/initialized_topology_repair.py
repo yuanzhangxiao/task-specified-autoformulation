@@ -19,6 +19,7 @@ from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "saved-topology-initialization-1"
 PROTOCOL_V2 = "saved-topology-initialization-2"
+PROTOCOL_V3 = "saved-topology-initialization-3"
 
 
 def refine(source: Path, destination: Path, bindings: dict | None = None) -> dict:
@@ -165,7 +166,7 @@ class Session:
 
     def __init__(self, problem, start, *, policy=api.POLICY):
         self.problem = problem
-        if policy not in {api.POLICY, api.POLICY_V2}:
+        if policy not in {api.POLICY, api.POLICY_V2, api.POLICY_V3}:
             raise ValueError("unknown initializer session policy")
         self.policy = policy
         self.contract = initial.validate_information_contract(
@@ -173,7 +174,7 @@ class Session:
         )
         expected_contract = (
             "recorded-t0-initial-information-2"
-            if policy == api.POLICY_V2
+            if policy in {api.POLICY_V2, api.POLICY_V3}
             else "recorded-t0-initial-information-1"
         )
         if self.contract.protocol != expected_contract:
@@ -184,6 +185,16 @@ class Session:
             self.contract,
         )
         self.handoff = initial.InitializerDependencyHandoff()
+        if policy == api.POLICY_V3:
+            self.handoff = initial.InitializerDependencyHandoff.model_validate(
+                start["initializer_handoff"]
+            )
+            api.handoff_status(
+                api.Draft.model_validate(start["draft"]),
+                problem.evidence,
+                self.contract,
+                self.handoff,
+            )
         self.baseline = start.get("previous_conflicts", start["diagnostics"])
         self.initialization_calls = 0
 
@@ -203,6 +214,11 @@ class Session:
             self.handoff,
             family=True,
             previous_questions=list(unique.values()),
+            **(
+                {"initial_time_policy": initial.INITIAL_TIME_POLICY}
+                if self.policy == api.POLICY_V3
+                else {}
+            ),
         )
 
     def status(self, draft):
@@ -222,7 +238,7 @@ class Session:
                 answers,
                 **(
                     {"witness_policy": ALL_SEEN_WITNESSES}
-                    if self.policy == api.POLICY_V2
+                    if self.policy in {api.POLICY_V2, api.POLICY_V3}
                     else {}
                 ),
             ),
@@ -240,7 +256,11 @@ class Session:
             "evidence": self.problem.evidence,
             "initial_contract": self.contract,
             "handoff": self.handoff,
-            **({"policy": self.policy} if self.policy == api.POLICY_V2 else {}),
+            **(
+                {"policy": self.policy}
+                if self.policy in {api.POLICY_V2, api.POLICY_V3}
+                else {}
+            ),
         }
 
     def result(self, draft, check):
@@ -268,6 +288,7 @@ def preview(plan: dict, output: Path) -> dict:
     links = []
     for number, task in enumerate(plan["tasks"]):
         start = plan["starts"][task["source_task"]]
+        focused = plan["protocol"] == PROTOCOL_V3
         problem = saved.Problem(plan["cells"][task["benchmark_id"]], start["task"])
         draft = api.Draft.model_validate(start["draft"])
         session = Session(problem, start, policy=plan["actionable_policy"])
@@ -280,9 +301,9 @@ def preview(plan: dict, output: Path) -> dict:
                 api,
                 problem,
                 draft,
-                None,
+                start.get("last_edit") if focused else None,
                 state,
-                None,
+                start.get("repetition_feedback") if focused else None,
                 0,
                 0,
                 stage=stage,
@@ -328,6 +349,25 @@ def preview(plan: dict, output: Path) -> dict:
                 stage="repair",
                 initialization=old_session,
             )
+        if focused:
+            old_session = Session(problem, start, policy=api.POLICY_V2)
+            old_session.handoff = session.handoff
+            old_report = old_session.diagnose(draft, old_session.baseline)
+            old_state = old_session.state(
+                draft, old_report, old_session.baseline, check["eligible"], {}
+            )
+            old = saved.make_packet(
+                api,
+                problem,
+                draft,
+                start.get("last_edit"),
+                old_state,
+                start.get("repetition_feedback"),
+                0,
+                0,
+                stage="repair",
+                initialization=old_session,
+            )
         diff = difflib.HtmlDiff(wrapcolumn=100).make_file(
             json.dumps(old, indent=2).splitlines(),
             json.dumps(packets["repair"], indent=2).splitlines(),
@@ -342,7 +382,9 @@ def preview(plan: dict, output: Path) -> dict:
             f"<p>First live stage: {session.stage(draft)}. "
             "Repair preview uses the same "
             "saved model before any new reply; it is not a predicted response.</p>",
-            f"<h2>System</h2><pre>{html.escape(api.SYSTEM)}</pre>",
+            "<h2>System</h2><pre>"
+            + html.escape(saved.request_system(api, packets["repair"]))
+            + "</pre>",
         ]
         for stage, packet in sorted(packets.items()):
             for label, value in (
@@ -366,7 +408,7 @@ def preview(plan: dict, output: Path) -> dict:
         (output / f"request-{number:02d}.json").write_text(
             json.dumps(
                 {
-                    "system": api.SYSTEM,
+                    "system": saved.request_system(api, packets["repair"]),
                     "first_stage": session.stage(draft),
                     "packets": packets,
                 },
@@ -385,7 +427,13 @@ def preview(plan: dict, output: Path) -> dict:
         "<style>body{font:16px/1.6 system-ui;max-width:1050px;margin:35px auto}</style>"
         "<h1>Initial dependencies at the topology boundary</h1>"
         + (
-            "<p>V2: repeated structural detail is displayed once; every distinct "
+            "<p>V3 focused ACES retest: three explicitly selected saved cases. "
+            "Feedback and equations precede complete public background. Repeated "
+            "identical reply records are displayed with counts. Initial-time "
+            "algebraic checks stop at differential states and use their declared "
+            "initializers, rather than importing later ODE dependencies.</p>"
+            if plan["protocol"] == PROTOCOL_V3
+            else "<p>V2: repeated structural detail is displayed once; every distinct "
             "trajectory witness is retained. Reviewed direct initial measurements "
             "are fixed identities, not fitted values. Serving-token reservations "
             "replace byte estimates; all maximum budgets remain unchanged.</p>"
@@ -398,7 +446,7 @@ def preview(plan: dict, output: Path) -> dict:
         "Missing choices remain unfinished. Joint repairs validate both records "
         "atomically. "
         "Previously matched trajectory prefixes remain in feedback after edits.</p>"
-        "<p>Every saved v2 final draft; no score selection. "
+        "<p>Frozen saved drafts; no score selection. "
         "At most three initial-dependency calls within ten total calls per episode. "
         "No fitting, test access, or scientific-correctness claim. No generation "
         "performed "

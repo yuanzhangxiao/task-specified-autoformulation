@@ -8,6 +8,7 @@ Historical evidence and topology diagnostics remain unchanged.
 
 from __future__ import annotations
 
+from itertools import combinations
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -25,12 +26,14 @@ from autoformalism.search.topology_compatibility import (
     _graph,
     _initial_key,
     _pair,
+    _value,
     diagnose,
     validate_evidence,
 )
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "topology-initializer-dependencies-1"
+INITIAL_TIME_POLICY = "initial-algebraic-dependencies-1"
 
 
 class InitialInformationContract(StrictSchema):
@@ -282,10 +285,113 @@ def _prefix_conditioning(target, saved, left, right, graph, kinds, errors, evide
     return scope, bool(equal and forcing), sorted(set(missing + fm))
 
 
+def _initial_scope(target: str, graph: dict, kinds: dict) -> set[str]:
+    """Expand readout dependencies at t0 without traversing differential RHSs."""
+    scope, pending = set(), [target]
+    while pending:
+        name = pending.pop()
+        if name in scope:
+            continue
+        scope.add(name)
+        if kinds.get(name) != "differential":
+            pending.extend(graph.get(name, ()))
+    return scope
+
+
+def _initial_conditioning(target, left, right, graph, kinds, errors, evidence):
+    """Compare state initializer rules and exact supplied values at the origin.
+
+    The differential equation determines changes after initialization, not the
+    initial value. An RHS ancestor can therefore distinguish later trajectories
+    without distinguishing a readout at t0. Initializer arguments are followed
+    through their declared public-information rules by ``_initial_key``.
+    """
+    scope = _initial_scope(target, graph, kinds)
+    states = {name for name in scope if kinds.get(name) == "differential"}
+    missing = [*_common_missing(evidence), *errors]
+    if target not in graph or not states:
+        missing.append("no generated differential ancestor subsystem")
+    # Keep the existing candidate-class qualification; this narrow policy does
+    # not broaden the supported class of resets, implicit equations or DAEs.
+    if evidence.contract.reset_impulse_free is not True:
+        missing.append("reset/impulse-free open-loop interval is not established")
+    if evidence.contract.uniqueness_assumed is not True:
+        missing.append("unique-solution candidate-class hypothesis is unavailable")
+    if missing:
+        return scope, False, missing
+    equal = True
+    for state in sorted(states):
+        a, am = _initial_key(left, state, evidence)
+        b, bm = _initial_key(right, state, evidence)
+        equal &= a == b
+        missing.extend(am + bm)
+    for name in sorted(scope - set(graph)):
+        if (
+            name != evidence.context.time_symbol
+            and evidence.contract.absolute_error_bounds.get(name) != 0
+        ):
+            missing.append(f"exact initial supplied argument {name} is not established")
+        try:
+            equal &= _value(left, name, 0, evidence.context.time_symbol) == _value(
+                right, name, 0, evidence.context.time_symbol
+            )
+        except KeyError:
+            missing.append(f"initial supplied argument {name} is unavailable")
+    return scope, bool(equal), sorted(set(missing))
+
+
+def initial_time_questions(
+    draft: Draft, evidence: TrainingCompatibilityEvidence
+) -> list[dict]:
+    """Locate initial readout contrasts without choosing any scientific repair.
+
+    These are candidate pairs, not established conflicts. Pass them to
+    ``recheck_closed_witnesses`` with ``INITIAL_TIME_POLICY`` to qualify their
+    conditioning and uncertainty. Only sealed training samples at a common
+    initial time are considered; no ODE integration or initializer is evaluated.
+    """
+    validate_evidence(evidence)
+    graph, kinds, _ = _graph(draft, evidence.context)
+    questions = []
+    for target in evidence.context.targets:
+        if kinds.get(target) != "algebraic" or not any(
+            kinds.get(name) == "differential"
+            for name in _initial_scope(target, graph, kinds)
+        ):
+            continue
+        witnesses = [
+            _pair(left, 0, right, 0, target, evidence).model_dump(mode="json")
+            for left, right in combinations(evidence.trajectories, 2)
+            if left.time[0] == right.time[0]
+            and left.targets[target][0] != right.targets[target][0]
+        ]
+        if witnesses:
+            questions.append(
+                {
+                    "question_id": content_hash(
+                        {
+                            "policy": INITIAL_TIME_POLICY,
+                            "evidence_sha256": evidence.sha256,
+                            "topology_sha256": content_hash(
+                                draft.model_dump(mode="json")
+                            ),
+                            "target": target,
+                        }
+                    )[:20],
+                    "property": "closed_subsystem",
+                    "target": target,
+                    "witnesses": witnesses,
+                }
+            )
+    return questions
+
+
 def recheck_closed_witnesses(
     draft: Draft,
     evidence: TrainingCompatibilityEvidence,
     previous_questions: list[dict] | tuple[dict, ...],
+    *,
+    initial_time_policy: str | None = None,
 ) -> ClosedWitnessRecheck:
     """Preserve old matched-pair conflicts using only causal forcing prefixes.
 
@@ -293,10 +399,14 @@ def recheck_closed_witnesses(
     observation. Missing assumptions and invalid coordinates never create a pass.
     Call with separately qualified derived evidence when initializer information
     has been declared or bounded by the explicit recorded-t0 family contract.
+    The opt-in initial-time policy stops dependency expansion at differential
+    states at the common initial time. The default preserves historical replay.
     """
+    if initial_time_policy not in {None, INITIAL_TIME_POLICY}:
+        raise ValueError("unknown initial-time conditioning policy")
     validate_evidence(evidence)
     graph, kinds, graph_errors = _graph(draft, evidence.context)
-    checks, supported, scopes = [], {}, {}
+    checks, supported, scopes, initial_targets = [], {}, {}, set()
     for question in previous_questions:
         if not isinstance(question, dict):
             checks.append({"status": "invalid_saved_witness", "reason": "not a record"})
@@ -326,9 +436,26 @@ def recheck_closed_witnesses(
                 sample_indices=list(saved.sample_indices),
                 conditioning_end_time=saved.times[0],
             )
-            scope, equal, missing = _prefix_conditioning(
-                target, saved, left, right, graph, kinds, graph_errors, evidence
+            at_initial_time = (
+                initial_time_policy == INITIAL_TIME_POLICY
+                and saved.times[0] == left.time[0] == right.time[0]
             )
+            if at_initial_time:
+                scope, equal, missing = _initial_conditioning(
+                    target, left, right, graph, kinds, graph_errors, evidence
+                )
+                check.update(
+                    conditioning_policy=INITIAL_TIME_POLICY,
+                    conditioning_scope=sorted(scope),
+                    initialized_states=sorted(
+                        name for name in scope if kinds.get(name) == "differential"
+                    ),
+                    instantaneous_supplied_sources=sorted(scope - set(graph)),
+                )
+            else:
+                scope, equal, missing = _prefix_conditioning(
+                    target, saved, left, right, graph, kinds, graph_errors, evidence
+                )
             if missing:
                 checks.append({**check, "status": "unavailable", "reasons": missing})
                 continue
@@ -359,7 +486,9 @@ def recheck_closed_witnesses(
                 supported.setdefault(target, {})[
                     (pair.trajectories, pair.sample_indices)
                 ] = pair
-                scopes[target] = scope
+                if at_initial_time:
+                    initial_targets.add(target)
+                scopes[target] = scopes.get(target, set()) | scope
             checks.append(
                 {
                     **check,
@@ -369,6 +498,9 @@ def recheck_closed_witnesses(
             )
     diagnostics = []
     for target, pairs in sorted(supported.items()):
+        initial_only = target in initial_targets and all(
+            pair.sample_indices == (0, 0) for pair in pairs.values()
+        )
         diagnostics.append(
             Diagnostic(
                 property="closed_subsystem",
@@ -378,9 +510,27 @@ def recheck_closed_witnesses(
                 verified=(
                     "Saved sample coordinates were checked against sealed evidence; "
                     "observations were recomputed, not copied from the prior question.",
-                    "All ancestor initializers and complete forcing/covariates were "
-                    "compared only through each saved conflicting observation. "
-                    "Later forcing differences cannot explain an earlier difference.",
+                    (
+                        "Initializers and supplied values relevant to each readout "
+                        "were compared at the initial time; later comparisons used "
+                        "the complete ancestor subsystem and forcing prefix. "
+                        "Later differences cannot explain an earlier observation."
+                        if target in initial_targets
+                        else "All ancestor initializers and complete "
+                        "forcing/covariates were compared only through each saved "
+                        "conflicting observation. Later forcing differences cannot "
+                        "explain an earlier difference."
+                    ),
+                )
+                + (
+                    (
+                        "At the common initial time, algebraic/process dependencies "
+                        "were expanded only to differential states and exact supplied "
+                        "readings. Those states' declared initial rules were compared; "
+                        "their ODE RHS ancestors cannot change the initial value.",
+                    )
+                    if target in initial_targets
+                    else ()
                 ),
                 assumptions=(
                     "Shared deterministic functions and parameters have unique "
@@ -388,10 +538,19 @@ def recheck_closed_witnesses(
                 ),
                 comparisons=len(pairs),
                 witnesses=tuple(pairs.values()),
-                question="The saved pair still has identical permitted initial "
-                "information and forcing through the conflicting observation. "
-                "Identify a justified missing distinction or support a specific "
-                "assumption challenge; no new dependence is prescribed.",
+                question=(
+                    "At the common initial time this readout receives identical "
+                    "state initializations and supplied values, yet its recorded "
+                    "outputs differ. An ODE RHS dependency can change later "
+                    "values but cannot change an already fixed initial value. "
+                    "Revise a justified readout or initializer dependence, or "
+                    "support a specific assumption challenge; no edge is prescribed."
+                    if initial_only
+                    else "The saved pair still has identical permitted initial "
+                    "information and forcing through the conflicting observation. "
+                    "Identify a justified missing distinction or support a specific "
+                    "assumption challenge; no new dependence is prescribed."
+                ),
             )
         )
     return ClosedWitnessRecheck(

@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in initializer v3 milestone fixes initial-time witness conditioning and
+focuses repair presentation. Three explicitly selected saved T2-easy cases retain
+their models, initializer choices and witnesses for a separately budgeted ACES
+retest. Exact repeated reply records are displayed with counts, and issue-specific
+guidance accompanies current findings. Public context remains available in each
+stateless call. Historical policies and benchmarks are unchanged; live results
+are pending. See `PHASE_C_INITIALIZATION_FOCUSED_RETEST.md` and its prompt audit.
+
 The opt-in initializer qualification v2 addresses repeated structural feedback,
 byte-based over-reservation and lost intermediate trajectory witnesses. Reviewed
 direct initial measurements remain fixed identities through interaction lowering;
