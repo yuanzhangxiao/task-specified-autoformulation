@@ -33,10 +33,12 @@ completed all nine partial diagnostics on ACES, yielding 150/150 complete
 profiles with separate accounting and unchanged fitted parameters. The extension
 added 1.698 CPU / 5.485 summed diagnostic wall seconds; persistence dominates
 the measured interval. The [M41 nonlinear-nuisance qualification](PHASE_C_FITTING_NONLINEAR_PRACTICAL_UNCERTAINTY.md)
-now prepares 36 paired Delta CPU fits and gain profiles with an unknown decay
-rate. It tests nuisance-search reliability against a separate rate scan without
-assuming identical inputs imply ambiguity. Delta results are pending;
-calibrated confidence remains outside the result.
+returned 36 qualified Delta CPU fits and 18 agreeing method pairs with an unknown
+decay rate. Profiles complete for 34/36 arms; two near-boundary reference-search
+omissions in remote tails require a diagnostic supplement, not refitting. Wide
+gain support detects physical ambiguity despite good measured-signal prediction
+and full local rank. Diagnostics add 144.9% of fitting CPU in this small control.
+Continuous support widths and calibrated confidence remain unclaimed.
 
 Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
 compares fixed calibration with one bounded shared observation trend, preserving

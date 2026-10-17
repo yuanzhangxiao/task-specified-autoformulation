@@ -32,13 +32,16 @@ An isolated post-fit helper can suggest investigating joint dependence from
 qualified training evidence, without automatic model growth. Historical policies
 remain unchanged. See `PHASE_C_INITIALIZATION_TOPOLOGY.md`.
 
-M41 prepares a separate 36-task Delta CPU qualification of nonlinear nuisance
-profiles with an unknown decay rate, gain, shared initial value and sensor drift.
-It retains the qualified direct/profiled rollout fitter and checks gain profiles
-against a bounded one-dimensional rate search. Identical inputs can now remain
-locally informative through transient curvature; reference-search agreement is
-numerical evidence, not a global-optimality or confidence-probability certificate.
-No production or benchmark defaults change; results are pending. See
+M41 returned 36 qualified Delta CPU fits and 18 agreeing direct/profiled pairs
+with an unknown decay rate, gain, shared initial value and sensor drift. Profiles
+complete for 34/36 arms; two remote-tail nodes expose a missed reference minimum
+next to a rate bound, not a fitted-endpoint failure. At high noise and identical
+inputs, accurate sensor predictions coexist with poor physical recovery and wide,
+domain-clipped sampled gain support despite full local rank. Diagnostics add
+144.9% of fitting CPU; persistence uses 45.7% of diagnostic wall time. The next
+focused step is boundary-cell reference refinement and a diagnostic-only
+supplement preserving the fits. No continuous interval, calibrated probability,
+production or benchmark default change is claimed. See
 `PHASE_C_FITTING_NONLINEAR_PRACTICAL_UNCERTAINTY.md`.
 
 M40 prepares a diagnostic-only extension for M39's nine partial profiles,

@@ -30,7 +30,7 @@ known noise scale and preparation provenance are frozen before fitting.
 - Input separation: `0.5`, `0.02`, `0`.
 - Known noise standard deviation: `0.01`, `0.2`.
 - Three paired noise seeds, shared by the direct and profiled fitting methods.
-- Eighteen acquisitions and **36 fitting/diagnostic tasks**.
+- Eighteen acquisition sets (three input levels each) and **36 fitting/diagnostic tasks**.
 - Domains: `g in [0.05,3]`, `k in [0.02,1.5]`, `x0 in [0.01,2]`,
   `b in [-2,2]`.
 - Generic start: `g=0.45`, `k=1.1`, `x0=0.35`, `b=0`, with two predetermined
@@ -177,6 +177,115 @@ A first-failure follow-up passed 246 tests and skipped three before being stoppe
 at 131 seconds without reproducing those setup errors. The repository-wide
 suite is not claimed to pass. These unrelated files were not changed.
 
-Delta results are pending; local smoke tests are not a substitute for the frozen
-36-task campaign. Continuous profile-width certification and calibrated
-probability coverage remain unclaimed.
+## Delta result review, 17 October 2026
+
+Returned archive: `review-20261017-224009.tar.gz`, SHA-256
+`9fdbf6d22f26122b10e0b39c67105ff5102197405aa43068979bc00d827952f3`.
+Frozen plan: `04bc18eab8f78a3b2b8f07d91c6d4bff1ecb5d1cb54d018b2cf31bb0b02285de`.
+The local review verified 939 top-level sealed JSON records, reproduced the
+summary exactly from the saved stages, and preserved all 1,675 extracted file
+contents. Review artifacts are uncommitted under
+`output/phase-c-nonlinear-practical-m41-delta-review/`; the separate read-only
+audit is `output/phase-c-nonlinear-practical-m41-review-audit.json`.
+
+All **36 fitted endpoints** pass the independent rollout and numerical endpoint
+qualification. All **18 paired objectives** agree, with maximum absolute
+difference `5.97e-13`; the largest paired parameter difference is `5.34e-8`.
+No diagnostic found a better endpoint beyond tolerance. All local joint
+sensitivities have rank four. These are finite numerical checks, not global
+optimality, coefficient-accuracy or confidence-probability certificates.
+
+### Recovery and practical uncertainty
+
+Below are direct-arm medians over three noise seeds. Profiled fitting gives
+essentially the same endpoints. Parameter errors are **absolute**, calculated
+after sealing the fit/diagnostic; the compact summary's grouped parameter-error
+medians are signed and are not used as accuracy statistics here. Reading RMSE
+compares the complete sensor prediction `x+b*t` with clean generating readings;
+physical RMSE compares the inferred `x` with the generating physical trajectory.
+Neither clean trajectory is available during fitting or diagnostics.
+
+| Input separation | Noise sigma | Gain error | Rate error | Drift error | Reading RMSE | Physical RMSE |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.5 | 0.01 | 0.00242 | 0.00412 | 0.00208 | 0.00302 | 0.00455 |
+| 0.02 | 0.01 | 0.00502 | 0.01420 | 0.01226 | 0.00291 | 0.02651 |
+| 0 | 0.01 | 0.00607 | 0.02675 | 0.01934 | 0.00316 | 0.04310 |
+| 0.5 | 0.2 | 0.05403 | 0.07692 | 0.04073 | 0.05947 | 0.08851 |
+| 0.02 | 0.2 | 0.17949 | 0.27931 | 0.20465 | 0.05748 | 0.43501 |
+| 0 | 0.2 | 0.52509 | 0.39938 | 0.76218 | 0.05469 | 1.74172 |
+
+At fixed noise, the measured signal remains comparably predictable while the
+inferred physical trajectory becomes much less reliable. In
+`d0_sigma0p2_s2__direct`, the retained solution has gain `2.90842`, rate
+`0.0843224` and drift `-2` at its lower bound, compared with generating values
+`1.3`, `0.65`, and `0.06`. Its clean reading RMSE is `0.05259`, but its clean
+physical RMSE is `4.85108`. Drift and physical dynamics compensate in the
+measured signal. Reaching the same optimum with two algorithms does not remove
+that ambiguity.
+
+The training-only profile exposes the problem without consulting truth:
+at objective rise 2, this example accepts sampled gain values from `0.935` to
+the upper domain limit `3`, with explicit clipping and active nuisance bounds.
+Across the three zero-separation seeds, median accepted-sample span grows from
+`0.03502` at noise `0.01` to `1.96667` at noise `0.2`. Every continuous `width`
+remains null: these are sampled extents, not certified interval endpoints or
+calibrated confidence intervals. Four acquisitions/eight arms have upper-gain
+domain clipping at rise 2. Frozen-nuisance slices sometimes accept just one
+sample; zero sampled span must not be described as zero uncertainty.
+
+### Two partial diagnostics: reference search, not fitting failure
+
+**34/36 profiles complete**. Both partials are acquisition
+`d0p5_sigma0p01_s1`, one per fitting method. Each resolves 39 of 40 gain nodes.
+There are 1,400 qualified nodes and two unresolved nodes across the campaign.
+No call failed or was interrupted, and these partials did not exhaust their
+budgets.
+
+At gain `2.3116666667`, the multistart nuisance optimizer finds rate
+`1.4953772541` with objective `3902.6138770`; the reference scan returns the
+upper rate bound `1.5` with objective `3903.1646077`. Its grid descends all the
+way to the boundary, but a minimum lies inside the last grid interval. The
+reference currently refines sampled interior basins and does not refine the
+boundary-adjacent intervals. Checking the boundary alone misses this minimum.
+
+A separate cheap scalar check using saved training inputs, an independently
+assembled exponential basis and unscaled least squares finds rate
+`1.4953772949`, objective `3902.6138770`, agreeing with the primary result to
+`4.3e-11`. This used 12 scalar evaluations including bracket checks, without
+rerunning a fit or changing saved artifacts. The problematic node has objective
+rise about `3874`, far outside the support thresholds `0.5` and `2`. It does not
+invalidate the fitted endpoint; the formal support summaries are nevertheless
+withheld under the current all-nodes-qualified rule.
+
+### Measured overhead and next step
+
+| Stage | CPU seconds | Summed task wall seconds |
+| --- | ---: | ---: |
+| Fitting | 130.599 | 379.293 |
+| Profiles | 189.221 | 444.513 |
+| Evaluator-only scoring | 0.071 | 1.732 |
+
+Profiles add **144.9% of fitting CPU time** in this small control. Persistence
+callbacks consume `203.192` wall seconds, or `45.7%` of diagnostic wall time.
+The evaluated numerical-work subcategory consumes `95.951` wall seconds; both
+are nested in the total, which also includes other diagnostic work. Summed task
+wall times are not campaign elapsed time. Profiled fitting uses `60.704` CPU
+seconds versus `69.895` for direct fitting (13.2% less here), without a general
+speedup claim. Uninstrumented inner-solver counters remain unknown: compact
+observed zeros must not be read as measured zero work.
+
+The next focused change should refine both boundary-adjacent reference cells,
+test lower/upper near-boundary and exact-boundary optima, then supplement only
+the two partial diagnostics with a new source identity and separately recorded
+costs. Preserve all fitted endpoints and original evidence. Increasing the
+wall budget alone cannot repair this search omission. Subsequently refine the
+objective-threshold crossings adaptively and reduce persistence overhead before
+qualifying larger nonlinear nuisance blocks. The current result supports
+training-only ambiguity feedback, not automatic model/data attribution, a
+confidence percentage, or a claim that general nonlinear fitting is solved.
+
+This documentation-only review reran all 70 M41 tests successfully and passed
+scoped Ruff and whitespace checks. Reconstructing the full returned report was
+the relevant artifact smoke check and changed no source artifact bytes. Whole
+checkout Ruff still reports the same 37 unrelated `analysis/claude` findings;
+the full repository pytest suite was not rerun for this documentation update.

@@ -38,7 +38,11 @@ production fitting. A fixed linear state equation has an unknown decay rate;
 gain profiles conditionally solve initial/drift coordinates and check the rate
 search against a separate low-dimensional numerical reference. Fitted endpoints
 are sealed before diagnostics and evaluator-only truth never selects solutions.
-See `PHASE_C_FITTING_NONLINEAR_PRACTICAL_UNCERTAINTY.md`; Delta results are pending.
+The Delta campaign returned 36 qualified fits and 34 complete profiles; two
+remote-tail reference-search failures require boundary-cell refinement. Broad,
+domain-clipped profiles expose physical ambiguity despite accurate readings and
+full local rank. See `PHASE_C_FITTING_NONLINEAR_PRACTICAL_UNCERTAINTY.md` for the
+diagnostic-only follow-up and overhead; production defaults remain unchanged.
 
 M40's opt-in practical-profile execution separates frozen-slice evaluation from
 bounded nuisance optimization while retaining the M39 scientific policy. Its
