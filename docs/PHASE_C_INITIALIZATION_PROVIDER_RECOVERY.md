@@ -15,9 +15,9 @@ snapshot. See the [official vLLM GPT-OSS recipe](https://github.com/vllm-project
 
 `scripts/harmony_vocab.py` explicitly provisions and SHA-256-verifies
 `o200k_base.tiktoken`. The delivery bundle includes that file; it is not committed
-to Git. Login and batch launchers bind the verified asset read-only into the
+to Git. Preflight and batch launchers bind the verified asset read-only into the
 pinned image using `TIKTOKEN_ENCODINGS_BASE`. They load Harmony and render a tiny
-conversation on CPU, making zero generation requests. The login check runs
+conversation on CPU, making zero generation requests. The launch check runs
 before submission; the batch check runs before CUDA and server startup. Neither
 launcher downloads assets on compute nodes.
 
@@ -67,13 +67,29 @@ PYTHONPATH=src:. .venv/bin/python scripts/saved_initialization_aces.py freeze-re
 
 The delivered bundle contains the recovery plan, complete source, verified
 vocabulary, and a `run_recovery.sh` wrapper. Upload and extract it under the
-writable ACES group directory, then use:
+writable ACES group directory. ACES documents container runtimes as available on
+compute nodes, without an extra module load; a login node may have neither
+`apptainer` nor `singularity` on PATH. Run the CPU preflight and submission in a
+short CPU allocation, then use the login node for status and inspection:
 
 ```bash
-bash /path/to/extracted-bundle/run_recovery.sh run
+srun --account=156264627414 --partition=cpu --nodes=1 --ntasks=1 \
+  --cpus-per-task=2 --mem=8G --time=00:30:00 --export=ALL --exclude=ac042 \
+  bash /path/to/extracted-bundle/run_recovery.sh run
 bash /path/to/extracted-bundle/run_recovery.sh status
 bash /path/to/extracted-bundle/run_recovery.sh inspect
 ```
+
+This uses the existing bundle unchanged, including the `587f99c` delivery.
+The CPU allocation ends after preparation and GPU-job submission; it does not
+host inference. Keep the existing output root and wave for deterministic resume.
+The updated source adds actionable stderr before preparation/submission instead
+of silently failing under `set -e`; these diagnostics are not retroactively added
+to the sealed `587f99c` bundle. Updated batch startup also reports a missing
+runtime, and inspection explains when preparation has not created a plan yet.
+Status and inspection do not require a container runtime. See the
+[HPRC container guide](https://hprc.tamu.edu/kb/Software/Singularity/) and
+[ACES batch guide](https://hprc.tamu.edu/kb/User-Guides/ACES/Batch/).
 
 The wrapper selects a new output root,
 `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-initialization-provider-recovery-v1`,

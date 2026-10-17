@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run on the ACES login node after extracting the reviewed bundle into group scratch.
+# The run preflight needs an ACES compute node; status/inspect work on login nodes.
 set -euo pipefail
 export AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
@@ -18,6 +18,13 @@ export AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-$AF_GROUP/phase-c-initialization-focused
 AF_INPUTS=${AF_INITIALIZATION_INPUTS:-$AF_REPO_ROOT/inputs/saved-initialization-v3}
 case "${1:?Use run, status, or inspect}" in
   run)
+    if ! AF_CONTAINER=$(command -v apptainer || command -v singularity); then
+      echo 'No Apptainer or Singularity executable is available on this node. Nothing was prepared or submitted.' >&2
+      echo 'ACES provides container runtimes on compute nodes. Run this same bundle command in a CPU allocation, for example:' >&2
+      printf 'srun --partition=cpu --account=%q --nodes=1 --ntasks=1 --cpus-per-task=2 --mem=8G --time=00:30:00 --export=ALL bash /path/to/run_recovery.sh run\n' "${AF_ACCOUNT:-156264627414}" >&2
+      echo 'If already on a compute node, report the node name and missing runtime to HPRC support.' >&2
+      exit 2
+    fi
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
     AF_REVISION=6cee5e81ee83917806bbde320786a8fb61efebee
     AF_SNAPSHOT=hub/models--openai--gpt-oss-20b/snapshots/$AF_REVISION/config.json
@@ -32,7 +39,6 @@ case "${1:?Use run, status, or inspect}" in
     export AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}
     AF_HARMONY_CLI="$AF_REPO_ROOT/scripts/harmony_vocab.py"
     "$AF_PYTHON" "$AF_HARMONY_CLI" verify --directory "$AF_HARMONY_ASSETS" >/dev/null
-    AF_CONTAINER=$(command -v apptainer || command -v singularity)
     # This CPU-only render uses the pinned image and makes no generation request.
     "$AF_CONTAINER" exec \
       --bind "$AF_HARMONY_ASSETS:$AF_HARMONY_ASSETS:ro,$AF_HARMONY_CLI:$AF_HARMONY_CLI:ro" \
@@ -57,6 +63,10 @@ PY
     printf 'Logs: %s/logs\n' "$AF_OUTPUT_ROOT"
     ;;
   inspect)
+    [[ -f "$AF_OUTPUT_ROOT/plan.json" ]] || {
+      printf 'No prepared plan: %s/plan.json\nRun the bundle with run and check its launch output before inspecting.\n' "$AF_OUTPUT_ROOT" >&2
+      exit 2
+    }
     "$AF_PYTHON" "$AF_CLI" inspect --root "$AF_OUTPUT_ROOT"
     cat "$AF_OUTPUT_ROOT/SUMMARY.md"
     printf '\nDownload: %s/inspection.tar.gz\n' "$AF_OUTPUT_ROOT"

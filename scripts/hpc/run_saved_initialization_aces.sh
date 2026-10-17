@@ -14,6 +14,11 @@ fi
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 OMP_NUM_THREADS=8
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}" no_proxy="127.0.0.1,localhost"
 "$AF_PYTHON" "$AF_CLI" verify --root "$AF_OUTPUT_ROOT"
+if ! AF_CONTAINER=$(command -v apptainer || command -v singularity); then
+  printf 'No Apptainer or Singularity executable on compute node %s; server and model requests were not started.\n' "${SLURMD_NODENAME:-unknown}" >&2
+  echo 'Check the node runtime with HPRC support before retrying.' >&2
+  exit 2
+fi
 AF_EXPECTED_IMAGE=$("$AF_PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["image_sha256"])' "$AF_OUTPUT_ROOT/execution.json")
 AF_ACTUAL_IMAGE=$(sha256sum "$AF_VLLM_IMAGE")
 [[ "${AF_ACTUAL_IMAGE%% *}" == "$AF_EXPECTED_IMAGE" ]] || { echo 'Serving image changed.' >&2; exit 2; }
@@ -41,7 +46,6 @@ drain() {
 }
 trap cleanup EXIT
 trap drain TERM INT
-AF_CONTAINER=$(command -v apptainer || command -v singularity)
 AF_CONTAINER_ARGS=(exec --bind "$AF_HF_HOME:$AF_HF_HOME,$AF_JOB_TMP:$AF_JOB_TMP,$AF_HARMONY_ASSETS:$AF_HARMONY_ASSETS:ro,$AF_HARMONY_CLI:$AF_HARMONY_CLI:ro"
   --env "HF_HOME=$AF_HF_HOME" --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1
   --env "TIKTOKEN_ENCODINGS_BASE=$AF_HARMONY_ASSETS" --env PYTHONDONTWRITEBYTECODE=1

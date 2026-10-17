@@ -325,3 +325,83 @@ def test_launchers_gate_submission_and_server_on_offline_render(
         assert "saved_initialization_aces prepare\n" in calls
         assert "submit_saved_initialization_aces --root\n" in calls
         assert len(containers) == 1
+
+
+@pytest.mark.parametrize("worker", [False, True])
+@pytest.mark.parametrize("runtime", ["missing", "singularity"])
+def test_launchers_report_missing_runtime_and_support_singularity(
+    tmp_path, worker, runtime
+):
+    repo, env = launcher_fixture(tmp_path, "none")
+    if runtime == "singularity":
+        (tmp_path / "bin/apptainer").rename(tmp_path / "bin/singularity")
+    # Mask lookup rather than rely on the host not having a real container runtime.
+    startup = tmp_path / "bash-startup.sh"
+    startup.write_text(
+        "command() {\n"
+        '  if [[ "$1" == -v && "$2" == apptainer ]]; then return 1; fi\n'
+        + (
+            '  if [[ "$1" == -v && "$2" == singularity ]]; then return 1; fi\n'
+            if runtime == "missing"
+            else ""
+        )
+        + '  builtin command "$@"\n}\n'
+    )
+    env["BASH_ENV"] = str(startup)
+    name = "run" if worker else "start"
+    result = subprocess.run(
+        [
+            "bash",
+            str(repo / f"scripts/hpc/{name}_saved_initialization_aces.sh"),
+            "propose" if worker else "run",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    calls = Path(env["AF_TEST_CALLS"]).read_text()
+    if runtime == "missing":
+        assert result.returncode == 2
+        assert "No Apptainer or Singularity executable" in result.stderr
+        if worker:
+            assert "server and model requests were not started" in result.stderr
+        else:
+            assert "srun --partition=cpu" in result.stderr
+            assert "Nothing was prepared or submitted" in result.stderr
+        expected = "saved_initialization_aces --help\n"
+        if worker:
+            expected += "saved_initialization_aces verify\n"
+        assert calls == expected
+        assert not Path(env["AF_TEST_CONTAINER_CALLS"]).exists()
+        assert not (Path(env["AF_OUTPUT_ROOT"]) / "runtime").exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert Path(env["AF_TEST_CONTAINER_CALLS"]).exists()
+        assert (
+            "saved_initialization_aces run\n"
+            if worker
+            else "submit_saved_initialization_aces --root\n"
+        ) in calls
+
+
+def test_inspection_without_prepared_plan_explains_next_step(tmp_path):
+    repo, env = launcher_fixture(tmp_path, "none")
+    result = subprocess.run(
+        [
+            "bash",
+            str(repo / "scripts/hpc/start_saved_initialization_aces.sh"),
+            "inspect",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 2
+    assert "No prepared plan:" in result.stderr
+    assert "check its launch output" in result.stderr
+    assert "Traceback" not in result.stderr
+    calls = Path(env["AF_TEST_CALLS"]).read_text()
+    assert calls == "saved_initialization_aces --help\n"
+    assert not Path(env["AF_TEST_CONTAINER_CALLS"]).exists()
