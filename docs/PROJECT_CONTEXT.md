@@ -1,12 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
 The initializer-v3 ACES retest returned nine provider failures and no responses;
-its three models are unchanged. An operational recovery bundles the verified
-Harmony vocabulary and checks CPU chat rendering before submission. A separate
-hash-bound continuation retains failed-call reservations and the original caps;
-provider unavailability is separated from scientific repeated repairs. Scientific
-prompts, checks and benchmarks are unchanged. See
-`PHASE_C_INITIALIZATION_PROVIDER_RECOVERY.md`; live confirmation remains pending.
+its three models were unchanged. The bounded Harmony recovery then returned 17
+responses: 16 normal completions and one truncation. All three initialization
+declarations are complete; seed 0 has conditional dependency progress with
+scientific review deferred, while seeds 1/2 retain initial-U and insulin-subsystem
+conflicts. No fitting occurred. Failed-call reservations remain charged. A
+description-only edit incorrectly counted as progress is the next bookkeeping
+issue to regress; scientific prompts and benchmarks remain unchanged. See
+`PHASE_C_INITIALIZATION_PROVIDER_RECOVERY.md` for the equation and feedback audit.
 
 The opt-in initializer v3 milestone fixes initial-time witness conditioning and
 focuses repair presentation. Three explicitly selected saved T2-easy cases retain

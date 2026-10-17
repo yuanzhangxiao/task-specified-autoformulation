@@ -427,6 +427,44 @@ def test_report_writes_mixed_assessed_pending_and_partial_tasks_in_each_arm(
     assert json.loads(summary_path.read_text()) == persisted
 
 
+@pytest.mark.parametrize(
+    "outcome", ["checks_clear", "repair_required", "pending", "partial"]
+)
+def test_report_scope_explains_clear_status_without_claiming_every_row_is_clear(
+    tmp_path, setup, outcome
+):
+    plan, tasks, _ = setup
+    plan["protocol"] = campaign.PROTOCOL_V2
+    plan["actionable_policy"] = campaign.actionable.POLICY_V2
+    task = tasks[1]
+    plan["tasks"] = [task]
+    calls = []
+
+    def send(url, body, timeout):
+        calls.append(body)
+        packet = json.loads(body["messages"][1]["content"])
+        edit = {**packet["response_template"], "stage_complete": True}
+        if outcome == "checks_clear":
+            edit["equations"] = [equation("y", "u", "t")]
+        return response(edit)
+
+    if outcome == "partial":
+        with pytest.raises(DeferredCall):
+            execute(tmp_path, plan, task, send, can_start=lambda: not calls)
+    elif outcome != "pending":
+        result = execute(tmp_path, plan, task, send)
+        assert result["scientific_state"]["repair_status"] == outcome
+
+    row = campaign.report(tmp_path, plan)["rows"][0]
+    unfinished = outcome in {"pending", "partial"}
+    assert row["status"] == (outcome if unfinished else "assessed")
+    assert row["scientific_status"] == (None if unfinished else outcome)
+    assert row["checks_clear_scope"].startswith("A checks_clear status means ")
+    assert "diagnostics are not scientific passes" in row["checks_clear_scope"]
+    persisted = json.loads((tmp_path / "summary.json").read_text())
+    assert persisted["rows"] == [row]
+
+
 @pytest.mark.parametrize("arm", campaign.ARMS)
 def test_distinct_rejected_alternatives_are_not_three_repeated_attempts(
     tmp_path, setup, arm

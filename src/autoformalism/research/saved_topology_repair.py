@@ -1067,8 +1067,8 @@ def report(root: Path, plan: dict) -> dict:
                 else None
             )
             row["checks_clear_scope"] = (
-                "No tracked repair obligation remains; deferred or inapplicable "
-                "diagnostics are not scientific passes."
+                "A checks_clear status means no tracked repair obligation remains; "
+                "deferred or inapplicable diagnostics are not scientific passes."
             )
         rows.append(row)
         parts.append(
