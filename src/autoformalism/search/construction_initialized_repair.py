@@ -20,13 +20,14 @@ POLICY = "topology-initialization-repair-1"
 POLICY_V2 = "topology-initialization-repair-2"
 POLICY_V3 = "topology-initialization-repair-3"
 POLICY_V4 = "topology-initialization-repair-4"
+POLICY_V5 = "topology-initialization-repair-5"
 SYSTEM = previous.SYSTEM
 Draft = previous.Draft
 
 
 def system_for(packet: dict) -> str:
     """Keep historical system text stable; opt in through the frozen policy."""
-    if packet.get("prompt_policy") in {POLICY_V3, POLICY_V4}:
+    if packet.get("prompt_policy") in {POLICY_V3, POLICY_V4, POLICY_V5}:
         from autoformalism.search.construction_initialization_focus import (
             SYSTEM as focused,
         )
@@ -156,7 +157,7 @@ def qualify_completion(state, status):
 
 def payload(stage, *args, evidence, initial_contract, handoff, policy=POLICY, **kwargs):
     """Present equations, initial conditions and existing conditional witnesses once."""
-    if policy not in {POLICY, POLICY_V2, POLICY_V3, POLICY_V4}:
+    if policy not in {POLICY, POLICY_V2, POLICY_V3, POLICY_V4, POLICY_V5}:
         raise ValueError("unknown initialization repair policy")
     kwargs["policy"] = previous.POLICY_V2
     packet = previous.payload("repair", *args, **kwargs)
@@ -268,7 +269,7 @@ def payload(stage, *args, evidence, initial_contract, handoff, policy=POLICY, **
                 "record. Other model conflicts are handled in joint repair.",
             }
         }
-    if policy in {POLICY_V2, POLICY_V3, POLICY_V4}:
+    if policy in {POLICY_V2, POLICY_V3, POLICY_V4, POLICY_V5}:
         from autoformalism.search.construction_feedback_projection import project
 
         packet["stage_instructions"] += (

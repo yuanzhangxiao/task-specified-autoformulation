@@ -21,6 +21,7 @@ PROTOCOL = "saved-topology-initialization-1"
 PROTOCOL_V2 = "saved-topology-initialization-2"
 PROTOCOL_V3 = "saved-topology-initialization-3"
 PROTOCOL_V4 = "saved-topology-initialization-4"
+PROTOCOL_V5 = "saved-topology-initialization-5"
 
 
 def refine(source: Path, destination: Path, bindings: dict | None = None) -> dict:
@@ -167,7 +168,13 @@ class Session:
 
     def __init__(self, problem, start, *, policy=api.POLICY):
         self.problem = problem
-        if policy not in {api.POLICY, api.POLICY_V2, api.POLICY_V3, api.POLICY_V4}:
+        if policy not in {
+            api.POLICY,
+            api.POLICY_V2,
+            api.POLICY_V3,
+            api.POLICY_V4,
+            api.POLICY_V5,
+        }:
             raise ValueError("unknown initializer session policy")
         self.policy = policy
         self.contract = initial.validate_information_contract(
@@ -175,7 +182,7 @@ class Session:
         )
         expected_contract = (
             "recorded-t0-initial-information-2"
-            if policy in {api.POLICY_V2, api.POLICY_V3, api.POLICY_V4}
+            if policy in {api.POLICY_V2, api.POLICY_V3, api.POLICY_V4, api.POLICY_V5}
             else "recorded-t0-initial-information-1"
         )
         if self.contract.protocol != expected_contract:
@@ -186,7 +193,7 @@ class Session:
             self.contract,
         )
         self.handoff = initial.InitializerDependencyHandoff()
-        if policy in {api.POLICY_V3, api.POLICY_V4}:
+        if policy in {api.POLICY_V3, api.POLICY_V4, api.POLICY_V5}:
             self.handoff = initial.InitializerDependencyHandoff.model_validate(
                 start["initializer_handoff"]
             )
@@ -219,12 +226,12 @@ class Session:
             previous_questions=list(unique.values()),
             **(
                 {"identity_policy": training.MATHEMATICAL_QUESTION_IDENTITY}
-                if self.policy == api.POLICY_V4
+                if self.policy in {api.POLICY_V4, api.POLICY_V5}
                 else {}
             ),
             **(
                 {"initial_time_policy": initial.INITIAL_TIME_POLICY}
-                if self.policy in {api.POLICY_V3, api.POLICY_V4}
+                if self.policy in {api.POLICY_V3, api.POLICY_V4, api.POLICY_V5}
                 else {}
             ),
         )
@@ -246,7 +253,8 @@ class Session:
                 answers,
                 **(
                     {"witness_policy": ALL_SEEN_WITNESSES}
-                    if self.policy in {api.POLICY_V2, api.POLICY_V3, api.POLICY_V4}
+                    if self.policy
+                    in {api.POLICY_V2, api.POLICY_V3, api.POLICY_V4, api.POLICY_V5}
                     else {}
                 ),
             ),
@@ -266,7 +274,8 @@ class Session:
             "handoff": self.handoff,
             **(
                 {"policy": self.policy}
-                if self.policy in {api.POLICY_V2, api.POLICY_V3, api.POLICY_V4}
+                if self.policy
+                in {api.POLICY_V2, api.POLICY_V3, api.POLICY_V4, api.POLICY_V5}
                 else {}
             ),
         }
@@ -296,7 +305,7 @@ def preview(plan: dict, output: Path) -> dict:
     links = []
     for number, task in enumerate(plan["tasks"]):
         start = plan["starts"][task["source_task"]]
-        focused = plan["protocol"] in {PROTOCOL_V3, PROTOCOL_V4}
+        focused = plan["protocol"] in {PROTOCOL_V3, PROTOCOL_V4, PROTOCOL_V5}
         problem = saved.Problem(plan["cells"][task["benchmark_id"]], start["task"])
         draft = api.Draft.model_validate(start["draft"])
         session = Session(problem, start, policy=plan["actionable_policy"])
@@ -361,7 +370,9 @@ def preview(plan: dict, output: Path) -> dict:
             old_session = Session(
                 problem,
                 start,
-                policy=api.POLICY_V3
+                policy=api.POLICY_V4
+                if plan["protocol"] == PROTOCOL_V5
+                else api.POLICY_V3
                 if plan["protocol"] == PROTOCOL_V4
                 else api.POLICY_V2,
             )
@@ -441,7 +452,13 @@ def preview(plan: dict, output: Path) -> dict:
         "<style>body{font:16px/1.6 system-ui;max-width:1050px;margin:35px auto}</style>"
         "<h1>Initial dependencies at the topology boundary</h1>"
         + (
-            "<p>V4 equality-feedback ACES retest: two explicitly selected saved "
+            "<p>V5 evidence-feedback ACES retest: two saved final cases. "
+            "Paired conditioning measurements and observed outputs are labeled "
+            "explicitly. Unsupported initializer feedback names available "
+            "information; equivalent unchanged initializers do not reset "
+            "repetition. Historical policies retain exact replay.</p>"
+            if plan["protocol"] == PROTOCOL_V5
+            else "<p>V4 equality-feedback ACES retest: two explicitly selected saved "
             "cases. Current model equalities precede complete witnesses and "
             "assumptions. Description-only edits cannot reset scientific progress. "
             "Historical results remain unchanged; this is a separately budgeted "

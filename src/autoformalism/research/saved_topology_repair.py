@@ -46,11 +46,13 @@ PROTOCOL_INITIALIZATION = "saved-topology-initialization-1"
 PROTOCOL_INITIALIZATION_V2 = "saved-topology-initialization-2"
 PROTOCOL_INITIALIZATION_V3 = "saved-topology-initialization-3"
 PROTOCOL_INITIALIZATION_V4 = "saved-topology-initialization-4"
+PROTOCOL_INITIALIZATION_V5 = "saved-topology-initialization-5"
 INITIALIZATION_PROTOCOLS = {
     PROTOCOL_INITIALIZATION,
     PROTOCOL_INITIALIZATION_V2,
     PROTOCOL_INITIALIZATION_V3,
     PROTOCOL_INITIALIZATION_V4,
+    PROTOCOL_INITIALIZATION_V5,
 }
 ARMS = ("control", "actionable")
 REPO = Path(__file__).resolve().parents[3]
@@ -305,7 +307,9 @@ def verify(root: Path) -> dict:
     if plan["protocol"] in INITIALIZATION_PROTOCOLS and (
         plan.get("actionable_policy")
         != (
-            initialized.POLICY_V4
+            initialized.POLICY_V5
+            if plan["protocol"] == PROTOCOL_INITIALIZATION_V5
+            else initialized.POLICY_V4
             if plan["protocol"] == PROTOCOL_INITIALIZATION_V4
             else initialized.POLICY_V3
             if plan["protocol"] == PROTOCOL_INITIALIZATION_V3
@@ -322,12 +326,17 @@ def verify(root: Path) -> dict:
         PROTOCOL_INITIALIZATION_V2,
         PROTOCOL_INITIALIZATION_V3,
         PROTOCOL_INITIALIZATION_V4,
+        PROTOCOL_INITIALIZATION_V5,
     } and (
         plan.get("budget_reservation_policy") != MEASURED_RESERVATION
         or plan.get("witness_policy") != "all-seen-witnesses-1"
     ):
         raise ValueError("initializer qualification policy differs")
-    if plan["protocol"] in {PROTOCOL_INITIALIZATION_V3, PROTOCOL_INITIALIZATION_V4}:
+    if plan["protocol"] in {
+        PROTOCOL_INITIALIZATION_V3,
+        PROTOCOL_INITIALIZATION_V4,
+        PROTOCOL_INITIALIZATION_V5,
+    }:
         from autoformalism.search.topology_initialization import INITIAL_TIME_POLICY
 
         if (
@@ -336,7 +345,7 @@ def verify(root: Path) -> dict:
             or not 1 <= len(plan["tasks"]) <= 3
         ):
             raise ValueError("focused initializer retest policy differs")
-    if plan["protocol"] == PROTOCOL_INITIALIZATION_V4:
+    if plan["protocol"] in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}:
         from autoformalism.research import construction_training as training
 
         if (
@@ -345,6 +354,15 @@ def verify(root: Path) -> dict:
             or len(plan["tasks"]) > 2
         ):
             raise ValueError("equality retest identity policy or roster differs")
+    if plan["protocol"] == PROTOCOL_INITIALIZATION_V5 and (
+        plan.get("budget_policy") != "separate-new-retest-budget-1"
+        or plan.get("maximum_calls_per_arm") != MAX_CALLS
+        or plan.get("maximum_tokens_per_arm") != MAX_TOKENS
+        or plan.get("automatic_followup") is not False
+        or plan.get("optimizer_calls") != 0
+        or "provider_recovery_policy" in plan
+    ):
+        raise ValueError("evidence retest must declare a separate bounded allowance")
     if "provider_recovery_policy" in plan:
         from autoformalism.research.initialization_provider_recovery import (
             validate_plan,
@@ -459,16 +477,23 @@ def make_packet(
     if initialization is not None and initialization.policy in {
         initialized.POLICY_V3,
         initialized.POLICY_V4,
+        initialized.POLICY_V5,
     }:
         from autoformalism.search.construction_initialization_focus import project
 
         packet = project(packet, draft)
-        if initialization.policy == initialized.POLICY_V4:
+        if initialization.policy in {initialized.POLICY_V4, initialized.POLICY_V5}:
             from autoformalism.research.initialization_equality_feedback import (
                 project as equality_project,
             )
 
             packet = equality_project(packet, draft)
+        if initialization.policy == initialized.POLICY_V5:
+            from autoformalism.research.initialization_evidence_feedback import (
+                project as evidence_project,
+            )
+
+            packet = evidence_project(packet, draft, problem.evidence)
         packet["prompt_policy"] = initialization.policy
     return packet
 
@@ -483,7 +508,7 @@ def request_user(packet: dict) -> str:
     return json.dumps(
         packet,
         sort_keys=packet.get("prompt_policy")
-        not in {initialized.POLICY_V3, initialized.POLICY_V4},
+        not in {initialized.POLICY_V3, initialized.POLICY_V4, initialized.POLICY_V5},
     )
 
 
@@ -559,6 +584,7 @@ def run_episode(
                 PROTOCOL_INITIALIZATION_V2,
                 PROTOCOL_INITIALIZATION_V3,
                 PROTOCOL_INITIALIZATION_V4,
+                PROTOCOL_INITIALIZATION_V5,
             }
             else {}
         ),
@@ -580,7 +606,11 @@ def run_episode(
     )
     answers, records, events = {}, [], []
     last, repetition = None, None
-    if plan.get("protocol") in {PROTOCOL_INITIALIZATION_V3, PROTOCOL_INITIALIZATION_V4}:
+    if plan.get("protocol") in {
+        PROTOCOL_INITIALIZATION_V3,
+        PROTOCOL_INITIALIZATION_V4,
+        PROTOCOL_INITIALIZATION_V5,
+    }:
         last = start.get("last_edit")
         repetition = start.get("repetition_feedback")
     unchanged = 0
@@ -654,9 +684,11 @@ def run_episode(
         before_initialization = (
             initialization.handoff if initialization is not None else None
         )
-        if (recovery or plan.get("protocol") == PROTOCOL_INITIALIZATION_V4) and record[
-            "status"
-        ] != "responded":
+        if (
+            recovery
+            or plan.get("protocol")
+            in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}
+        ) and record["status"] != "responded":
             event = sealed_write(
                 event_path,
                 {
@@ -758,7 +790,14 @@ def run_episode(
             before, before_check, before_report
         ) == scientific_signature(draft, check, report)
         if initialization is not None:
-            same &= before_initialization == initialization.handoff
+            if initialization.policy == initialized.POLICY_V5:
+                same &= repair_stagnation.initializer_semantics(
+                    before_initialization.model_dump(mode="json")
+                ) == repair_stagnation.initializer_semantics(
+                    initialization.handoff.model_dump(mode="json")
+                )
+            else:
+                same &= before_initialization == initialization.handoff
         lost = control.lost_required_predicates(before_check, check) if accepted else []
         last = {
             "status": "accepted" if accepted else "rejected",
@@ -806,15 +845,23 @@ def run_episode(
             else content_hash(control.repair_signature(draft, last, check["errors"]))
         )
         if initialization is not None:
-            signature = content_hash(
-                [
-                    signature,
-                    initialization.handoff.model_dump(mode="json"),
-                    (normalized or raw or {}).get("initialization")
-                    if isinstance(normalized or raw, dict)
-                    else None,
-                ]
+            proposed_initialization = (
+                (normalized or raw or {}).get("initialization")
+                if isinstance(normalized or raw, dict)
+                else None
             )
+            retained_initialization = initialization.handoff.model_dump(mode="json")
+            if initialization.policy == initialized.POLICY_V5:
+                signature = repair_stagnation.initializer_attempt_signature(
+                    signature,
+                    retained_initialization,
+                    proposed_initialization,
+                    error=error,
+                )
+            else:
+                signature = content_hash(
+                    [signature, retained_initialization, proposed_initialization]
+                )
         unchanged = (
             (unchanged + 1 if signature == previous_signature else 1)
             if not progress
@@ -1006,7 +1053,7 @@ def report(root: Path, plan: dict) -> dict:
             "Initialization dependencies and joint repairs of saved v2 final drafts; "
             "historical parents have different budgets. No fitting or test access."
         )
-    if plan.get("protocol") == PROTOCOL_INITIALIZATION_V4:
+    if plan.get("protocol") in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}:
         parts[2] = (
             "Equality feedback on saved final drafts; historical costs are retained "
             "separately. New cap: ten calls / 262,144 tokens per case. "
@@ -1061,7 +1108,11 @@ def report(root: Path, plan: dict) -> dict:
             "source_task": task["source_task"],
             "status": value["status"]
             if value
-            and (recovery or plan.get("protocol") == PROTOCOL_INITIALIZATION_V4)
+            and (
+                recovery
+                or plan.get("protocol")
+                in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}
+            )
             else "assessed"
             if value
             else "partial"
@@ -1074,7 +1125,10 @@ def report(root: Path, plan: dict) -> dict:
             "stop_reason": value["stop_reason"] if value else None,
             "cost": total_cost,
         }
-        if plan.get("protocol") == PROTOCOL_INITIALIZATION_V4:
+        if plan.get("protocol") in {
+            PROTOCOL_INITIALIZATION_V4,
+            PROTOCOL_INITIALIZATION_V5,
+        }:
             row["historical_cost"] = plan["starts"][task["source_task"]].get(
                 "historical_cost"
             )
@@ -1206,7 +1260,8 @@ def report(root: Path, plan: dict) -> dict:
                 "maximum_new_requests": MAX_CALLS * len(rows),
                 "maximum_new_charged_tokens": MAX_TOKENS * len(rows),
             }
-            if plan.get("protocol") == PROTOCOL_INITIALIZATION_V4
+            if plan.get("protocol")
+            in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}
             else {}
         ),
         **(

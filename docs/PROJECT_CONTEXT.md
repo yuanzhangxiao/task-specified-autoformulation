@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in initializer-v5 milestone adds labeled paired conditioning values,
+concrete feedback for unsupported observed initializers, and semantic repetition
+counting for unchanged initializer submissions. Two explicit V4 final models
+retain their witnesses and separate historical costs for a bounded ACES retest.
+Scientific predicates, benchmarks and older replay policies remain unchanged.
+See `PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md`; live effectiveness is untested.
+
 The opt-in initializer-v4 milestone repairs presentation-sensitive retained
 witness IDs and adds concise model-specific equality feedback. A separately
 budgeted ACES retest starts from the two unresolved provider-recovery final

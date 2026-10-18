@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from autoformalism.search import construction_actionable_repair as actionable
 from autoformalism.search.construction_protocol import substantive
 from autoformalism.staged_topology import content_hash
@@ -61,3 +63,33 @@ def attempt_signature(
         else:
             alternative = proposed
     return content_hash([model_signature(draft, check, report), alternative])
+
+
+def initializer_semantics(value: object) -> object:
+    """Ignore handoff record order, retaining multiplicity and ordered arguments.
+
+    This opt-in comparison does not validate or repair a reply. Invalid records
+    remain distinct alternatives; only the order of state records is immaterial.
+    """
+    result = deepcopy(value)
+    if isinstance(result, dict) and isinstance(result.get("records"), list):
+        result["records"] = sorted(result["records"], key=content_hash)
+    return result
+
+
+def initializer_attempt_signature(
+    base: str, retained: dict, proposed: object, *, error: str | None
+) -> str:
+    """Hash accepted initializer effects, while preserving rejected alternatives.
+
+    An accepted full restatement and null both retain the same handoff. Rejected
+    initializers remain part of the attempt so a genuinely different alternative
+    can still be tried. Historical policies keep their original raw-payload hash.
+    """
+    effective = initializer_semantics(retained)
+    alternative = None
+    if error and not error.startswith("no draft change;") and proposed is not None:
+        candidate = initializer_semantics(proposed)
+        if candidate != effective:
+            alternative = candidate
+    return content_hash([base, effective, alternative])

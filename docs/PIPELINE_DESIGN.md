@@ -1,5 +1,13 @@
 # Phase 1 Pipeline Design
 
+`saved-topology-initialization-5` presents numeric conditioning evidence from
+sealed training data and names unsupported observed-initializer choices in
+issue-specific feedback. Accepted null/restatement equivalence is reflected in
+repetition counting while distinct rejected alternatives remain separate. The
+freezer preserves two selected V4 finals and historical cost scopes under a new
+bounded allowance. V1–V4 replay and scientific predicates remain unchanged. See
+`PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md`.
+
 `saved-topology-initialization-4` retains initializer-v3 scientific predicates
 while using description-independent retained-witness identities and a leading
 model/data equality summary. The bounded freezer validates offset-aware recovered
