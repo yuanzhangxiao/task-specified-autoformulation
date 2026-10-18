@@ -102,7 +102,9 @@ def _forcing_rows(pair: list, channels: list, evidence, end: float) -> list[dict
     return result
 
 
-def _numeric_card(card: dict, packet: dict, evidence) -> dict:
+def _numeric_card(
+    card: dict, packet: dict, evidence, *, consistent_runtime_rules: bool = False
+) -> dict:
     """Resolve an existing witness against its sealed source, failing closed."""
     reference = _REFERENCE.fullmatch(card.get("evidence_reference", ""))
     if reference is None:
@@ -133,7 +135,9 @@ def _numeric_card(card: dict, packet: dict, evidence) -> dict:
         raise ValueError("witness does not identify these recorded outputs")
     conditioning = question["conditioning"]
     matched = conditioning["matched_initial_information"]
-    rules = equality._rules(packet["initialization"])
+    rules = equality._rules(
+        packet["initialization"], consistent_runtime_rules=consistent_runtime_rules
+    )
     if set(matched[pair[0].trajectory_id]) != set(matched[pair[1].trajectory_id]):
         raise ValueError("initializer conditioning differs")
     states = sorted(matched[pair[0].trajectory_id])
@@ -279,9 +283,13 @@ def _unsupported_observed(packet: dict, draft: Draft) -> list[dict]:
 
 
 def project(
-    packet: dict, draft: Draft, evidence: TrainingCompatibilityEvidence | dict
+    packet: dict,
+    draft: Draft,
+    evidence: TrainingCompatibilityEvidence | dict,
+    *,
+    consistent_runtime_rules: bool = False,
 ) -> dict:
-    """Annotate V5 packets after equality projection; omit unverifiable additions."""
+    """Annotate equality cards; opt-in identical rule merging preserves V5 defaults."""
     result = deepcopy(packet)
     try:
         guidance = _unsupported_observed(packet, draft)
@@ -303,7 +311,12 @@ def project(
         return result
     for card in result.get("model_data_conflicts", [])[:2]:
         try:
-            card["paired_recorded_values"] = _numeric_card(card, expanded, source)
+            card["paired_recorded_values"] = _numeric_card(
+                card,
+                expanded,
+                source,
+                consistent_runtime_rules=consistent_runtime_rules,
+            )
         except (KeyError, IndexError, TypeError, ValueError, AttributeError):
             continue
     return result

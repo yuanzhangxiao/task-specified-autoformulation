@@ -47,12 +47,14 @@ PROTOCOL_INITIALIZATION_V2 = "saved-topology-initialization-2"
 PROTOCOL_INITIALIZATION_V3 = "saved-topology-initialization-3"
 PROTOCOL_INITIALIZATION_V4 = "saved-topology-initialization-4"
 PROTOCOL_INITIALIZATION_V5 = "saved-topology-initialization-5"
+PROTOCOL_INITIALIZATION_V6 = "saved-topology-initialization-6"
 INITIALIZATION_PROTOCOLS = {
     PROTOCOL_INITIALIZATION,
     PROTOCOL_INITIALIZATION_V2,
     PROTOCOL_INITIALIZATION_V3,
     PROTOCOL_INITIALIZATION_V4,
     PROTOCOL_INITIALIZATION_V5,
+    PROTOCOL_INITIALIZATION_V6,
 }
 ARMS = ("control", "actionable")
 REPO = Path(__file__).resolve().parents[3]
@@ -307,7 +309,9 @@ def verify(root: Path) -> dict:
     if plan["protocol"] in INITIALIZATION_PROTOCOLS and (
         plan.get("actionable_policy")
         != (
-            initialized.POLICY_V5
+            initialized.POLICY_V6
+            if plan["protocol"] == PROTOCOL_INITIALIZATION_V6
+            else initialized.POLICY_V5
             if plan["protocol"] == PROTOCOL_INITIALIZATION_V5
             else initialized.POLICY_V4
             if plan["protocol"] == PROTOCOL_INITIALIZATION_V4
@@ -327,6 +331,7 @@ def verify(root: Path) -> dict:
         PROTOCOL_INITIALIZATION_V3,
         PROTOCOL_INITIALIZATION_V4,
         PROTOCOL_INITIALIZATION_V5,
+        PROTOCOL_INITIALIZATION_V6,
     } and (
         plan.get("budget_reservation_policy") != MEASURED_RESERVATION
         or plan.get("witness_policy") != "all-seen-witnesses-1"
@@ -336,6 +341,7 @@ def verify(root: Path) -> dict:
         PROTOCOL_INITIALIZATION_V3,
         PROTOCOL_INITIALIZATION_V4,
         PROTOCOL_INITIALIZATION_V5,
+        PROTOCOL_INITIALIZATION_V6,
     }:
         from autoformalism.search.topology_initialization import INITIAL_TIME_POLICY
 
@@ -345,7 +351,11 @@ def verify(root: Path) -> dict:
             or not 1 <= len(plan["tasks"]) <= 3
         ):
             raise ValueError("focused initializer retest policy differs")
-    if plan["protocol"] in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}:
+    if plan["protocol"] in {
+        PROTOCOL_INITIALIZATION_V4,
+        PROTOCOL_INITIALIZATION_V5,
+        PROTOCOL_INITIALIZATION_V6,
+    }:
         from autoformalism.research import construction_training as training
 
         if (
@@ -354,7 +364,10 @@ def verify(root: Path) -> dict:
             or len(plan["tasks"]) > 2
         ):
             raise ValueError("equality retest identity policy or roster differs")
-    if plan["protocol"] == PROTOCOL_INITIALIZATION_V5 and (
+    if plan["protocol"] in {
+        PROTOCOL_INITIALIZATION_V5,
+        PROTOCOL_INITIALIZATION_V6,
+    } and (
         plan.get("budget_policy") != "separate-new-retest-budget-1"
         or plan.get("maximum_calls_per_arm") != MAX_CALLS
         or plan.get("maximum_tokens_per_arm") != MAX_TOKENS
@@ -478,22 +491,46 @@ def make_packet(
         initialized.POLICY_V3,
         initialized.POLICY_V4,
         initialized.POLICY_V5,
+        initialized.POLICY_V6,
     }:
         from autoformalism.search.construction_initialization_focus import project
 
         packet = project(packet, draft)
-        if initialization.policy in {initialized.POLICY_V4, initialized.POLICY_V5}:
+        if initialization.policy == initialized.POLICY_V6:
+            packet = initialized.bookkeeping_packet(packet)
+        if initialization.policy in {
+            initialized.POLICY_V4,
+            initialized.POLICY_V5,
+            initialized.POLICY_V6,
+        }:
             from autoformalism.research.initialization_equality_feedback import (
                 project as equality_project,
             )
 
-            packet = equality_project(packet, draft)
-        if initialization.policy == initialized.POLICY_V5:
+            packet = equality_project(
+                packet,
+                draft,
+                **(
+                    {"consistent_runtime_rules": True}
+                    if initialization.policy == initialized.POLICY_V6
+                    else {}
+                ),
+            )
+        if initialization.policy in {initialized.POLICY_V5, initialized.POLICY_V6}:
             from autoformalism.research.initialization_evidence_feedback import (
                 project as evidence_project,
             )
 
-            packet = evidence_project(packet, draft, problem.evidence)
+            packet = evidence_project(
+                packet,
+                draft,
+                problem.evidence,
+                **(
+                    {"consistent_runtime_rules": True}
+                    if initialization.policy == initialized.POLICY_V6
+                    else {}
+                ),
+            )
         packet["prompt_policy"] = initialization.policy
     return packet
 
@@ -508,7 +545,12 @@ def request_user(packet: dict) -> str:
     return json.dumps(
         packet,
         sort_keys=packet.get("prompt_policy")
-        not in {initialized.POLICY_V3, initialized.POLICY_V4, initialized.POLICY_V5},
+        not in {
+            initialized.POLICY_V3,
+            initialized.POLICY_V4,
+            initialized.POLICY_V5,
+            initialized.POLICY_V6,
+        },
     )
 
 
@@ -585,6 +627,7 @@ def run_episode(
                 PROTOCOL_INITIALIZATION_V3,
                 PROTOCOL_INITIALIZATION_V4,
                 PROTOCOL_INITIALIZATION_V5,
+                PROTOCOL_INITIALIZATION_V6,
             }
             else {}
         ),
@@ -610,6 +653,7 @@ def run_episode(
         PROTOCOL_INITIALIZATION_V3,
         PROTOCOL_INITIALIZATION_V4,
         PROTOCOL_INITIALIZATION_V5,
+        PROTOCOL_INITIALIZATION_V6,
     }:
         last = start.get("last_edit")
         repetition = start.get("repetition_feedback")
@@ -684,11 +728,26 @@ def run_episode(
         before_initialization = (
             initialization.handoff if initialization is not None else None
         )
-        if (
+        # Transport success is not a complete scientific reply. In V6 a truncated
+        # or absent/unparseable final JSON stops the episode without consuming a
+        # scientific-stagnation step. The measured call remains in the ledger.
+        response_error = None
+        available_raw = None
+        if plan.get("protocol") == PROTOCOL_INITIALIZATION_V6:
+            try:
+                available_raw = visible_response(record)
+            except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                response_error = str(exc)[:6000]
+        unavailable = (
             recovery
             or plan.get("protocol")
-            in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}
-        ) and record["status"] != "responded":
+            in {
+                PROTOCOL_INITIALIZATION_V4,
+                PROTOCOL_INITIALIZATION_V5,
+                PROTOCOL_INITIALIZATION_V6,
+            }
+        ) and record["status"] != "responded"
+        if unavailable or response_error is not None:
             event = sealed_write(
                 event_path,
                 {
@@ -703,6 +762,11 @@ def run_episode(
                     "error": None,
                     "transport_status": record["status"],
                     "transport_error": record.get("error"),
+                    **(
+                        {"response_error": response_error}
+                        if plan.get("protocol") == PROTOCOL_INITIALIZATION_V6
+                        else {}
+                    ),
                     "scientific_reply_received": False,
                     "structural_assessment": check,
                     "scientific_state": state,
@@ -726,9 +790,14 @@ def run_episode(
             initialization.initialization_calls += 1
         raw, error, accepted, complete = None, None, False, False
         normalized = None
+        attempted_candidate = None
         normalizations, submitted = [], []
         try:
-            raw = visible_response(record)
+            raw = (
+                available_raw
+                if plan.get("protocol") == PROTOCOL_INITIALIZATION_V6
+                else visible_response(record)
+            )
             normalized, normalizations = api.normalize_reply(
                 problem.brief,
                 raw,
@@ -754,13 +823,45 @@ def run_episode(
                 initialized.initial.validate_public_bindings(
                     candidate, problem.brief.scientific_context, initialization.contract
                 )
-                next_handoff = initialized.changed_handoff(
-                    candidate,
-                    problem.evidence,
-                    initialization.contract,
-                    initialization.handoff,
-                    patch,
-                )
+                if initialization.policy == initialized.POLICY_V6:
+                    from autoformalism.research.initialization_bookkeeping import (
+                        cleanup_inherited_handoff,
+                    )
+
+                    # Capture only a fully assembled topology alternative. If its
+                    # initializer is invalid, this is still not a committed draft.
+                    attempted_candidate = candidate
+                    next_handoff = cleanup_inherited_handoff(
+                        draft, candidate, initialization.handoff, patch
+                    )
+                    initialized.handoff_status(
+                        candidate,
+                        problem.evidence,
+                        initialization.contract,
+                        next_handoff,
+                    )
+                    if patch.initialization is None:
+                        removed = sorted(
+                            {r.state for r in initialization.handoff.records}
+                            - {r.state for r in next_handoff.records}
+                        )
+                        if removed:
+                            normalizations.append(
+                                {
+                                    "code": "inherited_initializers_removed",
+                                    "states": removed,
+                                "reason": "explicit variable removal or retyping "
+                                "to algebraic",
+                                }
+                            )
+                else:
+                    next_handoff = initialized.changed_handoff(
+                        candidate,
+                        problem.evidence,
+                        initialization.contract,
+                        initialization.handoff,
+                        patch,
+                    )
                 initialization.handoff = next_handoff
             draft = candidate
             answers.update({d["question_id"]: d for d in submitted})
@@ -790,7 +891,7 @@ def run_episode(
             before, before_check, before_report
         ) == scientific_signature(draft, check, report)
         if initialization is not None:
-            if initialization.policy == initialized.POLICY_V5:
+            if initialization.policy in {initialized.POLICY_V5, initialized.POLICY_V6}:
                 same &= repair_stagnation.initializer_semantics(
                     before_initialization.model_dump(mode="json")
                 ) == repair_stagnation.initializer_semantics(
@@ -851,13 +952,32 @@ def run_episode(
                 else None
             )
             retained_initialization = initialization.handoff.model_dump(mode="json")
-            if initialization.policy == initialized.POLICY_V5:
-                signature = repair_stagnation.initializer_attempt_signature(
-                    signature,
-                    retained_initialization,
-                    proposed_initialization,
-                    error=error,
-                )
+            if initialization.policy in {initialized.POLICY_V5, initialized.POLICY_V6}:
+                if (
+                    initialization.policy == initialized.POLICY_V6
+                    and error is not None
+                    and attempted_candidate is not None
+                ):
+                    from autoformalism.research.initialization_bookkeeping import (
+                        rejected_initializer_attempt_signature,
+                    )
+
+                    signature = rejected_initializer_attempt_signature(
+                        draft,
+                        check,
+                        report,
+                        attempted_candidate,
+                        retained=retained_initialization,
+                        proposed=proposed_initialization,
+                        error=error,
+                    )
+                else:
+                    signature = repair_stagnation.initializer_attempt_signature(
+                        signature,
+                        retained_initialization,
+                        proposed_initialization,
+                        error=error,
+                    )
             else:
                 signature = content_hash(
                     [signature, retained_initialization, proposed_initialization]
@@ -1053,7 +1173,11 @@ def report(root: Path, plan: dict) -> dict:
             "Initialization dependencies and joint repairs of saved v2 final drafts; "
             "historical parents have different budgets. No fitting or test access."
         )
-    if plan.get("protocol") in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}:
+    if plan.get("protocol") in {
+        PROTOCOL_INITIALIZATION_V4,
+        PROTOCOL_INITIALIZATION_V5,
+        PROTOCOL_INITIALIZATION_V6,
+    }:
         parts[2] = (
             "Equality feedback on saved final drafts; historical costs are retained "
             "separately. New cap: ten calls / 262,144 tokens per case. "
@@ -1111,7 +1235,11 @@ def report(root: Path, plan: dict) -> dict:
             and (
                 recovery
                 or plan.get("protocol")
-                in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}
+                in {
+                    PROTOCOL_INITIALIZATION_V4,
+                    PROTOCOL_INITIALIZATION_V5,
+                    PROTOCOL_INITIALIZATION_V6,
+                }
             )
             else "assessed"
             if value
@@ -1128,6 +1256,7 @@ def report(root: Path, plan: dict) -> dict:
         if plan.get("protocol") in {
             PROTOCOL_INITIALIZATION_V4,
             PROTOCOL_INITIALIZATION_V5,
+            PROTOCOL_INITIALIZATION_V6,
         }:
             row["historical_cost"] = plan["starts"][task["source_task"]].get(
                 "historical_cost"
@@ -1261,7 +1390,11 @@ def report(root: Path, plan: dict) -> dict:
                 "maximum_new_charged_tokens": MAX_TOKENS * len(rows),
             }
             if plan.get("protocol")
-            in {PROTOCOL_INITIALIZATION_V4, PROTOCOL_INITIALIZATION_V5}
+            in {
+                PROTOCOL_INITIALIZATION_V4,
+                PROTOCOL_INITIALIZATION_V5,
+                PROTOCOL_INITIALIZATION_V6,
+            }
             else {}
         ),
         **(

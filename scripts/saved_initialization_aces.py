@@ -25,6 +25,7 @@ REPO = Path(__file__).resolve().parents[1]
 PROTOCOL = "saved-topology-initialization-3"
 EQUALITY_PROTOCOL = "saved-topology-initialization-4"
 EVIDENCE_PROTOCOL = "saved-topology-initialization-5"
+BOOKKEEPING_PROTOCOL = "saved-topology-initialization-6"
 PLATFORM = "aces-h100x1"
 MODEL = "openai/gpt-oss-20b"
 REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
@@ -48,11 +49,10 @@ def verify_inputs(root: Path) -> dict:
     plan = campaign.verify(root)
     settings = plan["settings"]
     if (
-        plan["protocol"] not in {PROTOCOL, EQUALITY_PROTOCOL, EVIDENCE_PROTOCOL}
+        plan["protocol"]
+        not in {PROTOCOL, EQUALITY_PROTOCOL, EVIDENCE_PROTOCOL, BOOKKEEPING_PROTOCOL}
         or plan.get("execution_platform") != PLATFORM
-        or not 1
-        <= len(plan["tasks"])
-        <= (2 if plan["protocol"] in {EQUALITY_PROTOCOL, EVIDENCE_PROTOCOL} else 3)
+        or not 1 <= len(plan["tasks"]) <= (3 if plan["protocol"] == PROTOCOL else 2)
         or len({task["task_id"] for task in plan["tasks"]}) != len(plan["tasks"])
         or settings["model"] != MODEL
         or settings["model_revision"] != REVISION
@@ -60,7 +60,7 @@ def verify_inputs(root: Path) -> dict:
         or settings["maximum_total_tokens"] != 262144
         or plan.get("automatic_followup") is not False
     ):
-        raise ValueError("requires a bounded ACES initializer-v3/v4/v5 retest")
+        raise ValueError("requires a bounded ACES initializer-v3/v4/v5/v6 retest")
     if plan.get("provider_recovery_policy"):
         from autoformalism.research.initialization_provider_recovery import (
             validate_plan,
@@ -245,6 +245,7 @@ def main() -> None:
             "freeze-recovery",
             "freeze-equality",
             "freeze-evidence",
+            "freeze-bookkeeping",
             "verify",
             "run",
             "report",
@@ -260,7 +261,13 @@ def main() -> None:
     parser.add_argument("--runtime-record", type=Path)
     args = parser.parse_args()
     with _lock(args.root / "campaign-lock"):
-        if args.command == "freeze-evidence":
+        if args.command == "freeze-bookkeeping":
+            if args.source is None or not args.task_id:
+                parser.error("freeze-bookkeeping requires --source and --task-id")
+            from autoformalism.research.initialization_bookkeeping_retest import freeze
+
+            result = freeze(args.source, args.root, args.task_id)
+        elif args.command == "freeze-evidence":
             if args.source is None or not args.task_id:
                 parser.error("freeze-evidence requires --source and --task-id")
             from autoformalism.research.initialization_evidence_retest import freeze

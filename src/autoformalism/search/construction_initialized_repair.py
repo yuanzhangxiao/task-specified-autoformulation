@@ -21,13 +21,14 @@ POLICY_V2 = "topology-initialization-repair-2"
 POLICY_V3 = "topology-initialization-repair-3"
 POLICY_V4 = "topology-initialization-repair-4"
 POLICY_V5 = "topology-initialization-repair-5"
+POLICY_V6 = "topology-initialization-repair-6"
 SYSTEM = previous.SYSTEM
 Draft = previous.Draft
 
 
 def system_for(packet: dict) -> str:
     """Keep historical system text stable; opt in through the frozen policy."""
-    if packet.get("prompt_policy") in {POLICY_V3, POLICY_V4, POLICY_V5}:
+    if packet.get("prompt_policy") in {POLICY_V3, POLICY_V4, POLICY_V5, POLICY_V6}:
         from autoformalism.search.construction_initialization_focus import (
             SYSTEM as focused,
         )
@@ -145,6 +146,29 @@ def changed_handoff(draft, evidence, contract, retained, patch):
     return candidate
 
 
+def bookkeeping_packet(packet: dict) -> dict:
+    """Describe V6 inherited-record cleanup without changing historical prompts."""
+    result = deepcopy(packet)
+    if result.get("stage") != "repair":
+        return result
+    old = "initialization=null retains the handoff;"
+    new = (
+        "initialization=null retains the handoff except that explicit variable "
+        "removal or retyping to algebraic removes that variable's inherited "
+        "initializer record automatically;"
+    )
+    result["editing_rules"] = result["editing_rules"].replace(old, new)
+    result["editing_rules"] = result["editing_rules"].replace(
+        "Keep intended records, remove records for deleted or\n"
+        "now-algebraic states, and initialize new differential states.",
+        "When sending a complete new handoff, keep intended records, omit records "
+        "for deleted or now-algebraic states, and initialize new differential "
+        "states. An explicitly conflicting new record is rejected; the runtime "
+        "does not silently rewrite your initializer choices.",
+    )
+    return result
+
+
 def qualify_completion(state, status):
     """Initializer readiness is separate from conditional scientific assessments."""
     return {
@@ -157,7 +181,7 @@ def qualify_completion(state, status):
 
 def payload(stage, *args, evidence, initial_contract, handoff, policy=POLICY, **kwargs):
     """Present equations, initial conditions and existing conditional witnesses once."""
-    if policy not in {POLICY, POLICY_V2, POLICY_V3, POLICY_V4, POLICY_V5}:
+    if policy not in {POLICY, POLICY_V2, POLICY_V3, POLICY_V4, POLICY_V5, POLICY_V6}:
         raise ValueError("unknown initialization repair policy")
     kwargs["policy"] = previous.POLICY_V2
     packet = previous.payload("repair", *args, **kwargs)
@@ -269,7 +293,7 @@ def payload(stage, *args, evidence, initial_contract, handoff, policy=POLICY, **
                 "record. Other model conflicts are handled in joint repair.",
             }
         }
-    if policy in {POLICY_V2, POLICY_V3, POLICY_V4, POLICY_V5}:
+    if policy in {POLICY_V2, POLICY_V3, POLICY_V4, POLICY_V5, POLICY_V6}:
         from autoformalism.search.construction_feedback_projection import project
 
         packet["stage_instructions"] += (

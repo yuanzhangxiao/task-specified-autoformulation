@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+`saved-topology-initialization-6` retains V5 scientific checks while correcting
+initializer evidence projection, provider-output availability, and rejected-edit
+identity. Atomic cleanup removes inherited initializer records only for explicit
+state removals/retypes. Explicit replacement handoffs remain validated as written.
+Incomplete final outputs remain fully charged and stop without a scientific
+stagnation increment or automatic retry. The V6 freezer preserves the latest V5
+final models, all qualified witnesses, complete historical accounting and the
+last usable scientific feedback. See `PHASE_C_INITIALIZATION_BOOKKEEPING_RETEST.md`.
+V1–V5 request/acceptance/stopping behavior remains reproducible.
+
 `saved-topology-initialization-5` presents numeric conditioning evidence from
 sealed training data and names unsupported observed-initializer choices in
 issue-specific feedback. Accepted null/restatement equivalence is reflected in

@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in initializer-v6 milestone fixes the V5 bookkeeping defects without
+changing scientific predicates: consistent runtime/retained rules preserve
+evidence cards, incomplete final replies stop as unavailable rather than
+scientific stagnation, rejected initializer attempts compare assembled topology
+effects, and explicit state removal/retyping cleans only inherited initializer
+records. A two-case ACES retest uses the latest V5 finals, preserves all historical
+charges (including truncations), and declares a separate 20-call maximum. No live
+results are available yet. See `PHASE_C_INITIALIZATION_BOOKKEEPING_RETEST.md`.
+
 The opt-in initializer-v5 milestone adds labeled paired conditioning values,
 concrete feedback for unsupported observed initializers, and semantic repetition
 counting for unchanged initializer submissions. Two explicit V4 final models
@@ -10,8 +19,8 @@ and two output truncations. Both models remain structurally eligible with one
 conditional conflict each. Identical runtime/proposer initializer records suppress
 seed 1's concise evidence cards; seed 2's truncations incorrectly advance the
 repetition counter. The scientific obligations remain visible and unresolved.
-See `PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md` for the offline audit and next
-bounded corrections. No new runtime policy or live run has been added.
+See `PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md` for the offline audit. Its
+historical V5 behavior remains unchanged; corrections are opt-in under V6 above.
 
 The opt-in initializer-v4 milestone repairs presentation-sensitive retained
 witness IDs and adds concise model-specific equality feedback. A separately

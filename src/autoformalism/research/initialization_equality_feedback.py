@@ -84,12 +84,28 @@ def _pair(witness: dict) -> bool:
     )
 
 
-def _rules(initialization: dict) -> dict:
-    """Combine explicit runtime and proposer rules without choosing missing ones."""
-    rules = deepcopy(initialization.get("fixed_runtime_rules", {}))
+def _rules(initialization: dict, *, consistent_runtime_rules: bool = False) -> dict:
+    """Combine rules, optionally accepting an exact repeat of a fixed runtime rule.
+
+    Historical projections reject every duplicate. The opt-in display path merges
+    only identical runtime/retained rules; conflicting or proposer-only duplicate
+    declarations remain unsupported. The original packet is never normalized.
+    """
+    fixed = initialization.get("fixed_runtime_rules", {})
+    rules = deepcopy(fixed)
+    seen_retained = set()
     for record in initialization.get("retained_handoff", {}).get("records", []):
         state = record["state"]
+        if consistent_runtime_rules and state in seen_retained:
+            raise ValueError("duplicate current initialization rule")
+        seen_retained.add(state)
         if state in rules:
+            if (
+                consistent_runtime_rules
+                and state in fixed
+                and rules[state] == record["rule"]
+            ):
+                continue
             raise ValueError("duplicate current initialization rule")
         rules[state] = record["rule"]
     return rules
@@ -242,13 +258,17 @@ def _summary(
     }
 
 
-def project(packet: dict, draft: Draft) -> dict:
+def project(
+    packet: dict, draft: Draft, *, consistent_runtime_rules: bool = False
+) -> dict:
     """Prepend up to two concise arguments after the focused request projection.
 
     Unsupported or incomplete evidence leaves the packet untouched. This adapter
     does not validate raw data again: evidence references identify the existing
     qualified diagnostics. It checks coverage and current initializer agreement
     to avoid attaching a stale equality argument to a changed model.
+    The optional duplicate-rule display correction leaves historical defaults
+    unchanged and never resolves conflicting initializer declarations.
     """
     result = deepcopy(packet)
     if "model_data_conflicts" in result:
@@ -266,7 +286,10 @@ def project(packet: dict, draft: Draft) -> dict:
     try:
         context = _context(expanded)
         graph, kinds, errors = _graph(draft, context)
-        rules = _rules(expanded.get("initialization", {}))
+        rules = _rules(
+            expanded.get("initialization", {}),
+            consistent_runtime_rules=consistent_runtime_rules,
+        )
     except (KeyError, TypeError, ValueError):
         return result
     if errors:
