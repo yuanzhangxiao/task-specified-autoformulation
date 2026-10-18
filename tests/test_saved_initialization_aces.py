@@ -381,3 +381,13 @@ def test_launcher_checks_real_imports_and_stops_if_module_cannot_repair(
         if health == "broken":
             assert "ImportError: libffi.so.8" in result.stderr
     assert not output.exists()
+
+
+def test_equality_adapter_admits_two_cases_but_not_three(setup):
+    plan, root, _ = setup
+    plan["protocol"] = adapter.EQUALITY_PROTOCOL
+    plan["tasks"] = plan["tasks"][:2]
+    assert adapter.verify_inputs(root)["protocol"] == adapter.EQUALITY_PROTOCOL
+    plan["tasks"].append({"task_id": "third-case"})
+    with pytest.raises(ValueError, match="bounded ACES"):
+        adapter.verify_inputs(root)

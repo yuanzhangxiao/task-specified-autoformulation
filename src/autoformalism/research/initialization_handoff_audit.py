@@ -90,9 +90,19 @@ def _handoff(folder, task, draft, evidence):
 
 
 def _preserve_witnesses(
-    report, draft, evidence, previous_questions, *, initial_time_policy=None
+    report,
+    draft,
+    evidence,
+    previous_questions,
+    *,
+    initial_time_policy=None,
+    identity_policy: str = training.SEMANTIC_QUESTION_IDENTITY,
 ):
-    """Merge causal-prefix rechecks before computing repair completion status."""
+    """Merge causal-prefix rechecks, preserving historical identity by default.
+
+    The opt-in mathematical identity excludes role/meaning prose from a retained
+    witness's topology hash; its actual diagnostic and evidence remain bound.
+    """
     recheck = initial.recheck_closed_witnesses(
         draft,
         evidence,
@@ -146,6 +156,26 @@ def _preserve_witnesses(
                 "matched_complete_forcing_channels", []
             )
             conditioning.pop("interpolation", None)
+        identity = {
+            "policy": recheck.protocol,
+            "evidence_sha256": evidence.sha256,
+            "topology_sha256": report["topology_sha256"],
+            "diagnostic": row.model_dump(mode="json"),
+        }
+        semantic = {}
+        if identity_policy == training.MATHEMATICAL_QUESTION_IDENTITY:
+            # Exclude explanatory roles/meanings, keeping typed dependencies,
+            # signed contributions, conversions, multiplicity and the witnesses.
+            semantic["semantic_topology_sha256"] = content_hash(
+                training._diagnostic_topology(draft, row.scope)
+            )
+            identity.pop("topology_sha256")
+            identity.update(
+                policy=identity_policy,
+                witness_recheck_policy=recheck.protocol,
+                initial_time_policy=initial_time_policy,
+                **semantic,
+            )
         questions.append(
             {
                 "target": row.target,
@@ -156,14 +186,8 @@ def _preserve_witnesses(
                 "witnesses": [w.model_dump(mode="json") for w in row.witnesses],
                 "conditioning": conditioning,
                 "question": row.question,
-                "question_id": content_hash(
-                    {
-                        "policy": recheck.protocol,
-                        "evidence_sha256": evidence.sha256,
-                        "topology_sha256": report["topology_sha256"],
-                        "diagnostic": row.model_dump(mode="json"),
-                    }
-                )[:20],
+                "question_id": content_hash(identity)[:20],
+                **semantic,
             }
         )
     uncertain = {"unavailable", "invalid_saved_witness", "uncertainty_limited"}
@@ -192,12 +216,14 @@ def qualified_feedback(
     family=False,
     previous_questions=(),
     initial_time_policy=None,
+    identity_policy: str = training.SEMANTIC_QUESTION_IDENTITY,
 ):
     """Keep immutable data identity separate from the initializer hypothesis hash.
 
     The full diagnostic retains its actual derived evidence hash. The tracking
     envelope retains the original data identity so repairs can be compared without
     pretending that changed initializer declarations changed the training samples.
+    Identity policy is explicit so older saved episodes retain exact question IDs.
     """
     family_available = (
         contract.scope == "recorded_t0"
@@ -210,7 +236,7 @@ def qualified_feedback(
     report = training.compatibility_feedback(
         draft,
         derived,
-        identity_policy=training.SEMANTIC_QUESTION_IDENTITY,
+        identity_policy=identity_policy,
     )
     _preserve_witnesses(
         report,
@@ -218,6 +244,7 @@ def qualified_feedback(
         derived,
         previous_questions,
         initial_time_policy=initial_time_policy,
+        identity_policy=identity_policy,
     )
     report["initialization_evidence_sha256"] = report["evidence_sha256"]
     report["evidence_sha256"] = evidence.sha256

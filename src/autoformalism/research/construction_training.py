@@ -38,6 +38,8 @@ BUNDLE_PROTOCOL = "construction-training-evidence-bundle-1"
 FEEDBACK_PROTOCOL = "construction-training-advice-1"
 HISTORICAL_QUESTION_IDENTITY = "full-draft-1"
 SEMANTIC_QUESTION_IDENTITY = "diagnostic-semantics-2"
+# The initializer recheck path also uses scoped topology under this opt-in policy.
+MATHEMATICAL_QUESTION_IDENTITY = "diagnostic-semantics-3"
 
 
 def load_evidence(raw: dict) -> TrainingCompatibilityEvidence:
@@ -260,6 +262,7 @@ def compatibility_feedback(
     if identity_policy not in {
         HISTORICAL_QUESTION_IDENTITY,
         SEMANTIC_QUESTION_IDENTITY,
+        MATHEMATICAL_QUESTION_IDENTITY,
     }:
         raise ValueError(
             f"unsupported compatibility identity policy: {identity_policy}"

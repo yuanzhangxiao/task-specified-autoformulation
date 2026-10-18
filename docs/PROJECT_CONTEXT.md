@@ -1,13 +1,20 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in initializer-v4 milestone repairs presentation-sensitive retained
+witness IDs and adds concise model-specific equality feedback. A separately
+budgeted ACES retest starts from the two unresolved provider-recovery final
+models (seeds 1/2), retaining initializers, witnesses and historical costs.
+No fitting, test access, new scientific predicates or benchmark edits are
+included. Historical policies retain replay behavior. See
+`PHASE_C_INITIALIZATION_EQUALITY_RETEST.md`; live effectiveness is untested.
+
 The initializer-v3 ACES retest returned nine provider failures and no responses;
 its three models were unchanged. The bounded Harmony recovery then returned 17
 responses: 16 normal completions and one truncation. All three initialization
 declarations are complete; seed 0 has conditional dependency progress with
 scientific review deferred, while seeds 1/2 retain initial-U and insulin-subsystem
-conflicts. No fitting occurred. Failed-call reservations remain charged. A
-description-only edit incorrectly counted as progress is the next bookkeeping
-issue to regress; scientific prompts and benchmarks remain unchanged. See
+conflicts. No fitting occurred. Failed-call reservations remain charged. The verified
+description-only progress defect is addressed by opt-in v4; scientific prompts and benchmarks remain unchanged. See
 `PHASE_C_INITIALIZATION_PROVIDER_RECOVERY.md` for the equation and feedback audit.
 
 The opt-in initializer v3 milestone fixes initial-time witness conditioning and
@@ -15,8 +22,8 @@ focuses repair presentation. Three explicitly selected saved T2-easy cases retai
 their models, initializer choices and witnesses for a separately budgeted ACES
 retest. Exact repeated reply records are displayed with counts, and issue-specific
 guidance accompanies current findings. Public context remains available in each
-stateless call. Historical policies and benchmarks are unchanged; live results
-are pending. See `PHASE_C_INITIALIZATION_FOCUSED_RETEST.md` and its prompt audit.
+stateless call. Historical policies and benchmarks are unchanged; returned recovery results
+appear above. See `PHASE_C_INITIALIZATION_FOCUSED_RETEST.md` and its prompt audit.
 
 The opt-in initializer qualification v2 addresses repeated structural feedback,
 byte-based over-reservation and lost intermediate trajectory witnesses. Reviewed

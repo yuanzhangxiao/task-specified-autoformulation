@@ -1,5 +1,12 @@
 # Phase 1 Pipeline Design
 
+`saved-topology-initialization-4` retains initializer-v3 scientific predicates
+while using description-independent retained-witness identities and a leading
+model/data equality summary. The bounded freezer validates offset-aware recovered
+call/event chains, keeps final models and old witnesses, and explicitly separates
+historical costs from its new allowance. Old protocols remain unchanged. See
+`PHASE_C_INITIALIZATION_EQUALITY_RETEST.md`.
+
 `aces-provider-recovery-1` adds a bounded operational continuation to initializer
 v3. Sealed predecessor failures remain in cumulative accounting; unchanged starts,
 initializers, witnesses and scientific receipts are preserved. New provider

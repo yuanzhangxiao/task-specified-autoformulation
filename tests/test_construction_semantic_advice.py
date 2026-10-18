@@ -9,6 +9,7 @@ from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.expressions import ValidationContext
 from autoformalism.research.construction_training import (
     HISTORICAL_QUESTION_IDENTITY,
+    MATHEMATICAL_QUESTION_IDENTITY,
     SEMANTIC_QUESTION_IDENTITY,
     compatibility_feedback,
 )
@@ -70,9 +71,9 @@ def fixture():
     return model, context, train, contract
 
 
-def feedback(model, evidence):
+def feedback(model, evidence, identity_policy=SEMANTIC_QUESTION_IDENTITY):
     return compatibility_feedback(
-        model, evidence, identity_policy=SEMANTIC_QUESTION_IDENTITY
+        model, evidence, identity_policy=identity_policy
     )
 
 
@@ -119,20 +120,25 @@ def test_historical_identity_and_response_fields_remain_unchanged():
         compatibility_feedback(model, evidence, identity_policy="unknown")
 
 
-def test_prose_and_bookkeeping_edits_preserve_ids_but_not_full_provenance():
+@pytest.mark.parametrize(
+    "identity_policy", [SEMANTIC_QUESTION_IDENTITY, MATHEMATICAL_QUESTION_IDENTITY]
+)
+def test_prose_and_bookkeeping_edits_preserve_ids_but_not_full_provenance(
+    identity_policy,
+):
     model, context, train, contract = fixture()
     evidence = build_evidence(train, context, contract)
-    before = feedback(model, evidence)
+    before = feedback(model, evidence, identity_policy)
     raw = model.model_dump(mode="json")
     raw["variables"][0]["scientific_role"] = "revised explanation of the same output"
     raw["processes"][0]["scientific_meaning"] = "clearer explanation, same declaration"
     raw["feedback_bindings"] = [{"target": "a", "states": ["a"]}]
     revised = Draft.model_validate(raw)
-    after = feedback(revised, evidence)
+    after = feedback(revised, evidence, identity_policy)
     assert before["topology_sha256"] != after["topology_sha256"]
     assert ids(before) == ids(after)
     assert before["advisory_questions"] == after["advisory_questions"]
-    assert after["question_identity_policy"] == SEMANTIC_QUESTION_IDENTITY
+    assert after["question_identity_policy"] == identity_policy
     assert after["full_report"]["topology_sha256"] == content_hash(raw)
     assert ids(compatibility_feedback(model, evidence)) != ids(
         compatibility_feedback(revised, evidence)
@@ -169,11 +175,18 @@ def test_valid_independent_subsystem_and_declaration_order_do_not_reask():
     assert not feedback(Draft.model_validate(raw), evidence)["advisory_questions"]
 
 
-@pytest.mark.parametrize("edit", ["dependency", "kind", "sign", "conversion"])
-def test_scientific_process_edits_reask_even_when_the_conflict_remains(edit):
+@pytest.mark.parametrize(
+    "identity_policy", [SEMANTIC_QUESTION_IDENTITY, MATHEMATICAL_QUESTION_IDENTITY]
+)
+@pytest.mark.parametrize(
+    "edit", ["dependency", "kind", "sign", "conversion", "multiplicity"]
+)
+def test_scientific_process_edits_reask_even_when_the_conflict_remains(
+    edit, identity_policy
+):
     model, context, train, contract = fixture()
     evidence = build_evidence(train, context, contract)
-    before = feedback(model, evidence)
+    before = feedback(model, evidence, identity_policy)
     raw = model.model_dump(mode="json")
     process = raw["processes"][0]
     if edit == "dependency":
@@ -182,14 +195,19 @@ def test_scientific_process_edits_reask_even_when_the_conflict_remains(edit):
         process["kind"] = "transfer"
     elif edit == "sign":
         process["uses"][0]["sign"] = "negative"
-    else:
+    elif edit == "conversion":
         process["uses"][0]["conversion"] = "2"
-    after = feedback(Draft.model_validate(raw), evidence)
+    else:
+        process["uses"].append(dict(process["uses"][0]))
+    after = feedback(Draft.model_validate(raw), evidence, identity_policy)
     assert ids(before).keys() == ids(after).keys()
     assert set(ids(before).values()).isdisjoint(ids(after).values())
 
 
-def test_relevant_variable_type_and_ordinary_dependencies_reask():
+@pytest.mark.parametrize(
+    "identity_policy", [SEMANTIC_QUESTION_IDENTITY, MATHEMATICAL_QUESTION_IDENTITY]
+)
+def test_relevant_variable_type_and_ordinary_dependencies_reask(identity_policy):
     model, context, train, contract = fixture()
     raw = model.model_dump(mode="json")
     raw["processes"][0]["depends_on"] = ["a", "z"]
@@ -217,14 +235,16 @@ def test_relevant_variable_type_and_ordinary_dependencies_reask():
         }
     )
     evidence = build_evidence(train, context, contract)
-    before = feedback(Draft.model_validate(raw), evidence)
+    before = feedback(Draft.model_validate(raw), evidence, identity_policy)
     raw["equations"][0]["terms"][0]["scientific_role"] = "better prose"
-    assert ids(feedback(Draft.model_validate(raw), evidence)) == ids(before)
+    assert ids(feedback(Draft.model_validate(raw), evidence, identity_policy)) == ids(
+        before
+    )
     raw["equations"][0]["terms"][0]["sources"] = ["v"]
-    dependency = feedback(Draft.model_validate(raw), evidence)
+    dependency = feedback(Draft.model_validate(raw), evidence, identity_policy)
     assert ids(dependency)["closed_subsystem"] != ids(before)["closed_subsystem"]
     raw["variables"][1]["definition"] = "differential"
-    typed = feedback(Draft.model_validate(raw), evidence)
+    typed = feedback(Draft.model_validate(raw), evidence, identity_policy)
     assert ids(typed)["closed_subsystem"] != ids(dependency)["closed_subsystem"]
     assert "scalar_autonomous" not in ids(typed)
 
