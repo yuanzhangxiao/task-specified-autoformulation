@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`saved-initializer-choice-diagnostic-1` is independent of the repair loop. An
+offline cache replay freezes unchanged V6 finals and their full provenance. Two
+exact failed-request repeats assess output availability; two separately budgeted
+initializer-choice units use smaller schemas while freezing all topology. Legal
+initializer candidates are assessed against retained witnesses and saved without
+promotion. Each unit has durable calls/events/results and a distinct namespace;
+unavailable output never triggers an automatic retry. Historical policies remain
+unchanged. See `PHASE_C_INITIALIZER_CHOICE_DIAGNOSTIC.md`.
+
 `saved-topology-initialization-6` retains V5 scientific checks while correcting
 initializer evidence projection, provider-output availability, and rejected-edit
 identity. Atomic cleanup removes inherited initializer records only for explicit

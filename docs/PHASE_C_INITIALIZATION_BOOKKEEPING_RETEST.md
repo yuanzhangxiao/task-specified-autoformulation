@@ -83,3 +83,16 @@ Download its `inspection.tar.gz` after completion. Preserve the same output root
 and wave for status/inspection; do not overwrite older campaigns. An unavailable
 response deliberately stops this bounded episode and requires inspection before
 any separately authorized continuation.
+
+## Returned ACES audit
+
+The retest used five calls and 118,450 observed tokens. Seed 1 returned three
+complete unsupported observed-initializer choices; seed 2 returned one such
+choice and then an incomplete final response with `finish_reason=length`. Both
+models and initializer handoffs remained unchanged. The qualified evidence cards
+appeared in all five requests. The incomplete reply remained charged and did not
+advance scientific repetition. Exact offline replay reproduced both outcomes.
+
+The bounded next experiment isolates initializer choice from full topology repair
+and tests output completion independently. See
+`PHASE_C_INITIALIZER_CHOICE_DIAGNOSTIC.md`; this does not alter historical V6.

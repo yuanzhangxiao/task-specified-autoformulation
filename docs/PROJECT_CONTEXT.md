@@ -1,13 +1,22 @@
 # Autoformalism Phase 1 Implementation Context
 
+The V6 ACES audit returned five calls / 118,450 observed tokens. Both saved models
+remain unchanged with one conditional conflict each: seed 1 repeats an invalid
+observed initializer, and seed 2 ends with an unavailable truncated reply. Evidence
+projection and response bookkeeping now work as intended. The next isolated
+diagnostic freezes both topologies, allows at most two initializer-choice calls
+per case, and separately repeats the failed request twice for output completion.
+Its six-call ceiling preserves historical costs and prohibits model promotion,
+fitting and automatic follow-up. See `PHASE_C_INITIALIZER_CHOICE_DIAGNOSTIC.md`.
+
 The opt-in initializer-v6 milestone fixes the V5 bookkeeping defects without
 changing scientific predicates: consistent runtime/retained rules preserve
 evidence cards, incomplete final replies stop as unavailable rather than
 scientific stagnation, rejected initializer attempts compare assembled topology
 effects, and explicit state removal/retyping cleans only inherited initializer
 records. A two-case ACES retest uses the latest V5 finals, preserves all historical
-charges (including truncations), and declares a separate 20-call maximum. No live
-results are available yet. See `PHASE_C_INITIALIZATION_BOOKKEEPING_RETEST.md`.
+charges (including truncations), and declares a separate 20-call maximum. Returned
+results appear above. See `PHASE_C_INITIALIZATION_BOOKKEEPING_RETEST.md`.
 
 The opt-in initializer-v5 milestone adds labeled paired conditioning values,
 concrete feedback for unsupported observed initializers, and semantic repetition
