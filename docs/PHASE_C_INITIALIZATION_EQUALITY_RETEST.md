@@ -85,3 +85,69 @@ Output defaults to
 `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-initialization-equality-v1`.
 Download its `inspection.tar.gz` after completion. Keep the same root and wave
 when checking or resuming; do not overwrite a historical campaign.
+
+
+## Returned ACES audit (2026-10-17)
+
+Job 2225153 completed with worker exit zero. The returned plan matches
+`f23173ba553a87afadb7dc565940c983d48f0db3b9bb3b02c5d7d73105874105`
+and source `dca7f8d47b6d59d8abe8bc4e510d32c8a032c845`. The inspection archive
+SHA-256 is `8a73a4b2790ffb431c370e45b9f990e00154910a7a0f06fe46698611e94ef3da`.
+All 13 generation responses finish normally, with 276,720 observed/charged tokens
+and no unknown usage. Historical costs remain separate. CUDA and offline Harmony
+preflights pass; no fitting or test access occurred.
+
+| Saved case | Calls | New tokens | Final conditional conflict | Stop |
+| --- | ---: | ---: | --- | --- |
+| T2-easy seed 1 | 3 | 63,043 | Initial algebraic U readout | Three repeated repairs |
+| T2-easy seed 2 | 10 | 213,677 | Coupled I / I_mem subsystem | Call allowance exhausted |
+
+Both final models are structurally eligible and have complete initialization
+records. Neither resolves its current conditional conflict. Eight other diagnostic
+records per case remain deferred; those are not passes. Every request includes
+the intended leading equality explanation.
+
+Seed 1 retains `U = f(Uii) + g(X)` and `X(0) = c`, with one shared constant.
+For train_011 and train_012, sealed training evidence gives `Uii(0) = 1` in both,
+but `U(0) = 1.9890358776874768` and `1.8350720852593723`. The proposer repeatedly
+labels these U measurements as unequal Uii readings and disputes the equality,
+without editing the model. The runtime correctly preserves the conflict and stops
+after three identical replies. The prompts assert matched Uii but omit its actual
+paired values; subsequent feedback does not correct that specific channel
+confusion. Accepted reply transactions do not imply accepted scientific claims.
+
+Seed 2 retains `I_mem(0) = h(I(0))`. The train_000/train_011 pair has equal
+`I(0) = 25.5878134642966` and matched complete external-forcing histories, yet
+`I(8) = 25.5878134642966` versus `48.42727474869684`. All I/I_mem dependencies
+remain inside that equally initialized subsystem and its matched forcing. One
+accepted edit changes an internal process argument from I to I_mem; this does not
+introduce distinguishing information. Four attempted `observed_initial` declarations
+for latent I_mem are rejected because no measured-initial binding exists. One reply
+explicitly understands the initializer equality restriction but proposes that
+unsupported initialization mode. No retained initializer changes.
+
+The V4 description-only progress fix behaves correctly: seed 2 event 004 changes
+only role text and remains semantically unchanged with the same question ID.
+A separate residual defect remains: events 003 and 004 have identical base
+scientific attempt signatures, but appending an explicit unchanged initialization
+versus `null` produces different final fingerprints. The unchanged counter resets
+to one, contradicting the instruction that redundant restatements do not reset it.
+Distinct rejected mathematical alternatives should still keep distinct identities.
+
+Recommended next milestone, not implemented in this audit:
+
+1. Present numeric paired conditioning values beside the observed difference,
+   with explicit channel and time labels. Use general evidence formatting rather
+   than a benchmark-specific scientific correction.
+2. For an unsupported observed initializer, name the state, absence of a measured
+   initial binding, current retained rule, and legal editable initial-information
+   choices. The proposer must choose the scientific dependence.
+3. Canonicalize unchanged initializer submissions for repetition counting while
+   retaining distinct rejected alternatives. Verify on saved replies before a new
+   separately budgeted two-case test.
+
+These are two selected difficult saved cases, not an estimate of all-seed success
+or a controlled causal comparison of prompts. No function construction, fitted
+accuracy or full scientific consistency is established. The local review at
+`output/initialization-equality-analysis-20261017/REPORT.html` links all 13 exact
+requests/replies; generated responses and evidence remain outside Git.

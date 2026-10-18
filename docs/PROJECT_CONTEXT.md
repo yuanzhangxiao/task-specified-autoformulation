@@ -5,8 +5,13 @@ witness IDs and adds concise model-specific equality feedback. A separately
 budgeted ACES retest starts from the two unresolved provider-recovery final
 models (seeds 1/2), retaining initializers, witnesses and historical costs.
 No fitting, test access, new scientific predicates or benchmark edits are
-included. Historical policies retain replay behavior. See
-`PHASE_C_INITIALIZATION_EQUALITY_RETEST.md`; live effectiveness is untested.
+included. Historical policies retain replay behavior. The returned two-case ACES
+run completed 13 responses / 276,720 tokens, with both conditional conflicts
+unresolved. Seed 1 confuses target U readings with matched Uii values; seed 2
+attempts an unsupported observed initializer. Description-invariant question IDs
+worked, but redundant explicit initializer versus null still resets a repetition
+counter. See `PHASE_C_INITIALIZATION_EQUALITY_RETEST.md` for the audited result
+and bounded next-step recommendations. No new repair policy is implemented.
 
 The initializer-v3 ACES retest returned nine provider failures and no responses;
 its three models were unchanged. The bounded Harmony recovery then returned 17
