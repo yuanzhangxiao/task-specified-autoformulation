@@ -5,7 +5,13 @@ concrete feedback for unsupported observed initializers, and semantic repetition
 counting for unchanged initializer submissions. Two explicit V4 final models
 retain their witnesses and separate historical costs for a bounded ACES retest.
 Scientific predicates, benchmarks and older replay policies remain unchanged.
-See `PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md`; live effectiveness is untested.
+The returned ACES run used 20 calls / 444,478 observed tokens: 18 normal replies
+and two output truncations. Both models remain structurally eligible with one
+conditional conflict each. Identical runtime/proposer initializer records suppress
+seed 1's concise evidence cards; seed 2's truncations incorrectly advance the
+repetition counter. The scientific obligations remain visible and unresolved.
+See `PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md` for the offline audit and next
+bounded corrections. No new runtime policy or live run has been added.
 
 The opt-in initializer-v4 milestone repairs presentation-sensitive retained
 witness IDs and adds concise model-specific equality feedback. A separately

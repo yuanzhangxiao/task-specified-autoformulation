@@ -6,7 +6,11 @@ issue-specific feedback. Accepted null/restatement equivalence is reflected in
 repetition counting while distinct rejected alternatives remain separate. The
 freezer preserves two selected V4 finals and historical cost scopes under a new
 bounded allowance. V1–V4 replay and scientific predicates remain unchanged. See
-`PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md`.
+`PHASE_C_INITIALIZATION_EVIDENCE_RETEST.md`. The returned V5 audit identifies
+three remaining bookkeeping gaps: consistent fixed/proposer rule duplicates can
+suppress evidence cards, redundant records in rejected topology edits affect
+attempt identities, and output truncation is counted as scientific repetition.
+These are observed defects, not implemented changes to the historical policy.
 
 `saved-topology-initialization-4` retains initializer-v3 scientific predicates
 while using description-independent retained-witness identities and a leading
