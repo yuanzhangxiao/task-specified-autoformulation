@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in M44 fitting experiment treats prefix duration as a hyperparameter:
+three clean/noisy acquisitions, two training starts, six durations and two fixed
+prefix starts. All candidates share a validation forecast horizon; shared
+parameters remain frozen. Root noise amplification is advisory and conditional,
+and generated truth is consulted only after selection. See
+`PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md`. Benchmark/production policies remain
+unchanged; remote results are pending.
+
 The opt-in initialization-graph construction path now declares shared or
 trajectory-scoped roots and dependent initial maps at topology, then constructs
 their analytic formulas at interaction. It exports the scoped M43 fitting problem

@@ -442,3 +442,59 @@ def test_all_known_parameter_free_problem_verifies_without_optimizer():
     prefix = p.make_prefix(data.rows[0], p.PrefixPolicy(duration=0))
     inference = p.infer_prefix(model, fit, prefix, p.NumericalPolicy())
     assert inference["fit_success"] and inference["roots"] == {}
+
+
+def test_explicit_root_start_changes_only_prefix_start_and_units(fitted):
+    model, fit, numerical = fitted
+    prefix = p.make_prefix(row("root_start", 2), p.PrefixPolicy(duration=0))
+    before = content_sha256(model), content_sha256(fit), content_sha256(prefix)
+    guesses = {"init_r_value": 3.5}
+    oracle = p.PrefixOracle(model, fit, prefix, numerical, root_guesses=guesses)
+    assert oracle.start == guesses
+    assert oracle.units == pytest.approx([3.5])
+    assert oracle.frozen == fit["shared_parameters"]
+    result = p.infer_prefix(model, fit, prefix, numerical, root_guesses=guesses)
+    assert result["fit_success"]
+    assert result["roots"] == result["root_start"] == guesses
+    guesses["init_r_value"] = 9
+    assert result["root_start"] == {"init_r_value": 3.5}
+    assert result["problem_sha256"] == before[0]
+    assert before == (
+        content_sha256(model),
+        content_sha256(fit),
+        content_sha256(prefix),
+    )
+    default = p.infer_prefix(model, fit, prefix, numerical)
+    assert default["roots"] == {"init_r_value": 0.8}
+    assert "root_start" not in default
+
+
+@pytest.mark.parametrize(
+    "guesses",
+    [
+        {},
+        {"theta": 1.0},
+        {"init_r_value": 1, "init_z_phi": 2},
+        {"init_r_value": float("nan")},
+        {"init_r_value": float("inf")},
+    ],
+)
+def test_root_start_rejects_shared_missing_extra_or_nonfinite_coordinates(
+    fitted, guesses
+):
+    model, fit, numerical = fitted
+    prefix = p.make_prefix(row("bad_start", 1), p.PrefixPolicy(duration=0.5))
+    with pytest.raises(ValueError, match=r"trajectory roots|outside declared domain"):
+        p.infer_prefix(model, fit, prefix, numerical, root_guesses=guesses)
+
+
+def test_root_start_obeys_native_root_domain(fitted):
+    original, original_fit, numerical = fitted
+    payload = original.model_dump(mode="json")
+    payload["graph"]["rules"]["r"]["initial"]["role"] = "nonnegative_coefficient"
+    model = p.PrefixFitProblem.model_validate(payload)
+    fit = deepcopy(original_fit)
+    fit["problem_sha256"] = content_sha256(model)
+    prefix = p.make_prefix(row("nonnegative_start", 1), p.PrefixPolicy(duration=0.5))
+    with pytest.raises(ValueError, match="outside declared domain"):
+        p.infer_prefix(model, fit, prefix, numerical, root_guesses={"init_r_value": -1})

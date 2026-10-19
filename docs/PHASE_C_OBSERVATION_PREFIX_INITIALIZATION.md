@@ -123,6 +123,14 @@ phi and c and re-infer each xi_j using only its prefix, exactly as for a new row
 
 ## What is permitted on a new trajectory
 
+Prefix duration is a fitting hyperparameter, not a proposer decision. A duration
+sweep must hold shared parameters fixed and compare candidates on a common
+future horizon. The [M44 qualification](PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md)
+selects the shortest adequate window using predeclared validation criteria,
+while reporting root information and inference cost separately. Duration tuning
+uses validation, so selected validation scores are not independent test estimates.
+The complete duration-selection policy must be frozen before test evaluation.
+
 The prefix policy fixes its duration, available observation channels, known future
 exogenous schedules, root domains, starting rule, numerical budget and training
 normalization before evaluation. For shared learned parameters theta_hat, phi_hat

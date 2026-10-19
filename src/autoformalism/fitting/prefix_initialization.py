@@ -393,7 +393,13 @@ class PrefixOracle(TrainingOracle):
     """Roots-only oracle with frozen shared parameters and training scales."""
 
     def __init__(
-        self, problem, fit_result, prefix: PrefixView, policy: NumericalPolicy
+        self,
+        problem,
+        fit_result,
+        prefix: PrefixView,
+        policy: NumericalPolicy,
+        *,
+        root_guesses: Mapping[str, float] | None = None,
     ):
         if not isinstance(prefix, PrefixView):
             raise TypeError("typed prefix-only view required")
@@ -412,11 +418,17 @@ class PrefixOracle(TrainingOracle):
         self.frozen = dict(fit_result["shared_parameters"])
         if set(self.frozen) != set(self.shared):
             raise ValueError("frozen shared parameter names differ")
-        _physical_vector(self.system, variables, guesses | self.frozen)
         specs = dict(zip(self.system.names, variables, strict=True))
         self.lower = np.asarray([specs[name].lower for name in self.names])
         self.upper = np.asarray([specs[name].upper for name in self.names])
         self.start = {name: guesses[name] for name in self.names}
+        if root_guesses is not None:
+            if not isinstance(root_guesses, Mapping):
+                raise TypeError("root guesses must be a mapping")
+            if set(root_guesses) != set(self.names):
+                raise ValueError("root guesses must name exactly the trajectory roots")
+            self.start = self.parameters(self.vector(root_guesses))
+        _physical_vector(self.system, variables, guesses | self.frozen | self.start)
         self.units = np.asarray([max(abs(value), 1.0) for value in self.start.values()])
         self.scales = dict(fit_result["training_scales"])
         if set(self.scales) != set(self.system.channels) or any(
@@ -579,10 +591,18 @@ def fit_training(
 
 
 def infer_prefix(
-    problem, fit_result, prefix: PrefixView, policy: NumericalPolicy, checkpoint=None
+    problem,
+    fit_result,
+    prefix: PrefixView,
+    policy: NumericalPolicy,
+    checkpoint=None,
+    *,
+    root_guesses: Mapping[str, float] | None = None,
 ) -> dict:
     """Infer only independent roots; shared coefficients remain frozen."""
-    oracle = PrefixOracle(problem, fit_result, prefix, policy)
+    oracle = PrefixOracle(
+        problem, fit_result, prefix, policy, root_guesses=root_guesses
+    )
     result = _solve(oracle, policy, checkpoint)
     return result | {
         "protocol": "prefix-inference-1",
@@ -600,6 +620,7 @@ def infer_prefix(
         "roots": result["parameters"],
         "realized_initial_states": _realized_initials(oracle, result["parameters"]),
         "policy": policy.model_dump(mode="json"),
+        **({"root_start": dict(oracle.start)} if root_guesses is not None else {}),
     }
 
 

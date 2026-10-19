@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`phase-c-prefix-window-selection-1` is an isolated M44 hyperparameter experiment.
+It fits shared parameters once per acquisition/start, independently estimates
+roots over predetermined prefixes, chooses root endpoints by prefix loss alone,
+and selects duration using a common validation suffix with complete denominators.
+Optional root-start overrides retain native domains and prohibit shared changes.
+Prefix-only information diagnostics and evaluator-only clean/root errors remain
+separate from selection. Existing production and historical defaults are unchanged.
+See `PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md`.
+
 `construction-initializer-dependencies-1` and
 `construction-initializer-formulas-1` add a separate construction path for M43.
 The runtime contract authorizes trajectory roots independently of a concrete

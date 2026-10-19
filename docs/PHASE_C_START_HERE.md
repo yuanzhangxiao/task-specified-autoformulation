@@ -21,6 +21,12 @@ benchmark qualification remain pending. Existing benchmark and production
 policies are unchanged. This takes priority
 over extending the completed M42 uncertainty diagnostic.
 
+The next opt-in fitting gate is [M44 prefix-duration selection](PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md):
+six CPU tasks sweep observation windows on clean/noisy known-equation controls,
+score a common late horizon and keep shared parameters frozen. It reports root
+information and starting-point sensitivity separately from forecast adequacy.
+This tunes a fitting hyperparameter; it does not change benchmark input access.
+
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
 The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) translates
 verified fitting diagnostics into bounded all-target response summaries. The
