@@ -7,6 +7,7 @@ export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1 PY
 case "${AF_INITIALIZATION_WORKER:-choice}" in
   choice) AF_CLI="$AF_REPO_ROOT/scripts/initializer_choice_aces.py" ;;
   graph) AF_CLI="$AF_REPO_ROOT/scripts/construction_initialization_graph.py" ;;
+  graph-repair) AF_CLI="$AF_REPO_ROOT/scripts/construction_initialization_repair.py" ;;
   *) echo 'Unknown initialization worker.' >&2; exit 2 ;;
 esac
 # Check the complete import chain before starting a server or reading artifacts.

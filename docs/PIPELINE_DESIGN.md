@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+`initialization-dependency-repair-1` adds an opt-in combined schema/dependency and
+deterministic model/data acceptance loop. Current qualified conflicts are
+recomputed before acceptance and rendered as verified equations and paired
+training observations. Every new reply is checked; repeated choices do not erase
+evidence. An explicit request for wider topology edits stops unresolved. Prefix
+root choices retain deferred evidence and do not establish scientific recovery.
+The separately sealed ten-episode diagnostic preserves historical source costs
+once per source and retains all physical calls across resume. Historical graph
+construction remains reproducible. See `PHASE_C_INITIALIZATION_CONFLICT_REPAIR.md`.
+
 `phase-c-prefix-window-selection-1` is an isolated M44 hyperparameter experiment.
 It fits shared parameters once per acquisition/start, independently estimates
 roots over predetermined prefixes, chooses root endpoints by prefix loss alone,

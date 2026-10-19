@@ -1,0 +1,52 @@
+#!/bin/bash
+# Ten saved-model/proposal-seed episodes; no formula generation or fitting.
+set -euo pipefail
+export AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
+[[ -d "$AF_GROUP" ]] || { echo 'Run on ACES with AF_GROUP set to writable scratch.' >&2; exit 2; }
+export AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-$AF_GROUP/phase-c-initialization-repair-seeds5-v1}
+export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
+export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
+AF_CLI="$AF_REPO_ROOT/scripts/construction_initialization_repair.py"
+if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
+  module load "${AF_GCCCORE_MODULE:-GCCcore/13.2.0}" "${AF_PYTHON_MODULE:-Python/3.11.5}"
+  "$AF_PYTHON" "$AF_CLI" --help >/dev/null
+fi
+case "${1:?Use run, status, or inspect}" in
+  run)
+    export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
+    AF_SNAPSHOT=hub/models--openai--gpt-oss-20b/snapshots/6cee5e81ee83917806bbde320786a8fb61efebee/config.json
+    if [[ -z "${AF_HF_HOME:-}" ]]; then
+      if [[ -f "$AF_GROUP/huggingface-cache/$AF_SNAPSHOT" ]]; then
+        export AF_HF_HOME="$AF_GROUP/huggingface-cache"
+      else
+        export AF_HF_HOME=/scratch/user/u.yx126462/huggingface-cache
+      fi
+    fi
+    [[ -f "$AF_HF_HOME/$AF_SNAPSHOT" && -f "$AF_VLLM_IMAGE" ]] || {
+      echo 'Set AF_HF_HOME and AF_VLLM_IMAGE to the existing model cache and image.' >&2; exit 2;
+    }
+    export AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}
+    "$AF_PYTHON" "$AF_REPO_ROOT/scripts/harmony_vocab.py" verify --directory "$AF_HARMONY_ASSETS"
+    "$AF_PYTHON" "$AF_CLI" prepare --source "${AF_GRAPH_REPAIR_SOURCE:-$AF_REPO_ROOT/inputs/source-inspection.tar.gz}" --root "$AF_OUTPUT_ROOT"
+    exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_initialization_repair_aces.py" --root "$AF_OUTPUT_ROOT" --wave "${AF_WAVE:-repair-1}"
+    ;;
+  status)
+    squeue -u "$USER" -o '%.18i %.32j %.10T %.10M %R'
+    if [[ -f "$AF_OUTPUT_ROOT/summary.json" ]]; then
+      "$AF_PYTHON" - "$AF_OUTPUT_ROOT/summary.json" <<'PY'
+import json, sys
+value = json.load(open(sys.argv[1]))
+print(json.dumps({key: value[key] for key in ('status', 'status_counts', 'cost')}, indent=2))
+PY
+    else
+      echo 'No summary yet; inspect the queued job and logs.'
+    fi
+    printf 'Last saved summary; refreshed when the worker exits. Logs: %s/logs\n' "$AF_OUTPUT_ROOT"
+    ;;
+  inspect)
+    "$AF_PYTHON" "$AF_CLI" inspect --root "$AF_OUTPUT_ROOT"
+    printf 'Download: %s/inspection.tar.gz\n' "$AF_OUTPUT_ROOT"
+    ;;
+  *) echo 'Use run, status, or inspect.' >&2; exit 2 ;;
+esac

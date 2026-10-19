@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in initializer conflict-repair diagnostic now includes demonstrated
+training model/data contradictions in deterministic acceptance. Each proposed
+dependency graph is checked immediately; blocked graphs remain inspection-only
+and receive concise equations, paired measurements and bounded repair options.
+Unavailable prefix-root evidence stays deferred, never a claimed scientific
+repair. The next ACES diagnostic uses two frozen saved models and five proposal
+seeds each, capped at three calls per episode, without fitting or test access.
+See `PHASE_C_INITIALIZATION_CONFLICT_REPAIR.md`. Remote results are pending.
+
 The opt-in M44 fitting experiment treats prefix duration as a hyperparameter:
 three clean/noisy acquisitions, two training starts, six durations and two fixed
 prefix starts. All candidates share a validation forecast horizon; shared
