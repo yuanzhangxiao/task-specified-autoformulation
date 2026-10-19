@@ -122,3 +122,88 @@ Local diagnostic totals are 5.162 CPU / 5.204 summed wall seconds, including
 different host, not a Delta speedup result. Artifacts remain uncommitted under
 `output/phase-c-fitting-m42-smoke/`. The separately requested Delta supplement
 has not been run by the agent.
+
+
+## Delta result review, 19 October 2026
+
+Returned archive: `review-20261019-083512.tar.gz`, SHA-256
+`da5632124ffdc26d5206b403cc812598a1ebeb1c0961da5ef875eb6c5ed293cf`.
+Execution commit: `46ad90c661d8e181b18c39a6818f2f014b924917`.
+Frozen plan: `ab6c2d1c08d019fc5b4711a42eb895fd9925cfac470f70a854e682715d8e3e0c`.
+Delta jobs were prepare `23008927`, array `23008928`, report `23008929`.
+The returned preparation log records 59 passing tests.
+
+Both separately budgeted diagnostics complete **40/40 nodes, zero unresolved**.
+Together with the original 34 complete profiles, the campaign now has **36/36
+complete profiles**. All 36 original fits retain their exact parameters,
+independent rollout checks and numerical endpoint qualification. There is no
+new fitting, truth-based selection, LLM call or test-data access.
+
+| Retained fitting method | Completed calls | CPU seconds | Diagnostic wall seconds |
+| --- | ---: | ---: | ---: |
+| Direct | 11,388 | 4.737 | 12.189 |
+| Profiled | 11,383 | 6.402 | 13.069 |
+| Supplement total | 22,771 | 11.139 | 25.258 |
+
+There are no failed or interrupted calls. These are the new diagnostic costs;
+original work is not subtracted or replaced. Combined historical plus supplemental
+diagnostic cost is 374,840 calls, 200.360 CPU seconds and 469.771 summed task wall
+seconds. Summed wall time is not campaign elapsed time. The numerical-work
+subcategory uses 5.911 wall seconds and persistence callbacks use 15.136 wall
+seconds (59.9% of the supplement total); both are nested within the 25.258-second
+total and must not be added to it. This strengthens the case for reducing
+checkpoint serialization/I/O overhead while preserving deterministic recovery.
+
+At the formerly unresolved gain `2.3116666667`, the corrected reference finds
+rate `1.4953772951` instead of stopping at `1.5`. Its objective now agrees with
+the primary nuisance search within `4.10e-11`; the previous discrepancy was
+`0.550731`. The point remains far outside the accepted support (objective rise
+about 3874 versus thresholds 0.5 and 2). All previously accepted sampled gains
+at both thresholds are preserved. Thus this correction restores diagnostic
+availability without changing the fitted endpoint or reversing a support
+classification.
+
+For this acquisition, the fitted gain is approximately `1.30109`. At objective
+rise 2, the six accepted samples span approximately `1.29289` to `1.31750`.
+The lower crossing is only bracketed by `[1.28468, 1.29289]`, and the upper by
+`[1.31750, 1.32833]`. These brackets show why the accepted-sample span is not a
+continuous interval width or a confidence interval. The frozen-nuisance slice
+accepts just the fitted-gain sample at this grid resolution, not zero true
+uncertainty.
+
+The broader M41 scientific result is unchanged: all local joint sensitivities
+have rank four, yet weak excitation and higher noise can yield broad gain
+support and poor physical-state recovery despite good sensor prediction.
+For direct fitting, the median accepted-sample span at rise 2 is about 0.02480
+for input separation 0.5/noise 0.01 and 1.96667 for separation 0/noise 0.2
+(three noise seeds each). All three latter profiles reach the upper gain domain
+bound. These are sampled extents under the declared bounds, not probabilities.
+
+The next numerical milestone should adaptively refine the existing threshold
+crossing brackets at the sealed endpoints, with a declared gain-resolution and
+objective tolerance, separate call/time budgets and explicit domain-clipped or
+unresolved outcomes. Apply the same logic to frozen and nuisance-reoptimized
+profiles; preserve possible multiple components rather than assume a single
+interval or quadratic profile. Bracket refinement alone does not prove that an
+arbitrarily narrow disconnected component was not missed. Use the saved M41/M42
+evidence, retain the independent nuisance-search checks, and do not refit or use
+evaluator truth. Continue recording persistence overhead before changing its
+checkpoint policy or generalizing to larger nonlinear nuisance blocks.
+
+Review evidence is retained locally under
+`output/phase-c-fitting-m42-delta-review/`. The full summary was reconstructed
+from the saved stages with exact agreement; all existing extracted file contents
+were preserved. The independent integrity audit is
+`output/phase-c-fitting-m42-review-audit.json`. These outputs are not committed.
+
+The independent audit verified 950 sealed JSON artifacts, 1,262 manifest hashes
+and 3,192 records across 38 checkpoint journals. All 1,262 source-snapshot files
+match the previously returned M41 archive byte-for-byte, and the recorded source
+digest matches the execution commit. The reconstructed report preserves all
+1,298 existing extracted file contents. No material provenance or accounting
+anomaly was found.
+
+This documentation-only review reran 59 profile/supplement/launcher tests:
+all passed. The report reconstruction is the artifact smoke check. Whitespace
+checks pass; whole-checkout Ruff still reports the same 37 unrelated findings
+in `analysis/claude`. No fitting implementation or experiment policy changed.
