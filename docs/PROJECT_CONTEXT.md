@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+The initializer conflict-repair diagnostic returned ten completed episodes:
+four accepted trajectory-root declarations with evidence deferred, five proposer
+requests for topology changes and one exhausted allowance (20 calls / 100,848
+tokens). None demonstrates fitted recovery. The new opt-in `scope-aware-2`
+feedback distinguishes invalid record targets from the still-active model-data
+conflict, identifies relevant editable initials, and preserves unaffected rather
+than merely schema-valid records. The next comparison retains the original two
+models, five proposal seeds each and three-call caps in a fresh campaign. See
+`PHASE_C_INITIALIZATION_SCOPE_REPAIR.md`; no live retest has run locally.
+
 The opt-in initializer conflict-repair diagnostic now includes demonstrated
 training model/data contradictions in deterministic acceptance. Each proposed
 dependency graph is checked immediately; blocked graphs remain inspection-only
@@ -7,7 +17,7 @@ and receive concise equations, paired measurements and bounded repair options.
 Unavailable prefix-root evidence stays deferred, never a claimed scientific
 repair. The next ACES diagnostic uses two frozen saved models and five proposal
 seeds each, capped at three calls per episode, without fitting or test access.
-See `PHASE_C_INITIALIZATION_CONFLICT_REPAIR.md`. Remote results are pending.
+See `PHASE_C_INITIALIZATION_CONFLICT_REPAIR.md`. Returned results appear above.
 
 The opt-in M44 fitting experiment treats prefix duration as a hyperparameter:
 three clean/noisy acquisitions, two training starts, six durations and two fixed

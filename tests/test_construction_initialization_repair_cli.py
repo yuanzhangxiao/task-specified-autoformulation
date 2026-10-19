@@ -100,8 +100,12 @@ def test_prepare_five_seeds_and_single_history_per_original_model(prepared):
     assert not (root / "results").exists()
 
 
-def test_run_resume_and_previews_match_actual_requests(prepared):
-    source, root = prepared
+@pytest.mark.parametrize("feedback_policy", ["legacy-1", "scope-aware-2"])
+def test_run_resume_and_previews_match_actual_requests(
+    source, tmp_path, feedback_policy
+):
+    root = tmp_path / "repair"
+    cli.prepare(source, root, feedback_policy=feedback_policy)
     initial = source.read_bytes()
     requests = []
 
@@ -142,6 +146,56 @@ def test_run_resume_and_previews_match_actual_requests(prepared):
         == result
     )
     assert source.read_bytes() == initial
+
+
+def test_scope_policy_is_sealed_and_cannot_overwrite_legacy_history(prepared, tmp_path):
+    source, legacy_root = prepared
+    root = tmp_path / "scope-repair"
+    cli.prepare(source, root, feedback_policy="scope-aware-2")
+    old = cli.verify(legacy_root)
+    new = cli.verify(root)
+    assert "feedback_policy" not in old
+    assert new["feedback_policy"] == "scope-aware-2"
+    assert old["protocol"] == cli.PROTOCOL
+    assert new["protocol"] == "saved-construction-initialization-repair-2"
+    assert new["proposal_seeds"] == old["proposal_seeds"]
+    assert new["source_archive_sha256"] == old["source_archive_sha256"]
+    assert new["source_models"] == old["source_models"]
+    assert new["settings"] == old["settings"]
+    assert new["budgets"] == old["budgets"]
+    assert {case["namespace"] for case in new["cases"]}.isdisjoint(
+        case["namespace"] for case in old["cases"]
+    )
+    assert (
+        "scripts/hpc/start_initialization_scope_repair_aces.sh"
+        in new["entrypoint_sha256"]
+    )
+    assert (
+        "scripts/hpc/start_initialization_scope_repair_aces.sh"
+        not in old["entrypoint_sha256"]
+    )
+    legacy_plan = (legacy_root / "plan.json").read_bytes()
+    with pytest.raises(ValueError, match="fresh root"):
+        cli.prepare(source, legacy_root, feedback_policy="scope-aware-2")
+    assert (legacy_root / "plan.json").read_bytes() == legacy_plan
+    assert cli.report(root)["feedback_policy"] == "scope-aware-2"
+    assert cli.report(root)["protocol"] == new["protocol"]
+    with pytest.raises(ValueError, match=r"unknown.*policy"):
+        cli.prepare(source, tmp_path / "bad", feedback_policy="guess")
+    assert not (tmp_path / "bad").exists()
+
+
+def test_resealed_policy_downgrade_cannot_reuse_scope_identity(source, tmp_path):
+    root = tmp_path / "scope-repair"
+    cli.prepare(source, root, feedback_policy="scope-aware-2")
+    plan = sealed_read(root / "plan.json")
+    plan["feedback_policy"] = "legacy-1"
+    plan["artifact_sha256"] = content_hash(
+        {key: value for key, value in plan.items() if key != "artifact_sha256"}
+    )
+    (root / "plan.json").write_text(json.dumps(plan))
+    with pytest.raises(ValueError, match="identity"):
+        cli.verify(root)
 
 
 def test_conflicting_replies_are_never_accepted_and_cap_is_three(prepared):

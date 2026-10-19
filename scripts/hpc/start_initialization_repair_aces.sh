@@ -28,7 +28,7 @@ case "${1:?Use run, status, or inspect}" in
     }
     export AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}
     "$AF_PYTHON" "$AF_REPO_ROOT/scripts/harmony_vocab.py" verify --directory "$AF_HARMONY_ASSETS"
-    "$AF_PYTHON" "$AF_CLI" prepare --source "${AF_GRAPH_REPAIR_SOURCE:-$AF_REPO_ROOT/inputs/source-inspection.tar.gz}" --root "$AF_OUTPUT_ROOT"
+    "$AF_PYTHON" "$AF_CLI" prepare --source "${AF_GRAPH_REPAIR_SOURCE:-$AF_REPO_ROOT/inputs/source-inspection.tar.gz}" --root "$AF_OUTPUT_ROOT" --feedback-policy "${AF_GRAPH_REPAIR_FEEDBACK_POLICY:-legacy-1}"
     exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_initialization_repair_aces.py" --root "$AF_OUTPUT_ROOT" --wave "${AF_WAVE:-repair-1}"
     ;;
   status)

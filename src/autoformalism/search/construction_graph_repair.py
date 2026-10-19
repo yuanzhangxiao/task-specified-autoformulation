@@ -31,6 +31,7 @@ from autoformalism.search.construction_initialization_graph import (
 )
 from autoformalism.search.construction_ledger import Draft
 from autoformalism.search.construction_readable import model_view
+from autoformalism.search.construction_scope_feedback import scoped_feedback
 from autoformalism.search.topology_compatibility import (
     TrainingCompatibilityEvidence,
     validate_evidence,
@@ -38,6 +39,8 @@ from autoformalism.search.topology_compatibility import (
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "initialization-dependency-repair-1"
+LEGACY_FEEDBACK = "legacy-1"
+SCOPE_FEEDBACK = "scope-aware-2"
 SYSTEM = (
     DEPENDENCY_SYSTEM
     + """
@@ -57,6 +60,33 @@ records=[], and explain the needed change. This stops unresolved, not accepted.
 No retain-approximation or acknowledgment option clears a concrete contradiction.
 """
 )
+
+SCOPE_SYSTEM = SYSTEM.replace(
+    "Initial dependencies must be acyclic. Do not use future\n"
+    "measurements, trajectory identifiers, algebraic variables or process names.",
+    "Initial dependencies must be acyclic. Only differential states may appear in\n"
+    "state_initials or receive initializer records. A recorded reading listed in\n"
+    "permitted_public_initials may be used in public_initials, including a reading\n"
+    "of an algebraic output; this does not give that output an independent "
+    "initializer.\n"
+    "Do not use unavailable future measurements, trajectory identifiers or "
+    "process names.",
+).replace(
+    "On repair return the complete replacement record list, retaining valid records.",
+    "On repair return the complete replacement record list, retaining unaffected\n"
+    "records. A schema-valid initializer that causes a model-data conflict must\n"
+    "still be revised. Removing a separate invalid record does not repair that\n"
+    "conflict, and the model cannot be accepted while the conflict remains.",
+)
+
+
+def system_prompt(feedback_policy: str = LEGACY_FEEDBACK) -> str:
+    """Keep historical wording fixed and reject an unknown presentation policy."""
+    if feedback_policy == LEGACY_FEEDBACK:
+        return SYSTEM
+    if feedback_policy == SCOPE_FEEDBACK:
+        return SCOPE_SYSTEM
+    raise ValueError(f"unknown initializer feedback policy: {feedback_policy}")
 
 
 class GraphDependencyReply(StrictSchema):
@@ -104,6 +134,7 @@ def dependency_construction_identity(
     evidence: TrainingCompatibilityEvidence,
     previous_questions: tuple[dict, ...] = (),
     initial_handoff: GraphDependencyHandoff | None = None,
+    feedback_policy: str = LEGACY_FEEDBACK,
 ) -> str:
     """Bind preview, execution, historical evidence and the acceptance policy."""
     from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
@@ -120,7 +151,12 @@ def dependency_construction_identity(
             "initial_handoff": initial_handoff.model_dump(mode="json")
             if initial_handoff
             else None,
-            "system": SYSTEM,
+            "system": system_prompt(feedback_policy),
+            **(
+                {"feedback_policy": feedback_policy}
+                if feedback_policy != LEGACY_FEEDBACK
+                else {}
+            ),
             "schema": GraphDependencyReply.model_json_schema(),
             "runtime": runtime_source_hash(),
             "namespace": client.namespace,
@@ -165,8 +201,10 @@ def dependency_request(
     previous_questions: tuple[dict, ...] = (),
     initial_handoff: GraphDependencyHandoff | None = None,
     construction_identity: str | None = None,
+    feedback_policy: str = LEGACY_FEEDBACK,
 ) -> str:
     """Lead with current, rechecked conflicts and retain one model/context view."""
+    system_prompt(feedback_policy)
     if previous is None:
         gate = (
             acceptance_feedback(
@@ -181,24 +219,35 @@ def dependency_request(
         )
         feedback = {"current_checks": _feedback_view(gate)}
     else:
+        gate = previous.get("gate")
         feedback = {
             key: value
             for key, value in previous.items()
             if key not in {"assessment", "gate", "candidate", "last_valid_candidate"}
         }
-        feedback["current_checks"] = _feedback_view(previous.get("gate"))
+        feedback["current_checks"] = _feedback_view(gate)
+    current = (
+        previous.get("candidate", previous.get("last_valid_candidate"))
+        if previous
+        and (previous.get("candidate") or previous.get("last_valid_candidate"))
+        else initial_handoff.model_dump(mode="json")
+        if initial_handoff
+        else None
+    )
+    if feedback_policy == SCOPE_FEEDBACK:
+        feedback["scope_guidance"] = scoped_feedback(
+            draft,
+            context,
+            contract,
+            GraphDependencyHandoff.model_validate(current) if current else None,
+            gate,
+            previous,
+        )
     payload = {
         "construction_identity": construction_identity,
         "feedback": feedback,
         "model_view": model_view(draft),
-        "current_dependency_records": (
-            previous.get("candidate", previous.get("last_valid_candidate"))
-            if previous
-            and (previous.get("candidate") or previous.get("last_valid_candidate"))
-            else initial_handoff.model_dump(mode="json")
-            if initial_handoff
-            else None
-        ),
+        "current_dependency_records": current,
         "latent_states_requiring_records": sorted(
             v.name
             for v in draft.variables
@@ -233,7 +282,15 @@ def _semantic(handoff: dict) -> str:
 
 
 def _evaluate(
-    record, draft, context, scientific_context, contract, evidence, questions
+    record,
+    draft,
+    context,
+    scientific_context,
+    contract,
+    evidence,
+    questions,
+    *,
+    feedback_policy: str = LEGACY_FEEDBACK,
 ):
     """Record atomic validity and deterministic conflict checks separately."""
     event = {"attempt": record["attempt"], "request_hash": record["request_hash"]}
@@ -272,9 +329,17 @@ def _evaluate(
             "structural_valid": False,
             "attempted_records": raw,
             "error": str(exc)[:2000],
-            "repair": "Return decision=revise with the complete corrected "
-            "record list, preserving valid siblings; or report "
-            "needs_topology_revision if initialization alone cannot fix it.",
+            "repair": (
+                "Correct the reported declaration error; scope_guidance explains "
+                "invalid targets when present. Also revise any initializer still "
+                "causing the displayed conflict. "
+                "Return the complete replacement, retaining unaffected records. "
+                "Removing an invalid record alone does not establish acceptance."
+                if feedback_policy == SCOPE_FEEDBACK
+                else "Return decision=revise with the complete corrected "
+                "record list, preserving valid siblings; or report "
+                "needs_topology_revision if initialization alone cannot fix it."
+            ),
         }
     gate = acceptance_feedback(
         draft,
@@ -325,7 +390,7 @@ def _advance(state: dict, event: dict, initial: GraphDependencyHandoff | None):
         state["handoff"] = event["candidate"]
 
 
-def _result(state, contract, client):
+def _result(state, contract, client, feedback_policy=LEGACY_FEEDBACK):
     """No unresolved conflict can coexist with an accepted exported handoff."""
     gate = state.get("gate")
     accepted = state["status"] == "complete"
@@ -340,6 +405,11 @@ def _result(state, contract, client):
     )
     result = {
         "protocol": PROTOCOL,
+        **(
+            {"feedback_policy": feedback_policy}
+            if feedback_policy != LEGACY_FEEDBACK
+            else {}
+        ),
         "identity": state["identity"],
         "status": state["status"],
         "contract": contract.model_dump(mode="json"),
@@ -405,6 +475,7 @@ def construct_graph_dependencies(
     evidence: TrainingCompatibilityEvidence,
     previous_questions: tuple[dict, ...] = (),
     initial_handoff: GraphDependencyHandoff | None = None,
+    feedback_policy: str = LEGACY_FEEDBACK,
 ) -> dict:
     """Recheck each reply before acceptance, replaying cached work without refunds."""
     _check_inputs(
@@ -423,6 +494,7 @@ def construct_graph_dependencies(
         evidence=evidence,
         previous_questions=previous_questions,
         initial_handoff=initial_handoff,
+        feedback_policy=feedback_policy,
     )
     path = directory / "state.json"
     saved = None
@@ -448,7 +520,7 @@ def construct_graph_dependencies(
 
     def call(attempt):
         record = client.call(
-            system=SYSTEM,
+            system=system_prompt(feedback_policy),
             user=dependency_request(
                 draft,
                 context,
@@ -459,6 +531,7 @@ def construct_graph_dependencies(
                 previous_questions=previous_questions,
                 initial_handoff=initial_handoff,
                 construction_identity=identity,
+                feedback_policy=feedback_policy,
             ),
             response_model=GraphDependencyReply,
             step="initialization_dependency_repair",
@@ -491,6 +564,7 @@ def construct_graph_dependencies(
             contract,
             evidence,
             previous_questions,
+            feedback_policy=feedback_policy,
         )
         _advance(state, event, initial_handoff)
         if event != recorded:
@@ -510,7 +584,7 @@ def construct_graph_dependencies(
                 raise ValueError(
                     "initialization repair checkpoint has unbound cached requests"
                 )
-            expected = _result(state, contract, client)
+            expected = _result(state, contract, client, feedback_policy)
             if saved["result"] != expected:
                 raise ValueError("initialization repair result differs")
             atomic_json(directory / "result.json", expected)
@@ -542,6 +616,7 @@ def construct_graph_dependencies(
             contract,
             evidence,
             previous_questions,
+            feedback_policy=feedback_policy,
         )
         _advance(state, event, initial_handoff)
         save()
@@ -549,7 +624,7 @@ def construct_graph_dependencies(
         state["status"] = "repair_exhausted"
     if cached_keys - seen_keys:
         raise ValueError("initialization repair checkpoint has unbound cached requests")
-    result = _result(state, contract, client)
+    result = _result(state, contract, client, feedback_policy)
     state["result"] = result
     save()
     atomic_json(directory / "result.json", result)

@@ -30,11 +30,11 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.search.construction_graph_repair import (
-    SYSTEM,
     GraphDependencyReply,
     construct_graph_dependencies,
     dependency_construction_identity,
     dependency_request,
+    system_prompt,
 )
 from autoformalism.search.construction_initialization_graph import (
     GraphConstructionContract,
@@ -53,6 +53,10 @@ sys.path.insert(0, str(REPO))
 from scripts import construction_initialization_graph as legacy  # noqa: E402
 
 PROTOCOL = "saved-construction-initialization-repair-1"
+FEEDBACK_PROTOCOLS = {
+    "legacy-1": PROTOCOL,
+    "scope-aware-2": "saved-construction-initialization-repair-2",
+}
 PROPOSAL_SEEDS = (0, 1, 2, 3, 4)
 BUDGETS = {
     "maximum_calls_per_episode": 3,
@@ -176,8 +180,18 @@ def _source(source: Path) -> tuple[dict, dict, dict[str, dict]]:
     return plan, summary, models
 
 
-def _prepared(source: Path) -> tuple[dict, dict[str, dict]]:
+def _prepared(
+    source: Path, *, feedback_policy: str = "legacy-1"
+) -> tuple[dict, dict[str, dict]]:
     """Replicate independent proposal seeds, never historical work or model search."""
+    if feedback_policy not in FEEDBACK_PROTOCOLS:
+        raise ValueError("unknown initializer repair feedback policy")
+    protocol = FEEDBACK_PROTOCOLS[feedback_policy]
+    entrypoints = ENTRYPOINTS + (
+        ("scripts/hpc/start_initialization_scope_repair_aces.sh",)
+        if feedback_policy == "scope-aware-2"
+        else ()
+    )
     prior, summary, models = _source(source)
     settings = StagedModelSettings.model_validate(prior["settings"]).model_copy(
         update={
@@ -196,18 +210,23 @@ def _prepared(source: Path) -> tuple[dict, dict[str, dict]]:
                     "case_id": episode,
                     "source_model_id": name,
                     "seed": seed,
-                    "namespace": f"{PROTOCOL}/{prior['artifact_sha256']}/{episode}",
+                    "namespace": f"{protocol}/{prior['artifact_sha256']}/{episode}",
                     "input_sha256": content_hash(models[name]),
                 }
             )
     return {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
+        **(
+            {"feedback_policy": feedback_policy}
+            if feedback_policy != "legacy-1"
+            else {}
+        ),
         "source_archive_sha256": legacy._file_hash(source),
         "source_plan_sha256": prior["artifact_sha256"],
         "source_diagnostic_summary": summary,
         "runtime_source_hash": runtime_source_hash(),
         "entrypoint_sha256": {
-            name: legacy._file_hash(REPO / name) for name in ENTRYPOINTS
+            name: legacy._file_hash(REPO / name) for name in entrypoints
         },
         "settings": settings.model_dump(mode="json"),
         "budgets": BUDGETS,
@@ -226,12 +245,17 @@ def _prepared(source: Path) -> tuple[dict, dict[str, dict]]:
     }, models
 
 
-def prepare(source: Path, root: Path) -> dict:
+def prepare(source: Path, root: Path, *, feedback_policy: str = "legacy-1") -> dict:
     """Seal a new child plan and keep the entire predecessor archive unchanged."""
     source = source.resolve()
     if (root / "results").exists() and not (root / "plan.json").exists():
         raise ValueError("existing results lack a plan; use a fresh root")
-    plan, models = _prepared(source)
+    plan, models = _prepared(source, feedback_policy=feedback_policy)
+    if (root / "plan.json").exists() and sealed_read(root / "plan.json") != {
+        **plan,
+        "artifact_sha256": content_hash(plan),
+    }:
+        raise ValueError("repair identity differs; use a fresh root")
     historical = root / "historical/source.tar.gz"
     historical.parent.mkdir(parents=True, exist_ok=True)
     if historical.exists():
@@ -252,7 +276,10 @@ def prepare(source: Path, root: Path) -> dict:
 def verify(root: Path) -> dict:
     """Reject changed source, code, settings, seeds or inputs before any request."""
     plan = sealed_read(root / "plan.json")
-    expected, models = _prepared(root / "historical/source.tar.gz")
+    expected, models = _prepared(
+        root / "historical/source.tar.gz",
+        feedback_policy=plan.get("feedback_policy", "legacy-1"),
+    )
     if plan != {**expected, "artifact_sha256": content_hash(expected)}:
         raise ValueError("repair plan, source or runtime identity differs")
     for name, model in models.items():
@@ -372,6 +399,7 @@ def run(
                     evidence=evidence,
                     previous_questions=tuple(case["previous_questions"]),
                     initial_handoff=initial,
+                    feedback_policy=plan.get("feedback_policy", "legacy-1"),
                 )
             except DeferredCall:
                 break
@@ -395,6 +423,8 @@ def run(
 def preview(root: Path) -> dict:
     """Render exact first requests for all seeds without any provider access."""
     plan = verify(root)
+    feedback_policy = plan.get("feedback_policy", "legacy-1")
+    system = system_prompt(feedback_policy)
     sections = []
     for entry in plan["cases"]:
         case, draft, evidence, contract, initial = _parts(root, entry)
@@ -415,6 +445,7 @@ def preview(root: Path) -> dict:
             evidence=evidence,
             previous_questions=tuple(case["previous_questions"]),
             initial_handoff=initial,
+            feedback_policy=feedback_policy,
         )
         user = dependency_request(
             draft,
@@ -425,9 +456,10 @@ def preview(root: Path) -> dict:
             previous_questions=tuple(case["previous_questions"]),
             construction_identity=identity,
             initial_handoff=initial,
+            feedback_policy=feedback_policy,
         )
         packet = {
-            "system": SYSTEM,
+            "system": system,
             "user": user,
             "response_schema": strict_provider_schema(
                 GraphDependencyReply.model_json_schema()
@@ -436,7 +468,7 @@ def preview(root: Path) -> dict:
         atomic_json(root / "preview" / f"{entry['case_id']}.json", packet)
         sections.append(
             f"<h2>{html.escape(entry['case_id'])}</h2>"
-            f"<h3>System</h3><pre>{html.escape(SYSTEM)}</pre>"
+            f"<h3>System</h3><pre>{html.escape(system)}</pre>"
             f"<h3>User</h3>{legacy._html_user_message(user)}"
             "<h3>Schema</h3>"
             f"<pre>{html.escape(json.dumps(packet['response_schema'], indent=2))}</pre>"
@@ -500,7 +532,12 @@ def report(root: Path) -> dict:
             "predecessor_historical_cost": case["predecessor_historical_cost"],
         }
     summary = {
-        "protocol": PROTOCOL,
+        "protocol": plan["protocol"],
+        **(
+            {"feedback_policy": plan["feedback_policy"]}
+            if "feedback_policy" in plan
+            else {}
+        ),
         "plan_sha256": plan["artifact_sha256"],
         "status": "pending" if counts.get("pending") else "complete",
         "availability_status": "unavailable"
@@ -613,12 +650,22 @@ def main() -> None:
     parser.add_argument("--base-url")
     parser.add_argument("--runtime-record", type=Path)
     parser.add_argument("--seconds", type=int, default=3600)
+    parser.add_argument("--feedback-policy", choices=tuple(FEEDBACK_PROTOCOLS))
     args = parser.parse_args()
+    if args.feedback_policy is not None and args.command != "prepare":
+        parser.error(
+            "--feedback-policy applies only to prepare; "
+            "other commands use the sealed plan"
+        )
     with _lock(args.root / "campaign-lock"):
         if args.command == "prepare":
             if args.source is None:
                 parser.error("prepare requires --source")
-            result = prepare(args.source, args.root)
+            result = prepare(
+                args.source,
+                args.root,
+                feedback_policy=args.feedback_policy or "legacy-1",
+            )
         elif args.command == "run":
             if args.base_url is None or args.seconds <= 0:
                 parser.error("run requires --base-url and positive --seconds")

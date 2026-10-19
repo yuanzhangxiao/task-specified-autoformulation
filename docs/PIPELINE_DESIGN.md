@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`scope-aware-2` is an opt-in presentation policy for the initializer acceptance
+loop. It preserves the gate and reports declaration errors separately from active
+model-data contradictions. Relevant editable initializer rules are derived from
+the fixed topology and current initializer DAG, including transitive parents;
+invalid attempted records never supply that graph. Recorded public initial
+measurements remain distinct from initializer targets. A separately sealed V2
+campaign repeats the same two source models and five seeds without replacing V1
+results or changing budgets. See `PHASE_C_INITIALIZATION_SCOPE_REPAIR.md`.
+
 `initialization-dependency-repair-1` adds an opt-in combined schema/dependency and
 deterministic model/data acceptance loop. Current qualified conflicts are
 recomputed before acceptance and rendered as verified equations and paired
