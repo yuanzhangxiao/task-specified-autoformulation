@@ -204,9 +204,14 @@ The experiment must demonstrate recovery on shared-root and trajectory-root
 controls, exact derivatives through dependencies, frozen shared parameters,
 suffix-independent inference, and independent numerical replay. It must preserve
 failure/ambiguity reports and separate full-training reconstruction from
-prefix-conditioned forecast. The four-task local CLI qualification passes, including 20 prefix forecasts;
-remote qualification and construction integration remain pending. No LLM calls,
-benchmark rewriting or test access are required. Delta CPU commands are in the
+prefix-conditioned forecast. Both local and returned Delta qualifications pass
+all four tasks and 20 prefix forecasts. The Delta review verifies unchanged shared
+parameters and prefix-only inference on unseen rows; worst validation suffix NMSE
+is 1.98e-20 on these noiseless known-equation controls. The opt-in construction
+exporter is implemented separately in
+`PHASE_C_INITIALIZATION_CONSTRUCTION_GRAPH.md`; a complete exported-model fitting
+experiment and benchmark evaluation remain pending. No LLM calls,
+benchmark rewriting or test access were used by M43. Delta CPU commands are in the
 [M43 experiment document](PHASE_C_FITTING_INITIALIZATION_QUALIFICATION.md).
 
 This first adapter reuses direct rollout and forward sensitivities with bounded,

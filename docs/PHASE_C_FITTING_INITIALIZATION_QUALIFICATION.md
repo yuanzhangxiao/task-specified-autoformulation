@@ -130,9 +130,9 @@ The graph/kernel regression set covers both root scopes, DAG chain derivatives,
 cycles and invalid references, native parameter domains, unchanged shared
 parameters, prefix-forcing consistency, poisoned suffix observations, a
 zero-duration ambiguous prefix, and independent forecast integration failure.
-The qualification also checks sealed resume and interruption accounting. Remote
-CPU results remain to be collected; local verification is not a new benchmark
-performance result.
+The qualification also checks sealed resume and interruption accounting. Local
+verification is not a new benchmark performance result. The returned Delta
+qualification is recorded below.
 
 The four-task local CLI smoke completed all four qualifications. Training
 reconstruction NMSE ranged from 5.07e-20 to 9.75e-20; all 20 prefix-conditioned
@@ -163,3 +163,69 @@ Changed files pass Ruff and shell syntax checks; changed Python parses with
 Python 3.11 syntax for Delta. Full `ruff check .` reports 37 pre-existing findings
 in unrelated, untracked `analysis/claude` scripts; the rest of the repository is
 clean under `ruff check . --exclude analysis`.
+
+## Returned Delta qualification, 19 October 2026
+
+**All four tasks qualified.** These are two synthetic datasets, each fitted from
+two predetermined starts; they are not four independent benchmark cases.
+
+| Initializer option | Starts passed | Training reconstruction NMSE | Worst validation suffix NMSE |
+| --- | ---: | ---: | ---: |
+| Shared root and dependent map | 2/2 | 5.07e-20 | 4.77e-21 |
+| Trajectory root and dependent map | 2/2 | 9.75e-20 | 1.98e-20 |
+
+The shared case recovered r(0)=0.8 and phi=0.7 and reused them for both validation
+rows, with no validation parameter search. The trajectory case recovered training
+roots (0.4, 1.2, 1.6). With theta and phi frozen, its two unseen prefixes recovered
+roots 0.65 and 1.45, despite identical first measured values y(0)=0.4. Each prefix
+contained 11 samples through t=1; each forecast score used the 30 samples strictly
+after t=1. All dependent boundaries satisfied z(0)=phi*r(0) exactly.
+
+All 20 forecast scores were independently recomputed from saved arrays using
+training normalization. Prefix, fitted-endpoint, inference and forecast-schedule
+hashes matched, and shared parameters remained unchanged in every inference.
+Maximum absolute evaluator-only coefficient/root error was 6.50e-10. Maximum
+forecast discrepancy against the closed-form solution at fitted values was
+7.92e-10; maximum normalized independent-method discrepancy was 2.33e-9. Training
+sensitivity ranks were 3/3 and 5/5, respectively. Trajectory-prefix inference had
+one coordinate and rank one. The shared case's zero-coordinate rank check says
+nothing about new hidden-state information: no root was estimated there.
+
+The complete ledger records 85 search calls, 88 verification oracle calls and
+48 operations, including four evaluator operations. Summed operation CPU time
+was 19.16 seconds and summed wall time 38.97 seconds; this excludes scheduler
+queue time and is not end-to-end campaign latency. There were no unknown-cost
+operations, LLM calls or test-data access. No new fitting was needed for review.
+
+Provenance: archive `review-20261019-103213.tar.gz`, SHA-256
+`1bbe31e875a88a0e637bb3a4ce0eba364085f32053a949feb6f65939f5d40209`;
+plan `f8794d3ae0c56b8ca7f546657a00e67488a631e68b4d7fd607492e37c949466c`.
+The frozen source hash matches the delivered `5e76ad1` code exactly. The later
+construction commit changes the current source-tree hash; it does not invalidate
+this pinned run. Sealed operation records reproduce the supplied summary exactly.
+Review artifacts remain uncommitted in `output/phase-c-fitting-m43-delta-review/`.
+
+This qualifies the isolated fitting interface, not general initialization
+robustness. Equations and latent decay rates are known, measurements are noiseless,
+the rate domain avoids a pole exchange, and validation roots lie inside the
+training range. Training-prefix forecasts reuse shared parameters learned from
+full training trajectories and are not independent validation forecasts. No
+calibrated confidence or global identification claim follows from these results.
+
+The next recommended gate is a small construction-export-to-fit integration test
+using the opt-in path in `PHASE_C_INITIALIZATION_CONSTRUCTION_GRAPH.md`: exercise
+mixed shared/trajectory roots and a dependent map with a permitted measured
+initial value, preserve scopes and derivatives through export, and repeat suffix
+poisoning and deliberately uninformative-prefix controls. Once the separate
+construction diagnostic supplies accepted dependencies and executable formulas,
+consume that actual export on one benchmark candidate under a frozen prefix
+policy, without manually fixing its declarations. Keep deferred scientific
+witnesses visible and prohibit fallback to the historical shared-only fitter.
+This recommendation does not change production defaults or launch a new campaign.
+
+Review-time verification: 144 focused fitting and construction initializer tests
+passed. The portable report reconstruction was exact, and all 20 saved forecast
+scores were checked independently. `ruff check .` still reports only the 37
+pre-existing findings in untracked `analysis/claude` files;
+`ruff check . --exclude analysis` and `git diff --check` pass. This review changes
+documentation only; no full-suite or new numerical campaign was run.

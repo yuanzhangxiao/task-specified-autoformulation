@@ -22,6 +22,13 @@ construction extension is described above.
 The legacy public fitter still learns shared initialization on training and
 freezes it for validation.
 
+The returned M43 Delta qualification passed four tasks (two root-scope controls,
+two starts each), with 20 verified prefix forecasts and worst validation suffix
+NMSE 1.98e-20. Shared dynamics/maps stayed frozen during unseen-root inference.
+These noiseless known-equation controls qualify the isolated interface; the
+construction export-to-fit experiment and benchmark qualification remain pending.
+See `PHASE_C_FITTING_INITIALIZATION_QUALIFICATION.md` for audited costs and limits.
+
 The V6 ACES audit returned five calls / 118,450 observed tokens. Both saved models
 remain unchanged with one conditional conflict each: seed 1 repeats an invalid
 observed initializer, and seed 2 ends with an unavailable truncated reply. Evidence

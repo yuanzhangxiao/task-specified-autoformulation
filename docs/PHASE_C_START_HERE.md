@@ -13,8 +13,12 @@ Current construction/fitting compatibility gate: M43 qualifies the two agreed
 [initialization options](PHASE_C_OBSERVATION_PREFIX_INITIALIZATION.md): shared
 roots with dependent maps, and trajectory roots inferred from a declared
 observation prefix. The handoff is the common document for Astra and Orion.
-The [CPU qualification](PHASE_C_FITTING_INITIALIZATION_QUALIFICATION.md) is opt-in;
-existing benchmark and production policies are unchanged. This takes priority
+The [CPU qualification](PHASE_C_FITTING_INITIALIZATION_QUALIFICATION.md) passed
+all four Delta tasks: both root scopes and dependent maps recover the known
+control, with shared parameters frozen during prefix inference. The separate
+construction exporter is implemented; an exported-model fitting experiment and
+benchmark qualification remain pending. Existing benchmark and production
+policies are unchanged. This takes priority
 over extending the completed M42 uncertainty diagnostic.
 
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
