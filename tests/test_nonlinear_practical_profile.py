@@ -212,6 +212,127 @@ def test_reference_refines_all_sampled_basins_and_keeps_endpoints(monkeypatch):
     assert not reference["global_optimum_proved"]
 
 
+def test_boundary_policy_is_opt_in_and_preserves_legacy_serialization():
+    legacy = profile.Policy().model_dump(mode="json")
+    assert "reference_boundary_cells" not in legacy
+    assert (
+        profile.Policy(reference_boundary_cells=False).model_dump(mode="json") == legacy
+    )
+    assert profile.Policy.model_validate(legacy).model_dump(mode="json") == legacy
+    enabled = profile.Policy(reference_boundary_cells=True).model_dump(mode="json")
+    assert enabled == legacy | {"reference_boundary_cells": True}
+    assert profile.Policy.model_validate(enabled).reference_boundary_cells
+
+
+@pytest.mark.parametrize("rate", [0.0205, 1.4995, 0.02, 1.5])
+def test_reference_refines_both_edge_cells_and_retains_exact_boundaries(
+    rate, monkeypatch
+):
+    def edge_basin(arrays, k, gain):
+        return POINT | {"k": k}, np.asarray([100 * (k - rate)]), {}
+
+    monkeypatch.setattr(profile, "_project", edge_basin)
+    legacy = profile._dense_reference(
+        None,
+        1.3,
+        SMALL,
+        profile._Execution(profile._initial_state({}, []), SMALL, None),
+    )
+    policy = SMALL.model_copy(update={"reference_boundary_cells": True})
+    reference = profile._dense_reference(
+        None,
+        1.3,
+        policy,
+        profile._Execution(profile._initial_state({}, []), policy, None),
+    )
+    assert legacy["sampled_local_basins"] == reference["sampled_local_basins"] == 0
+    assert [item["side"] for item in reference["boundary_refinements"]] == [
+        "lower",
+        "upper",
+    ]
+    assert reference["parameters"]["k"] == pytest.approx(rate, abs=1e-9)
+    assert reference["objective"] < 1e-14
+    assert reference["endpoints_checked"]
+    assert not reference["global_optimum_proved"]
+    if rate in profile.DOMAINS["k"]:
+        assert reference["parameters"]["k"] == rate  # Preserve exact boundary.
+        assert legacy["objective"] == reference["objective"] == 0
+    else:
+        assert legacy["objective"] > reference["objective"] + 0.001
+
+
+def test_returned_m41_tail_node_requires_upper_boundary_cell_refinement():
+    problem = fixtures.make(0.5, 0.01, 1)[0]
+    arrays = profile._public_arrays(problem)
+    gain = float(np.linspace(*profile.DOMAINS["g"], 31)[23])
+    assert gain == pytest.approx(2.3116666667)
+    policy = profile.Policy()
+    legacy = profile._node(
+        arrays,
+        gain,
+        dict(problem.start),
+        policy,
+        profile._Execution(profile._initial_state({}, []), policy, None),
+    )
+    assert legacy["status"] == "unresolved"
+    assert legacy["reference"]["parameters"]["k"] == 1.5
+    assert abs(legacy["objective_gap"]) > legacy["objective_tolerance"]
+    policy = policy.model_copy(update={"reference_boundary_cells": True})
+    fixed = profile._node(
+        arrays,
+        gain,
+        dict(problem.start),
+        policy,
+        profile._Execution(profile._initial_state({}, []), policy, None),
+    )
+    assert fixed["status"] == "complete"
+    assert fixed["reference"]["parameters"]["k"] == pytest.approx(
+        1.4953772541, abs=2e-7
+    )
+    assert fixed["reference_objective"] == pytest.approx(3902.6138770, abs=1e-6)
+    assert abs(fixed["objective_gap"]) <= fixed["objective_tolerance"]
+    assert len(fixed["reference"]["boundary_refinements"]) == 2
+    assert not fixed["reference"]["global_optimum_proved"]
+
+
+def test_failed_boundary_refinement_stays_unresolved(fitted, monkeypatch):
+    problem, parameters = fitted
+    original = profile.minimize_scalar
+    lower_cell = tuple(np.linspace(*profile.DOMAINS["k"], SMALL.reference_points)[:2])
+
+    def fail_lower(function, *, bounds, **kwargs):
+        if tuple(bounds) == lower_cell:
+            return SimpleNamespace(success=False, nfev=1)
+        return original(function, bounds=bounds, **kwargs)
+
+    monkeypatch.setattr(profile, "minimize_scalar", fail_lower)
+    policy = SMALL.model_copy(update={"reference_boundary_cells": True})
+    result = profile.run(problem, parameters, policy=policy)
+    assert result["status"] == "partial"
+    assert "lower boundary-cell refinement failed" in result["reason"]
+    assert not result["endpoint_qualification"]["numerically_qualified"]
+    assert result["supports"] == []
+    assert result["nodes_completed"] == 0
+
+
+def test_boundary_refinement_obeys_call_budget_and_does_not_retry():
+    policy = SMALL.model_copy(
+        update={"reference_boundary_cells": True, "maximum_calls": 11}
+    )
+    arrays = profile._public_arrays(exact_problem())
+    state = profile._initial_state({}, [])
+    work = profile._Execution(state, policy, None)
+    operation = work.operation(
+        "reference", lambda: profile._dense_reference(arrays, 3.0, policy, work)
+    )
+    assert operation["status"] == "unresolved"
+    assert "call allowance exhausted" in operation["reason"]
+    assert state["calls"] == state["completed_calls"] == 11
+    assert (
+        work.operation("reference", lambda: pytest.fail("must not retry")) == operation
+    )
+
+
 def test_call_budget_is_total_and_cannot_reset_on_resume(fitted):
     problem, parameters = fitted
     policy = SMALL.model_copy(update={"maximum_calls": 4})
@@ -249,9 +370,11 @@ def test_finished_resume_is_exact_and_checks_content_and_identity(fitted):
         )
 
 
-def test_completed_node_snapshot_resumes_deterministically(fitted):
+@pytest.mark.parametrize("boundary_cells", [False, True])
+def test_completed_node_snapshot_resumes_deterministically(fitted, boundary_cells):
     problem, parameters = fitted
     ledger = []
+    policy = SMALL.model_copy(update={"reference_boundary_cells": boundary_cells})
 
     def stop(state):
         ledger.append(state)
@@ -261,16 +384,20 @@ def test_completed_node_snapshot_resumes_deterministically(fitted):
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        profile.run(problem, parameters, policy=SMALL, save=stop)
+        profile.run(problem, parameters, policy=policy, save=stop)
     snapshot = ledger[-1]
-    resumed = profile.run(problem, parameters, policy=SMALL, state=snapshot)
-    ordinary = profile.run(problem, parameters, policy=SMALL)
+    resumed = profile.run(problem, parameters, policy=policy, state=snapshot)
+    ordinary = profile.run(problem, parameters, policy=policy)
     assert resumed["status"] == "complete"
     assert resumed["calls"] == ordinary["calls"]
     assert resumed["nodes"] == ordinary["nodes"]
     assert resumed["supports"] == ordinary["supports"]
     assert not resumed["accounting_complete"]  # Lost callback duration stays explicit.
     assert resumed["budget_charge_seconds"] >= SMALL.callback_seconds
+    if boundary_cells:
+        assert resumed["identity"]["policy"]["reference_boundary_cells"]
+        with pytest.raises(ValueError, match="identity or content"):
+            profile.run(problem, parameters, policy=SMALL, state=resumed)
 
 
 def test_started_node_interruption_is_charged_and_never_retried(fitted):
@@ -360,6 +487,7 @@ def test_public_structure_mismatch_and_untrusted_fields_fail_closed(fitted):
         {"nuisance_starts": 1},
         {"wall_seconds": float("nan")},
         {"thresholds": [0.5, 3.0]},
+        {"reference_boundary_cells": 1},
         {"unexpected": 4},
     ],
 )

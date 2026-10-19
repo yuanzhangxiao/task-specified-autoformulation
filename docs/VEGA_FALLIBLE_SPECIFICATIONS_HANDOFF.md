@@ -169,6 +169,12 @@ Boundary-cell search repair and a separate diagnostic supplement should precede
 larger nonlinear nuisance qualifications. Current construction integration
 continues through the existing M37/M38 interfaces.
 
+The [M42 supplement](PHASE_C_FITTING_NONLINEAR_PROFILE_SUPPLEMENT.md) now provides
+opt-in boundary-cell reference refinement and a separately accounted retest of
+the two partial diagnostics, preserving all fitted endpoints. Delta results are
+pending. This repairs diagnostic reliability, without changing the uncertainty
+definition, introducing calibrated coverage or advancing automatic attribution.
+
 The [M40 diagnostic supplement](PHASE_C_FITTING_PROFILE_SUPPLEMENT.md) completed
 all nine partial profiles on ACES from the unchanged saved endpoints, yielding
 150/150 complete selected profiles with original costs preserved. Independent

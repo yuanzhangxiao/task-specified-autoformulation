@@ -39,6 +39,10 @@ omissions in remote tails require a diagnostic supplement, not refitting. Wide
 gain support detects physical ambiguity despite good measured-signal prediction
 and full local rank. Diagnostics add 144.9% of fitting CPU in this small control.
 Continuous support widths and calibrated confidence remain unclaimed.
+The [M42 supplement](PHASE_C_FITTING_NONLINEAR_PROFILE_SUPPLEMENT.md) implements
+the opt-in boundary-cell search and prepares a separately budgeted two-task
+Delta diagnosis using unchanged fits. Historical evidence/costs remain intact;
+production fitting and construction do not change. Delta results are pending.
 
 Completed [M36 shared sensor drift](PHASE_C_FITTING_SENSOR_DRIFT.md)
 compares fixed calibration with one bounded shared observation trend, preserving

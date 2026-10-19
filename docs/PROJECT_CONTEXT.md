@@ -77,6 +77,14 @@ An isolated post-fit helper can suggest investigating joint dependence from
 qualified training evidence, without automatic model growth. Historical policies
 remain unchanged. See `PHASE_C_INITIALIZATION_TOPOLOGY.md`.
 
+M42 prepares a two-task Delta diagnostic supplement for M41's partial profiles.
+Its opt-in reference search refines both boundary-adjacent rate cells and retains
+exact boundary candidates; historical default policy serialization stays intact.
+All fitted endpoints and original costs remain frozen. The supplement adds a
+separately accounted 60-second profile allowance per task with deterministic
+checkpoint recovery and no refitting, evaluator calls or production changes.
+See `PHASE_C_FITTING_NONLINEAR_PROFILE_SUPPLEMENT.md`; Delta results are pending.
+
 M41 returned 36 qualified Delta CPU fits and 18 agreeing direct/profiled pairs
 with an unknown decay rate, gain, shared initial value and sensor drift. Profiles
 complete for 34/36 arms; two remote-tail nodes expose a missed reference minimum

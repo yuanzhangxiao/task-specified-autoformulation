@@ -71,6 +71,14 @@ cannot masquerade as completion. `interaction_dependency_advice` is an isolated
 opt-in post-fit investigation helper, not an automatic complexity rule. See
 `PHASE_C_INITIALIZATION_TOPOLOGY.md` and `PHASE_C_JOINT_DEPENDENCY_ADVICE.md`.
 
+M42 adds an opt-in boundary-cell reference search to the isolated nonlinear
+profile diagnostic. A separate supplement freezes complete M41 provenance and
+selects only incomplete profiles at already qualified endpoints. New identities
+bind the corrected search, source/runtime and original endpoint/profile; original
+costs remain additive. Failed or adverse supplemental evidence stays visible.
+No fitting, evaluator or production-default changes are introduced. See
+`PHASE_C_FITTING_NONLINEAR_PROFILE_SUPPLEMENT.md`.
+
 M41 adds an isolated nonlinear-nuisance diagnostic qualification while preserving
 production fitting. A fixed linear state equation has an unknown decay rate;
 gain profiles conditionally solve initial/drift coordinates and check the rate

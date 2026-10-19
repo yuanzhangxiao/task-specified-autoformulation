@@ -14,7 +14,7 @@ from time import monotonic, process_time
 from typing import Literal
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_serializer
 from scipy.optimize import least_squares, minimize_scalar
 
 from autoformalism.fitting import practical_profile as affine
@@ -56,6 +56,15 @@ class Policy(StrictSchema):
     objective_relative_tolerance: FiniteFloat = Field(default=1e-7, gt=0, le=1e-3)
     rollout_tolerance: FiniteFloat = Field(default=1e-6, gt=0, le=1e-3)
     rank_relative_tolerance: FiniteFloat = Field(default=1e-9, gt=0, le=1e-4)
+    reference_boundary_cells: bool = Field(default=False, strict=True)
+
+    @model_serializer(mode="wrap")
+    def serialize_policy(self, handler):
+        """Preserve M41 identities; bind explicit M42 edge searches when enabled."""
+        result = handler(self)
+        if not self.reference_boundary_cells:
+            result.pop("reference_boundary_cells", None)
+        return result
 
 
 POLICY = Policy().model_dump(mode="json")
@@ -316,7 +325,7 @@ class _Execution:
 
 
 def _dense_reference(arrays, gain: float | None, policy: Policy, work: _Execution):
-    """Search all sampled local k basins and both endpoints, without global proof."""
+    """Search sampled k basins/endpoints and opt-in edge cells, without proof."""
     cache = {}
 
     def evaluate(k):
@@ -356,8 +365,32 @@ def _dense_reference(arrays, gain: float | None, policy: Policy, work: _Executio
         if not solved.success or not np.isfinite(solved.fun):
             raise ValueError("dense reference local basin refinement failed")
         evaluate(solved.x)
+    boundary_refinements = []
+    if policy.reference_boundary_cells:
+        for side, indices in (("lower", (0, 1)), ("upper", (-2, -1))):
+            bounds = tuple(float(grid[index]) for index in indices)
+            solved = minimize_scalar(
+                evaluate,
+                bounds=bounds,
+                method="bounded",
+                options={"xatol": 1e-11, "maxiter": policy.max_nfev},
+            )
+            if not solved.success or not np.isfinite(solved.fun):
+                raise ValueError(
+                    f"dense reference {side} boundary-cell refinement failed"
+                )
+            evaluate(solved.x)
+            boundary_refinements.append(
+                {
+                    "side": side,
+                    "bounds": list(bounds),
+                    "success": True,
+                    "evaluations": int(solved.nfev),
+                    "k": float(solved.x),
+                }
+            )
     best = min(cache.values(), key=lambda item: item["objective"])
-    return best | {
+    result = best | {
         "grid_points": len(grid),
         "sampled_local_basins": len(basins),
         "refinements": refinements,
@@ -366,6 +399,16 @@ def _dense_reference(arrays, gain: float | None, policy: Policy, work: _Executio
         "global_optimum_proved": False,
         "method": "dense k grid; bounded refinement of every sampled basin",
     }
+    if policy.reference_boundary_cells:
+        result.update(
+            boundary_refinements=boundary_refinements,
+            reference_boundary_cells=True,
+            method=(
+                "dense k grid; bounded refinement of every sampled basin and "
+                "both boundary-adjacent cells; exact endpoints retained"
+            ),
+        )
+    return result
 
 
 def _multistart(
