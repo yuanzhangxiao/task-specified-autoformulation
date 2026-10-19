@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`construction-initializer-dependencies-1` and
+`construction-initializer-formulas-1` add a separate construction path for M43.
+The runtime contract authorizes trajectory roots independently of a concrete
+observation-window duration. Topology selects acyclic state/public initial
+dependencies; the formula stage consumes those fixed choices and exports a
+`prefix-fit-problem-1` with root scope preserved. Graph-aware evidence retains
+witnesses and defers equality claims affected by trajectory roots. Existing
+policies are unchanged. See `PHASE_C_INITIALIZATION_CONSTRUCTION_GRAPH.md`.
+
 M43 adds a separate `latent-initialization-graph-1` lowering and prefix fitting
 adapter. Shared roots and map coefficients are learned jointly with dynamics;
 optional trajectory roots receive one training coordinate per row. On unseen

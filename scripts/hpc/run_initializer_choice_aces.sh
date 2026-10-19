@@ -4,7 +4,11 @@ set -euo pipefail
 : "${AF_REPO_ROOT:?}" "${AF_OUTPUT_ROOT:?}" "${AF_PYTHON:?}" "${AF_VLLM_IMAGE:?}" "${AF_HF_HOME:?}" "${SLURM_JOB_ID:?}"
 [[ "${1:-propose}" == propose ]] || exit 2
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
-AF_CLI="$AF_REPO_ROOT/scripts/initializer_choice_aces.py"
+case "${AF_INITIALIZATION_WORKER:-choice}" in
+  choice) AF_CLI="$AF_REPO_ROOT/scripts/initializer_choice_aces.py" ;;
+  graph) AF_CLI="$AF_REPO_ROOT/scripts/construction_initialization_graph.py" ;;
+  *) echo 'Unknown initialization worker.' >&2; exit 2 ;;
+esac
 # Check the complete import chain before starting a server or reading artifacts.
 if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
   echo 'Python worker imports failed; loading the Python module and its library dependencies.' >&2

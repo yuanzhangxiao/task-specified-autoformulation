@@ -42,6 +42,15 @@ from autoformalism.search.causal_initialization import (
     construct_initializers,
     validate_dependency_handoff,
 )
+from autoformalism.search.construction_graph_formulas import construct_graph_formulas
+from autoformalism.search.construction_initialization_graph import (
+    GraphConstructionContract,
+    GraphDependencyHandoff,
+)
+from autoformalism.search.construction_initialization_graph import (
+    validate_handoff as validate_graph_handoff,
+)
+from autoformalism.search.construction_ledger import Draft as TopologyDraft
 from autoformalism.search.shared_process_guidance import system_prompt
 from autoformalism.search.staged_function_prompts import (
     render_equation_function_batch_system_prompt,
@@ -88,9 +97,13 @@ def run_staged_functions(
     *,
     generation_granularity: FunctionGenerationGranularity = "atomic_interaction",
     function_repair_policy: FunctionRepairPolicy = "legacy",
-    initialization_policy: Literal["legacy", "causal_training"] = "legacy",
+    initialization_policy: Literal[
+        "legacy", "causal_training", "initialization_graph"
+    ] = "legacy",
     initial_information_contract: InitialInformationContract | None = None,
     initializer_handoff: InitializerDependencyHandoff | None = None,
+    initialization_graph_contract: GraphConstructionContract | None = None,
+    initialization_graph_handoff: GraphDependencyHandoff | None = None,
     training_evidence: TrainingEvidence | None = None,
     shared_process_guidance: bool = False,
     dependency_policy: str = "strict",
@@ -105,6 +118,51 @@ def run_staged_functions(
     source_initialization = any(
         key in source for key in ("initial_information_contract", "initializer_handoff")
     )
+    graph_metadata = any(
+        k in source
+        for k in ("initialization_graph_contract", "initialization_graph_handoff")
+    )
+    graph_requested = graph_metadata or initialization_policy == "initialization_graph"
+    if graph_requested and (
+        initialization_policy == "causal_training"
+        or source_initialization
+        or initial_information_contract is not None
+        or initializer_handoff is not None
+    ):
+        raise ValueError(
+            "initialization graph and historical dependency policies cannot mix"
+        )
+    if graph_metadata:
+        retained_contract = GraphConstructionContract.model_validate(
+            source.get("initialization_graph_contract")
+        )
+        retained_handoff = GraphDependencyHandoff.model_validate(
+            source.get("initialization_graph_handoff")
+        )
+        for explicit, retained in (
+            (initialization_graph_contract, retained_contract),
+            (initialization_graph_handoff, retained_handoff),
+        ):
+            if explicit is not None and explicit != retained:
+                raise ValueError("initialization graph arguments differ from source")
+        initialization_graph_contract = retained_contract
+        initialization_graph_handoff = retained_handoff
+        initialization_policy = "initialization_graph"
+    if graph_requested:
+        if (
+            initialization_graph_contract is None
+            or initialization_graph_handoff is None
+        ):
+            raise ValueError("initialization graph requires contract and handoff")
+        if context.fitted_initialization or context.lagged_targets:
+            raise ValueError(
+                "initialization graph requires an unlowered free-rollout context"
+            )
+    elif (
+        initialization_graph_contract is not None
+        or initialization_graph_handoff is not None
+    ):
+        raise ValueError("graph dependencies require initialization_graph policy")
     if source_initialization:
         source_contract = validate_information_contract(
             source.get("initial_information_contract")
@@ -150,14 +208,18 @@ def run_staged_functions(
         )
     if flexible and generation_granularity != "equation_batch_atomic_repair":
         raise ValueError("local dependency repair requires hybrid construction")
-    if initialization_policy not in {"legacy", "causal_training"}:
+    if initialization_policy not in {
+        "legacy",
+        "causal_training",
+        "initialization_graph",
+    }:
         raise ValueError("unknown function initialization policy")
     enriched = evidence_brief(brief.model_dump(mode="json"), context, training_evidence)
     if (
         shared_process_guidance
         or flexible
         or source.get("shared_process_contract")
-        or initialization_policy == "causal_training"
+        or initialization_policy in {"causal_training", "initialization_graph"}
         or training_evidence is not None
         or (output / "construction_contract.json").exists()
     ):
@@ -169,6 +231,13 @@ def run_staged_functions(
             "repair": function_repair_policy,
             "initialization": initialization_policy,
         }
+        if graph_requested:
+            contract["initialization_graph_contract"] = (
+                initialization_graph_contract.model_dump(mode="json")
+            )
+            contract["initialization_graph_handoff"] = (
+                initialization_graph_handoff.model_dump(mode="json")
+            )
         if initial_information_contract is not None or initializer_handoff is not None:
             if initial_information_contract is None or initializer_handoff is None:
                 raise ValueError(
@@ -230,6 +299,43 @@ def run_staged_functions(
     initialization_dependency_contract = _dependency_receipt(
         initial_information_contract, initializer_handoff, aliases
     )
+    graph_aliases = {}
+    if graph_requested:
+        graph_aliases = {
+            name: aliases.get(name, name)
+            for name in initialization_graph_contract.state_declaration_sha256
+        }
+        validate_graph_handoff(
+            initialization_graph_handoff,
+            initialization_graph_contract,
+            draft=TopologyDraft.model_validate(
+                {
+                    "variables": [
+                        item.model_dump(mode="json")
+                        for item in inventory
+                        if item.definition == "differential"
+                    ],
+                }
+            ),
+            state_names=tuple(s.name for s in topology.states),
+            context=context,
+            scientific_context=brief.scientific_context,
+            state_aliases=graph_aliases,
+        )
+        if {
+            graph_aliases[name]: channel
+            for name, channel in (
+                initialization_graph_contract.observed_initial_channels.items()
+            )
+        } != (
+            {item.state: item.channel for item in topology.state_measurements}
+            | {
+                item.source: item.channel
+                for item in topology.target_mappings
+                if item.source in {state.name for state in topology.states}
+            }
+        ):
+            raise ValueError("graph observed identities differ from topology")
     commitment = topology_commitment_sha256(topology)
     draft = FunctionalDraft(topology_commitment_sha256=commitment)
     events: list[dict[str, Any]] = []
@@ -821,7 +927,7 @@ def run_staged_functions(
         for state in topology.states:
             if state.kind is not StateKind.LATENT:
                 continue
-            if initialization_policy == "causal_training":
+            if initialization_policy in {"causal_training", "initialization_graph"}:
                 # Temporary completeness scaffold. It is never emitted as the
                 # final physical boundary: every latent state receives a plan.
                 draft = apply_initial_reply(
@@ -880,11 +986,24 @@ def run_staged_functions(
                 initializer_handoff=initializer_handoff,
                 state_aliases=aliases,
             )
+        elif graph_requested:
+            initialization = construct_graph_formulas(
+                expansion.candidate,
+                context,
+                enriched,
+                initialization_graph_contract,
+                initialization_graph_handoff,
+                client,
+                output / "initialization_graph",
+                state_aliases=graph_aliases,
+            )
     except (ValueError, ModelValidationError) as exc:
         error = str(exc)[:6000]
         expansion = None
     result = {
-        "protocol": "scientific-staged-functions-2"
+        "protocol": "scientific-staged-functions-3"
+        if graph_requested
+        else "scientific-staged-functions-2"
         if initialization_policy == "causal_training"
         else "scientific-staged-functions-1",
         "generation_granularity": generation_granularity,
@@ -925,9 +1044,23 @@ def run_staged_functions(
         "test_data_opened": False,
         "private_reference_opened": False,
     }
-    if initialization_policy == "causal_training":
+    if initialization_policy in {"causal_training", "initialization_graph"}:
         result["initialization_policy"] = initialization_policy
         result["initialization"] = initialization
+    if graph_requested:
+        # A compiled trajectory coordinate must never silently become a global
+        # parameter in the legacy fitter. The scoped M43 problem is the handoff.
+        result["candidate"] = None
+        result["fitting_backend"] = "prefix-fit-problem-1"
+        result["prefix_fit_problem"] = (
+            initialization["prefix_fit_problem"] if expansion else None
+        )
+        result["initialization_graph_contract"] = (
+            initialization_graph_contract.model_dump(mode="json")
+        )
+        result["initialization_graph_handoff"] = (
+            initialization_graph_handoff.model_dump(mode="json")
+        )
     if initialization_dependency_contract:
         result["initialization_dependency_contract"] = (
             initialization_dependency_contract
@@ -948,7 +1081,11 @@ def run_staged_functions(
             dependency_policy=dependency_policy,
             dependency_revisions=dependency_revisions,
             effective_source=effective_source,
-            equation_connectivity=dependencies.connectivity(result["candidate"]),
+            equation_connectivity=dependencies.connectivity(
+                initialization["candidate"]
+                if graph_requested and expansion
+                else result["candidate"]
+            ),
         )
     checkpoint()
     atomic_json(output / "result.json", result)

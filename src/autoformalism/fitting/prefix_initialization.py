@@ -11,49 +11,25 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from itertools import pairwise
 from time import monotonic
-from typing import Literal
 
 import numpy as np
 from pydantic import Field, model_validator
 
 from autoformalism.data import Trajectory
-from autoformalism.expressions import ValidationContext, compile_candidate
+from autoformalism.expressions import compile_candidate
 from autoformalism.fitting import fitter, recovery_numerics
-from autoformalism.fitting.initialization_graph import (
-    InitializationGraph,
-    apply_initialization_graph,
-)
+from autoformalism.fitting.initialization_graph import apply_initialization_graph
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.public_fitting import content_sha256, unpack_split
 from autoformalism.fitting.sensitivity_probe import SymbolicODE, symbolic_rollout
 from autoformalism.schemas.base import FiniteFloat, Identifier, StrictSchema
-from autoformalism.schemas.candidate import CandidateModel
+from autoformalism.schemas.prefix_initialization import (
+    PrefixFitProblem,
+    PrefixPolicy,
+)
 from autoformalism.schemas.public_fitting import PublicSplit, PublicTrajectory
 
 Checkpoint = Callable[[dict], None]
-
-
-class PrefixFitProblem(StrictSchema):
-    """Serializable model boundary with no validation/test data or legacy plan."""
-
-    protocol: Literal["prefix-fit-problem-1"] = "prefix-fit-problem-1"
-    base_candidate: CandidateModel
-    context: ValidationContext
-    graph: InitializationGraph
-    parameter_guesses: Mapping[Identifier, FiniteFloat] = Field(default_factory=dict)
-
-
-class PrefixPolicy(StrictSchema):
-    """Predeclared elapsed prefix duration and genuinely known future inputs."""
-
-    duration: FiniteFloat = Field(ge=0)
-    future_inputs: tuple[Identifier, ...] = ()
-
-    @model_validator(mode="after")
-    def unique_inputs(self):
-        if len(self.future_inputs) != len(set(self.future_inputs)):
-            raise ValueError("duplicate future input")
-        return self
 
 
 class NumericalPolicy(StrictSchema):

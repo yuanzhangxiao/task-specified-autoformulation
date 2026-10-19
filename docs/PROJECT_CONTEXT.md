@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in initialization-graph construction path now declares shared or
+trajectory-scoped roots and dependent initial maps at topology, then constructs
+their analytic formulas at interaction. It exports the scoped M43 fitting problem
+without routing trajectory roots into the historical shared fitter. Window duration
+remains a fitting hyperparameter; construction only requires explicit authorization.
+Conditional equality evidence is deferred, not cleared, for relevant trajectory
+roots. See `PHASE_C_INITIALIZATION_CONSTRUCTION_GRAPH.md`.
+
 The initializer-choice diagnostic completed four calls / 56,373 tokens: both
 completion probes passed, while both scientific choices abstained and preserved
 their conditional conflicts. A presentation-only V2 retest uses readable equations,
@@ -9,7 +17,8 @@ omits successful probe repeats, and caps new work at four calls / 131,072 tokens
 See `PHASE_C_INITIALIZER_READABLE_RETEST.md`. The shared handoff in
 `PHASE_C_OBSERVATION_PREFIX_INITIALIZATION.md` now specifies dependent initializer graphs and trajectory roots inferred from a
 declared observation prefix. M43 adds a separate opt-in fitting qualification;
-production construction and historical public-fit policies remain unchanged.
+historical construction and public-fit policies remain unchanged. The opt-in
+construction extension is described above.
 The legacy public fitter still learns shared initialization on training and
 freezes it for validation.
 
