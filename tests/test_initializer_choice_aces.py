@@ -11,15 +11,20 @@ from scripts import initializer_choice_aces as adapter
 from scripts import submit_initializer_choice_aces as scheduler
 
 
-@pytest.fixture
-def setup(tmp_path, monkeypatch):
+@pytest.fixture(params=["v1", "v2"])
+def setup(tmp_path, monkeypatch, request):
     monkeypatch.setattr(
         adapter.harmony_vocab,
         "verify",
         lambda path: {"protocol": "fixture-harmony", "sha256": "fixed-vocabulary"},
     )
+    protocol, budgets = (
+        (adapter.PROTOCOL, adapter.inputs.BUDGETS)
+        if request.param == "v1"
+        else (adapter.PROTOCOL_V2, adapter.inputs.BUDGETS_V2)
+    )
     plan = {
-        "protocol": adapter.PROTOCOL,
+        "protocol": protocol,
         "execution_platform": adapter.PLATFORM,
         "artifact_sha256": "new-diagnostic-plan",
         "cases": {"seed1": {}, "seed2": {}},
@@ -30,7 +35,7 @@ def setup(tmp_path, monkeypatch):
                 "max_output_tokens": 8192,
             }
         },
-        "budgets": deepcopy(adapter.BUDGETS),
+        "budgets": deepcopy(budgets),
         "automatic_followup": False,
         "test_data_opened": False,
     }
@@ -51,6 +56,13 @@ def setup(tmp_path, monkeypatch):
         "output_budget",
         "calls_budget",
         "token_budget",
+        "choice_calls_budget",
+        "choice_tokens_budget",
+        "probe_calls_budget",
+        "probe_tokens_budget",
+        "other_protocol_budget",
+        "fractional_budget",
+        "boolean_budget",
         "cases",
         "followup",
         "test",
@@ -69,9 +81,33 @@ def test_incompatible_or_expanded_diagnostic_is_rejected(setup, mutation):
             "output_budget": "max_output_tokens",
         }[mutation]
         plan["parent_plan"]["settings"][key] = "changed"
-    elif mutation in {"calls_budget", "token_budget"}:
-        key = "maximum_calls" if mutation == "calls_budget" else "maximum_tokens"
+    elif mutation in {
+        "calls_budget",
+        "token_budget",
+        "choice_calls_budget",
+        "choice_tokens_budget",
+        "probe_calls_budget",
+        "probe_tokens_budget",
+    }:
+        key = {
+            "calls_budget": "maximum_calls",
+            "token_budget": "maximum_tokens",
+            "choice_calls_budget": "maximum_choice_calls_per_case",
+            "choice_tokens_budget": "maximum_choice_tokens_per_case",
+            "probe_calls_budget": "completion_probe_calls",
+            "probe_tokens_budget": "completion_probe_tokens_per_call",
+        }[mutation]
         plan["budgets"][key] += 1
+    elif mutation == "other_protocol_budget":
+        plan["budgets"] = deepcopy(
+            adapter.inputs.BUDGETS_V2
+            if plan["protocol"] == adapter.PROTOCOL
+            else adapter.inputs.BUDGETS
+        )
+    elif mutation == "fractional_budget":
+        plan["budgets"]["maximum_calls"] = float(plan["budgets"]["maximum_calls"])
+    elif mutation == "boolean_budget":
+        plan["budgets"]["completion_probe_calls"] = False
     elif mutation == "cases":
         plan["cases"]["third"] = {}
     elif mutation == "followup":
@@ -93,6 +129,28 @@ def test_execution_is_frozen_and_old_results_are_not_imported(setup, tmp_path):
     (foreign / "calls").mkdir(parents=True)
     with pytest.raises(ValueError, match="lack diagnostic execution"):
         adapter.prepare(tmp_path, foreign, image)
+
+
+def test_protocol_specific_execution_caps_preserve_serving_settings(setup):
+    plan, root, _ = setup
+    execution = sealed_read(root / "execution.json")
+    assert adapter.verify_inputs(root) == plan
+    assert execution["maximum_generation_requests"] == plan["budgets"]["maximum_calls"]
+    assert execution["maximum_charged_tokens"] == plan["budgets"]["maximum_tokens"]
+    assert execution["model"] == adapter.MODEL
+    assert execution["model_revision"] == adapter.REVISION
+    assert execution["served_context_tokens"] == 32768
+    assert execution["maximum_output_tokens"] == 8192
+    assert execution["tensor_parallel_size"] == 1
+    assert execution["maximum_sequences"] == 1
+    assert execution["gpu_memory_utilization"] == 0.9
+
+
+def test_legacy_default_caps_are_unchanged():
+    assert adapter.PROTOCOL == "saved-initializer-choice-diagnostic-1"
+    assert adapter.MAXIMUM_CALLS == 6
+    assert adapter.MAXIMUM_TOKENS == 196608
+    assert adapter.BUDGETS == adapter.inputs.BUDGETS
 
 
 def test_run_delegates_all_units_once_without_a_provider_failure_shortcut(
@@ -190,7 +248,8 @@ def scheduler_setup(setup, monkeypatch):
     return root
 
 
-def test_submission_is_idempotent_and_keeps_separate_six_call_limit(setup, monkeypatch):
+def test_submission_is_idempotent_and_keeps_protocol_caps(setup, monkeypatch):
+    plan, _, _ = setup
     root = scheduler_setup(setup, monkeypatch)
     submitted = []
 
@@ -202,8 +261,8 @@ def test_submission_is_idempotent_and_keeps_separate_six_call_limit(setup, monke
     value = scheduler.submit(root, "choice-1")
     assert scheduler.submit(root, "choice-1") == value
     assert len(submitted) == 1
-    assert value["maximum_generation_requests"] == 6
-    assert value["maximum_charged_tokens"] == 196608
+    assert value["maximum_generation_requests"] == plan["budgets"]["maximum_calls"]
+    assert value["maximum_charged_tokens"] == plan["budgets"]["maximum_tokens"]
     assert value["maximum_cases"] == 2
     assert "--gres=gpu:h100:1" in submitted[0][0]
     assert "--time=01:30:00" in submitted[0][0]

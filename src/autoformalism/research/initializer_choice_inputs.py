@@ -33,6 +33,13 @@ BUDGETS = {
     "maximum_calls": 6,
     "maximum_tokens": 196608,
 }
+PROTOCOL_V2 = "saved-initializer-choice-diagnostic-2"
+BUDGETS_V2 = {
+    **BUDGETS,
+    "completion_probe_calls": 0,
+    "maximum_calls": 4,
+    "maximum_tokens": 131072,
+}
 ENTRYPOINTS = (
     "scripts/initializer_choice_aces.py",
     "scripts/submit_initializer_choice_aces.py",
@@ -307,13 +314,14 @@ def freeze(source: Path, destination: Path) -> dict:
         raise ValueError("malformed initializer-choice source") from exc
 
 
-def verify(root: Path) -> dict:
-    """Recheck policy, embedded history and offline replay before any new call."""
+def _verify_original(plan: dict, *, archived: bool = False) -> dict:
+    """Verify V1 content; archived plans retain their old source identity."""
     try:
-        plan = sealed_read(root / "plan.json")
+        _sealed(plan)
         if (
             plan.get("protocol") != PROTOCOL
-            or plan.get("source_identity") != source_identity()
+            or (not archived and plan.get("source_identity") != source_identity())
+            or not isinstance(plan.get("source_identity"), str)
             or plan.get("budgets") != BUDGETS
             or any(type(value) is not int for value in plan["budgets"].values())
             or any(
@@ -338,6 +346,8 @@ def verify(root: Path) -> dict:
                 case["source_calls"],
             )
         expected = _assemble(parent, cases)
+        if archived:
+            expected["source_identity"] = plan["source_identity"]
         if {
             key: value for key, value in plan.items() if key != "artifact_sha256"
         } != expected:
@@ -347,3 +357,162 @@ def verify(root: Path) -> dict:
         return plan
     except (KeyError, TypeError, AttributeError, IndexError) as exc:
         raise ValueError("malformed initializer-choice plan") from exc
+
+
+def _completed(snapshot: dict) -> dict:
+    """Replay complete V1 history without refunding costs or using a provider."""
+    from autoformalism.research import initializer_choice_diagnostic as diagnostic
+
+    plan = _verify_original(snapshot["plan"], archived=True)
+    expected_units = {unit for unit, _ in diagnostic.units(plan)}
+    if set(snapshot["units"]) != expected_units:
+        raise ValueError("completed diagnostic unit coverage differs")
+    with TemporaryDirectory(prefix="initializer-readable-replay-") as temporary:
+        root = Path(temporary)
+        for unit, name in diagnostic.units(plan):
+            saved_unit = snapshot["units"][unit]
+            directory = root / "results" / unit
+            if [event["index"] for event in saved_unit["events"]] != list(
+                range(len(saved_unit["events"]))
+            ) or any(type(event["index"]) is not int for event in saved_unit["events"]):
+                raise ValueError("completed diagnostic event indices differ")
+            atomic_json(directory / "result.json", _sealed(saved_unit["result"]))
+            for event in saved_unit["events"]:
+                atomic_json(
+                    directory / "events" / f"{event['index']:03d}.json", _sealed(event)
+                )
+            for record in saved_unit["calls"]:
+                if record["request_hash"] != content_hash(record["request"]):
+                    raise ValueError("completed diagnostic request hash differs")
+                atomic_json(
+                    directory / "calls" / f"{record['request_hash']}.json", record
+                )
+            for record in saved_unit["tokenization"]:
+                if (
+                    type(record.get("count")) is not int
+                    or record["count"] <= 0
+                    or type(record.get("max_model_len")) is not int
+                    or record["max_model_len"] != 32768
+                    or "error" in record
+                ):
+                    raise ValueError("completed diagnostic tokenizer metadata differs")
+                token_key = content_hash(record["request"])
+                atomic_json(
+                    directory / "calls" / "tokenization" / f"{token_key}.json", record
+                )
+            kwargs = {
+                "base_url": "http://blocked.invalid",
+                "transport": _blocked,
+                "token_transport": _blocked,
+            }
+            if name is None:
+                replayed = diagnostic.run_probe(root, plan, unit, **kwargs)
+                if not replayed.get("schema_passed"):
+                    raise ValueError(
+                        "completed diagnostic requires successful availability probes"
+                    )
+            else:
+                replayed = diagnostic.run_choice(root, plan, unit, name, **kwargs)
+                if (
+                    replayed["candidate_initializer_handoff"]
+                    != plan["cases"][name]["start"]["initializer_handoff"]
+                ):
+                    raise ValueError(
+                        "readable retest requires unchanged initializer choices"
+                    )
+            if replayed != saved_unit["result"] or replayed["status"] != "assessed":
+                raise ValueError("completed diagnostic differs on exact cache replay")
+            actual_events = [
+                sealed_read(p) for p in sorted((directory / "events").glob("*.json"))
+            ]
+            if actual_events != saved_unit["events"]:
+                raise ValueError("completed diagnostic events differ on replay")
+        summary = diagnostic.report(root, plan)
+        if summary != snapshot["summary"]:
+            raise ValueError("completed diagnostic summary differs on replay")
+    return snapshot
+
+
+def _assemble_readable(snapshot: dict) -> dict:
+    """Keep all previous work separate from this new presentation-only allowance."""
+    original = snapshot["plan"]
+    plan = _assemble(original["parent_plan"], original["cases"])
+    plan.update(
+        protocol=PROTOCOL_V2,
+        budgets=dict(BUDGETS_V2),
+        completion_probe=None,
+        prior_diagnostic=snapshot,
+        prompt_policy="readable-initializer-choice-1",
+        selection="The same unchanged saved models and seeds from the complete V1 "
+        "diagnostic. Only request presentation changes; no controlled causal "
+        "comparison is claimed.",
+        historical_cost_scope="All V6/predecessor costs remain in cases. The complete "
+        "V1 diagnostic and its costs are retained in prior_diagnostic. No work is "
+        "refunded. This new allowance is at most four calls and 131072 charged tokens; "
+        "successful completion probes are not repeated.",
+    )
+    return plan
+
+
+def refine_completed(source: Path, destination: Path) -> dict:
+    """Freeze the two unchanged choices after verifying the completed V1 diagnostic."""
+    from autoformalism.research import initializer_choice_diagnostic as diagnostic
+
+    if (
+        source.resolve() == destination.resolve()
+        or source.resolve() in destination.resolve().parents
+    ):
+        raise ValueError("write readable inputs outside the historical source")
+    try:
+        plan = sealed_read(source / "plan.json")
+        snapshot = {
+            "plan": plan,
+            "summary": json.loads((source / "summary.json").read_text()),
+            "units": {},
+        }
+        for unit, _ in diagnostic.units(plan):
+            directory = source / "results" / unit
+            calls, events, result = diagnostic._checked_unit(source, plan, unit)
+            if result is None:
+                raise ValueError("source diagnostic is incomplete")
+            snapshot["units"][unit] = {
+                "calls": calls,
+                "events": events,
+                "result": result,
+                "tokenization": [
+                    json.loads(path.read_text())
+                    for path in sorted(
+                        (directory / "calls" / "tokenization").glob("*.json")
+                    )
+                ],
+            }
+        return sealed_write(
+            destination / "plan.json", _assemble_readable(_completed(snapshot))
+        )
+    except (KeyError, TypeError, AttributeError, IndexError) as exc:
+        raise ValueError("malformed completed diagnostic") from exc
+
+
+def verify(root: Path) -> dict:
+    """Bind the executing source and replay historical records before new calls."""
+    plan = sealed_read(root / "plan.json")
+    if plan.get("protocol") == PROTOCOL:
+        return _verify_original(plan)
+    try:
+        if (
+            plan.get("protocol") != PROTOCOL_V2
+            or plan.get("source_identity") != source_identity()
+        ):
+            raise ValueError("initializer-choice source identity or protocol differs")
+        expected = _assemble_readable(_completed(plan["prior_diagnostic"]))
+        if (
+            any(type(value) is not int for value in plan["budgets"].values())
+            or {key: value for key, value in plan.items() if key != "artifact_sha256"}
+            != expected
+        ):
+            raise ValueError(
+                "readable initializer-choice policy, history or budget differs"
+            )
+        return plan
+    except (KeyError, TypeError, AttributeError, IndexError) as exc:
+        raise ValueError("malformed readable initializer-choice plan") from exc

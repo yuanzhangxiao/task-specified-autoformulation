@@ -103,5 +103,8 @@ and submission wave for deterministic resume.
 
 The report separates availability from scientific status. A Slurm failure can
 mean one preplanned request had unavailable output even when the other units
-completed; inspect both the per-unit table and logs. Live diagnostic results are
-not available yet.
+completed; inspect both the per-unit table and logs. The returned V1 run completed
+four requests / 56,373 observed tokens. Both
+completion probes passed; both initializer decisions abstained and retained the
+scientific conflicts. See `PHASE_C_INITIALIZER_READABLE_RETEST.md` for the
+subsequent presentation-only retest.

@@ -21,6 +21,7 @@ from scripts.saved_initialization_aces import bind_server, file_hash
 
 REPO = Path(__file__).resolve().parents[1]
 PROTOCOL = "saved-initializer-choice-diagnostic-1"
+PROTOCOL_V2 = "saved-initializer-choice-diagnostic-2"
 PLATFORM = "aces-h100x1"
 MODEL = "openai/gpt-oss-20b"
 REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
@@ -49,11 +50,16 @@ def verify_inputs(root: Path) -> dict:
     """Require the explicit new diagnostic, pinned model and at most two cases."""
     plan = inputs.verify(root)
     settings = plan["parent_plan"]["settings"]
+    expected_budgets = {
+        inputs.PROTOCOL: inputs.BUDGETS,
+        inputs.PROTOCOL_V2: inputs.BUDGETS_V2,
+    }.get(plan["protocol"])
     if (
-        plan["protocol"] != PROTOCOL
+        expected_budgets is None
         or plan.get("execution_platform") != PLATFORM
         or not 1 <= len(plan["cases"]) <= 2
-        or plan.get("budgets") != BUDGETS
+        or plan.get("budgets") != expected_budgets
+        or any(type(value) is not int for value in plan["budgets"].values())
         or settings["model"] != MODEL
         or settings["model_revision"] != REVISION
         or settings["max_output_tokens"] != 8192
@@ -82,8 +88,8 @@ def execution_identity(plan: dict, image_sha256: str) -> dict:
         "tensor_parallel_size": 1,
         "maximum_sequences": 1,
         "gpu_memory_utilization": 0.90,
-        "maximum_generation_requests": MAXIMUM_CALLS,
-        "maximum_charged_tokens": MAXIMUM_TOKENS,
+        "maximum_generation_requests": plan["budgets"]["maximum_calls"],
+        "maximum_charged_tokens": plan["budgets"]["maximum_tokens"],
         "compiler_cache_policy": "node-local-job-temporary-1",
         "server_binding": "127.0.0.1",
         "test_data_opened": False,

@@ -25,7 +25,9 @@ from autoformalism.rebuttal.prefit_construction_campaign import _cache_records, 
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.research import initialized_topology_repair as initialized
+from autoformalism.research import initializer_choice_inputs as inputs
 from autoformalism.research import initializer_choice_prompt as prompt
+from autoformalism.research import initializer_choice_readable as readable
 from autoformalism.research import saved_topology_repair as saved
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.search import construction_initialized_repair as api
@@ -35,9 +37,10 @@ from autoformalism.staged_topology import content_hash
 
 def units(plan: dict) -> list[tuple[str, str | None]]:
     """Return the frozen order; probe repeats are independent planned units."""
-    return [(f"completion-{i}", None) for i in range(2)] + [
-        (f"choice-{name}", name) for name in plan["cases"]
-    ]
+    return [
+        (f"completion-{i}", None)
+        for i in range(plan["budgets"]["completion_probe_calls"])
+    ] + [(f"choice-{name}", name) for name in plan["cases"]]
 
 
 def namespace(plan: dict, unit: str) -> str:
@@ -301,6 +304,13 @@ def choice_packet(case, problem, draft, session, state, previous, index, charged
     return prompt.build_packet(full, case["editable_state"], previous=previous)
 
 
+def choice_message(plan, packet, evidence):
+    """Keep V1 requests identical and render V2 evidence as readable text."""
+    if plan["protocol"] == inputs.PROTOCOL_V2:
+        return readable.render(packet, evidence)
+    return json.dumps(packet, ensure_ascii=False)
+
+
 def assess_choice(case, problem, draft, session, check, state, raw):
     """Validate one editable initializer and recheck every retained witness."""
     reply = prompt.ChoiceReply.model_validate(raw)
@@ -337,7 +347,7 @@ def run_choice(root, plan, unit, name, *, base_url, **kwargs):
     )
     previous, events = None, []
     stop, status, decision = "choice_budget_exhausted", "assessed", None
-    for index in range(2):
+    for index in range(plan["budgets"]["maximum_choice_calls_per_case"]):
         charged = sum(event["budget_charge"] for event in events)
         packet = choice_packet(
             case, problem, draft, session, state, previous, index, charged
@@ -346,7 +356,7 @@ def run_choice(root, plan, unit, name, *, base_url, **kwargs):
             record = _request(
                 client,
                 prompt.SYSTEM,
-                packet,
+                choice_message(plan, packet, problem.evidence),
                 prompt.ChoiceReply,
                 f"initializer_choice_{index:03d}",
                 index,
@@ -514,7 +524,7 @@ def report(root: Path, plan: dict) -> dict:
     elif counts.get("pending"):
         available = "pending"
     cost = _cost(records)
-    if cost["physical_requests"] > 6:
+    if cost["physical_requests"] > plan["budgets"]["maximum_calls"]:
         raise ValueError("diagnostic request cap exceeded")
     summary = {
         "protocol": plan["protocol"],
@@ -528,8 +538,8 @@ def report(root: Path, plan: dict) -> dict:
         "physical_requests": cost["physical_requests"],
         "observed_tokens": cost["observed_tokens"],
         "unmeasured_requests": cost["requests_with_unknown_usage"],
-        "maximum_calls": 6,
-        "maximum_charged_tokens": 196608,
+        "maximum_calls": plan["budgets"]["maximum_calls"],
+        "maximum_charged_tokens": plan["budgets"]["maximum_tokens"],
         "cost_scope": "New diagnostic units only; source costs remain "
         "separately frozen in plan.cases.",
         "source_model_changes": 0,
@@ -571,13 +581,14 @@ def preview(plan: dict, output: Path) -> dict:
     for name, case in plan["cases"].items():
         problem, draft, session, _, state = _session(case)
         packet = choice_packet(case, problem, draft, session, state, None, 0, 0)
+        message = choice_message(plan, packet, problem.evidence)
         body = request_body(
             choice_settings(plan),
             case["task"]["seed"],
             "initializer_choice_000",
             0,
             prompt.SYSTEM,
-            json.dumps(packet, ensure_ascii=False),
+            message,
             prompt.ChoiceReply,
         )
         label = f"choice-{len(links)}"
@@ -592,7 +603,11 @@ def preview(plan: dict, output: Path) -> dict:
             f"<pre>{html.escape(prompt.SYSTEM)}</pre>"
             "<h2>Focused request</h2>"
             "<pre>"
-            + html.escape(json.dumps(packet, indent=2, ensure_ascii=False))
+            + html.escape(
+                message
+                if plan["protocol"] == inputs.PROTOCOL_V2
+                else json.dumps(packet, indent=2, ensure_ascii=False)
+            )
             + "</pre>"
             "<details><summary>Output schema</summary>"
             f"<pre>{html.escape(json.dumps(body['response_format'], indent=2))}</pre>"
@@ -613,8 +628,18 @@ def preview(plan: dict, output: Path) -> dict:
             f'<li><a href="{label}.html">{html.escape(name)}</a> · '
             f'<a href="{label}.json">Exact request body</a></li>'
         )
-    (output / "completion-probe.json").write_text(
-        json.dumps(plan["completion_probe"]["request"]["body"], indent=2) + "\n"
+    if plan["completion_probe"]:
+        (output / "completion-probe.json").write_text(
+            json.dumps(plan["completion_probe"]["request"]["body"], indent=2) + "\n"
+        )
+    availability = (
+        "Separate availability check: two planned repeats of the exact previously "
+        "incomplete request. These are not repairs and do not change models."
+        if plan["completion_probe"]
+        else "Changed: readable equations and paired initial readings; fixed runtime "
+        "rules are distinguished from the editable latent initializer. The complete "
+        "V1 diagnostic is retained with its costs. Its successful completion probes "
+        "are not repeated. This retest allows at most four new calls."
     )
     (output / "PROMPTS.html").write_text(
         '<!doctype html><meta charset="utf-8"><style>'
@@ -625,14 +650,18 @@ def preview(plan: dict, output: Path) -> dict:
         "Only shared_parameter or common_map can be proposed. Topology change or "
         "insufficient information can be reported, but cannot mark the conflict "
         "resolved. Each case allows two attempts; prior evidence and costs "
-        "remain unchanged.</p><p>Separate availability check: two planned repeats "
-        "of the exact previously incomplete request. These are not repairs and "
-        "do not change models. A failure does not prevent the independent choice "
-        "tests.</p><ul>"
+        "remain unchanged.</p><p>"
+        + availability
+        + "</p><ul>"
         + "".join(links)
-        + '</ul><p><a href="completion-probe.json">Unchanged completion request '
-        "(both repeats)</a></p>"
-        f"<pre>{html.escape(json.dumps(sizes, indent=2))}</pre>"
+        + "</ul>"
+        + (
+            '<p><a href="completion-probe.json">Unchanged completion request '
+            "(both repeats)</a></p>"
+            if plan["completion_probe"]
+            else ""
+        )
+        + f"<pre>{html.escape(json.dumps(sizes, indent=2))}</pre>"
         "<p>Byte sizes are not token counts. Serving-token preflight remains "
         "mandatory.</p>"
     )

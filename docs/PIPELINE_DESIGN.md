@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+`saved-initializer-choice-diagnostic-2` preserves V1 replay and scientific checks,
+but renders the choice as readable equations and paired permitted initial values.
+It distinguishes fixed runtime rules from editable latent initialization, retains
+full structured evidence outside the model request, and validates every displayed
+number against sealed training arrays. Complete V1 provenance and tokenizer caches
+are replayed offline before a new four-call allowance is sealed. Completion probes
+are not repeated. No fitting or broader evaluation policy changes are included.
+See `PHASE_C_INITIALIZER_READABLE_RETEST.md` and the separately proposed
+`PHASE_C_OBSERVATION_PREFIX_INITIALIZATION.md`.
+
 `saved-initializer-choice-diagnostic-1` is independent of the repair loop. An
 offline cache replay freezes unchanged V6 finals and their full provenance. Two
 exact failed-request repeats assess output availability; two separately budgeted

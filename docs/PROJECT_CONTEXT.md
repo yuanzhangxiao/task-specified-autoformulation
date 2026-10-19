@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+The initializer-choice diagnostic completed four calls / 56,373 tokens: both
+completion probes passed, while both scientific choices abstained and preserved
+their conditional conflicts. A presentation-only V2 retest uses readable equations,
+paired permitted initial measurements, and an explicit fixed-versus-editable
+initializer distinction. It retains the two models/seeds and complete history,
+omits successful probe repeats, and caps new work at four calls / 131,072 tokens.
+See `PHASE_C_INITIALIZER_READABLE_RETEST.md`. A separate observation-prefix
+initialization proposal is documented but not enabled; the public Phase C fitter
+still fits shared initialization on training data and freezes it for validation.
+
 The V6 ACES audit returned five calls / 118,450 observed tokens. Both saved models
 remain unchanged with one conditional conflict each: seed 1 repeats an invalid
 observed initializer, and seed 2 ends with an unavailable truncated reply. Evidence

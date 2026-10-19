@@ -84,8 +84,8 @@ def submit(root: Path, wave: str) -> dict:
             **identity,
             "jobs": {"propose": job},
             "maximum_cases": len(plan["cases"]),
-            "maximum_generation_requests": campaign.MAXIMUM_CALLS,
-            "maximum_charged_tokens": campaign.MAXIMUM_TOKENS,
+            "maximum_generation_requests": execution["maximum_generation_requests"],
+            "maximum_charged_tokens": execution["maximum_charged_tokens"],
             "automatic_followup": False,
             "test_data_opened": False,
         }
