@@ -190,7 +190,93 @@ verification oracle calls and 144 additional sensitivity calls. Summed operation
 CPU was 121.40 seconds and wall time 124.41 seconds. All costs were observed;
 there were no interrupted stages. Six terminal replays preserved the bytes and
 timestamps of all 2,205 JSON artifacts. The smoke artifacts remain uncommitted in
-`output/phase-c-fitting-m44-smoke/`. Cluster results are still pending.
+`output/phase-c-fitting-m44-smoke/`. The returned Delta results follow below.
+
+## Returned Delta review, 19 October 2026
+
+The replacement archive `review-20261019-131033 (1).tar.gz` is complete, with
+SHA256 `117bec9cd138116369ab3d16b79662434174c0c15df4a54e2c97f8f9b86d4aec`.
+The first download was truncated and is not the review source. The full report
+rebuild reproduces the saved summary exactly, including operation receipts,
+scores, start choices and selections. Its source fingerprint matches the local
+qualification. Regenerated inputs differ from the local control only by floating
+point differences up to 2.22e-16 and their derived hashes. Each campaign uses its
+own sealed measurements; datasets were not replaced during review.
+
+All six terminal records exist, but only four tasks are numerically complete:
+the four noisy tasks pass; both clean tasks have incomplete windows. Consequently
+the official clean recommendation is `unavailable`, while all four noisy tasks
+and the aggregate noisy recommendation select duration 0.2.
+
+| Prefix duration | Clean common-horizon mean NMSE | Noisy common-horizon mean NMSE |
+|---|---:|---:|
+| 0 | 1.74464 | 1.74978--1.82312 |
+| 0.1 | 6.80e-21 | 0.01475--0.01646 |
+| 0.2 | One complete task: 4.64e-21 | 0.002415--0.003210 |
+| 0.5 | 1.40e-19 | 0.000907--0.001534 |
+| 1 | One complete task: 3.80e-21 | 0.000858--0.001077 |
+| 2 | One complete task: 1.40e-21 | 0.000784--0.000986 |
+
+These remain means over the same four validation rows at t>2. The two training
+starts share each measured acquisition, so the four noisy tasks are two noise
+replicates, not four. Both clean tasks fully verify the 0.1 window, but the frozen
+all-windows-complete rule prevents selecting it retrospectively when other
+windows are incomplete. No accuracy threshold or missing-result rule was relaxed.
+
+An independent saved-array audit reproduces all 285 successful forecast scores
+to within 8.9e-16 and verifies prefix-loss start selection. Forecasts agree with
+the analytic model at fitted parameters within 8.4e-10. Analytic root-sensitivity
+norms agree with the saved diagnostics within 2.0e-10 relative error. No returned
+candidate was refitted, and no LLM calls or test-data access were used.
+
+### Three verification timeouts
+
+| Task and operation | Wall seconds | CPU seconds | Outcome |
+|---|---:|---:|---|
+| clean start 0, duration 0.2, val_0, inference start 1.1 | 20.47 | 0.093 | Search allowance exhausted; first verifier timed out |
+| clean start 0, duration 2, val_3, forecast start 0.5 | 5.06 | 0.493 | Second verifier timed out |
+| clean start 1, duration 1, val_3, inference start 1.1 | 6.52 | 0.080 | Search converged; second verifier timed out |
+
+The last search already found root 1.79999999973 with prefix NMSE 7.34e-19.
+All six shared training fits passed verification. The timing failures therefore
+must not be interpreted as evidence that a longer prefix or different equations
+are needed. `_solve` and `forecast` start the five-second verification deadline
+before synchronous checkpoint writes, and those writes call `fsync`. Waiting
+for storage can consume the solver allowance. The large wall/CPU gaps support
+a waiting-overhead diagnosis, but current receipts do not isolate filesystem
+latency from descheduling, so the exact cause is not proved.
+
+The ledger contains 730 operations, 1,119 search calls, 1,159 verification calls
+started / 1,156 completed, and 144 information calls. Two dependent forecasts
+were not attempted after failed inferences. Total recorded operation CPU is
+189.80 seconds versus 1,602.98 seconds of summed operation wall time; the latter
+is not campaign makespan. Accounting is complete and the failures remain visible.
+
+### Interpretation and next gate
+
+At duration 0.2 the noisy runs' across-start prediction spread is at most 3.2e-9,
+while the conditional one-noise-unit root scale is 0.0312--0.0326. Agreement
+between starts does not remove measurement uncertainty. In the first noisy
+acquisition the shared initializer coefficient is about 0.6296 instead of its
+generating value 0.7; the maximum root error is 0.1251 at duration 0.2 and 0.0947
+at duration 2. The latter exceeds its conditional noise scale of about 0.00371
+because that diagnostic holds shared parameters fixed. It is not a bound on total
+root error. Predictive adequacy does not certify accurate latent coordinates.
+
+The immediate follow-up is to measure checkpoint time separately from numerical
+work and make verification robust to storage waits while retaining a finite
+overall deadline and complete cost accounting. Recover the affected clean cases
+under an explicitly new supplementary policy; preserve the original failed
+ledger and do not relabel this run as a six-task pass. The four completed noisy
+tasks need no numerical rerun to interpret this experiment. After execution is
+qualified, move to multiple independent roots and a construction-exported model,
+and assess a frozen duration policy on new trajectories. These results do not
+establish a universal duration or immediate post-prefix forecast accuracy.
+
+Review verification: all 154 relevant tests pass in 17.44 seconds, report
+reconstruction and `git diff --check` pass, and Ruff passes outside the unchanged
+37 existing findings in unrelated `analysis/claude/` files. This results update
+changes documentation only; it does not implement the proposed timing recovery.
 
 ## Verification
 

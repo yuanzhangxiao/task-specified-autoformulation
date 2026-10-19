@@ -21,11 +21,13 @@ benchmark qualification remain pending. Existing benchmark and production
 policies are unchanged. This takes priority
 over extending the completed M42 uncertainty diagnostic.
 
-The next opt-in fitting gate is [M44 prefix-duration selection](PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md):
-six CPU tasks sweep observation windows on clean/noisy known-equation controls,
-score a common late horizon and keep shared parameters frozen. It reports root
-information and starting-point sensitivity separately from forecast adequacy.
-This tunes a fitting hyperparameter; it does not change benchmark input access.
+The [M44 prefix-duration selection](PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md)
+Delta review confirms duration 0.2 in all four noisy tasks. Both clean tasks have
+excellent verified 0.1 windows but incomplete sweeps after three verification
+timeouts. The next fitting gate is checkpoint/deadline reliability and an explicit
+supplementary recovery of those clean cases. Root information remains conditional
+on learned shared parameters; solver agreement is not root accuracy. This tunes a
+fitting hyperparameter without changing benchmark input access or production defaults.
 
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
 The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) translates

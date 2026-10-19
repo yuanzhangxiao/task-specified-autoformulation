@@ -15,7 +15,11 @@ prefix starts. All candidates share a validation forecast horizon; shared
 parameters remain frozen. Root noise amplification is advisory and conditional,
 and generated truth is consulted only after selection. See
 `PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md`. Benchmark/production policies remain
-unchanged; remote results are pending.
+unchanged. Returned Delta results verify all four noisy tasks and select duration
+0.2; two clean tasks remain incomplete due to three verification wall-clock
+timeouts. Both clean tasks' 0.1 windows pass, but the frozen complete-sweep rule
+withholds selection. Checkpoint writes occur inside numerical deadlines; separating
+their timing and recovering the clean cases is the next execution-reliability gate.
 
 The opt-in initialization-graph construction path now declares shared or
 trajectory-scoped roots and dependent initial maps at topology, then constructs
