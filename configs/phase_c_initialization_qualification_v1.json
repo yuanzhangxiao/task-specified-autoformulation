@@ -1,0 +1,11 @@
+{
+  "protocol": "phase-c-initialization-qualification-policy-1",
+  "numerical": {
+    "maximum_calls": 100,
+    "seconds": 30.0,
+    "verification_seconds": 10.0,
+    "rtol": 1e-9,
+    "atol": 1e-11
+  },
+  "prefix": {"duration": 1.0, "future_inputs": []}
+}

@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+M43 adds a separate `latent-initialization-graph-1` lowering and prefix fitting
+adapter. Shared roots and map coefficients are learned jointly with dynamics;
+optional trajectory roots receive one training coordinate per row. On unseen
+rows only roots are inferred from a declared prefix with shared parameters frozen.
+Dependent maps expand in acyclic order using the restricted expression grammar.
+Future-only scoring and explicit permitted forcing preserve information access.
+No finalized prompt, historical public-fit schema or construction default changes.
+See `PHASE_C_OBSERVATION_PREFIX_INITIALIZATION.md` for the shared interface and
+`PHASE_C_FITTING_INITIALIZATION_QUALIFICATION.md` for the synthetic CPU gate.
+
 `saved-initializer-choice-diagnostic-2` preserves V1 replay and scientific checks,
 but renders the choice as readable equations and paired permitted initial values.
 It distinguishes fixed runtime rules from editable latent initialization, retains
@@ -7,7 +17,7 @@ full structured evidence outside the model request, and validates every displaye
 number against sealed training arrays. Complete V1 provenance and tokenizer caches
 are replayed offline before a new four-call allowance is sealed. Completion probes
 are not repeated. No fitting or broader evaluation policy changes are included.
-See `PHASE_C_INITIALIZER_READABLE_RETEST.md` and the separately proposed
+See `PHASE_C_INITIALIZER_READABLE_RETEST.md` and the opt-in initialization handoff
 `PHASE_C_OBSERVATION_PREFIX_INITIALIZATION.md`.
 
 `saved-initializer-choice-diagnostic-1` is independent of the repair loop. An

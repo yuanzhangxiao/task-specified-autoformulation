@@ -1,134 +1,248 @@
-# Initial-state estimation from an observation prefix: proposed scope
+# Phase C initialization contract: construction and fitting
 
-This document records an implementation audit and a proposed extension. It does
-not enable a new fitting or evaluation policy. The currently runnable change is
-the separate [readable initializer diagnostic](PHASE_C_INITIALIZER_READABLE_RETEST.md).
+Updated 2026-10-19. This is the shared handoff for Astra (construction) and Orion
+(fitting). It records the two agreed extensions and their first opt-in numerical
+qualification, M43. Historical public fitting policies and finalized benchmark
+prompts remain unchanged. Passing a synthetic qualification is not yet evidence
+that the construction pipeline and all fitting backends support this contract.
 
-## What the current implementation estimates
+## The agreement in plain language
 
-Orion's public Phase C C+S and transcription paths estimate shared latent initial
-values and shared initializer-map coefficients jointly with dynamics parameters
-from complete TRAIN trajectories. The map is evaluated on each trajectory's
-permitted first readings. A shared constant is the same across trajectories; a
-shared map can produce different values from different permitted readings.
+1. A latent initial value may be an unknown constant shared across trajectories.
+   Another initial value may depend on that constant, on other declared initial
+   states, and on permitted public initial observations. Fit the independent
+   constants and map coefficients; calculate dependent initial values.
+2. A latent initial value may instead be an independent unknown for each training
+   trajectory. For an unseen trajectory, infer that unknown from a declared short
+   observation window while holding the learned dynamics and initializer-map
+   coefficients fixed. Forecast and score only after that window.
 
-Relevant implementation:
+These options can coexist in one model. A dependent initializer is not an
+additional independent variable. For example, in
 
-- `fitting/initialization.py:lower_initialization` lowers these quantities to global
-  fitted parameters; the plan records `scope=shared_training` and no fitted
-  validation initials.
-- `fitting/collocation_sensitivity.py` passes training data to initialization and
-  refinement. `sensitivity_probe.py` constructs residuals over training target
-  samples. Its validation replay disables trajectory-specific initial fitting.
-- `fitting/transcription_solver.py` constrains first nodes to the declared initial
-  rule. Later shooting/collocation nodes are optimization variables for numerical
-  transcription, not free initial states exported to held-out replay.
-- `fitting/simulation.py:trajectory_initial_state` evaluates the shared initial
-  rule from the new trajectory's permitted initial data. Qualification performs
-  a free rollout and does not fit validation initial values.
+    z1_j(0) = alpha
+    z2_j(0) = a * z1_j(0) + b * y_j(0),
 
-There is a separate legacy generic backend in `fitting/fitter.py` with ranged
-per-trajectory initial variables and full-validation-trajectory initial fitting.
-The public fitting boundary rejects that initialization scope. Its existence must
-not be described as the current public Phase C protocol, and it must not be reused
-unchanged for future-only prefix evaluation.
+the unknowns are alpha, a and b, all shared. There is no separate free z2_j(0).
+Replacing alpha by a trajectory root xi_j permits different hidden preparations
+for identical initial measured values. The shared coefficients a and b do not
+become trajectory-specific.
 
-## Information available at prediction time
+A shared map already allows different initial values when its permitted inputs
+differ. Neither prefix inference nor a new latent root is necessary merely
+because two trajectories have different observations. They become useful when
+available initial measurements cannot determine the hidden preparation.
 
-Estimating an initial state is not itself leakage. The allowed information and
-scoring horizon determine the claim:
+## Construction-to-fitting interface
 
-| Evaluation task | Allowed state-estimation data | What the score measures |
+Use an explicit `latent-initialization-graph-1` graph with exactly one rule for
+**each latent state**. Identity-observed states receive their own permitted first
+measurement in this milestone. Construction must not declare a free initial value
+for an observed state to evade that equality.
+
+| Initial rule | Independent fitted quantities | Application to a new trajectory |
 | --- | --- | --- |
-| Prediction/control from the first instant | Initial measurements, pre-existing history and a prior | Prospective behavior from the start |
-| Prediction after an observation window | A predeclared prefix ending at time tau | Future predictions strictly after tau |
-| Retrospective reconstruction | The entire held-out observed trajectory | Reconstruction conditional on those observations |
+| `known` | None | Use the justified declared value |
+| `value`, `shared_training` | One shared scalar | Reuse the learned scalar |
+| `value`, `trajectory` | One scalar per training trajectory | Infer a new scalar using the prefix policy |
+| `map` | Shared declared map coefficients | Evaluate the map in dependency order |
 
-Full-trajectory state fitting can be useful for investigating whether equations
-can explain data. It does not demonstrate that the model could have predicted
-those observations or supported decisions before they arrived. Observed output
-channels remain unavailable before their measurement time, even when a separate
-benchmark target is hidden. An online observer can update as data arrive; a
-retrospective smoother uses future observations to estimate earlier states.
-Future exogenous inputs may be supplied only under the declared forecast scenario
-(for example, a known control schedule). Future measured auxiliary channels cannot
-be treated as known inputs merely because the dataset calls them auxiliary.
+Dependencies are explicit aliases. `state_initials` denotes an initial value of a
+named model state; `public_initials` denotes a first public reading, input,
+covariate or initial time. These have distinct meanings even if the public channel
+and a model variable have similar names. A map cannot silently read a whole
+trajectory, a future value, a generated process, or undeclared equation parameters.
+Map-local parameters are namespaced by state. The first version permits acyclic
+dependencies only; it does not solve implicit simultaneous initializer equations.
 
-For a fixed learned model theta, a minimal prefix estimator is
+For the example above, the graph is:
 
-    z_hat(0) = argmin_z sum_{t_k <= tau} ||y_hat_theta(t_k; z) - y(t_k)||^2_W + R(z).
+```json
+{
+  "protocol": "latent-initialization-graph-1",
+  "rules": {
+    "z1": {
+      "initial": {
+        "mode": "value", "guess": 1.0,
+        "role": "nonnegative_coefficient", "scope": "shared_training"
+      }
+    },
+    "z2": {
+      "initial": {
+        "mode": "map", "expression": "a * root + b * reading",
+        "parameters": [
+          {"name": "a", "role": "nonnegative_coefficient", "guess": 0.5},
+          {"name": "b", "role": "coefficient", "guess": 0.5}
+        ],
+        "state_initials": {"root": "z1"},
+        "public_initials": {"reading": "y"}
+      }
+    }
+  }
+}
+```
 
-Only the latent boundary is optimized here. Shared dynamics, observation-map and
-initializer parameters are frozen. Propagate the resulting state to tau, then
-score samples with t_k > tau. Bounds, prior/regularizer R, solver budget, observation
-channels, tau and normalization must be fixed using training/validation decisions,
-never selected from the final test outcomes. Failure to estimate a state remains
-visible. The prefix may not identify every hidden state; a good fit need not imply
-a unique state or correct physics.
+Changing only z1's scope to `trajectory` gives the second option. Generated
+coordinates are `init_z1_value`, `init_z2_a`, and `init_z2_b`. The fitted root
+`init_z1_value` then has a separate assignment per trajectory in the new adapter;
+its occurrence in a compiled expression does not make it a shared parameter.
+The graph audit preserves this distinction. Guess values are starting points, not
+fixed values or biological claims. Numerical domains follow declared parameter
+roles and the fitting bound policy; these coefficient bounds do not prove that
+every dependent state expression stays in its physical domain. The first numerical
+adapter rejects unsupported state-constraint models rather than silently dropping
+those declarations.
 
-For control beginning at time zero, a later prefix cannot be used retrospectively
-for the early decisions. Predeployment history, a prior with uncertainty, or causal
-online estimation is needed for that period. This is a different experiment from
-waiting until tau to begin prediction.
+Construction should export this graph with the candidate, the initialization
+policy, and the provenance of any fixed initial value or domain claim. It should
+not export independently optimized values for dependent map outputs. The fitter
+returns both independent coordinates and realized complete initial states, with
+shared versus trajectory scope preserved.
 
-## Minimal implementation boundary
+## What training solves
 
-1. **Evaluation contract and schemas.** Add a separate opt-in initialization policy
-   describing allowed observed channels, prefix cutoff, latent coordinates/bounds,
-   estimation budget and scoring start. Keep time-zero-only policy as a baseline.
-2. **Numerical state estimator.** With theta frozen, optimize only latent initial
-   state coordinates using a physically restricted prefix view. Return a sealed
-   inferred state and diagnostics. Existing rollout/sensitivity infrastructure can
-   be reused; this is not a new dynamics fitter. Do not call the legacy
-   full-validation initial-state routine.
-3. **Simulation and metrics.** Carry the inferred state to the cutoff, define the
-   treatment of observed components there, then perform free future rollout with
-   no future target or unavailable auxiliary forcing. Apply a strict future-only
-   metric mask. Use the same
-   prefix and scoring horizon for every compared method.
-4. **Construction and compatibility feedback.** Retain variables, RHS topology,
-   interaction grammar and scientific requirements. Record the estimator policy
-   as part of initialization. Requalify matched-trajectory checks: equal t0
-   observations no longer imply equal latent estimates when different permitted
-   histories may be used. Initializer-dependent checks are conditional or deferred
-   until that policy is known. Existing shared constants/maps remain testable in
-   the current strict protocol.
-5. **Reporting, provenance and tests.** Separate cold-start, prefix-conditioned and
-   retrospective scores; report prefix duration and inference cost. Add cache keys,
-   deterministic resume and a test that changing observations strictly after tau
-   cannot change the estimated initial state. Test cutoff boundaries, unavailable
-   observations, failed/infeasible estimates and latent-state nonidentifiability.
+Let theta be shared equation parameters, phi shared initializer-map parameters,
+c shared constant roots, and xi_j the independent roots of training trajectory j.
+The acyclic initializer graph defines the complete boundary
 
-The minimal estimator does not solve a separate training restriction: if training
-trajectories genuinely need different hidden initials and the current t0 map cannot
-represent them, freezing a poorly fitted shared-initial model is insufficient.
-Supporting that situation additionally requires per-trajectory TRAIN initial
-coordinates (or a learned history initializer), while retaining shared dynamics.
-The public fitting boundary, parameter indexing/sensitivities and transcription
-boundary constraints would need an explicit new opt-in policy. Training-only free
-initials still do not specify how to initialize an unseen trajectory; the prefix
-estimator supplies that missing inference procedure. This broader fitting change
-should be coordinated separately with Orion rather than silently activated here.
+    x_j(0) = G(y_j(0), u_j(0), covariates_j; c, phi, xi_j).
 
-A first milestone can use known equations and a small synthetic partially observed
-system, with a fixed prefix length and no proposer changes. It should demonstrate
-causal access, future-only scoring and reproducibility before any campaign change.
-A learned history encoder or online observer can follow if repeated numerical
-state estimation is too expensive. A neural encoder is not required for this first
-milestone. Existing benchmark files and historical results need not be rewritten.
+Direct rollout fitting minimizes
 
-## Literature context
+    sum_j sum_k || h(x_j(t_k; theta, G_j)) - y_j(t_k) ||^2_W
 
-There is no general convention banning fitted initial states. Beintema, Toth and
-Schoukens (2021) discuss optimizing section initial states and instead learn an
-encoder from past input/output samples to initialize unseen sequences:
-https://proceedings.mlr.press/v144/beintema21a/beintema21a.pdf
+jointly over theta, phi, c and all training xi_j, subject to their declared domains.
+Only independent roots and coefficients enter the optimization. Sensitivities
+include the derivative through the complete initializer graph and are assembled
+into shared columns plus the appropriate trajectory's root columns.
 
-Rubanova et al. (2019), section 4.2, demonstrate extrapolation by conditioning a
-latent-state encoder on the first half of observations and predicting the second:
-https://proceedings.neurips.cc/paper/8773-latent-ordinary-differential-equations-for-irregularly-sampled-time-series.pdf
+Complete training trajectories may be used to learn these quantities. This yields
+a **training reconstruction score**. It must not be confused with a training
+forecast score: to report prefix-conditioned training forecasts, freeze theta,
+phi and c and re-infer each xi_j using only its prefix, exactly as for a new row.
 
-MathWorks `compare` documents initial-state estimation from comparison data, which
-illustrates why a reported model-fit score is not automatically a prospective
-forecast score:
-https://www.mathworks.com/help/ident/ref/compare.html
+## What is permitted on a new trajectory
+
+The prefix policy fixes its duration, available observation channels, known future
+exogenous schedules, root domains, starting rule, numerical budget and training
+normalization before evaluation. For shared learned parameters theta_hat, phi_hat
+and c_hat, inference solves only
+
+    xi_hat_j = argmin_xi sum_{t_k <= tau_j}
+        || h(x_j(t_k; theta_hat, G_j(c_hat, phi_hat, xi))) - y_j(t_k) ||^2_W.
+
+Here tau_j is the declared cutoff relative to the trajectory's initial time.
+The initial milestone uses no learned encoder or extra regularizer. Additional
+priors would require an explicit new policy rather than an undocumented default.
+
+The initial adapter uses all declared target channels as prefix observations;
+auxiliary measurements are available to initializer maps only at time zero.
+Assimilating additional measured auxiliary histories requires an explicit future
+extension of the observation contract.
+
+The estimator receives a typed prefix view, not an entire validation trajectory.
+Shared parameters and training-derived normalization are frozen. Forecasting gets
+initial permitted readings and declared future exogenous inputs; it does not get
+future targets or an unapproved future measured auxiliary. The inferred boundary
+is propagated continuously through the cutoff without resetting observed states
+to their last measured values. Scoring uses samples strictly **after** the cutoff.
+Replaying the complete interval from the inferred initial state is equivalent to
+carrying the same simulated state forward at the cutoff.
+
+| Evaluation claim | Data used to infer roots | Scored observations |
+| --- | --- | --- |
+| Time-zero initialization | Permitted first readings / shared roots | Declared horizon after initialization |
+| Prefix-conditioned forecast | Fixed observation window | Strictly after the window |
+| Retrospective reconstruction | Complete trajectory | Reconstruction, never called prospective prediction |
+
+Comparisons must use the same permitted window and scoring horizon. A prefix is
+not available for control decisions made before that prefix ends. Future input
+schedules may be known as part of an intervention; future sensor readings are not
+known simply because a dataset labels a column auxiliary. Altering a held-out
+suffix must not alter inferred roots or model predictions.
+
+## Construction checks that must change
+
+- Same time-zero observations imply the same initializer output only when the
+  declared rule is a deterministic time-zero map with shared roots.
+- Different permitted prefixes may justify different inferred roots. A witness
+  using only equality at time zero must not reject a prefix-conditioned model.
+- Training roots can differ without revealing the hidden simulator state. They are
+  inferred from observations, not copied from benchmark truth.
+- Prefix inference does not guarantee uniqueness. A root with no observable
+  influence, a redundant parameterization, or an insufficient window remains
+  ambiguous. A good trajectory fit is not a certificate of a unique physical state.
+- Adding dependent maps does not remove scale symmetries. If only a product such
+  as a*alpha is observed, separate recovery of both may remain impossible.
+- Initialization cannot repair a missing dynamical mechanism automatically. Poor
+  prediction can still reflect equations, optimization, data, or inadequate state
+  information. Report these separately rather than assigning a cause by default.
+
+## Ownership and first integration gate
+
+**Astra / construction:** declare independent roots, scopes and a complete acyclic
+initializer graph; preserve mechanistic justification; adapt conditional equality
+witnesses; supply candidate analytic equations before numerical fitting; retain
+current prompt/replay policies until the opt-in interface is explicitly selected.
+
+**Orion / fitting:** validate and lower the graph; fit shared and per-trajectory
+coordinates; infer unseen roots from the declared prefix; preserve split boundaries;
+report fit quality, numerical reliability, root information and inference costs.
+
+M43 implements a separate adapter and known-equation qualification before an
+end-to-end construction campaign. Its source entry points are:
+
+- `src/autoformalism/fitting/initialization_graph.py`: typed graph and restricted
+  AST expansion, with cycle, namespace and dependency checks.
+- `src/autoformalism/fitting/prefix_initialization.py`: shared/per-trajectory direct
+  rollout fitting, prefix-only root estimation and future-only scoring.
+- `src/autoformalism/fitting/initialization_qualification.py`: frozen synthetic
+  qualification and durable operation records.
+- `scripts/phase_c_initialization_qualification.py`: independent CLI.
+
+The experiment must demonstrate recovery on shared-root and trajectory-root
+controls, exact derivatives through dependencies, frozen shared parameters,
+suffix-independent inference, and independent numerical replay. It must preserve
+failure/ambiguity reports and separate full-training reconstruction from
+prefix-conditioned forecast. The four-task local CLI qualification passes, including 20 prefix forecasts;
+remote qualification and construction integration remain pending. No LLM calls,
+benchmark rewriting or test access are required. Delta CPU commands are in the
+[M43 experiment document](PHASE_C_FITTING_INITIALIZATION_QUALIFICATION.md).
+
+This first adapter reuses direct rollout and forward sensitivities with bounded,
+scaled optimization. It does not yet extend collocation, the legacy public-fit
+schema, all profiling paths, or production construction. Identity-observed first
+readings are treated as exact boundaries; noisy first-state estimation is a
+separate observation-model choice. A local rank diagnostic is not a calibrated
+confidence interval or a proof of global identifiability.
+
+Operations preserve terminal results on resume. Interrupted bounded operations
+remain charged and visible; they are not silently rerun with a replenished budget.
+Native optimizer internal-state continuation is not claimed.
+
+## Historical implementation boundary
+
+`fitting/initialization.py:apply_initialization_plan` implements the existing
+`shared-latent-initialization-1` contract: shared scalar roots or shared map
+coefficients applied to permitted first readings, with no dependent latent
+initializers. Public C+S/transcription paths learn those parameters on complete
+training trajectories and freeze them for validation. Shooting/collocation nodes
+are numerical transcription variables, not extra exported free initial states.
+
+The legacy generic `fitter.py` also contains full-held-out-trajectory initial
+fitting. That behavior is outside the public evaluation contract and is not reused
+for prefix forecasts. The separate noisy-measurement fitting adapter has its own
+explicit initial-boundary contract and is not silently changed by M43.
+
+## Background references
+
+These references motivate conditioning on available observations; they do not
+establish implementation coverage or guarantees for this adapter.
+
+- [Beintema, Toth and Schoukens (2021)](https://proceedings.mlr.press/v144/beintema21a/beintema21a.pdf):
+  section initial states and encoders from past input/output samples.
+- [Rubanova et al. (2019)](https://proceedings.neurips.cc/paper/8773-latent-ordinary-differential-equations-for-irregularly-sampled-time-series.pdf):
+  extrapolation after conditioning on an observed prefix.
+- [MathWorks `compare`](https://www.mathworks.com/help/ident/ref/compare.html):
+  initial-state estimation illustrates why reconstruction fit need not be a
+  prospective forecast measure.

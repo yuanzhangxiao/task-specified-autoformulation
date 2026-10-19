@@ -9,6 +9,14 @@ New to the compute platforms? Start with the
 [Delta and ACES agent quickstart](HPC_AGENT_QUICKSTART.md) for environments,
 pinned deliveries, submission, inspection and recovery.
 
+Current construction/fitting compatibility gate: M43 qualifies the two agreed
+[initialization options](PHASE_C_OBSERVATION_PREFIX_INITIALIZATION.md): shared
+roots with dependent maps, and trajectory roots inferred from a declared
+observation prefix. The handoff is the common document for Astra and Orion.
+The [CPU qualification](PHASE_C_FITTING_INITIALIZATION_QUALIFICATION.md) is opt-in;
+existing benchmark and production policies are unchanged. This takes priority
+over extending the completed M42 uncertainty diagnostic.
+
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
 The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) translates
 verified fitting diagnostics into bounded all-target response summaries. The

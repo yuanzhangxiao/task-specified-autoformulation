@@ -6,9 +6,12 @@ their conditional conflicts. A presentation-only V2 retest uses readable equatio
 paired permitted initial measurements, and an explicit fixed-versus-editable
 initializer distinction. It retains the two models/seeds and complete history,
 omits successful probe repeats, and caps new work at four calls / 131,072 tokens.
-See `PHASE_C_INITIALIZER_READABLE_RETEST.md`. A separate observation-prefix
-initialization proposal is documented but not enabled; the public Phase C fitter
-still fits shared initialization on training data and freezes it for validation.
+See `PHASE_C_INITIALIZER_READABLE_RETEST.md`. The shared handoff in
+`PHASE_C_OBSERVATION_PREFIX_INITIALIZATION.md` now specifies dependent initializer graphs and trajectory roots inferred from a
+declared observation prefix. M43 adds a separate opt-in fitting qualification;
+production construction and historical public-fit policies remain unchanged.
+The legacy public fitter still learns shared initialization on training and
+freezes it for validation.
 
 The V6 ACES audit returned five calls / 118,450 observed tokens. Both saved models
 remain unchanged with one conditional conflict each: seed 1 repeats an invalid
