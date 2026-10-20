@@ -1,0 +1,29 @@
+{
+  "protocol": "phase-c-prefix-multiroot-policy-1",
+  "durations": [0, 0.1, 0.2, 0.5, 1, 2],
+  "root_starts": [[0.3, 1.3], [1.3, 0.3], [1, 1]],
+  "immediate_duration": 0.5,
+  "validation_nmse_limit": 0.01,
+  "start_prediction_spread_limit": 0.01,
+  "training_numerical": {
+    "maximum_calls": 100,
+    "seconds": 30,
+    "verification_seconds": 10,
+    "rtol": 1e-9,
+    "atol": 1e-11,
+    "solver_tolerance": 1e-6
+  },
+  "prefix_numerical": {
+    "maximum_calls": 100,
+    "seconds": 10,
+    "verification_seconds": 5,
+    "rtol": 1e-9,
+    "atol": 1e-11,
+    "solver_tolerance": 1e-6
+  },
+  "execution": {
+    "protocol": "prefix-search-execution-1",
+    "search_overall_seconds": 120,
+    "verification_overall_seconds": 60
+  }
+}

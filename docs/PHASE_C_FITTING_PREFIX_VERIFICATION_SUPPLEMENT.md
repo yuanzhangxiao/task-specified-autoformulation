@@ -1,5 +1,20 @@
 # M45: reliable verification of saved prefix initializations
 
+## Returned Delta qualification
+
+Archive `review-20261020-041337.tar.gz` passes independent report reconstruction:
+both tasks complete, all three forecast gaps recover, and ten independent
+integrator calls complete without new search. Clean/noisy durations are 0.1/0.2.
+All 2,198 original source artifacts remain byte-identical. Supplemental operation
+cost is 1.161989 CPU seconds and 2.270110 wall seconds, including 1.112704 wall
+seconds in measured checkpoint callbacks.
+
+Unlike the earlier local replay described below, this returned run has no changed
+selected-inference receipt requiring a stale-information warning. The M45 remote
+gate is complete. The next implemented qualification is
+[M46 multiple roots and immediate forecasts](PHASE_C_FITTING_MULTIPLE_ROOTS.md);
+actual construction-export fitting remains pending executable laws.
+
 Implemented 19 October 2026. This is the execution-reliability follow-up to
 [M44](PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md), before multiple-root and
 construction-export fitting qualification. It changes no historical kernel,

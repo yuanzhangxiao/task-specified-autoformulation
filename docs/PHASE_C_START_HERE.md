@@ -25,11 +25,20 @@ The [M44 prefix-duration selection](PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md)
 Delta review confirms duration 0.2 in all four noisy tasks. Both clean tasks have
 excellent verified 0.1 windows but incomplete sweeps after three verification
 timeouts. The [M45 verification supplement](PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md)
-implements checkpoint/deadline isolation and recovery of those clean cases at
-fixed saved endpoints, preserving the old ledger. Delta qualification is pending.
+passed on Delta: it recovered all three gaps with ten integrator calls and no
+new fitting, preserving the old ledger. Clean/noisy durations are 0.1/0.2.
 Root information remains conditional
 on learned shared parameters; solver agreement is not root accuracy. This tunes a
 fitting hyperparameter without changing benchmark input access or production defaults.
+
+The next implemented CPU qualification is
+[M46 multiple hidden roots](PHASE_C_FITTING_MULTIPLE_ROOTS.md): twelve tasks
+cover distinguishable, nearly confounded and exactly confounded roots with clean
+and noisy observations. It adds immediate post-prefix scoring, conditional
+optimization checks and a frozen policy on fresh synthetic trajectories.
+Remote outcomes are pending. Locally available construction artifacts still lack
+completed executable function laws, so construction-export fitting stays an
+explicit pending gate.
 
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
 The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) translates

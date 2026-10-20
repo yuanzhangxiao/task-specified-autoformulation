@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+`phase-c-prefix-multiroot-1` is the separate M46 qualification. It trains a shared
+coefficient and per-row independent roots, then holds the shared fit fixed.
+Prefix endpoints use only prefix loss; duration selection requires both immediate
+and common-horizon validation forecasts with all starts present. Selection is
+sealed before fresh synthetic follow-up evaluation. Conditional root SVD and
+bounded least-squares diagnostics cannot replace endpoints or gate duration.
+The opt-in execution wrapper separates numerical-active and inclusive search/
+verification clocks. No historical kernels or production defaults change.
+Actual executable construction-export qualification remains pending. See
+`PHASE_C_FITTING_MULTIPLE_ROOTS.md`.
+
 `phase-c-prefix-window-supplement-1` is a separate M45 verification campaign.
 It freezes the complete M44 source, keeps shared fits and saved root candidates,
 and evaluates only missing verification/forecast receipts. Callback timing is

@@ -134,6 +134,12 @@ The [M45 supplement](PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md) addresse
 verification timing at fixed saved endpoints; it changes neither this initialization
 interface nor the duration-selection criterion. Its separate allowances preserve
 historical failures and distinguish storage overhead from numerical work.
+Its returned Delta run passed without refitting. The separate
+[M46 multiple-root qualification](PHASE_C_FITTING_MULTIPLE_ROOTS.md) adds an
+immediate post-prefix criterion alongside the common horizon and freezes duration
+before fresh synthetic follow-up trajectories. It reports conditional root
+information and optimization quality separately from forecast accuracy. These
+controls do not yet qualify an actual construction-exported model.
 
 The prefix policy fixes its duration, available observation channels, known future
 exogenous schedules, root domains, starting rule, numerical budget and training

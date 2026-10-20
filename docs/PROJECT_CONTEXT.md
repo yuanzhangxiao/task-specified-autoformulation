@@ -1,12 +1,26 @@
 # Autoformalism Phase 1 Implementation Context
 
-M45 implements an isolated verification-only supplement for M44's two incomplete
+M46 implements an isolated multiple-root prefix experiment: three distinct/similar/
+equal hidden decay controls, clean/noisy observations and two training starts
+(12 CPU tasks). Duration selection requires immediate and common-horizon forecasts,
+then freezes before fresh synthetic follow-up trajectories. Conditional SVD and
+bounded least-squares references distinguish root ambiguity from optimization
+failure without replacing fitted roots. Separate search/verification timers include
+setup and retain checkpoint overhead. Actual construction-export integration is
+still pending executable functions; no production defaults change. See
+`PHASE_C_FITTING_MULTIPLE_ROOTS.md`. Remote qualification is pending.
+
+M45 completed the isolated verification-only supplement for M44's two incomplete
 clean sweeps. It preserves all six training fits and original ledgers, rechecks
 exact saved roots, and reruns only failed/blocked forecasts. Numerical-active
 wall time excludes measured callbacks; a separate inclusive deadline and explicit
 attempted/executed counters retain overhead and failures. No optimizer, test data,
 LLM, benchmark or production default changes. See
-`PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md`; Delta qualification is pending.
+`PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md`. Both returned Delta tasks
+complete: all three forecast gaps recover with ten integrator calls and no
+search; clean/noisy durations are 0.1/0.2. New operation cost is 1.162 CPU seconds
+and 2.270 wall seconds, including 1.113 wall seconds in measured callbacks.
+All original artifacts remain unchanged.
 
 The initializer conflict-repair diagnostic returned ten completed episodes:
 four accepted trajectory-root declarations with evidence deferred, five proposer
@@ -37,7 +51,7 @@ unchanged. Returned Delta results verify all four noisy tasks and select duratio
 0.2; two clean tasks remain incomplete due to three verification wall-clock
 timeouts. Both clean tasks' 0.1 windows pass, but the frozen complete-sweep rule
 withholds selection. Checkpoint writes occur inside numerical deadlines; separating
-their timing and recovering the clean cases is the next execution-reliability gate.
+their timing and recovering the clean cases was the M45 gate, now passed above.
 
 The opt-in initialization-graph construction path now declares shared or
 trajectory-scoped roots and dependent initial maps at topology, then constructs
