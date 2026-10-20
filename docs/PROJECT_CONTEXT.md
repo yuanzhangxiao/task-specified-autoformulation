@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+The first ACES function-construction run processed all eight saved proposals:
+five complete packets and three initializer-map syntax failures, with 134
+responses / 2,407,158 tokens. All dynamics assignments completed. All three first
+map replies pass a non-adopted offline check after removing their assignment LHS.
+The audit also found the graph export bypasses existing process-gain lowering,
+leaving promised fitted consumer magnitudes fixed at one. Correct that handoff
+before fitting; future auxiliary forcing and prefix-policy limits remain explicit.
+No optimization, rollout or test access occurred. See the returned-run section
+of `PHASE_C_FUNCTION_CONSTRUCTION_HANDOFF.md`.
+
 The returned scope-aware initializer diagnostic accepted eight of ten saved
 episodes: three maps and five trajectory roots, with compatibility still
 deferred. `saved-construction-functions-1` now continues all eight into frozen

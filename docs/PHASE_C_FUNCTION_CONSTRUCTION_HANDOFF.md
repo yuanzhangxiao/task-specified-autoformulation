@@ -154,3 +154,40 @@ The actual eight saved proposals pass function preflight without a provider
 request. Live function quality, full-model numerical behavior, overlap and
 conservation remain to be inspected after this run. Historical campaigns,
 benchmark prompts/data and Orion's fitting kernels are unchanged by this work.
+
+## Returned ACES run: 2236653
+
+The worker exited successfully and assessed all eight cases. All 134 provider
+requests returned responses, with 2,407,158 observed tokens and no missing usage.
+The frozen source/plan, call provenance and eight completion receipts were
+verified offline. No fitting, numerical rollout or test access occurred.
+
+All eight cases completed their dynamics-function assignments. Five complete
+packets compile; three stopped at initializer-map syntax. The five trajectory
+roots completed, while all three dependent-map cases failed. This is a format
+failure, not evidence against the map family: each of the six map replies put
+`state(0) = ...` inside the expression field. The prompt says to return an RHS
+but illustrates a whole equation; repair reports only a generic syntax error.
+In a non-adopted offline counterfactual, removing the assignment prefix passes
+the original validator for all three first attempts and five of six total replies.
+The remaining reply additionally omits its required time alias.
+
+A separate export defect must be repaired before numerical interpretation.
+The prompts promise runtime-fitted consumer magnitudes, but the initialization-
+graph route bypasses the existing process-gain lowering. The five packets retain
+unit consumer magnitudes: 8 uses in the first topology and 11 in each of the four
+complete second-topology packets. One packet has no adjustable dynamics
+parameters at all. Successful static compilation does not detect this missing
+fitting freedom. The repair should preserve the existing gain normalization,
+sign and identity policy, rather than adding redundant gains blindly.
+
+Four complete packets also require future measured `EGP` and `Uii`, which the
+current prefix forecaster does not support; all five still require an explicit
+prefix policy. These previously reported restrictions remain separate from the
+newly identified gain defect.
+
+The next bounded milestone is to repair the initializer example/diagnostics and
+gain handoff, qualify them offline against saved cases, and retest only the three
+failed initializer maps. Preserve all historical calls/formulas and avoid
+repeating successful dynamics generation. No retest or automatic fitting was
+launched during this inspection.
