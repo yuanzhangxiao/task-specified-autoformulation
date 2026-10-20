@@ -164,6 +164,10 @@ The launcher prints progress and verifies source checksums and numerical imports
 Each of 36 array tasks requests one CPU, 16 GB and a 45-minute scheduling ceiling;
 concurrency defaults to two. No GPU, LLM, prior snapshot or benchmark test data
 is needed. Uncertain scheduler replies stop for reconciliation.
+The updated repository submitter allows 30 minutes for preparation (verification
+plus the eight test modules). The original `6bd2f8e` archive retains its ten-minute
+setting; use the recovery below for the affected campaign. This scheduler
+allowance is separate from every fitting budget.
 
 The block above is for the first submission. To resume, reuse the original code
 directory: submission identity includes its absolute path. Do not extract a new
@@ -185,6 +189,54 @@ If identity does not exist yet, reuse the original extracted directory. An
 unconfirmed scheduler reply still requires reconciliation; resume does not
 automatically repeat uncertain submissions.
 
+### Recovery of the first preparation timeout
+
+On 2026-10-20, preparation job `23060456` verified all 36 tasks but reached its
+original ten-minute scheduler limit during pytest. No test failure was shown.
+The dependent array `23060458` was cancelled before starting; report `23060459`
+completed with all 36 tasks missing. This is not a numerical fitting result.
+
+Upload `scripts/recover_prefix_noise_preparation.py` as a standalone file to
+`/work/hdd/bibo/yxiao2/phase_c/recover_prefix_noise_preparation.py`, **outside**
+the original source bundle. Then run:
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+AF_ROOT=/work/hdd/bibo/yxiao2/phase_c/prefix-noise-reliability-v1
+AF_PYTHON=$(jq -er '.value.python' "$AF_ROOT/submission/identity.json")
+"$AF_PYTHON" -u /work/hdd/bibo/yxiao2/phase_c/recover_prefix_noise_preparation.py \
+  --root "$AF_ROOT"
+BASH
+```
+
+The helper verifies the original sealed plan, inputs, bundle and job intents,
+then requires accounting for the timed-out preparation, completed report and
+all 36 cancelled, unstarted array elements. It submits the **original worker
+and tests** with a 30-minute preparation limit. Array resources, numerical
+budgets and dependencies stay the same. No frozen experiment is regenerated.
+
+Original submission files remain intact. Separate recovery receipts, original
+accounting and a copy of the incomplete summary are retained under
+`submission/prepare-timeout-recovery/`. Repeating the command reuses confirmed
+jobs, even after results start appearing; it never automatically retries an
+unconfirmed submission or a terminal recovery job. If accounting is incomplete,
+the helper stops without submitting. Use the recovery IDs for status checks:
+
+```bash
+AF_ROOT=/work/hdd/bibo/yxiao2/phase_c/prefix-noise-reliability-v1
+AF_IDS=$(jq -er '.jobs | [.prepare,.run,.report] | join(",")' \
+  "$AF_ROOT/submission/prepare-timeout-recovery/manifest.json")
+sacct -j "$AF_IDS" --format=JobID,JobName%48,State,ExitCode,Elapsed,Timelimit
+```
+
+Local recovery verification: all 308 original bundled preparation tests pass,
+as do 125 current launcher/recovery tests. A standalone smoke check uses the
+real original bundle and submission code with simulated Slurm replies; repeat
+invocation adds no submissions and preserves original bytes and modification
+times. This does not establish completion on Delta. Changed files pass Ruff;
+repository-wide Ruff retains 37 unrelated findings in `analysis/claude/`.
+
 After the report completes:
 
 ```bash
@@ -193,7 +245,7 @@ jq '{status, expected, recorded, status_counts, selection_counts, groups, cost}'
   "$AF_ROOT/summary.json"
 AF_REVIEW="$AF_ROOT/review-$(date +%Y%m%d-%H%M%S).tar.gz"
 tar -czf "$AF_REVIEW" -C "$AF_ROOT" \
-  plan.json inputs.json summary.json results
+  plan.json inputs.json summary.json results submission logs
 printf '%s\n' "$AF_REVIEW"
 ```
 

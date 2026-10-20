@@ -78,7 +78,7 @@ def test_cpu_only_submission_is_idempotent_and_uses_frozen_roster(scheduler):
     assert "--dependency=afterok:101" in s.calls[1]
     assert "--dependency=afterany:101:102" in s.calls[2]
     for argv, duration in zip(
-        s.calls, ("00:10:00", "00:45:00", "00:05:00"), strict=True
+        s.calls, ("00:30:00", "00:45:00", "00:05:00"), strict=True
     ):
         assert "--cpus-per-task=1" in argv and "--mem=16G" in argv
         assert "--partition=cpu" in argv and f"--time={duration}" in argv

@@ -82,7 +82,7 @@ def submit(
         worker_name="run_phase_c_prefix_noise_reliability_delta.sh",
         job_prefix="prefix-noise-reliability",
         run_time="00:45:00",
-        prepare_time="00:10:00",
+        prepare_time="00:30:00",
     )
 
 
