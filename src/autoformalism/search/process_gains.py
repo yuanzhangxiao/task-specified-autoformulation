@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from typing import Any
 
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.expressions.parser import RestrictedParser
@@ -61,39 +63,26 @@ def _outer_gain(expression, parameters):
     return None
 
 
-def compile_bundle(bundle, contract, policy, training):
-    """Compile shared shapes and boundaries using a declared gain policy.
+def lower_candidate_gains(
+    candidate: CandidateModel,
+    context: ValidationContext,
+    contract: Mapping[str, Any] | None,
+    policy: str,
+    *,
+    fixed_covariates: Sequence[Mapping[str, float]] = (),
+    state_aliases: Mapping[str, str] | None = None,
+    preserve_signed_amplitudes: bool = False,
+) -> tuple[CandidateModel, dict[str, float], list[dict[str, Any]]]:
+    """Lower shared laws and consumer gains without choosing an initializer.
 
-    Only a private-to-the-process direct amplitude is normalized to one; its role
-    is replaced by one tied transfer gain or one effective gain per consumer.
-    Internal parameters and signed nonlinear laws remain untouched.
+    This is the candidate-only portion of the historical bundle compiler. It
+    preserves its amplitude, sign, conversion and gain-sharing policies. Only
+    fixed covariates are inspected; observations and numerical fits are absent.
     """
     if policy not in POLICIES:
         raise ValueError("unknown process gain policy")
-    result = deepcopy(bundle)
-    base = deepcopy(bundle["initialization"]["base_candidate"])
-    context = ValidationContext.model_validate(bundle["context"])
-    aliases = {}
-    if policy == "declared_or_independent":
-        from autoformalism.schemas.staged_topology import (
-            EquationDefinition,
-            PublicScientificBrief,
-            ScientificVariable,
-        )
-        from autoformalism.staged_topology import lower_topology
-
-        _, aliases = lower_topology(
-            PublicScientificBrief.model_validate(bundle["brief"]),
-            tuple(
-                ScientificVariable.model_validate(v)
-                for v in bundle["topology"]["inventory"]
-            ),
-            tuple(
-                EquationDefinition.model_validate(e)
-                for e in bundle["topology"]["equations"]
-            ),
-            context,
-        )
+    base = candidate.model_dump(mode="json")
+    aliases = dict(state_aliases or {})
     process_by_name = {p["name"]: p for p in base["processes"]}
     # Legacy policies retain their original symbol treatment for historical runs.
     all_names = (
@@ -128,6 +117,13 @@ def compile_bundle(bundle, contract, policy, training):
         law = process_by_name[p.name]
         original = law["expression"]
         amplitude = _outer_gain(original, parameter_by_name)
+        retained_signed_amplitude = None
+        if (
+            preserve_signed_amplitudes
+            and amplitude
+            and parameter_by_name[amplitude]["domain"] == "real"
+        ):
+            retained_signed_amplitude, amplitude = amplitude, None
         other_expressions = (
             [x["expression"] for x in base["processes"] if x["name"] != p.name]
             + [x["rhs"] for x in base["state_equations"]]
@@ -170,8 +166,8 @@ def compile_bundle(bundle, contract, policy, training):
                         f"conversion unavailable: {p.name} -> {use.target}"
                     )
                 conversion = "1"
-            for trajectory in training["rows"]:
-                conversion_value(conversion, trajectory["fixed_covariates"])
+            for covariates in fixed_covariates:
+                conversion_value(conversion, dict(covariates))
             gain = f"af_process_gain_{index}_{0 if tied else use_index}"
             guess, start_status = 1.0, "explicit_conversion"
             if effective_policy == "independent_gains":
@@ -179,8 +175,8 @@ def compile_bundle(bundle, contract, policy, training):
                 try:
                     declared = (
                         [
-                            conversion_value(use.conversion, r["fixed_covariates"])
-                            for r in training["rows"]
+                            conversion_value(use.conversion, dict(covariates))
+                            for covariates in fixed_covariates
                         ]
                         if use.conversion
                         else []
@@ -246,8 +242,60 @@ def compile_bundle(bundle, contract, policy, training):
                 "global_scale_redundancy_fully_audited": False,
             }
         )
+        if preserve_signed_amplitudes:
+            rows[-1]["retained_signed_amplitude"] = retained_signed_amplitude
+            rows[-1]["normalization_limitation"] = (
+                "Signed law amplitude retained to preserve its real domain; "
+                "global scale redundancy with consumer magnitudes remains."
+                if retained_signed_amplitude
+                else None
+            )
     base["parameters"] = [p for p in base["parameters"] if p["name"] not in removed]
     candidate = CandidateModel.model_validate(base)
+    compile_candidate(candidate, context)
+    return candidate, gain_guesses, rows
+
+
+def compile_bundle(bundle, contract, policy, training):
+    """Compile shared shapes and boundaries using a declared gain policy.
+
+    Only a private-to-the-process direct amplitude is normalized to one; its role
+    is replaced by one tied transfer gain or one effective gain per consumer.
+    Internal parameters and signed nonlinear laws remain untouched.
+    """
+    if policy not in POLICIES:
+        raise ValueError("unknown process gain policy")
+    result = deepcopy(bundle)
+    context = ValidationContext.model_validate(bundle["context"])
+    aliases = {}
+    if policy == "declared_or_independent":
+        from autoformalism.schemas.staged_topology import (
+            EquationDefinition,
+            PublicScientificBrief,
+            ScientificVariable,
+        )
+        from autoformalism.staged_topology import lower_topology
+
+        _, aliases = lower_topology(
+            PublicScientificBrief.model_validate(bundle["brief"]),
+            tuple(
+                ScientificVariable.model_validate(v)
+                for v in bundle["topology"]["inventory"]
+            ),
+            tuple(
+                EquationDefinition.model_validate(e)
+                for e in bundle["topology"]["equations"]
+            ),
+            context,
+        )
+    candidate, gain_guesses, rows = lower_candidate_gains(
+        CandidateModel.model_validate(bundle["initialization"]["base_candidate"]),
+        context,
+        contract,
+        policy,
+        fixed_covariates=[row["fixed_covariates"] for row in training["rows"]],
+        state_aliases=aliases,
+    )
     model = compile_candidate(candidate, context)
     plan = LatentInitializationPlan.model_validate(bundle["initialization"]["plan"])
     compiled, guesses, audit = apply_initialization_plan(model, plan)

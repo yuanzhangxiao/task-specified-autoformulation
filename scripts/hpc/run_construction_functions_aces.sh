@@ -4,8 +4,10 @@ set -euo pipefail
 : "${AF_REPO_ROOT:?}" "${AF_OUTPUT_ROOT:?}" "${AF_PYTHON:?}" "${AF_VLLM_IMAGE:?}" "${AF_HF_HOME:?}" "${SLURM_JOB_ID:?}"
 [[ "${1:-propose}" == propose ]] || exit 2
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
-AF_CLI="$AF_REPO_ROOT/scripts/construction_functions.py"
-AF_SUBMIT_CLI="$AF_REPO_ROOT/scripts/submit_construction_functions_aces.py"
+AF_CLI=${AF_FUNCTION_CLI:-$AF_REPO_ROOT/scripts/construction_functions.py}
+AF_SUBMIT_CLI=${AF_FUNCTION_SUBMIT_CLI:-$AF_REPO_ROOT/scripts/submit_construction_functions_aces.py}
+AF_WORKER_SECONDS=${AF_FUNCTION_WORKER_SECONDS:-5400}
+[[ "$AF_WORKER_SECONDS" =~ ^[1-9][0-9]*$ ]] || { echo 'Worker seconds must be a positive integer.' >&2; exit 2; }
 # Check imports and frozen source before starting any server or touching CUDA.
 if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
   echo 'Python worker imports failed; loading the Python module and its library dependencies.' >&2
@@ -96,7 +98,7 @@ for AF_ATTEMPT in $(seq 1 450); do
 done
 [[ "$AF_READY" == true ]] || { echo 'Server startup deadline exceeded.' >&2; exit 1; }
 [[ "$AF_DRAINING" == false ]] || exit 0
-"$AF_PYTHON" "$AF_CLI" run --root "$AF_OUTPUT_ROOT" --base-url "$AF_ENDPOINT" --runtime-record "$AF_RUNTIME/probe-${SLURM_JOB_ID}.json" --seconds 5400 &
+"$AF_PYTHON" "$AF_CLI" run --root "$AF_OUTPUT_ROOT" --base-url "$AF_ENDPOINT" --runtime-record "$AF_RUNTIME/probe-${SLURM_JOB_ID}.json" --seconds "$AF_WORKER_SECONDS" &
 AF_WORKER_PID=$!
 AF_STATUS=0
 wait "$AF_WORKER_PID" || AF_STATUS=$?

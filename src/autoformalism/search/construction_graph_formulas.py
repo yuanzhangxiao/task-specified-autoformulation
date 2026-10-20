@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
@@ -51,6 +52,8 @@ from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "construction-initializer-formulas-1"
 START_POLICY = "existing-role-runtime-range-midpoint-1"
+RHS_ONLY_POLICY = "rhs-only-2"
+FormulaPolicy = Literal["legacy", "rhs-only-2"]
 
 
 class GraphRootReply(StrictSchema):
@@ -103,6 +106,57 @@ are used by the separate numerical root estimator, never by an initializer map.
 Return only the selected schema. Revise dependencies explicitly upstream when
 needed; this formula reply cannot change the selected graph.
 """
+
+
+def render_graph_formula_system_prompt(formula_policy: FormulaPolicy = "legacy") -> str:
+    """Select an explicit formula presentation policy without changing legacy text."""
+    if formula_policy == "legacy":
+        return SYSTEM_PROMPT
+    if formula_policy != RHS_ONLY_POLICY:
+        raise ValueError(f"unknown initializer formula policy: {formula_policy}")
+    return SYSTEM_PROMPT.replace(
+        "For a dependent map, return a scalar RHS and local parameter names/roles. "
+        "For\n"
+        "example z2_j(0) = a*state_1 + b*public_1 uses state_1 = z1_j(0) and\n"
+        "public_1 = y_j(0). Use those supplied aliases, "
+        "not raw state or channel names.\n",
+        "For a dependent map, the expression field contains only a scalar right-hand\n"
+        "side. It must not contain an equation left-hand side, an equals sign, an\n"
+        "assignment, or a state name followed by (0). For illustration only, when\n"
+        "the assigned aliases are exactly state_1 and public_1, a valid reply is:\n"
+        '{"expression":"a*state_1 + b*public_1","parameters":'
+        '[{"name":"a","role":"coefficient"},'
+        '{"name":"b","role":"coefficient"}]}\n'
+        "The example illustrates reply syntax, not a required scientific formula.\n"
+        "Use every alias assigned to the current selected dependency, which may\n"
+        "differ from this example. Use supplied aliases, "
+        "not raw state/channel names.\n",
+    )
+
+
+def _formula_repair_feedback(record: GraphDependencyRecord, choice: dict) -> dict:
+    """Explain a rejected map without rewriting its expression or dependencies."""
+    aliases = initializer_aliases(record.rule)
+    required = [*aliases["state_initials"], *aliases["public_initials"]]
+    expression = choice["expression"]
+    assignment = re.search(r"(?<![=!<>])=(?!=)", expression) is not None
+    return {
+        "code": "INITIALIZER_RHS_ONLY"
+        if assignment
+        else "INITIALIZER_FORMULA_REJECTED",
+        "selected_state": record.state,
+        "rejected_expression": expression,
+        "required_aliases": required,
+        "instruction": (
+            "Remove the equation left-hand side and '=' from expression; return "
+            "only the scalar right-hand side in that JSON field. "
+            if assignment
+            else "Correct the rejected scalar right-hand side using the diagnostic. "
+        )
+        + "Retain every required alias and every declared local parameter in the "
+        "formula. Do not change the selected state, dependency list, mode or scope. "
+        "The runtime has not modified or accepted the rejected expression.",
+    }
 
 
 def _receipt(
@@ -419,6 +473,7 @@ def compile_graph_formula_result(
         or result.get("protocol") != PROTOCOL
     ):
         raise ValueError("graph formula result seal or protocol differs")
+    render_graph_formula_system_prompt(result.get("formula_policy", "legacy"))
     receipt = result["initialization_dependency_contract"]
     retained_contract = GraphConstructionContract.model_validate(receipt["contract"])
     retained_handoff = GraphDependencyHandoff.model_validate(receipt["handoff"])
@@ -509,6 +564,7 @@ def construct_graph_formulas(
     directory: Path,
     *,
     state_aliases: Mapping[str, str] | None = None,
+    formula_policy: FormulaPolicy = "legacy",
 ) -> dict:
     """Construct bounded, cached formulas for an already selected graph.
 
@@ -517,6 +573,7 @@ def construct_graph_formulas(
     """
     from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 
+    system = render_graph_formula_system_prompt(formula_policy)
     contract = GraphConstructionContract.model_validate(
         contract.model_dump(mode="json")
     )
@@ -530,28 +587,31 @@ def construct_graph_formulas(
         state_aliases,
         scientific_context=brief.get("scientific_context"),
     )
-    identity = content_hash(
-        {
-            "protocol": PROTOCOL,
-            "start_policy": START_POLICY,
-            "candidate": candidate.model_dump(mode="json"),
-            "context": context.model_dump(mode="json"),
-            "brief": brief,
-            "contract": _receipt(contract, handoff, state_aliases),
-            "system": SYSTEM_PROMPT,
-            "schemas": [
-                GraphRootReply.model_json_schema(),
-                GraphMapReply.model_json_schema(),
-            ],
-            "client_namespace": client.namespace,
-            "settings": client.settings.model_dump(mode="json"),
-            "seed": client.seed,
-            "request_policy": client.request_policy(),
-            "runtime_sha256": runtime_source_hash(),
-        }
-    )
+    identity_fields = {
+        "protocol": PROTOCOL,
+        "start_policy": START_POLICY,
+        "candidate": candidate.model_dump(mode="json"),
+        "context": context.model_dump(mode="json"),
+        "brief": brief,
+        "contract": _receipt(contract, handoff, state_aliases),
+        "system": system,
+        "schemas": [
+            GraphRootReply.model_json_schema(),
+            GraphMapReply.model_json_schema(),
+        ],
+        "client_namespace": client.namespace,
+        "settings": client.settings.model_dump(mode="json"),
+        "seed": client.seed,
+        "request_policy": client.request_policy(),
+        "runtime_sha256": runtime_source_hash(),
+    }
+    if formula_policy != "legacy":
+        identity_fields["formula_policy"] = formula_policy
+    identity = content_hash(identity_fields)
     path = directory / "state.json"
     state = {"identity": identity, "choices": {}, "attempts": [], "status": "running"}
+    if formula_policy != "legacy":
+        state["formula_policy"] = formula_policy
     if path.exists():
         saved = json.loads(path.read_text())
         digest = saved.pop("state_sha256", None)
@@ -564,6 +624,8 @@ def construct_graph_formulas(
         raise ValueError(
             "graph formula request interrupted: uncertain outcome remains charged"
         )
+    if formula_policy == RHS_ONLY_POLICY and state["status"] == "failed":
+        raise ValueError(state["error"])
     if state["status"] == "complete":
         compile_graph_formula_result(
             candidate,
@@ -596,8 +658,10 @@ def construct_graph_formulas(
             payload = json.loads(prompt.split("\n", 1)[1])
             payload["construction_identity"] = identity
             payload["diagnostics"] = attempts[-1:]
+            if formula_policy != "legacy":
+                payload["formula_policy"] = formula_policy
             outcome = client.call(
-                system=SYSTEM_PROMPT,
+                system=system,
                 user="Initializer graph formulas\n"
                 + json.dumps(payload, sort_keys=True),
                 response_model=response_model,
@@ -610,6 +674,7 @@ def construct_graph_formulas(
                 "request_hash": outcome["request_hash"],
                 "accepted": False,
             }
+            choice = None
             try:
                 choice = response_model.model_validate(
                     visible_response(outcome)
@@ -620,6 +685,12 @@ def construct_graph_formulas(
                 )
             except (ValueError, TypeError, KeyError, ModelValidationError) as exc:
                 event["error"] = str(exc)[:2000]
+                if (
+                    formula_policy == RHS_ONLY_POLICY
+                    and isinstance(record.rule, GraphMapDependency)
+                    and choice is not None
+                ):
+                    event["repair_feedback"] = _formula_repair_feedback(record, choice)
             else:
                 state["choices"] = choices
                 event["accepted"] = True
@@ -636,7 +707,11 @@ def construct_graph_formulas(
             if event["accepted"]:
                 break
         if name not in state["choices"]:
-            raise ValueError(f"bounded graph formula repair exhausted for {name}")
+            error = f"bounded graph formula repair exhausted for {name}"
+            if formula_policy == RHS_ONLY_POLICY:
+                state.update(status="failed", failed_state=name, error=error)
+                _save(path, state)
+            raise ValueError(error)
     _, fields = _result_fields(
         candidate, context, model, contract, handoff, state["choices"], state_aliases
     )
@@ -647,6 +722,8 @@ def construct_graph_formulas(
         "choices": state["choices"],
         "attempts": state["attempts"],
     }
+    if formula_policy != "legacy":
+        result["formula_policy"] = formula_policy
     result["result_sha256"] = content_hash(result)
     compile_graph_formula_result(
         candidate,

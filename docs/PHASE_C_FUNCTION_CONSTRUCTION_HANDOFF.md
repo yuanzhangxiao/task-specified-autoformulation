@@ -191,3 +191,72 @@ gain handoff, qualify them offline against saved cases, and retest only the thre
 failed initializer maps. Preserve all historical calls/formulas and avoid
 repeating successful dynamics generation. No retest or automatic fitting was
 launched during this inspection.
+
+
+## Implemented saved-function repair (20 October 2026)
+
+The opt-in `saved-function-handoff-repair-1` campaign verifies the returned
+inspection, all 134 requests/completion receipts, and nested original public
+inputs. It retains all eight source identities without ranking. It restores
+runtime consumer magnitudes under `scoped-declared-process-gains-1` and creates
+separate derivative exports; original formulas, calls and artifacts are kept.
+
+Gain lowering preserves the declared signs and explicit conversion ties. A
+strictly nonnegative direct law amplitude can be absorbed into consumer gains;
+a signed amplitude is retained so the allowed function family is not silently
+restricted. Such retained amplitudes can leave global scale redundancy, which
+is reported explicitly. No identifiability claim follows. The old legacy
+compiler is unchanged. Scoped starts follow the existing graph role policy,
+not a fitted choice.
+
+All five successful initialization graphs are rebound to the corrected dynamics
+without changing their graph, scopes, formulas or accepted choices and without
+provider calls. Only the three exhausted dependent maps receive new calls in
+fresh namespaces: two attempts and 65,536 charged tokens per case, at most six
+calls total. The new initializer policy `rhs-only-2` includes a valid JSON
+expression example. An assignment error identifies the rejected expression,
+selected initial state and required aliases and instructs the proposer to
+remove the LHS. The runtime does not strip or invent an expression. Exhaustion
+is terminal and retains charges; successful sibling results are not regenerated.
+
+`scripts/hpc/start_function_handoff_repair_aces.sh` prepares the derivative root
+`phase-c-function-handoff-repair-v1`, then submits one H100, 8 CPU, 64 GB job with
+a one-hour allocation and 1,800-second generation window. Its delivered wrapper
+is `run_repair.sh`; use `run`, `status`, `report`, or `inspect`. The original
+function worker has only default-preserving CLI/worker-duration overrides.
+A second wave is not implicitly authorized by an uncertain submission; retain
+its intent and inspect Slurm. No fitting or dependent job is submitted.
+
+The updated `PROMPTS.html` renders actual first retry requests offline, while
+`REPORT.html` renders corrected equations and readiness. Tests cover cached
+resume, failed attempts, unknown usage, exact previews, no new dynamics requests,
+source/receipt tampering, and the old default behavior. Offline qualification
+on the actual archive confirms five migrated graphs and three pending maps;
+the live repair outcomes remain unknown.
+
+## What the interaction-stage inspection established
+
+All eight saved cases concern two Dalla T2-easy topologies. They are not eight
+different benchmark tasks. Every one of the 240 final slots is assigned:
+161 proposer functions and 79 runtime-generated process identities. There are
+179 identities, 43 scaled-linear expressions, 15 source/time-constant forms and
+three constants. Thus all 237 nonconstant slots are single-source and linear.
+These frozen topology slots did not exercise a multivariable nonlinear law.
+
+Actual formula inspection establishes overlapping linear effects within the
+same receiving equation in every model. This was only a possibility at topology
+stage. In one saved model the uncorrected equations reduce exactly to
+`I' = 3*infusion + 3*meal - 3*I + 2*I_mem`, with
+`I_mem' = I - 2*I_mem`. Restoring gains changes the available fitted amplitudes,
+not the overlap or the fixed source sets. Fitted sums may remain unidentifiable.
+Two double-negative interaction replies were rejected and repaired. Several
+baseline/oscillation explanations are not realized by their actual formulas.
+
+The audit additionally finds 13 provider-declared nonnegative shared-law gains
+relaxed by the existing runtime to unrestricted real roles. This bounded
+recovery preserves saved accepted laws and exposes their sign freedom; it does
+not silently repair their scientific interpretation. Before a wider function
+campaign, review that role-normalization policy and build function-level feedback
+for overlapping effects and interpretation. No numeric fit, stability sweep,
+unit-consistency certification or full mechanism compliance was performed.
+Prefix-policy and future-observed-forcing restrictions remain unchanged.

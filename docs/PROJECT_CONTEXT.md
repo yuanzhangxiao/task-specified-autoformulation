@@ -1,5 +1,22 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in saved-function handoff repair now restores promised consumer gains
+without changing saved function/dependency declarations. Five completed
+initializer graphs migrate exactly offline; only three failed map expressions
+may be retried (two calls each) using RHS-only JSON examples and actionable
+assignment feedback. Signed law amplitudes remain signed; residual scale
+redundancy is recorded. Original outputs/costs stay separate. No fitting or
+live retry has been launched locally. See the repair section of
+`PHASE_C_FUNCTION_CONSTRUCTION_HANDOFF.md`.
+
+A complete equation audit found all eight interaction inventories finished
+(161 proposer functions plus 79 runtime identities). All 237 nonconstant slots
+have one source and all assigned forms are linear; three are constants.
+Every model contains overlapping linear contributions. The audit also found
+13 runtime nonnegative-to-real role relaxations; saved roles are preserved for
+this bounded recovery, not certified as scientifically correct. Function-level
+scientific review and fitting qualification remain open.
+
 The first ACES function-construction run processed all eight saved proposals:
 five complete packets and three initializer-map syntax failures, with 134
 responses / 2,407,158 tokens. All dynamics assignments completed. All three first

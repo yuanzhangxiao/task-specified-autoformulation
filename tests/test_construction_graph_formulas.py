@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from dataclasses import replace
 
@@ -18,13 +19,18 @@ from autoformalism.llm.staged_topology import (
     StagedTopologyClient,
 )
 from autoformalism.search.construction_graph_formulas import (
+    RHS_ONLY_POLICY,
+    SYSTEM_PROMPT,
     GraphMapReply,
     GraphRootReply,
+    _choice_rule,
     compile_graph_formula_result,
     construct_graph_formulas,
+    render_graph_formula_system_prompt,
 )
 from autoformalism.search.construction_initialization_graph import (
     GraphDependencyHandoff,
+    GraphDependencyRecord,
     build_contract,
 )
 from autoformalism.staged_topology import content_hash
@@ -402,22 +408,28 @@ def test_exhausted_attempts_and_budget_survive_a_new_client(tmp_path):
     assert len(resumed[4].records) == 3
 
 
-def test_deferred_request_preserves_accepted_sibling_and_consumed_cost(tmp_path):
+@pytest.mark.parametrize("formula_policy", ["legacy", RHS_ONLY_POLICY])
+def test_deferred_request_preserves_accepted_sibling_and_consumed_cost(
+    tmp_path, formula_policy
+):
     fixture = setup(tmp_path)
     fixture[4].can_start = lambda: len(fixture[5]) < 1
     with pytest.raises(DeferredCall):
-        construct(fixture, tmp_path)
+        construct(fixture, tmp_path, formula_policy=formula_policy)
     checkpoint = json.loads((tmp_path / "result/state.json").read_text())
     assert checkpoint["choices"] == {"a": {"role": "coefficient"}}
     resumed = setup(tmp_path, [{"role": "nonnegative_coefficient"}, MAP])
-    result = construct(resumed, tmp_path)
+    result = construct(resumed, tmp_path, formula_policy=formula_policy)
     assert [item["selected_state"] for item in resumed[5]] == ["b", "m"]
     assert resumed[5][0]["accepted_formulas"] == checkpoint["choices"]
     assert result["choices"]["a"] == checkpoint["choices"]["a"]
     assert len(resumed[4].records) == 3
 
 
-def test_interrupted_uncertain_call_never_silently_retries_or_resets_budget(tmp_path):
+@pytest.mark.parametrize("formula_policy", ["legacy", RHS_ONLY_POLICY])
+def test_interrupted_uncertain_call_never_silently_retries_or_resets_budget(
+    tmp_path, formula_policy
+):
     fixture = setup(tmp_path)
 
     def interrupt(url, body, timeout):
@@ -425,11 +437,11 @@ def test_interrupted_uncertain_call_never_silently_retries_or_resets_budget(tmp_
 
     fixture[4].transport = interrupt
     with pytest.raises(KeyboardInterrupt):
-        construct(fixture, tmp_path)
+        construct(fixture, tmp_path, formula_policy=formula_policy)
     for _ in range(2):
         resumed = setup(tmp_path)
         with pytest.raises(ValueError, match="uncertain outcome remains charged"):
-            construct(resumed, tmp_path)
+            construct(resumed, tmp_path, formula_policy=formula_policy)
         assert resumed[5] == []
         assert len(resumed[4].records) == 1
         assert resumed[4].records[0]["status"] == "uncertain"
@@ -508,8 +520,9 @@ def test_missing_observed_runtime_identity_fails_before_any_formula_call(tmp_pat
     assert requests == []
 
 
+@pytest.mark.parametrize("formula_policy", ["legacy", RHS_ONLY_POLICY])
 def test_construction_never_calls_numerical_fitting_or_prefix_inference(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, formula_policy
 ):
     from autoformalism.fitting import prefix_initialization
 
@@ -518,7 +531,7 @@ def test_construction_never_calls_numerical_fitting_or_prefix_inference(
 
     monkeypatch.setattr(prefix_initialization, "fit_training", forbidden)
     monkeypatch.setattr(prefix_initialization, "infer_prefix", forbidden)
-    result = construct(setup(tmp_path), tmp_path)
+    result = construct(setup(tmp_path), tmp_path, formula_policy=formula_policy)
     assert result["parameter_fitting_performed"] is False
 
 
@@ -533,3 +546,161 @@ def test_base_runtime_parameter_ranges_determine_guesses(tmp_path):
     result = construct(fixture, tmp_path)
     assert result["prefix_fit_problem"]["parameter_guesses"] == {"rate": 7.0}
     assert result["parameter_guesses"]["rate"] == 7.0
+
+
+def test_legacy_prompt_and_default_replay_remain_exact(tmp_path):
+    assert hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest() == (
+        "a9e5586213f946af9dffd764374e5b7a0aa25c491e1f246ec2031ad834147f93"
+    )
+    assert render_graph_formula_system_prompt() == SYSTEM_PROMPT
+    assert render_graph_formula_system_prompt("legacy") == SYSTEM_PROMPT
+    default = setup(tmp_path / "default")
+    explicit = setup(tmp_path / "explicit")
+    result = construct(default, tmp_path / "default")
+    assert construct(explicit, tmp_path / "explicit", formula_policy="legacy") == result
+    assert default[5] == explicit[5]
+    assert "formula_policy" not in result
+    assert all("formula_policy" not in request for request in default[5])
+
+
+def test_rhs_policy_example_is_an_exact_valid_json_rhs(tmp_path):
+    system = render_graph_formula_system_prompt(RHS_ONLY_POLICY)
+    assert "z2_j(0) =" not in system
+    example = json.loads(
+        next(line for line in system.splitlines() if line.startswith("{"))
+    )
+    reply = GraphMapReply.model_validate(example)
+    assert "=" not in reply.expression
+    fixture = setup(tmp_path)
+    record = GraphDependencyRecord.model_validate(
+        {
+            "state": "m",
+            "rule": {"mode": "map", "state_initials": ["a"], "public_initials": ["u"]},
+            "justification": "illustrative alias binding",
+        }
+    )
+    rule = _choice_rule(record, example, fixture[2], None)
+    assert rule["initial"]["expression"] == "a*state_1 + b*public_1"
+    assert rule["initial"]["state_initials"] == {"state_1": "a"}
+    assert rule["initial"]["public_initials"] == {"public_1": "u"}
+
+
+def test_rhs_assignment_feedback_repairs_only_formula_and_preserves_graph(tmp_path):
+    bad = {**MAP, "expression": "m(0) = " + MAP["expression"]}
+    fixture = setup(
+        tmp_path,
+        [{"role": "coefficient"}, {"role": "nonnegative_coefficient"}, bad, MAP],
+    )
+    original = [value.model_dump(mode="json") for value in fixture[:4]]
+    result = construct(fixture, tmp_path, formula_policy=RHS_ONLY_POLICY)
+    first, retry = fixture[5][2:]
+    diagnostic = retry["diagnostics"][0]
+    feedback = diagnostic["repair_feedback"]
+    assert not diagnostic["accepted"]
+    assert "SYNTAX_ERROR" in diagnostic["error"]
+    assert feedback["code"] == "INITIALIZER_RHS_ONLY"
+    assert feedback["rejected_expression"] == bad["expression"]
+    assert feedback["selected_state"] == "m"
+    assert feedback["required_aliases"] == [
+        "state_1",
+        "state_2",
+        "state_3",
+        "public_1",
+        "public_2",
+        "public_3",
+        "public_4",
+    ]
+    assert "Remove the equation left-hand side and '='" in feedback["instruction"]
+    assert "Retain every required alias" in feedback["instruction"]
+    for key in (
+        "accepted_formulas",
+        "initializer_graph",
+        "selected_initializer_dependency",
+    ):
+        assert retry[key] == first[key]
+    assert "m" not in retry["accepted_formulas"]
+    assert result["choices"]["m"] == MAP
+    assert result["formula_policy"] == RHS_ONLY_POLICY
+    assert [value.model_dump(mode="json") for value in fixture[:4]] == original
+    assert len(fixture[4].records) == 4
+    raw = json.loads(
+        (tmp_path / "calls" / (diagnostic["request_hash"] + ".json")).read_text()
+    )
+    assert raw["request"]["body"]["messages"][0]["content"] == (
+        render_graph_formula_system_prompt(RHS_ONLY_POLICY)
+    )
+    assert json.loads(raw["raw_response"]["choices"][0]["message"]["content"]) == bad
+    compile_graph_formula_result(fixture[0], fixture[1], result)
+
+
+def test_rhs_policy_does_not_hide_missing_dependency_aliases(tmp_path):
+    bad = {**MAP, "expression": MAP["expression"].replace(" + public_4", "")}
+    fixture = setup(
+        tmp_path,
+        [{"role": "coefficient"}, {"role": "nonnegative_coefficient"}, bad, MAP],
+    )
+    result = construct(fixture, tmp_path, formula_policy=RHS_ONLY_POLICY)
+    diagnostic = fixture[5][3]["diagnostics"][0]
+    assert "missing=['public_4']" in diagnostic["error"]
+    assert diagnostic["repair_feedback"]["code"] == "INITIALIZER_FORMULA_REJECTED"
+    assert "public_4" in diagnostic["repair_feedback"]["required_aliases"]
+    assert result["choices"]["m"] == MAP
+    assert len(fixture[4].records) == 4
+
+
+@pytest.mark.parametrize("formula_policy", ["legacy", RHS_ONLY_POLICY])
+def test_assignment_exhaustion_preserves_limits_and_does_not_strip(
+    tmp_path, formula_policy
+):
+    bad = {**MAP, "expression": "m(0) = " + MAP["expression"]}
+    replies = [{"role": "coefficient"}, {"role": "nonnegative_coefficient"}, bad]
+    fixture = setup(tmp_path, replies)
+    with pytest.raises(ValueError, match="exhausted for m"):
+        construct(fixture, tmp_path, formula_policy=formula_policy)
+    path = tmp_path / "result/state.json"
+    saved = path.read_bytes()
+    checkpoint = json.loads(saved)
+    assert len(fixture[5]) == 5
+    assert set(checkpoint["choices"]) == {"a", "b"}
+    assert len(checkpoint["attempts"]) == 5
+    assert not any(event["accepted"] for event in checkpoint["attempts"][2:])
+    if formula_policy == RHS_ONLY_POLICY:
+        assert checkpoint["status"] == "failed"
+        assert checkpoint["failed_state"] == "m"
+        assert checkpoint["error"] == "bounded graph formula repair exhausted for m"
+        assert checkpoint["formula_policy"] == RHS_ONLY_POLICY
+    else:
+        assert checkpoint["status"] == "running"
+        assert "formula_policy" not in checkpoint
+        assert all("repair_feedback" not in event for event in checkpoint["attempts"])
+    resumed = setup(tmp_path, replies)
+    with pytest.raises(ValueError, match="exhausted for m"):
+        construct(resumed, tmp_path, formula_policy=formula_policy)
+    assert resumed[5] == []
+    assert len(resumed[4].records) == 5
+    assert sum(record["budget_charge"] for record in resumed[4].records) == 500
+    assert path.read_bytes() == saved
+
+
+def test_rhs_complete_resume_is_exact_and_policy_change_cannot_reuse_checkpoint(
+    tmp_path,
+):
+    fixture = setup(tmp_path)
+    result = construct(fixture, tmp_path, formula_policy=RHS_ONLY_POLICY)
+    saved = (tmp_path / "result/state.json").read_bytes()
+    resumed = setup(tmp_path)
+    assert construct(resumed, tmp_path, formula_policy=RHS_ONLY_POLICY) == result
+    assert resumed[5] == []
+    assert len(resumed[4].records) == 3
+    assert (tmp_path / "result/state.json").read_bytes() == saved
+    with pytest.raises(ValueError, match="identity or digest"):
+        construct(resumed, tmp_path)
+    assert resumed[5] == []
+
+
+def test_unknown_formula_policy_is_rejected_before_calls_or_checkpoint(tmp_path):
+    fixture = setup(tmp_path)
+    with pytest.raises(ValueError, match="unknown initializer formula policy"):
+        construct(fixture, tmp_path, formula_policy="unknown")
+    assert fixture[5] == []
+    assert not (tmp_path / "result/state.json").exists()
