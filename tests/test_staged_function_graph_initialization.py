@@ -38,7 +38,14 @@ def lower(source, brief, context):
     return topology
 
 
-def fixture(tmp_path, *, auxiliary=False, dependent=False, invalid_formula=False):
+def fixture(
+    tmp_path,
+    *,
+    auxiliary=False,
+    dependent=False,
+    invalid_formula=False,
+    differential_auxiliary=False,
+):
     """Prepare explicit graph metadata over the repository's existing toy topology."""
     task = function_diagnostic(
         "generated_auxiliary" if auxiliary else "driven_memory", ModelingLimits()
@@ -46,6 +53,13 @@ def fixture(tmp_path, *, auxiliary=False, dependent=False, invalid_formula=False
     brief = PublicScientificBrief.model_validate(task["brief"])
     context = ValidationContext.model_validate(task["context"])
     source = task["source"]
+    if differential_auxiliary:
+        for variable in source["inventory"]:
+            if variable["name"] == "a":
+                variable["definition"] = "differential"
+        for equation in source["equations"]:
+            if equation["name"] == "a":
+                equation["definition"] = "differential"
     if dependent:
         source["inventory"].append(
             {
@@ -87,7 +101,9 @@ def fixture(tmp_path, *, auxiliary=False, dependent=False, invalid_formula=False
                 set(context.targets) | context.forcing_channels | {context.time_symbol}
             )
         ),
-        observed_initial_channels={"x": "x"},
+        observed_initial_channels={"x": "x", "a": "a"}
+        if differential_auxiliary
+        else {"x": "x"},
         trajectory_initialization="observation_prefix",
         provenance="Reviewed public toy identities",
     )
@@ -202,6 +218,17 @@ def test_staged_functions_export_exact_m43_problem_and_dependent_scopes(tmp_path
     assert result["parameter_fitting_performed"] is False
     assert result["test_data_opened"] is False
     assert len(parts[-1]) == result["physical_requests"] == 5
+    interaction_packets = [packet for packet in parts[-1] if "selected_term" in packet]
+    assert interaction_packets
+    for packet in interaction_packets:
+        assert packet["initialization_graph"]["contract"] == parts[3].model_dump(
+            mode="json"
+        )
+        assert packet["initialization_graph"]["handoff"] == parts[4].model_dump(
+            mode="json"
+        )
+        assert "fixed" in packet["initialization_scope"]
+        assert "Deferred evidence remains unresolved" in packet["initialization_scope"]
     assert sum("selected_initializer_dependency" in call for call in parts[-1]) == 2
 
 
@@ -239,6 +266,53 @@ def test_nonstate_compiler_aliases_are_filtered_from_graph_handoff(tmp_path):
     assert result["prefix_fit_problem"]["graph"]["rules"] == {}
     assert len(parts[-1]) == 2
     assert not any("selected_initializer_dependency" in call for call in parts[-1])
+
+
+def test_generated_auxiliary_fixed_t0_identity_needs_no_provider_choice(tmp_path):
+    parts = fixture(tmp_path, auxiliary=True, differential_auxiliary=True)
+    parts[2]["scientific_declarations"] = {
+        "mechanism_realizations": [{"description": "Retain the original mechanism"}],
+        "external_exchanges": [],
+        "variables": copy.deepcopy(parts[2]["inventory"]),
+        "equations": copy.deepcopy(parts[2]["equations"]),
+        "processes": [],
+    }
+    result = run(parts, tmp_path / "result")
+    assert result["complete_model"], result["error"]
+    assert result["candidate"] is None
+    rules = result["prefix_fit_problem"]["graph"]["rules"]
+    receipt = result["initialization"]["initialization_dependency_contract"]
+    compiled = receipt["state_aliases"]["a"]
+    assert compiled != "a"
+    assert rules[compiled]["initial"] == {
+        "mode": "map",
+        "expression": "public_1",
+        "parameters": [],
+        "state_initials": {},
+        "public_initials": {"public_1": "a"},
+    }
+    assert len(parts[-1]) == 2
+    assert not any("selected_initializer_dependency" in call for call in parts[-1])
+    for packet in parts[-1]:
+        assert (
+            packet["retained_topology_declarations"]
+            == {
+                "mechanism_realizations": parts[2]["scientific_declarations"][
+                    "mechanism_realizations"
+                ],
+                "external_exchanges": [],
+            }
+        )
+        assert packet["frozen_inventory"] == parts[2]["inventory"]
+        assert packet["frozen_equation_sketch"] == parts[2]["equations"]
+    assert "variables" in parts[2]["scientific_declarations"]
+    assert "equations" in parts[2]["scientific_declarations"]
+    assert all(
+        mapping["channel"] != "a"
+        for mapping in result["prefix_fit_problem"]["base_candidate"][
+            "observation_mappings"
+        ]
+    )
 
 
 def test_legacy_path_keeps_original_candidate_and_initial_schema(tmp_path):

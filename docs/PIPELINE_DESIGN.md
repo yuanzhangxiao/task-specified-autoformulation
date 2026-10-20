@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+`saved-construction-functions-1` verifies accepted initializer episodes against
+their complete historical declarations, then compiles immutable signed topology
+into equation-batch function construction with atomic term repair. Graph scope
+and dependencies are visible but not editable in formula requests. Completed
+models export a separate scoped `prefix-fit-problem-1` and portable readiness
+receipt; numerical compilation is distinct from fitting and forecasting.
+Runtime-owned recorded auxiliary initial identities lower to parameter-free maps
+without changing supervision. Future auxiliary forcing and unresolved window
+policies remain explicit blockers. No automatic fitting or family selection.
+See `PHASE_C_FUNCTION_CONSTRUCTION_HANDOFF.md`.
+
 `phase-c-prefix-multiroot-1` is the separate M46 qualification. It trains a shared
 coefficient and per-row independent roots, then holds the shared fit fixed.
 Prefix endpoints use only prefix loss; duration selection requires both immediate

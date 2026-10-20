@@ -300,6 +300,7 @@ def run_staged_functions(
         initial_information_contract, initializer_handoff, aliases
     )
     graph_aliases = {}
+    graph_receipt = None
     if graph_requested:
         graph_aliases = {
             name: aliases.get(name, name)
@@ -322,20 +323,40 @@ def run_staged_functions(
             scientific_context=brief.scientific_context,
             state_aliases=graph_aliases,
         )
-        if {
+        graph_observed = {
             graph_aliases[name]: channel
             for name, channel in (
                 initialization_graph_contract.observed_initial_channels.items()
             )
-        } != (
+        }
+        direct_observed = (
             {item.state: item.channel for item in topology.state_measurements}
             | {
                 item.source: item.channel
                 for item in topology.target_mappings
                 if item.source in {state.name for state in topology.states}
             }
-        ):
+        )
+        runtime_auxiliary_initials = {
+            graph_aliases[name]: channel
+            for name, channel in (
+                initialization_graph_contract.observed_initial_channels.items()
+            )
+            if name == channel
+            and channel in context.auxiliaries
+            and graph_aliases[name] != name
+            and any(
+                state.name == graph_aliases[name] and state.kind is StateKind.LATENT
+                for state in topology.states
+            )
+        }
+        if graph_observed != direct_observed | runtime_auxiliary_initials:
             raise ValueError("graph observed identities differ from topology")
+        graph_receipt = {
+            "contract": initialization_graph_contract.model_dump(mode="json"),
+            "handoff": initialization_graph_handoff.model_dump(mode="json"),
+            "state_aliases": graph_aliases,
+        }
     commitment = topology_commitment_sha256(topology)
     draft = FunctionalDraft(topology_commitment_sha256=commitment)
     events: list[dict[str, Any]] = []
@@ -432,6 +453,31 @@ def run_staged_functions(
                     "Executable initial formulas follow interaction construction. "
                     "Any initializer dependency revision belongs explicitly upstream."
                 )
+                user = heading + "\n" + json.dumps(packet)
+            if graph_receipt:
+                heading, body = user.split("\n", 1)
+                packet = json.loads(body)
+                packet["initialization_graph"] = graph_receipt
+                packet["initialization_scope"] = (
+                    "The accepted initializer graph, scopes and dependencies are "
+                    "fixed. Construct only the selected analytic functions. "
+                    "Independent trajectory roots are inferred separately from "
+                    "an authorized observation prefix; dependent map coefficients "
+                    "and dynamics parameters remain shared. Initializer formulas "
+                    "follow interaction construction. No graph or topology edits "
+                    "are allowed here. Deferred evidence remains unresolved."
+                )
+                if "scientific_declarations" in source:
+                    packet["retained_topology_declarations"] = {
+                        field: source["scientific_declarations"][field]
+                        for field in (
+                            "mechanism_realizations",
+                            "external_exchanges",
+                            "feedback_bindings",
+                            "overlap_confirmations",
+                        )
+                        if field in source["scientific_declarations"]
+                    }
                 user = heading + "\n" + json.dumps(packet)
             record = client.call(
                 system=system,

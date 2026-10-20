@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+The returned scope-aware initializer diagnostic accepted eight of ten saved
+episodes: three maps and five trajectory roots, with compatibility still
+deferred. `saved-construction-functions-1` now continues all eight into frozen
+function/initializer-formula construction and exports the scoped prefix fitting
+interface. It retains both excluded episodes and makes no fitting-family
+selection. Readiness distinguishes formula validity, numerical compilation and
+forecast information access; the observed-auxiliary initial identity and future
+auxiliary forcing limitations are explicit. No optimization or live test has
+run locally. See `PHASE_C_FUNCTION_CONSTRUCTION_HANDOFF.md`.
+
 M46 implements an isolated multiple-root prefix experiment: three distinct/similar/
 equal hidden decay controls, clean/noisy observations and two training starts
 (12 CPU tasks). Duration selection requires immediate and common-horizon forecasts,

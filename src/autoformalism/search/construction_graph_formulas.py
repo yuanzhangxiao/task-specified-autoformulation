@@ -118,6 +118,70 @@ def _receipt(
     }
 
 
+def runtime_observed_initial_rules(
+    model: CompiledModel,
+    contract: GraphConstructionContract,
+    state_aliases: Mapping[str, str] | None,
+) -> tuple[dict[str, dict], list[dict]]:
+    """Lower attested generated auxiliary t0 identities without supervision.
+
+    The historical topology compiler aliases generated auxiliary states and
+    deliberately omits auxiliary observation mappings. A reviewed same-channel
+    initial identity can still be represented by an exact, parameter-free graph
+    map. This does not expose auxiliary histories or create provider choices.
+    """
+    aliases = state_aliases or {}
+    observed = {
+        aliases.get(state, state): channel
+        for state, channel in contract.observed_initial_channels.items()
+    }
+    direct = dict(model.direct_state_observation_channels)
+    if any(observed.get(state) != channel for state, channel in direct.items()):
+        raise ValueError("graph observed identities differ from compiled model")
+    states = {state.name: state for state in model.validated.candidate.states}
+    context = model.validated.context
+    rules, provenance = {}, []
+    for scientific_state, channel in contract.observed_initial_channels.items():
+        state = aliases.get(scientific_state, scientific_state)
+        if state in direct:
+            continue
+        if (
+            scientific_state != channel
+            or state == scientific_state
+            or channel not in context.auxiliaries
+            or channel not in contract.permitted_public_initials
+            or state not in states
+            or states[state].kind.value != "latent"
+        ):
+            raise ValueError("graph observed identities differ from compiled model")
+        rules[state] = {
+            "initial": {
+                "mode": "map",
+                "expression": "public_1",
+                "parameters": [],
+                "state_initials": {},
+                "public_initials": {"public_1": channel},
+            }
+        }
+        provenance.append(
+            {
+                "scientific_state": scientific_state,
+                "compiled_state": state,
+                "channel": channel,
+                "identity": "runtime_observed_initial",
+                "scope": "recorded_t0_only",
+                "independent_parameter": False,
+                "state_declaration_sha256": contract.state_declaration_sha256[
+                    scientific_state
+                ],
+                "contract_sha256": content_hash(contract.model_dump(mode="json")),
+                "public_context_sha256": contract.public_context_sha256,
+                "provenance": contract.provenance,
+            }
+        )
+    return rules, provenance
+
+
 def _resolve(
     model: CompiledModel,
     context: ValidationContext,
@@ -136,13 +200,7 @@ def _resolve(
         state_aliases=state_aliases,
         scientific_context=scientific_context,
     )
-    aliases = state_aliases or {}
-    observed = {
-        aliases.get(state, state): source
-        for state, source in contract.observed_initial_channels.items()
-    }
-    if observed != dict(model.direct_state_observation_channels):
-        raise ValueError("graph observed identities differ from compiled model")
+    runtime_observed_initial_rules(model, contract, state_aliases)
     if context.fitted_initialization or context.lagged_targets:
         raise ValueError(
             "graph construction requires an unlowered free-rollout context"
@@ -252,6 +310,7 @@ def _lower(
         raise ValueError(
             "graph choices must cover exactly the requested formula states"
         )
+    runtime_rules, _ = runtime_observed_initial_rules(model, contract, state_aliases)
     graph = InitializationGraph.model_validate(
         {
             "rules": {
@@ -263,6 +322,7 @@ def _lower(
                 )
                 for record in resolved.records
             }
+            | runtime_rules
         }
     )
     compiled, _, audit = apply_initialization_graph(model, graph)
@@ -310,7 +370,10 @@ def _result_fields(
     policy_required = (
         bool(audit["trajectory_parameter_names"]) and contract.prefix_policy is None
     )
-    return compiled, {
+    _, runtime_initials = runtime_observed_initial_rules(
+        model, contract, state_aliases
+    )
+    fields = {
         "base_candidate": candidate.model_dump(mode="json"),
         "base_context": context.model_dump(mode="json"),
         "candidate": compiled.validated.candidate.model_dump(mode="json"),
@@ -331,6 +394,9 @@ def _result_fields(
         "window_policy_unresolved": policy_required,
         "fitting_policy_required": policy_required,
     }
+    if runtime_initials:
+        fields["runtime_observed_initials"] = runtime_initials
+    return compiled, fields
 
 
 def compile_graph_formula_result(
