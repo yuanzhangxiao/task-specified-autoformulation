@@ -85,10 +85,11 @@ Two concrete boundary details are preserved:
   The export reports this limitation. It neither promotes these channels to
   inputs nor changes the model to work around it.
 
-The portable fitting packet contains formulas and provenance, not a full
-numerical dataset. The original public training observations and a frozen
-prefix policy must be bound by the subsequent fitting experiment. No
-validation/test arrays or scores enter this construction campaign.
+The portable fitting packet contains formulas, provenance and the retained
+public training observations used for compatibility evidence. It is not a
+complete training/validation/test fitting bundle. The subsequent fitting
+experiment must explicitly bind its training inputs and frozen prefix policy.
+No validation/test arrays or scores enter this construction campaign.
 
 ## ACES operation
 
