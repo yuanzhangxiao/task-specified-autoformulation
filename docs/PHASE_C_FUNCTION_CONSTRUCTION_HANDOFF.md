@@ -117,6 +117,31 @@ The final command writes `inspection.tar.gz` in the output root. A new
 allocation may resume a draining campaign with a new explicit submission wave;
 it does not reset call budgets or rerun completed proposals.
 
+### A submitted job with a missing acknowledgement
+
+A socket timeout from `sbatch` can occur after Slurm accepted the job. An empty
+reply is therefore uncertain even when the wrapper reports exit code zero.
+Inspect the queue before taking further action; do not remove the saved intent
+or use a new wave to bypass it.
+
+The standalone standard-library recovery command records an existing job after
+checking its owner, submission time and complete submission command against the
+saved intent. It also checks the original plan, execution and source identities.
+It makes no submission or cancellation and does not alter campaign inputs,
+scientific settings, results or budgets. Keep it outside the pinned bundle:
+
+```bash
+python3 recover_construction_functions_submission.py \
+  --root /scratch/group/p.nairr260351.000/u.yx126462/phase-c-functions-v1 \
+  --wave functions-1 --job-id 2236653
+```
+
+The original intent/reply are retained alongside an adoption audit, recovered
+job-ID file and normal submission manifest. Repeating this recovery is safe;
+conflicting metadata or insufficient scheduler evidence stops it. Recording a
+failed job does not retry it. The worker itself needs the frozen plan and
+execution files, so a missing submission manifest does not prevent it running.
+
 ## Offline verification
 
 Tests cover genuine full-source recovery, both excluded and accepted seeds,
