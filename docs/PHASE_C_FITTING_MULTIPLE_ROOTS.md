@@ -200,8 +200,8 @@ printf '%s\n' "$AF_REVIEW"
 
 Keep unsuccessful tasks and all starts in the review archive. Review predictions,
 hidden-root ambiguity, optimizer-reference gaps and diagnostic overhead together.
-Remote outcomes are pending; local checks do not establish a universal prefix
-policy or complete construction integration.
+Returned outcomes are recorded below. These controls do not establish a
+universal prefix policy or complete construction integration.
 
 ## Local qualification
 
@@ -234,3 +234,44 @@ maximum root-vector spread 2.50 across starts on the follow-up trajectories, whi
 normalized prediction spread is approximately 1e-10. The rank-one result correctly
 withholds unique-root recovery despite useful predictions. These two local cases
 are smoke evidence, not the results of the complete twelve-task experiment.
+
+## Returned Delta results: October 20
+
+The archive `review-20261020-123724.tar.gz` contains all twelve completed runs
+and all 336 chosen-endpoint diagnostic pairs. Its archive SHA256 is
+`b6557b717cfb3cd6fe57ff81c0e180e349e44115f06b2589695c6d1d5cd54512`.
+Both training starts yield effectively identical forecasts and share acquisitions.
+
+| Condition | Selected duration | Fresh immediate NMSE | Fresh common NMSE |
+|---|---:|---:|---:|
+| Separated, clean | 0.2 | 9.55e-19 | 1.64e-17 |
+| Separated, noisy | 1.0 | 0.000993 | 0.00264 |
+| Nearly confounded, clean | 0.2 | 9.03e-13 | 3.66e-11 |
+| Nearly confounded, noisy | 0.2 | 0.00604 | 0.0216 |
+| Exactly confounded, clean | 0.1 | 1.04e-18 | 1.62e-19 |
+| Exactly confounded, noisy | 0.2 | 0.00172 | 0.00206 |
+
+Ten of twelve run records meet the fresh-forecast criterion, representing five
+of six conditions, not an independently estimated success probability.
+The noisy nearly confounded case passes tuning at 0.00668 but misses the
+common-horizon target on follow-up. Clean-signal follow-up NMSE is also 0.0207.
+All starts agree on boundary solutions with z(0) essentially zero, despite
+positive generating values. Every retained conditional optimum check passes;
+the largest objective gap is 4.64e-15. More iterations cannot resolve this
+noise-sensitivity limitation. The noisy short-prefix information matrix has
+condition number about 1,990.
+
+Exactly confounded clean follow-up predictions are excellent while the root
+vector error reaches about 1.50. Only the root sum is identifiable. These
+results distinguish optimization, prediction and individual-root recovery.
+
+Recorded totals are 453.82 CPU seconds and 1,196.46 summed operation wall
+seconds, including 756.44 checkpoint wall seconds. They exclude scheduler waits,
+final receipt sealing and report writing.
+
+Portable reconstruction initially rejected 62 evaluator discrepancy values
+across three tasks for cross-machine differences no larger than 4.44e-16.
+The M47 fix permits only this derived-field roundoff (<=1e-15 absolute) while
+retaining all other exact comparisons. Reconstructing a copy now reproduces
+the returned summary exactly, with no numerical work or original artifact edits.
+The next study is [M47 prefix noise reliability](PHASE_C_FITTING_PREFIX_NOISE_RELIABILITY.md).

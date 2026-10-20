@@ -623,12 +623,80 @@ def _assemble(record, identity, operations, policy, selection):
     }
 
 
+def _portable_analytic_path(path: tuple[str | int, ...]) -> bool:
+    """Identify only postselection analytic-versus-numerical discrepancy leaves."""
+    return (
+        len(path) in (6, 7)
+        and path[0] == "evaluation"
+        and path[1] in ("validation", "followup")
+        and type(path[2]) is int
+        and path[2] >= 0
+        and path[3] == "rows"
+        and type(path[4]) is int
+        and path[4] >= 0
+        and (
+            (len(path) == 6 and path[5] == "analytic_max_absolute_difference")
+            or (
+                len(path) == 7
+                and path[5] == "all_start_analytic_max_absolute_differences"
+                and type(path[6]) is int
+                and path[6] >= 0
+            )
+        )
+    )
+
+
+def _portable_result_matches(
+    saved: object,
+    expected: object,
+    path: tuple[str | int, ...] = (),
+) -> bool:
+    """Compare reconstructed JSON, allowing only platform analytic roundoff.
+
+    The two postselection discrepancy fields may differ by at most 1e-15
+    absolute (zero relative tolerance), covering the observed 4.44e-16
+    cross-platform drift. This never relaxes scores, selections, parameters,
+    receipt identities or hashes. Types, container shapes and all other values
+    remain exact; nonfinite numbers and negative absolute errors are invalid.
+    """
+    if type(saved) is not type(expected):
+        return False
+    if _portable_analytic_path(path):
+        return saved is None or (
+            type(saved) is float
+            and type(expected) is float
+            and np.isfinite(saved)
+            and np.isfinite(expected)
+            and min(saved, expected) >= 0
+            and abs(saved - expected) <= 1e-15
+        )
+    if isinstance(saved, dict) and isinstance(expected, dict):
+        return (
+            saved.keys() == expected.keys()
+            and all(type(key) is str for key in saved)
+            and all(
+                _portable_result_matches(value, expected[key], (*path, key))
+                for key, value in saved.items()
+            )
+        )
+    if isinstance(saved, list) and isinstance(expected, list):
+        return len(saved) == len(expected) and all(
+            _portable_result_matches(left, right, (*path, index))
+            for index, (left, right) in enumerate(zip(saved, expected, strict=True))
+        )
+    if type(saved) is float and not np.isfinite(saved):
+        return False
+    return (
+        saved is None or type(saved) in (bool, int, float, str)
+    ) and saved == expected
+
+
 def _completed(folder, identity, record, policy):
     selection = read_seal(folder / "selection.json")
     operations = _read_operations(folder, identity)
     result = read_seal(folder / "result.json")
     expected = _assemble(record, identity, operations, policy, selection)
-    if result != expected:
+    if not _portable_result_matches(result, expected):
         raise ValueError("multiroot terminal artifact differs")
     return result
 

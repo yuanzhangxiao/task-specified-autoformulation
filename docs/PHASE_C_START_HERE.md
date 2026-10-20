@@ -36,9 +36,13 @@ The next implemented CPU qualification is
 cover distinguishable, nearly confounded and exactly confounded roots with clean
 and noisy observations. It adds immediate post-prefix scoring, conditional
 optimization checks and a frozen policy on fresh synthetic trajectories.
-Remote outcomes are pending. Locally available construction artifacts still lack
-completed executable function laws, so construction-export fitting stays an
-explicit pending gate.
+The returned twelve runs all complete. Ten meet fresh-forecast criteria; both
+starts of the noisy nearly confounded case miss the common-horizon threshold
+despite solved prefix optimization. The separate
+[M47 noise reliability study](PHASE_C_FITTING_PREFIX_NOISE_RELIABILITY.md)
+compares the same rule with conditional predictive support across five new noise
+acquisitions per structure. Both rules freeze before follow-up; no production
+policy changes. Actual construction-export fitting remains an explicit gate.
 
 Current fitting priority: [connect numerical evidence to interaction proposals](PHASE_C_INTERACTION_FITTING_FEEDBACK.md).
 The [M37 offline adapter](PHASE_C_FITTING_INTERACTION_ADAPTER.md) translates

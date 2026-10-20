@@ -139,7 +139,11 @@ Its returned Delta run passed without refitting. The separate
 immediate post-prefix criterion alongside the common horizon and freezes duration
 before fresh synthetic follow-up trajectories. It reports conditional root
 information and optimization quality separately from forecast accuracy. These
-controls do not yet qualify an actual construction-exported model.
+controls do not yet qualify an actual construction-exported model. M46's returned
+results also show that agreement across optimizer starts can coexist with noisy
+prefix sensitivity. The [M47 qualification](PHASE_C_FITTING_PREFIX_NOISE_RELIABILITY.md)
+tests independent noise acquisitions and an additional conditional predictive
+support rule; it preserves the initializer interface and all production defaults.
 
 The prefix policy fixes its duration, available observation channels, known future
 exogenous schedules, root domains, starting rule, numerical budget and training
