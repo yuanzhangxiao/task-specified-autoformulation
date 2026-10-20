@@ -24,8 +24,10 @@ over extending the completed M42 uncertainty diagnostic.
 The [M44 prefix-duration selection](PHASE_C_FITTING_PREFIX_WINDOW_SELECTION.md)
 Delta review confirms duration 0.2 in all four noisy tasks. Both clean tasks have
 excellent verified 0.1 windows but incomplete sweeps after three verification
-timeouts. The next fitting gate is checkpoint/deadline reliability and an explicit
-supplementary recovery of those clean cases. Root information remains conditional
+timeouts. The [M45 verification supplement](PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md)
+implements checkpoint/deadline isolation and recovery of those clean cases at
+fixed saved endpoints, preserving the old ledger. Delta qualification is pending.
+Root information remains conditional
 on learned shared parameters; solver agreement is not root accuracy. This tunes a
 fitting hyperparameter without changing benchmark input access or production defaults.
 

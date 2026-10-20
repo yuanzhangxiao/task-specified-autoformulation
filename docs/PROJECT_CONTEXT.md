@@ -1,5 +1,13 @@
 # Autoformalism Phase 1 Implementation Context
 
+M45 implements an isolated verification-only supplement for M44's two incomplete
+clean sweeps. It preserves all six training fits and original ledgers, rechecks
+exact saved roots, and reruns only failed/blocked forecasts. Numerical-active
+wall time excludes measured callbacks; a separate inclusive deadline and explicit
+attempted/executed counters retain overhead and failures. No optimizer, test data,
+LLM, benchmark or production default changes. See
+`PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md`; Delta qualification is pending.
+
 The initializer conflict-repair diagnostic returned ten completed episodes:
 four accepted trajectory-root declarations with evidence deferred, five proposer
 requests for topology changes and one exhausted allowance (20 calls / 100,848

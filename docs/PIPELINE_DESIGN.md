@@ -1,5 +1,14 @@
 # Phase 1 Pipeline Design
 
+`phase-c-prefix-window-supplement-1` is a separate M45 verification campaign.
+It freezes the complete M44 source, keeps shared fits and saved root candidates,
+and evaluates only missing verification/forecast receipts. Callback timing is
+excluded from the numerical-active allowance but charged to a finite overall
+cooperative deadline. Interrupted progress is a lower bound, never a complete
+cost; historical and supplemental call semantics stay distinct. Selection retains
+M44's complete grid and common validation horizon. No historical kernel or
+production policy changes. See `PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md`.
+
 `scope-aware-2` is an opt-in presentation policy for the initializer acceptance
 loop. It preserves the gate and reports declaration errors separately from active
 model-data contradictions. Relevant editable initializer rules are derived from

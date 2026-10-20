@@ -130,6 +130,10 @@ selects the shortest adequate window using predeclared validation criteria,
 while reporting root information and inference cost separately. Duration tuning
 uses validation, so selected validation scores are not independent test estimates.
 The complete duration-selection policy must be frozen before test evaluation.
+The [M45 supplement](PHASE_C_FITTING_PREFIX_VERIFICATION_SUPPLEMENT.md) addresses
+verification timing at fixed saved endpoints; it changes neither this initialization
+interface nor the duration-selection criterion. Its separate allowances preserve
+historical failures and distinguish storage overhead from numerical work.
 
 The prefix policy fixes its duration, available observation channels, known future
 exogenous schedules, root domains, starting rule, numerical budget and training

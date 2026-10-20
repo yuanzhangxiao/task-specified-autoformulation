@@ -1,0 +1,9 @@
+{
+  "protocol": "phase-c-prefix-window-supplement-policy-1",
+  "selection": "failed_verification_only",
+  "execution": {
+    "protocol": "prefix-verification-execution-1",
+    "numerical_seconds": 5,
+    "overall_seconds": 60
+  }
+}
