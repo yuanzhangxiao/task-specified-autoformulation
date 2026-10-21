@@ -8,7 +8,14 @@ future target values. A fixed eight-minute diagnostic prefix gives a common
 validation scoring horizon; no model is preselected, promoted or automatically
 revised. CPU operations have durable budgets and separate numerical/fit outcomes.
 This is a new prefix-evaluation protocol, not a replacement historical score.
-See `PHASE_C_CONSTRUCTION_FITTING_QUALIFICATION.md`; remote fitting is pending.
+The returned ACES campaign used the current scoped-initialization fitter; all
+eight searches exhausted their 600-second allowances. Seven saved endpoints
+timed out in the first sensitivity verification pass, while one produced a
+qualified but poor validation fit. A separate saved-parameter supplement checks
+training outputs with DOP853/Radau without sensitivities, new optimization,
+validation-root inference, or historical changes. See
+`PHASE_C_CONSTRUCTION_SAVED_VERIFICATION.md` and
+`PHASE_C_CONSTRUCTION_FITTING_HANDOFF.md` for provenance and Orion's work items.
 
 The opt-in saved-function handoff repair now restores promised consumer gains
 without changing saved function/dependency declarations. Five completed
