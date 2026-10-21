@@ -69,6 +69,7 @@ def test_cpu_only_submission_is_idempotent_and_uses_frozen_roster(scheduler):
     assert first["array_tasks"] == len(TASKS)
     assert first["gpus"] == first["live_llm_calls"] == 0
     assert first["test_data_opened"] is False
+    assert first["identity"]["report_time"] == "00:30:00"
     worker = Path(f"scripts/hpc/run_{STEM}_delta.sh")
     assert first["identity"]["worker_sha256"] == hashlib.sha256(
         worker.read_bytes()
@@ -78,7 +79,7 @@ def test_cpu_only_submission_is_idempotent_and_uses_frozen_roster(scheduler):
     assert "--dependency=afterok:101" in s.calls[1]
     assert "--dependency=afterany:101:102" in s.calls[2]
     for argv, duration in zip(
-        s.calls, ("00:30:00", "00:45:00", "00:05:00"), strict=True
+        s.calls, ("00:30:00", "00:45:00", "00:30:00"), strict=True
     ):
         assert "--cpus-per-task=1" in argv and "--mem=16G" in argv
         assert "--partition=cpu" in argv and f"--time={duration}" in argv
@@ -86,6 +87,44 @@ def test_cpu_only_submission_is_idempotent_and_uses_frozen_roster(scheduler):
         assert not any("--gres" in item or "--gpus" in item for item in argv)
         assert argv[-2].endswith(f"run_{STEM}_delta.sh")
     assert submitter.submit(s.root, CONFIG, account="test") == first
+    assert len(s.calls) == 3
+
+
+def test_changed_report_time_is_rejected(scheduler, monkeypatch):
+    s = scheduler
+    submitter.submit(s.root, CONFIG)
+    original = submitter.scheduler.submit
+
+    def changed_report_time(*args, **kwargs):
+        return original(*args, **(kwargs | {"report_time": "00:45:00"}))
+
+    monkeypatch.setattr(submitter.scheduler, "submit", changed_report_time)
+    with pytest.raises(ValueError, match="sealed artifact differs"):
+        submitter.submit(s.root, CONFIG)
+    assert len(s.calls) == 3
+
+
+def test_common_default_report_time_preserves_historical_identity(scheduler):
+    s = scheduler
+    s.root.mkdir()
+    policy = cli.campaign.Policy.model_validate_json(CONFIG.read_text())
+    adapter = submitter._PreparedCampaign(s.root, policy, s.plan, {})
+    options = {
+        "inputs": s.root,
+        "account": "test",
+        "concurrency": 2,
+        "campaign": adapter,
+        "policy_type": cli.campaign.Policy,
+    }
+    first = submitter.scheduler.submit(s.root, CONFIG, **options)
+    assert set(first["identity"]) == {
+        "plan_sha256", "commit", "account", "concurrency", "python", "repo",
+        "worker_sha256",
+    }
+    assert "--time=00:05:00" in s.calls[2]
+    assert submitter.scheduler.submit(
+        s.root, CONFIG, **options, report_time="00:05:00"
+    ) == first
     assert len(s.calls) == 3
 
 

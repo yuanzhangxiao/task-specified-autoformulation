@@ -29,6 +29,7 @@ def submit(
     job_prefix="generic-fit",
     run_time="00:35:00",
     prepare_time="00:15:00",
+    report_time="00:05:00",
 ) -> dict:
     """Persist each intent/receipt; uncertain submissions cannot be repeated."""
     root = root.resolve()
@@ -57,6 +58,7 @@ def submit(
         "worker_sha256": hashlib.sha256(worker.read_bytes()).hexdigest(),
         **({"run_time": run_time} if run_time != "00:35:00" else {}),
         **({"prepare_time": prepare_time} if prepare_time != "00:15:00" else {}),
+        **({"report_time": report_time} if report_time != "00:05:00" else {}),
     }
     os.environ.update(
         AF_REPO_ROOT=str(REPO), AF_OUTPUT_ROOT=str(root), AF_COMMIT=commit
@@ -79,7 +81,7 @@ def submit(
                 + {
                     "prepare": prepare_time,
                     "run": run_time,
-                    "report": "00:05:00",
+                    "report": report_time,
                 }[stage],
                 "--export=ALL",
                 "--kill-on-invalid-dep=yes",

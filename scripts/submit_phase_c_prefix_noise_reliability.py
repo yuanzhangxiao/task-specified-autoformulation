@@ -83,6 +83,7 @@ def submit(
         job_prefix="prefix-noise-reliability",
         run_time="00:45:00",
         prepare_time="00:30:00",
+        report_time="00:30:00",
     )
 
 

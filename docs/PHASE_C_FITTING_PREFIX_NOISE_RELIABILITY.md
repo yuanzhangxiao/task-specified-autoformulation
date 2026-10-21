@@ -164,10 +164,12 @@ The launcher prints progress and verifies source checksums and numerical imports
 Each of 36 array tasks requests one CPU, 16 GB and a 45-minute scheduling ceiling;
 concurrency defaults to two. No GPU, LLM, prior snapshot or benchmark test data
 is needed. Uncertain scheduler replies stop for reconciliation.
-The updated repository submitter allows 30 minutes for preparation (verification
-plus the eight test modules). The original `6bd2f8e` archive retains its ten-minute
-setting; use the recovery below for the affected campaign. This scheduler
-allowance is separate from every fitting budget.
+The updated repository submitter allows 30 minutes each for preparation
+(verification plus the eight test modules) and reporting. The original `6bd2f8e`
+archive retains ten-minute preparation and five-minute reporting; use the
+recoveries below for the affected campaign. These scheduler allowances are
+separate from every fitting budget. Other campaigns retain the shared scheduler's
+five-minute report default and unchanged identity format.
 
 The block above is for the first submission. To resume, reuse the original code
 directory: submission identity includes its absolute path. Do not extract a new
@@ -236,6 +238,62 @@ real original bundle and submission code with simulated Slurm replies; repeat
 invocation adds no submissions and preserves original bytes and modification
 times. This does not establish completion on Delta. Changed files pass Ruff;
 repository-wide Ruff retains 37 unrelated findings in `analysis/claude/`.
+
+### Report-only recovery after all 36 runs complete
+
+The recovered preparation `23065423` passed in 9:09. All elements 0–35 of array
+`23065424` completed with exit code 0:0 and saved 36 result files. Report `23065425`
+then reached its five-minute limit. Scientific outcomes remain pending aggregation;
+completed scheduler jobs alone do not establish forecast adequacy.
+
+The report reconstructs and verifies saved operation receipts, selections and
+derived evaluator quantities before atomically writing `summary.json`. It calls
+no fitter, prefix optimizer, forecast integrator or predictive-support optimizer.
+Many sequential reads, hashes and reconstruction checks can be costly on a shared
+filesystem; their contribution to this timeout has not been individually measured.
+
+Upload `phase-c-fitting-m47-report-recovery.tar.gz` to the Phase C directory.
+It contains two standard-library helpers. Extract it **outside the original
+source bundle**, then run:
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+AF_BASE=/work/hdd/bibo/yxiao2/phase_c
+AF_ROOT="$AF_BASE/prefix-noise-reliability-v1"
+AF_HELPER="$AF_BASE/m47-report-recovery"
+mkdir -p "$AF_HELPER"
+tar -xzf "$AF_BASE/phase-c-fitting-m47-report-recovery.tar.gz" -C "$AF_HELPER"
+cd "$AF_HELPER"
+sha256sum -c SHA256SUMS --quiet
+AF_PYTHON=$(jq -er '.value.python' "$AF_ROOT/submission/identity.json")
+"$AF_PYTHON" -u recover_prefix_noise_report.py --root "$AF_ROOT"
+BASH
+```
+
+The helper checks the original source, preparation-recovery receipts and exact
+36-task completion, then submits **only** the original worker's `report` mode:
+one CPU, 16 GB, 30 minutes. It does not reuse expired Slurm dependencies. The
+original manifests, results and operation budgets remain intact. Prior accounting
+and the old summary are saved in `submission/report-timeout-recovery/`, alongside
+new intent/response/job receipts. Repeated invocation reuses the confirmed report
+job; uncertain replies stop for reconciliation rather than duplicate submission.
+
+Local verification passes 205 focused tests across reporting, both recovery
+helpers and the common/M47 schedulers. The report path's no-repeat test rejects
+any attempt to call fitting, inference or forecast work. A separate smoke check
+uses the actual original bundle and saved submission chain with simulated Slurm:
+one report is submitted, repeat invocation submits nothing, and existing files
+retain their bytes and modification times. Successful full reporting on Delta
+still requires the job below to complete.
+
+```bash
+AF_ROOT=/work/hdd/bibo/yxiao2/phase_c/prefix-noise-reliability-v1
+AF_JOB=$(jq -er '.jobs.report' \
+  "$AF_ROOT/submission/report-timeout-recovery/manifest.json")
+sacct -X -j "$AF_JOB" --format=JobID,JobName%48,State,ExitCode,Elapsed,Timelimit
+tail -n 40 "$AF_ROOT/logs/report-retry-${AF_JOB}.err"
+```
 
 After the report completes:
 
