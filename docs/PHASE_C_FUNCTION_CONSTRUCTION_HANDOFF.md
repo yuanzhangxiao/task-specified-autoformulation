@@ -1,5 +1,13 @@
 # Frozen function construction and scoped fitting handoff
 
+Update 21 October: all eight returned repaired packets now enter the separate
+CPU fitting-interface qualification. The public task authorizes EGP/Uii auxiliary
+histories; opt-in auxiliary forcing resolves the older prefix adapter limitation.
+Both initializer families are retained. See
+`PHASE_C_CONSTRUCTION_FITTING_QUALIFICATION.md` for the frozen eight-minute
+diagnostic prefix, public-only inputs and run commands. Historical exports and
+the observations below are retained without rewriting their readiness receipts.
+
 Implemented 20 October 2026. This milestone continues the eight accepted
 initializer declarations from `scope-aware-2`. It constructs executable formulas
 and exports the existing scoped fitting problem. It does not choose which

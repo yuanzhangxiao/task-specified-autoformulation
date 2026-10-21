@@ -13,7 +13,7 @@ from itertools import pairwise
 from time import monotonic
 
 import numpy as np
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from autoformalism.data import Trajectory
 from autoformalism.expressions import compile_candidate
@@ -55,11 +55,23 @@ class PrefixView(StrictSchema):
     external_inputs: Mapping[Identifier, tuple[FiniteFloat, ...]] = Field(
         default_factory=dict
     )
+    auxiliaries: Mapping[Identifier, tuple[FiniteFloat, ...]] = Field(
+        default_factory=dict
+    )
     fixed_covariates: Mapping[Identifier, FiniteFloat] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize_prefix(self, handler):
+        """Preserve historical prefix payloads when auxiliary forcing is absent."""
+        result = handler(self)
+        if not self.auxiliaries:
+            result.pop("auxiliaries", None)
+        return result
 
     @model_validator(mode="after")
     def prefix_arrays(self):
-        _check_arrays(self.time, self.targets, self.external_inputs)
+        _check_arrays(self.time, self.targets, self.external_inputs, self.auxiliaries)
+        _check_auxiliary_schedule(self, self.targets)
         if not np.isfinite(self.cutoff):
             raise ValueError("prefix cutoff must be finite")
         if self.time[-1] > self.cutoff:
@@ -88,11 +100,23 @@ class ForecastSchedule(StrictSchema):
     external_inputs: Mapping[Identifier, tuple[FiniteFloat, ...]] = Field(
         default_factory=dict
     )
+    auxiliaries: Mapping[Identifier, tuple[FiniteFloat, ...]] = Field(
+        default_factory=dict
+    )
     fixed_covariates: Mapping[Identifier, FiniteFloat] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize_schedule(self, handler):
+        """Preserve historical schedule payloads when auxiliary forcing is absent."""
+        result = handler(self)
+        if not self.auxiliaries:
+            result.pop("auxiliaries", None)
+        return result
 
     @model_validator(mode="after")
     def forecast_arrays(self):
-        _check_arrays(self.time, self.external_inputs)
+        _check_arrays(self.time, self.external_inputs, self.auxiliaries)
+        _check_auxiliary_schedule(self, self.initial_targets)
         if not np.isfinite(self.cutoff):
             raise ValueError("forecast cutoff must be finite")
         if set(self.external_inputs) - set(self.policy.future_inputs):
@@ -114,6 +138,33 @@ def _check_arrays(time, *groups) -> None:
         raise ValueError("channel length differs from time")
 
 
+def _check_auxiliary_schedule(
+    view: PrefixView | ForecastSchedule, targets: Mapping
+) -> None:
+    """Require complete allowlisted schedules in the supplied auxiliary role."""
+    if set(view.auxiliaries) != set(view.policy.future_auxiliaries):
+        raise ValueError("auxiliary schedule differs from frozen future allowlist")
+    other_roles = set(targets) | set(view.initial_inputs) | set(view.fixed_covariates)
+    if set(view.auxiliaries) & other_roles:
+        raise ValueError("future auxiliary overlaps a target, input or covariate role")
+    for name, values in view.auxiliaries.items():
+        if view.initial_auxiliaries.get(name) != values[0]:
+            raise ValueError("initial auxiliary differs from schedule")
+
+
+def _validate_policy_row(row: PublicTrajectory, policy: PrefixPolicy) -> None:
+    """Check permission against row roles before copying any future arrays."""
+    if set(policy.future_inputs) - set(row.external_inputs):
+        raise ValueError("future-input allowlist is not supplied external input")
+    if set(policy.future_auxiliaries) - set(row.auxiliaries):
+        raise ValueError("future-auxiliary allowlist is not supplied auxiliary")
+    other_roles = (
+        set(row.targets) | set(row.external_inputs) | set(row.fixed_covariates)
+    )
+    if set(policy.future_auxiliaries) & other_roles:
+        raise ValueError("future auxiliary overlaps a target, input or covariate role")
+
+
 def _initial_fields(row: PublicTrajectory) -> dict:
     return {
         "trajectory_id": row.trajectory_id,
@@ -129,8 +180,7 @@ def _initial_fields(row: PublicTrajectory) -> dict:
 
 def make_prefix(row: PublicTrajectory, policy: PrefixPolicy) -> PrefixView:
     """Copy only observed samples at or before the predeclared cutoff."""
-    if set(policy.future_inputs) - set(row.external_inputs):
-        raise ValueError("future-input allowlist is not supplied external input")
+    _validate_policy_row(row, policy)
     count = sum(t <= row.time[0] + policy.duration for t in row.time)
     return PrefixView(
         **_initial_fields(row),
@@ -140,15 +190,17 @@ def make_prefix(row: PublicTrajectory, policy: PrefixPolicy) -> PrefixView:
         external_inputs={
             name: row.external_inputs[name][:count] for name in policy.future_inputs
         },
+        auxiliaries={
+            name: row.auxiliaries[name][:count] for name in policy.future_auxiliaries
+        },
     )
 
 
 def make_forecast_schedule(
     row: PublicTrajectory, policy: PrefixPolicy
 ) -> ForecastSchedule:
-    """Drop all future target/auxiliary readings at the forecast boundary."""
-    if set(policy.future_inputs) - set(row.external_inputs):
-        raise ValueError("future-input allowlist is not supplied external input")
+    """Drop future targets and retain only explicitly authorized forcing."""
+    _validate_policy_row(row, policy)
     return ForecastSchedule(
         **_initial_fields(row),
         policy=policy,
@@ -157,6 +209,7 @@ def make_forecast_schedule(
         external_inputs={
             name: row.external_inputs[name] for name in policy.future_inputs
         },
+        auxiliaries={name: row.auxiliaries[name] for name in policy.future_auxiliaries},
     )
 
 
@@ -175,13 +228,22 @@ def _boundary(view: PrefixView | ForecastSchedule) -> dict:
 
 
 def _prefix_forcing(view: PrefixView | ForecastSchedule, end: float) -> dict:
-    """Bind every supplied input knot used while estimating the roots."""
+    """Bind every supplied forcing knot used while estimating the roots."""
     count = sum(time <= end for time in view.time)
     return {
         "time": view.time[:count],
         "external_inputs": {
             name: values[:count] for name, values in view.external_inputs.items()
         },
+        **(
+            {
+                "auxiliaries": {
+                    name: values[:count] for name, values in view.auxiliaries.items()
+                }
+            }
+            if view.auxiliaries
+            else {}
+        ),
     }
 
 
@@ -209,6 +271,10 @@ def _trajectory(view: PrefixView | ForecastSchedule) -> Trajectory:
         {
             name: np.full(count, value)
             for name, value in view.initial_auxiliaries.items()
+        }
+        | {
+            name: np.asarray(values, float)
+            for name, values in view.auxiliaries.items()
         },
         inputs,
         dict(view.fixed_covariates),
@@ -271,7 +337,13 @@ def _validate_future(system: SymbolicODE, view: PrefixView | ForecastSchedule) -
     context = system.model.validated.context
     if set(view.policy.future_inputs) - set(context.external_inputs):
         raise ValueError("future forcing must be explicitly declared external input")
-    allowed = set(view.policy.future_inputs) | set(context.fixed_covariates)
+    if set(view.policy.future_auxiliaries) - set(context.auxiliaries):
+        raise ValueError("future forcing must be explicitly declared auxiliary")
+    allowed = (
+        set(view.policy.future_inputs)
+        | set(view.policy.future_auxiliaries)
+        | set(context.fixed_covariates)
+    )
     forbidden = set(system.model.validated.forcing_symbols) - allowed
     if forbidden:
         raise ValueError(
@@ -280,6 +352,11 @@ def _validate_future(system: SymbolicODE, view: PrefixView | ForecastSchedule) -
     missing = set(system.model.validated.forcing_symbols) & set(context.external_inputs)
     if missing - set(view.external_inputs):
         raise ValueError("future forcing schedule is incomplete")
+    missing_auxiliaries = set(system.model.validated.forcing_symbols) & set(
+        context.auxiliaries
+    )
+    if missing_auxiliaries - set(view.auxiliaries):
+        raise ValueError("future auxiliary forcing schedule is incomplete")
 
 
 class TrainingOracle:

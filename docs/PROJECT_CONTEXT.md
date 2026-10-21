@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in returned-construction fitting qualification now retains all eight
+complete saved packets, binds all 16 training/four validation rows, and preserves
+both analytic-map and trajectory-root initializer families. Explicit auxiliary
+forcing permission supports benchmark-supplied EGP/Uii histories without exposing
+future target values. A fixed eight-minute diagnostic prefix gives a common
+validation scoring horizon; no model is preselected, promoted or automatically
+revised. CPU operations have durable budgets and separate numerical/fit outcomes.
+This is a new prefix-evaluation protocol, not a replacement historical score.
+See `PHASE_C_CONSTRUCTION_FITTING_QUALIFICATION.md`; remote fitting is pending.
+
 The opt-in saved-function handoff repair now restores promised consumer gains
 without changing saved function/dependency declarations. Five completed
 initializer graphs migrate exactly offline; only three failed map expressions

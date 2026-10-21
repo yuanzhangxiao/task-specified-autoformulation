@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+`construction-fit-qualification-1` verifies the full returned function/initializer
+history before fitting every complete packet. It seals public train/validation
+data, existing starts, source/runtime identities and a common diagnostic prefix.
+Shared parameters fit only training data; validation can infer only declared
+trajectory roots from prefix observations. Explicit `future_auxiliaries` permits
+publicly authorized schedules in a target-free forecast view, retaining the
+historical default payload hashes when empty. Durable operation reservations
+prevent interruption from renewing budgets. Reports retain all models and
+distinguish numerical availability, predictive error and unassessed mechanism
+compliance. See `PHASE_C_CONSTRUCTION_FITTING_QUALIFICATION.md`.
+
 `saved-construction-functions-1` verifies accepted initializer episodes against
 their complete historical declarations, then compiles immutable signed topology
 into equation-batch function construction with atomic term repair. Graph scope

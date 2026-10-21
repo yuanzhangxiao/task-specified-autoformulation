@@ -1,0 +1,30 @@
+{
+  "protocol": "construction-fit-qualification-policy-1",
+  "population": "returned-eight",
+  "prefix": {
+    "duration": 8.0,
+    "future_inputs": ["meal_rate_g_per_min", "insulin_pmol_per_kg_min"],
+    "future_auxiliaries": ["EGP", "Uii", "E", "Gt"]
+  },
+  "training": {
+    "maximum_calls": 300,
+    "seconds": 600,
+    "verification_seconds": 60
+  },
+  "training_execution": {
+    "search_overall_seconds": 720,
+    "verification_overall_seconds": 90
+  },
+  "inference": {
+    "maximum_calls": 100,
+    "seconds": 60,
+    "verification_seconds": 30
+  },
+  "inference_execution": {
+    "search_overall_seconds": 90,
+    "verification_overall_seconds": 60
+  },
+  "forecast_execution": {"numerical_seconds": 60, "overall_seconds": 90},
+  "reconstruction_execution": {"numerical_seconds": 60, "overall_seconds": 90},
+  "poor_fit_nmse": 1.0
+}
