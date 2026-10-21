@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+`construction-feedback-revision-1` is an explicit opt-in revision boundary after
+fitting qualification. It accepts joint dependency/formula patches on existing
+components, authenticates training-only residual evidence, and atomically checks
+restricted expressions, exact sources, shared uses, public paths and the unchanged
+scoped initializer graph. It preserves verified public-to-compiled identities.
+All eight parents and three revision seeds are retained, with durable cached
+budgets and exact request/reply reconstruction. It exports independent fitting
+packets without running optimization or selecting a model. This does not change
+the fixed-topology contract of the original function-construction stage below.
+See `PHASE_C_TRAINING_FEEDBACK_REVISIONS.md`.
+
 `construction-fit-qualification-1` verifies the full returned function/initializer
 history before fitting every complete packet. It seals public train/validation
 data, existing starts, source/runtime identities and a common diagnostic prefix.

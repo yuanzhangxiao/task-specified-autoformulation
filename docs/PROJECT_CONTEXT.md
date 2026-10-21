@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in training-feedback construction revision pilot revisits dependencies
+and formulas together, allowing justified changes such as `f(I)` to `f(I,Gp)`.
+All eight saved T2-easy models receive three revision seeds, each bounded to one
+proposal plus two mechanical repair retries. Authenticated training-only evidence
+retains optimizer-budget caveats and original modeled-auxiliary identities.
+Unchanged controls, variable/output rosters and scoped initializers are preserved;
+accepted children export for independent fitting without promotion or test access.
+See `PHASE_C_TRAINING_FEEDBACK_REVISIONS.md`. Live results are not yet available.
+
 The opt-in returned-construction fitting qualification now retains all eight
 complete saved packets, binds all 16 training/four validation rows, and preserves
 both analytic-map and trajectory-root initializer families. Explicit auxiliary
