@@ -58,8 +58,11 @@ below a tenth of the best one.
 **Cost.** On a laptop, rolling out one T2 easy system over one trajectory takes
 0.25 to 0.4 s, because the solver restarts wherever an input's slope changes,
 and the insulin input changes slope every minute (300 restarts). A test product
-of 125 similar three-target systems took 4 minutes in 8 processes. The smoke
-measures this on js2.
+of 125 similar three-target systems took 4 minutes in 8 processes. In the
+smokes on js2 on 2026-10-18 (20 iterations), choosing took 2 to 21 seconds in
+the one-target cells, 18 and 60 seconds in T2 hard (154 and 168 systems), and 6
+and 9 minutes in T2 easy (1,344 and 2,288 systems); most systems were stopped
+early.
 
 ## The prompt: two campaigns
 
@@ -106,7 +109,14 @@ Accepted on 2026-10-17, as LLM-SR's search runs every program it scores:
 
 On 2026-10-06, eight replies of the hosted gpt-oss-120b to this prompt with the
 description finished within 1,024 tokens, at 452 to 916 (394 to 820 of them
-reasoning), and all 24 of their equations parsed. So the limit stays upstream's.
+reasoning), and all 24 of their equations parsed. In the smokes on 2026-10-18
+(every cell, 20 iterations), 46 of the 880 replies to the prompt with the
+description reached the limit, 43 of them in the two detention cells (33 and 10
+of 80), and 7 of the 880 to the published prompt; the model's reasoning counts
+toward it. Upstream reads the first three lines of a reply, and 30 of the 53
+cut-off replies had written their three equations first, so about 2% of the
+description campaign's proposed equations were lost. The limit stays
+upstream's, decided on 2026-10-21.
 
 ## Where it departs from the released code
 
@@ -145,24 +155,36 @@ The sealed plan records each, and a report states them.
   - the selection's time and the sealed result.
 
   It also measures an iteration's time in each cell.
-- `configs/phase_c_llm_ode_published_prompt_smoke_v1.json`: the same smoke with the prompt as published. Frozen; not a result.
-- `configs/phase_c_llm_ode_hosted_120b_v1.json`: the main campaign, 8 roster cells × 2 seeds at 200 iterations. Proposed; frozen once the smoke passes and the user and the planning agent sign off.
-- `configs/phase_c_llm_ode_published_prompt_hosted_120b_v1.json`: the second campaign, the same with the prompt as published. Proposed, as above.
+
+  Ran on 2026-10-18 and passed:
+  - all eight tasks sealed complete in 15 minutes;
+  - 880 requests, no cache hits, no failed requests;
+  - every system in the products converted to the evaluator's grammar;
+  - about 99% of the lines upstream reads were equations; lowercase `abs`, which SymPy reads as `Abs`, was the only unusual name;
+  - 46 replies reached the limit (above);
+  - an iteration took 9 to 15 seconds for each target searched.
+- `configs/phase_c_llm_ode_published_prompt_smoke_v1.json`: the same smoke with the prompt as published. Frozen; not a result. Ran beside it on 2026-10-18 and passed: all eight tasks sealed complete in 19 minutes; 880 requests, no cache hits, no failed requests; 7 replies reached the limit.
+- `configs/phase_c_llm_ode_hosted_120b_v1.json`: the main campaign, 8 roster cells × 2 seeds at 200 iterations. Frozen on 2026-10-21, after both smokes passed and the user signed off. No setting changed; the budget's rationale now gives the smokes' measurements.
+- `configs/phase_c_llm_ode_published_prompt_hosted_120b_v1.json`: the second campaign, the same with the prompt as published. Frozen with it.
 
 Run from a clean checkout that no other run is using:
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_smoke_v1.json phase-c-llm-ode-smoke-v1 8
 bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_published_prompt_smoke_v1.json phase-c-llm-ode-published-prompt-smoke-v1 8
+bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_hosted_120b_v1.json phase-c-llm-ode-hosted-120b-v1 8
+bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_published_prompt_hosted_120b_v1.json phase-c-llm-ode-published-prompt-hosted-120b-v1 8
 ```
 
-The last argument is how many tasks run at once. When every task has ended,
-the launcher writes the report to `report.json` in the run's directory.
+The last argument is how many tasks run at once. The two full campaigns run
+side by side, 8 tasks each, as the smokes did. When every task has ended, the
+launcher writes the report to `report.json` in the run's directory.
 
 ## Limitations
 
-- **Selection time grows with the product of the fronts.** The smoke's fronts, after 20 iterations, are smaller than the full run's, so its selection times understate the full run's. If the full run's T2 easy fronts reach 20 equations per target, 8,000 systems, selection could take a few hours when the systems are close in error and few stop early.
-- **Wall-clock limits.** The 30-second limit is wall time, as upstream's alarm is. On a heavily loaded VM a slow system could exceed it and become unselectable. Typical rollouts take under a second.
+- **Selection time grows with the product of the fronts.** After the smokes' 20 iterations the fronts held 8 to 16 equations per target, and T2 easy's 1,344 and 2,288 systems took 6 and 9 minutes. The full run's fronts will be larger: at 25 equations per target, T2 easy has 15,625 systems, about an hour at the smokes' rate, longer if fewer stop early.
+- **Wall-clock limits.** The 30-second limit is wall time, as upstream's alarm is. On a heavily loaded VM a slow system could exceed it and become unselectable. Typical rollouts take under a second; in the published prompt's smoke, 58 of T2 easy's 2,288 systems exceeded the limit.
+- **Replies cut off.** The model's reasoning counts toward upstream's 1,024-token limit. In the smokes it cut off 5% of the replies with the description (41% in the coupled detention cell) and 0.8% of the replies to the published prompt. About 2% of the description campaign's proposed equations were lost.
 - **Unseeded.** Upstream sets no seed, so the two runs per cell are independent and cannot be reproduced exactly.
 - **Raw units.** Pooling the targets in their own units, as upstream does, lets the target with larger values decide the choice in the T2 cells.
 - **A finished search can still be lost.** The selection runs after the search in the same process, so a reboot during selection restarts the whole task. The fronts are in upstream's per-target logs, but nothing yet reruns the selection from them.

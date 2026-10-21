@@ -1,6 +1,6 @@
 {
   "schema_version": "phase-c-vendored-campaign-plan-1",
-  "status": "proposed_pending_review",
+  "status": "frozen_before_calls",
   "development_only": true,
   "release_protocol": "phase-c-development-2",
   "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
@@ -15,7 +15,7 @@
     "unit": "iterations",
     "published_default": 200,
     "declared": 200,
-    "rationale": "The published budget, unreduced. Each iteration asks the model once per island for each searched target; the roster's eight cells have eleven targets, so two seeds make 22 searches and 200 x 4 x 22 = 17,600 requests, each with upstream's 1,024-token output limit. On 2026-10-06 eight replies of the hosted gpt-oss-120b to this prompt with the description finished within it, at 452 to 916 tokens, and all 24 of their equations parsed. The smoke measures the time an iteration takes."
+    "rationale": "The published budget, unreduced. Each iteration asks the model once per island for each searched target; the roster's eight cells have eleven targets, so two seeds make 22 searches and 200 x 4 x 22 = 17,600 requests, each with upstream's 1,024-token output limit. In the smokes on 2026-10-18 (every cell, 20 iterations), 46 of the 880 replies to the prompt with the description reached that limit, 43 of them in the two detention cells, and 7 of the 880 to the published prompt; 30 of the 53 had written their three equations first, so about 2% of the description campaign's proposed equations were lost. The limit stays upstream's, decided on 2026-10-21. An iteration took 9 to 15 seconds for each target searched, so a search takes about 30 to 95 minutes."
   },
   "prompt_policy": {
     "supplies_public_task_specification": false,

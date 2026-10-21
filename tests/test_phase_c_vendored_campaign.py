@@ -765,6 +765,8 @@ def test_the_llm_ode_plans_run_the_published_search_on_the_roster():
     ).model_dump(mode="json")
     for name in ("hosted_120b_v1", "published_prompt_hosted_120b_v1"):
         full = plans[name]
+        # Frozen on 2026-10-21, after both smokes passed.
+        assert full["status"] == "frozen_before_calls"
         assert full["cells"] == roster["cells"] == llm_sr["cells"]
         assert full["repetitions"] == [0, 1]
         assert full["budget"]["declared"] == full["budget"]["published_default"] == 200
@@ -794,6 +796,7 @@ def test_each_llm_ode_smoke_is_its_full_plan_on_one_seed_and_a_short_search():
     ):
         smoke, full = plans[smoke], plans[full]
         assert {key for key in smoke if smoke[key] != full[key]} <= scope
+        assert smoke["status"] == "frozen_before_calls"
         assert smoke["repetitions"] == [0]
         assert smoke["budget"]["declared"] == 20
         assert smoke["cells"] == full["cells"]
