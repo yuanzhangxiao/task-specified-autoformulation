@@ -308,8 +308,8 @@ printf '%s\n' "$AF_REVIEW"
 ```
 
 Keep all starts, failed operations and both policies. `status: complete` means
-the experiment finished, not that every forecast passed. Remote M47 outcomes
-are pending.
+the experiment finished, not that every forecast passed. Returned M47 outcomes
+are recorded below; the recovery instructions remain for provenance.
 
 ## Reporting recovery after the thirty-minute timeout
 
@@ -390,3 +390,104 @@ cache comparisons, missing/changed dependency rejection, and duplicate/uncertain
 submission behavior. The original frozen source bundle also verified two saved
 full-grid smoke tasks and reused both checkpoints without changing the source
 results. These are reporting qualification checks, not new scientific results.
+
+## Returned results, 21 October 2026
+
+The returned `summary.json` contains all 36 unique planned tasks: 35 complete
+and one incomplete. Both policies selected a duration for every task. Reporting
+has therefore produced the aggregate; its `incomplete` status now identifies
+one unavailable numerical forecast verification, not missing result files.
+Group summaries, operation costs and status counts recompute exactly from the
+returned rows. This is a summary-internal consistency check: the original
+operation files and sharded-report checkpoints were not supplied in this upload.
+
+Source summary SHA-256:
+`ca7dc9a24944faee3034eeb8ede9ede7892fcc631e2f8eb2b5bcc52f4c9550f7`.
+Plan SHA-256:
+`40bdb4179eca54c3faaf94dccdaa3ae763ccdc829a34d4fa47fcddafdda2757d`.
+No live LLM calls or test-data access are reported.
+
+### Paired noisy forecast results
+
+The following means use the same available task pairs and the same future
+interval, t>2. Durations are in the synthetic control's time units. They are
+not recommended observation windows for a physiological benchmark.
+
+| Structure | Baseline duration | Added-rule duration | Baseline common NMSE | Added-rule common NMSE | Paired runs |
+| --- | --- | --- | --- | --- | --- |
+| Separated | 1 | 2 | 0.005289 | 0.002408 | 10 |
+| Nearly confounded | 0.2 or 0.5 | 2 | 0.010300 | 0.001484 | 10 |
+| Exactly confounded | 0.2 or 0.5 | 0.5 | 0.005725 | 0.001805 | 9 |
+
+Mean reductions are 54.5%, 85.6% and 68.5%, respectively. There are 27 improved
+run pairs, two ties with identical selected durations, and one unavailable
+pair. Each structure uses five independent noisy acquisitions with two optimizer
+starts, not ten independent acquisitions. Standardized noise is paired across
+structures. Starts select identical durations within each acquisition, and
+their common-horizon scores differ by less than 6.3e-10; the improvement is
+consistent with obtaining more informative observations rather than resolving
+optimizer disagreement.
+
+The exactly confounded group's published added-rule mean, 0.001758, includes
+ten scored tasks whereas its baseline mean includes nine. The table excludes
+the same unavailable task from both policies. It reports task-weighted means;
+it is not an equal-acquisition estimate with a completed pair of starts for
+every acquisition.
+
+All 30 noisy added-rule follow-ups meet the frozen adequacy conditions. The
+baseline has 25 adequate, four inadequate and one unavailable noisy follow-up.
+The four inadequate results are the two starts of two nearly confounded noise
+acquisitions. Separated baseline forecasts already pass in all ten runs, so the
+support check is conservative; its longer window is not proved necessary or
+optimal. The clean tasks select identical durations under both rules and retain
+essentially numerical-precision forecast errors.
+
+Immediate post-prefix windows shift when the chosen duration changes. Their
+errors sometimes worsen; they do not support a claim of uniformly better
+immediate forecasts. The common-horizon comparison above avoids that mismatch.
+
+### Forecast reliability remains distinct from individual-state identification
+
+For nearly confounded noisy controls, mean individual-root L2 error decreases
+from 1.450 to 0.487, but the maximum remains 1.978. For exactly confounded
+controls, mean individual-root error stays approximately 0.762, while maximum
+root-sum error decreases from 0.11659 to 0.03983. Equal decay rates allow the
+data to identify z(0)+r(0) without identifying z(0) and r(0) separately.
+Even the clean exactly confounded controls combine virtually exact predictions
+with substantial individual-root error.
+
+The useful check is whether alternative initials that fit the noisy prefix
+nearly as well could produce substantially different forecasts. It does not
+require every hidden coordinate to be unique. Its support bound remains
+conditional on fitted theta and an exact first reading; it is not a confidence
+interval, a bound against physical truth, or a treatment of shared-parameter
+uncertainty. These synthetic results do not qualify actual construction exports.
+
+### Remaining verification and overhead
+
+Task `exact_confounded_noisy_r100_s0` lacks one baseline forecast verification:
+`followup_w0_followup_1_s2_forecast`. Its prefix inference succeeded, but one
+independent rollout reached the five-second numerical-active wall limit.
+The operation records 9.90 seconds total wall time, 7.09 numerical-active wall
+seconds and only 0.036 CPU seconds. This discrepancy is consistent with execution
+or I/O delays, but does not identify their cause. It is unavailable evidence,
+not proof of a poor scientific model. Retrospective partial scores must not
+replace the strict missing baseline forecast.
+
+All recorded operation accounting is complete: 8,996 operations, 26.53 total
+CPU minutes and 133.54 summed operation-wall minutes. The latter is not campaign
+elapsed time. Checkpoint callbacks account for 80.65% of operation wall time.
+The additional predictive-support checks cost 18.74 CPU seconds in total, about
+1.18% of the recorded CPU cost. Final receipt sealing, report generation and
+scheduler waiting are outside these operation totals; these numbers do not
+measure the cause of the earlier reporting timeouts.
+
+The narrow remaining numerical follow-up is a separately recorded verification
+of that saved endpoint, preserving fitted parameters, inferred roots, policy
+choices, original failure and charged cost. No refit or duration reselection is
+needed. The next current-paper qualification is the separately frozen eight
+returned construction packets described in
+`PHASE_C_CONSTRUCTION_FITTING_QUALIFICATION.md`; retain their eight-minute policy
+rather than retrofitting this analytic linear-control support rule. A later
+reliability experiment should include shared-parameter uncertainty and new roots
+and noise acquisitions before considering a general policy change.
