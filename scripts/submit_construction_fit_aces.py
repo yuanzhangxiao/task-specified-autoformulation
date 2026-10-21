@@ -55,7 +55,7 @@ def runtime_identity() -> dict:
         "python_version": platform.python_version(),
         "packages": {
             name: importlib.metadata.version(name)
-            for name in ("numpy", "scipy", "pandas", "sympy", "pydantic")
+            for name in ("numpy", "scipy", "pandas", "pydantic", "casadi")
         },
     }
     if mode == "container":

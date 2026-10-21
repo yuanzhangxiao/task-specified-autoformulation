@@ -92,6 +92,14 @@ reply. The native Python preflight checks `ctypes`, scientific imports and the
 real campaign import, with an ordered compiler/Python module fallback. An
 explicit existing CPU container can be selected instead.
 
+The original `0879f4d` launcher unnecessarily imported and pinned SymPy, which is
+not used by this fitting path. The launch-only correction removes that check
+and pins the actual CasADi dependency. A failure at the import preflight occurs
+before preparation or scheduler submission; it starts no fitting jobs. Apply
+the verified launcher patch only before the launch identity or submission intent
+has been written. Models, source data, numerical policies and the campaign's
+scientific source hash are unchanged by this script-only correction.
+
 From the delivered pinned bundle on ACES:
 
 ```bash

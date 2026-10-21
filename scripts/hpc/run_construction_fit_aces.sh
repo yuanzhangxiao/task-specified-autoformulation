@@ -11,7 +11,7 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 export AF_FIT_RUNTIME=${AF_FIT_RUNTIME:-native}
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
-AF_PROBE='import ctypes, numpy, scipy, pandas, sympy, pydantic; from autoformalism.research import construction_fit_qualification'
+AF_PROBE='import ctypes, numpy, scipy, pandas, pydantic; from autoformalism.research import construction_fit_qualification'
 case "$AF_FIT_RUNTIME" in
   native)
     if ! "$AF_PYTHON" -c "$AF_PROBE" >/dev/null 2>&1; then

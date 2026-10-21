@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+from textwrap import dedent
 from types import SimpleNamespace
 
 import pytest
@@ -190,6 +193,63 @@ def test_worker_preflight_and_index_routing_use_cpu_python(tmp_path):
     assert args[args.index("--index") + 1] == "6"
     assert str(REPO / "scripts/submit_construction_fit_aces.py") in args
     assert str(REPO / "scripts/qualify_construction_fitting.py") in args
+
+
+def test_actual_preflight_and_runtime_identity_do_not_require_sympy(tmp_path):
+    environment = worker_environment(tmp_path)
+    worker = REPO / "scripts/hpc/run_construction_fit_aces.sh"
+    subprocess.run(["bash", str(worker), "verify"], env=environment, check=True)
+    args = (tmp_path / "arguments.txt").read_text().splitlines()
+    assert args[0] == "-c"
+    blocker = dedent(
+        """\
+        import importlib.abc
+        import importlib.metadata
+        import json
+        import sys
+
+        class MissingSymPy(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "sympy" or fullname.startswith("sympy."):
+                    raise ModuleNotFoundError("SymPy is unavailable", name=fullname)
+
+        sys.meta_path.insert(0, MissingSymPy())
+        actual_version = importlib.metadata.version
+
+        def package_version(name):
+            if name.lower() == "sympy":
+                raise importlib.metadata.PackageNotFoundError(name)
+            return actual_version(name)
+
+        importlib.metadata.version = package_version
+        """
+    )
+    probe = blocker + args[1] + "\n" + dedent(
+        """\
+        from scripts.submit_construction_fit_aces import runtime_identity
+
+        assert "autoformalism.research.construction_fit_qualification" in sys.modules
+        assert "sympy" not in sys.modules
+        print(json.dumps(runtime_identity()))
+        """
+    )
+    environment.update(
+        AF_PYTHON=sys.executable,
+        AF_FIT_RUNTIME="native",
+        PYTHONPATH=os.pathsep.join((str(REPO), str(REPO / "src"))),
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=REPO,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    runtime = json.loads(result.stdout)
+    assert runtime["selected_python"] == sys.executable
+    assert runtime["packages"]["casadi"] == importlib.metadata.version("casadi")
+    assert "sympy" not in runtime["packages"]
 
 
 def test_native_import_failure_loads_compiler_before_python(tmp_path):
