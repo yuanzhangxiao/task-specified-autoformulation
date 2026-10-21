@@ -4,7 +4,14 @@ set -euo pipefail
 export AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 [[ -d "$AF_GROUP" ]] || { echo 'Run on ACES with AF_GROUP set to writable scratch.' >&2; exit 2; }
-export AF_OUTPUT_ROOT=${AF_OUTPUT_ROOT:-$AF_GROUP/phase-c-construction-revision-v1}
+# Generic AF_OUTPUT_ROOT may still name a previous fitting campaign in the
+# interactive shell. Only the task-specific override selects this campaign.
+export AF_REVISION_ROOT=${AF_REVISION_ROOT:-$AF_GROUP/phase-c-construction-revision-v1}
+if [[ -n "${AF_OUTPUT_ROOT:-}" && "$AF_OUTPUT_ROOT" != "$AF_REVISION_ROOT" ]]; then
+  printf 'Ignoring inherited AF_OUTPUT_ROOT=%s; revision output is %s.\n' "$AF_OUTPUT_ROOT" "$AF_REVISION_ROOT"
+fi
+export AF_OUTPUT_ROOT="$AF_REVISION_ROOT"
+printf 'Construction revision output: %s\n' "$AF_OUTPUT_ROOT"
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 AF_CLI="$AF_REPO_ROOT/scripts/construction_feedback_revision.py"

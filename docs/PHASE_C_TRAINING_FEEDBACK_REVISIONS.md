@@ -106,6 +106,15 @@ root and submits one H100 job (8 CPUs, 64 GiB, two hours; 90-minute worker).
 Compiler caches use node-local job storage. `status`, `report`, and `inspect`
 never initiate generation. `inspect` creates `inspection.tar.gz`.
 
+Set `AF_REVISION_ROOT` to override this campaign's output directory. The launcher
+ignores an inherited generic `AF_OUTPUT_ROOT` (which may still name an earlier
+fitting campaign), then exports its resolved revision directory to the shared
+worker. Existing fitting inputs use a different seal format; a revision reader's
+`artifact digest differs` at a fitting directory does not establish corruption.
+Do not delete or rewrite those inputs. For the original `3627487` bundle, which
+predates this launcher fix, explicitly set both `AF_REVISION_ROOT` and
+`AF_OUTPUT_ROOT` to `phase-c-construction-revision-v1` for run/status/inspect.
+
 The submitter records intent before submission and refuses another submission
 wave after an ambiguous scheduler reply. Reconcile `squeue`/`sacct` and the saved
 intent instead of blindly submitting again. The worker itself supports

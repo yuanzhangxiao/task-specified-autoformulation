@@ -1,9 +1,11 @@
 """The revision launcher requests one bounded H100 allocation with no fit jobs."""
 
 import json
+import os
 import subprocess
 import sys
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -128,6 +130,114 @@ def test_shell_entrypoints_validate_and_use_shared_server():
     assert "phase-c-construction-revision-v1" in start
     assert "inputs/revision-inputs.json" in start
     assert '"${AF_GCCCORE_MODULE:-GCCcore/13.2.0}"' in start
+
+
+@pytest.fixture
+def launcher(tmp_path):
+    """Run the real shell dispatch with local assets and a recording Python stub."""
+    group = tmp_path / "group scratch"
+    old_root = group / "phase-c-construction-fitting-v1"
+    old_root.mkdir(parents=True)
+    old_inputs = old_root / "inputs.json"
+    old_inputs.write_bytes(b'{"sha256":"old-fitting-seal","value":{}}\n')
+    original = old_inputs.read_bytes()
+    image, cache = tmp_path / "image.sif", tmp_path / "cache"
+    image.write_bytes(b"local test image")
+    snapshot = (
+        cache
+        / "hub/models--openai--gpt-oss-20b/snapshots"
+        / submission.REVISION
+        / "config.json"
+    )
+    snapshot.parent.mkdir(parents=True)
+    snapshot.write_text("{}")
+    log = tmp_path / "python-calls.jsonl"
+    stub = tmp_path / "python-stub"
+    stub.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "record = {'argv': sys.argv[1:], "
+        "'output_root': os.environ.get('AF_OUTPUT_ROOT'), "
+        "'revision_root': os.environ.get('AF_REVISION_ROOT')}\n"
+        "with open(os.environ['AF_TEST_CALL_LOG'], 'a') as stream:\n"
+        "    stream.write(json.dumps(record) + '\\n')\n"
+        "if (Path(sys.argv[1]).name == 'construction_feedback_revision.py' "
+        "and sys.argv[2] == 'prepare'):\n"
+        "    sys.exit(int(os.environ.get('AF_TEST_PREPARE_EXIT', '0')))\n"
+    )
+    stub.chmod(0o755)
+
+    def invoke(command, *, revision_root=None, prepare_exit=0):
+        log.write_text("")
+        env = {
+            **os.environ,
+            "AF_GROUP": str(group),
+            "AF_OUTPUT_ROOT": str(old_root),
+            "AF_PYTHON": str(stub),
+            "AF_VLLM_IMAGE": str(image),
+            "AF_HF_HOME": str(cache),
+            "AF_TEST_CALL_LOG": str(log),
+            "AF_TEST_PREPARE_EXIT": str(prepare_exit),
+        }
+        env.pop("AF_REVISION_ROOT", None)
+        if revision_root is not None:
+            env["AF_REVISION_ROOT"] = str(revision_root)
+        result = subprocess.run(
+            [
+                "bash",
+                str(
+                    submission.REPO / "scripts/hpc/start_construction_revision_aces.sh"
+                ),
+                command,
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert old_inputs.read_bytes() == original
+        return result, [json.loads(line) for line in log.read_text().splitlines()]
+
+    return invoke, group
+
+
+@pytest.mark.parametrize("command", ["run", "report", "inspect"])
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_launcher_isolates_revision_root_from_stale_generic_root(
+    launcher, command, explicit_root
+):
+    invoke, group = launcher
+    override = group / "custom revision" if explicit_root else None
+    expected = str(override or group / "phase-c-construction-revision-v1")
+    result, calls = invoke(command, revision_root=override)
+    assert result.returncode == 0, result.stderr
+    assert calls
+    assert all(call["output_root"] == expected for call in calls)
+    assert all(call["revision_root"] == expected for call in calls)
+    rooted = [call["argv"] for call in calls if "--root" in call["argv"]]
+    assert len(rooted) == (2 if command == "run" else 1)
+    assert all(args[args.index("--root") + 1] == expected for args in rooted)
+    if command == "run":
+        assert Path(rooted[0][0]).name == "construction_feedback_revision.py"
+        assert rooted[0][1] == "prepare"
+        assert Path(rooted[1][0]).name == "submit_construction_revision_aces.py"
+    else:
+        assert Path(rooted[0][0]).name == "construction_feedback_revision.py"
+        assert rooted[0][1] == command
+
+
+def test_launcher_prepare_failure_never_reaches_submission(launcher):
+    invoke, group = launcher
+    result, calls = invoke("run", prepare_exit=37)
+    assert result.returncode == 37
+    assert [Path(call["argv"][0]).name for call in calls] == [
+        "construction_feedback_revision.py",
+        "harmony_vocab.py",
+        "construction_feedback_revision.py",
+    ]
+    assert calls[-1]["argv"][1] == "prepare"
+    assert calls[-1]["output_root"] == str(group / "phase-c-construction-revision-v1")
 
 
 def test_execution_identity_cannot_be_changed(setup, monkeypatch):
