@@ -310,3 +310,83 @@ printf '%s\n' "$AF_REVIEW"
 Keep all starts, failed operations and both policies. `status: complete` means
 the experiment finished, not that every forecast passed. Remote M47 outcomes
 are pending.
+
+## Reporting recovery after the thirty-minute timeout
+
+The recovered prepare job `23065423` and all 36 tasks in array `23065424`
+completed. Both reporting jobs timed out: `23065425` at five minutes and
+`23071311` at thirty minutes. The summary timestamp remained October 20 at
+16:26, with zero recorded tasks. This is the old summary: the original reporter
+publishes only after reconstructing every task, so a timeout preserves that file.
+It is not evidence of lost fitting results or failed numerical outcomes.
+
+The reporter checks hundreds of operation records per task in a serial loop.
+Two existing full-grid local smoke tasks each contain 257 operations and require
+773 JSON reads; reconstructing a task locally took approximately 0.7 seconds
+without profiling. That CPU cost alone does not explain Delta's thirty-minute
+timeout. Shared-filesystem stalls remain plausible, not established. No numerical
+search or ODE integration occurs in reporting.
+
+The reporting-only sidecar now submits 36 independent validation tasks, with at
+most two running concurrently, and one reducer. Each requests one CPU, 16 GB and
+one hour. This ceiling accommodates slow storage; it is not a numerical budget.
+Every validation uses the original frozen campaign's reconstruction/checks and
+seals a task checkpoint with dependency hashes. Resume requires identical source
+files and reuses verified checkpoints. The reducer checks all checkpoint seals,
+identities and current dependency inventories, then invokes the original report
+aggregation through a strictly checked cache. Original results, selections,
+operation ledgers and scientific source remain unchanged. No fitting, inference,
+forecast, support search, LLM call or benchmark regeneration is submitted.
+
+The helper prints progress and records reporting overhead separately from the
+experiment's numerical cost. Periodic Python stack traces expose where a future
+stall occurs. It cannot cure an unavailable storage server. A missing, changed
+or invalid checkpoint stops final publication and leaves the previous summary
+intact. All report checkpoints live under `report-sharded-v1/`; the submission
+journal is separate at `submission/sharded-report-v1/`. The snapshots audit saved
+results, not numerical success probabilities or scientific correctness.
+
+Upload `phase-c-fitting-m47-sharded-report.tar.gz` to the Delta Phase C directory,
+then run:
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+AF_BASE=/work/hdd/bibo/yxiao2/phase_c
+AF_ROOT="$AF_BASE/prefix-noise-reliability-v1"
+AF_HELPER="$AF_BASE/m47-sharded-report"
+mkdir -p "$AF_HELPER"
+tar -xzf "$AF_BASE/phase-c-fitting-m47-sharded-report.tar.gz" -C "$AF_HELPER"
+cd "$AF_HELPER"
+sha256sum -c SHA256SUMS --quiet
+AF_PYTHON=$(jq -er '.value.python' "$AF_ROOT/submission/identity.json")
+"$AF_PYTHON" -u recover_prefix_noise_sharded.py --root "$AF_ROOT"
+BASH
+```
+
+This verifies the confirmed earlier chain, submits the validation array, then
+submits a reducer dependent on its successful completion. Repeat invocation
+returns the same confirmed jobs; uncertain submissions require reconciliation.
+
+```bash
+AF_ROOT=/work/hdd/bibo/yxiao2/phase_c/prefix-noise-reliability-v1
+AF_IDS=$(jq -er '.jobs | [.check,.reduce] | join(",")' \
+  "$AF_ROOT/submission/sharded-report-v1/manifest.json")
+sacct -X -j "$AF_IDS" \
+  --format=JobID,JobName%36,State,ExitCode,Elapsed,Timelimit
+find "$AF_ROOT/report-sharded-v1/checkpoints" -maxdepth 1 \
+  -type f -name '*.json' | wc -l
+```
+
+After the reducer completes, read the updated `summary.json`. If anything fails,
+provide the relevant `logs/report-check-*.out/.err` or
+`logs/report-reduce-*.out/.err` and report progress files. Do not rerun fitting.
+The review archive should include `report-sharded-v1` as well as `submission`,
+original results, plan, inputs, summary and logs.
+
+Local verification covers exact equality with original summary aggregation,
+unchanged scientific files, resume without reconstruction, finite/type-strict
+cache comparisons, missing/changed dependency rejection, and duplicate/uncertain
+submission behavior. The original frozen source bundle also verified two saved
+full-grid smoke tasks and reused both checkpoints without changing the source
+results. These are reporting qualification checks, not new scientific results.
