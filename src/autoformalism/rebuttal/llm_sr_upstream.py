@@ -1834,7 +1834,7 @@ def evaluate(data: dict) -> float:
 @equation.evolve
 def equation({signature}, params: np.ndarray) -> np.ndarray:
     """ Mathematical function for the time derivative of {target}
-
+{instruction}
     Args:
 {argument_docs}
         params: Array of numeric constants or parameters to be optimized
@@ -1842,9 +1842,15 @@ def equation({signature}, params: np.ndarray) -> np.ndarray:
     Return:
         A numpy array representing the time derivative of {target}.
     """
-    {initial} = {initial_expression}
-    return {initial}
+{body}
 '''
+
+#: The one line the single-expression form adds to the evolved function's
+#: docstring, which every prompt shows on its first function.
+SINGLE_EXPRESSION_INSTRUCTION = (
+    "    Write the body as one return statement: a single mathematical\n"
+    "    expression of the arguments and params, with no other statements.\n"
+)
 
 
 def specification_variable(channel: str, index: int) -> str:
@@ -1863,6 +1869,7 @@ def build_specification(
     target: str,
     *,
     max_params: int = MAX_NPARAMS,
+    single_expression: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """Render one Phase-B specification, and the variable to channel mapping.
 
@@ -1871,6 +1878,10 @@ def build_specification(
     therefore unavoidable rather than a modification, and their own examples
     carry a description of the system, so including the public task text
     matches their protocol.
+
+    ``single_expression`` renders the paper's "w/o Program" form: the starting
+    function returns its expression directly, and its docstring asks for one
+    return statement (``SINGLE_EXPRESSION_INSTRUCTION``).
     """
     if target not in channels:
         raise ValueError(f"target {target!r} is not among the channels")
@@ -1894,6 +1905,15 @@ def build_specification(
     )
     # Named after the derivative it computes, as upstream names its `dv`.
     derivative = variables[channels.index(target)]
+    initial_expression = " + ".join(
+        [f"params[{index}] * {variable}" for index, variable in enumerate(variables)]
+        + [f"params[{len(variables)}]"]
+    )
+    body = (
+        f"    return {initial_expression}"
+        if single_expression
+        else f"    d{derivative} = {initial_expression}\n    return d{derivative}"
+    )
     specification = SPECIFICATION_TEMPLATE.format(
         description=description.strip(),
         max_params=max_params,
@@ -1902,13 +1922,31 @@ def build_specification(
         signature=", ".join(f"{variable}: np.ndarray" for variable in variables),
         target=target,
         argument_docs=argument_docs,
-        initial="d" + derivative,
-        initial_expression=" + ".join(
-            [
-                f"params[{index}] * {variable}"
-                for index, variable in enumerate(variables)
-            ]
-            + [f"params[{len(variables)}]"]
-        ),
+        instruction=SINGLE_EXPRESSION_INSTRUCTION if single_expression else "",
+        body=body,
     )
     return specification, dict(zip(variables, channels, strict=True))
+
+
+def single_expression_refusal(
+    function_source: str, inputs: dict[str, str]
+) -> str | None:
+    """Why a sample is not one expression of the current values, or ``None``.
+
+    The paper's "w/o Program" form: the evolved function's body, past its
+    docstring, must be one return statement, and the non-executing reader must
+    turn its expression into an equation of the current values in the
+    baseline grammar -- elementwise, with no loop, branch, helper, row access
+    or reduction. Nothing is executed. ``inputs`` maps the function's argument
+    names to channel names, as ``build_specification`` returns it.
+    """
+    try:
+        statements = _parse_body(equation_body(function_source))
+        if len(statements) != 1 or not isinstance(statements[0], ast.Return):
+            return "the body is not one return statement"
+        if statements[0].value is None:
+            return "the return statement has no expression"
+        convert_program(ast.unparse(statements[0]), inputs, None)
+    except InexpressibleProgram as exc:
+        return f"not an expression of the current values: {exc}"
+    return None

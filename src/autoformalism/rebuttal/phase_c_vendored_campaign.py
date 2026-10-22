@@ -398,6 +398,36 @@ class PaperSettings(BaseModel):
         )
 
 
+class HypothesisForm(BaseModel):
+    """LLM-SR's "w/o Program" ablation: every hypothesis one expression.
+
+    Shojaee et al. (ICLR 2025, Sec. 3.5, Fig. 6) ablate the program form with
+    a variant that "restricts LLM hypothesis generation to single-line
+    mathematical expressions", on one problem with GPT-3.5; neither the paper
+    nor the released code says how. Here their search, prompts, evaluator and
+    fit run unchanged except in three declared places: the starting function
+    returns one expression; its docstring, which every prompt shows, asks for
+    one return statement; and a sample whose evolved function is anything else
+    -- more statements, or an expression the non-executing reader cannot turn
+    into an equation of the current values -- is scored as a failed run before
+    it executes, as their evaluator scores a program that raises.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    form: Literal["single_expression"]
+    rationale: str = Field(min_length=1)
+
+    def qualification(self) -> str:
+        """The statement a report of such a campaign carries."""
+        return (
+            'LLM-SR in the "w/o Program" form of its paper\'s ablation, '
+            "reconstructed: each hypothesis is one return statement whose "
+            "expression the reader turns into an equation of the current values, "
+            "and any other sample is scored as a failed run before it executes"
+        )
+
+
 class SystemSelection(BaseModel):
     """LLM-ODE's system chosen by the rule its released code applies.
 
@@ -450,6 +480,22 @@ def llm_ode_selection_settings(plan: dict) -> dict[str, float | int]:
         "seconds_per_rollout": selection.seconds_per_trajectory,
         "workers": selection.workers,
     }
+
+
+def llm_sr_hypothesis_settings(plan: dict) -> dict[str, bool]:
+    """Whether a sealed LLM-SR plan asks for one expression per hypothesis."""
+    declared = plan.get("hypothesis_form")
+    if declared is None:
+        return {"single_expression": False}
+    return {
+        "single_expression": HypothesisForm.model_validate(declared).form
+        == "single_expression"
+    }
+
+
+def llm_sr_method_label(plan: dict) -> str:
+    """The method name a sealed LLM-SR plan's results carry."""
+    return "llm_sr_expression" if plan.get("hypothesis_form") else "llm_sr"
 
 
 def llm_sr_recovery_settings(plan: dict) -> dict[str, bool]:
@@ -507,6 +553,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
     program_rollout: ProgramRollout | None = None
     #: LLM-SR only; absent means their code's own settings.
     paper_settings: PaperSettings | None = None
+    #: LLM-SR only; absent means programs, as LLM-SR proposes them.
+    hypothesis_form: HypothesisForm | None = None
     #: LLM-ODE only, and required there: how its system is chosen.
     system_selection: SystemSelection | None = None
     cells: tuple[PhaseCBaselineCell, ...] = Field(min_length=1)
@@ -551,10 +599,11 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             self.regression_table is not None
             or self.paper_settings is not None
             or self.program_rollout is not None
+            or self.hypothesis_form is not None
         ):
             raise ValueError(
-                "a regression table, a program rollout and the paper's settings "
-                "are declared for LLM-SR only"
+                "a regression table, a program rollout, the paper's settings and "
+                "a hypothesis form are declared for LLM-SR only"
             )
         if (self.method == "llm_ode") != (self.system_selection is not None):
             raise ValueError(
@@ -612,6 +661,8 @@ class PhaseCVendoredCampaignPlan(BaseModel):
             notes.append(self.program_rollout.qualification())
         if self.paper_settings is not None:
             notes.append(self.paper_settings.qualification())
+        if self.hypothesis_form is not None:
+            notes.append(self.hypothesis_form.qualification())
         if self.system_selection is not None:
             notes.append(self.system_selection.qualification())
         return tuple(notes)

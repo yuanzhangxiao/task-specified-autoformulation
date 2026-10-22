@@ -49,6 +49,7 @@ from autoformalism.rebuttal.llm_sr_programs import EXECUTION as PROGRAM_EXECUTIO
 from autoformalism.rebuttal.phase_c_baselines import PhaseCBaselineCell
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     endpoint_environment,
+    llm_sr_method_label,
     load_development,
     load_phase_c_vendored_plan,
     require_endpoint,
@@ -346,13 +347,13 @@ def _search_and_seal(
             equations = outcome["equations"]
             payload = {
                 "candidate": equation_candidate(
-                    "llm_sr", equations, context
+                    llm_sr_method_label(sealed["plan"]), equations, context
                 ).model_dump(mode="json"),
                 # Coefficients are refitted into the expressions, so none remain.
                 "parameters": {},
             }
         selection = BaselineDevelopmentResult(
-            method="llm_sr",
+            method=llm_sr_method_label(sealed["plan"]),
             benchmark_id=row["benchmark_id"],
             tier=row["tier"],
             seed=row["repetition"],

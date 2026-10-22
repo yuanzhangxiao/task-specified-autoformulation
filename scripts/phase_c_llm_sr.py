@@ -23,6 +23,7 @@ from autoformalism.rebuttal.llm_sr_driver import build_searcher
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     CACHING_ENDPOINTS,
     OUTAGE_PATIENCE_SECONDS,
+    llm_sr_hypothesis_settings,
     llm_sr_recovery_settings,
     llm_sr_search_settings,
     llm_sr_transport_settings,
@@ -84,6 +85,7 @@ def _searcher(
         **llm_sr_transport_settings(sealed["plan"]),
         **llm_sr_search_settings(sealed["plan"]),
         **llm_sr_recovery_settings(sealed["plan"]),
+        **llm_sr_hypothesis_settings(sealed["plan"]),
     )
 
 

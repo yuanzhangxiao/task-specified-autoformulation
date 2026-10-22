@@ -162,6 +162,52 @@ programs is a declared exception for this baseline, agreed on 2026-10-09:
 - The exception covers only the programs LLM-SR selected, only after the allowlist, and only in the worker process.
 - The repository's scan for dynamic execution (`tests/test_ode_compiler.py`) names the worker as its one exception and allows it exactly one call. Anything else in the package that executes text still fails the scan.
 
+## The "w/o Program" form: one expression per hypothesis
+
+Asked for by the user on 2026-10-22, to run beside the program form as its own
+labelled row, `llm_sr_expression`. The paper's ablation has this variant: "The
+'w/o Program' variant, which restricts LLM hypothesis generation to
+single-line mathematical expressions" (Sec. 3.5, Fig. 6, on Oscillation 2 with
+GPT-3.5). Neither the paper nor the released code says how it was built, and
+the code's `specs/` holds only numpy and torch program specifications. So this
+is a reconstruction, declared in the plan's `hypothesis_form` block, that
+changes LLM-SR in three places only:
+
+1. **The starting function returns one expression** (`return params[0] * Gp + …`)
+   instead of assigning and then returning it.
+2. **Its docstring asks for one.** The evolved function's docstring, which
+   upstream shows on the first function of every prompt, gains: "Write the body
+   as one return statement: a single mathematical expression of the arguments
+   and params, with no other statements."
+3. **Only such samples are evaluated.** A subclass of their sandbox
+   (`llm_sr_driver.single_expression_sandbox`) answers any other sample with
+   `(None, False)`, the answer their evaluator gets from a program that
+   raises, so it is never registered. "Such" means: past its docstring, the
+   body is one return statement, and our non-executing reader turns its
+   expression into an equation of the current values, so no loop, branch,
+   helper, row access, comparison or reduction. Nothing is executed to decide
+   it. Refusals are counted by reason in each search's record.
+
+Everything else is the frozen main plan's: PySR's table in time order, the
+prompts, islands, the paper's temperature and cluster period, their BFGS fit,
+10,000 samples per target, and LLM-SR's own selection. Every pick is an
+equation of the current values, so it is rolled out by the shared solver, as
+PySR's are, and the mechanism tests read it as written, with no transcription.
+
+Plans:
+- `configs/phase_c_llm_sr_expression_smoke_v1.json`: smoke v5's cells (T1 easy;
+  T2 hard, two targets) at 400 samples per target. Frozen. It shows whether
+  gpt-oss writes one-line expressions often enough, and what share the form
+  refuses.
+- `configs/phase_c_llm_sr_expression_hosted_120b_v1.json`: the full roster, two
+  seeds, 10,000 samples per target. Proposed, pending review. Its cost is about
+  the main run's: 220,000 samples and about 55,000 requests, or three to four
+  days with all 22 searches at once if the service holds.
+
+```bash
+bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1 3
+```
+
 ## Settings
 
 | Setting | Paper | Released code | Phase C plan |

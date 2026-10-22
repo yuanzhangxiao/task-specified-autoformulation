@@ -42,9 +42,11 @@ patience.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import time
+from collections import Counter
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -84,6 +86,7 @@ from autoformalism.rebuttal.llm_sr_upstream import (
     evaluate_expression,
     refit_program,
     sample_yield,
+    single_expression_refusal,
     training_error,
 )
 from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
@@ -200,6 +203,51 @@ def _transport(
         module.LocalLLM._do_request = original
 
 
+def _evolved_source(program: str, function: str) -> str:
+    """The evolved function's text inside one of their runnable programs."""
+    try:
+        module = ast.parse(program)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return ""
+    return next(
+        (
+            ast.unparse(node)
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == function
+        ),
+        "",
+    )
+
+
+def single_expression_sandbox(
+    base: type, inputs: dict[str, str], refused: Counter
+) -> type:
+    """Their sandbox, run only on a sample that is one expression of the present.
+
+    The paper's "w/o Program" form. Their evaluator scores a sample by calling
+    ``sandbox.run`` and treats ``(None, False)`` as a program that failed,
+    which it never registers. A sample whose evolved function is not one return
+    statement that the non-executing reader turns into an equation of the
+    current values (``single_expression_refusal``) gets that answer before
+    anything runs; every other sample runs in their sandbox unchanged. Refusals
+    are counted by reason in ``refused``.
+    """
+
+    class SingleExpressionSandbox(base):
+        def run(self, program, function_to_run, function_to_evolve, inputs_,
+                test_input, timeout_seconds, **kwargs):
+            reason = single_expression_refusal(
+                _evolved_source(program, function_to_evolve), inputs
+            )
+            if reason is not None:
+                refused[reason.split(":")[0]] += 1
+                return None, False
+            return super().run(program, function_to_run, function_to_evolve,
+                               inputs_, test_input, timeout_seconds, **kwargs)
+
+    return SingleExpressionSandbox
+
+
 def build_searcher(
     *,
     upstream_root: Path,
@@ -216,6 +264,7 @@ def build_searcher(
     cluster_sampling_temperature_period: int | None = None,
     num_evaluators: int | None = None,
     program_rollout: bool = False,
+    single_expression: bool = False,
 ):
     """Bind the pinned checkout to our data; returns a campaign searcher.
 
@@ -227,7 +276,10 @@ def build_searcher(
     `before_search` runs before each target search that actually starts, so a
     run that only assembles finished searches contacts no endpoint.
     `program_rollout` follows a plan's declaration: a selected program that
-    reads the history is run as one rather than refused.
+    reads the history is run as one rather than refused. `single_expression`
+    is the paper's "w/o Program" form, which a plan declares
+    (``HypothesisForm``): a one-line starting program, a docstring asking for
+    one, and only such samples evaluated.
     """
     import sys
 
@@ -290,8 +342,11 @@ def build_searcher(
                 before_search()
             set_aside_unfinished_search(log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
-            specification, _ = build_specification(description, channels, target)
+            specification, mapping = build_specification(
+                description, channels, target, single_expression=single_expression
+            )
             (log_dir / "specification.txt").write_text(specification, encoding="utf-8")
+            refused: Counter = Counter()
 
             dataset = {
                 "data": {
@@ -300,7 +355,12 @@ def build_searcher(
                 }
             }
             class_config = config_lib.ClassConfig(
-                llm_class=sampler.LocalLLM, sandbox_class=evaluator.LocalSandbox
+                llm_class=sampler.LocalLLM,
+                sandbox_class=(
+                    single_expression_sandbox(evaluator.LocalSandbox, mapping, refused)
+                    if single_expression
+                    else evaluator.LocalSandbox
+                ),
             )
             accounting = ShimAccounting(log=CallLog(log_dir / "llm_calls.jsonl"))
             started_utc = _utc_now()
@@ -347,6 +407,11 @@ def build_searcher(
                     "search_seconds": round(monotonic() - running["started"], 1),
                     "started_utc": started_utc,
                     "finished_utc": _utc_now(),
+                    **(
+                        {"single_expression_refusals": dict(refused)}
+                        if single_expression
+                        else {}
+                    ),
                 },
             )
             running.update(accounting=ShimAccounting(), started=None)
@@ -654,6 +719,7 @@ def _accounting(
     """
     calls = dict.fromkeys(CALL_COUNTS, 0)
     written = scored = 0
+    refusals: dict[str, int] = {}
     accounting: ShimAccounting = running["accounting"]
     requests, samples, failures = (
         accounting.requests, accounting.samples, accounting.failures
@@ -678,6 +744,8 @@ def _accounting(
         failures += record["transport_failures"]
         for reason, count in record["transport_failure_reasons"].items():
             reasons[reason] = reasons.get(reason, 0) + count
+        for reason, count in record.get("single_expression_refusals", {}).items():
+            refusals[reason] = refusals.get(reason, 0) + count
         seconds += record["search_seconds"]
         starts.append(datetime.fromisoformat(record["started_utc"]))
         finishes.append(datetime.fromisoformat(record["finished_utc"]))
@@ -694,6 +762,9 @@ def _accounting(
         "search_seconds": round(seconds, 1),
         "inexpressible_targets": inexpressible,
     }
+    if refusals:
+        # The "w/o Program" form: samples refused before they were evaluated.
+        value["single_expression_refusals"] = refusals
     if running["started"] is None and len(starts) == len(targets):
         value["wall_seconds"] = round(
             (max(finishes) - min(starts)).total_seconds(), 1
