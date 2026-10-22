@@ -1,8 +1,9 @@
 # Phase C external baselines: public mechanism tests
 
-Protocol: `phase-c-baseline-mechanisms-1`. Status: **built, not yet run.** The
-LLM-SR transcriptions are `proposed_pending_review`; the assessment runs after
-the user and the planning agent agree to this protocol and the transcriptions.
+Protocol: `phase-c-baseline-mechanisms-1`. Status: **run on js2 on 2026-10-22
+at the user's request, before review** (results below). The LLM-SR
+transcriptions are still `proposed_pending_review`; a change after review is a
+new protocol version in a new root, reported beside this one.
 
 This applies to every external baseline's sealed Phase C pick the same finite
 public mechanism tests our own Phase C construction baseline gets
@@ -200,6 +201,38 @@ the transcription's glucose went negative. Task 4's program copies the previous
 row through a filter of weight 1e-11; the decay-matched `T` of 0.04 min dropped
 the one-row delay, and the transcription diverged (1e12). Matching the mean
 delay fixed both. For the slow T1 filters the two rules differ by a few 1e-4.
+
+## Results (js2, 2026-10-22)
+
+Plan `c90cb0ab2f6caa956847946a9d6eb87e1f0f82d5219249f4a3beab0cf26dcabc`, source
+`951e793`, root `~/af/runs/phase-c-baseline-mechanisms-v1`; all 96 rows assessed
+in under a minute. Confirmed = the fraction of a cell's public mechanism
+requirements confirmed; per method, case means over the two runs, then the
+mean and sample SD over the eight cells. A failed run confirms nothing.
+
+| Method | Runs completed | Runs confirming every requirement | Confirmed, mean (SD) | Possible, mean |
+|---|---:|---:|---:|---:|
+| SINDy | 14/16 | 0/16 | 0.042 (0.118) | 0.242 |
+| PySR | 13/16 | 0/16 | 0.073 (0.137) | 0.444 |
+| D3 | 16/16 | 5/16 | 0.460 (0.264) | 0.656 |
+| LLM-ODE, description prompt | 16/16 | 4/16 | 0.271 (0.454) | 0.544 |
+| LLM-ODE, published prompt | 16/16 | 0/16 | 0.125 (0.231) | 0.325 |
+| LLM-SR (through the transcriptions) | 15/16 | 5/16 | 0.429 (0.405) | 0.633 |
+
+Confirmed per cell (seed 0 / seed 1; "fail" is a failed run):
+
+| Method | T1 easy | T1 hard | T2 easy | T2 hard | CSTR | Alien | Det. coupled | Det. independent |
+|---|---|---|---|---|---|---|---|---|
+| SINDy | 0/0 | 0/0 | 0/0 | 0/0 | fail/fail | 0/0 | 0/0 | 0.33/0.33 |
+| PySR | 0/0 | 0/0 | 0.5/fail | 0/fail | 0/0 | 0/0 | fail/0 | 0.33/0.33 |
+| D3 | 1/0 | 1/0 | 0.5/0 | 0.5/0.5 | 1/0 | 1/1 | 0/0.2 | 0.33/0.33 |
+| LLM-ODE, description | 0/0 | 0/0 | 1/1 | 0/0 | 0/0 | 1/1 | 0/0 | 0.33/0 |
+| LLM-ODE, published | 0/0 | 0/0 | 0.5/0.5 | 0.5/0.5 | 0/0 | 0/0 | 0/0 | 0/0 |
+| LLM-SR | 1/1 | 0/0 | 1/fail | 0.5/0.5 | 0/0 | 1/1 | 0.2/0 | 0.33/0.33 |
+
+T2 hard's delayed insulin action is capped at unresolved for every method (its
+identification limit), so 0.5 is that cell's maximum. No baseline confirms
+every basin predicate.
 
 ## Running it
 

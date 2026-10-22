@@ -141,6 +141,21 @@ adaptive solver's error is reported beside it as a sensitivity check, never as
 the score; on validation the two differ only for CSTR seed 1 (0.62 against
 2.9e20).
 
+**Revised by the user the same day: results always come from an accurate
+solver.** The CSTR seed 1 case showed why: on one validation trajectory its
+model sits 3.7 K below an ignition point (it reads the reactant concentration
+from the data, so nothing stops a runaway); solved accurately it crosses the
+point and runs away, while steps of 0.1 stay just below it. Halving the step
+already ignites it. So the four current-value picks (CSTR, detention
+independent) are rolled out with the shared adaptive solver, as PySR's are.
+A program that reads the history is defined only on the grid, its filters
+advancing one row at a time, so it has no more accurate rollout of its own;
+how its score is reported (the grid, with its accurately solved ODE
+transcription beside it, or that transcription instead) is for the user to
+decide. A check on 2026-10-22 found the solver matters nowhere else: re-solving
+every SINDy, PySR and LLM-ODE pick on validation with Radau at rtol 1e-10
+changed no NMSE by more than 0.1%.
+
 A plan without `program_rollout`, such as the budget pilot and smokes v3 and v4,
 keeps the earlier recovery: the reader refits each pick without running it, and
 a pick that reads the history is refused as inexpressible.
