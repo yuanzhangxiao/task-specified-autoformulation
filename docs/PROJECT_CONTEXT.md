@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The 22 October 2026 opt-in parent–child fitting comparison retains all eight
+T2-easy parents and 16 accepted revisions. It uses the e7067f3 numerical routines
+with identical fresh two-start allowances, exact gain reduction, precision-aware
+checks and original-equation verification. Training error freezes each endpoint
+before four validation forecasts with a common eight-minute, roots-only prefix.
+Reports retain failures, paired changes and parent-balanced median/unscaled MAD;
+historical fits, test data and model promotion remain outside this experiment.
+See `PHASE_C_PARENT_CHILD_FITTING.md`.
+
 The opt-in construction fitting reliability follow-up preserves the eight frozen
 models and both parameter-coordinate arms. It replays disputed endpoints under
 stricter original-equation solver tolerances, separates negligible derivative

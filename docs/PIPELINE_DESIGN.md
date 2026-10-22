@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+`construction-parent-child-fit-1` (22 October 2026) authenticates the complete
+eight-parent/16-child roster, then applies matched fresh fitting allowances using
+the e7067f3 affine/reliability kernels. Durable operations separate qualification,
+search, original-equation verification and diagnosis. Training alone freezes the
+endpoint; a typed observation prefix estimates only held-out roots, followed by
+an independently checked target-free forecast. Reporting pairs every child with
+its unchanged parent and retains unavailable outcomes. This opt-in comparison
+does not select models or alter production defaults. See
+`PHASE_C_PARENT_CHILD_FITTING.md`.
+
 `construction-fitting-reliability-1` is a separate training-only follow-up to
 affine construction continuation. Authenticated inherited endpoints and failed
 verification candidates receive bounded tolerance-ladder replay. A precision-aware

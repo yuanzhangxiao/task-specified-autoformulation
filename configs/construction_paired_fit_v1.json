@@ -1,0 +1,20 @@
+{
+  "population": "returned-24",
+  "search_seconds": 600.0,
+  "diagnostic_seconds": 120.0,
+  "verification_seconds": 180.0,
+  "inference_seconds": 60.0,
+  "forecast_seconds": 180.0,
+  "maximum_calls": 1000,
+  "inference_calls": 100,
+  "numerical": {
+    "maximum_calls": 1000,
+    "seconds": 600.0,
+    "verification_seconds": 180.0,
+    "rtol": 1e-09,
+    "atol": 1e-11,
+    "solver_tolerance": 1e-07
+  },
+  "arm": "affine_reduced",
+  "perturbation_seed": 1729
+}
