@@ -1,5 +1,15 @@
 # Phase 1 Pipeline Design
 
+`construction-fitting-reliability-1` is a separate training-only follow-up to
+affine construction continuation. Authenticated inherited endpoints and failed
+verification candidates receive bounded tolerance-ladder replay. A precision-aware
+derivative policy distinguishes search safety from parameter confidence; typed
+invalid trial handling allows trust-region rejection without accepting nonfinite
+states. One new continuation per arm starts from the best independently verified
+checkpoint. Source artifacts/costs and incomplete history are preserved separately.
+All behavior is opt-in; equations, domains, initializer semantics and production
+defaults stay unchanged. See `PHASE_C_CONSTRUCTION_FITTING_RELIABILITY.md`.
+
 `construction-feedback-revision-1` is an explicit opt-in revision boundary after
 fitting qualification. It accepts joint dependency/formula patches on existing
 components, authenticates training-only residual evidence, and atomically checks

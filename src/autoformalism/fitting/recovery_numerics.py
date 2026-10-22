@@ -22,6 +22,10 @@ class DomainViolation(ValueError):
         super().__init__("material parameter-domain violation")
 
 
+class NumericalInvalidTrial(ValueError):
+    """A numerical overflow/nonfinite trial, not a domain or programming error."""
+
+
 def restore(anchor, units, q, lower, upper, names, events):
     """Project only bounded floating-point reconstruction error, never inputs."""
     step = units * q
@@ -124,8 +128,14 @@ def search(
     normalized_objective=False,
     objective_multiplier: float | None = None,
     poor_fit: stationary.Policy | None = None,
+    reject_invalid_trials: bool = False,
 ):
-    """Joint or projected TRF; charge started attempts, distinguish completed calls."""
+    """Joint or projected TRF; optionally shrink after unusable numerical trials.
+
+    Only numerical nonfiniteness is rejectable, and only after a finite starting
+    evaluation. TRF receives an infinite residual and no Jacobian for that trial;
+    deadlines, domain violations and other errors still terminate the attempt.
+    """
     if optimizer_scaling not in {"jacobian", "fixed_coordinates", "guarded_relative"}:
         raise ValueError("unknown optimizer scaling")
     multiplier = (
@@ -145,6 +155,8 @@ def search(
     accepted = None
     scaling = {}
     history, stationarity = [], None
+    started = failed = 0
+    rejected, invalid_cached = [], None
 
     class Reached(Exception):
         pass
@@ -165,12 +177,30 @@ def search(
             )
             | ({"accepted_steps": steps} if record_steps else {})
             | ({"solver_scaling": scaling} if scaling else {})
+            | rejection_receipt()
+        )
+
+    def rejection_receipt():
+        """Keep failed starts visible without serializing an infinite penalty."""
+        return (
+            {
+                "calls_started": started,
+                "failed_calls": failed,
+                "rejected_calls": len(rejected),
+                "rejected_trials": rejected,
+                "reject_invalid_trials": True,
+            }
+            if reject_invalid_trials
+            else {}
         )
 
     def evaluate(q):
         nonlocal count, best, cached, projection, accepted, stationarity
+        nonlocal started, failed, invalid_cached
         if cached is not None and np.array_equal(q, cached[0]):
             return cached[1:]
+        if invalid_cached is not None and np.array_equal(q, invalid_cached[0]):
+            return invalid_cached[1:]
         if count >= calls or monotonic() >= deadline:
             raise TimeoutError("search allowance exhausted")
         vector = anchor.copy()
@@ -185,14 +215,47 @@ def search(
         )
         count += 1
         save()
-        if profile is None:
-            r, j = oracle.evaluate(vector, deadline)
-            j = j[:, free]
-        else:
-            vector, r, j, projection = profile.evaluate(vector, deadline)
-        value = float(np.mean(r * r))
-        if not np.isfinite(value) or not np.isfinite(j).all():
-            raise ValueError("nonfinite fitted residual or derivative")
+        started += 1
+        try:
+            if profile is None:
+                r, j = oracle.evaluate(vector, deadline)
+                j = j[:, free]
+            else:
+                vector, r, j, projection = profile.evaluate(vector, deadline)
+            if reject_invalid_trials and (
+                r.ndim != 1
+                or not len(r)
+                or j.shape != (len(r), len(free))
+                or (cached is not None and r.shape != cached[1].shape)
+            ):
+                raise ValueError("invalid fitted residual or derivative shape")
+            with np.errstate(over="ignore", invalid="ignore"):
+                value = float(np.mean(r * r))
+                scaled_jacobian = j * units
+            if not np.isfinite(value) or not np.isfinite(scaled_jacobian).all():
+                raise NumericalInvalidTrial("nonfinite fitted residual or derivative")
+        except BaseException as error:
+            failed += 1
+            if not (
+                reject_invalid_trials
+                and isinstance(error, NumericalInvalidTrial)
+                and cached is not None
+            ):
+                raise
+            if monotonic() >= deadline:
+                raise TimeoutError("search allowance exhausted") from error
+            # A failed trial cannot enter best/history, supply curvature, or
+            # overwrite the finite evaluation used by accepted-step callbacks.
+            rejected.append(
+                {
+                    "attempt": count,
+                    "parameters_sha256": content_sha256(oracle.parameters(vector)),
+                    "error": f"{type(error).__name__}: {error}"[-1000:],
+                }
+            )
+            invalid_cached = (q.copy(), np.full(cached[1].shape, np.inf), None)
+            save()
+            return invalid_cached[1:]
         if best is None or value < best["training_nmse"]:
             best = {"parameters": oracle.parameters(vector), "training_nmse": value}
         if telemetry:
@@ -224,7 +287,7 @@ def search(
                 }
             )
         save()
-        cached = (q.copy(), r, j * units)
+        cached = (q.copy(), r, scaled_jacobian)
         if record_steps and accepted is None:
             accepted = cached
         if value <= target and (acceptable is None or acceptable(r)):
@@ -247,6 +310,13 @@ def search(
                 )
                 raise Stationary
         return cached[1:]
+
+    def evaluate_jacobian(q):
+        """Never provide fabricated curvature for a rejected residual trial."""
+        derivative = evaluate(q)[1]
+        if derivative is None:
+            raise NumericalInvalidTrial("Jacobian requested for rejected trial")
+        return derivative * factor
 
     def callback(intermediate_result):
         """Accepted displacement and local linear prediction; no extra evaluations."""
@@ -298,7 +368,7 @@ def search(
         solved = least_squares(
             lambda q: evaluate(q)[0] * factor,
             np.zeros(len(free)),
-            jac=lambda q: evaluate(q)[1] * factor,
+            jac=evaluate_jacobian,
             bounds=(
                 (oracle.lower[free] - anchor[free]) / units,
                 (oracle.upper[free] - anchor[free]) / units,
@@ -339,6 +409,7 @@ def search(
         **detail,
         "domain_events": domain_events,
         "projection": projection,
+        **rejection_receipt(),
         **({"solver_scaling": scaling} if scaling else {}),
         **({"completed_calls": len(trace), "evaluations": trace} if telemetry else {}),
         **(

@@ -1,5 +1,14 @@
 # Autoformalism Phase 1 Implementation Context
 
+The opt-in construction fitting reliability follow-up preserves the eight frozen
+models and both parameter-coordinate arms. It replays disputed endpoints under
+stricter original-equation solver tolerances, separates negligible derivative
+uncertainty from material errors, and rejects nonfinite search trials before
+continuing verified incumbents. Original campaign receipts/budgets stay immutable;
+the missing cancelled arm retains unknown historical cost. No validation/test
+access, scientific revisions, or production default changes. See
+`PHASE_C_CONSTRUCTION_FITTING_RELIABILITY.md`.
+
 The opt-in training-feedback construction revision pilot revisits dependencies
 and formulas together, allowing justified changes such as `f(I)` to `f(I,Gp)`.
 All eight saved T2-easy models receive three revision seeds, each bounded to one

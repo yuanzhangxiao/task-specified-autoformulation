@@ -19,6 +19,7 @@ from scipy.linalg import expm, expm_frechet
 from autoformalism.data import Trajectory
 from autoformalism.fitting import prefix_initialization as kernel
 from autoformalism.fitting.public_fitting import content_sha256
+from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
 from autoformalism.fitting.simulation import trajectory_forcing
 from autoformalism.schemas.prefix_initialization import PrefixFitProblem
@@ -34,7 +35,7 @@ def _check_deadline(deadline: float | None) -> None:
 def _finite(values: np.ndarray, label: str) -> np.ndarray:
     """Fail closed on an unusable state, derivative or transition matrix."""
     if not np.isfinite(values).all():
-        raise ValueError(f"nonfinite scoped affine {label}")
+        raise NumericalInvalidTrial(f"nonfinite scoped affine {label}")
     return values
 
 
@@ -241,7 +242,14 @@ class TrainingOracle(_AffineEvaluation, kernel.TrainingOracle):
         policy: kernel.NumericalPolicy,
     ) -> None:
         super().__init__(problem, training, policy)
+        self.training, self.numerical_policy = training, policy
         self._initialize_affine(tuple(range(len(self.system.names))), self.indices)
+
+    def with_numerical_policy(self, policy: kernel.NumericalPolicy) -> TrainingOracle:
+        """Recompile an independent replay oracle with explicitly changed tolerances."""
+        if not isinstance(policy, kernel.NumericalPolicy):
+            raise TypeError("typed numerical policy required")
+        return type(self)(self.problem, self.training, policy)
 
 
 class PrefixOracle(_AffineEvaluation, kernel.PrefixOracle):

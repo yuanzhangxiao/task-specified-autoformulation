@@ -7,6 +7,7 @@ separate, and a failed new point never displaces a verified incumbent.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 
 import numpy as np
@@ -68,9 +69,11 @@ def predetermined_starts(oracle, retained):
 class _TimedOracle:
     """Track actual numerical calls while excluding measured checkpoint writes."""
 
-    def __init__(self, oracle, budget):
+    def __init__(self, oracle, budget, *, reject_invalid_trials=False):
         self.oracle, self.budget = oracle, budget
+        self.reject_invalid_trials = reject_invalid_trials
         self.started = self.completed = self.failed = 0
+        self._residual_shape = None
 
     def __getattr__(self, name):
         return getattr(self.oracle, name)
@@ -82,13 +85,37 @@ class _TimedOracle:
             self.started += 1
             try:
                 result = self.oracle.evaluate(vector, active_deadline)
+                if self.reject_invalid_trials:
+                    residual, derivative = (np.asarray(item) for item in result)
+                    if (
+                        residual.ndim != 1
+                        or not residual.size
+                        or derivative.shape != (residual.size, len(vector))
+                        or (
+                            self._residual_shape is not None
+                            and residual.shape != self._residual_shape
+                        )
+                    ):
+                        raise ValueError("invalid fitted residual or derivative shape")
+                    with np.errstate(over="ignore", invalid="ignore"):
+                        loss = np.mean(residual * residual)
+                    if not np.isfinite(loss) or not np.isfinite(derivative).all():
+                        raise recovery_numerics.NumericalInvalidTrial(
+                            "nonfinite fitted residual or derivative"
+                        )
+                    self._residual_shape = residual.shape
+                    result = residual, derivative
             except BaseException:
                 self.failed += 1
                 raise
             self.completed += 1
             return result
 
-        value = self.budget.numerical(run)
+        try:
+            value = self.budget.numerical(run)
+        except recovery_numerics.NumericalInvalidTrial:
+            self.budget.check()
+            raise
         self.budget.check()
         return value
 
@@ -140,10 +167,12 @@ def _finish(result, budget, checkpoint, stage, interrupted=None):
     return result
 
 
-def search(oracle, start, seconds, maximum_calls, checkpoint):
+def search(
+    oracle, start, seconds, maximum_calls, checkpoint, *, reject_invalid_trials=False
+):
     """One bounded TRF attempt with evaluation and accepted-step receipts."""
     budget = prefix_execution._budget(seconds, seconds + 120)
-    timed = _TimedOracle(oracle, budget)
+    timed = _TimedOracle(oracle, budget, reject_invalid_trials=reject_invalid_trials)
     last = {"best": None, "calls": 0, "stop_reason": "not_started"}
 
     def save(partial):
@@ -180,6 +209,7 @@ def search(oracle, start, seconds, maximum_calls, checkpoint):
             optimizer_scaling="guarded_relative",
             objective_multiplier=1.0,
             poor_fit=poor_fit.Policy(),
+            reject_invalid_trials=reject_invalid_trials,
         )
     except Exception as error:
         result = last
@@ -274,7 +304,141 @@ def verify_endpoint(original, oracle, parameters, seconds, checkpoint):
     return _finish(result, budget, checkpoint, "verification", interrupted)
 
 
-def qualification(original, oracle, retained, seconds, checkpoint):
+_ENDPOINT_TOLERANCE_LADDER = ((1e-9, 1e-11), (1e-11, 1e-13), (1e-12, 1e-14))
+
+
+def verify_endpoint_ladder(
+    original: prefix_affine.TrainingOracle,
+    oracle: prefix_affine.TrainingOracle | gains.ReducedTrainingOracle,
+    parameters: Mapping[str, float],
+    seconds: float,
+    checkpoint: Callable[[dict], None],
+) -> dict:
+    """Replay one frozen endpoint at predeclared increasingly tight tolerances.
+
+    All construction and original-equation Radau replays share one allowance.
+    Only a failed agreement check advances the ladder; no fitting is performed,
+    and the prediction/loss acceptance thresholds never change. The original
+    oracle is reconstructed with each explicit policy, never mutated in place.
+    """
+    budget = prefix_execution._budget(seconds, seconds + 60)
+    vector = oracle.vector(parameters)
+    lifted = to_original(original, oracle, parameters)
+    result = {
+        "parameters": lifted,
+        "effective_parameters": deepcopy(parameters),
+        "reduced_vector": vector.tolist(),
+        "original_equations_verified": False,
+        "calls_attempted": 0,
+        "calls_started": 0,
+        "calls_completed": 0,
+        "methods": ["certified_affine", "original_Radau"],
+        "verification_protocol": "original-equation-tolerance-ladder-1",
+        "tolerance_ladder": [
+            {"rtol": rtol, "atol": atol} for rtol, atol in _ENDPOINT_TOLERANCE_LADDER
+        ],
+        "replays": [],
+        "no_search_performed": True,
+    }
+
+    def save():
+        """Persist each reservation and completed replay within the same budget."""
+        budget.callback(
+            lambda: checkpoint(deepcopy(result) | {"timing": budget.snapshot()})
+        )
+
+    def replay(method, tolerance=None):
+        """Count actual starts separately from durable pre-call reservations."""
+        record = {"method": method, "status": "reserved"}
+        if tolerance is not None:
+            record.update(rtol=tolerance[0], atol=tolerance[1])
+        result["replays"].append(record)
+        result["calls_attempted"] += 1
+        save()
+
+        def evaluate(deadline):
+            result["calls_started"] += 1
+            record["status"] = "started"
+            try:
+                if tolerance is None:
+                    residual, _ = oracle.evaluate(vector, deadline, jacobian=False)
+                else:
+                    policy = original.numerical_policy.model_copy(
+                        update={"rtol": tolerance[0], "atol": tolerance[1]}
+                    )
+                    reference = original.with_numerical_policy(policy)
+                    budget.check()
+                    residual, _ = reference.evaluate(
+                        reference.vector(lifted),
+                        deadline,
+                        jacobian=False,
+                        method="Radau",
+                    )
+                if not np.isfinite(residual).all():
+                    raise ValueError("nonfinite verified residual")
+                with np.errstate(over="ignore", invalid="ignore"):
+                    loss = float(np.mean(residual * residual))
+                if not np.isfinite(loss):
+                    raise ValueError("nonfinite verified loss")
+            except BaseException as error:
+                record.update(status="failed", error=f"{type(error).__name__}: {error}")
+                raise
+            result["calls_completed"] += 1
+            record.update(status="complete", training_nmse=loss)
+            return residual, loss
+
+        value = budget.numerical(evaluate)
+        budget.check()
+        return value
+
+    interrupted = None
+    try:
+        reference, loss = replay("certified_affine")
+        result["training_nmse"] = loss
+        save()
+        for tolerance in _ENDPOINT_TOLERANCE_LADDER:
+            alternate, other_loss = replay("original_Radau", tolerance)
+            gap = float(np.max(np.abs(reference - alternate), initial=0))
+            loss_gap = abs(loss - other_loss)
+            passed = gap <= 1e-7 and loss_gap <= max(
+                1e-12, 1e-8 * max(loss, other_loss)
+            )
+            agreement = {
+                "alternate_training_nmse": other_loss,
+                "solver_loss_discrepancy": loss_gap,
+                "solver_prediction_discrepancy": gap,
+                "original_equations_verified": passed,
+            }
+            result.update(agreement)
+            result["replays"][-1].update(agreement)
+            save()
+            if passed:
+                columns = reference.reshape(-1, len(original.system.channels))
+                result["per_target_normalized_mse"] = dict(
+                    zip(
+                        original.system.channels,
+                        np.mean(columns**2, axis=0).tolist(),
+                        strict=True,
+                    )
+                )
+                break
+    except Exception as error:
+        _invalidate(result, error, "verification")
+    except BaseException as error:
+        interrupted = error
+        _invalidate(result, error, "verification")
+    result.update(
+        verification_calls_attempted=result["calls_attempted"],
+        verification_calls_started=result["calls_started"],
+        verification_calls_completed=result["calls_completed"],
+        verification_calls_failed=result["calls_started"] - result["calls_completed"],
+    )
+    return _finish(result, budget, checkpoint, "verification", interrupted)
+
+
+def qualification(
+    original, oracle, retained, seconds, checkpoint, *, adequacy_policy=None
+):
     """Check the lift at the inherited point and audit actual optimizer derivatives."""
     start = to_effective(original, oracle, retained)
     vector = oracle.vector(start)
@@ -308,12 +472,18 @@ def qualification(original, oracle, retained, seconds, checkpoint):
                 oracle.upper,
                 deadline,
                 coordinate_units=oracle.units,
+                policy=adequacy_policy,
                 residual_only=lambda x, d: oracle.evaluate(x, d, jacobian=False)[0],
             )
         )
         result["derivative_check"] = public._jsonable(check)
         budget.check()
-        result["passed"] = gap <= 1e-7 and check.status == "passed"
+        derivative_qualified = (
+            check.search_qualified
+            if adequacy_policy is not None and adequacy_policy.precision_aware
+            else check.status == "passed"
+        )
+        result["passed"] = gap <= 1e-7 and derivative_qualified
     except Exception as error:
         _invalidate(result, error, "qualification")
     except BaseException as error:
@@ -322,7 +492,16 @@ def qualification(original, oracle, retained, seconds, checkpoint):
     return _finish(result, budget, checkpoint, "qualification", interrupted)
 
 
-def diagnose(oracle, parameters, verification, search_result, seconds, checkpoint):
+def diagnose(
+    oracle,
+    parameters,
+    verification,
+    search_result,
+    seconds,
+    checkpoint,
+    *,
+    adequacy_policy=None,
+):
     """Assess the exact retained endpoint; a weak rank is distinct from convergence."""
     budget = prefix_execution._budget(seconds, seconds + 60)
     result, interrupted = {"assessment": None}, None
@@ -336,6 +515,7 @@ def diagnose(oracle, parameters, verification, search_result, seconds, checkpoin
                 oracle.upper,
                 deadline,
                 coordinate_units=oracle.units,
+                policy=adequacy_policy,
                 residual_only=lambda x, d: oracle.evaluate(x, d, jacobian=False)[0],
             )
         )
@@ -367,6 +547,7 @@ def diagnose(oracle, parameters, verification, search_result, seconds, checkpoin
             or stop in {"budget_limited", "numerical_failure", "interrupted"},
             history=history,
             coordinate_units=oracle.units,
+            policy=adequacy_policy,
         )
         budget.check()
         result["assessment"] = public._jsonable(assessment)

@@ -423,3 +423,194 @@ def test_scoped_affine_oracle_audit_covers_shared_maps_and_per_row_roots():
     assert len(result.checked_indices) == len(oracle.names) == 4
     assert result.jacobian_calls_started == 1
     assert result.residual_only_calls_started == 17
+
+
+def precision_check(evaluate, x=(0,), lower=(-2,), upper=(2,), **kwargs):
+    """Run the predeclared precision audit without changing legacy test helpers."""
+    return adequacy.derivative_check(
+        evaluate,
+        x,
+        lower,
+        upper,
+        monotonic() + 5,
+        policy=adequacy.Policy(precision_aware=True),
+        **kwargs,
+    )
+
+
+def test_precision_opt_in_preserves_legacy_serialization_and_probe_counts():
+    policy = adequacy.Policy()
+    assert not any(name.startswith("precision_") for name in policy.model_dump())
+    assert adequacy.Policy.model_validate(policy.model_dump()) == policy
+    check = adequacy.derivative_check(linear, [0], [-2], [2], monotonic() + 5)
+    assert check.status == "passed" and check.calls_started == 5
+    assert not check.directions[0].precision_probes
+    precision = precision_check(linear)
+    assert precision.status == "passed" and precision.search_qualified
+    assert precision.calls_started == precision.calls_completed == 13
+    assert [probe.multiplier for probe in precision.directions[0].precision_probes] == [
+        1,
+        0.5,
+        16,
+        8,
+        1024,
+        512,
+    ]
+    assert (
+        adequacy.Policy.model_validate_json(precision.policy.model_dump_json())
+        == precision.policy
+    )
+
+
+def test_unresolved_nearzero_column_qualifies_search_without_parameter_confidence():
+    def tiny(x, deadline):
+        return np.array([1 + 1e-14 * x[0]]), np.array([[1e-14]])
+
+    legacy = adequacy.derivative_check(tiny, [0], [-2], [2], monotonic() + 5)
+    check = precision_check(tiny)
+    assert legacy.status == "failed"
+    assert check.status == "inconclusive" and check.search_qualified
+    assert check.inconclusive_indices == (0,) and check.failed_indices == ()
+    assert not check.parameter_information_qualified
+    assert 0 < check.gradient_error_bound_inf < 1e-9
+    assert check.directions[0].reference_probe_index == 5
+    result = run(
+        tiny, [0], lower=[-2], upper=[2], derivative=check, policy=check.policy
+    )
+    assert result.classification == "locally_converged_poor_fit"
+    assert result.parameter_information == "derivative_precision_unresolved"
+    assert not result.parameter_information_qualified
+    assert result.parameter_condition_number is None
+    assert result.maximum_residual_column_correlation == pytest.approx(1)
+    assert result.correlation_unresolved_indices == (0,)
+    assert result.projected_gradient_upper_bound < check.policy.gradient_tolerance
+    # The certificate is specific to this opt-in and exact declared domain.
+    assert run(tiny, [0], derivative=check).classification == "optimization_unresolved"
+    mismatched = run(tiny, [0], derivative=check, policy=check.policy)
+    assert "reduced_derivative_audit_unqualified_or_mismatched" in mismatched.reasons
+
+
+@pytest.mark.parametrize("slope,offset", [(1e-12, 0), (1e-9, 1), (1, 1)])
+def test_precision_policy_rejects_resolvable_wrong_derivatives(slope, offset):
+    def wrong(x, deadline):
+        return np.array([offset + slope * x[0]]), np.zeros((1, 1))
+
+    result = precision_check(wrong, x=(1,))
+    assert result.status == "failed" and not result.search_qualified
+    assert result.failed_indices == (0,) and not result.inconclusive_indices
+    assert result.directions[0].precision_status == "failed"
+
+
+def test_precision_tiny_kink_cannot_hide_behind_absolute_or_gradient_floor():
+    def kink(x, deadline):
+        return np.array([1e-12 * abs(x[0])]), np.zeros((1, 1))
+
+    result = precision_check(kink)
+    assert result.status == "failed" and not result.search_qualified
+    assert result.gradient_error_bound_inf == 0
+
+
+def test_unresolved_column_must_bound_mean_loss_gradient_in_fixed_units():
+    def tiny(x, deadline):
+        return np.array([1 + 1e-14 * x[0]]), np.array([[1e-14]])
+
+    ordinary = precision_check(tiny)
+
+    # Change physical coordinates consistently while preserving dimensionless
+    # fixed optimizer units; the uncertainty bound must remain the same.
+    def rescaled(x, deadline):
+        return np.array([1 + 1e-14 * x[0] / 10]), np.array([[1e-15]])
+
+    rescaled_check = precision_check(
+        rescaled, lower=(-20,), upper=(20,), coordinate_units=[10]
+    )
+    assert rescaled_check.gradient_error_bound_inf == pytest.approx(
+        ordinary.gradient_error_bound_inf, rel=1e-8
+    )
+
+    def huge_residual(x, deadline):
+        return np.array([1e6 + 1e-14 * x[0]]), np.array([[1e-14]])
+
+    huge = precision_check(huge_residual)
+    assert huge.status == "inconclusive" and not huge.search_qualified
+    assert huge.gradient_error_bound_inf > 1e-8
+
+
+@pytest.mark.parametrize("point,scheme", [(0, "forward"), (1, "backward")])
+def test_precision_bound_probes_are_inward_and_gradient_uncertainty_is_projected(
+    point,
+    scheme,
+):
+    sign = 1 if point == 0 else -1
+
+    def bounded(x, deadline):
+        assert 0 <= x[0] <= 1
+        return np.array([1 + sign * 1e-14 * x[0]]), np.array([[sign * 1e-14]])
+
+    check = precision_check(bounded, x=(point,), lower=(0,), upper=(1,))
+    assert check.status == "inconclusive" and check.search_qualified
+    assert check.directions[0].scheme == scheme
+    assert check.calls_started == check.calls_completed == 7
+    result = run(
+        bounded, [point], lower=[0], upper=[1], derivative=check, policy=check.policy
+    )
+    assert result.projected_gradient_inf == 0
+    # Nominal outward descent does not discard the possible inward gradient.
+    assert 0 < result.projected_gradient_upper_bound < 1e-8
+
+
+def test_precision_missing_coverage_never_qualifies_and_calls_remain_accounted():
+    def two(x, deadline):
+        return np.ones(2) + x * 1e-14, np.eye(2) * 1e-14
+
+    check = precision_check(
+        two,
+        x=(0, 0),
+        lower=(-2, -2),
+        upper=(2, 2),
+        directions=[0],
+        residual_only=lambda x, deadline: two(x, deadline)[0],
+    )
+    assert check.status == "incomplete" and not check.search_qualified
+    assert check.inconclusive_indices == (0,) and check.omitted_indices == (1,)
+    assert check.jacobian_calls_started == 1
+    assert check.residual_only_calls_started == 13
+    assert check.gradient_error_bound_inf is None
+
+
+def test_precision_tiny_wrong_sign_is_a_failure_not_negligible_permission():
+    def wrong_sign(x, deadline):
+        return np.array([1e-12 * x[0]]), np.array([[-1e-12]])
+
+    check = precision_check(wrong_sign, x=(1,))
+    assert check.status == "failed" and not check.search_qualified
+    assert check.gradient_error_bound_inf < 1e-9
+
+
+def test_precision_unrepresentable_probe_fails_closed_and_narrow_domain_is_respected():
+    point = 1.0
+    upper = np.nextafter(point, np.inf)
+    unavailable = precision_check(linear, x=(point,), lower=(point,), upper=(upper,))
+    assert unavailable.status == "incomplete" and not unavailable.search_qualified
+    assert unavailable.calls_started == unavailable.calls_completed == 1
+    assert "not representable" in unavailable.error
+    assert unavailable.omitted_indices == (0,)
+
+    def narrow(x, deadline):
+        assert 1 <= x[0] <= 1 + 1e-8
+        return x.copy(), np.ones((1, 1))
+
+    check = precision_check(narrow, x=(1,), lower=(1,), upper=(1 + 1e-8,))
+    assert check.status == "passed" and check.search_qualified
+    assert check.directions[0].scheme == "forward"
+    assert len(check.directions[0].precision_probes) == 6
+
+
+def test_precision_assessment_binds_frozen_envelope_policy():
+    check = precision_check(incompatible)
+    changed = adequacy.Policy(precision_aware=True, precision_roundoff_factor=64)
+    result = run(
+        incompatible, [0], lower=[-2], upper=[2], derivative=check, policy=changed
+    )
+    assert result.classification == "optimization_unresolved"
+    assert "reduced_derivative_audit_unqualified_or_mismatched" in result.reasons

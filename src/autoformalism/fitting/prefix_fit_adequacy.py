@@ -15,12 +15,14 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from autoformalism.schemas.base import FiniteFloat, StrictSchema
 
 Array = NDArray[np.float64]
 Evaluate = Callable[[Array, float], tuple[ArrayLike, ArrayLike]]
+# Three predeclared coarse/fine pairs; never enlarge a probe in response to a fit.
+PRECISION_PROBE_MULTIPLIERS = (1.0, 0.5, 16.0, 8.0, 1024.0, 512.0)
 
 
 class Policy(StrictSchema):
@@ -39,6 +41,22 @@ class Policy(StrictSchema):
     derivative_absolute_tolerance: FiniteFloat = Field(default=1e-7, gt=0)
     max_directions: int = Field(default=64, ge=1)
     rank_relative_tolerance: FiniteFloat = Field(default=1e-8, gt=0, lt=1)
+    precision_aware: bool = False
+    precision_roundoff_factor: FiniteFloat = Field(default=32, ge=1)
+    precision_gradient_fraction: FiniteFloat = Field(default=0.1, gt=0, le=1)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_policy(self, handler):
+        """Keep historical policy fingerprints unchanged when the opt-in is off."""
+        result = handler(self)
+        if not self.precision_aware:
+            for name in (
+                "precision_aware",
+                "precision_roundoff_factor",
+                "precision_gradient_fraction",
+            ):
+                result.pop(name, None)
+        return result
 
 
 class HistoryPoint(StrictSchema):
@@ -72,6 +90,16 @@ class OriginalVerification(StrictSchema):
     original_equations_verified: bool
 
 
+class PrecisionProbe(StrictSchema):
+    """One fixed-scale probe in the same declared optimizer coordinate units."""
+
+    multiplier: FiniteFloat
+    step: FiniteFloat
+    derivative_rms: FiniteFloat = Field(ge=0)
+    error_rms: FiniteFloat = Field(ge=0)
+    roundoff_rms: FiniteFloat = Field(ge=0)
+
+
 class DerivativeDirection(StrictSchema):
     """One reduced coordinate, with two representable in-domain probe sizes."""
 
@@ -83,17 +111,24 @@ class DerivativeDirection(StrictSchema):
     between_steps_relative_error: FiniteFloat
     one_sided_disagreement: tuple[FiniteFloat, FiniteFloat] | None = None
     passed: bool
+    precision_status: Literal["passed", "failed", "inconclusive"] | None = None
+    precision_probes: tuple[PrecisionProbe, ...] = ()
+    reference_probe_index: int | None = None
+    derivative_uncertainty_rms: FiniteFloat | None = Field(default=None, ge=0)
+    gradient_error_bound: FiniteFloat | None = Field(default=None, ge=0)
 
 
 class DerivativeCheck(StrictSchema):
     """Finite local audit with explicit uncovered columns and call accounting."""
 
-    status: Literal["passed", "failed", "incomplete", "unavailable"]
+    status: Literal["passed", "failed", "inconclusive", "incomplete", "unavailable"]
     reduced_vector: tuple[FiniteFloat, ...]
     coordinate_units: tuple[FiniteFloat, ...]
     base_residual_sha256: str | None = None
     base_jacobian_sha256: str | None = None
     base_training_nmse: FiniteFloat | None = None
+    lower_bounds_sha256: str | None = None
+    upper_bounds_sha256: str | None = None
     policy: Policy
     required_indices: tuple[int, ...]
     checked_indices: tuple[int, ...]
@@ -105,6 +140,11 @@ class DerivativeCheck(StrictSchema):
     residual_only_calls_started: int = Field(ge=0)
     elapsed_seconds: FiniteFloat = Field(ge=0)
     error: str | None = None
+    search_qualified: bool = False
+    inconclusive_indices: tuple[int, ...] = ()
+    failed_indices: tuple[int, ...] = ()
+    gradient_error_bound_inf: FiniteFloat | None = Field(default=None, ge=0)
+    parameter_information_qualified: bool = False
     scope: str = (
         "Two-scale finite differences at one reduced endpoint; not a global "
         "smoothness or minimum certificate. Deadlines are cooperative."
@@ -149,8 +189,15 @@ class Assessment(StrictSchema):
     free_coordinates: int = Field(ge=0)
     parameter_condition_number: FiniteFloat | None
     parameter_information: Literal[
-        "full_local_rank", "rank_deficient", "no_free_coordinates"
+        "full_local_rank",
+        "rank_deficient",
+        "no_free_coordinates",
+        "derivative_precision_unresolved",
     ]
+    projected_gradient_upper_bound: FiniteFloat | None = Field(default=None, ge=0)
+    gradient_error_bound_inf: FiniteFloat | None = Field(default=None, ge=0)
+    correlation_unresolved_indices: tuple[int, ...] = ()
+    parameter_information_qualified: bool = False
     complete_predeclared_restarts: int = Field(ge=0)
     improving_predeclared_restarts: int = Field(ge=0)
     global_minimum_certified: Literal[False] = False
@@ -215,6 +262,91 @@ def _agreement(left, right, policy):
     return error, relative, passed
 
 
+def _precision_result(
+    estimates: Sequence[Array],
+    roundoffs: Sequence[Array],
+    unilateral: Sequence[float],
+    unilateral_roundoff: Sequence[float],
+    steps: Sequence[float],
+    residual: Array,
+    column: Array,
+    policy: Policy,
+) -> dict:
+    """Bound an empirical derivative interval using all fixed coarse/fine pairs.
+
+    The enclosure assumes locally smooth leading-order finite-difference error
+    and the declared floating-point residual envelope. It is numerical evidence,
+    not an interval-arithmetic guarantee for an arbitrary black-box oracle.
+    A resolved disagreement is a failure regardless of the column's magnitude.
+    """
+    order_factor = 4 if unilateral else 2
+    candidates = []
+    for fine in range(1, len(estimates), 2):
+        coarse = fine - 1
+        # Inflate observed truncation and rounding uncertainty; do not infer
+        # accuracy merely from a small analytic column or an absolute tolerance.
+        radius = roundoffs[fine] + 4 / (order_factor - 1) * (
+            np.abs(estimates[fine] - estimates[coarse])
+            + roundoffs[fine]
+            + roundoffs[coarse]
+        )
+        sides_ok = not unilateral or (
+            unilateral[fine]
+            <= unilateral_roundoff[fine]
+            + policy.derivative_relative_tolerance * _rms(column)
+            or unilateral[fine]
+            <= 0.75 * unilateral[coarse]
+            + unilateral_roundoff[fine]
+            + 0.75 * unilateral_roundoff[coarse]
+        )
+        candidates.append((_rms(radius), fine, radius, sides_ok))
+    admissible = [item for item in candidates if item[3]]
+    uncertainty, fine, radius, sides_ok = min(
+        admissible or candidates, key=lambda item: (item[0], item[1])
+    )
+    estimate = estimates[fine]
+    error, _, agrees = _agreement(estimate, column, policy)
+    scale = max(_rms(estimate), _rms(column))
+    contradiction = error > (uncertainty + policy.derivative_relative_tolerance * scale)
+    stable = _agreement(estimates[fine - 1], estimate, policy)[2]
+    resolved = uncertainty <= policy.derivative_relative_tolerance * scale
+    status = (
+        "failed"
+        if contradiction or not sides_ok
+        else "passed"
+        if agrees and stable and resolved
+        else "inconclusive"
+    )
+    gradient_error = float(
+        2 * np.mean(np.abs(residual) * (np.abs(column - estimate) + radius))
+    )
+    if not np.isfinite(gradient_error):
+        raise ValueError("nonfinite derivative gradient uncertainty")
+    return {
+        "passed": status == "passed",
+        "precision_status": status,
+        "reference_probe_index": fine,
+        "derivative_uncertainty_rms": uncertainty,
+        "gradient_error_bound": gradient_error,
+        "precision_probes": tuple(
+            PrecisionProbe(
+                multiplier=multiplier,
+                step=step,
+                derivative_rms=_rms(value),
+                error_rms=_rms(value - column),
+                roundoff_rms=_rms(roundoff),
+            )
+            for multiplier, step, value, roundoff in zip(
+                PRECISION_PROBE_MULTIPLIERS,
+                steps,
+                estimates,
+                roundoffs,
+                strict=True,
+            )
+        ),
+    }
+
+
 def derivative_check(
     evaluate: Evaluate,
     vector: ArrayLike,
@@ -236,6 +368,8 @@ def derivative_check(
     Each started oracle call is counted even when it fails or overruns the deadline.
     Optional ``residual_only`` avoids sensitivity integrations at perturbed points;
     its base residual is first checked exactly against ``evaluate``'s residual.
+    The precision-aware opt-in retains unresolved columns and can qualify search
+    only when their mean-loss gradient error is negligible in the fixed units.
     """
     policy = policy or Policy()
     x, lo, hi, units = _coordinates(vector, lower, upper, coordinate_units)
@@ -286,15 +420,20 @@ def derivative_check(
                 policy.derivative_relative_step * max(abs(x[index]), units[index]),
             )
             left, right = x[index] - lo[index], hi[index] - x[index]
-            if left >= h and right >= h:
+            multipliers = (
+                PRECISION_PROBE_MULTIPLIERS if policy.precision_aware else (1, 0.5)
+            )
+            largest = max(multipliers)
+            if left >= h * largest and right >= h * largest:
                 scheme = "central"
             elif right >= left:
-                scheme, h = "forward", min(h, right / 2)
+                scheme, h = "forward", min(h, right / (2 * largest))
             else:
-                scheme, h = "backward", min(h, left / 2)
+                scheme, h = "backward", min(h, left / (2 * largest))
             estimates, steps, errors, relatives, agrees = [], [], [], [], []
-            unilateral = []
-            for step in (h, h / 2):
+            unilateral, roundoffs, unilateral_roundoff = [], [], []
+            for multiplier in multipliers:
+                step = h * multiplier
                 a, b = x.copy(), x.copy()
                 if scheme != "backward":
                     a[index] += step
@@ -321,11 +460,32 @@ def derivative_check(
                 errors.append(e)
                 relatives.append(rel)
                 agrees.append(ok)
+                if policy.precision_aware:
+                    epsilon = np.finfo(float).eps * policy.precision_roundoff_factor
+                    roundoffs.append(
+                        epsilon
+                        * (np.abs(ra) + np.abs(rb))
+                        / displacement
+                        * units[index]
+                    )
                 if scheme == "central":
                     forward = (ra - base_r) / (a[index] - x[index]) * units[index]
                     backward = (base_r - rb) / (x[index] - b[index]) * units[index]
                     unilateral.append(_rms(forward - backward))
-            _, between, stable = _agreement(*estimates, policy)
+                    if policy.precision_aware:
+                        unilateral_roundoff.append(
+                            _rms(
+                                epsilon
+                                * units[index]
+                                * (
+                                    (np.abs(ra) + np.abs(base_r))
+                                    / (a[index] - x[index])
+                                    + (np.abs(base_r) + np.abs(rb))
+                                    / (x[index] - b[index])
+                                )
+                            )
+                        )
+            _, between, stable = _agreement(*estimates[:2], policy)
             # Central cancellation must not certify abs(x) at its kink. Smooth
             # curvature may disagree at finite h, but its discrepancy contracts.
             sides_ok = not unilateral or (
@@ -335,30 +495,56 @@ def derivative_check(
                 * _rms(base_j[:, index] * units[index])
                 or unilateral[1] <= 0.75 * unilateral[0]
             )
+            precision = (
+                _precision_result(
+                    estimates,
+                    roundoffs,
+                    unilateral,
+                    unilateral_roundoff,
+                    steps,
+                    base_r,
+                    base_j[:, index] * units[index],
+                    policy,
+                )
+                if policy.precision_aware
+                else {"passed": all(agrees) and stable and sides_ok}
+            )
             rows.append(
                 DerivativeDirection(
                     index=index,
                     scheme=scheme,
-                    steps=tuple(steps),
-                    error_rms=tuple(errors),
-                    relative_errors=tuple(relatives),
+                    steps=tuple(steps[:2]),
+                    error_rms=tuple(errors[:2]),
+                    relative_errors=tuple(relatives[:2]),
                     between_steps_relative_error=between,
-                    one_sided_disagreement=tuple(unilateral) if unilateral else None,
-                    passed=all(agrees) and stable and sides_ok,
+                    one_sided_disagreement=tuple(unilateral[:2])
+                    if unilateral
+                    else None,
+                    **precision,
                 )
             )
     except (ValueError, RuntimeError, ArithmeticError, TimeoutError) as exc:
         error = f"{type(exc).__name__}: {exc}"
     checked = tuple(row.index for row in rows)
     omitted = tuple(i for i in required if i not in checked)
+    inconclusive = tuple(
+        row.index for row in rows if row.precision_status == "inconclusive"
+    )
+    failed = tuple(
+        row.index
+        for row in rows
+        if not row.passed and row.precision_status != "inconclusive"
+    )
     status = (
         "failed"
-        if any(not row.passed for row in rows)
+        if failed
         else (
             "unavailable"
             if base_r is None
             else "incomplete"
             if omitted or error
+            else "inconclusive"
+            if inconclusive
             else "passed"
         )
     )
@@ -369,6 +555,8 @@ def derivative_check(
         base_residual_sha256=None if base_r is None else _digest(base_r),
         base_jacobian_sha256=None if base_j is None else _digest(base_j),
         base_training_nmse=None if base_r is None else float(np.mean(base_r**2)),
+        lower_bounds_sha256=_digest(lo) if policy.precision_aware else None,
+        upper_bounds_sha256=_digest(hi) if policy.precision_aware else None,
         policy=policy,
         required_indices=required,
         checked_indices=checked,
@@ -380,6 +568,39 @@ def derivative_check(
         residual_only_calls_started=residual_calls,
         elapsed_seconds=monotonic() - begun,
         error=error,
+        search_qualified=status == "passed"
+        or (
+            policy.precision_aware
+            and status == "inconclusive"
+            and all(
+                row.gradient_error_bound
+                <= policy.gradient_tolerance * policy.precision_gradient_fraction
+                for row in rows
+                if row.index in inconclusive
+            )
+        ),
+        inconclusive_indices=inconclusive,
+        failed_indices=failed,
+        gradient_error_bound_inf=(
+            max((row.gradient_error_bound for row in rows), default=0.0)
+            if policy.precision_aware and not omitted and error is None
+            else None
+        ),
+        parameter_information_qualified=status == "passed",
+        **(
+            {
+                "scope": (
+                    "Fixed six-scale finite differences at one endpoint. Gradient "
+                    "error bounds assume smooth local truncation and the declared "
+                    "floating-point "
+                    "residual envelope; not rigorous interval bounds or a solver-error "
+                    "certificate. Inconclusive columns may qualify search only, not "
+                    "parameter information. Deadlines are cooperative."
+                )
+            }
+            if policy.precision_aware
+            else {}
+        ),
     )
 
 
@@ -444,20 +665,57 @@ def assess(
         )
     if not verified:
         reasons.append("original_equation_rollout_unverified_or_mismatched")
-    if not (
-        derivative.status == "passed"
+    derivative_qualified = (
+        (
+            derivative.status == "passed"
+            or (policy.precision_aware and derivative.search_qualified)
+        )
         and np.array_equal(x, derivative.reduced_vector)
         and np.array_equal(units, derivative.coordinate_units)
         and _digest(r) == derivative.base_residual_sha256
         and _digest(j) == derivative.base_jacobian_sha256
+        and derivative.policy.precision_aware == policy.precision_aware
         and derivative.policy.derivative_relative_tolerance
         <= policy.derivative_relative_tolerance
         and derivative.policy.derivative_absolute_tolerance
         <= policy.derivative_absolute_tolerance
         and set(derivative.checked_indices) == set(np.flatnonzero(free))
         and not derivative.omitted_indices
-    ):
+        and (
+            not policy.precision_aware
+            or (
+                derivative.policy == policy
+                and derivative.lower_bounds_sha256 == _digest(lo)
+                and derivative.upper_bounds_sha256 == _digest(hi)
+                and derivative.gradient_error_bound_inf is not None
+                and not derivative.failed_indices
+                and derivative.error is None
+            )
+        )
+    )
+    if not derivative_qualified:
         reasons.append("reduced_derivative_audit_unqualified_or_mismatched")
+    gradient_upper = None
+    unresolved_correlation = ()
+    correlation_for_gate = max_correlation
+    if policy.precision_aware and derivative_qualified:
+        uncertainty = np.zeros(len(x))
+        for direction in derivative.directions:
+            uncertainty[direction.index] = direction.gradient_error_bound
+        nominal = 2 * product / len(r)
+        gradient_low, gradient_high = nominal - uncertainty, nominal + uncertainty
+        # Projection is applied to the whole interval. A nominal outward gradient
+        # at a bound cannot hide a potentially material inward gradient.
+        worst = np.maximum(np.abs(gradient_low), np.abs(gradient_high))
+        at_lower, at_upper = x - lo <= tolerance, hi - x <= tolerance
+        worst = np.where(at_lower & ~at_upper, np.maximum(0, -gradient_low), worst)
+        worst = np.where(at_upper & ~at_lower, np.maximum(0, gradient_high), worst)
+        worst = np.where(free, worst, 0)
+        gradient_upper = float(np.max(worst, initial=0))
+        unresolved_correlation = derivative.inconclusive_indices
+        resolved_correlation = correlation.copy()
+        resolved_correlation[list(unresolved_correlation)] = 0
+        correlation_for_gate = float(np.max(resolved_correlation, initial=0))
     if budget_exhausted is not False or stop_reason in {
         "budget_limited",
         "wall_clock_limit",
@@ -476,7 +734,9 @@ def assess(
         reasons.append("termination_not_supported")
     if gradient > policy.gradient_tolerance:
         reasons.append("projected_gradient_not_small")
-    if max_correlation > policy.correlation_tolerance:
+    if gradient_upper is not None and gradient_upper > policy.gradient_tolerance:
+        reasons.append("projected_gradient_uncertainty_not_small")
+    if correlation_for_gate > policy.correlation_tolerance:
         reasons.append("residual_column_correlation_not_small")
     accepted = [HistoryPoint.model_validate(p) for p in history]
     accepted = [p for p in accepted if p.accepted and p.coordinate_step_norm > 0]
@@ -505,6 +765,11 @@ def assess(
     nfree = int(np.sum(free))
     condition = float(singular[0] / singular[-1]) if rank == nfree and nfree else None
     if condition is not None and not np.isfinite(condition):
+        condition = None
+    parameter_information_qualified = (
+        derivative_qualified and derivative.parameter_information_qualified
+    )
+    if policy.precision_aware and not parameter_information_qualified:
         condition = None
     records = [RestartEvidence.model_validate(item) for item in restarts]
     ids = [item.start_id for item in records]
@@ -549,7 +814,15 @@ def assess(
         parameter_condition_number=condition,
         parameter_information="no_free_coordinates"
         if not nfree
+        else "derivative_precision_unresolved"
+        if policy.precision_aware and not parameter_information_qualified
         else ("full_local_rank" if rank == nfree else "rank_deficient"),
+        projected_gradient_upper_bound=gradient_upper,
+        gradient_error_bound_inf=derivative.gradient_error_bound_inf
+        if policy.precision_aware and derivative_qualified
+        else None,
+        correlation_unresolved_indices=unresolved_correlation,
+        parameter_information_qualified=parameter_information_qualified,
         complete_predeclared_restarts=len(complete),
         improving_predeclared_restarts=improving,
     )

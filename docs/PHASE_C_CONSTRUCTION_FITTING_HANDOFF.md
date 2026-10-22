@@ -544,6 +544,15 @@ available outside this worker's input payload.
 
 ### Run and inspect on Delta
 
+**Follow-up after the returned continuation:** 15/16 tasks returned, with task 13
+cancelled according to the supplied scheduler evidence. All retained endpoints
+verified, but no local optimization convergence was established. The separate
+`construction-fitting-reliability-1` campaign handles tiny derivative uncertainty,
+tighter independent solver replay, and invalid trial rejection, then continues
+from verified incumbents. It preserves the original run and all equations.
+Use [the reliability milestone](PHASE_C_CONSTRUCTION_FITTING_RELIABILITY.md)
+for its policy and new commands; the commands below describe the original run.
+
 The portable delivery includes `inputs/continuation-inputs.json`, sealed policy,
 all executable source and a `SOURCE_COMMIT`. Extract into a new code directory,
 then run from its top level:
