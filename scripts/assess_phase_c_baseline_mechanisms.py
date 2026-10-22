@@ -72,16 +72,21 @@ def main() -> None:
     elif args.command == "run":
         rows = len(sealed_read(args.root / "plan.json")["rows"])
         indices = args.index or list(range(rows))
-        if args.workers <= 1:
-            for index in indices:
-                print(*_assess(args.root, index), flush=True)
-            return
+        failed = 0
+        # A row that raises stays pending and is named; the others go on.
         with ProcessPoolExecutor(
-            args.workers, mp_context=multiprocessing.get_context("spawn")
+            max(1, args.workers), mp_context=multiprocessing.get_context("spawn")
         ) as pool:
-            futures = [pool.submit(_assess, args.root, i) for i in indices]
+            futures = {pool.submit(_assess, args.root, i): i for i in indices}
             for future in as_completed(futures):
-                print(*future.result(), flush=True)
+                try:
+                    print(*future.result(), flush=True)
+                except Exception as exc:  # reported, never sealed as a result
+                    failed += 1
+                    print(f"row {futures[future]} raised {type(exc).__name__}: "
+                          f"{exc}", flush=True)
+        if failed:
+            raise SystemExit(f"{failed} rows raised and remain pending")
     else:
         value = mechanisms.report(args.root)
         print((args.root / "SUMMARY.md").read_text())

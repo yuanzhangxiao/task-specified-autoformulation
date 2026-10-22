@@ -219,6 +219,18 @@ python scripts/assess_phase_c_baseline_mechanisms.py report --root ROOT
 A saved row is reused; an interrupted rollout stays unresolved rather than
 getting a fresh budget, as in the construction baseline.
 
+On js2 (decided by the user on 2026-10-22), from a clean checkout of this
+branch, after copying the SINDy/PySR run to `~/af/runs/phase-c-classical-v1`:
+
+```bash
+bash scripts/jetstream/run_phase_c_baseline_mechanisms.sh 12
+```
+
+It prepares in the foreground, then assesses detached, 12 rows at a time, into
+`~/af/runs/phase-c-baseline-mechanisms-v1` (`runner.log`, `SUMMARY.md`,
+`summary.json`). It refuses to start beside another live run, as the rollouts'
+wall-clock limits assume their own CPUs. On a laptop, 12 rows took 11 s.
+
 ## Aggregation
 
 Per run: confirmed = passes / requirements; possible = (passes + unresolved) /
