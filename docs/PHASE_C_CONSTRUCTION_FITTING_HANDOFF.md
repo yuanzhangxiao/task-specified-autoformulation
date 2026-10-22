@@ -189,7 +189,12 @@ Eliminating exact gain redundancies must preserve shared-consumer constraints,
 domains and a mapping back to original coefficients. It must not turn coupled
 processes into independently fitted effects.
 
-### Training witnesses that can already guide review
+### Training witnesses retained for review after fitting qualification
+
+These are observations about the saved, unfinished fits and exact equation
+identities. They are useful diagnostics now, but are not a request to revise the
+models before fitting qualification. Recompute parameter-dependent witnesses
+after continuation; their present values may change.
 
 **Baseline glucose balance, all three topology-1 models.** At zero meal input,
 the compiled glucose equation is exactly `Gp'=-U`. Their named basal-production
@@ -201,9 +206,10 @@ before considering any particular nonlinear law. With discrete readings alone,
 the integrated argument assumes the observed flat continuous behavior; it is not
 a universal sampled-NMSE lower bound excluding arbitrary between-sample motion.
 
-Feedback should ask for a compensating source and coherent units/balance, using
-public evidence. A source outside the declared slot requires explicit topology
-revision. The observations do not uniquely prescribe EGP, Gt, a private equation,
+After fitting qualification, this witness can support asking about a compensating
+source and coherent units/balance, using public evidence. A source outside the
+declared slot requires explicit topology revision. The observations do not
+uniquely prescribe EGP, Gt, a private equation,
 or a saturating response. Parameter tuning cannot change the identity `Gp'=-U`
 at zero meal while also reproducing both continuous observed target curves.
 
@@ -300,21 +306,20 @@ The first packet should contain:
    adding a source or replacing separate slots by a multivariable shared law
    requires topology authorization; new memory requires state/initialization work.
 
-A suitable topology-2 insulin draft is:
+The user-selected sequence is **fit first, then request residual-driven model
+revision**. This supersedes the earlier suggestion to revise in parallel with
+unchanged-model continuation. Record algebraic witnesses and scientific concerns
+now, but do not send the current budget-limited residuals as a request for a more
+complex model. After the fitting gate passes, assemble a fresh packet with the
+actual convergence scope and recomputed residuals, rather than relabeling these
+unfinished receipts. A local convergence certificate is not a global optimum.
 
-> The saved training rollout is independently verified, but fitting stopped at
-> its budget and no optimum is established. On train_003 the model loses insulin
-> while the measured response rises, and the zero-input basal level also decays.
-> The effective meal contribution is negative under the currently real-valued
-> inner amplitudes. Propose a coherent correction of the response direction and
-> basal behavior, preserving the delayed-action obligation and all observed
-> targets. The dose table additionally suggests amplitude-dependent timing and
-> gain; explain whether your change addresses those patterns or requests a new
-> source. Predict the training windows that should improve after joint refitting.
-
-We should not wait for global optimization proof before reviewing structural
-witnesses, nor tell the proposer that every large residual proves a wrong law.
-The controller may allocate a revision alongside unchanged-model continuation.
+The opt-in `construction-feedback-revision-1` launcher is already implemented,
+but it intentionally accepts budget-limited parents and does not enforce this
+new gate. Its existence is not permission to skip qualification. Hold a new
+launch under the fitting-first sequence; qualify a versioned gate and freeze new
+inputs before using it for this comparison. Do not alter already frozen runs or
+cancel a separately submitted campaign implicitly.
 
 For nonlinear or multi-argument ranking, compare a small nested ladder: unchanged
 law; flexible single-source law; and an explicitly authorized coupled-source law.
@@ -342,11 +347,21 @@ never put historical validation/test metrics into proposer feedback.
 
 ### Next bounded implementation
 
-First qualify output-only verification and a stiff-aware search route on all
-eight unchanged equations/initializers, with exact inherited endpoints and
-separate costs. Compare solver efficiency before enlarging budgets. Then qualify
-safe coordinate reduction and applicable profiling; affine RHS dependence does
-not imply affine integrated dependence on arbitrary dynamics coefficients.
+First audit and qualify safe redundant-coordinate reduction and an efficient
+affine or stiff-aware search route on all eight unchanged equations/initializers.
+Preserve inherited endpoints and record transformation, search and verification
+costs separately. Then continue fitting with a declared convergence gate and
+bounded distinct starts where needed. Compare solver efficiency before enlarging
+budgets; affine RHS dependence does not imply affine integrated dependence on
+arbitrary dynamics coefficients.
+
+The existing affine propagator supports certified autonomous affine dynamics and
+piecewise-linear forcing, but its fitting adapter uses the older initialization
+interface. The existing coupled profiling adapter additionally requires one
+identity-observed target. These three-target scoped-root models therefore require
+an adapter and qualification, not just a configuration switch. The existing
+`process_gains` lowering deliberately preserves signed inner amplitudes; it is
+not a complete gain-redundancy eliminator.
 
 In parallel, add a provenance adapter from these scoped-prefix receipts to the
 M37/M38 descriptive feedback contract. The current exporter expects older staged
@@ -360,3 +375,98 @@ Only after this qualification should the matched revision/refit experiment
 expand functions or combine source sets. The present review updates the plan;
 it does not change models, domains, benchmark data, production defaults or
 historical results.
+
+### Fitting-first qualification and division of responsibilities
+
+**Exact numerical cleanup is distinct from changing the scientific model.**
+For an isolated product `c=g*a`, with otherwise unused `g>=0` and unrestricted
+real `a`, optimizing `c` directly is equivalent when a valid lift such as
+`g=1, a=c` is retained. With a shared amplitude `a` and several nonnegative
+consumer gains `g_i`, independent unrestricted `c_i` would permit mixed signs
+that the original model cannot represent. Bounded amplitudes, initializer uses,
+observation mappings and other constraints can further couple the reachable
+coefficient domain. Reduce only blocks whose exact domain and reconstruction
+are established; retain unsupported blocks. A small sampled Jacobian column
+alone does not authorize removing a parameter or mechanism.
+
+Record symbolic equivalence and the mapping back to the original candidate;
+check predictions and derivatives at representative interior/boundary points.
+Neither imposing a newly inferred biological sign nor removing a distinct
+mechanism is an equivalent coordinate transformation. Both are model edits.
+If a sign is already an explicit enforceable contract, a violation is a contract
+failure requiring correction, not an invitation to silently reinterpret a bound.
+
+The fitting gate should report separately:
+
+1. Original-model rollout verification at the retained endpoint, checked
+   derivatives and respected declared domains.
+2. Local optimization evidence: bound-aware scaled projected gradient, residual
+   correlations with feasible sensitivity directions, objective/step history and
+   the precise stop reason. Step tolerance or budget exhaustion alone is not
+   sufficient. A flat or stationary initial point is not a demonstrated minimum.
+3. Continuation and predetermined distinct-start outcomes, including unresolved
+   starts and their costs. Agreement strengthens local-search evidence without
+   certifying a global optimum.
+4. Effective-parameter/root conditioning after exact redundant coordinates have
+   been removed. Weak identification can remain despite accurate predictions and
+   converged optimization; do not claim unique original gain factorizations.
+
+Allow the states `optimization_unresolved`, `locally_converged_accurate_fit`, and
+`locally_converged_poor_fit`, with numerical reliability and identification as
+separate fields. A poor locally converged fit supports investigating model,
+initialization, observation or data assumptions; it does not uniquely identify
+which assumption is wrong. The existing conservative poor-fit stopping code is
+reusable, but is not currently enabled by the scoped-prefix training adapter.
+Thresholds and restart allowances must be frozen before this next experiment.
+
+| Question | When | Deterministic runtime | Scientific judge |
+| --- | --- | --- | --- |
+| Are expressions, scopes, units and declared domains consistent? | Before fitting | Parse, compile, check initializer graph and encoded contracts; units only where typed | Interpret missing semantic assumptions, without inventing hard constraints |
+| Are gain coordinates redundant; is affine propagation valid? | Before fitting | Restricted symbolic certification, exact domain/lift checks | Not needed for numerical certification |
+| Does a named basal source vanish at zero input; is a shared transfer reused coherently? | Before fitting | Expand actual laws, evaluate the specified regime, compare declared consumers | Assess whether the behavior violates the public scientific meaning; a process name alone is insufficient |
+| Is the effective influence positive or negative? | Before and after fitting | Prove derivative/sign on a declared domain for supported forms; otherwise provide local witnesses or unknown | Interpret whether that direction is appropriate for the named quantity and regime |
+| Is fitting numerically reliable and locally converged? | During/after fitting | Verification, derivative checks, stopping evidence, restart ledger | Cannot certify or override this gate |
+| What remains mismatched? | After qualified fitting | Per-target physical-unit residuals, baseline, amplitude, timing, recovery and input-response comparisons, with uncertainty/censoring | Relate verified patterns to scientific mechanisms |
+| Which law, dependency or memory should change? | After qualified fitting | Restricted model-family incompatibility tests and controlled alternative refits where applicable | Offer conditional scientific hypotheses, competing explanations and predicted effects; abstain when evidence cannot localize a cause |
+
+The runtime should produce small factual evidence packets. The judge should not
+be asked to discover a numerical fitting failure from a long parameter dump.
+A new judge packet may include public requirements, normalized equations,
+domains, source/consumer identities and qualified training witnesses. It must
+distinguish a contract violation, a supported scientific concern and a speculative
+repair hypothesis. No hidden reference equations or validation/test residuals
+belong in proposal-generation context. An invalid citation is recorded and does
+not become verified support; it does not by itself reject an otherwise supported
+decision under the established citation policy.
+
+### Qualifying GPT-OSS for this advisory role
+
+Do not transfer calibration from an older symbolic judge to fitted numerical
+feedback. `JUDGE_HYBRID_PROTOCOL.md` records strong results for a narrow frozen
+wrong-sign/repeated-flux/accumulator study (0.983 labeled accuracy), but the later
+blinded V8 target-completeness study achieved only 0.650 candidate-verdict
+accuracy and detected incomplete targets in 0.300 of paired trials. Both are
+task-specific results, not general scientific-judgment accuracy. The earlier
+`GENERAL_CALIBRATED_CRITIC.md` protocol also excluded fitted values and numerical
+residuals from the judge request. The current revision pilot uses a proposer and
+static checks, not a separately qualified scientific judge.
+
+A bounded follow-up should compare equations/public context alone against the
+same context plus deterministic witnesses, using the intended deployed GPT-OSS
+model. Freeze correct controls and explicitly constructed faults, blinded labels,
+equivalent renamings/reorderings, legitimate signed deviations and ambiguous or
+unfinished-fit cases. Obtain reference labels from explicit mathematical/public
+contracts where possible, and separately adjudicate scientific cases that lack
+such labels. Keep prompt-development examples separate from confirmation cases.
+
+Measure defect detection by type, false accusations on valid models, factual
+evidence fidelity, abstention, equivalent-representation stability, physical
+requests, tokens and wall time. Count all failures and unavailable reviews. The
+first study evaluates diagnosis only, with no automatic edits or model promotion.
+Until qualified, the judge supplies advisory hypotheses; deterministic contracts
+and numerical checks retain authority over their own claims. Neither a judge
+pass nor absence of a finding certifies scientific correctness.
+
+This section records the next design and execution order. It does not claim that
+the gain quotient, scoped affine adapter, convergence gate or new judge study has
+already been implemented or run.

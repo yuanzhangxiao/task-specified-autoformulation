@@ -1,5 +1,17 @@
 # Phase C: training-feedback construction revisions
 
+## Execution order update, 21 October 2026
+
+The user has selected fitting qualification **before** residual-driven proposal
+revision. This implemented opt-in pilot accepts budget-limited endpoints and
+does not enforce a local optimization-adequacy gate. Hold new launches for this
+comparison until unchanged-parent fitting is qualified, then freeze versioned
+inputs/gating rather than relabeling the old receipts. Existing saved campaigns
+remain unchanged. See `PHASE_C_CONSTRUCTION_FITTING_HANDOFF.md`, especially
+"Fitting-first qualification and division of responsibilities", for exact gain
+reduction, scoped affine fitting and runtime/judge responsibilities. This is an
+execution-plan update, not an implemented scheduler or runtime block.
+
 ## Purpose and bounded experiment
 
 The first fitted construction cohort contains eight T2-easy models, from two
