@@ -1404,3 +1404,25 @@ are advisory, independent of external feasibility certificates, and numerically
 blind. The ad hoc critic is absent from both. No-change and interrupted operations
 are explicit outcomes; neither erases the best evaluated candidate or prior numerical
 evidence. These changes do not switch production defaults or introduce MCTS.
+
+## Unchanged construction models: numerical qualification and continuation
+
+`construction-affine-continuation-1` is a separate training-only CPU experiment,
+documented in `PHASE_C_CONSTRUCTION_FITTING_HANDOFF.md`. The scoped-prefix adapter
+certifies autonomous affine state/input dynamics, uses a matrix exponential at
+every piecewise-linear input interval, and propagates analytic sensitivities
+through shared/trajectory-specific initializer dependencies. Unsupported models
+fail qualification rather than being approximated.
+
+Exact gain-coordinate reduction is allowed only with exclusive-use and feasible
+domain/lift certificates. Both arms retain identical equations and starts in the
+original parameter space. Independent original-equation rollout and two-scale
+derivative checks support a local convergence gate; parameter rank is separate.
+Budget/step stops alone do not satisfy that gate. The original inherited vector
+is preserved independently, including when reduction qualification fails.
+
+Every attempt has a durable nonrenewable stage reservation. Saved improvements
+from interrupted searches may be independently verified without restarting the
+search. Reports include every model/arm, restart outcomes and diagnostic costs.
+No held-out scores enter this worker, no proposer runs, and no structural revision
+or scientific correctness follows automatically from the numerical diagnosis.

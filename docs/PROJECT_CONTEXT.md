@@ -1511,3 +1511,13 @@ Explicit fixed/shared parameter declarations propagate across all uses. Each
 transaction presents the entire rebuilt model and affected consumers for proposer
 review before one frozen-profile child fit. Historical parents remain unchanged;
 there is no automatic promotion or follow-up. See `docs/BASIN_EQUATION_REPAIR.md`.
+
+The opt-in `construction-affine-continuation-1` fitting milestone keeps all eight
+returned T2-easy construction models fixed. It pairs original coordinates with
+conservatively reduced gain coordinates, uses certified affine propagation with
+scoped initializers and multiple targets, and verifies retained improvements by
+the original ODE under Radau. Predetermined starts, bounded attempts, durable
+checkpoint recovery, and explicit local convergence/identification diagnostics
+precede any equation-revision feedback. The CPU comparison uses training only;
+it does not change production defaults or invoke an LLM. See
+`docs/PHASE_C_CONSTRUCTION_FITTING_HANDOFF.md` for scope and platform commands.

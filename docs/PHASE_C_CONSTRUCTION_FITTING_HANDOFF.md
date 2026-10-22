@@ -4,9 +4,10 @@
 
 The user wants confirmation that construction fitting used Orion's current
 algorithm, independent verification of the saved parameters, and concrete
-fitting improvements. No new search or model change is authorized by this
-verification campaign. Proposed fitting experiments below are follow-up work,
-not changes to historical results.
+fitting improvements. The original verification campaign performed no new search
+or model change. The separately authorized continuation milestone below now
+implements new fitting attempts on frozen equations; historical results remain
+unchanged.
 
 Source archive SHA-256:
 `1ec8f1deb8f25a698c6c3e4a948874398fdd89b446e81dbc5f0c3c7a7e2a6265`.
@@ -467,6 +468,120 @@ Until qualified, the judge supplies advisory hypotheses; deterministic contracts
 and numerical checks retain authority over their own claims. Neither a judge
 pass nor absence of a finding certifies scientific correctness.
 
-This section records the next design and execution order. It does not claim that
-the gain quotient, scoped affine adapter, convergence gate or new judge study has
-already been implemented or run.
+### Implemented first milestone: unchanged-model CPU continuation
+
+`construction-affine-continuation-1` implements the first three numerical items
+above as an opt-in experiment. The scientific judge study and automatic
+proposer feedback remain deferred. No production fitter default changes.
+
+The experiment contains all eight saved models, with two arms per model:
+
+1. Certified affine propagation in the original parameter coordinates.
+2. The same propagation after conservative, exact elimination of isolated
+   multiplicative gain redundancies.
+
+The state dynamics must be affine jointly in states and public forcing, and
+autonomous apart from that forcing. Parameters and initializer maps may remain
+nonlinear. A matrix exponential propagates each continuous piecewise-linear
+input segment, including every input knot; Frechet derivatives propagate
+sensitivities through the original scoped initializer graph. Multiple targets,
+shared constants, dependent maps, and per-trajectory training roots retain their
+original semantics. Non-affine dynamics fail qualification, rather than being
+silently linearized. This is exact affine rollout, **not coefficient profiling**:
+the fitted rates still enter the matrix exponential nonlinearly.
+
+Gain elimination requires a restricted symbolic certificate, exclusive parameter
+use, and an exact feasible-domain/lift construction. It preserves shared process
+consumers and rejects reductions involving initializer/observation uses, coupled
+constraints, or unsupported domains. In the exported eight models, it removes
+29 of 226 coordinates (remaining counts, in source order: 27, 16, 13, 31, 31,
+14, 38, 27). It does not eliminate every possible redundancy, nor identify a
+unique original factorization. Shared/coupled gains and remaining weak parameter
+directions are explicitly retained. Every effective endpoint is lifted to the
+original parameter domain for independent verification.
+
+Both arms use identical predeclared starts in original coordinates: the saved
+endpoint, the original declared start, and a seed-1729 perturbation of the
+declared start within its original bounds. The frozen budgets are 600 seconds
+for saved-endpoint continuation and 300 seconds for each other start, with at
+most 1,000 oracle calls per attempt. Qualification/diagnosis receive separate
+120-second numerical allowances and endpoint verification 180 seconds; inclusive
+allowances also bound setup and checkpoint overhead. Deadlines are cooperative;
+an operation that overruns cannot issue a completed qualification certificate.
+The Slurm ceiling is 90 minutes per task, one CPU and 8 GB, with array concurrency
+two. Scheduler waiting time is not fitting time.
+
+Before search, the runtime audits optimizer derivatives at two perturbation
+scales and compares the exact saved original endpoint against an independent
+original-equation Radau rollout. New checkpoints must pass the same independent
+rollout comparison before displacing the inherited model. Failed or interrupted
+searches preserve their saved best for verification without renewing their search
+allowance. The unchanged control always retains the **exact original saved
+vector**, even when gain-lift qualification fails.
+
+The report separates:
+
+- Actual per-target training error and original-equation solver agreement.
+- `optimization_unresolved`, `locally_converged_accurate_fit`, or
+  `locally_converged_poor_fit`, based on derivative agreement, projected gradient,
+  residual/Jacobian-column correlation, accepted-step history and stopping reason.
+- Local parameter rank/conditioning, separate from optimization convergence.
+- Each predetermined restart's outcome and verified error; no global-optimum claim.
+- Search, verification, derivative-check, wall/CPU and checkpoint costs. Interrupted
+  accounting remains a lower bound where the complete cost is unknown.
+
+The convergence assessment concerns the selected endpoint's own optimizer
+history; other attempts are listed separately in `restart_summary`. Neither a
+finite rollout, a budget stop, nor a small step alone establishes convergence.
+`status: complete` means the scheduled attempts have terminal receipts, not that
+the model fits well or that its parameter estimates are correct.
+
+Only training arrays and original saved endpoints are exported. No validation or
+test arrays/metrics enter this new fitting experiment. Validation-prefix inference
+and residual-driven revisions should follow only after reviewing these fitting
+outcomes. The independent source archive and previous validation reports remain
+available outside this worker's input payload.
+
+### Run and inspect on Delta
+
+The portable delivery includes `inputs/continuation-inputs.json`, sealed policy,
+all executable source and a `SOURCE_COMMIT`. Extract into a new code directory,
+then run from its top level:
+
+```bash
+export AF_PLATFORM=delta
+export AF_CONTINUATION_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-continuation-v1
+bash scripts/hpc/start_construction_continuation.sh run
+```
+
+The default native Python is
+`/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python`, with CasADi dependencies
+from `/projects/bibo/yxiao2/venvs/fitter-methods-v1-deps`. Override `AF_PYTHON` and
+`AF_CASADI_ROOT` only before the first preparation. The launcher ignores inherited
+`AF_OUTPUT_ROOT`, pins source/runtime/entrypoints, validates schemas without fitting
+on the login node, and submits the 16-task CPU array plus an `afterany` report.
+
+```bash
+bash scripts/hpc/start_construction_continuation.sh status
+bash scripts/hpc/start_construction_continuation.sh inspect
+jq '{status,expected,recorded,rows: [.rows[] | {task_id,arm,qualification_passed,
+  original_coordinates,optimizer_coordinates,retained_origin,training_nmse,
+  optimization_status,restart_summary}]}' "$AF_CONTINUATION_ROOT/report/summary.json"
+```
+
+Download `$AF_CONTINUATION_ROOT/inspection.tar.gz` after completion. Inspection
+reconstructs summaries from receipts and performs no fitting. Confirmed submission
+IDs are reused; an ambiguous scheduler reply stops for reconciliation, never a
+blind duplicate submission. An interrupted numerical stage is charged and will
+not silently run again. Keep the extracted code unchanged while jobs are active.
+ACES is optional via `AF_PLATFORM=aces` and an explicitly separate campaign root;
+the default account/runtime follow the existing native fitting environment.
+
+Local validation includes synthetic paired fitting, gain/domain equivalence,
+multi-target/root/map affine-versus-Radau agreement, finite-difference derivatives,
+checkpoint/resume failures, timing overruns and mocked scheduler submission.
+A single saved real-model residual/Jacobian check (no optimization) reproduced
+NMSE 3.831008922103463 versus the stored 3.831008922106169 in approximately
+0.74 seconds locally with 24 original / 16 effective coordinates. This is a kernel
+agreement check, not a fitting result or a general speedup estimate. The 16-task
+comparison has not been run locally or submitted by this agent.

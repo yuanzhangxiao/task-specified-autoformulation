@@ -1,0 +1,555 @@
+"""Opt-in local fitting adequacy for a scoped, reduced-coordinate residual.
+
+The caller owns training-only data, durable budgets, oracle construction and the
+independent verification of the *original* equations. This module never fits or
+changes a model. A local first-order assessment is not a minimum, identifiability,
+scientific-validity, or global optimality certificate.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from hashlib import sha256
+from time import monotonic
+from typing import Literal
+
+import numpy as np
+from numpy.typing import ArrayLike, NDArray
+from pydantic import Field, model_validator
+
+from autoformalism.schemas.base import FiniteFloat, StrictSchema
+
+Array = NDArray[np.float64]
+Evaluate = Callable[[Array, float], tuple[ArrayLike, ArrayLike]]
+
+
+class Policy(StrictSchema):
+    """Frozen thresholds in explicit optimizer coordinates; no adaptive loosening."""
+
+    accuracy_nmse: FiniteFloat = Field(default=1e-8, gt=0)
+    gradient_tolerance: FiniteFloat = Field(default=1e-8, gt=0)
+    correlation_tolerance: FiniteFloat = Field(default=1e-6, gt=0, lt=1)
+    history_window: int = Field(default=3, ge=2)
+    loss_tolerance: FiniteFloat = Field(default=1e-10, gt=0)
+    step_tolerance: FiniteFloat = Field(default=1e-6, gt=0)
+    bound_tolerance: FiniteFloat = Field(default=1e-10, gt=0)
+    derivative_relative_step: FiniteFloat = Field(default=1e-4, gt=0, le=0.1)
+    derivative_absolute_step: FiniteFloat = Field(default=1e-6, gt=0, le=0.1)
+    derivative_relative_tolerance: FiniteFloat = Field(default=1e-3, gt=0, lt=1)
+    derivative_absolute_tolerance: FiniteFloat = Field(default=1e-7, gt=0)
+    max_directions: int = Field(default=64, ge=1)
+    rank_relative_tolerance: FiniteFloat = Field(default=1e-8, gt=0, lt=1)
+
+
+class HistoryPoint(StrictSchema):
+    """An accepted optimizer step, never an arbitrary residual evaluation.
+
+    Project these fields from ``recovery_numerics.search(..., record_steps=True)``
+    ``accepted_steps``. Step norms must use the same coordinate units as assessment.
+    Repeated checkpoints of the same evaluation must not become separate steps.
+    """
+
+    training_nmse: FiniteFloat = Field(ge=0)
+    coordinate_step_norm: FiniteFloat = Field(ge=0)
+    accepted: bool = True
+    evaluation_count: int | None = Field(default=None, ge=1)
+
+
+class OriginalVerification(StrictSchema):
+    """Caller-authenticated original-equation replay at this reduced endpoint.
+
+    The two NMSEs/discrepancies have the ``recovery_numerics.usable`` semantics:
+    same training residual normalization, two independent original-equation solvers,
+    and maximum normalized prediction discrepancy. Reduced-oracle agreement alone
+    does not supply ``original_equations_verified``.
+    """
+
+    reduced_vector: tuple[FiniteFloat, ...]
+    training_nmse: FiniteFloat = Field(ge=0)
+    alternate_training_nmse: FiniteFloat = Field(ge=0)
+    solver_loss_discrepancy: FiniteFloat = Field(ge=0)
+    solver_prediction_discrepancy: FiniteFloat = Field(ge=0)
+    original_equations_verified: bool
+
+
+class DerivativeDirection(StrictSchema):
+    """One reduced coordinate, with two representable in-domain probe sizes."""
+
+    index: int = Field(ge=0)
+    scheme: Literal["central", "forward", "backward"]
+    steps: tuple[FiniteFloat, FiniteFloat]
+    error_rms: tuple[FiniteFloat, FiniteFloat]
+    relative_errors: tuple[FiniteFloat, FiniteFloat]
+    between_steps_relative_error: FiniteFloat
+    one_sided_disagreement: tuple[FiniteFloat, FiniteFloat] | None = None
+    passed: bool
+
+
+class DerivativeCheck(StrictSchema):
+    """Finite local audit with explicit uncovered columns and call accounting."""
+
+    status: Literal["passed", "failed", "incomplete", "unavailable"]
+    reduced_vector: tuple[FiniteFloat, ...]
+    coordinate_units: tuple[FiniteFloat, ...]
+    base_residual_sha256: str | None = None
+    base_jacobian_sha256: str | None = None
+    base_training_nmse: FiniteFloat | None = None
+    policy: Policy
+    required_indices: tuple[int, ...]
+    checked_indices: tuple[int, ...]
+    omitted_indices: tuple[int, ...]
+    directions: tuple[DerivativeDirection, ...] = ()
+    calls_started: int = Field(ge=0)
+    calls_completed: int = Field(ge=0)
+    jacobian_calls_started: int = Field(ge=0)
+    residual_only_calls_started: int = Field(ge=0)
+    elapsed_seconds: FiniteFloat = Field(ge=0)
+    error: str | None = None
+    scope: str = (
+        "Two-scale finite differences at one reduced endpoint; not a global "
+        "smoothness or minimum certificate. Deadlines are cooperative."
+    )
+
+
+class RestartEvidence(StrictSchema):
+    """Predeclared, distinct starts strengthen only observed search reliability."""
+
+    start_id: str = Field(min_length=1)
+    predeclared: bool
+    distinct_from_incumbent: bool
+    status: Literal["complete", "failed", "incomplete"]
+    verified_training_nmse: FiniteFloat | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def complete_has_loss(self):
+        if self.status == "complete" and self.verified_training_nmse is None:
+            raise ValueError("complete restart requires a verified training loss")
+        return self
+
+
+class Assessment(StrictSchema):
+    """Separate fit adequacy, local parameter information and restart coverage."""
+
+    classification: Literal[
+        "optimization_unresolved",
+        "locally_converged_accurate_fit",
+        "locally_converged_poor_fit",
+    ]
+    policy: Policy
+    reasons: tuple[str, ...]
+    training_nmse: FiniteFloat
+    projected_gradient_inf: FiniteFloat
+    maximum_residual_column_correlation: FiniteFloat
+    active_bound_indices: tuple[int, ...]
+    accepted_history_points: int = Field(ge=0)
+    derivative_status: str
+    original_rollout_verified: bool
+    parameter_rank: int = Field(ge=0)
+    parameter_singular_values: tuple[FiniteFloat, ...]
+    free_coordinates: int = Field(ge=0)
+    parameter_condition_number: FiniteFloat | None
+    parameter_information: Literal[
+        "full_local_rank", "rank_deficient", "no_free_coordinates"
+    ]
+    complete_predeclared_restarts: int = Field(ge=0)
+    improving_predeclared_restarts: int = Field(ge=0)
+    global_minimum_certified: Literal[False] = False
+    structural_revision_justified: Literal[False] = False
+    scope: str = (
+        "Local first-order evidence in declared coordinates, not proof of a "
+        "local/global minimum, coefficient accuracy, or a structural defect. "
+        "Parameter rank is local and separate from optimization adequacy; full "
+        "rank alone is not a statistical parameter-confidence conclusion."
+    )
+
+
+def _coordinates(vector, lower, upper, coordinate_units):
+    x, lo, hi = (np.asarray(v, dtype=float) for v in (vector, lower, upper))
+    if x.ndim != 1 or lo.shape != x.shape or hi.shape != x.shape:
+        raise ValueError("coordinate and bound shapes differ")
+    if not np.isfinite(x).all() or np.isnan(lo).any() or np.isnan(hi).any():
+        raise ValueError("nonfinite coordinates or NaN bounds")
+    if np.any(lo > hi) or np.any(x < lo) or np.any(x > hi):
+        raise ValueError("coordinates outside ordered bounds")
+    units = (
+        np.ones_like(x)
+        if coordinate_units is None
+        else np.asarray(coordinate_units, dtype=float)
+    )
+    if units.shape != x.shape or not np.isfinite(units).all() or np.any(units <= 0):
+        raise ValueError("coordinate units must be finite positive and shape matched")
+    return x, lo, hi, units
+
+
+def _arrays(residual, jacobian, dimension):
+    r, j = np.asarray(residual, dtype=float), np.asarray(jacobian, dtype=float)
+    if r.ndim != 1 or not len(r) or j.shape != (len(r), dimension):
+        raise ValueError("invalid residual or reduced Jacobian shape")
+    if not np.isfinite(r).all() or not np.isfinite(j).all():
+        raise ValueError("nonfinite residual or reduced Jacobian")
+    if not np.isfinite(np.mean(r * r)):
+        raise ValueError("nonfinite residual loss")
+    return r, j
+
+
+def _rms(value):
+    scale = float(np.max(np.abs(value), initial=0))
+    return scale * float(np.sqrt(np.mean((value / scale) ** 2))) if scale else 0.0
+
+
+def _digest(value):
+    """Bind exact float64 array shape/content without serializing large Jacobians."""
+    data = np.ascontiguousarray(value, dtype="<f8")
+    return sha256(str(data.shape).encode("ascii") + data.tobytes()).hexdigest()
+
+
+def _agreement(left, right, policy):
+    error = _rms(left - right)
+    scale = max(_rms(left), _rms(right))
+    relative = error / scale if scale else 0.0
+    # The absolute floor alone must not certify a completely wrong tiny column.
+    passed = relative <= policy.derivative_relative_tolerance and error <= (
+        policy.derivative_absolute_tolerance
+        + policy.derivative_relative_tolerance * scale
+    )
+    return error, relative, passed
+
+
+def derivative_check(
+    evaluate: Evaluate,
+    vector: ArrayLike,
+    lower: ArrayLike,
+    upper: ArrayLike,
+    deadline: float,
+    *,
+    coordinate_units: ArrayLike | None = None,
+    policy: Policy | None = None,
+    directions: Sequence[int] | None = None,
+    residual_only: Callable[[Array, float], ArrayLike] | None = None,
+) -> DerivativeCheck:
+    """Audit the actual reduced residual, including profiled reconstruction.
+
+    ``evaluate(x, deadline)`` returns residual and derivative with respect to ``x``.
+    The caller must use the same residual weighting and reconstruction as optimization.
+    All nonfixed coordinates are required for a pass; selected or capped subsets are
+    explicitly incomplete. At a domain boundary use one-sided inward differences.
+    Each started oracle call is counted even when it fails or overruns the deadline.
+    Optional ``residual_only`` avoids sensitivity integrations at perturbed points;
+    its base residual is first checked exactly against ``evaluate``'s residual.
+    """
+    policy = policy or Policy()
+    x, lo, hi, units = _coordinates(vector, lower, upper, coordinate_units)
+    if not np.isfinite(deadline):
+        raise ValueError("finite monotonic deadline required")
+    required = tuple(int(i) for i in np.flatnonzero(lo < hi))
+    selected = list(required if directions is None else directions)
+    if len(set(selected)) != len(selected) or any(
+        not isinstance(i, (int, np.integer)) or isinstance(i, bool) or i not in required
+        for i in selected
+    ):
+        raise ValueError("directions must be distinct nonfixed coordinate indices")
+    selected = selected[: policy.max_directions]
+    begun, started, completed = monotonic(), 0, 0
+    jacobian_calls, residual_calls = 0, 0
+    base_r, base_j, rows, error = None, None, [], None
+
+    def call(v, *, full=False):
+        nonlocal started, completed, jacobian_calls, residual_calls
+        if monotonic() >= deadline:
+            raise TimeoutError("derivative audit deadline reached")
+        started += 1
+        if full or residual_only is None:
+            jacobian_calls += 1
+            r, j = _arrays(*evaluate(v.copy(), deadline), len(x))
+        else:
+            residual_calls += 1
+            r = np.asarray(residual_only(v.copy(), deadline), dtype=float)
+            if r.ndim != 1 or not len(r) or not np.isfinite(r).all():
+                raise ValueError("invalid residual-only oracle result")
+            j = None
+        completed += 1
+        if monotonic() >= deadline:
+            raise TimeoutError("derivative oracle returned after deadline")
+        if base_r is not None and r.shape != base_r.shape:
+            raise ValueError("oracle residual size changed across probes")
+        return r, j
+
+    try:
+        base_r, base_j = call(x, full=True)
+        if residual_only is not None and not np.array_equal(call(x)[0], base_r):
+            raise ValueError(
+                "residual-only callback differs from audited oracle at base"
+            )
+        for index in selected:
+            h = max(
+                policy.derivative_absolute_step * units[index],
+                policy.derivative_relative_step * max(abs(x[index]), units[index]),
+            )
+            left, right = x[index] - lo[index], hi[index] - x[index]
+            if left >= h and right >= h:
+                scheme = "central"
+            elif right >= left:
+                scheme, h = "forward", min(h, right / 2)
+            else:
+                scheme, h = "backward", min(h, left / 2)
+            estimates, steps, errors, relatives, agrees = [], [], [], [], []
+            unilateral = []
+            for step in (h, h / 2):
+                a, b = x.copy(), x.copy()
+                if scheme != "backward":
+                    a[index] += step
+                if scheme != "forward":
+                    b[index] -= step
+                displacement = a[index] - b[index]
+                if not np.isfinite(displacement) or displacement <= 0:
+                    raise ValueError(
+                        "finite-difference displacement is not representable"
+                    )
+                if np.any(a > hi) or np.any(b < lo):
+                    raise ValueError("finite-difference probe outside domain")
+                ra = base_r if np.array_equal(a, x) else call(a)[0]
+                rb = base_r if np.array_equal(b, x) else call(b)[0]
+                # Report derivatives in the fixed optimizer coordinate units.
+                estimate = (ra - rb) / displacement * units[index]
+                if not np.isfinite(estimate).all():
+                    raise ValueError("nonfinite finite-difference estimate")
+                e, rel, ok = _agreement(
+                    estimate, base_j[:, index] * units[index], policy
+                )
+                estimates.append(estimate)
+                steps.append(float(step))
+                errors.append(e)
+                relatives.append(rel)
+                agrees.append(ok)
+                if scheme == "central":
+                    forward = (ra - base_r) / (a[index] - x[index]) * units[index]
+                    backward = (base_r - rb) / (x[index] - b[index]) * units[index]
+                    unilateral.append(_rms(forward - backward))
+            _, between, stable = _agreement(*estimates, policy)
+            # Central cancellation must not certify abs(x) at its kink. Smooth
+            # curvature may disagree at finite h, but its discrepancy contracts.
+            sides_ok = not unilateral or (
+                unilateral[1]
+                <= policy.derivative_absolute_tolerance
+                + policy.derivative_relative_tolerance
+                * _rms(base_j[:, index] * units[index])
+                or unilateral[1] <= 0.75 * unilateral[0]
+            )
+            rows.append(
+                DerivativeDirection(
+                    index=index,
+                    scheme=scheme,
+                    steps=tuple(steps),
+                    error_rms=tuple(errors),
+                    relative_errors=tuple(relatives),
+                    between_steps_relative_error=between,
+                    one_sided_disagreement=tuple(unilateral) if unilateral else None,
+                    passed=all(agrees) and stable and sides_ok,
+                )
+            )
+    except (ValueError, RuntimeError, ArithmeticError, TimeoutError) as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    checked = tuple(row.index for row in rows)
+    omitted = tuple(i for i in required if i not in checked)
+    status = (
+        "failed"
+        if any(not row.passed for row in rows)
+        else (
+            "unavailable"
+            if base_r is None
+            else "incomplete"
+            if omitted or error
+            else "passed"
+        )
+    )
+    return DerivativeCheck(
+        status=status,
+        reduced_vector=tuple(x),
+        coordinate_units=tuple(units),
+        base_residual_sha256=None if base_r is None else _digest(base_r),
+        base_jacobian_sha256=None if base_j is None else _digest(base_j),
+        base_training_nmse=None if base_r is None else float(np.mean(base_r**2)),
+        policy=policy,
+        required_indices=required,
+        checked_indices=checked,
+        omitted_indices=omitted,
+        directions=tuple(rows),
+        calls_started=started,
+        calls_completed=completed,
+        jacobian_calls_started=jacobian_calls,
+        residual_only_calls_started=residual_calls,
+        elapsed_seconds=monotonic() - begun,
+        error=error,
+    )
+
+
+def assess(
+    vector: ArrayLike,
+    residual: ArrayLike,
+    jacobian: ArrayLike,
+    lower: ArrayLike,
+    upper: ArrayLike,
+    *,
+    verification: OriginalVerification | Mapping | None,
+    derivative: DerivativeCheck,
+    stop_reason: str | None,
+    budget_exhausted: bool | None,
+    history: Sequence[HistoryPoint | Mapping] = (),
+    coordinate_units: ArrayLike | None = None,
+    restarts: Sequence[RestartEvidence | Mapping] = (),
+    policy: Policy | None = None,
+) -> Assessment:
+    """Require independent replay, current derivatives and accepted local progress.
+
+    Neither an optimizer success flag, a budget stop, a small step alone, nor a
+    stationary starting point qualifies. Repeated diverse restarts can strengthen
+    observed reliability, but never override the local gates or certify a global fit.
+    """
+    policy = policy or Policy()
+    x, lo, hi, units = _coordinates(vector, lower, upper, coordinate_units)
+    r, j = _arrays(residual, jacobian, len(x))
+    loss, scaled = float(np.mean(r * r)), j * units
+    free = lo < hi
+    product = scaled.T @ r
+    tolerance = policy.bound_tolerance * np.maximum(units, np.abs(x))
+    blocked = (
+        ((x - lo <= tolerance) & (product > 0))
+        | ((hi - x <= tolerance) & (product < 0))
+        | ~free
+    )
+    projected = np.where(blocked, 0.0, product)
+    gradient = float(np.max(2 * np.abs(projected) / len(r), initial=0))
+    denominator = np.linalg.norm(scaled, axis=0) * np.linalg.norm(r)
+    correlation = np.divide(
+        np.abs(projected),
+        denominator,
+        out=np.zeros_like(projected),
+        where=denominator > 0,
+    )
+    max_correlation = float(np.max(correlation, initial=0))
+    reasons = []
+    verified = False
+    if verification is not None:
+        v = OriginalVerification.model_validate(verification)
+        loss_allowance = max(
+            1e-12, 1e-8 * max(v.training_nmse, v.alternate_training_nmse)
+        )
+        verified = (
+            v.original_equations_verified
+            and np.array_equal(x, v.reduced_vector)
+            and v.solver_prediction_discrepancy <= 1e-7
+            and v.solver_loss_discrepancy <= loss_allowance
+            and abs(v.training_nmse - v.alternate_training_nmse) <= loss_allowance
+            and abs(loss - v.training_nmse) <= loss_allowance
+        )
+    if not verified:
+        reasons.append("original_equation_rollout_unverified_or_mismatched")
+    if not (
+        derivative.status == "passed"
+        and np.array_equal(x, derivative.reduced_vector)
+        and np.array_equal(units, derivative.coordinate_units)
+        and _digest(r) == derivative.base_residual_sha256
+        and _digest(j) == derivative.base_jacobian_sha256
+        and derivative.policy.derivative_relative_tolerance
+        <= policy.derivative_relative_tolerance
+        and derivative.policy.derivative_absolute_tolerance
+        <= policy.derivative_absolute_tolerance
+        and set(derivative.checked_indices) == set(np.flatnonzero(free))
+        and not derivative.omitted_indices
+    ):
+        reasons.append("reduced_derivative_audit_unqualified_or_mismatched")
+    if budget_exhausted is not False or stop_reason in {
+        "budget_limited",
+        "wall_clock_limit",
+        "numerical_failure",
+        "interrupted",
+    }:
+        reasons.append("search_incomplete_or_budget_status_unknown")
+    if stop_reason not in {
+        "step_or_gradient_converged",
+        "gradient_converged",
+        "stationary_poor_fit",
+        "numerical_target_reached",
+        "output_problem_solved",
+        "no_free_coordinates",
+    }:
+        reasons.append("termination_not_supported")
+    if gradient > policy.gradient_tolerance:
+        reasons.append("projected_gradient_not_small")
+    if max_correlation > policy.correlation_tolerance:
+        reasons.append("residual_column_correlation_not_small")
+    accepted = [HistoryPoint.model_validate(p) for p in history]
+    accepted = [p for p in accepted if p.accepted and p.coordinate_step_norm > 0]
+    counts = [p.evaluation_count for p in accepted if p.evaluation_count is not None]
+    if counts != sorted(set(counts)):
+        reasons.append("accepted_history_repeated_or_out_of_order")
+    recent = accepted[-policy.history_window :]
+    if np.any(free):
+        if len(recent) < policy.history_window:
+            reasons.append("accepted_progress_history_insufficient")
+        elif (
+            max(p.coordinate_step_norm for p in recent) > policy.step_tolerance
+            or max(p.training_nmse for p in recent)
+            - min(p.training_nmse for p in recent)
+            > policy.loss_tolerance * max(1, loss)
+            or abs(recent[-1].training_nmse - loss)
+            > policy.loss_tolerance * max(1, loss)
+        ):
+            reasons.append("accepted_history_not_stable_at_endpoint")
+    singular = np.linalg.svd(scaled[:, free], compute_uv=False)
+    rank = (
+        int(np.sum(singular > policy.rank_relative_tolerance * singular[0]))
+        if len(singular)
+        else 0
+    )
+    nfree = int(np.sum(free))
+    condition = float(singular[0] / singular[-1]) if rank == nfree and nfree else None
+    if condition is not None and not np.isfinite(condition):
+        condition = None
+    records = [RestartEvidence.model_validate(item) for item in restarts]
+    ids = [item.start_id for item in records]
+    if len(set(ids)) != len(ids):
+        raise ValueError("restart identities must be unique")
+    complete = [
+        item
+        for item in records
+        if item.predeclared
+        and item.distinct_from_incumbent
+        and item.status == "complete"
+    ]
+    improving = sum(
+        item.verified_training_nmse < loss - policy.loss_tolerance * max(1, loss)
+        for item in complete
+    )
+    if improving:
+        reasons.append("predeclared_restart_has_better_verified_endpoint")
+    classification = (
+        "optimization_unresolved"
+        if reasons
+        else (
+            "locally_converged_accurate_fit"
+            if loss <= policy.accuracy_nmse
+            else "locally_converged_poor_fit"
+        )
+    )
+    return Assessment(
+        classification=classification,
+        policy=policy,
+        reasons=tuple(reasons),
+        training_nmse=loss,
+        projected_gradient_inf=gradient,
+        maximum_residual_column_correlation=max_correlation,
+        active_bound_indices=tuple(int(i) for i in np.flatnonzero(blocked & free)),
+        accepted_history_points=len(accepted),
+        derivative_status=derivative.status,
+        original_rollout_verified=verified,
+        parameter_rank=rank,
+        parameter_singular_values=tuple(singular),
+        free_coordinates=nfree,
+        parameter_condition_number=condition,
+        parameter_information="no_free_coordinates"
+        if not nfree
+        else ("full_local_rank" if rank == nfree else "rank_deficient"),
+        complete_predeclared_restarts=len(complete),
+        improving_predeclared_restarts=improving,
+    )
