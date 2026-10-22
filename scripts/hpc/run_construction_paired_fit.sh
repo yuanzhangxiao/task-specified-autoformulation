@@ -26,19 +26,23 @@ if ! "$AF_PYTHON" -c "$AF_PROBE" >/dev/null 2>&1; then
   if [[ "$AF_PLATFORM" == aces ]] && type module >/dev/null 2>&1; then
     echo 'Scientific Python import failed; loading the compiler and Python module hierarchy.' >&2
     module load "${AF_GCCCORE_MODULE:-GCCcore/13.2.0}" "${AF_PYTHON_MODULE:-Python/3.11.5}"
-    "$AF_PYTHON" -c "$AF_PROBE"
   else
     echo 'Scientific Python import failed. Select AF_PYTHON and AF_CASADI_ROOT; no work was started.' >&2
     exit 2
   fi
 fi
+# Module loading can prepend EasyBuild's helper directory. Use the same explicit
+# package path at submission and on workers that inherit already-loaded modules.
+# Recheck after restoring it: do not hide a dependency supplied only by that path.
+export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT${AF_CASADI_ROOT:+:$AF_CASADI_ROOT}"
+"$AF_PYTHON" -c "$AF_PROBE"
 cd "$AF_REPO_ROOT"
 AF_CLI="$AF_REPO_ROOT/scripts/compare_construction_fitting.py"
 case "$AF_STAGE" in
-  prepare|submit|verify-execution)
+  prepare|submit)
     exec "$AF_PYTHON" "$AF_CLI" "$AF_STAGE" --root "$AF_PAIRED_FIT_ROOT" "$@"
     ;;
-  status|report|inspect)
+  status|report|inspect|verify-execution)
     # A scheduler-generated report command carries an unused task-index placeholder.
     exec "$AF_PYTHON" "$AF_CLI" "$AF_STAGE" --root "$AF_PAIRED_FIT_ROOT"
     ;;

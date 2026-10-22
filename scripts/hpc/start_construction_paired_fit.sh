@@ -5,10 +5,10 @@ export AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 export AF_PLATFORM=${AF_PLATFORM:-aces}
 case "$AF_PLATFORM" in
   aces)
-    AF_DEFAULT_ROOT=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}/phase-c-paired-fit-v1
+    AF_DEFAULT_ROOT=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}/phase-c-paired-fit-v2
     ;;
   delta)
-    AF_DEFAULT_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-paired-fit-v1
+    AF_DEFAULT_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-paired-fit-v2
     ;;
   *) echo 'AF_PLATFORM must be aces or delta.' >&2; exit 2 ;;
 esac

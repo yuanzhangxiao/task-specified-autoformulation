@@ -53,7 +53,7 @@ def execution_identity(root: Path) -> dict:
     if len(plan.get("tasks", [])) != TASKS:
         raise ValueError("paired comparison requires 24 frozen model tasks")
     return {
-        "protocol": "construction-paired-fit-cpu-execution-1",
+        "protocol": "construction-paired-fit-cpu-execution-2",
         "plan_sha256": public.content_sha256(plan),
         "source_sha256": plan["source_sha256"],
         "root": str(root.resolve()),
@@ -72,6 +72,7 @@ def execution_identity(root: Path) -> dict:
         "memory": "8G",
         "wall_time": "03:00:00",
         "report_wall_time": "00:15:00",
+        "preflight_wall_time": "00:05:00",
         "exclude": "ac042" if platform == "aces" else None,
         "gpus": 0,
         "llm_calls": 0,
@@ -81,11 +82,37 @@ def execution_identity(root: Path) -> dict:
     }
 
 
+def _identity_differences(saved: dict, current: dict, prefix: str = "") -> list[dict]:
+    """Name every differing field without dumping the complete identity."""
+    differences = []
+    for key in sorted(saved.keys() | current.keys()):
+        field = f"{prefix}.{key}" if prefix else key
+        if key not in saved or key not in current:
+            differences.append({
+                "field": field,
+                "saved_present": key in saved,
+                "current_present": key in current,
+                "saved": saved.get(key),
+                "current": current.get(key),
+            })
+        elif isinstance(saved[key], dict) and isinstance(current[key], dict):
+            differences.extend(_identity_differences(saved[key], current[key], field))
+        elif saved[key] != current[key]:
+            differences.append({
+                "field": field, "saved": saved[key], "current": current[key],
+            })
+    return differences
+
+
 def verify_execution(root: Path) -> dict:
     """Reject a changed plan, source, interpreter, dependency set or worker."""
     value = read_seal(root / "launcher_execution.json")
-    if value != execution_identity(root):
-        raise ValueError("paired fitting launcher identity differs")
+    differences = _identity_differences(value, execution_identity(root))
+    if differences:
+        raise ValueError(
+            "paired fitting launcher identity differs: "
+            + json.dumps(differences, sort_keys=True)
+        )
     return value
 
 
@@ -117,29 +144,36 @@ def submit(root: Path) -> dict:
         ]
         worker = REPO / "scripts/hpc/run_construction_paired_fit.sh"
         jobs = {}
-        for stage in ("run", "report"):
+        for stage in ("preflight", "run", "report"):
+            worker_stage = "verify-execution" if stage == "preflight" else stage
+            if stage == "preflight":
+                scheduling = [f"--time={identity['preflight_wall_time']}"]
+            elif stage == "run":
+                scheduling = [
+                    f"--dependency=afterok:{jobs['preflight']}",
+                    f"--array={identity['array']}",
+                    f"--time={identity['wall_time']}",
+                ]
+            else:
+                scheduling = [
+                    f"--dependency=afterany:{jobs['run']}",
+                    f"--time={identity['report_wall_time']}",
+                ]
             options = [
                 *base,
                 f"--job-name=construction-paired-{stage}",
                 f"--output={root}/logs/{stage}-%A_%a.out",
                 f"--error={root}/logs/{stage}-%A_%a.err",
-                *(
-                    [f"--array={identity['array']}", f"--time={identity['wall_time']}"]
-                    if stage == "run"
-                    else [
-                        f"--dependency=afterany:{jobs['run']}",
-                        f"--time={identity['report_wall_time']}",
-                    ]
-                ),
+                *scheduling,
             ]
-            argv = ["sbatch", "--parsable", *options, str(worker), stage, "0"]
+            argv = ["sbatch", "--parsable", *options, str(worker), worker_stage, "0"]
             job = confirmed_job(directory, stage, argv)
             if job is None:
                 if saved:
                     raise ValueError(
                         "submission manifest lacks a confirmed job receipt"
                     )
-                job = submit_job(directory, stage, options, worker, stage, 0)
+                job = submit_job(directory, stage, options, worker, worker_stage, 0)
             jobs[stage] = job
         value = {
             "execution_sha256": execution_sha256,

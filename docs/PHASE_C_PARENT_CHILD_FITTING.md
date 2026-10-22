@@ -91,8 +91,10 @@ selection, promotion, revision, or follow-up experiment.
 
 ## Run on ACES and inspect
 
-Upload and extract the delivered bundle under
-`/scratch/group/p.nairr260351.000/u.yx126462`. In an **ACES shell**, run from that
+Upload the delivered bundle under
+`/scratch/group/p.nairr260351.000/u.yx126462`, then extract its source under
+`/scratch/user/u.yx126462` to spread file-count use across the two quotas.
+Results remain in group scratch. In an **ACES shell**, run from the extracted
 bundle directory:
 
 ```bash
@@ -102,7 +104,7 @@ bash run_fit.sh inspect
 ```
 
 The bundle wrapper resolves its own code directory. The default results root is
-`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-paired-fit-v1`.
+`/scratch/group/p.nairr260351.000/u.yx126462/phase-c-paired-fit-v2`.
 Preparation authenticates inputs and runtime without fitting on the login node.
 The required scientific packages are NumPy, SciPy, pandas, Pydantic and CasADi.
 The first launcher mistakenly also required SymPy, which these fitter kernels
@@ -111,8 +113,12 @@ the corrected source bundle without installing SymPy or changing the numerical
 environment. Do not patch an existing sealed execution: keep it intact and choose
 a fresh results root if preparation or submission had already succeeded there.
 Because ACES previously reached its file quota, check `showquota` before
-extracting; allow roughly 3,500 free file/directory entries for this bundle and
-its bounded receipts. No GPU/compiler cache is created by this launch.
+extracting; budget roughly 700 file/directory entries in user scratch for code
+and 2,500 in group scratch for the bounded receipts. Leave additional room for
+other work sharing the allocation. No GPU/compiler cache is created by this launch.
+The launcher first submits a five-minute CPU preflight that verifies the saved
+execution identity on a compute node, without fitting. The array depends on its
+successful completion; a failed preflight prevents all 24 fits from starting.
 The array contains **24 CPU tasks, at most eight concurrent**, each requesting
 one CPU, 8 GB RAM and three hours. It requests no GPU. A separate report job runs
 after the array, including failed tasks. Scheduler wall time is a ceiling, not a
@@ -134,7 +140,7 @@ results root and the existing Delta scientific Python/dependency environment:
 
 ```bash
 export AF_PLATFORM=delta
-export AF_PAIRED_FIT_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-paired-fit-v1
+export AF_PAIRED_FIT_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-paired-fit-v2
 bash run_fit.sh run
 bash run_fit.sh status
 bash run_fit.sh inspect
@@ -142,3 +148,21 @@ bash run_fit.sh inspect
 
 Platform/Python/dependency overrides must be set before preparation. Do not reuse
 an already sealed ACES campaign root with a different platform or interpreter.
+
+### Recovery from the first ACES array
+
+The returned `2246406` array failed before fitting. The saved identity included
+EasyBuild's helper directory, which the Python module prepended to `PYTHONPATH`
+during submission. Workers inherited the loaded module environment, reset
+`PYTHONPATH`, and therefore differed from the sealed identity. This was a launcher
+environment inconsistency, not numerical evidence about the 24 models.
+
+The corrected launcher restores the explicit source/dependency path **after**
+module loading and repeats the import check on that exact path. Actual Python,
+package, source and entrypoint pins remain enforced. Launcher-identity errors now
+list the differing fields and their saved/current values; scientific source and
+package verification remain earlier gates with their own errors. Execution protocol 2 adds
+the compute preflight described above and uses the separate `v2` output root.
+Keep `phase-c-paired-fit-v1` and its job/error records intact; do not edit its
+sealed identity to make verification pass. The models, inputs, fitter kernels,
+two starts and numerical budgets remain unchanged.

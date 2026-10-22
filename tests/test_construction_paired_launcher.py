@@ -52,22 +52,28 @@ def accepting(monkeypatch):
     return commands
 
 
-def test_twenty_four_cpu_models_eight_parallel_afterany_and_idempotent(
+def test_preflight_gates_twenty_four_cpu_models_and_afterany_report(
     prepared, monkeypatch
 ):
     root, _, plan, _ = prepared
     commands = accepting(monkeypatch)
     monkeypatch.setenv("AF_OUTPUT_ROOT", "/historical/unrelated")
     result = cli.submit(root)
-    assert result["jobs"] == {"run": "101", "report": "102"}
+    assert result["jobs"] == {"preflight": "101", "run": "102", "report": "103"}
     assert result["tasks"] == 24 and result["maximum_parallel_tasks"] == 8
     assert result["gpus"] == result["llm_calls"] == 0
     assert result["test_data_opened"] is False
     assert result["automatic_followup"] is False
-    assert "--array=0-23%8" in commands[0]
-    assert "--time=03:00:00" in commands[0]
-    assert "--time=00:15:00" in commands[1]
-    assert "--dependency=afterany:101" in commands[1]
+    assert "--time=00:05:00" in commands[0]
+    assert commands[0][-2:] == ["verify-execution", "0"]
+    assert not any(part.startswith("--array=") for part in commands[0])
+    assert "--array=0-23%8" in commands[1]
+    assert "--time=03:00:00" in commands[1]
+    assert "--dependency=afterok:101" in commands[1]
+    assert commands[1][-2:] == ["run", "0"]
+    assert "--time=00:15:00" in commands[2]
+    assert "--dependency=afterany:102" in commands[2]
+    assert commands[2][-2:] == ["report", "0"]
     for command in commands:
         assert "--account=156264627414" in command
         assert "--partition=cpu" in command
@@ -77,8 +83,10 @@ def test_twenty_four_cpu_models_eight_parallel_afterany_and_idempotent(
         assert not any("gpu" in value for value in command)
     assert os.environ["AF_PAIRED_FIT_ROOT"] == str(root)
     assert os.environ["AF_OUTPUT_ROOT"] == "/historical/unrelated"
-    assert cli.submit(root) == result and len(commands) == 2
+    assert cli.submit(root) == result and len(commands) == 3
     identity = cli.verify_execution(root)
+    assert identity["protocol"] == "construction-paired-fit-cpu-execution-2"
+    assert identity["preflight_wall_time"] == "00:05:00"
     assert identity["source_sha256"] == "frozen-source"
     assert identity["plan_sha256"] == content_sha256(plan)
 
@@ -124,7 +132,31 @@ def test_uncertain_reply_never_renews_submission(prepared, monkeypatch, failure)
     with pytest.raises(ValueError, match="uncertain"):
         cli.submit(root)
     assert len(commands) == 1
-    assert (root / cli.SUBMISSIONS / "run.reply.json").exists()
+    assert (root / cli.SUBMISSIONS / "preflight.reply.json").exists()
+    assert not (root / cli.SUBMISSIONS / "run.intent.json").exists()
+    assert not (root / cli.SUBMISSIONS / "report.intent.json").exists()
+
+
+def test_confirmed_preflight_is_not_resubmitted_after_uncertain_array(
+    prepared, monkeypatch
+):
+    root, _, _, _ = prepared
+    commands = []
+
+    def reply(argv, **kwargs):
+        commands.append(argv)
+        return SimpleNamespace(
+            returncode=0, stdout="101\n" if len(commands) == 1 else "", stderr=""
+        )
+
+    monkeypatch.setattr(scheduler.subprocess, "run", reply)
+    with pytest.raises(ValueError, match="unconfirmed"):
+        cli.submit(root)
+    with pytest.raises(ValueError, match="uncertain run"):
+        cli.submit(root)
+    assert len(commands) == 2
+    assert "--dependency=afterok:101" in commands[1]
+    assert (root / cli.SUBMISSIONS / "preflight.id").read_text().strip() == "101"
     assert not (root / cli.SUBMISSIONS / "report.intent.json").exists()
 
 
@@ -137,7 +169,9 @@ def test_confirmed_array_is_not_resubmitted_after_uncertain_report(
     def reply(argv, **kwargs):
         commands.append(argv)
         return SimpleNamespace(
-            returncode=0, stdout="103\n" if len(commands) == 1 else "", stderr=""
+            returncode=0,
+            stdout=f"{100 + len(commands)}\n" if len(commands) <= 2 else "",
+            stderr="",
         )
 
     monkeypatch.setattr(scheduler.subprocess, "run", reply)
@@ -145,7 +179,9 @@ def test_confirmed_array_is_not_resubmitted_after_uncertain_report(
         cli.submit(root)
     with pytest.raises(ValueError, match="uncertain report"):
         cli.submit(root)
-    assert len(commands) == 2
+    assert len(commands) == 3
+    assert "--dependency=afterany:102" in commands[2]
+    assert (root / cli.SUBMISSIONS / "run.id").read_text().strip() == "102"
 
 
 @pytest.mark.parametrize("change", ["source", "entrypoint", "runtime", "plan"])
@@ -165,18 +201,78 @@ def test_changed_execution_cannot_submit_or_run(prepared, monkeypatch, change):
         cli.verify_execution(root)
     with pytest.raises(ValueError):
         cli.submit(root)
-    assert len(commands) == 2
+    assert len(commands) == 3
 
 
-def test_saved_manifest_does_not_bypass_confirmed_receipts(prepared, monkeypatch):
+@pytest.mark.parametrize(
+    "field,saved,current",
+    [
+        ("pythonpath", "/canonical/src:/canonical", "/module:/canonical"),
+        ("python_sha256", "saved-python-hash", "changed-python-hash"),
+        ("packages.casadi", "3.7.2", "3.7.3"),
+    ],
+)
+def test_runtime_mismatch_names_field_and_saved_and_current_values(
+    prepared, monkeypatch, field, saved, current
+):
+    root, _, _, _ = prepared
+    runtime = {
+        "mode": "native",
+        "pythonpath": "/canonical/src:/canonical",
+        "python_sha256": "saved-python-hash",
+        "packages": {"casadi": "3.7.2"},
+    }
+    monkeypatch.setattr(cli, "runtime_identity", lambda: runtime)
+    commands = accepting(monkeypatch)
+    cli.submit(root)
+    if field == "packages.casadi":
+        runtime["packages"]["casadi"] = current
+    else:
+        runtime[field] = current
+    with pytest.raises(ValueError, match="identity differs") as error:
+        cli.verify_execution(root)
+    message = str(error.value)
+    assert json.loads(message.split(": ", 1)[1]) == [
+        {"field": f"runtime.{field}", "saved": saved, "current": current}
+    ]
+    with pytest.raises(ValueError):
+        cli.submit(root)
+    assert len(commands) == 3
+
+
+@pytest.mark.parametrize("saved_present", [False, True])
+def test_runtime_diagnostics_distinguish_absent_and_null_fields(
+    prepared, monkeypatch, saved_present
+):
+    root, _, _, _ = prepared
+    runtime = {"mode": "native", **({"optional": None} if saved_present else {})}
+    monkeypatch.setattr(cli, "runtime_identity", lambda: runtime)
+    accepting(monkeypatch)
+    cli.submit(root)
+    if saved_present:
+        del runtime["optional"]
+    else:
+        runtime["optional"] = None
+    with pytest.raises(ValueError, match="identity differs") as error:
+        cli.verify_execution(root)
+    assert json.loads(str(error.value).split(": ", 1)[1]) == [{
+        "field": "runtime.optional", "saved": None, "current": None,
+        "saved_present": saved_present, "current_present": not saved_present,
+    }]
+
+
+@pytest.mark.parametrize("stage", ["preflight", "run", "report"])
+def test_saved_manifest_does_not_bypass_confirmed_receipts(
+    prepared, monkeypatch, stage
+):
     root, _, _, _ = prepared
     commands = accepting(monkeypatch)
     cli.submit(root)
-    receipt = root / cli.SUBMISSIONS / "run.reply.json"
+    receipt = root / cli.SUBMISSIONS / f"{stage}.reply.json"
     receipt.write_text(json.dumps({"returncode": 0, "stdout": "999\n"}))
-    with pytest.raises(ValueError, match="unconfirmed run"):
+    with pytest.raises(ValueError, match=f"unconfirmed {stage}"):
         cli.submit(root)
-    assert len(commands) == 2
+    assert len(commands) == 3
 
 
 def test_run_requires_execution_verification_before_numerical_work(
@@ -309,7 +405,7 @@ def test_shell_resolves_bundle_from_any_directory_and_preserves_historical_root(
     assert str(REPO / "configs/construction_paired_fit_v1.json") in args
     assert env["AF_PAIRED_FIT_ROOT"] in args
     assert env["AF_OUTPUT_ROOT"] not in args
-    assert args.count("-c") == 2 and "casadi" in args[1]
+    assert args.count("-c") == 4 and "casadi" in args[1]
     assert "sympy" not in args[1]
     assert not {"run_task", "--index"} & set(args)
 
@@ -324,7 +420,7 @@ def test_readonly_shell_commands_do_not_prepare_submit_or_fit(tmp_path, command)
     assert not {"run", "prepare", "submit", "--index"} & set(args)
 
 
-def test_worker_array_index_and_report_placeholder(tmp_path):
+def test_worker_array_index_and_scheduler_placeholders(tmp_path):
     env = shell_environment(tmp_path) | {
         "SLURM_ARRAY_TASK_ID": "23", "SLURM_JOB_ID": "100", "AF_PLATFORM": "aces",
     }
@@ -332,10 +428,11 @@ def test_worker_array_index_and_report_placeholder(tmp_path):
     subprocess.run(["bash", str(worker), "run", "0"], env=env, check=True)
     args = (tmp_path / "args.txt").read_text().splitlines()
     assert args[args.index("--index") + 1] == "23"
-    (tmp_path / "args.txt").unlink()
-    subprocess.run(["bash", str(worker), "report", "0"], env=env, check=True)
-    args = (tmp_path / "args.txt").read_text().splitlines()
-    assert "report" in args and "0" not in args and "--index" not in args
+    for stage in ("report", "verify-execution"):
+        (tmp_path / "args.txt").unlink()
+        subprocess.run(["bash", str(worker), stage, "0"], env=env, check=True)
+        args = (tmp_path / "args.txt").read_text().splitlines()
+        assert stage in args and "0" not in args and "--index" not in args
 
 
 def test_worker_rejects_run_without_compute_allocation(tmp_path):
@@ -375,6 +472,125 @@ def test_aces_preflight_loads_compiler_before_python_when_required(tmp_path):
     assert (tmp_path / "args.txt").read_text().splitlines().count("-c") == 2
 
 
+def scientific_overlay(root: Path, version: str, *, needs_libraries: bool) -> None:
+    """Supply importable packages and metadata with a simulated loader requirement."""
+    root.mkdir()
+    for name in ("numpy", "scipy", "pandas", "pydantic", "casadi"):
+        (root / f"{name}.py").write_text(
+            "import os\n"
+            f"if {needs_libraries!r} and not os.environ.get('AF_TEST_LIBRARIES'):\n"
+            "    raise ImportError('required shared libraries are unavailable')\n"
+        )
+        metadata = root / f"{name}-{version}.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+        )
+
+
+def module_mutation_environment(tmp_path: Path) -> dict[str, str]:
+    """Record real import probes and package pins without dispatching campaign work."""
+    env = shell_environment(tmp_path)
+    canonical, module_packages = tmp_path / "canonical", tmp_path / "module"
+    scientific_overlay(canonical, "1.0", needs_libraries=True)
+    scientific_overlay(module_packages, "9.0", needs_libraries=False)
+    python = Path(env["AF_PYTHON"])
+    python.write_text(
+        f"#!{sys.executable}\n"
+        "import importlib, importlib.metadata, json, os, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "record = {'argv': sys.argv[1:], 'pythonpath': os.environ['PYTHONPATH']}\n"
+        "with Path(os.environ['AF_ARGUMENT_LOG']).open('a') as stream:\n"
+        "    stream.write(json.dumps(record) + '\\n')\n"
+        "if sys.argv[1] == '-c':\n"
+        "    result = subprocess.run([sys.executable, *sys.argv[1:]])\n"
+        "    raise SystemExit(result.returncode)\n"
+        "record['packages'] = {\n"
+        "    name: {'file': importlib.import_module(name).__file__,\n"
+        "           'version': importlib.metadata.version(name)}\n"
+        "    for name in ('numpy', 'scipy', 'pandas', 'pydantic', 'casadi')\n"
+        "}\n"
+        "Path(os.environ['AF_DISPATCH_LOG']).write_text(json.dumps(record))\n"
+    )
+    env.update(
+        AF_PLATFORM="aces",
+        AF_CASADI_ROOT=str(canonical),
+        AF_MODULE_PACKAGES=str(module_packages),
+        AF_MODULE_LOG=str(tmp_path / "modules.txt"),
+        AF_DISPATCH_LOG=str(tmp_path / "dispatch.json"),
+        PYTHONPATH=str(module_packages),
+    )
+    return env
+
+
+def test_module_path_mutation_keeps_login_and_batch_imports_and_pins_identical(
+    tmp_path,
+):
+    env = module_mutation_environment(tmp_path)
+    worker = REPO / "scripts/hpc/run_construction_paired_fit.sh"
+    command = (
+        'module() { printf "%s\\n" "$*" >> "$AF_MODULE_LOG"; '
+        'export PYTHONPATH="$AF_MODULE_PACKAGES:$PYTHONPATH" AF_TEST_LIBRARIES=1; }; '
+        'export -f module; bash "$1" verify-execution 0'
+    )
+    subprocess.run(["bash", "-c", command, "bash", str(worker)], env=env, check=True)
+    login = json.loads(Path(env["AF_DISPATCH_LOG"]).read_text())
+    canonical_path = f"{REPO / 'src'}:{REPO}:{env['AF_CASADI_ROOT']}"
+    assert login["pythonpath"] == canonical_path
+    assert login["argv"] == [
+        str(REPO / "scripts/compare_construction_fitting.py"),
+        "verify-execution", "--root", env["AF_PAIRED_FIT_ROOT"],
+    ]
+    for name, package in login["packages"].items():
+        assert package == {
+            "file": str(Path(env["AF_CASADI_ROOT"]) / f"{name}.py"),
+            "version": "1.0",
+        }
+    probes = [
+        json.loads(line)
+        for line in Path(env["AF_ARGUMENT_LOG"]).read_text().splitlines()
+    ]
+    assert len(probes) == 3
+    assert all(probe["pythonpath"] == canonical_path for probe in probes)
+    assert Path(env["AF_MODULE_LOG"]).read_text().splitlines() == [
+        "load GCCcore/13.2.0 Python/3.11.5"
+    ]
+    batch_env = env | {
+        "AF_TEST_LIBRARIES": "1",
+        "SLURM_JOB_ID": "101",
+        "AF_ARGUMENT_LOG": str(tmp_path / "batch-args.jsonl"),
+    }
+    subprocess.run(
+        ["bash", "-c", command, "bash", str(worker)], env=batch_env, check=True
+    )
+    assert json.loads(Path(env["AF_DISPATCH_LOG"]).read_text()) == login
+    assert len(Path(env["AF_MODULE_LOG"]).read_text().splitlines()) == 1
+
+
+def test_module_only_import_success_cannot_dispatch_with_broken_canonical_path(
+    tmp_path,
+):
+    env = module_mutation_environment(tmp_path)
+    worker = REPO / "scripts/hpc/run_construction_paired_fit.sh"
+    command = (
+        'module() { export PYTHONPATH="$AF_MODULE_PACKAGES:$PYTHONPATH"; }; '
+        'export -f module; bash "$1" verify-execution 0'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command, "bash", str(worker)],
+        env=env, capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "required shared libraries are unavailable" in result.stderr
+    assert not Path(env["AF_DISPATCH_LOG"]).exists()
+    calls = [
+        json.loads(line)
+        for line in Path(env["AF_ARGUMENT_LOG"]).read_text().splitlines()
+    ]
+    assert len(calls) == 2
+    assert all(call["argv"][0] == "-c" for call in calls)
+
+
 @pytest.mark.parametrize("index", [-1, 24])
 def test_run_rejects_unplanned_indices_before_verification(
     prepared, monkeypatch, index
@@ -406,8 +622,8 @@ def test_status_exposes_counts_without_model_packets(prepared):
 @pytest.mark.parametrize(
     "platform,expected",
     [
-        ("aces", "/scratch/group/p.nairr260351.000/u.yx126462/phase-c-paired-fit-v1"),
-        ("delta", "/work/hdd/bibo/yxiao2/phase_c/construction-paired-fit-v1"),
+        ("aces", "/scratch/group/p.nairr260351.000/u.yx126462/phase-c-paired-fit-v2"),
+        ("delta", "/work/hdd/bibo/yxiao2/phase_c/construction-paired-fit-v2"),
     ],
 )
 def test_platform_default_output_root_is_distinct(tmp_path, platform, expected):
