@@ -21,7 +21,7 @@ export AF_FIT_RUNTIME=native
 export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT${AF_CASADI_ROOT:+:$AF_CASADI_ROOT}"
 export PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-AF_PROBE='import ctypes, numpy, scipy, pandas, pydantic, casadi, sympy'
+AF_PROBE='import ctypes, numpy, scipy, pandas, pydantic, casadi'
 if ! "$AF_PYTHON" -c "$AF_PROBE" >/dev/null 2>&1; then
   if [[ "$AF_PLATFORM" == aces ]] && type module >/dev/null 2>&1; then
     echo 'Scientific Python import failed; loading the compiler and Python module hierarchy.' >&2

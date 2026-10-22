@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -225,17 +226,52 @@ def test_prepare_reads_sealed_portable_inputs_without_submitting(
     assert result["tasks"] == 24 and "models" not in result
 
 
-def test_runtime_binds_sympy_version_and_selected_overlay(monkeypatch):
+def test_runtime_preserves_fitter_dependencies_and_selected_overlay(monkeypatch):
     monkeypatch.setenv("AF_FIT_RUNTIME", "native")
     monkeypatch.setenv("AF_CASADI_ROOT", "/explicit/deps")
-    monkeypatch.setattr(cli, "_runtime_identity", lambda: {"packages": {}})
-    monkeypatch.setattr(cli.importlib.metadata, "version", lambda name: "1.14.0")
+    packages = {"casadi": "3.7.2", "scipy": "1.16.3"}
+    monkeypatch.setattr(cli, "_runtime_identity", lambda: {"packages": packages})
     result = cli.runtime_identity()
-    assert result["packages"]["sympy"] == "1.14.0"
+    assert result["packages"] == packages
     assert result["casadi_root"] == "/explicit/deps"
     monkeypatch.setenv("AF_FIT_RUNTIME", "container")
     with pytest.raises(ValueError, match="native"):
         cli.runtime_identity()
+
+
+def test_campaign_and_runtime_work_with_sympy_unavailable(tmp_path):
+    """The paired fitter uses CasADi; an unrelated optional package cannot block it."""
+    pytest.importorskip("casadi")
+    code = '''
+import importlib.abc
+import importlib.metadata
+import sys
+
+class Unavailable(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in {"sympy", "mpmath"}:
+            raise ModuleNotFoundError(fullname)
+
+sys.meta_path.insert(0, Unavailable())
+original_version = importlib.metadata.version
+def version(name):
+    if name in {"sympy", "mpmath"}:
+        raise importlib.metadata.PackageNotFoundError(name)
+    return original_version(name)
+importlib.metadata.version = version
+
+from scripts import compare_construction_fitting as cli
+assert cli._campaign().PROTOCOL == "construction-parent-child-fit-1"
+identity = cli.runtime_identity()
+assert set(identity["packages"]) == {"numpy", "scipy", "pandas", "pydantic", "casadi"}
+assert not {"sympy", "mpmath"} & set(sys.modules)
+'''
+    env = os.environ | {
+        "AF_PYTHON": sys.executable,
+        "AF_FIT_RUNTIME": "native",
+        "PYTHONPATH": f"{REPO / 'src'}:{REPO}",
+    }
+    subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=env, check=True)
 
 
 def shell_environment(tmp_path):
@@ -273,7 +309,8 @@ def test_shell_resolves_bundle_from_any_directory_and_preserves_historical_root(
     assert str(REPO / "configs/construction_paired_fit_v1.json") in args
     assert env["AF_PAIRED_FIT_ROOT"] in args
     assert env["AF_OUTPUT_ROOT"] not in args
-    assert args.count("-c") == 2 and "sympy" in args[1]
+    assert args.count("-c") == 2 and "casadi" in args[1]
+    assert "sympy" not in args[1]
     assert not {"run_task", "--index"} & set(args)
 
 

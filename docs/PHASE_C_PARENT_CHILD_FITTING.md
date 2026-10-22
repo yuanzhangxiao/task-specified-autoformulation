@@ -104,6 +104,12 @@ bash run_fit.sh inspect
 The bundle wrapper resolves its own code directory. The default results root is
 `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-paired-fit-v1`.
 Preparation authenticates inputs and runtime without fitting on the login node.
+The required scientific packages are NumPy, SciPy, pandas, Pydantic and CasADi.
+The first launcher mistakenly also required SymPy, which these fitter kernels
+do not use. A missing-SymPy failure occurs before preparation/submission. Use
+the corrected source bundle without installing SymPy or changing the numerical
+environment. Do not patch an existing sealed execution: keep it intact and choose
+a fresh results root if preparation or submission had already succeeded there.
 Because ACES previously reached its file quota, check `showquota` before
 extracting; allow roughly 3,500 free file/directory entries for this bundle and
 its bounded receipts. No GPU/compiler cache is created by this launch.

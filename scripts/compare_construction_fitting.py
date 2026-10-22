@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -35,11 +34,10 @@ def _campaign() -> ModuleType:
 
 
 def runtime_identity() -> dict:
-    """Pin native scientific Python, SymPy, and the explicit dependency overlay."""
+    """Pin native scientific Python and the explicit dependency overlay."""
     if os.environ.get("AF_FIT_RUNTIME", "native") != "native":
         raise ValueError("paired fitting requires native AF_PYTHON")
     value = _runtime_identity()
-    value["packages"]["sympy"] = importlib.metadata.version("sympy")
     return value | {
         "casadi_root": os.environ.get("AF_CASADI_ROOT", ""),
         "pythonpath": os.environ.get("PYTHONPATH", ""),
