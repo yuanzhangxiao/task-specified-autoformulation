@@ -5,6 +5,7 @@ from copy import deepcopy
 import pytest
 
 from autoformalism.research.construction_revision_edits import (
+    FORMATTING_POLICY,
     RevisionReply,
     RevisionValidationError,
     apply_revision,
@@ -518,3 +519,305 @@ def test_invalid_or_borrowed_aliases_rejected_atomically(aliases):
             scientific_aliases=aliases,
         )
     assert source.model_dump(mode="json") == before
+
+
+@pytest.mark.parametrize(
+    "component,kind,expression,expected",
+    [
+        ("I", "dynamic", "d(I)/dt = -q+u-I", "-q+u-I"),
+        ("I", "dynamic", " I' = -q+u-I ", "-q+u-I"),
+        ("I", "dynamic", "I\u2032 = -q+u-I", "-q+u-I"),
+        ("I", "dynamic", "d ( I ) / d t = -q+u-I", "-q+u-I"),
+        ("q", "algebraic", " q = a*mem+Gp ", "a*mem+Gp"),
+    ],
+)
+def test_v2_matching_labels_and_missing_dependencies_are_audited(
+    component, kind, expression, expected
+):
+    source = problem()
+    before = source.model_dump(mode="json")
+    raw = reply(
+        edits=[
+            {
+                "component": component,
+                "kind": kind,
+                "sources": [],
+                "expression": expression,
+            }
+        ]
+    )
+    original = deepcopy(raw)
+    result = apply_revision(
+        source, raw, evidence_ids=["training:I"], tolerant_formatting=True
+    )
+    audit = result["audit"]["normalization"]
+    assert audit["policy"] == FORMATTING_POLICY
+    assert audit["raw_reply"] == original
+    assert audit["canonical_reply"] == result["audit"]["reply"]
+    normalized = audit["canonical_reply"]["edits"][0]
+    assert normalized["expression"] == expected
+    assert normalized["sources"] == (
+        ["I", "q", "u"] if kind == "dynamic" else ["Gp", "mem"]
+    )
+    assert [row["field"] for row in audit["changes"]] == ["expression", "sources"]
+    assert audit["changes"][0]["before"] == expression
+    assert result["problem"].graph == source.graph
+    assert result["problem"].context == source.context
+    assert result["problem"].base_candidate.initial_conditions == (
+        source.base_candidate.initial_conditions
+    )
+    assert source.model_dump(mode="json") == before
+    assert raw == original
+
+
+def test_v2_parameter_metadata_duplicates_and_unused_sources_are_normalized():
+    source = problem()
+    raw = reply(
+        edits=[
+            {
+                "component": "q",
+                "kind": "algebraic",
+                "sources": ["a", "mem", "b", "mem", "unused_metadata"],
+                "expression": "q = a*mem+b",
+            }
+        ],
+        new_parameters=[{"name": "b", "role": "offset"}],
+    )
+    original = deepcopy(raw)
+    result = apply_revision(
+        source, raw, evidence_ids=["training:I"], tolerant_formatting=True
+    )
+    canonical = result["audit"]["reply"]["edits"][0]
+    assert canonical == {
+        "component": "q",
+        "kind": "algebraic",
+        "sources": ["mem"],
+        "expression": "a*mem+b",
+    }
+    assert result["audit"]["new_parameters"] == ["b"]
+    assert result["audit"]["normalization"]["raw_reply"] == original
+    assert raw == original
+    assert result["problem"].graph == source.graph
+    assert result["audit"]["shared_laws_after"][0]["direct_consumers"] == ["Gp", "I"]
+
+
+@pytest.mark.parametrize(
+    "component,kind,expression",
+    [
+        ("I", "dynamic", "Gp' = -I"),
+        ("I", "dynamic", "I = -I"),
+        ("I", "dynamic", "d(I)/ds = -I"),
+        ("I", "dynamic", "d(Gp)/dt = -I"),
+        ("I", "dynamic", "d(I)/dt = I = 0"),
+        ("I", "dynamic", "I' == -I"),
+        ("I", "dynamic", "I' ="),
+        ("q", "algebraic", "d(q)/dt = a*mem"),
+        ("q", "algebraic", "q' = a*mem"),
+        ("q", "algebraic", "Gp = a*mem"),
+        ("q", "algebraic", "q <= a*mem"),
+    ],
+)
+def test_v2_ambiguous_or_mismatched_labels_are_rejected_without_guessing(
+    component, kind, expression
+):
+    source = problem()
+    before = source.model_dump(mode="json")
+    with pytest.raises(RevisionValidationError) as error:
+        apply_revision(
+            source,
+            reply(
+                edits=[
+                    {
+                        "component": component,
+                        "kind": kind,
+                        "sources": [],
+                        "expression": expression,
+                    }
+                ]
+            ),
+            evidence_ids=["training:I"],
+            tolerant_formatting=True,
+        )
+    assert error.value.code == "RHS_LABEL"
+    assert error.value.details["expected_kind"] == kind
+    assert error.value.details["syntax_examples"]
+    assert source.model_dump(mode="json") == before
+
+
+def test_v2_component_kind_feedback_explains_allowed_self_dependency():
+    with pytest.raises(RevisionValidationError) as error:
+        apply_revision(
+            problem(),
+            reply(
+                edits=[
+                    {
+                        "component": "I",
+                        "kind": "algebraic",
+                        "sources": ["I"],
+                        "expression": "I = -I",
+                    }
+                ]
+            ),
+            evidence_ids=["training:I"],
+            tolerant_formatting=True,
+        )
+    assert error.value.code == "COMPONENT_IDENTITY"
+    assert error.value.details["expected_kind"] == "dynamic"
+    assert error.value.details["existing_components"]["q"] == "algebraic"
+    assert "may reference its own state" in str(error.value)
+
+
+def test_v2_unknown_formula_symbol_is_not_invented_from_source_metadata():
+    raw = reply()
+    raw["edits"][0].update(
+        sources=["undeclared_rate", "mem"], expression="undeclared_rate*mem"
+    )
+    with pytest.raises(RevisionValidationError) as error:
+        apply_revision(
+            problem(), raw, evidence_ids=["training:I"], tolerant_formatting=True
+        )
+    assert error.value.code == "UNKNOWN_FORMULA_SYMBOL"
+    details = error.value.details
+    assert details["unknown"] == ["undeclared_rate"]
+    assert details["declared_parameters"] == ["a"]
+    assert "mem" in details["allowed_variable_sources"]
+    assert "new_parameters" in details["guidance"]
+    assert "cannot add states or processes" in details["guidance"]
+
+
+def test_v2_time_indexed_sources_keep_existing_restricted_parser_semantics():
+    raw = reply()
+    raw["edits"][0].update(sources=[], expression="a*mem+aux(t)")
+    result = apply_revision(
+        problem(), raw, evidence_ids=["training:I"], tolerant_formatting=True
+    )
+    normalized = result["audit"]["reply"]["edits"][0]
+    assert normalized["expression"] == "a*mem+aux(t)"
+    assert normalized["sources"] == ["aux", "mem"]
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "mem" + "*1" * 1000,
+        "+".join(["(" + "+".join(["mem"] * 30) + ")"] * 10),
+        "-" * 2000 + "mem",
+    ],
+)
+def test_v2_expression_complexity_rejected_before_recursive_parser(
+    expression, monkeypatch
+):
+    from autoformalism.research import construction_revision_edits as module
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("recursive restricted parser ran before AST bounds")
+
+    monkeypatch.setattr(module.RestrictedParser, "parse", forbidden)
+    raw = reply()
+    raw["edits"][0].update(expression=expression)
+    with pytest.raises(RevisionValidationError) as error:
+        apply_revision(
+            problem(), raw, evidence_ids=["training:I"], tolerant_formatting=True
+        )
+    assert error.value.code == "EXPRESSION_COMPLEXITY"
+    assert error.value.details["limits"]["max_depth"] == 64
+    assert error.value.details["syntax_examples"] == ["0", "q = 0"]
+
+
+@pytest.mark.parametrize("expression", ["a*", "(a*mem", "a mem"])
+def test_v2_syntax_feedback_contains_component_kind_and_rhs_examples(expression):
+    raw = reply()
+    raw["edits"][0]["expression"] = expression
+    with pytest.raises(RevisionValidationError) as error:
+        apply_revision(
+            problem(), raw, evidence_ids=["training:I"], tolerant_formatting=True
+        )
+    assert error.value.code == "RHS_SYNTAX"
+    assert error.value.details["expected_kind"] == "algebraic"
+    assert error.value.details["syntax_examples"] == ["0", "q = 0"]
+
+
+@pytest.mark.parametrize(
+    "expression", ["__import__('os')", "mem.__class__", "[mem][0]"]
+)
+def test_v2_still_uses_restricted_expression_grammar(expression):
+    raw = reply()
+    raw["edits"][0].update(sources=[], expression=expression)
+    with pytest.raises(RevisionValidationError) as error:
+        apply_revision(
+            problem(), raw, evidence_ids=["training:I"], tolerant_formatting=True
+        )
+    assert error.value.code == "MODEL_VALIDATION"
+    assert error.value.details["diagnostics"]
+    assert "restricted scalar RHS" in error.value.details["guidance"]
+
+
+@pytest.mark.parametrize("gate", ["shared_law", "public_path", "evidence", "schema"])
+def test_v2_normalization_preserves_existing_scientific_and_scope_gates(gate):
+    source = problem()
+    before = source.model_dump(mode="json")
+    raw = reply()
+    raw["edits"][0]["expression"] = "q = a*mem*Gp"
+    if gate == "shared_law":
+        raw["edits"].append(
+            {"component": "I", "kind": "dynamic", "sources": [], "expression": "I' = u"}
+        )
+        code = "SHARED_CONSUMER_REMOVED"
+    elif gate == "public_path":
+        raw["edits"] = [
+            {
+                "component": "mem",
+                "kind": "dynamic",
+                "sources": [],
+                "expression": "mem' = -mem",
+            }
+        ]
+        code = "PUBLIC_PATH_REGRESSION"
+    elif gate == "evidence":
+        raw["evidence_ids"] = ["validation:I"]
+        code = "UNKNOWN_EVIDENCE"
+    else:
+        raw["graph"] = {}
+        code = "REVISION_SCHEMA"
+    with pytest.raises(RevisionValidationError) as error:
+        apply_revision(
+            source,
+            raw,
+            evidence_ids=["training:I"],
+            brief=brief(),
+            tolerant_formatting=True,
+        )
+    assert error.value.code == code
+    assert source.model_dump(mode="json") == before
+
+
+def test_v2_metadata_tolerance_does_not_bypass_schema_bounds_or_item_checks():
+    for sources in (["mem"] * 65, ["mem", "illegal-name"], ["mem", 17]):
+        raw = reply()
+        raw["edits"][0]["sources"] = sources
+        with pytest.raises(RevisionValidationError, match="REVISION_SCHEMA"):
+            apply_revision(
+                problem(), raw, evidence_ids=["training:I"], tolerant_formatting=True
+            )
+
+
+def test_v1_defaults_remain_strict_and_v2_noop_preserves_exact_parent():
+    source = problem()
+    strict = apply_revision(source, reply(), evidence_ids=["training:I"])
+    assert "normalization" not in strict["audit"]
+    assert strict == apply_revision(
+        source, reply(), evidence_ids=["training:I"], tolerant_formatting=False
+    )
+    raw = reply()
+    raw["edits"][0].update(sources=["a", "mem"], expression="q = a*mem")
+    with pytest.raises(RevisionValidationError, match="UNAVAILABLE_SOURCE"):
+        apply_revision(source, raw, evidence_ids=["training:I"])
+    raw["edits"][0]["sources"] = ["mem"]
+    with pytest.raises(RevisionValidationError, match="MODEL_VALIDATION"):
+        apply_revision(source, raw, evidence_ids=["training:I"])
+    result = apply_revision(
+        source, raw, evidence_ids=["training:I"], tolerant_formatting=True
+    )
+    assert result["status"] == "retained"
+    assert result["problem"] == source
+    assert result["audit"]["normalization"]["raw_reply"] == raw

@@ -11,6 +11,15 @@ packets without running optimization or selecting a model. This does not change
 the fixed-topology contract of the original function-construction stage below.
 See `PHASE_C_TRAINING_FEEDBACK_REVISIONS.md`.
 
+`construction-feedback-revision-2` uses a distinct namespace for tolerant,
+audited RHS/source metadata normalization and candidate-specific training equality
+checks. An authenticated training sidecar supplies observation/forcing contracts;
+the current compiled model and scoped initializers determine each equality claim.
+Qualified contradictions block even retained replies; missing conditioning and
+small numerical discrepancies defer. Prompts show concise witnesses while results
+retain complete assessments. It does not establish optimization adequacy or launch
+fitting, and preserves v1 behavior by default.
+
 `construction-fit-qualification-1` verifies the full returned function/initializer
 history before fitting every complete packet. It seals public train/validation
 data, existing starts, source/runtime identities and a common diagnostic prefix.

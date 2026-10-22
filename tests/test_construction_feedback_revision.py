@@ -247,3 +247,177 @@ def test_missing_public_path_never_exported(prepared):
     assert result["status"] == "rejected"
     assert result["problem"] is None
     assert result["attempts"][-1]["diagnostic"]["code"] == "PUBLIC_PATH_REPAIR_REQUIRED"
+
+
+@pytest.fixture
+def prepared_v2(prepared, tmp_path, monkeypatch):
+    """Exercise orchestration with real checker and synthetic producer boundary."""
+    import numpy as np
+
+    from autoformalism.data import DatasetSplit, SplitName, Trajectory
+    from autoformalism.rebuttal.prefit_replay import sealed_write
+    from autoformalism.research import construction_revision_contract as contract
+    from autoformalism.search.topology_compatibility import (
+        EvidenceContract,
+        build_evidence,
+    )
+
+    rows = tuple(
+        Trajectory(
+            trajectory_id=name,
+            time=np.array([0.0, 1.0]),
+            targets={"I": np.array(values), "Gp": np.array([2.0, 2.0])},
+            external_inputs={"u": np.zeros(2)},
+            auxiliaries={"aux": np.ones(2)},
+            fixed_covariates={},
+            derivatives={},
+        )
+        for name, values in (("a", [1.0, 1.0]), ("b", [1.0, 3.0]))
+    )
+    evidence = build_evidence(
+        DatasetSplit(SplitName.TRAIN, rows, "synthetic"),
+        problem().context,
+        EvidenceContract(
+            provenance="synthetic producer boundary",
+            dependencies_exhaustive=True,
+            shared_parameters=True,
+            open_loop=True,
+            reset_impulse_free=True,
+            uniqueness_assumed=True,
+            interpolation={
+                "u": "linear_complete_knots",
+                "aux": "linear_complete_knots",
+            },
+            absolute_error_bounds=dict.fromkeys(("I", "Gp", "u", "aux"), 0.0),
+        ),
+    ).model_dump(mode="json")
+    sidecar = tmp_path / "consistency.json"
+    sealed_write(sidecar, {"evidence": evidence})
+    monkeypatch.setattr(
+        contract, "validate", lambda value, projection: value["evidence"]
+    )
+    source, old = prepared
+    root = tmp_path / "revision-v2"
+    cli.prepare(source, root, protocol=cli.V2_PROTOCOL, consistency_source=sidecar)
+    return source, root, sidecar, old
+
+
+def test_v2_raw_normalization_one_call_exact_resume_and_v1_root_unchanged(prepared_v2):
+    source, root, sidecar, old = prepared_v2
+    original = (old / "plan.json").read_bytes()
+    seen = []
+    raw = reply(
+        edits=[
+            {
+                "component": "q",
+                "kind": "algebraic",
+                "sources": ["a", "mem", "mem"],
+                "expression": "q = a*mem*Gp",
+            }
+        ]
+    )
+
+    def respond(url, body, timeout):
+        seen.append(body["messages"])
+        return response(raw)
+
+    cli.preview(root)
+    preview = json.loads((root / "preview/parent_0.json").read_text())
+    result = cli.run(
+        root, "http://127.0.0.1", transport=respond, token_transport=tokenizer
+    )
+    assert result["protocol"] == cli.V2_PROTOCOL
+    assert result["status_counts"] == {"revised": 24}
+    assert result["cost"]["physical_requests"] == 24
+    assert seen[0] == [
+        {"role": "system", "content": preview["system"]},
+        {"role": "user", "content": preview["user"]},
+    ]
+    saved = json.loads(next((root / "results").glob("*/result.json")).read_text())
+    assert saved["reply"] == raw
+    normalized = saved["audit"]["normalization"]
+    assert normalized["raw_reply"] == raw
+    assert normalized["canonical_reply"]["edits"][0]["sources"] == ["Gp", "mem"]
+    packet = sealed_read(next((root / "results").glob("*/fit_handoff.json")))
+    assert packet["protocol"] == "construction-revision-fit-handoff-2"
+    assert not packet["training_consistency"]["conflicts"]
+    assert not packet["optimization_adequacy_established"]
+
+    def forbidden(*args):
+        pytest.fail("completed cache must replay without requests")
+
+    assert (
+        cli.run(
+            root, "http://127.0.0.1", transport=forbidden, token_transport=forbidden
+        )
+        == result
+    )
+    assert (old / "plan.json").read_bytes() == original
+    with pytest.raises(ValueError, match=r"protocol|fresh"):
+        cli.prepare(source, old, protocol=cli.V2_PROTOCOL, consistency_source=sidecar)
+    assert (old / "plan.json").read_bytes() == original
+
+
+def test_v2_actual_candidate_conflict_feedback_and_repair(prepared_v2):
+    _, root, _, _ = prepared_v2
+    plan = cli.verify(root)
+    inputs = sealed_read(root / "inputs.json")
+    parent = cli._prepared_parent(root, inputs, "parent_0", plan)
+    bad = reply(
+        edits=[
+            {
+                "component": "I",
+                "kind": "dynamic",
+                "sources": ["a", "u"],
+                "expression": "d(I)/dt = -a*I+u",
+            }
+        ]
+    )
+
+    class Client:
+        def __init__(self):
+            self.packets = []
+
+        def call(self, **kwargs):
+            packet = json.loads(kwargs["user"])
+            self.packets.append(packet)
+            payload = bad if len(self.packets) == 1 else reply()
+            return {
+                "status": "responded",
+                "request_hash": str(len(self.packets)),
+                "raw_response": response(payload),
+            }
+
+    client = Client()
+    outcome = cli._episode(parent, client)
+    assert outcome["status"] == "revised"
+    feedback = client.packets[1]["repair_feedback"]
+    assert feedback["diagnostic"]["code"] == "MODEL_DATA_CONFLICT"
+    assert feedback["diagnostic"]["details"]["assessment"]["conflicts"]
+    assert feedback["last_reply"] == bad
+    assert "raw_reply" not in feedback["diagnostic"]
+    assert parent["problem"] == problem().model_dump(mode="json")
+
+
+def test_v2_retain_cannot_bypass_conflict(prepared_v2):
+    _, root, _, _ = prepared_v2
+    from autoformalism.research.construction_revision_edits import (
+        RevisionValidationError,
+    )
+
+    parent = cli._prepared_parent(
+        root, sealed_read(root / "inputs.json"), "parent_0", cli.verify(root)
+    )
+    parent["problem"]["base_candidate"]["state_equations"][0]["rhs"] = "-a*I+u"
+    with pytest.raises(RevisionValidationError, match="conflict"):
+        cli._apply(parent, reply(edits=[]))
+
+
+def test_v2_evidence_and_policy_are_sealed(prepared_v2):
+    _, root, _, _ = prepared_v2
+    path = root / "consistency_evidence.json"
+    value = json.loads(path.read_text())
+    value["evidence"]["contract"]["uniqueness_assumed"] = False
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError):
+        cli.verify(root)

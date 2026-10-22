@@ -7,7 +7,12 @@ proposal plus two mechanical repair retries. Authenticated training-only evidenc
 retains optimizer-budget caveats and original modeled-auxiliary identities.
 Unchanged controls, variable/output rosters and scoped initializers are preserved;
 accepted children export for independent fitting without promotion or test access.
-See `PHASE_C_TRAINING_FEEDBACK_REVISIONS.md`. Live results are not yet available.
+The returned v1 run has ten revised, thirteen rejected and one retained episode.
+Eight rejections are recoverable by unambiguous formatting/source metadata alone.
+Opt-in v2 normalizes these and restores actual-candidate training equality checks,
+with authenticated evidence and initializer-aware deferrals. This is a bounded
+interface diagnostic; fitting qualification still precedes efficacy claims.
+See `PHASE_C_TRAINING_FEEDBACK_REVISIONS.md`.
 
 The opt-in returned-construction fitting qualification now retains all eight
 complete saved packets, binds all 16 training/four validation rows, and preserves

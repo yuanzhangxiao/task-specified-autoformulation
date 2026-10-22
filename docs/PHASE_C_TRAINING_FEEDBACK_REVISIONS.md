@@ -12,6 +12,67 @@ remain unchanged. See `PHASE_C_CONSTRUCTION_FITTING_HANDOFF.md`, especially
 reduction, scoped affine fitting and runtime/judge responsibilities. This is an
 execution-plan update, not an implemented scheduler or runtime block.
 
+## Interface and consistency diagnostic, 22 October 2026
+
+The returned v1 pilot completed 24 episodes: ten revised, one retained, and
+thirteen rejected, using 64 calls. Offline replay preserves all original outcomes.
+Eight rejected final replies become statically eligible after changing only
+unambiguous equation labels or source-list metadata. This is an interface result,
+not evidence that those models fit well. Six accepted revisions introduced a
+closed insulin subsystem incompatible with matched training histories.
+
+The opt-in `construction-feedback-revision-2` diagnostic corrects those two
+boundaries. It uses a fresh root/cache namespace and the same eight parents,
+three seeds and three-attempt budgets. This narrow parser/consistency test is
+separate from the fitting-qualified efficacy comparison described above; it
+explicitly records `optimization_adequacy_established=false`. Neither historical
+outcomes nor the fitting-first execution gate are relabeled.
+
+* A matching `d(X)/dt = ...`, `X' = ...`, or algebraic `P = ...` label is
+  removed before restricted parsing. A label for a different variable or equation
+  kind is rejected. Multiple assignments and incomplete JSON are not guessed.
+* The parsed formula determines its sources. Declared parameters are removed
+  from source metadata; omitted self-dependencies and duplicate source entries
+  are corrected automatically. Unknown formula symbols, new states and forbidden
+  type changes remain errors. Raw replies, canonical replies and each change are
+  logged. The runtime never chooses an additional scientific dependence.
+* A bounded AST check rejects excessively deep/large expressions before recursive
+  parser visitors. Component/type and symbol errors explain the actual permitted
+  edit and distinguish parameters, sources and self-dependence.
+* A separate sealed sidecar authenticates the original complete training evidence
+  against the construction archive, all eight parent packets, and the projection's
+  exact training arrays. It carries the recorded observation-error bounds and
+  forcing interpolation contract. No held-out records are copied.
+* Before any child or retained reply is exported, the checker resolves its actual
+  algebraic/dynamic ancestors and current initializer graph. Initial-readout and
+  closed-subsystem equality tests require exact complete conditioning. Relevant
+  trajectory-specific roots, unknown observation bounds or unknown forcing
+  interpolation defer the affected check. Disconnected latent roots cannot excuse
+  a conflict in a closed observed subsystem. No fitted parameters or rollout are
+  used to establish these necessary conditions.
+
+For the saved six scalar-insulin cases, equal initial insulin and identical forcing
+through time 8 imply equal predictions, while the recorded target values differ by
+22.83946. This is conditional on the explicit shared-parameter, unique-solution,
+open-loop, reset-free class contract. The feedback shows the child's equations,
+matched pair and discrepancy, then asks for a scientifically justified equation
+repair. Acknowledgment or deleting an evidence record cannot bypass this gate.
+A matching parent also cannot pass simply by returning no edits.
+
+The comparison has a separately frozen target-only numerical guard,
+`1e-9 + 1e-7 * max(abs(left), abs(right))`, using the existing FitConfig numerical
+convention. It is applied after declared observation intervals. It is neither an
+inferred noise bound nor a guarantee of solver accuracy. Smaller discrepancies
+remain numerically unresolved; they are not certified compatible. Initial values
+and forcing histories still have to match exactly. Sampled flatness alone does
+not impose a steady-state balance theorem.
+
+Prompts contain each decisive witness once and a compact status list for other
+checks; full machine-readable assessments remain in audited results and v2 fitting
+handoffs. Passing the gate establishes neither fit quality nor full mechanism
+compliance. All edits remain atomic; original initializer policies, controls,
+call budgets, checkpoint/replay rules and no-automatic-follow-up policy remain.
+
 ## Purpose and bounded experiment
 
 The first fitted construction cohort contains eight T2-easy models, from two

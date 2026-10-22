@@ -6,7 +6,13 @@ AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 [[ -d "$AF_GROUP" ]] || { echo 'Run on ACES with AF_GROUP set to writable scratch.' >&2; exit 2; }
 # Generic AF_OUTPUT_ROOT may still name a previous fitting campaign in the
 # interactive shell. Only the task-specific override selects this campaign.
-export AF_REVISION_ROOT=${AF_REVISION_ROOT:-$AF_GROUP/phase-c-construction-revision-v1}
+export AF_REVISION_PROTOCOL=${AF_REVISION_PROTOCOL:-construction-feedback-revision-1}
+case "$AF_REVISION_PROTOCOL" in
+  construction-feedback-revision-1) AF_REVISION_DEFAULT=phase-c-construction-revision-v1 ;;
+  construction-feedback-revision-2) AF_REVISION_DEFAULT=phase-c-construction-revision-checks-v2 ;;
+  *) echo 'Unsupported AF_REVISION_PROTOCOL.' >&2; exit 2 ;;
+esac
+export AF_REVISION_ROOT=${AF_REVISION_ROOT:-$AF_GROUP/$AF_REVISION_DEFAULT}
 if [[ -n "${AF_OUTPUT_ROOT:-}" && "$AF_OUTPUT_ROOT" != "$AF_REVISION_ROOT" ]]; then
   printf 'Ignoring inherited AF_OUTPUT_ROOT=%s; revision output is %s.\n' "$AF_OUTPUT_ROOT" "$AF_REVISION_ROOT"
 fi
@@ -35,7 +41,11 @@ case "${1:?Use run, status, report, or inspect}" in
     }
     export AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}
     "$AF_PYTHON" "$AF_REPO_ROOT/scripts/harmony_vocab.py" verify --directory "$AF_HARMONY_ASSETS"
-    "$AF_PYTHON" "$AF_CLI" prepare --source "${AF_REVISION_INPUTS:-$AF_REPO_ROOT/inputs/revision-inputs.json}" --root "$AF_OUTPUT_ROOT"
+    AF_PREPARE_OPTIONS=(--protocol "$AF_REVISION_PROTOCOL")
+    if [[ "$AF_REVISION_PROTOCOL" == construction-feedback-revision-2 ]]; then
+      AF_PREPARE_OPTIONS+=(--consistency-evidence "${AF_REVISION_CONSISTENCY:-$AF_REPO_ROOT/inputs/consistency-evidence.json}")
+    fi
+    "$AF_PYTHON" "$AF_CLI" prepare --source "${AF_REVISION_INPUTS:-$AF_REPO_ROOT/inputs/revision-inputs.json}" --root "$AF_OUTPUT_ROOT" "${AF_PREPARE_OPTIONS[@]}"
     exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_construction_revision_aces.py" --root "$AF_OUTPUT_ROOT" --wave "${AF_WAVE:-revision-1}"
     ;;
   status)

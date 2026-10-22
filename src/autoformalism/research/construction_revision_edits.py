@@ -7,7 +7,10 @@ or turns static compilation into a scientific or numerical accuracy certificate.
 
 from __future__ import annotations
 
+import ast
+import re
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from typing import Any, Literal
 
 from pydantic import Field, ValidationError, model_validator
@@ -31,6 +34,8 @@ from autoformalism.search.shared_model_revision import relationships
 from autoformalism.staged_topology import content_hash
 
 POLICY = "training-construction-law-revision-1"
+FORMATTING_POLICY = "construction-revision-formatting-2"
+_AST_LIMITS = {"max_length": 4096, "max_nodes": 512, "max_depth": 64}
 
 
 class LawEdit(StrictSchema):
@@ -99,6 +104,236 @@ def _definitions(candidate: CandidateModel) -> dict[str, tuple[str, str]]:
 def _symbols(expression: str, location: str) -> set[str]:
     """Parse the restricted scalar grammar without executing provider text."""
     return set(RestrictedParser().parse(expression, location=location).symbols)
+
+
+def _rhs_guidance(component: str, kind: str, time_symbol: str) -> dict[str, Any]:
+    """Offer syntax examples without proposing a replacement scientific law."""
+    labels = (
+        [f"d({component})/d{time_symbol}", f"{component}'"]
+        if kind == "dynamic"
+        else [component]
+    )
+    return {
+        "component": component,
+        "expected_kind": kind,
+        "syntax_examples": ["0", *(f"{label} = 0" for label in labels)],
+        "guidance": (
+            "Supply one scalar RHS using the restricted arithmetic grammar. "
+            "The examples illustrate syntax only. A label must match this exact "
+            "component and its existing kind; do not change the scientific law "
+            "merely to match an example. Dynamic RHSs may reference their own state."
+        ),
+    }
+
+
+def _canonical_rhs(expression: str, component: str, kind: str, time: str) -> str:
+    """Strip only an exactly matching equation label, never infer its meaning."""
+    source = expression.strip()
+    if "=" not in source:
+        return source
+    guidance = _rhs_guidance(component, kind, time)
+    if source.count("=") != 1:
+        raise RevisionValidationError(
+            "RHS_LABEL",
+            "multiple equality signs are ambiguous; supply a single RHS",
+            **guidance,
+        )
+    lhs, rhs = (part.strip() for part in source.split("=", 1))
+    name, clock = re.escape(component), re.escape(time)
+    pattern = (
+        rf"(?:d\s*\(\s*{name}\s*\)\s*/\s*d\s*{clock}|{name}\s*['\u2032])"
+        if kind == "dynamic"
+        else name
+    )
+    if not re.fullmatch(pattern, lhs) or not rhs:
+        raise RevisionValidationError(
+            "RHS_LABEL",
+            "equation label must match the edited component and its existing kind",
+            supplied_lhs=lhs,
+            **guidance,
+        )
+    return rhs
+
+
+def _bounded_ast(expression: str, location: str) -> None:
+    """Bound parsed trees iteratively before any recursive restricted visitor."""
+    if len(expression) > _AST_LIMITS["max_length"]:
+        raise RevisionValidationError(
+            "EXPRESSION_COMPLEXITY",
+            "expression exceeds the formatting policy's character limit",
+            location=location,
+            limits=dict(_AST_LIMITS),
+        )
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except (SyntaxError, ValueError) as exc:
+        raise RevisionValidationError(
+            "RHS_SYNTAX",
+            "RHS is not a single valid arithmetic expression; check operators "
+            "and parentheses, and omit prose, assignments and chained equations",
+            location=location,
+            syntax_error=type(exc).__name__,
+        ) from exc
+    except (MemoryError, RecursionError) as exc:
+        raise RevisionValidationError(
+            "EXPRESSION_COMPLEXITY",
+            "expression exceeds safe parsing complexity; shorten or flatten it",
+            location=location,
+            limits=dict(_AST_LIMITS),
+        ) from exc
+    stack, count = [(tree, 1)], 0
+    while stack:
+        node, depth = stack.pop()
+        count += 1
+        if count > _AST_LIMITS["max_nodes"] or depth > _AST_LIMITS["max_depth"]:
+            raise RevisionValidationError(
+                "EXPRESSION_COMPLEXITY",
+                "expression exceeds safe AST size or depth; shorten or flatten it",
+                location=location,
+                observed_nodes=count,
+                observed_depth=depth,
+                limits=dict(_AST_LIMITS),
+            )
+        stack.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
+
+
+def _preflight_parent(problem: PrefixFitProblem) -> None:
+    """Bound frozen source expressions too, before compiling the parent model."""
+    candidate = problem.base_candidate
+    expressions = [(name, value[1]) for name, value in _definitions(candidate).items()]
+    expressions += [
+        (f"output:{item.channel}", item.expression)
+        for item in candidate.observation_mappings
+    ]
+    expressions += [
+        (f"initial:{item.state}", item.expression)
+        for item in candidate.initial_conditions
+        if item.expression is not None
+    ]
+    expressions += [
+        (f"initial_map:{name}", rule.initial.expression)
+        for name, rule in problem.graph.rules.items()
+        if rule.initial.mode == "map"
+    ]
+    for location, expression in expressions:
+        _bounded_ast(expression, location)
+
+
+def _normalize_reply(
+    problem: PrefixFitProblem, raw: Mapping[str, Any]
+) -> tuple[RevisionReply, dict[str, Any]]:
+    """Normalize presentation metadata; preserve all scientific expressions."""
+    original = deepcopy(raw)
+    payload = deepcopy(raw)
+    # Duplicate entries are presentation metadata too. Keep the original list
+    # bound and item validation: deduplication must not bypass the strict schema.
+    if isinstance(payload, Mapping) and isinstance(payload.get("edits"), (list, tuple)):
+        for edit in payload["edits"]:
+            if not isinstance(edit, dict):
+                continue
+            sources = edit.get("sources")
+            if (
+                isinstance(sources, (list, tuple))
+                and len(sources) <= 64
+                and all(isinstance(source, str) for source in sources)
+            ):
+                edit["sources"] = list(
+                    dict.fromkeys(source.strip() for source in sources)
+                )
+    parsed = RevisionReply.model_validate(payload)
+    parent = _copy_problem(problem)
+    definitions = _definitions(parent.base_candidate)
+    parameters = {p.name for p in parent.base_candidate.parameters} | {
+        p.name for p in parsed.new_parameters
+    }
+    allowed = (
+        set(definitions)
+        | set(parent.context.forcing_channels)
+        | {parent.context.time_symbol}
+    )
+    canonical = parsed.model_dump(mode="json")
+    changes = []
+    for index, edit in enumerate(parsed.edits):
+        old = definitions.get(edit.component)
+        if old is None or old[0] != edit.kind:
+            raise RevisionValidationError(
+                "COMPONENT_IDENTITY",
+                "edit an existing component with its existing kind; a dynamic "
+                "RHS may reference its own state without becoming algebraic",
+                component=edit.component,
+                supplied_kind=edit.kind,
+                expected_kind=old[0] if old else None,
+                existing_components={
+                    name: value[0] for name, value in definitions.items()
+                },
+            )
+        expression = _canonical_rhs(
+            edit.expression, edit.component, edit.kind, parent.context.time_symbol
+        )
+        try:
+            _bounded_ast(expression, edit.component)
+            symbols = _symbols(expression, edit.component)
+        except RevisionValidationError as exc:
+            raise RevisionValidationError(
+                exc.code,
+                str(exc).removeprefix(f"{exc.code}: "),
+                **exc.details,
+                **_rhs_guidance(edit.component, edit.kind, parent.context.time_symbol),
+            ) from exc
+        actual = symbols - parameters
+        if unknown := actual - allowed:
+            raise RevisionValidationError(
+                "UNKNOWN_FORMULA_SYMBOL",
+                "formula contains undeclared names; source metadata cannot "
+                "declare a new variable or parameter",
+                component=edit.component,
+                unknown=sorted(unknown),
+                declared_parameters=sorted(parameters),
+                allowed_variable_sources=sorted(allowed),
+                guidance=(
+                    "If a name denotes a new scalar coefficient, declare it in "
+                    "new_parameters with its supported role. If it denotes a "
+                    "scientific variable, use an existing component or permitted "
+                    "forcing channel. This pilot cannot add states or processes. "
+                    "Self references in dynamic RHSs are allowed."
+                ),
+            )
+        canonical["edits"][index]["expression"] = expression
+        canonical["edits"][index]["sources"] = sorted(actual)
+        raw_edit = original["edits"][index]
+        for field, after, reason in (
+            (
+                "expression",
+                expression,
+                "strip an exact matching equation label and outer whitespace only",
+            ),
+            (
+                "sources",
+                sorted(actual),
+                "derive variable dependencies from restricted-parser symbols, "
+                "excluding declared parameters; include any self reference",
+            ),
+        ):
+            before = raw_edit[field]
+            if before != after:
+                changes.append(
+                    {
+                        "component": edit.component,
+                        "field": field,
+                        "before": before,
+                        "after": after,
+                        "reason": reason,
+                    }
+                )
+    _preflight_parent(parent)
+    reply = RevisionReply.model_validate(canonical)
+    return reply, {
+        "policy": FORMATTING_POLICY,
+        "raw_reply": original,
+        "canonical_reply": reply.model_dump(mode="json"),
+        "changes": changes,
+        "ast_limits": dict(_AST_LIMITS),
+    }
 
 
 def _copy_problem(problem: PrefixFitProblem) -> PrefixFitProblem:
@@ -639,19 +874,33 @@ def apply_revision(
     evidence_ids: Iterable[str],
     brief: PublicScientificBrief | None = None,
     scientific_aliases: Mapping[str, str] | None = None,
+    tolerant_formatting: bool = False,
 ) -> dict[str, Any]:
-    """Return a valid detached child or an actionable error, never a partial edit."""
+    """Return a detached child atomically; opt-in formatting retains raw provenance.
+
+    The default preserves the historical strict schema, diagnostics and audit.
+    Tolerant formatting strips only matching labels, derives redundant source
+    metadata, and bounds ASTs before recursive parsing. It adds a normalization
+    audit containing both the supplied reply and the canonical validated reply.
+    """
     try:
         raw = (
             reply.model_dump(mode="json") if isinstance(reply, RevisionReply) else reply
         )
-        return _apply(
+        if tolerant_formatting:
+            normalized, normalization_audit = _normalize_reply(problem, raw)
+        else:
+            normalized = RevisionReply.model_validate(raw)
+        result = _apply(
             problem,
-            RevisionReply.model_validate(raw),
+            normalized,
             evidence_ids,
             brief,
             scientific_aliases,
         )
+        if tolerant_formatting:
+            result["audit"]["normalization"] = normalization_audit
+        return result
     except RevisionValidationError:
         raise
     except ValidationError as exc:
@@ -662,6 +911,18 @@ def apply_revision(
             "REVISION_SCHEMA", "reply or candidate schema rejected", errors=errors
         ) from exc
     except ModelValidationError as exc:
+        guidance = (
+            {
+                "guidance": "Use one restricted scalar RHS (for example '-I' "
+                "for a dynamic I equation or 'a*mem' for an algebraic q law). "
+                "A label, if supplied, must match the component and existing "
+                "kind: d(I)/dt = -I, I' = -I, or q = a*mem. These are syntax "
+                "examples only. Declare new scalar coefficients in new_parameters; "
+                "sources are derived from the expression and exclude parameters."
+            }
+            if tolerant_formatting
+            else {}
+        )
         raise RevisionValidationError(
             "MODEL_VALIDATION",
             "restricted model compilation rejected the patch",
@@ -673,6 +934,15 @@ def apply_revision(
                 }
                 for d in exc.diagnostics
             ],
+            **guidance,
+        ) from exc
+    except RecursionError as exc:
+        if not tolerant_formatting:
+            raise
+        raise RevisionValidationError(
+            "EXPRESSION_COMPLEXITY",
+            "model expression expansion exceeds safe recursion limits",
+            limits=dict(_AST_LIMITS),
         ) from exc
     except (ValueError, TypeError) as exc:
         raise RevisionValidationError("REVISION_VALIDATION", str(exc)) from exc

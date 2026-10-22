@@ -168,7 +168,7 @@ def launcher(tmp_path):
     )
     stub.chmod(0o755)
 
-    def invoke(command, *, revision_root=None, prepare_exit=0):
+    def invoke(command, *, revision_root=None, prepare_exit=0, protocol=None):
         log.write_text("")
         env = {
             **os.environ,
@@ -181,6 +181,9 @@ def launcher(tmp_path):
             "AF_TEST_PREPARE_EXIT": str(prepare_exit),
         }
         env.pop("AF_REVISION_ROOT", None)
+        env.pop("AF_REVISION_PROTOCOL", None)
+        if protocol is not None:
+            env["AF_REVISION_PROTOCOL"] = protocol
         if revision_root is not None:
             env["AF_REVISION_ROOT"] = str(revision_root)
         result = subprocess.run(
@@ -200,6 +203,41 @@ def launcher(tmp_path):
         return result, [json.loads(line) for line in log.read_text().splitlines()]
 
     return invoke, group
+
+
+def test_v2_launcher_uses_fresh_root_and_authenticated_evidence(launcher):
+    invoke, group = launcher
+    result, calls = invoke("run", protocol=submission.campaign.V2_PROTOCOL)
+    assert result.returncode == 0, result.stderr
+    expected = str(group / "phase-c-construction-revision-checks-v2")
+    assert all(call["revision_root"] == expected for call in calls)
+    prepare = next(c["argv"] for c in calls if "prepare" in c["argv"])
+    assert prepare[prepare.index("--protocol") + 1] == submission.campaign.V2_PROTOCOL
+    assert prepare[prepare.index("--consistency-evidence") + 1].endswith(
+        "/inputs/consistency-evidence.json"
+    )
+
+
+def test_v2_execution_freezes_acceptance_policy(setup, monkeypatch):
+    root, plan = setup
+    plan.update(
+        protocol=submission.campaign.V2_PROTOCOL,
+        policies=deepcopy(submission.campaign.V2_POLICIES),
+        consistency_evidence_sha256="c" * 64,
+    )
+    seen = []
+
+    def queue(directory, key, options, worker, stage, index):
+        seen.extend(options)
+        return "12345"
+
+    monkeypatch.setattr(submission, "submit_job", queue)
+    submission.submit(root)
+    _, execution = submission.verify(root)
+    assert execution["protocol"] == "construction-revision-aces-execution-2"
+    assert execution["acceptance_policies"] == plan["policies"]
+    assert execution["consistency_evidence_sha256"] == "c" * 64
+    assert "--job-name=phasec-revision-checks" in seen
 
 
 @pytest.mark.parametrize("command", ["run", "report", "inspect"])

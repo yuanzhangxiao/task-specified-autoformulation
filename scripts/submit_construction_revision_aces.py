@@ -48,20 +48,27 @@ def verify_inputs(root: Path) -> dict:
     """Require the exact 24-episode bounded plan before a serving allocation."""
     plan = campaign.verify(root)
     if (
-        plan["protocol"] != PROTOCOL
+        plan["protocol"] not in {PROTOCOL, campaign.V2_PROTOCOL}
         or len(plan["cases"]) != 24
         or any(plan["settings"].get(k) != v for k, v in SETTINGS.items())
         or plan["optimizer_calls"] != 0
         or plan["automatic_followup"] is not False
     ):
         raise ValueError("requires all eight parents and three bounded revision seeds")
+    if plan["protocol"] == campaign.V2_PROTOCOL and (
+        plan.get("policies") != campaign.V2_POLICIES
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", plan.get("consistency_evidence_sha256", "")
+        )
+    ):
+        raise ValueError("v2 requires frozen formatting and consistency policies")
     return plan
 
 
 def execution_identity(plan: dict, image_sha256: str) -> dict:
     """Freeze the serving assets, resources, source and revision-only worker."""
     count = len(plan["cases"])
-    return {
+    identity = {
         "protocol": EXECUTION_PROTOCOL,
         "plan_sha256": plan["artifact_sha256"],
         "input_bundle_sha256": plan["input_bundle_sha256"],
@@ -95,6 +102,14 @@ def execution_identity(plan: dict, image_sha256: str) -> dict:
         "automatic_followup": False,
         "model_promotion": False,
     }
+    if plan["protocol"] == campaign.V2_PROTOCOL:
+        identity.update(
+            protocol="construction-revision-aces-execution-2",
+            revision_protocol=plan["protocol"],
+            acceptance_policies=plan["policies"],
+            consistency_evidence_sha256=plan["consistency_evidence_sha256"],
+        )
+    return identity
 
 
 def verify(root: Path) -> tuple[dict, dict]:
@@ -171,7 +186,12 @@ def submit(root: Path, wave: str = "revision-1") -> dict:
             "--time=02:00:00",
             "--signal=B:TERM@300",
             "--exclude=ac042",
-            "--job-name=phasec-fit-feedback",
+            "--job-name="
+            + (
+                "phasec-revision-checks"
+                if plan["protocol"] == campaign.V2_PROTOCOL
+                else "phasec-fit-feedback"
+            ),
             f"--output={root}/logs/revision-%j.out",
             f"--error={root}/logs/revision-%j.err",
         ]
