@@ -359,3 +359,22 @@ def baseline_parser() -> RestrictedParser:
         functions=BASELINE_FUNCTION_ARITY,
         real_powers=True,
     )
+
+
+#: The two grammars a model is read with: ours, and the external baselines'.
+GRAMMARS = ("default", "baseline")
+
+
+def grammar_parser(grammar: str = "default", **limits) -> RestrictedParser:
+    """A parser for one of ``GRAMMARS``.
+
+    ``limits`` are the bounds a caller of the default grammar has always
+    used; the baseline grammar keeps its own wider ones, so they are ignored
+    there. Checks that assess an external baseline's model read it with the
+    grammar it was selected under, and our own models with ours.
+    """
+    if grammar == "baseline":
+        return baseline_parser()
+    if grammar != "default":
+        raise ValueError(f"unknown expression grammar: {grammar!r}")
+    return RestrictedParser(**limits)

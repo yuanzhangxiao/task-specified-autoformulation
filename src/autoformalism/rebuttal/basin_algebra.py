@@ -1,7 +1,10 @@
 """Bounded formal algebra over restricted expressions, without symbolic execution.
 
-Only sums, products and powers of monomials are expanded. Other expressions are
-opaque factors. An unproved identity stays unverified, never a scientific failure.
+Only sums, products and integer powers of monomials are expanded. Other
+expressions, including powers with a real or symbolic exponent (which only the
+external-baseline grammar admits), are opaque factors. An unproved identity
+stays unverified, never a scientific failure. ``grammar`` names the grammar the
+model was written in (``expressions.parser.GRAMMARS``).
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from fractions import Fraction
 from functools import lru_cache
 
 from autoformalism.expressions.compiler import _evaluate
-from autoformalism.expressions.parser import RestrictedParser
+from autoformalism.expressions.parser import RestrictedParser, grammar_parser
 
 Monomial = tuple[tuple[str, int], ...]
 Polynomial = dict[Monomial, Fraction]
@@ -82,8 +85,14 @@ def formal(node: ast.AST) -> Polynomial:
         if isinstance(node.op, ast.Div) and len(b) == 1:
             ((key, coefficient),) = b.items()
             return multiply(a, {tuple((n, -p) for n, p in key): 1 / coefficient})
-        if isinstance(node.op, ast.Pow) and len(a) == 1:
-            power = int(RestrictedParser._signed_number(node.right))
+        exponent = RestrictedParser._signed_number(node.right)
+        if (
+            isinstance(node.op, ast.Pow)
+            and len(a) == 1
+            and exponent is not None
+            and float(exponent).is_integer()
+        ):
+            power = int(exponent)
             ((key, coefficient),) = a.items()
             if max(
                 coefficient.numerator.bit_length(), coefficient.denominator.bit_length()
@@ -96,25 +105,31 @@ def formal(node: ast.AST) -> Polynomial:
 
 
 @lru_cache(maxsize=4096)
-def factor_symbols(expression: str) -> frozenset[str]:
+def factor_symbols(expression: str, grammar: str = "default") -> frozenset[str]:
     """Read dependencies through the same restricted parser as the fitter."""
     return (
-        RestrictedParser(max_length=40000, max_nodes=4096)
+        grammar_parser(grammar, max_length=40000, max_nodes=4096)
         .parse(expression, location="basin audit factor")
         .symbols
     )
 
 
-def symbols(value: Polynomial) -> set[str]:
+def symbols(value: Polynomial, grammar: str = "default") -> set[str]:
     """Return dependencies after exact additive cancellation."""
-    return {s for key in value for name, _ in key for s in factor_symbols(name)}
+    return {
+        s for key in value for name, _ in key for s in factor_symbols(name, grammar)
+    }
 
 
-def coefficient(value: Polynomial, variable: str) -> Polynomial | None:
+def coefficient(
+    value: Polynomial, variable: str, grammar: str = "default"
+) -> Polynomial | None:
     """Extract a linear coefficient; nonlinear dependence is explicitly unknown."""
     result = {}
     for key, scalar in value.items():
-        dependent = [(n, p) for n, p in key if variable in factor_symbols(n)]
+        dependent = [
+            (n, p) for n, p in key if variable in factor_symbols(n, grammar)
+        ]
         if not dependent:
             continue
         if dependent != [(variable, 1)]:
@@ -132,13 +147,15 @@ def render(value: Polynomial) -> str:
     return " + ".join(terms) or "0"
 
 
-def number(value: Polynomial, environment: dict[str, float]) -> float:
+def number(
+    value: Polynomial, environment: dict[str, float], grammar: str = "default"
+) -> float:
     """Evaluate validated factors using the production scalar interpreter."""
     total = 0.0
     for key, scalar in value.items():
         term = float(scalar)
         for name, power in key:
-            parsed = RestrictedParser(max_length=40000, max_nodes=4096).parse(
+            parsed = grammar_parser(grammar, max_length=40000, max_nodes=4096).parse(
                 name, location="basin audit point"
             )
             term *= _evaluate(parsed, environment) ** power
@@ -146,7 +163,9 @@ def number(value: Polynomial, environment: dict[str, float]) -> float:
     return total
 
 
-def expanded(expression: str, processes: dict[str, str]) -> ast.AST:
+def expanded(
+    expression: str, processes: dict[str, str], grammar: str = "default"
+) -> ast.AST:
     """Inline algebraics, rejecting cycles and excessive expansion before allocation."""
     budget = 4096
 
@@ -170,6 +189,10 @@ def expanded(expression: str, processes: dict[str, str]) -> ast.AST:
         return node
 
     def parse(text):
-        return RestrictedParser().parse(text, location="basin audit equation").tree.body
+        return (
+            grammar_parser(grammar)
+            .parse(text, location="basin audit equation")
+            .tree.body
+        )
 
     return walk(parse(expression), set())

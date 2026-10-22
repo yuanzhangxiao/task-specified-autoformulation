@@ -1,0 +1,1214 @@
+{
+  "protocol": "phase-c-llm-sr-ode-transcriptions-1",
+  "status": "proposed_pending_review",
+  "source_run": "phase-c-llm-sr-hosted-120b-v1",
+  "source_plan_sha256": "ba3d23cdbad28bd4c165154a3ea86a67a709df2b438e88d0f3b40af1a40f3bd4",
+  "rules": {
+    "filter": "A first-order filter recursion z[k] = a*z[k-1] + (1-a)*u, with 0 <= a < 1, becomes dz/dt = (u - z)/T, where T is the recursion's mean delay (the centroid of its impulse response): T = D*a/(1-a) when u is read at the current row k, and T = D/(1-a) when it is read at the previous row k-1. The ODE keeps the filter's gain and its lag behind a ramp. A forward- or backward-Euler filter written with a time constant tau gets T = tau; a copy of the previous row (a = 0) gets T = D. A rearranged form, z[k] = z[k-1] + (1-a)*(u - z[k-1]), is the same filter.",
+    "euler": "Any other row recursion z[k] = z[k-1] + s*g(row values), including a filter whose weight a lies outside (0, 1), is read as one explicit-Euler step: dz/dt = s*g/D, with s the program's own step multiplier (1 if none).",
+    "lag": "A value from the previous row, x[k-1], used beside the current one is the filter rule's copy of the previous row: a state x_prev with d(x_prev)/dt = (x - x_prev)/D. A backward difference x[k] - x[k-1] becomes x - x_prev.",
+    "initial": "Every hidden state starts at the program's own first-row value, written as an expression of first-row observations, inputs, covariates and coefficients.",
+    "guard": "A guard that cannot change any value on the public domain is dropped: a division guard max(area, eps) or area > eps on a surveyed area (every area is 800 or 1200 m^2), the replacement of non-finite values by 0 or NaN masks (they act only where the expression is undefined), and a clamp on a hidden state that its ODE keeps in range (nonnegative inputs and start). Every other guard is kept, written with max, min, clip or heaviside.",
+    "coefficients": "Coefficients are the sealed values after the program's own handling (defaults, padding, clamps such as max(p, 0)); branches on coefficients are resolved with them and only the branch taken is transcribed. Names are the program's, prefixed with the target where a pick has several programs; a name that is a grammar function gains a suffix (gamma -> gamma_c).",
+    "direct": "Code of the current values is rewritten exactly: np.where becomes heaviside, max or min; np.clip clip; np.maximum and np.minimum max and min; np.power **.",
+    "time_unit": "A program that steps its recursions in rows, or with a hard-coded dt, is converted to the cell's time unit through the sample interval D: 1 min (Dalla Man), 0.1 (CSTR, alien device) or 4 min (detention). Its output is already a derivative in the cell's unit: LLM-SR fitted it to numpy.gradient labels."
+  },
+  "transcriptions": [
+    {
+      "task": 0,
+      "benchmark_id": "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
+      "repetition": 0,
+      "programs": {
+        "Gp": {
+          "function_sha256": "b6c5379e5fb0ac4e75f7fc0b27fd9366ea501d738b1c4ed390c46384078d5f4a",
+          "parameters": [
+            5.247269443510632,
+            3.3141784077844147,
+            44.7820663071762,
+            8.271799800541219,
+            -0.19172498618801917,
+            302.01405141063566,
+            0.04739946549594797,
+            0.042952024075711956,
+            9.395616700134825,
+            -140.2999375056831
+          ]
+        }
+      },
+      "parameters": {
+        "k_meal": 5.247269443510632,
+        "tau_stomach": 3.3141784077844147,
+        "tau_gut": 44.7820663071762,
+        "tau_ins": 8.271799800541219,
+        "k_EGP": -0.19172498618801917,
+        "k_Uii": 302.01405141063566,
+        "k_ins": 0.04739946549594797,
+        "k_xt": 0.042952024075711956,
+        "k_E": 9.395616700134825,
+        "Km": -140.2999375056831
+      },
+      "processes": {
+        "meal_flux": "k_meal * meal_rate_g_per_min",
+        "egp_eff": "k_EGP * EGP / (1.0 + I_proxy + 1e-12)",
+        "uii_term": "-k_Uii * (Uii / (Km + Uii + 1e-12))",
+        "insulin_term": "-k_ins * I_proxy * (Gp / (Km + Gp + 1e-12))",
+        "excretion_term": "-k_E * E * (Gp / (Gp + 1e-12))",
+        "exchange_term": "k_xt * (Gt - Gp)"
+      },
+      "hidden_states": {
+        "stomach_out": {
+          "rhs": "(meal_flux - stomach_out) / (tau_stomach * 1.0)",
+          "initial": "k_meal * meal_rate_g_per_min / (tau_stomach + 1.0)",
+          "program_name": "stomach_out = exp_lowpass(meal_flux, tau_stomach)",
+          "rule": "filter"
+        },
+        "gut_flux": {
+          "rhs": "(stomach_out - gut_flux) / (tau_gut * 1.0)",
+          "initial": "k_meal * meal_rate_g_per_min / ((tau_stomach + 1.0) * (tau_gut + 1.0))",
+          "program_name": "gut_flux = exp_lowpass(stomach_out, tau_gut)",
+          "rule": "filter"
+        },
+        "I_proxy": {
+          "rhs": "(stomach_out - I_proxy) / (tau_ins * 1.0)",
+          "initial": "k_meal * meal_rate_g_per_min / ((tau_stomach + 1.0) * (tau_ins + 1.0))",
+          "program_name": "I_proxy = exp_lowpass(stomach_out, tau_ins)",
+          "rule": "filter"
+        }
+      },
+      "targets": {
+        "Gp": "gut_flux + egp_eff + uii_term + insulin_term + excretion_term + exchange_term"
+      },
+      "rules": [
+        "filter",
+        "initial",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "exp_lowpass uses alpha = dt/(tau + dt), dt = 1: y[i] = alpha*sig[i] + (1-alpha)*y[i-1], a backward-Euler filter of the current row with a = tau/(tau+1), so T = D*a/(1-a) = tau.",
+        "y[0] = alpha*sig[0] + (1-alpha)*init with init = 0, so each filter starts at alpha times its input's first-row value.",
+        "All ten coefficients are the sealed ones (the defaults are overwritten)."
+      ]
+    },
+    {
+      "task": 1,
+      "benchmark_id": "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
+      "repetition": 1,
+      "programs": {
+        "Gp": {
+          "function_sha256": "2d1386fb258839127386e0d0d7f88b51d11a3bdbe3a8b824b1d54ab3648810f6",
+          "parameters": [
+            0.15764666483972595,
+            -114.09751044850019,
+            5.375384814972049,
+            38.23179056873474,
+            4.154782561818188,
+            11.091293546206275,
+            -0.26435878800800316,
+            -2.9981073593647016,
+            14.110433691784628,
+            0.050227154821805314
+          ]
+        }
+      },
+      "parameters": {
+        "Vmax_clear": 0.15764666483972595,
+        "K_clear": -114.09751044850019,
+        "k_abs": 5.375384814972049,
+        "tau_abs": 38.23179056873474,
+        "k_ins": 4.154782561818188,
+        "tau_ins": 11.091293546206275,
+        "k_EGP": -0.26435878800800316,
+        "k_Uii": -2.9981073593647016,
+        "k_Eexcr": 14.110433691784628,
+        "k_gt": 0.050227154821805314
+      },
+      "processes": {
+        "A": "k_abs * A_filter",
+        "I": "k_ins * I_filter",
+        "term_clear": "-Vmax_clear * (Gp / (Gp + K_clear + 1e-12)) * (1.0 + I)",
+        "term_EGP": "k_EGP * EGP / (1.0 + I)",
+        "term_Uii": "-k_Uii * Uii",
+        "term_Eexcr": "-k_Eexcr * E",
+        "term_tissue": "-k_gt * (Gp - Gt) / (1.0 + 0.001 * abs(Gp - Gt))"
+      },
+      "hidden_states": {
+        "A_filter": {
+          "rhs": "(1.0 - exp(-1.0 / tau_abs)) / 1.0 * (meal_rate_g_per_min - A_filter)",
+          "initial": "0.0",
+          "program_name": "_first_order_filter(meal, tau_abs) (k_abs > 0 branch)",
+          "rule": "filter"
+        },
+        "I_filter": {
+          "rhs": "(1.0 - exp(-1.0 / tau_ins)) / 1.0 * (meal_rate_g_per_min - I_filter)",
+          "initial": "0.0",
+          "program_name": "_first_order_filter(meal, tau_ins) (k_ins != 0 branch)",
+          "rule": "filter"
+        }
+      },
+      "targets": {
+        "Gp": "A + term_clear + term_EGP + term_Uii + term_Eexcr + term_tissue"
+      },
+      "rules": [
+        "filter",
+        "initial",
+        "guard",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "_first_order_filter: alpha = exp(-1/tau), A[0] = 0, A[i] = alpha*A[i-1] + (1-alpha)*x[i-1]: a filter of the previous row with a = alpha, so T = D/(1 - exp(-1/tau)).",
+        "No sealed coefficient is 0, so np.where(full == 0, defaults, full) keeps every one.",
+        "Dropped: _clean (np.where(isfinite)) on finite inputs and the final isfinite guard; the unused vectorised attempt is overwritten by the loop in the program."
+      ]
+    },
+    {
+      "task": 2,
+      "benchmark_id": "phase_c_dalla_man_t1_canonical_named_hard_rates_v1",
+      "repetition": 0,
+      "programs": {
+        "Gp": {
+          "function_sha256": "3dfeace41dd405f475b5c834a6a83f7bd988df831e40fe515922a304d81048b2",
+          "parameters": [
+            0.045650303339818274,
+            0.04390212334073161,
+            5.538268414609617,
+            3.1699983838290082,
+            51.439840460299706,
+            9.04175968076058,
+            0.1741359240747583,
+            -2.6881859361534772,
+            -144.85182466243077,
+            -1.2466330616665449
+          ]
+        }
+      },
+      "parameters": {
+        "k_elim": 0.045650303339818274,
+        "k_ret": 0.04390212334073161,
+        "k_abs": 5.538268414609617,
+        "tau_fast": 3.1699983838290082,
+        "tau_slow": 51.439840460299706,
+        "tau_ins": 9.04175968076058,
+        "k_ins": 0.1741359240747583,
+        "k_eff": -2.6881859361534772,
+        "K_eff": -144.85182466243077,
+        "k_hgp": -1.2466330616665449
+      },
+      "processes": {
+        "basal_clearance": "-k_elim * Gp",
+        "tissue_return": "k_ret * Gt",
+        "appearance": "k_abs * A",
+        "utilisation": "k_ins * I * Gp / (K_eff + Gp + 1e-12)",
+        "effectiveness": "k_eff * Gp ** 2 / (K_eff + Gp ** 2 + 1e-12)",
+        "hepatic_prod": "k_hgp * K_eff ** 2 / (K_eff ** 2 + Gp ** 2 + 1e-12)"
+      },
+      "hidden_states": {
+        "a": {
+          "rhs": "(meal_rate_g_per_min - a) / (tau_fast * 1.0)",
+          "initial": "0.0",
+          "program_name": "a[t] = a[t-1] + (meal[t-1] - a[t-1])/tau_fast",
+          "rule": "filter"
+        },
+        "A": {
+          "rhs": "(a - A) / (tau_slow * 1.0)",
+          "initial": "0.0",
+          "program_name": "A[t] = A[t-1] + (a[t-1] - A[t-1])/tau_slow",
+          "rule": "filter"
+        },
+        "I": {
+          "rhs": "(a - I) / (tau_ins * 1.0)",
+          "initial": "0.0",
+          "program_name": "I[t] = I[t-1] + (a[t-1] - I[t-1])/tau_ins",
+          "rule": "filter"
+        }
+      },
+      "targets": {
+        "Gp": "basal_clearance + tissue_return + appearance + hepatic_prod - utilisation - effectiveness"
+      },
+      "rules": [
+        "filter",
+        "initial",
+        "guard",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "Each loop line is z[t] = (1 - 1/tau)*z[t-1] + (1/tau)*u[t-1]: a forward-Euler filter of the previous row with a = 1 - 1/tau, so T = D/(1-a) = tau.",
+        "max(tau, 1e-6) and the K_eff != 0 default do not act on the sealed coefficients; the nan_to_num guard is dropped."
+      ]
+    },
+    {
+      "task": 3,
+      "benchmark_id": "phase_c_dalla_man_t1_canonical_named_hard_rates_v1",
+      "repetition": 1,
+      "programs": {
+        "Gp": {
+          "function_sha256": "4943698054a67a56384e573e25c11cd9eb478224eaafc71e923f0bede6c1f208",
+          "parameters": [
+            101.3053111559156,
+            65.92973668340888,
+            2.9953337696590467,
+            14.125022905550384,
+            0.04896331850390267,
+            6.882580070889297,
+            4.833985310286922,
+            9.893415186998425,
+            0.34854118878680496,
+            -126.99639714736271
+          ]
+        }
+      },
+      "parameters": {
+        "k_abs": 101.3053111559156,
+        "tau_delay": 65.92973668340888,
+        "k_clear": 2.9953337696590467,
+        "Kc_clear": 14.125022905550384,
+        "k_exch": 0.04896331850390267,
+        "tau_exch": 6.882580070889297,
+        "k_prod": 4.833985310286922,
+        "tau_ins": 9.893415186998425,
+        "k_ins": 0.34854118878680496,
+        "Km_ins": -126.99639714736271
+      },
+      "processes": {
+        "appearance": "k_abs * meal_delayed / (Kc_clear + abs(meal_delayed))",
+        "clear_raw": "-k_clear * Gp / (Kc_clear + abs(Gp) + 2.220446049250313e-16)",
+        "exchange_raw": "k_exch * (Gt - Gp)",
+        "insulin_util": "-(k_ins * insulin_proxy) * Gp / (Km_ins + abs(Gp) + 2.220446049250313e-16)"
+      },
+      "hidden_states": {
+        "meal_delayed": {
+          "rhs": "(meal_rate_g_per_min - meal_delayed) / (tau_delay * 1.0)",
+          "initial": "meal_rate_g_per_min",
+          "program_name": "meal_delayed = _exp_ma(meal, tau_delay)",
+          "rule": "filter"
+        },
+        "clearance": {
+          "rhs": "(clear_raw - clearance) / (tau_exch * 1.0)",
+          "initial": "-k_clear * Gp / (Kc_clear + abs(Gp) + 2.220446049250313e-16)",
+          "program_name": "clearance = _exp_ma(clear_raw, tau_exch)",
+          "rule": "filter"
+        },
+        "exchange": {
+          "rhs": "(exchange_raw - exchange) / (tau_exch * 1.0)",
+          "initial": "k_exch * (Gt - Gp)",
+          "program_name": "exchange = _exp_ma(exchange_raw, tau_exch)",
+          "rule": "filter"
+        },
+        "insulin_proxy": {
+          "rhs": "(meal_rate_g_per_min - insulin_proxy) / (tau_ins * 1.0)",
+          "initial": "meal_rate_g_per_min",
+          "program_name": "insulin_proxy = _exp_ma(meal, tau_ins)",
+          "rule": "filter"
+        }
+      },
+      "targets": {
+        "Gp": "clip(appearance + k_prod + clearance + exchange + insulin_util, -1000000.0, 1000000.0)"
+      },
+      "rules": [
+        "filter",
+        "initial",
+        "guard",
+        "coefficients",
+        "direct",
+        "time_unit"
+      ],
+      "notes": [
+        "_exp_ma: alpha = 1/(tau + 1), out[0] = signal[0], out[i] = (1-alpha)*out[i-1] + alpha*signal[i]: a backward-Euler filter of the current row, so T = tau.",
+        "Kc_clear > 0 selects the saturable appearance and clearance branches; eps = np.finfo(float).eps.",
+        "The clip to [-1e6, 1e6] is kept; the NaN mask is dropped.",
+        "clearance and exchange filter terms of the target Gp itself, so they start from Gp's first observation."
+      ]
+    },
+    {
+      "task": 4,
+      "benchmark_id": "phase_c_dalla_man_t2_canonical_named_easy_rates_v1",
+      "repetition": 0,
+      "programs": {
+        "Gp": {
+          "function_sha256": "2140d4402f6d54c264ad622474c60659fee264b166ef0681fdf2f8ad9e6def8a",
+          "parameters": [
+            0.0028308003819851454,
+            -0.4000912735104506,
+            -1.9440983496722684,
+            0.8847401182741719,
+            -34.58717001576812,
+            2.1715445744439865,
+            -704.5307804471496,
+            9.396169416386146,
+            50.57077767472018,
+            682.5051287776926
+          ]
+        },
+        "I": {
+          "function_sha256": "97f7de7df8a6c5d8016e0cd5026d61596223e8dcaa1e9518523bcf96d1e06e8c",
+          "parameters": [
+            73.4226868656911,
+            -0.9883605112769797,
+            -362.44400165024507,
+            2200.5826621761876,
+            0.43089670624064685,
+            0.1610976550263107,
+            -0.9791711312200064,
+            -26.371723883603536,
+            25.352117943593797,
+            -0.16471173653434254
+          ]
+        },
+        "U": {
+          "function_sha256": "bcd247c38c05c89ba85eb32f70040ffcba2e25a578f9a1bfd1186b6f26fb5b51",
+          "parameters": [
+            0.04348508286587644,
+            -0.028733303076710123,
+            0.002049514572097669,
+            1040.0753465564237,
+            -2.0688560531115087e-05,
+            -328.43718874316664,
+            0.0063394546862653705,
+            0.29173943353755616,
+            -0.000489117248504882,
+            1.1757786187076882
+          ]
+        }
+      },
+      "parameters": {
+        "Gp_k_meal": 0.0028308003819851454,
+        "Gp_k_EGP": -0.4000912735104506,
+        "Gp_k_I": -1.9440983496722684,
+        "Gp_k_U": 0.8847401182741719,
+        "Gp_k_E": -34.58717001576812,
+        "Gp_k_0": 2.1715445744439865,
+        "Gp_tau_M": 9.396169416386146,
+        "Gp_tau_M2": 50.57077767472018,
+        "Gp_tau_Gt": 682.5051287776926,
+        "I_Gp_basal": 73.4226868656911,
+        "I_k_I": -0.9883605112769797,
+        "I_sigma_max": -362.44400165024507,
+        "I_Km_G": 2200.5826621761876,
+        "I_beta_meal": 0.43089670624064685,
+        "I_beta_exo": 0.1610976550263107,
+        "I_gamma_lag": -0.9791711312200064,
+        "I_alpha_Udep": -26.371723883603536,
+        "I_gamma_Udep": 25.352117943593797,
+        "I_beta_basal": -0.16471173653434254,
+        "U_k_clear": 0.04348508286587644,
+        "U_k_uii": -0.028733303076710123,
+        "U_k_ins": 0.002049514572097669,
+        "U_Km": 1040.0753465564237,
+        "U_k_meal": -2.0688560531115087e-05,
+        "U_I0": -328.43718874316664,
+        "U_k_EGP": 0.0063394546862653705,
+        "U_k_E": 0.29173943353755616,
+        "U_k_gt": -0.000489117248504882,
+        "U_k_delay": 1.1757786187076882
+      },
+      "processes": {
+        "Gp_A_meal": "Gp_k_meal * 1000.0 * Gp_G_abs",
+        "Gp_A_EGP": "Gp_k_EGP * EGP",
+        "Gp_D_insulin": "Gp_k_I * (I + insulin_pmol_per_kg_min) / (1.0 + max(Gp, 0.0))",
+        "Gp_D_indep": "Gp_k_U * U",
+        "Gp_D_excr": "Gp_k_E * E",
+        "Gp_exchange": "(Gt - Gp) / Gp_tau_Gt",
+        "I_glucose_stim": "I_sigma_max * max(Gp - I_Gp_basal, 0.0) / (I_Km_G + max(Gp - I_Gp_basal, 0.0) + 1e-12)",
+        "U_insulin_excess": "max(I + insulin_pmol_per_kg_min - U_I0, 0.0)",
+        "U_insulin_term": "U_k_ins * U_X * Gp / (U_Km + Gp)"
+      },
+      "hidden_states": {
+        "Gp_G_abs1": {
+          "rhs": "(meal_rate_g_per_min - Gp_G_abs1) / ((Gp_tau_M - 1.0) * 1.0)",
+          "initial": "meal_rate_g_per_min",
+          "program_name": "G_abs1 = lowpass(meal, tau_M)",
+          "rule": "filter"
+        },
+        "Gp_G_abs": {
+          "rhs": "(Gp_G_abs1 - Gp_G_abs) / ((Gp_tau_M2 - 1.0) * 1.0)",
+          "initial": "meal_rate_g_per_min",
+          "program_name": "G_abs = lowpass(G_abs1, tau_M2)",
+          "rule": "filter"
+        },
+        "I_meal_filt1": {
+          "rhs": "(1.0 - exp(-0.5)) / 1.0 * (meal_rate_g_per_min - I_meal_filt1)",
+          "initial": "0.0",
+          "program_name": "meal_filt1 (gamma_meal1 = 0.5)",
+          "rule": "filter"
+        },
+        "I_meal_filt2": {
+          "rhs": "(1.0 - exp(-0.05)) / 1.0 * (I_meal_filt1 - I_meal_filt2)",
+          "initial": "0.0",
+          "program_name": "meal_filt2 (gamma_meal2 = 0.05)",
+          "rule": "filter"
+        },
+        "I_U_filt": {
+          "rhs": "(1.0 - exp(-I_gamma_Udep)) / 1.0 * ((U - Uii) - I_U_filt)",
+          "initial": "0.0",
+          "program_name": "U_filt[t] = (1-a_U)*U_filt[t-1] + a_U*U_dep[t-1], a_U = 1 - exp(-gamma_Udep)",
+          "rule": "filter"
+        },
+        "I_prev": {
+          "rhs": "(I - I_prev) / 1.0",
+          "initial": "0.0",
+          "program_name": "I_lag = concatenate(([0.0], I[:-1]))",
+          "rule": "lag"
+        },
+        "Gp_prev": {
+          "rhs": "(Gp - Gp_prev) / 1.0",
+          "initial": "Gp",
+          "program_name": "dGp_dt[1:] = Gp[1:] - Gp[:-1], dGp_dt[0] = 0",
+          "rule": "lag"
+        },
+        "U_X": {
+          "rhs": "U_k_delay / 1.0 * (U_insulin_excess - U_X)",
+          "initial": "max(I + insulin_pmol_per_kg_min - U_I0, 0.0)",
+          "program_name": "X[t] = X[t-1] + k_delay*(insulin_excess[t] - X[t-1]), clamped at 0",
+          "rule": "euler"
+        }
+      },
+      "targets": {
+        "Gp": "Gp_A_meal + Gp_A_EGP - Gp_D_insulin - Gp_D_indep - Gp_D_excr + Gp_k_0 + Gp_exchange",
+        "I": "-I_k_I * I + I_glucose_stim + I_beta_meal * I_meal_filt2 + I_beta_exo * insulin_pmol_per_kg_min + I_gamma_lag * I_prev + I_alpha_Udep * (U - Uii) + I_gamma_Udep * I_U_filt + I_beta_basal * (I_Gp_basal - Gp) + I_beta_basal * (Gp - Gp_prev)",
+        "U": "-U_k_clear * U + U_k_uii * Uii + U_insulin_term + U_k_meal * meal_rate_g_per_min - U_k_EGP * EGP + U_k_E * E + U_k_gt * (Gt - Gp)"
+      },
+      "rules": [
+        "filter",
+        "euler",
+        "lag",
+        "initial",
+        "guard",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "Gp: lowpass is out[t] = out[t-1] + (signal[t] - out[t-1])/tau with out[0] = signal[0], a filter of the current row with a = 1 - 1/tau, so T = D*(tau - 1) (tau_M, tau_M2 > 1). tau_I < 0 bypasses the insulin filter, so I_eff = I + insulin forcing; tau_Gt > 0 selects G_inhib = 1/(1 + max(Gp, 0)) and the exchange; k_U >= 0 selects k_U*U.",
+        "Gp: tau_I is unused after the bypass and is not a parameter here.",
+        "I: beta_dG reuses beta_basal, so the backward difference of Gp has coefficient I_beta_basal. The meal filters read the previous row with a = exp(-gamma), so T = D/(1 - exp(-gamma)).",
+        "I: U_filt reads the previous row with a = exp(-gamma_Udep), about 1e-11, so T = D/(1 - a) is one row: it is a copy of the previous row's U - Uii.",
+        "U: k_delay = 1.176 > 1 gives the recursion weight 1 - k_delay < 0, so it is read as an Euler step. Its clamp at 0 is dropped: X starts at max(.,0) >= 0 and is driven by a nonnegative input.",
+        "U: k_clear and Km pass their max(., 1e-12) clamps; k_delay its max(., 0)."
+      ]
+    },
+    {
+      "task": 6,
+      "benchmark_id": "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
+      "repetition": 0,
+      "programs": {
+        "Gp": {
+          "function_sha256": "bab40bb55a1fb5adad244a0ebe1d765c6b9e4fc32a7ef36ae4bb5b84c4e618c2",
+          "parameters": [
+            0.0024730231157746936,
+            32.756864067096465,
+            6.345557897914339,
+            6.346987144773989,
+            -0.0017137143890634226,
+            0.883941049965666,
+            17.98318879080935,
+            17.99859541987699,
+            4265.7604734978495,
+            -24.88527151142173
+          ]
+        },
+        "I": {
+          "function_sha256": "f685f0d37dc667afff4d298d69737d6f025cf98f765fe2b1d45f988c6d85e813",
+          "parameters": [
+            -0.09167122731266089,
+            17.38875100227599,
+            9.078914078520752,
+            0.05662452856282381,
+            0.10316648869421444,
+            1.0514204559878044,
+            0.7290147873209523,
+            0.08851744317462998,
+            7.670033708566821,
+            17.388443119869784
+          ]
+        }
+      },
+      "parameters": {
+        "Gp_k_meal": 0.0024730231157746936,
+        "Gp_k_ins_max": 32.756864067096465,
+        "Gp_tau_ins1": 6.345557897914339,
+        "Gp_tau_ins2": 6.346987144773989,
+        "Gp_k_e": -0.0017137143890634226,
+        "Gp_R0_base": 0.883941049965666,
+        "Gp_tau_meal": 17.98318879080935,
+        "Gp_tau_intake": 17.99859541987699,
+        "Gp_Km_ins": 4265.7604734978495,
+        "I_basal_sec": -0.09167122731266089,
+        "I_k_clear": 17.38875100227599,
+        "I_Vb": 9.078914078520752,
+        "I_tau_I": 0.05662452856282381,
+        "I_k_sec_max": 0.10316648869421444,
+        "I_Km_Gp_sec": 1.0514204559878044,
+        "I_n_hill": 0.7290147873209523,
+        "I_k_meal_sec": 0.08851744317462998,
+        "I_tau_meal": 7.670033708566821,
+        "I_k_extra_prod_ins": 17.388443119869784
+      },
+      "processes": {
+        "Gp_U_ins": "Gp_k_ins_max * Gp_I_delayed2 / (Gp_Km_ins + Gp_I_delayed2)",
+        "I_total_insulin": "I * I_Vb + insulin_pmol_per_kg_min",
+        "I_sec_glucose": "I_k_sec_max * Gp ** I_n_hill / (I_Km_Gp_sec ** I_n_hill + Gp ** I_n_hill)",
+        "I_extra_prod": "I_k_extra_prod_ins * I_total_insulin / I_Vb"
+      },
+      "hidden_states": {
+        "Gp_stomach": {
+          "rhs": "(meal_rate_g_per_min - Gp_stomach) / (Gp_tau_meal * 1.0)",
+          "initial": "0.0",
+          "program_name": "stomach = low_pass(meal, tau_meal)",
+          "rule": "filter"
+        },
+        "Gp_intestine": {
+          "rhs": "(Gp_stomach - Gp_intestine) / (Gp_tau_intake * 1.0)",
+          "initial": "0.0",
+          "program_name": "intestine = low_pass(stomach, tau_intake)",
+          "rule": "filter"
+        },
+        "Gp_I_delayed1": {
+          "rhs": "((I + insulin_pmol_per_kg_min) - Gp_I_delayed1) / (Gp_tau_ins1 * 1.0)",
+          "initial": "0.0",
+          "program_name": "low_pass(I + insulin forcing, tau_ins1)",
+          "rule": "filter"
+        },
+        "Gp_I_delayed2": {
+          "rhs": "(Gp_I_delayed1 - Gp_I_delayed2) / (Gp_tau_ins2 * 1.0)",
+          "initial": "0.0",
+          "program_name": "I_delayed = low_pass(., tau_ins2)",
+          "rule": "filter"
+        },
+        "I_X": {
+          "rhs": "(I_total_insulin - I_X) / (I_tau_I * 1.0)",
+          "initial": "I * I_Vb + insulin_pmol_per_kg_min",
+          "program_name": "X = ema(total_insulin, tau_I)",
+          "rule": "filter"
+        },
+        "I_meal_filtered": {
+          "rhs": "(meal_rate_g_per_min - I_meal_filtered) / (I_tau_meal * 1.0)",
+          "initial": "meal_rate_g_per_min",
+          "program_name": "meal_filtered = ema(meal, tau_meal)",
+          "rule": "filter"
+        }
+      },
+      "targets": {
+        "Gp": "Gp_k_meal * 1000.0 * Gp_intestine + Gp_R0_base - (Uii + Gp_U_ins) - Gp_k_e * Gp",
+        "I": "max(I_basal_sec + I_sec_glucose + I_k_meal_sec * I_meal_filtered + I_extra_prod + insulin_pmol_per_kg_min / I_Vb - I_k_clear * I_X / I_Vb, -I)"
+      },
+      "rules": [
+        "filter",
+        "initial",
+        "guard",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "Gp: low_pass uses alpha = dt/(tau + dt) with y[0] = 0: a backward-Euler filter of the current row, so T = tau, starting at 0. n_ins = -24.9 gives Km_meal = max(0, n_ins - 1) = 0 (no saturation) and max(n_ins, 1) = 1, so U_ins is k_ins_max*I_delayed/(Km_ins + I_delayed).",
+        "I: ema uses alpha = dt/(tau + dt) with out[0] = signal[0], a backward-Euler filter, so T = tau; tau_I = 0.057 min. k_clear (17.38875) and k_extra_prod_ins (17.38844) nearly cancel, so I's equation holds k_clear*(total - X)/Vb, about 0.98 times dI/dt: T must be the program's tau for that feedback to survive. k_meal_sec and k_extra_prod_ins are nonzero, so both optional terms are present.",
+        "I: the final np.maximum(dI_dt, -I) guard is kept as max(., -I)."
+      ]
+    },
+    {
+      "task": 7,
+      "benchmark_id": "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
+      "repetition": 1,
+      "programs": {
+        "Gp": {
+          "function_sha256": "5547d60fe43c5387fb16562d72a5e3e2be87bfb5e52d2ad27e2261613803b640",
+          "parameters": [
+            2.6930611536501363,
+            0.031179535873826957,
+            3.2959641042289975,
+            3.295957645258826,
+            0.06816167639644374,
+            0.006973541536378783,
+            3.2150537959659156,
+            3.2150607356790264,
+            3.2150481943496723,
+            -0.08851186590460633
+          ]
+        },
+        "I": {
+          "function_sha256": "3e1d5f902bcc226b78d6866e5ff54966dfbd5790483082393d2c9e855bb5a2bd",
+          "parameters": [
+            11.254600367773921,
+            0.43469439822241357,
+            93.37264064906091,
+            -0.00027308685334368984,
+            61.68774970443366,
+            1034.275311868422,
+            11.248504050788094,
+            0.0011603290969196772,
+            -0.7954355678725115,
+            1.0
+          ]
+        }
+      },
+      "parameters": {
+        "Gp_k_meal": 2.6930611536501363,
+        "Gp_k_abs": 0.031179535873826957,
+        "Gp_tau_meal": 3.2959641042289975,
+        "Gp_tau_meal2": 3.295957645258826,
+        "Gp_c_meal": 0.06816167639644374,
+        "Gp_k_ins": 0.006973541536378783,
+        "Gp_tau_ins_fast": 3.2150537959659156,
+        "Gp_tau_ins_slow": 3.2150607356790264,
+        "Gp_tau_ins_slow2": 3.2150481943496723,
+        "Gp_alpha_Uii": -0.08851186590460633,
+        "I_R0": 11.254600367773921,
+        "I_k_meal": 0.43469439822241357,
+        "I_tau_meal": 93.37264064906091,
+        "I_k_ins": -0.00027308685334368984,
+        "I_K_m": 61.68774970443366,
+        "I_alpha_ins": 1034.275311868422,
+        "I_k_U": 11.248504050788094,
+        "I_k_suppr": 0.0011603290969196772,
+        "I_k_ins_ext": -0.7954355678725115
+      },
+      "processes": {
+        "I_I_delayed": "I_alpha_ins * I_prev + (1.0 - I_alpha_ins) * max(I, 0.0)",
+        "I_Ra": "max(I_R0 - I_k_suppr * (I_I_delayed + insulin_pmol_per_kg_min), 0.0) + I_k_meal * I_M_f",
+        "I_U_ins": "I_k_ins * (I_I_delayed + I_k_ins_ext * insulin_pmol_per_kg_min) * max(Gp, 0.0) / (I_K_m + max(Gp, 0.0))"
+      },
+      "hidden_states": {
+        "Gp_meal_lag1": {
+          "rhs": "1.0 / (Gp_tau_meal * 1.0) * (meal_rate_g_per_min - Gp_meal_lag1)",
+          "initial": "meal_rate_g_per_min / (Gp_tau_meal + 1.0)",
+          "program_name": "meal_lag = _lag(meal, tau_meal)",
+          "rule": "filter"
+        },
+        "Gp_meal_lag2": {
+          "rhs": "1.0 / (Gp_tau_meal2 * 1.0) * (Gp_meal_lag1 - Gp_meal_lag2)",
+          "initial": "meal_rate_g_per_min / ((Gp_tau_meal + 1.0) * (Gp_tau_meal2 + 1.0))",
+          "program_name": "meal_lag = _lag(meal_lag, tau_meal2) (first)",
+          "rule": "filter"
+        },
+        "Gp_meal_lag3": {
+          "rhs": "1.0 / (Gp_tau_meal2 * 1.0) * (Gp_meal_lag2 - Gp_meal_lag3)",
+          "initial": "meal_rate_g_per_min / ((Gp_tau_meal + 1.0) * (Gp_tau_meal2 + 1.0) ** 2)",
+          "program_name": "meal_lag = _lag(meal_lag, tau_meal2) (second)",
+          "rule": "filter"
+        },
+        "Gp_R_a": {
+          "rhs": "Gp_k_abs / 1.0 * (Gp_k_meal * Gp_meal_lag3 + Gp_c_meal - Gp_R_a)",
+          "initial": "(Gp_k_meal * meal_rate_g_per_min / ((Gp_tau_meal + 1.0) * (Gp_tau_meal2 + 1.0) ** 2) + Gp_c_meal) / (1.0 / Gp_k_abs + 1.0)",
+          "program_name": "R_a = _lag(glucose_input, 1/k_abs)",
+          "rule": "filter"
+        },
+        "Gp_I_eff1": {
+          "rhs": "1.0 / (Gp_tau_ins_fast * 1.0) * (I - Gp_I_eff1)",
+          "initial": "I / (Gp_tau_ins_fast + 1.0)",
+          "program_name": "I_eff = _lag(insulin_total, tau_ins_fast)",
+          "rule": "filter"
+        },
+        "Gp_I_eff2": {
+          "rhs": "1.0 / (Gp_tau_ins_slow * 1.0) * (Gp_I_eff1 - Gp_I_eff2)",
+          "initial": "I / ((Gp_tau_ins_fast + 1.0) * (Gp_tau_ins_slow + 1.0))",
+          "program_name": "I_eff = _lag(I_eff, tau_ins_slow)",
+          "rule": "filter"
+        },
+        "Gp_I_eff3": {
+          "rhs": "1.0 / (Gp_tau_ins_slow2 * 1.0) * (Gp_I_eff2 - Gp_I_eff3)",
+          "initial": "I / ((Gp_tau_ins_fast + 1.0) * (Gp_tau_ins_slow + 1.0) * (Gp_tau_ins_slow2 + 1.0))",
+          "program_name": "I_eff = _lag(I_eff, tau_ins_slow2) (first)",
+          "rule": "filter"
+        },
+        "Gp_I_eff4": {
+          "rhs": "1.0 / (Gp_tau_ins_slow2 * 1.0) * (Gp_I_eff3 - Gp_I_eff4)",
+          "initial": "I / ((Gp_tau_ins_fast + 1.0) * (Gp_tau_ins_slow + 1.0) * (Gp_tau_ins_slow2 + 1.0) ** 2)",
+          "program_name": "I_eff = _lag(I_eff, tau_ins_slow2) (second)",
+          "rule": "filter"
+        },
+        "I_M_f": {
+          "rhs": "(meal_rate_g_per_min - I_M_f) / ((I_tau_meal - 1.0) * 1.0)",
+          "initial": "meal_rate_g_per_min",
+          "program_name": "M_f = low_pass(meal, tau_meal)",
+          "rule": "filter"
+        },
+        "I_prev": {
+          "rhs": "(max(I, 0.0) - I_prev) / 1.0",
+          "initial": "max(I, 0.0)",
+          "program_name": "I_prev = concatenate((I_pos[:1], I_pos[:-1]))",
+          "rule": "lag"
+        }
+      },
+      "targets": {
+        "Gp": "Gp_R_a - (Gp_alpha_Uii * Uii + Gp_k_ins * Gp_I_eff4)",
+        "I": "I_Ra - (I_k_U * Uii + I_U_ins)"
+      },
+      "rules": [
+        "filter",
+        "lag",
+        "initial",
+        "guard",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "Gp: _lag uses alpha = 1/(tau + 1) with out[0] = alpha*signal[0]: a backward-Euler filter, so T = tau, starting at alpha times the input's first value. With 10 coefficients, k_forc = 0, Vmax = 0 (linear disposal k_ins*I_eff) and b = 0. k_abs > 0 gives tau_abs = 1/k_abs, so T = 1/k_abs.",
+        "I: the program for the target I is a glucose balance (its docstring says dGp/dt); it is transcribed as written, as the derivative of I.",
+        "I: low_pass uses alpha = min(1, 1/tau) and y[0] = sig[0], a filter of the current row with a = 1 - 1/tau_meal, so T = D*(tau_meal - 1). alpha_ins = 1034 weights the previous row's I: I_delayed = I - 1034*(I - I_prev). k_suppr != 0 selects the suppressed basal term; K_m is finite.",
+        "I: the tenth coefficient is reserved and unused."
+      ]
+    },
+    {
+      "task": 8,
+      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1",
+      "repetition": 0,
+      "programs": {
+        "T": {
+          "function_sha256": "dfa06d5afac843212f80a994456cf15a6e5ff5f5819c73d9e26365d59d00b3f6",
+          "parameters": [
+            0.9589450785529416,
+            -2339379.2745759916,
+            -2327224.8332153107,
+            8741.559765637852,
+            2.2942017935632872,
+            0.05423892616048818,
+            -0.022132745809179642,
+            -0.60219290446086,
+            0.000691019230468874,
+            0.1396875934811327
+          ]
+        }
+      },
+      "parameters": {
+        "alpha": 0.9589450785529416,
+        "beta": -2339379.2745759916,
+        "k0": -2327224.8332153107,
+        "gamma_c": 8741.559765637852,
+        "kappa": 2.2942017935632872,
+        "sigma": 0.05423892616048818,
+        "b_const": -0.022132745809179642,
+        "b_lin": -0.60219290446086,
+        "eta": 0.000691019230468874,
+        "delta": 0.1396875934811327
+      },
+      "processes": {},
+      "hidden_states": {},
+      "targets": {
+        "T": "alpha * (Tf - T) + beta * (k0 * exp(-gamma_c / max(T, 1.0))) * C + kappa * (Tj - T) + sigma * (Tjf - T) + eta * (Cf - C) * (Tf - T) + b_lin * (Cf - C) + delta * (Cf - C) ** 2 + b_const"
+      },
+      "rules": [
+        "direct",
+        "coefficients"
+      ],
+      "notes": [
+        "Reads only the current row; rewritten term by term. gamma is renamed gamma_c (a grammar function)."
+      ]
+    },
+    {
+      "task": 9,
+      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1",
+      "repetition": 1,
+      "programs": {
+        "T": {
+          "function_sha256": "f5067ec75b32732efd075c2b2cb9d253700ca5f6eabacbfbca729f714583cfde",
+          "parameters": [
+            0.9323081972887575,
+            0.02708508281752457,
+            0.11706141387646288,
+            2.2919001442110853,
+            31.252863260548708,
+            8678.66585407496,
+            0.03654997957555731,
+            -2.073891561983979,
+            -2.0243266104583166,
+            0.05460672520414303
+          ]
+        }
+      },
+      "parameters": {
+        "k_f0": 0.9323081972887575,
+        "k_f1": 0.02708508281752457,
+        "k_r": 0.11706141387646288,
+        "k_j": 2.2919001442110853,
+        "a0": 31.252863260548708,
+        "a1": 8678.66585407496,
+        "a2": 0.03654997957555731,
+        "bias": -2.073891561983979,
+        "k_cm": -2.0243266104583166,
+        "k_cp": 0.05460672520414303
+      },
+      "processes": {},
+      "hidden_states": {},
+      "targets": {
+        "T": "(k_f0 + k_f1 * Cf) * (Tf - T) + k_r * C * exp(clip(a0 - a1 * (1.0 / (T + 2.220446049250313e-16)) + a2 * Cf, -700.0, 700.0)) + k_j * (Tj - T) + bias + k_cm * (Cf - C) + k_cp * (T - 298.15) + k_cp * (Tjf - T)"
+      },
+      "rules": [
+        "direct",
+        "guard",
+        "coefficients"
+      ],
+      "notes": [
+        "Reads only the current row. The Tjf term is present because Tjf is never all NaN; the NaN mask is dropped."
+      ]
+    },
+    {
+      "task": 10,
+      "benchmark_id": "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
+      "repetition": 0,
+      "programs": {
+        "v01": {
+          "function_sha256": "b151b969801e44df8a0100d60b2d73dd5b7aa900dac8ed8c50ee1342fbc9db9b",
+          "parameters": [
+            -0.002874833588163923,
+            -1.581095747319498,
+            0.755273956487336,
+            0.10036949572625908,
+            -0.7920669434155084,
+            -4.695681922090436,
+            10.591690964459143,
+            13.377373593496914,
+            0.0069590996648526676,
+            4.926196576944696
+          ]
+        }
+      },
+      "parameters": {
+        "bias": -0.002874833588163923,
+        "b_cmd": 0.755273956487336,
+        "tau_mem": 0.10036949572625908,
+        "g_mem": -0.7920669434155084,
+        "g_out": 10.591690964459143,
+        "cross_gain": 13.377373593496914,
+        "aux_gain": 0.0069590996648526676,
+        "sat_scale": 4.926196576944696
+      },
+      "processes": {
+        "dv_raw": "bias + b_cmd * u01 + g_mem * m_cmd + g_out * v01 + aux_gain * (v02 + v03)"
+      },
+      "hidden_states": {
+        "v01_prev": {
+          "rhs": "(v01 - v01_prev) / 0.1",
+          "initial": "0.0",
+          "program_name": "cross[0] = 0; cross[1:] = cross_gain*m_out[:-1], m_out = v01 (tau_out <= 0)",
+          "rule": "lag"
+        },
+        "m_cmd": {
+          "rhs": "(exp(1.0 / tau_mem) - 1.0) / 0.1 * ((u01 + cross_gain * v01_prev) - m_cmd)",
+          "initial": "u01",
+          "program_name": "m_cmd = ema(u01, tau_mem, cross)",
+          "rule": "filter"
+        }
+      },
+      "targets": {
+        "v01": "dv_raw / (1.0 + (dv_raw / sat_scale) ** 2)"
+      },
+      "rules": [
+        "filter",
+        "lag",
+        "initial",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "tau_out <= 0 makes m_out the raw output v01; tau_f <= 0 disables the output filter; sat_scale > 0 applies the soft saturation.",
+        "cross is cross_gain times the previous row's v01, 0 at row 0: a lag state starting at 0.",
+        "ema reads the current row with a = exp(-1/tau_mem) = 4.7e-5, so T = D*a/(1-a) = 4.7e-6: m_cmd follows u01 + cross at once. m_aux is computed but unused."
+      ]
+    },
+    {
+      "task": 11,
+      "benchmark_id": "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
+      "repetition": 1,
+      "programs": {
+        "v01": {
+          "function_sha256": "f2cb4739f6fd6ad070c9f9c45a5384cb8f90955bda9b0bc47065abbd211bb7a1",
+          "parameters": [
+            -0.45538344602967207,
+            9.77249576378657,
+            -1.822889074057933,
+            -1.851847093059588,
+            0.487209593563417,
+            1.8299009928125647,
+            -0.0027945043718193654,
+            7.139620870427763e-05,
+            -0.6982050962740082,
+            1.669409186977697
+          ]
+        }
+      },
+      "parameters": {
+        "k_u": -0.45538344602967207,
+        "k_vel": 9.77249576378657,
+        "k_02": -1.822889074057933,
+        "k_03": -1.851847093059588,
+        "k_mc": 0.487209593563417,
+        "k_ma": 1.8299009928125647,
+        "k_mo": -0.0027945043718193654,
+        "k_int": 7.139620870427763e-05,
+        "log_tau_mem": -0.6982050962740082,
+        "clip_gamma": 1.669409186977697
+      },
+      "processes": {
+        "core_linear": "k_u * u01 + k_vel * (v01 - v01_prev) + k_02 * v02 + k_03 * v03 + k_mc * m_c + k_ma * m_a + k_mo * m_o"
+      },
+      "hidden_states": {
+        "m_c": {
+          "rhs": "(exp(1.0 / exp(log_tau_mem)) - 1.0) / 0.1 * (u01 - m_c)",
+          "initial": "(1.0 - exp(-1.0 / exp(log_tau_mem))) * u01",
+          "program_name": "m_c = EMA(u01)",
+          "rule": "filter"
+        },
+        "m_o": {
+          "rhs": "(exp(1.0 / exp(log_tau_mem)) - 1.0) / 0.1 * (v01 - m_o)",
+          "initial": "(1.0 - exp(-1.0 / exp(log_tau_mem))) * v01",
+          "program_name": "m_o = EMA(v01)",
+          "rule": "filter"
+        },
+        "m_a": {
+          "rhs": "(exp(1.0 / exp(log_tau_mem)) - 1.0) / 0.1 * ((v02 + v03) - m_a)",
+          "initial": "(1.0 - exp(-1.0 / exp(log_tau_mem))) * (v02 + v03)",
+          "program_name": "m_a = EMA(v02 + v03)",
+          "rule": "filter"
+        },
+        "v01_prev": {
+          "rhs": "(v01 - v01_prev) / 0.1",
+          "initial": "v01",
+          "program_name": "vdot_meas[1:] = (v01[1:] - v01[:-1])/dt, vdot_meas[0] = 0",
+          "rule": "lag"
+        }
+      },
+      "targets": {
+        "v01": "clip(core_linear + k_int * (m_c * m_o), -clip_gamma, clip_gamma)"
+      },
+      "rules": [
+        "filter",
+        "lag",
+        "initial",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "tau_mem = exp(params[8]) = 0.497 rows; each EMA reads the current row with a = exp(-1/tau_mem) = 0.134, so T = D*a/(1-a) = 0.0155. Each starts at (1 - a) times its input's first value.",
+        "vdot_meas is the per-row difference (dt = 1), so k_vel multiplies v01 - v01_prev. gamma = max(params[9], 0) > 0 selects the clip; it is renamed clip_gamma."
+      ]
+    },
+    {
+      "task": 12,
+      "benchmark_id": "phase_c_detention_coupled_noise0_v1",
+      "repetition": 0,
+      "programs": {
+        "h_down": {
+          "function_sha256": "34d4d9299902318023841a4bfdeb7e970a0f5387914c3fcba8c56071f753d22a",
+          "parameters": [
+            0.03585991467353619,
+            61.318157394688434,
+            1.5410970003313502,
+            9.966620345382168,
+            1.6841605599283391,
+            1.211217540527343,
+            7.702361389873735,
+            7.133305077396376,
+            -0.007318725670377018,
+            8.860673446773417
+          ]
+        }
+      },
+      "parameters": {
+        "k_over": 0.03585991467353619,
+        "k_out": 61.318157394688434,
+        "alpha": 1.5410970003313502,
+        "k_warn": 9.966620345382168,
+        "k_base": 1.6841605599283391,
+        "beta": 1.211217540527343,
+        "extra_crest": 7.702361389873735,
+        "k_extra": 7.133305077396376,
+        "k_leak": -0.007318725670377018,
+        "dt": 8.860673446773417
+      },
+      "processes": {
+        "Q_over": "k_over * max(0.0, h_up - crest_up) ** beta * area_up",
+        "Q_total_out": "k_out * max(0.0, h_down - crest_down) ** alpha + k_warn * max(0.0, h_down - warning_depth) + k_extra * max(0.0, h_down - extra_crest) + k_base + k_leak * max(0.0, h_down) * area_down",
+        "dh_down": "(inflow_down + Q_over - Q_total_out) / area_down"
+      },
+      "hidden_states": {
+        "h_up": {
+          "rhs": "dt / 4.0 * (inflow_up - Q_over) / area_up",
+          "initial": "max(0.0, initial_up)",
+          "program_name": "h_up[t] = max(0, h_up[t-1] + dt*(inflow_up[t-1] - Q_over_prev)/max(area_up, eps))",
+          "rule": "euler"
+        }
+      },
+      "targets": {
+        "h_down": "dh_down + heaviside(-h_down, 1.0) * max(-dh_down, 0.0)"
+      },
+      "rules": [
+        "euler",
+        "initial",
+        "guard",
+        "direct",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "The program simulates the upstream basin itself and calls it h_up. Its Euler step uses its fitted dt = 8.86 min per 4-min row, so in minutes dh_up/dt = (dt/4)*(inflow_up - Q_over)/area_up: it fills 2.2 times as fast as its volume balance says.",
+        "Dropped: max(area, eps) on the surveyed areas, and the clamp h_up >= 0 (inflow_up >= 0, Q_over = 0 below the crest, and h_up starts at max(0, initial_up)).",
+        "Kept: np.where((h_down <= 0) & (dh_down < 0), 0, dh_down), written as dh_down + heaviside(-h_down, 1)*max(-dh_down, 0)."
+      ]
+    },
+    {
+      "task": 13,
+      "benchmark_id": "phase_c_detention_coupled_noise0_v1",
+      "repetition": 1,
+      "programs": {
+        "h_down": {
+          "function_sha256": "528438f87d819aea35d758e4e12aa65c28115a9d2df32b51f154d04d9b6bfaf7",
+          "parameters": [
+            0.45889279687674517,
+            1.085021201160839,
+            0.04265160535431866,
+            1.4858552251927395,
+            0.01400586255930171,
+            0.3654386883410354,
+            0.9577664181750546,
+            0.6652771114224224,
+            0.6652771114225614,
+            1.3327511068205182
+          ]
+        }
+      },
+      "parameters": {
+        "k_ov": 0.45889279687674517,
+        "beta": 1.085021201160839,
+        "k_out": 0.04265160535431866,
+        "alpha": 1.4858552251927395,
+        "k_warn": 0.01400586255930171,
+        "gamma_c": 0.3654386883410354,
+        "k_in": 0.9577664181750546,
+        "k_evap": 0.6652771114224224,
+        "k_loss": 0.6652771114225614,
+        "k_gain": 1.3327511068205182
+      },
+      "processes": {
+        "Q_ov": "k_ov * max(h_up - crest_up, 0.0) ** beta * area_up",
+        "dV_down_dt": "Q_ov + k_in * inflow_down + (k_gain - k_evap - k_loss) * (h_down * area_down) - (k_out * max(h_down - crest_down, 0.0) ** alpha * area_down + k_warn * max(h_down - warning_depth, 0.0) ** gamma_c * area_down)",
+        "dh_down_dt": "dV_down_dt / area_down"
+      },
+      "hidden_states": {
+        "h_up": {
+          "rhs": "(inflow_up - Q_ov) / area_up / 4.0",
+          "initial": "initial_up",
+          "program_name": "h_up[t+1] = max(h_up[t] + (inflow_up[t] - Q_ov)/max(area_up, eps), 0)",
+          "rule": "euler"
+        }
+      },
+      "targets": {
+        "h_down": "dh_down_dt + heaviside(-h_down, 1.0) * max(-dh_down_dt, 0.0)"
+      },
+      "rules": [
+        "euler",
+        "initial",
+        "guard",
+        "direct",
+        "coefficients",
+        "time_unit"
+      ],
+      "notes": [
+        "The program simulates the upstream basin itself and calls it h_up, one step per row with no dt, so in minutes dh_up/dt = (inflow_up - Q_ov)/area_up/4: it fills at a quarter of the rate its volume balance says.",
+        "_p clamps every coefficient at 0; none is negative. gamma is renamed gamma_c.",
+        "Dropped: max(area, eps) and the clamp h_up >= 0 (as for task 12). Kept: np.where(h_down <= 0, max(0, dh), dh), written with heaviside."
+      ]
+    },
+    {
+      "task": 14,
+      "benchmark_id": "phase_c_detention_independent_noise0_v1",
+      "repetition": 0,
+      "programs": {
+        "h_down": {
+          "function_sha256": "6da24415d46dd33497f2c3ed3ef78505d1f53ab6bd953514f0af47478de85040",
+          "parameters": [
+            0.044077117693626426,
+            1.5117717725748867,
+            0.5107161822121903,
+            2.103455881517891,
+            0.0005479635412161188,
+            3.646851958754879,
+            0.11097094377391906,
+            1.0,
+            -0.05397371535752275,
+            1.0
+          ]
+        }
+      },
+      "parameters": {
+        "k0": 0.044077117693626426,
+        "p0": 1.5117717725748867,
+        "kw": 0.5107161822121903,
+        "pw": 2.103455881517891,
+        "beta": 0.0005479635412161188,
+        "h_max": 3.646851958754879,
+        "gamma_c": 0.11097094377391906,
+        "k_spill": -0.05397371535752275
+      },
+      "processes": {
+        "dh_dt": "inflow_down / area_down * max(1.0 - h_down / h_max, 0.0) ** gamma_c - k0 * max(h_down - crest_down, 0.0) ** p0 - kw * max(h_down - warning_depth, 0.0) ** pw - k_spill * max(h_down - warning_depth, 0.0) - beta * h_down"
+      },
+      "hidden_states": {},
+      "targets": {
+        "h_down": "dh_dt + heaviside(-h_down, 1.0) * max(-dh_dt, 0.0)"
+      },
+      "rules": [
+        "direct",
+        "guard",
+        "coefficients"
+      ],
+      "notes": [
+        "Reads only the current row. eps = params[7] = 1.0 guards np.where(area_down > eps, inflow_down/area_down, 0); every area is 1200 m^2, so the guard never acts and is dropped. params[9] is unused.",
+        "Kept: np.where((h_down <= 0) & (dh_dt < 0), 0, dh_dt), written with heaviside."
+      ]
+    },
+    {
+      "task": 15,
+      "benchmark_id": "phase_c_detention_independent_noise0_v1",
+      "repetition": 1,
+      "programs": {
+        "h_down": {
+          "function_sha256": "b750f4fedae59c5ef9df4b2c56246863367e38b61a78c68fb80c1e842f2fcf1c",
+          "parameters": [
+            0.09755727662729322,
+            0.9875252126428838,
+            -0.2116333773815543,
+            1.3118371332541159,
+            1.0,
+            0.13060657935524914,
+            0.9820933714909922,
+            0.526576858465385,
+            0.5228259301722322,
+            0.06573355989186282
+          ]
+        }
+      },
+      "parameters": {
+        "C": 0.09755727662729322,
+        "beta": 0.9875252126428838,
+        "eps_s": 1.3118371332541159,
+        "h_max": 1.0,
+        "Q_max": 0.13060657935524914,
+        "dt": 0.9820933714909922,
+        "k_loss": 0.526576858465385,
+        "k_gw": 0.5228259301722322,
+        "kappa": 0.06573355989186282
+      },
+      "processes": {
+        "inflow_rate": "inflow_down / area_down",
+        "outflow_capped": "min(C * max(h_down - crest_down, 0.0) ** beta * (0.5 * (1.0 + tanh((h_down - crest_down) / eps_s))), Q_max)",
+        "outflow": "max(max(outflow_capped, inflow_rate - (h_max - h_down) / dt - k_loss), 0.0)",
+        "dh0": "(inflow_rate - outflow - k_loss + k_gw * (1.0 + kappa * h_down)) * dt",
+        "dh1": "dh0 + heaviside(-h_down, 1.0) * max(-dh0, 0.0)"
+      },
+      "hidden_states": {},
+      "targets": {
+        "h_down": "dh1 + heaviside(-(h_down + dh1), 0.0) * (-h_down - dh1)"
+      },
+      "rules": [
+        "direct",
+        "guard",
+        "coefficients"
+      ],
+      "notes": [
+        "Reads only the current row. gamma = max(params[2], 0) = 0, so the warning boost multiplies the outflow by 1 and is omitted; sigma and k_coup are absent (10 coefficients), so the tanh activation is used and there is no coupling.",
+        "np.where(excess > 0, C*excess**beta, 0) is C*max(excess, 0)**beta (beta > 0). The area guard never acts (1200 m^2) and is dropped; nan_to_num is dropped.",
+        "Kept, in order: np.where(h_down <= 0, max(dh, 0), dh) and np.where(h_down + dh < 0, -h_down, dh), written with heaviside. The program returns dh_dt*dt with its fitted dt = 0.982 as the derivative LLM-SR fitted."
+      ]
+    }
+  ]
+}

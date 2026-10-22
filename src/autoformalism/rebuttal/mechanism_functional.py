@@ -16,7 +16,11 @@ import numpy as np
 from pydantic import Field, field_validator, model_validator
 
 from autoformalism.baselines.d3_rollout import predict
-from autoformalism.expressions import ValidationContext, compile_candidate
+from autoformalism.expressions import (
+    ValidationContext,
+    baseline_validator,
+    compile_candidate,
+)
 from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.rebuttal.basin_algebra import expanded
 from autoformalism.rebuttal.mechanism_checks import effective_trees
@@ -87,17 +91,29 @@ class ConstantForcing:
 
 
 class Runtime:
-    """Use production ODE expressions or the native D3 increment interpreter."""
+    """Use production ODE expressions or the native D3 increment interpreter.
+
+    A row may name the grammar its model was selected under (``"grammar"``);
+    an external baseline's model is read with the baseline grammar, ours with
+    the default one.
+    """
 
     def __init__(self, row: dict):
         self.row = row
         if row["semantics"] not in {"native_increment", "continuous_time"}:
             raise ValueError("unsupported execution semantics")
+        self.grammar = row.get("grammar", "default")
         self.context = ValidationContext.model_validate(row["context"])
         self.candidate = CandidateModel.model_validate(row["candidate"])
         self.native = _native(row) if row["semantics"] == "native_increment" else None
         self.compiled = (
-            None if self.native else compile_candidate(self.candidate, self.context)
+            None
+            if self.native
+            else compile_candidate(
+                self.candidate,
+                self.context,
+                validator=baseline_validator() if self.grammar == "baseline" else None,
+            )
         )
         self.names = self.native.states if self.native else self.compiled.state_names
         self.dynamic = tuple(
@@ -119,7 +135,9 @@ class Runtime:
             if o.channel == channel
         )
         tree = expanded(
-            mapping, {p.name: p.expression for p in self.candidate.processes}
+            mapping,
+            {p.name: p.expression for p in self.candidate.processes},
+            self.grammar,
         )
         if isinstance(tree, ast.Name) and tree.id in self.names:
             return self.names.index(tree.id)
@@ -234,7 +252,9 @@ def local_response(runtime, rule, x, forcing, time, scales, time_unit, settings)
     free = [i for i in runtime.dynamic if i not in held]
     dynamic_required = rule["kind"] in {"memory", "delayed_action"}
     if dynamic_required:
-        trees = effective_trees(runtime.candidate, runtime.parameters)
+        trees = effective_trees(
+            runtime.candidate, runtime.parameters, grammar=runtime.grammar
+        )
         graph = {
             n: {v.id for v in ast.walk(t) if isinstance(v, ast.Name)}
             for n, t in trees.items()
@@ -372,7 +392,9 @@ def thermal_balance(runtime, rule, x, forcing, time, scales, time_unit, settings
     target = rule["target"]
     index = runtime.coordinate(target)
     # An unlabelled extra energy/concentration coordinate needs semantic mapping.
-    tree = effective_trees(runtime.candidate, runtime.parameters)
+    tree = effective_trees(
+        runtime.candidate, runtime.parameters, grammar=runtime.grammar
+    )
     dependencies = {
         n: {v.id for v in ast.walk(t) if isinstance(v, ast.Name)}
         for n, t in tree.items()
@@ -490,8 +512,11 @@ def structural_check(row, rule):
     """Absent effective dependencies are definitive; presence alone never passes."""
     if rule["kind"] == "thermal_balance":
         return None
+    grammar = row.get("grammar", "default")
     trees = effective_trees(
-        CandidateModel.model_validate(row["candidate"]), row["parameters"]
+        CandidateModel.model_validate(row["candidate"]),
+        row["parameters"],
+        grammar=grammar,
     )
     deps = {
         n: {x.id for x in ast.walk(t) if isinstance(x, ast.Name)}
@@ -504,7 +529,9 @@ def structural_check(row, rule):
         mapping = next(
             o.expression for o in candidate.observation_mappings if o.channel == driver
         )
-        tree = expanded(mapping, {p.name: p.expression for p in candidate.processes})
+        tree = expanded(
+            mapping, {p.name: p.expression for p in candidate.processes}, grammar
+        )
         if not isinstance(tree, ast.Name) or tree.id not in {
             s.name for s in candidate.states
         }:

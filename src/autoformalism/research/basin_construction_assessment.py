@@ -6,7 +6,8 @@ import ast
 from pathlib import Path
 
 from autoformalism.data import DatasetSplit
-from autoformalism.expressions import RestrictedParser, ValidationContext
+from autoformalism.expressions import ValidationContext
+from autoformalism.expressions.parser import grammar_parser
 from autoformalism.rebuttal import basin_equation_checks as equations
 from autoformalism.rebuttal import mechanism_functional as functional
 from autoformalism.rebuttal.mechanism_checks import effective_trees
@@ -185,13 +186,15 @@ def brief(
     )
 
 
-def isolation(candidate: CandidateModel, parameters: dict) -> dict:
+def isolation(
+    candidate: CandidateModel, parameters: dict, grammar: str = "default"
+) -> dict:
     """Absence certifies isolation; a syntactic path alone is unresolved.
 
     Include initial maps: an autonomous downstream law can still inherit the
     disconnected upstream gauge reading through a hidden state's initializer.
     """
-    trees = effective_trees(candidate, parameters)
+    trees = effective_trees(candidate, parameters, grammar=grammar)
     dependencies = {
         n: {x.id for x in ast.walk(tree) if isinstance(x, ast.Name)}
         for n, tree in trees.items()
@@ -199,7 +202,7 @@ def isolation(candidate: CandidateModel, parameters: dict) -> dict:
     for initial in candidate.initial_conditions:
         if initial.expression is not None:
             symbols = (
-                RestrictedParser()
+                grammar_parser(grammar)
                 .parse(initial.expression, location="basin initialization isolation")
                 .symbols
             )
@@ -222,17 +225,34 @@ def assess(
     settings: functional.Settings,
     directory: Path,
 ) -> list[dict]:
-    """Reuse saved-model physics witnesses and the general fitted memory probe."""
+    """Reuse saved-model physics witnesses and the general fitted memory probe.
+
+    An external baseline's row names its grammar. A native one-step map
+    (``semantics == "native_increment"``) carries its sample interval as
+    ``increment_step``, which sets the discrete input conversions.
+    """
     case = BASINS[cell["public_specification"]["benchmark_id"]]
     candidate = CandidateModel.model_validate(row["candidate"])
     context = ValidationContext.model_validate(row["context"])
+    grammar = row.get("grammar", "default")
+    step = row.get("increment_step")
+    if (step is None) != (row["semantics"] != "native_increment"):
+        raise ValueError("a native increment row, and only one, needs its step")
     surveys = list(
         {
             tuple(sorted(t.fixed_covariates.items())): dict(t.fixed_covariates)
             for t in train.trajectories
         }.values()
     )
-    evidence = equations.assess(candidate, context, case, surveys, row["parameters"])
+    evidence = equations.assess(
+        candidate,
+        context,
+        case,
+        surveys,
+        row["parameters"],
+        grammar=grammar,
+        increment_step=step,
+    )
     by_code = {f["code"]: f for f in evidence["checks"]}
     # The witness uses the actual state name; the public predicate uses its channel.
     down = evidence["coordinate_bindings"]["downstream_depth"]
@@ -255,7 +275,7 @@ def assess(
         if kind == "memory":
             value = memory[rule["id"]]
         elif kind == "basin_isolation":
-            value = isolation(candidate, row["parameters"])
+            value = isolation(candidate, row["parameters"], grammar)
         else:
             selected = [
                 by_code.get(

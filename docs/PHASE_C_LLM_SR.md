@@ -128,12 +128,31 @@ Run on the Mac against the frozen release (receipt `200deb42`), the check gave:
 | 15, detention independent, seed 1 | 2.75e-4 | 2.69e-4 |
 
 CSTR seed 0's model diverges either way. CSTR seed 1's does too when solved
-accurately: steps of 0.1 understate its fast growth. How to roll out such picks
-on test is to be decided before the test data open.
+accurately: steps of 0.1 understate its fast growth.
+
+**Test rollout, decided on 2026-10-22.** The user asked for the rollout closest
+to the LLM-SR paper. The paper never simulates: its model is the program,
+evaluated on the data's own rows. The rollout that changes that least runs the
+program itself on the observation grid, feeding back its own predictions with
+the trapezoid rule. That is the rollout behind the sealed validation numbers,
+and the only one a history-reading pick has. So on test every pick is rolled out
+on the grid, the four current-value picks included. For those four, the
+adaptive solver's error is reported beside it as a sensitivity check, never as
+the score; on validation the two differ only for CSTR seed 1 (0.62 against
+2.9e20).
 
 A plan without `program_rollout`, such as the budget pilot and smokes v3 and v4,
 keeps the earlier recovery: the reader refits each pick without running it, and
 a pick that reads the history is refused as inexpressible.
+
+### ODE transcriptions, for the mechanism tests only
+
+The public mechanism tests probe an ODE's states, and these picks are programs.
+`configs/phase_c_llm_sr_transcriptions_v1.json` transcribes each sealed pick
+by hand into an ODE whose hidden states are its row recursions, under fixed
+rules, bound to the exact program text and coefficients. They are used for the
+mechanism tests only; prediction is always scored by running the program. See
+[PHASE_C_BASELINE_MECHANISMS.md](PHASE_C_BASELINE_MECHANISMS.md).
 
 ### The exception to the no-exec rule
 
