@@ -62,6 +62,13 @@ def _reports(model: dict) -> list[tuple[str, dict]]:
     function = _dict(consistency.get("function_consistency"))
     if function:
         result.append(("Function and parameter domains", function))
+    for key, label in (
+        ("initial_family_consistency", "Shared initializer family"),
+        ("affine_family_consistency", "Affine trajectory family"),
+    ):
+        report = _dict(consistency.get(key))
+        if report:
+            result.append((label, report))
     return result
 
 
@@ -248,7 +255,9 @@ def _proof(label: str, check: dict) -> str:
             + _text(witness.get("observations", "unavailable"))
             + ".</p>"
         )
-        required = _dict(witness.get("required_change"))
+        required = _dict(
+            witness.get("model_implied_change_bound", witness.get("required_change"))
+        )
         if required:
             relation = {"at_least": "at least", "at_most": "at most"}.get(
                 required.get("comparison"), str(required.get("comparison", "unknown"))
@@ -262,6 +271,17 @@ def _proof(label: str, check: dict) -> str:
                 + _text(witness.get("observed_change_interval", "unavailable"))
                 + ".</p>"
             )
+        if witness.get("directional_explanation"):
+            parts.append(
+                '<p class="callout warning">'
+                + _text(witness["directional_explanation"])
+                + "</p>"
+            )
+    if check.get("model_relations"):
+        parts.append(
+            "<h4>Closed subsystem used by this check</h4>"
+            + _json(check["model_relations"])
+        )
     if check.get("repair_feedback"):
         parts.append(
             '<p class="callout warning">' + _text(check["repair_feedback"]) + "</p>"

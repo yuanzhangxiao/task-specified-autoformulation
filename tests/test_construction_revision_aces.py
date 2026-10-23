@@ -322,3 +322,23 @@ def test_execution_identity_cannot_be_changed(setup, monkeypatch):
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError):
         submission.verify(root)
+
+
+def test_v4_fixed_six_saved_models_three_seeds_bound(setup, monkeypatch):
+    root, plan = setup
+    plan.update(
+        protocol=submission.campaign.V4_PROTOCOL,
+        policies=deepcopy(submission.campaign.V4_POLICIES),
+        consistency_evidence_sha256="c" * 64,
+    )
+    plan["cases"] = plan["cases"][:18]
+    monkeypatch.setattr(submission, "submit_job", lambda *args: "12345")
+    outcome = submission.submit(root)
+    assert outcome["maximum_generation_requests"] == 54
+    assert outcome["maximum_charged_tokens"] == 18 * 98304
+    _, execution = submission.verify(root)
+    assert execution["protocol"] == "construction-revision-aces-execution-4"
+    assert execution["acceptance_policies"] == submission.campaign.V4_POLICIES
+    plan["cases"].append({"case_id": "extra"})
+    with pytest.raises(ValueError):
+        submission.verify_inputs(root)
