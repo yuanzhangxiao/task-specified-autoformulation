@@ -26,17 +26,22 @@ class _Probe:
     roundoff: a.Array
     unilateral: float | None
     unilateral_roundoff: float
+    order: int = 1
 
 
-def _initial_step(value, lower, upper, unit, policy):
+def _initial_step(value, lower, upper, unit, policy, local_scale=None):
     """Cap the physical perturbation by local magnitude and declared domain.
 
-    In particular, optimizer units cannot turn a tiny positive time constant
-    into an order-one perturbation. Zero coordinates use their supplied units
-    and finite domain width; no data-dependent increase follows a failed probe.
+    By default tiny positive time constants remain magnitude-capped. The separate
+    bounds-aware policy accepts a caller-declared scale for each coordinate, so
+    nonsingular gains near zero need not inherit that reciprocal-scale restriction.
+    No data-dependent increase follows a failed probe.
     """
-    scales = [unit]
-    if value != 0:
+    # A declared physical radius is distinct from the optimizer's coordinate
+    # unit. Capping a large nonsingular coefficient by that unit can produce
+    # roundoff-dominated differences far below a meaningful relative step.
+    scales = [local_scale] if local_scale is not None else [unit]
+    if local_scale is None and value != 0:
         scales.append(abs(value))
     width = upper - lower
     if np.isfinite(width):
@@ -48,7 +53,13 @@ def _initial_step(value, lower, upper, unit, policy):
     )
     step = min(proposed, policy.local_relative_step_cap * scale)
     left, right = value - lower, upper - value
-    if left > 0 and right > 0:
+    if policy.local_bounds_aware:
+        # Preserve a meaningful local radius near a bound. A second-order
+        # inward stencil needs two steps of room, not symmetric distance from
+        # an arbitrarily tiny positive coefficient to its lower bound.
+        if min(left, right) < step:
+            step = min(step / 2, max(left, right) / 2)
+    elif left > 0 and right > 0:
         step = min(step, left / 2, right / 2)
     else:
         step = min(step, max(left, right) / 2)
@@ -60,7 +71,7 @@ def _initial_step(value, lower, upper, unit, policy):
 def _pair(coarse, fine, residual, column, policy):
     """Assess one same-scheme geometric pair without using larger-scale data."""
     central = fine.scheme == "central"
-    order_factor = 4 if central else 2
+    order_factor = 4 if central or fine.order == 2 else 2
     radius = fine.roundoff + 4 / (order_factor - 1) * (
         np.abs(fine.estimate - coarse.estimate) + fine.roundoff + coarse.roundoff
     )
@@ -139,6 +150,23 @@ def _direction(index, probes, pair, reference, column, initial_step, policy):
     )
 
 
+def _best_pair(previous, candidate):
+    """Keep the least uncertain smooth pair without hiding resolved failures.
+
+    Selection uses estimated truncation/roundoff, not agreement with the analytic
+    column. A newly observed unresolved kink overrides earlier smooth evidence;
+    later smaller probes may resolve such a coarse-scale curvature warning.
+    """
+    if previous is None or candidate[0]["status"] in {"passed", "failed"}:
+        return candidate
+    old, new = previous[0], candidate[0]
+    if old["status"] == "failed":
+        return candidate if new["sides_ok"] else previous
+    old_key = (not old["sides_ok"], not old["stable"], old["uncertainty"])
+    new_key = (not new["sides_ok"], not new["stable"], new["uncertainty"])
+    return candidate if new_key < old_key else previous
+
+
 def local_derivative_check(
     evaluate,
     vector,
@@ -150,6 +178,7 @@ def local_derivative_check(
     policy,
     directions=None,
     residual_only=None,
+    local_coordinate_scales=None,
 ):
     """Check all nonfixed coordinates with local, bounded shrinking differences.
 
@@ -159,6 +188,15 @@ def local_derivative_check(
     A valid pair stops a direction early, avoiding unconditional six-scale work.
     """
     x, lo, hi, units = a._coordinates(vector, lower, upper, coordinate_units)
+    if local_coordinate_scales is not None and not policy.local_bounds_aware:
+        raise ValueError("local coordinate scales require local_bounds_aware")
+    scales = (
+        np.where(x == 0, units, np.minimum(np.abs(x), units))
+        if local_coordinate_scales is None
+        else np.asarray(local_coordinate_scales, dtype=float)
+    )
+    if scales.shape != x.shape or not np.isfinite(scales).all() or np.any(scales <= 0):
+        raise ValueError("local coordinate scales must be finite positive full vector")
     if not np.isfinite(deadline):
         raise ValueError("finite monotonic deadline required")
     required = tuple(int(i) for i in np.flatnonzero(lo < hi))
@@ -222,6 +260,42 @@ def local_derivative_check(
         }
         try:
             pa, pb = x.copy(), x.copy()
+            if policy.local_bounds_aware and scheme != "central":
+                sign = 1 if scheme == "forward" else -1
+                pa[index] += sign * step
+                pb[index] += sign * 2 * step
+                h1 = sign * (pa[index] - x[index])
+                h2 = sign * (pb[index] - x[index])
+                if not np.isfinite(h2) or not (0 < h1 < h2):
+                    raise ValueError(
+                        "finite local probe displacement is not representable"
+                    )
+                if (
+                    np.any(pa < lo)
+                    or np.any(pa > hi)
+                    or np.any(pb < lo)
+                    or np.any(pb > hi)
+                ):
+                    raise ValueError("finite local derivative probe outside domain")
+                r1, r2 = call(pa)[0], call(pb)[0]
+                w1, w2 = h2 / (h1 * (h2 - h1)), -h1 / (h2 * (h2 - h1))
+                estimate = (
+                    sign * units[index] * (w1 * (r1 - base_r) + w2 * (r2 - base_r))
+                )
+                epsilon = np.finfo(float).eps * policy.precision_roundoff_factor
+                roundoff = (
+                    epsilon
+                    * units[index]
+                    * (
+                        abs(w1 + w2) * np.abs(base_r)
+                        + abs(w1) * np.abs(r1)
+                        + abs(w2) * np.abs(r2)
+                    )
+                )
+                unilateral, side_roundoff = None, 0.0
+                return save_probe(
+                    metadata, estimate, roundoff, unilateral, side_roundoff, order=2
+                )
             if scheme != "backward":
                 pa[index] += step
             if scheme != "forward":
@@ -276,21 +350,13 @@ def local_derivative_check(
                     epsilon * (np.abs(ra) + np.abs(rb)) / displacement * units[index]
                 )
                 unilateral, side_roundoff = None, 0.0
-            if not np.isfinite(estimate).all() or not np.isfinite(roundoff).all():
-                raise NumericalInvalidTrial(
-                    "nonfinite local finite-difference estimate"
-                )
-            records.append(
-                a.LocalProbeRecord(
-                    **metadata,
-                    status="complete",
-                    derivative_rms=a._rms(estimate),
-                    error_rms=a._rms(estimate - base_j[:, index] * units[index]),
-                    roundoff_rms=a._rms(roundoff),
-                )
-            )
-            return _Probe(
-                scale_index, step, scheme, estimate, roundoff, unilateral, side_roundoff
+            return save_probe(
+                metadata,
+                estimate,
+                roundoff,
+                unilateral,
+                side_roundoff,
+                order=2 if scheme == "central" else 1,
             )
         except (ValueError, RuntimeError, ArithmeticError, TimeoutError) as exc:
             records.append(
@@ -306,6 +372,32 @@ def local_derivative_check(
             )
             raise
 
+    def save_probe(metadata, estimate, roundoff, unilateral, side_roundoff, *, order):
+        """Retain one finite stencil, including its truncation order internally."""
+        if not np.isfinite(estimate).all() or not np.isfinite(roundoff).all():
+            raise NumericalInvalidTrial("nonfinite local finite-difference estimate")
+        records.append(
+            a.LocalProbeRecord(
+                **metadata,
+                status="complete",
+                derivative_rms=a._rms(estimate),
+                error_rms=a._rms(
+                    estimate - base_j[:, metadata["index"]] * units[metadata["index"]]
+                ),
+                roundoff_rms=a._rms(roundoff),
+            )
+        )
+        return _Probe(
+            metadata["scale_index"],
+            metadata["step"],
+            metadata["scheme"],
+            estimate,
+            roundoff,
+            unilateral,
+            side_roundoff,
+            order,
+        )
+
     try:
         base_r, base_j = call(x, full=True)
         if residual_only is not None and not np.array_equal(call(x)[0], base_r):
@@ -314,9 +406,15 @@ def local_derivative_check(
             )
         for position, index in enumerate(selected):
             initial_step = _initial_step(
-                x[index], lo[index], hi[index], units[index], policy
+                x[index],
+                lo[index],
+                hi[index],
+                units[index],
+                policy,
+                scales[index] if policy.local_bounds_aware else None,
             )
             column, probes = base_j[:, index] * units[index], []
+            selected_pair = None
             for scale_index in range(policy.local_max_scales):
                 step = initial_step * 0.5**scale_index
                 # Reserve estimated minimum work for remaining directions. This
@@ -340,12 +438,17 @@ def local_derivative_check(
                 ):
                     continue
                 pair = _pair(coarse, fine, base_r, column, policy)
-                row = _direction(
-                    index, probes, pair, len(probes) - 1, column, initial_step, policy
+                selected_pair = (
+                    _best_pair(selected_pair, (pair, len(probes) - 1))
+                    if policy.local_bounds_aware
+                    else (pair, len(probes) - 1)
                 )
-                # Keep the latest complete local evidence, even if the next
-                # requested probe fails or times out. A more local smoothness
-                # failure cannot be hidden by an earlier inconclusive pair.
+                row = _direction(
+                    index, probes, *selected_pair, column, initial_step, policy
+                )
+                # Preserve finite evidence through later failures. Bounds-aware
+                # mode retains the least uncertain smooth pair, while a resolved
+                # contradiction or unresolved kink cannot be hidden by selection.
                 rows[index] = row
                 if pair["status"] == "passed":
                     break
@@ -413,6 +516,7 @@ def local_derivative_check(
         else None,
         parameter_information_qualified=status == "passed",
         local_probe_attempts=tuple(records),
+        local_coordinate_scales=tuple(scales) if policy.local_bounds_aware else (),
         scope=(
             "Bounded local shrinking finite differences at one endpoint. No probe "
             "enlargement or global smoothness claim. Gradient uncertainty assumes "

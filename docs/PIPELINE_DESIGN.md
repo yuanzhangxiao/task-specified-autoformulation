@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+## Construction derivative recovery
+
+`construction-derivative-recovery-1` resumes the eight verified local-recovery
+incumbents under a new numerical contract. Bounds-aware local stencils and a
+bounded precision retry address inconclusive derivatives; structural proofs can
+omit training-inactive initializer coordinates while preserving full-model lifts.
+Search permission, independent endpoint verification and convergence assessment
+remain separate. No equation revision, held-out access or production-default
+change is introduced. See
+[construction derivative recovery](PHASE_C_CONSTRUCTION_DERIVATIVE_RECOVERY.md).
+
 ## Local numerical recovery of constructed models
 
 The returned reliability experiment verified all 16 retained checkpoints, but

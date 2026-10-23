@@ -47,17 +47,22 @@ class Policy(StrictSchema):
     local_adaptive: bool = False
     local_max_scales: int = Field(default=6, ge=2, le=12)
     local_relative_step_cap: FiniteFloat = Field(default=1e-4, gt=0, le=1e-2)
+    local_bounds_aware: bool = False
 
     @model_validator(mode="after")
     def local_requires_precision(self):
         if self.local_adaptive and not self.precision_aware:
             raise ValueError("local adaptive checks require precision_aware")
+        if self.local_bounds_aware and not self.local_adaptive:
+            raise ValueError("bounds-aware checks require local_adaptive")
         return self
 
     @model_serializer(mode="wrap")
     def preserve_legacy_policy(self, handler):
         """Keep historical policy fingerprints unchanged when the opt-in is off."""
         result = handler(self)
+        if not self.local_bounds_aware:
+            result.pop("local_bounds_aware", None)
         if not self.local_adaptive:
             for name in (
                 "local_adaptive",
@@ -176,6 +181,7 @@ class DerivativeCheck(StrictSchema):
     gradient_error_bound_inf: FiniteFloat | None = Field(default=None, ge=0)
     parameter_information_qualified: bool = False
     local_probe_attempts: tuple[LocalProbeRecord, ...] = ()
+    local_coordinate_scales: tuple[FiniteFloat, ...] = ()
     scope: str = (
         "Two-scale finite differences at one reduced endpoint; not a global "
         "smoothness or minimum certificate. Deadlines are cooperative."
@@ -187,6 +193,8 @@ class DerivativeCheck(StrictSchema):
         result = handler(self)
         if not self.policy.local_adaptive:
             result.pop("local_probe_attempts", None)
+        if not self.policy.local_bounds_aware:
+            result.pop("local_coordinate_scales", None)
         return result
 
 
@@ -397,6 +405,7 @@ def derivative_check(
     policy: Policy | None = None,
     directions: Sequence[int] | None = None,
     residual_only: Callable[[Array, float], ArrayLike] | None = None,
+    local_coordinate_scales: ArrayLike | None = None,
 ) -> DerivativeCheck:
     """Audit the actual reduced residual, including profiled reconstruction.
 
@@ -409,8 +418,13 @@ def derivative_check(
     its base residual is first checked exactly against ``evaluate``'s residual.
     The precision-aware opt-in retains unresolved columns and can qualify search
     only when their mean-loss gradient error is negligible in the fixed units.
+    Bounds-aware probes optionally take physical ``local_coordinate_scales``;
+    these are caller-declared local radii, not proofs that a residual is affine.
+    Singular/nonlinear small scales must remain restricted by that caller.
     """
     policy = policy or Policy()
+    if local_coordinate_scales is not None and not policy.local_bounds_aware:
+        raise ValueError("local coordinate scales require local_bounds_aware")
     if policy.local_adaptive:
         from autoformalism.fitting.prefix_local_derivatives import (
             local_derivative_check,
@@ -426,6 +440,7 @@ def derivative_check(
             policy=policy,
             directions=directions,
             residual_only=residual_only,
+            local_coordinate_scales=local_coordinate_scales,
         )
     x, lo, hi, units = _coordinates(vector, lower, upper, coordinate_units)
     if not np.isfinite(deadline):

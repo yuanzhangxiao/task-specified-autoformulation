@@ -393,3 +393,271 @@ def test_remaining_direction_reserve_uses_probe_cost_not_initial_sensitivity_cos
     assert len(result.directions[0].precision_probes) > 2
     assert result.jacobian_calls_started == 1
     assert result.elapsed_seconds < 130
+
+
+def bounds_check(evaluate, **kwargs):
+    """Use the separate bounds-aware policy with explicitly declared radii."""
+    return check(
+        evaluate,
+        policy=adequacy.Policy(
+            precision_aware=True, local_adaptive=True, local_bounds_aware=True
+        ),
+        **kwargs,
+    )
+
+
+def test_bounds_aware_policy_preserves_earlier_local_payload_and_requires_opt_in():
+    old = adequacy.Policy(precision_aware=True, local_adaptive=True)
+    assert "local_bounds_aware" not in old.model_dump()
+    with pytest.raises(ValidationError, match="require local_adaptive"):
+        adequacy.Policy(precision_aware=True, local_bounds_aware=True)
+    with pytest.raises(ValueError, match="require local_bounds_aware"):
+        check(lambda x, d: (x, np.eye(1)), local_coordinate_scales=[1])
+    result = check(lambda x, d: (x, np.eye(1)))
+    assert "local_coordinate_scales" not in result.model_dump()
+
+
+@pytest.mark.parametrize(
+    "value,scheme", [(0.0, "forward"), (1e-16, "forward"), (1 - 1e-16, "backward")]
+)
+def test_meaningful_inward_local_probe_resolves_near_bound_gain(value, scheme):
+    points = []
+
+    def gain(x, deadline):
+        points.append(float(x[0]))
+        assert 0 <= x[0] <= 1
+        return np.array([1 + 0.2 * x[0]]), np.array([[0.2]])
+
+    result = bounds_check(
+        gain, x=(value,), lower=(0,), upper=(1,), local_coordinate_scales=[1]
+    )
+    assert result.status == "passed"
+    assert result.directions[0].scheme == scheme
+    assert result.directions[0].steps[0] == 5e-5
+    assert max(abs(p - value) for p in points) <= 1.00001e-4
+    assert result.calls_started == result.calls_completed == 5
+    assert result.local_coordinate_scales == (1,)
+    assert (
+        adequacy.DerivativeCheck.model_validate_json(result.model_dump_json()) == result
+    )
+
+
+def test_inward_second_order_stencil_resolves_curved_equation_at_bound():
+    def quadratic(x, deadline):
+        return np.array([1 + x[0] + 1e3 * x[0] ** 2]), np.array([[1 + 2e3 * x[0]]])
+
+    result = bounds_check(
+        quadratic, x=(1e-16,), lower=(0,), upper=(1,), local_coordinate_scales=[1]
+    )
+    assert result.status == "passed" and result.calls_started == 5
+    assert result.directions[0].relative_errors[-1] < 1e-8
+
+
+def test_small_nonlinear_time_constant_keeps_local_probes_in_mixed_coordinates():
+    tau, points = 1.5e-6, []
+
+    def mixed(x, deadline):
+        points.append(x.copy())
+        value = np.exp(-tau / x[0])
+        return np.array([value, 1 + x[1]]), np.diag([value * tau / x[0] ** 2, 1])
+
+    result = bounds_check(
+        mixed,
+        x=(tau, 1e-16),
+        lower=(1e-12, 0),
+        upper=(1, 10),
+        coordinate_units=[1, 1],
+        local_coordinate_scales=[tau, 1],
+    )
+    assert result.status == "passed" and result.checked_indices == (0, 1)
+    assert result.directions[0].scheme == "central"
+    assert result.directions[1].scheme == "forward"
+    assert max(abs(p[0] - tau) for p in points) <= tau * 1.00001e-4
+    assert max(abs(p[1] - 1e-16) for p in points) <= 1.00001e-4
+
+
+def test_bounds_aware_without_declared_scale_remains_conservative_for_small_tau():
+    tau, points = 1.5e-6, []
+
+    def stiff(x, deadline):
+        points.append(x[0])
+        r = np.exp(-tau / x[0])
+        return np.array([r]), np.array([[r * tau / x[0] ** 2]])
+
+    result = bounds_check(stiff, x=(tau,), lower=(1e-12,), upper=(1,))
+    assert result.status == "passed" and result.local_coordinate_scales == (tau,)
+    assert max(abs(p - tau) for p in points) <= tau * 1.00001e-4
+
+
+@pytest.mark.parametrize("scales", [[0], [-1], [np.nan], [np.inf], [1, 2], [[1]]])
+def test_invalid_semantic_scales_are_not_silently_ignored(scales):
+    with pytest.raises(ValueError, match="finite positive full vector"):
+        bounds_check(lambda x, d: (x, np.eye(1)), local_coordinate_scales=scales)
+
+
+def test_bound_scaled_wrong_derivative_is_rejected():
+    result = bounds_check(
+        lambda x, d: (np.array([1 + x[0]]), np.array([[-1.0]])),
+        x=(1e-16,),
+        lower=(0,),
+        upper=(1,),
+        local_coordinate_scales=[1],
+    )
+    assert result.status == "failed" and not result.search_qualified
+    assert result.failed_indices == (0,)
+
+
+def test_bound_scaled_kink_still_withholds_information_and_search():
+    result = bounds_check(
+        lambda x, d: (np.array([abs(x[0])]), np.zeros((1, 1))),
+        local_coordinate_scales=[1],
+    )
+    assert result.status == "failed" and not result.search_qualified
+    assert not result.parameter_information_qualified
+
+
+def test_bound_scaled_exact_zero_is_not_claimed_identifiable():
+    result = bounds_check(
+        lambda x, d: (np.ones(1), np.zeros((1, 1))),
+        x=(1e-16,),
+        lower=(0,),
+        upper=(1,),
+        local_coordinate_scales=[1],
+    )
+    assert (
+        result.status == "inconclusive" and not result.parameter_information_qualified
+    )
+    # The empirical rounding envelope still applies despite meaningful steps.
+    assert result.directions[0].gradient_error_bound > 0
+
+
+def test_bound_scaled_stencil_timeout_preserves_finite_completed_columns(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(local, "monotonic", lambda: clock[0])
+
+    def slow(x, deadline):
+        clock[0] += 1
+        return x.copy(), np.eye(2)
+
+    result = bounds_check(
+        slow,
+        x=(1e-16, 1e-16),
+        lower=(0, 0),
+        upper=(1, 1),
+        local_coordinate_scales=[1, 1],
+        deadline=6.5,
+    )
+    assert result.status == "incomplete" and result.checked_indices == (0,)
+    assert result.omitted_indices == (1,) and not result.search_qualified
+    assert result.local_probe_attempts[-1].status == "deadline"
+
+
+def test_second_order_inward_probe_failure_shrinks_without_budget_reset():
+    def narrow(x, deadline):
+        if x[0] > 6e-5:
+            raise NumericalInvalidTrial("transition unavailable")
+        return x.copy(), np.eye(1)
+
+    result = bounds_check(
+        narrow, x=(1e-16,), lower=(0,), upper=(1,), local_coordinate_scales=[1]
+    )
+    assert result.status == "passed"
+    assert result.local_probe_attempts[0].status == "numerical_failure"
+    assert result.calls_started == result.calls_completed + 1
+    assert result.calls_started == 7
+
+
+def test_smaller_noisier_pair_does_not_replace_more_resolvable_local_evidence():
+    def cancellation(x, deadline):
+        value = x[0]
+        return np.array(
+            [4e6 + 1e-3 * value + 1e3 * value**3 - 1e13 * value**5]
+        ), np.array([[1e-3 + 3e3 * value**2 - 5e13 * value**4]])
+
+    result = bounds_check(cancellation, local_coordinate_scales=[1])
+    row = result.directions[0]
+    assert len(row.precision_probes) == 3
+    assert row.reference_probe_index == 1
+    assert row.steps == (1e-4, 5e-5)
+    # The finest pair has closer analytic agreement, but twice the rounding
+    # envelope. Preserve numerical evidence, rather than cherry-picking agreement.
+    assert row.precision_probes[-1].error_rms < row.precision_probes[1].error_rms
+    assert row.precision_probes[-1].roundoff_rms > row.precision_probes[1].roundoff_rms
+    assert result.status == "inconclusive" and not result.search_qualified
+
+
+def test_nonlinear_inward_stencil_must_shrink_before_it_qualifies():
+    points = []
+
+    def steep(x, deadline):
+        points.append(x[0])
+        result = np.exp(1e4 * x[0])
+        return np.array([result]), np.array([[1e4 * result]])
+
+    result = bounds_check(
+        steep, x=(1e-16,), lower=(0,), upper=(1,), local_coordinate_scales=[1]
+    )
+    assert result.status == "passed"
+    assert len(result.local_probe_attempts) > 2
+    assert all(0 <= x <= 1.00001e-4 for x in points)
+    assert result.calls_started <= 1 + 2 * result.policy.local_max_scales
+
+
+def test_large_physical_scale_is_relative_and_nonlinear_curvature_still_shrinks():
+    value, points = 3e5, []
+
+    def nonlinear(x, deadline):
+        points.append(float(x[0]))
+        result = np.exp(1e4 * (x[0] / value - 1))
+        return np.array([result]), np.array([[result * 1e4 / value]])
+
+    result = bounds_check(
+        nonlinear,
+        x=(value,),
+        lower=(0,),
+        upper=(1e6,),
+        coordinate_units=[1.5],
+        local_coordinate_scales=[value],
+    )
+    assert result.status == "passed"
+    probes = result.local_probe_attempts
+    assert probes[0].step == value * 1e-4
+    assert len(probes) > 2
+    assert all(a.step / 2 == b.step for a, b in pairwise(probes))
+    assert max(abs(p - value) for p in points) <= value * 1.00001e-4
+    assert result.directions[0].steps[0] < probes[0].step
+
+
+def test_physical_scale_never_overrides_finite_declared_domain_width():
+    points = []
+    value = 3e5
+
+    def quadratic(x, deadline):
+        points.append(float(x[0]))
+        return np.array([(x[0] - value) ** 2 + x[0] - value]), np.array(
+            [[2 * (x[0] - value) + 1]]
+        )
+
+    result = bounds_check(
+        quadratic,
+        x=(value,),
+        lower=(value,),
+        upper=(value + 1,),
+        coordinate_units=[1.5],
+        local_coordinate_scales=[value],
+    )
+    assert result.status == "passed"
+    assert max(p - value for p in points) <= 1.00001e-4
+
+
+def test_old_local_mode_keeps_optimizer_unit_cap_for_large_coordinates():
+    value, points = 3e5, []
+
+    def affine(x, deadline):
+        points.append(float(x[0]))
+        return np.array([x[0] / value]), np.array([[1 / value]])
+
+    result = check(affine, x=(value,), lower=(0,), upper=(1e6,), coordinate_units=[1.5])
+    assert result.local_probe_attempts[0].step == pytest.approx(1.5e-4)
+    assert max(abs(p - value) for p in points) <= 1.500001e-4
+    assert "local_coordinate_scales" not in result.model_dump()

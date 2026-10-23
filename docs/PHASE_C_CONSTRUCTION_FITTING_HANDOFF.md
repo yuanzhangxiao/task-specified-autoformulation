@@ -1,5 +1,16 @@
 # Orion handoff: fitting the returned construction models
 
+## Construction derivative recovery
+
+The returned local-recovery campaign verified all historical incumbents and all
+six disputed endpoints. It still started no optimizer: all eight derivative
+audits completed but remained inconclusive. The opt-in follow-up fixes local
+bound stencils, escalates precision when derivative evidence requires it and
+removes only proven training-inactive initializer coordinates. Eight new bounded
+continuations retain full original-model parameter vectors and independent replay.
+See [the derivative recovery protocol](PHASE_C_CONSTRUCTION_DERIVATIVE_RECOVERY.md).
+These numerical results do not establish equation inadequacy or a global optimum.
+
 ## Local numerical recovery of constructed models
 
 The returned reliability experiment verified all 16 retained checkpoints, but

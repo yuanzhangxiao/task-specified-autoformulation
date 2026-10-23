@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Construction derivative recovery
+
+The returned local-recovery experiment resolved all six disputed affine/Radau
+comparisons, but all eight continuations remained blocked by inconclusive local
+derivative checks. The next opt-in milestone introduces bounds-aware local probes,
+diagnostic-triggered precision escalation and exact training-inactive initializer
+coordinate removal. It imports the eight verified incumbents into a new durable
+campaign, preserving equations, data and historical costs. See
+[construction derivative recovery](PHASE_C_CONSTRUCTION_DERIVATIVE_RECOVERY.md).
+
 ## Local numerical recovery of constructed models
 
 The returned reliability experiment verified all 16 retained checkpoints, but
