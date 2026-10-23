@@ -207,6 +207,12 @@ the transcription's glucose went negative. Task 4's program copies the previous
 row through a filter of weight 1e-11; the decay-matched `T` of 0.04 min dropped
 the one-row delay, and the transcription diverged (1e12). Matching the mean
 delay fixed both. For the slow T1 filters the two rules differ by a few 1e-4.
+Neither rule is exact here. The decay-matched lag reproduces a filter at the
+rows only when its input is held constant between rows. The shared evaluator
+instead interpolates supplied inputs linearly, and many of these filters act on
+simulated states (glucose terms, insulin, the device's output). Each rule keeps
+part of the filter's response: decay matching keeps its pole, mean-delay
+matching its gain and delay.
 
 ## Results (js2, 2026-10-22)
 
