@@ -1,0 +1,7 @@
+{
+  "population": "returned-eight",
+  "search_seconds": 600,
+  "diagnostic_seconds": 300,
+  "verification_seconds": 180,
+  "maximum_calls": 1000
+}

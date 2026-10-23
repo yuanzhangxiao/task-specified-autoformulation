@@ -44,11 +44,27 @@ class Policy(StrictSchema):
     precision_aware: bool = False
     precision_roundoff_factor: FiniteFloat = Field(default=32, ge=1)
     precision_gradient_fraction: FiniteFloat = Field(default=0.1, gt=0, le=1)
+    local_adaptive: bool = False
+    local_max_scales: int = Field(default=6, ge=2, le=12)
+    local_relative_step_cap: FiniteFloat = Field(default=1e-4, gt=0, le=1e-2)
+
+    @model_validator(mode="after")
+    def local_requires_precision(self):
+        if self.local_adaptive and not self.precision_aware:
+            raise ValueError("local adaptive checks require precision_aware")
+        return self
 
     @model_serializer(mode="wrap")
     def preserve_legacy_policy(self, handler):
         """Keep historical policy fingerprints unchanged when the opt-in is off."""
         result = handler(self)
+        if not self.local_adaptive:
+            for name in (
+                "local_adaptive",
+                "local_max_scales",
+                "local_relative_step_cap",
+            ):
+                result.pop(name, None)
         if not self.precision_aware:
             for name in (
                 "precision_aware",
@@ -118,6 +134,20 @@ class DerivativeDirection(StrictSchema):
     gradient_error_bound: FiniteFloat | None = Field(default=None, ge=0)
 
 
+class LocalProbeRecord(StrictSchema):
+    """One bounded local probe, retained even when a later probe cannot finish."""
+
+    index: int = Field(ge=0)
+    scale_index: int = Field(ge=0)
+    scheme: Literal["central", "forward", "backward"]
+    step: FiniteFloat = Field(gt=0)
+    status: Literal["complete", "numerical_failure", "unavailable", "deadline"]
+    derivative_rms: FiniteFloat | None = Field(default=None, ge=0)
+    error_rms: FiniteFloat | None = Field(default=None, ge=0)
+    roundoff_rms: FiniteFloat | None = Field(default=None, ge=0)
+    error: str | None = None
+
+
 class DerivativeCheck(StrictSchema):
     """Finite local audit with explicit uncovered columns and call accounting."""
 
@@ -145,10 +175,19 @@ class DerivativeCheck(StrictSchema):
     failed_indices: tuple[int, ...] = ()
     gradient_error_bound_inf: FiniteFloat | None = Field(default=None, ge=0)
     parameter_information_qualified: bool = False
+    local_probe_attempts: tuple[LocalProbeRecord, ...] = ()
     scope: str = (
         "Two-scale finite differences at one reduced endpoint; not a global "
         "smoothness or minimum certificate. Deadlines are cooperative."
     )
+
+    @model_serializer(mode="wrap")
+    def preserve_historical_audit(self, handler):
+        """Do not add local-policy payload fields to historical receipts."""
+        result = handler(self)
+        if not self.policy.local_adaptive:
+            result.pop("local_probe_attempts", None)
+        return result
 
 
 class RestartEvidence(StrictSchema):
@@ -372,6 +411,22 @@ def derivative_check(
     only when their mean-loss gradient error is negligible in the fixed units.
     """
     policy = policy or Policy()
+    if policy.local_adaptive:
+        from autoformalism.fitting.prefix_local_derivatives import (
+            local_derivative_check,
+        )
+
+        return local_derivative_check(
+            evaluate,
+            vector,
+            lower,
+            upper,
+            deadline,
+            coordinate_units=coordinate_units,
+            policy=policy,
+            directions=directions,
+            residual_only=residual_only,
+        )
     x, lo, hi, units = _coordinates(vector, lower, upper, coordinate_units)
     if not np.isfinite(deadline):
         raise ValueError("finite monotonic deadline required")

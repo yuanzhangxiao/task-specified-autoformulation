@@ -473,3 +473,38 @@ def test_precision_policy_flows_through_qualification_and_diagnosis():
     assert diagnosed["assessment"]["parameter_information"] == (
         "derivative_precision_unresolved"
     )
+
+
+def test_fixed_strict_replay_uses_only_declared_tolerance():
+    oracle = ReplayOracle({1e-11: 2e-7})
+    result = continuation.verify_endpoint_ladder(
+        oracle,
+        oracle,
+        oracle.start,
+        10,
+        lambda _: None,
+        tolerances=((1e-11, 1e-13),),
+    )
+    assert not result["original_equations_verified"]
+    assert result["verification_calls_started"] == 2
+    assert result["tolerance_ladder"] == [{"rtol": 1e-11, "atol": 1e-13}]
+    assert [(p.rtol, p.atol) for p in oracle.used_policies] == [(1e-11, 1e-13)]
+
+
+@pytest.mark.parametrize(
+    "tolerances",
+    [
+        (),
+        ((0, 1e-13),),
+        ((1e-11, float("nan")),),
+        ((1e-11, 1e-13), (1e-9, 1e-11)),
+        ((True, 1e-13),),
+    ],
+)
+def test_bad_tolerance_policy_rejected_before_any_rollout(tolerances):
+    oracle = ReplayOracle({})
+    with pytest.raises(ValueError, match="tolerances required"):
+        continuation.verify_endpoint_ladder(
+            oracle, oracle, oracle.start, 10, lambda _: None, tolerances=tolerances
+        )
+    assert not oracle.evaluations

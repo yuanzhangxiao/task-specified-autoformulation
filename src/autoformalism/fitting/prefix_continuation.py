@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from itertools import pairwise
 
 import numpy as np
 
@@ -23,9 +24,10 @@ from autoformalism.fitting import prefix_gain_reduction as gains
 from autoformalism.fitting import public_fitting as public
 
 
-def make_oracle(problem, training, numerical, arm):
+def make_oracle(problem, training, numerical, arm, *, precision_policy=None):
     """Certify the original model; reduce only supported exact gain products."""
-    original = prefix_affine.TrainingOracle(problem, training, numerical)
+    options = {} if precision_policy is None else {"precision_policy": precision_policy}
+    original = prefix_affine.TrainingOracle(problem, training, numerical, **options)
     if arm == "affine_original":
         return original, original
     if arm == "affine_reduced":
@@ -313,6 +315,8 @@ def verify_endpoint_ladder(
     parameters: Mapping[str, float],
     seconds: float,
     checkpoint: Callable[[dict], None],
+    *,
+    tolerances: tuple[tuple[float, float], ...] = _ENDPOINT_TOLERANCE_LADDER,
 ) -> dict:
     """Replay one frozen endpoint at predeclared increasingly tight tolerances.
 
@@ -321,6 +325,25 @@ def verify_endpoint_ladder(
     and the prediction/loss acceptance thresholds never change. The original
     oracle is reconstructed with each explicit policy, never mutated in place.
     """
+    if (
+        not tolerances
+        or len(tolerances) > len(_ENDPOINT_TOLERANCE_LADDER)
+        or any(
+            len(pair) != 2
+            or any(
+                isinstance(value, bool) or not np.isfinite(value) or value <= 0
+                for value in pair
+            )
+            for pair in tolerances
+        )
+        or any(
+            later[0] > earlier[0] or later[1] > earlier[1]
+            for earlier, later in pairwise(tolerances)
+        )
+    ):
+        raise ValueError(
+            "one to three positive, increasingly strict tolerances required"
+        )
     budget = prefix_execution._budget(seconds, seconds + 60)
     vector = oracle.vector(parameters)
     lifted = to_original(original, oracle, parameters)
@@ -334,9 +357,7 @@ def verify_endpoint_ladder(
         "calls_completed": 0,
         "methods": ["certified_affine", "original_Radau"],
         "verification_protocol": "original-equation-tolerance-ladder-1",
-        "tolerance_ladder": [
-            {"rtol": rtol, "atol": atol} for rtol, atol in _ENDPOINT_TOLERANCE_LADDER
-        ],
+        "tolerance_ladder": [{"rtol": rtol, "atol": atol} for rtol, atol in tolerances],
         "replays": [],
         "no_search_performed": True,
     }
@@ -396,7 +417,7 @@ def verify_endpoint_ladder(
         reference, loss = replay("certified_affine")
         result["training_nmse"] = loss
         save()
-        for tolerance in _ENDPOINT_TOLERANCE_LADDER:
+        for tolerance in tolerances:
             alternate, other_loss = replay("original_Radau", tolerance)
             gap = float(np.max(np.abs(reference - alternate), initial=0))
             loss_gap = abs(loss - other_loss)

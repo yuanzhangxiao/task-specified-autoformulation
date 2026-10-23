@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Local numerical recovery of constructed models
+
+The returned reliability experiment verified all 16 retained checkpoints, but
+only four tasks entered optimization and none qualified local convergence. The
+next isolated milestone uses shrinking local derivative probes, opt-in bounded
+multiprecision affine transitions, and one reduced-coordinate continuation per
+model from its best newly verified cross-arm checkpoint. Six disputed endpoints
+are separate verification-only tasks. No equation, domain, initializer or data
+split changes; historical and new budgets remain distinct. See
+[construction local recovery](PHASE_C_CONSTRUCTION_LOCAL_RECOVERY.md) for the
+14-task CPU design, Delta commands and limits on interpretation.
+
 The 22 October 2026 opt-in parent–child fitting comparison retains all eight
 T2-easy parents and 16 accepted revisions. It uses the e7067f3 numerical routines
 with identical fresh two-start allowances, exact gain reduction, precision-aware

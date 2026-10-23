@@ -18,6 +18,10 @@ from scipy.linalg import expm, expm_frechet
 
 from autoformalism.data import Trajectory
 from autoformalism.fitting import prefix_initialization as kernel
+from autoformalism.fitting.affine_precision import (
+    AffinePrecisionPolicy,
+    TransitionEvaluator,
+)
 from autoformalism.fitting.public_fitting import content_sha256
 from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
 from autoformalism.fitting.sensitivity_probe import SymbolicODE
@@ -42,8 +46,16 @@ def _finite(values: np.ndarray, label: str) -> np.ndarray:
 class _Propagation:
     """Certify one compiled system and selected local derivative coordinates."""
 
-    def __init__(self, system: SymbolicODE, columns: tuple[int, ...]) -> None:
+    def __init__(
+        self,
+        system: SymbolicODE,
+        columns: tuple[int, ...],
+        precision_policy: AffinePrecisionPolicy | None = None,
+    ) -> None:
         self.system, self.columns = system, columns
+        self.transitions = (
+            None if precision_policy is None else TransitionEvaluator(precision_policy)
+        )
         n, m, p = system.state_count, len(system.inputs), len(system.names)
         t, x = ca.SX.sym("t"), ca.SX.sym("x", n)
         u, theta = ca.SX.sym("u", m), ca.SX.sym("theta", p)
@@ -80,6 +92,8 @@ class _Propagation:
             "cache_scope": "one oracle evaluation; exact dynamics coordinates and dt",
             "reference_coefficients_used": False,
         }
+        if self.transitions is not None:
+            self.audit["transition_precision"] = self.transitions.audit
 
     def rollout(
         self,
@@ -127,29 +141,18 @@ class _Propagation:
                 dt = float(time - row.time[index - 1])
                 key = dynamic_key, dt
                 if key not in cache:
-                    matrix = _finite(expm(generator * dt), "transition")
-                    _check_deadline(deadline)
-                    derivatives = []
-                    if jacobian:
-                        for j in range(k):
-                            _check_deadline(deadline)
-                            # Initial-only parameters have exactly zero generator
-                            # derivatives; their initial sensitivities still evolve.
-                            direction = derivative[:, :, j]
-                            derivatives.append(
-                                _finite(
-                                    expm_frechet(
-                                        generator * dt,
-                                        direction * dt,
-                                        compute_expm=False,
-                                    ),
-                                    "transition derivative",
-                                )
-                                if np.any(direction)
-                                else np.zeros_like(generator)
-                            )
-                            _check_deadline(deadline)
-                    cache[key] = matrix, derivatives
+                    if self.transitions is not None:
+                        cache[key] = self.transitions(
+                            generator * dt,
+                            [derivative[:, :, j] * dt for j in range(k)]
+                            if jacobian
+                            else [],
+                            deadline,
+                        )
+                    else:
+                        cache[key] = self._legacy_transition(
+                            generator, derivative, dt, k, jacobian, deadline
+                        )
                 matrix, derivatives = cache[key]
                 extended = np.r_[
                     state,
@@ -178,12 +181,39 @@ class _Propagation:
             _finite(np.asarray(gradients), "output derivatives") if jacobian else None
         )
 
+    @staticmethod
+    def _legacy_transition(generator, derivative, dt, k, jacobian, deadline):
+        """Retain the historical double-precision path when no policy is supplied."""
+        matrix = _finite(expm(generator * dt), "transition")
+        _check_deadline(deadline)
+        derivatives = []
+        if jacobian:
+            for j in range(k):
+                _check_deadline(deadline)
+                # Initial-only parameters have exactly zero generator
+                # derivatives; their initial sensitivities still evolve.
+                direction = derivative[:, :, j]
+                derivatives.append(
+                    _finite(
+                        expm_frechet(
+                            generator * dt,
+                            direction * dt,
+                            compute_expm=False,
+                        ),
+                        "transition derivative",
+                    )
+                    if np.any(direction)
+                    else np.zeros_like(generator)
+                )
+                _check_deadline(deadline)
+        return matrix, derivatives
+
 
 class _AffineEvaluation:
     """Share propagation while retaining the two inherited coordinate layouts."""
 
     def _initialize_affine(self, columns: tuple[int, ...], indices: dict) -> None:
-        self._propagation = _Propagation(self.system, columns)
+        self._propagation = _Propagation(self.system, columns, self.precision_policy)
         self._affine_indices = indices
         self.affine_audit = self._propagation.audit | {
             "problem_sha256": content_sha256(self.problem),
@@ -240,8 +270,11 @@ class TrainingOracle(_AffineEvaluation, kernel.TrainingOracle):
         problem: PrefixFitProblem,
         training: PublicSplit,
         policy: kernel.NumericalPolicy,
+        *,
+        precision_policy: AffinePrecisionPolicy | None = None,
     ) -> None:
         super().__init__(problem, training, policy)
+        self.precision_policy = precision_policy
         self.training, self.numerical_policy = training, policy
         self._initialize_affine(tuple(range(len(self.system.names))), self.indices)
 
@@ -249,7 +282,9 @@ class TrainingOracle(_AffineEvaluation, kernel.TrainingOracle):
         """Recompile an independent replay oracle with explicitly changed tolerances."""
         if not isinstance(policy, kernel.NumericalPolicy):
             raise TypeError("typed numerical policy required")
-        return type(self)(self.problem, self.training, policy)
+        return type(self)(
+            self.problem, self.training, policy, precision_policy=self.precision_policy
+        )
 
 
 class PrefixOracle(_AffineEvaluation, kernel.PrefixOracle):
@@ -263,8 +298,10 @@ class PrefixOracle(_AffineEvaluation, kernel.PrefixOracle):
         policy: kernel.NumericalPolicy,
         *,
         root_guesses: Mapping[str, float] | None = None,
+        precision_policy: AffinePrecisionPolicy | None = None,
     ) -> None:
         super().__init__(problem, fit_result, prefix, policy, root_guesses=root_guesses)
+        self.precision_policy = precision_policy
         self._initialize_affine(
             tuple(self.system.names.index(name) for name in self.names),
             {row.trajectory_id: np.arange(len(self.names)) for row in self.rows},
