@@ -19,16 +19,21 @@ from scripts import install_verified_paired_bundle as installer
 ROOT = "phase-c-paired-fit-0bf4747"
 
 
-def make_archive(tmp_path, *, changes=None, manifest=None, extra=()):
+def make_archive(
+    tmp_path, *, changes=None, manifest=None, extra=(), profile="paired-fit",
+):
     """Build regular-file fixtures, optionally retaining a stale manifest."""
-    files = dict.fromkeys(installer.REQUIRED, b"fixture\n")
-    files["run_fit.sh"] = b"#!/bin/bash\nexit 0\n"
+    prefix, manifest_name, required = installer.PROFILES[profile]
+    root = prefix + "-0bf4747"
+    files = dict.fromkeys(required, b"fixture\n")
+    if profile == "paired-fit":
+        files["run_fit.sh"] = b"#!/bin/bash\nexit 0\n"
     if manifest is None:
         manifest = "".join(
             f"{hashlib.sha256(data).hexdigest()}  {name}\n"
             for name, data in sorted(files.items())
         ).encode()
-    files[installer.MANIFEST] = manifest
+    files[manifest_name] = manifest
     for name, data in (changes or {}).items():
         if data is None:
             del files[name]
@@ -37,13 +42,55 @@ def make_archive(tmp_path, *, changes=None, manifest=None, extra=()):
     archive = tmp_path / "bundle.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:
         for name, data in files.items():
-            member = tarfile.TarInfo(f"{ROOT}/{name}")
+            member = tarfile.TarInfo(f"{root}/{name}")
             member.size = len(data)
             member.mode = 0o755 if name.endswith(".sh") else 0o644
             bundle.addfile(member, io.BytesIO(data))
         for member in extra:
             bundle.addfile(member, io.BytesIO(b""))
     return archive, hashlib.sha256(archive.read_bytes()).hexdigest()
+
+
+def test_directional_install_requires_opt_in_preserves_partial_elsewhere(tmp_path):
+    archive, digest = make_archive(tmp_path, profile="directional-family")
+    root_name = "phase-c-directional-family-0bf4747"
+    partial = tmp_path / root_name
+    partial.mkdir()
+    (partial / "run_revision.sh").write_bytes(b"partial extraction")
+    fresh = tmp_path / "recovered-code"
+    fresh.mkdir()
+    with pytest.raises(ValueError, match="unsupported bundle member"):
+        installer.install_bundle(archive, digest, fresh)
+    result = installer.install_bundle(
+        archive, digest, fresh, profile="directional-family",
+    )
+    assert result == {"code_path": str(fresh / root_name), "files": 5,
+                      "reused": False}
+    assert (partial / "run_revision.sh").read_bytes() == b"partial extraction"
+    assert installer.install_bundle(
+        archive, digest, fresh, profile="directional-family",
+    ) == result | {"reused": True}
+
+
+@pytest.mark.parametrize("changes", [
+    {"run_revision.sh": b"corrupt"}, {"SHA256SUMS": None},
+    {"extra": b"unlisted"}, {"inputs/saved-source.tar.gz": None},
+])
+def test_directional_authentication_before_extraction(tmp_path, changes):
+    archive, digest = make_archive(
+        tmp_path, profile="directional-family", changes=changes,
+    )
+    with pytest.raises(ValueError):
+        installer.install_bundle(
+            archive, digest, tmp_path, profile="directional-family",
+        )
+    assert {p.name for p in tmp_path.iterdir()} == {archive.name}
+
+
+def test_unknown_profile_does_not_open_archive(tmp_path):
+    with pytest.raises(ValueError, match="unknown bundle profile"):
+        installer.install_bundle(tmp_path / "missing", "0" * 64, tmp_path,
+                                 profile="anything")
 
 
 def test_install_success_and_exact_reuse(tmp_path):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a complete authenticated paired-fit bundle without running its code."""
+"""Install a complete authenticated experiment bundle without running its code."""
 
 from __future__ import annotations
 
@@ -19,6 +19,14 @@ MANIFEST = "MANIFEST.sha256"
 REQUIRED = {
     "run_fit.sh", "configs/construction_paired_fit_v1.json",
     "inputs/paired-inputs.json", "scripts/hpc/start_construction_paired_fit.sh",
+}
+PROFILES = {
+    "paired-fit": ("phase-c-paired-fit", MANIFEST, REQUIRED),
+    "directional-family": (
+        "phase-c-directional-family", "SHA256SUMS",
+        {"run_revision.sh", "SOURCE_COMMIT", "inputs/saved-source.tar.gz",
+         "scripts/hpc/start_construction_revision_aces.sh"},
+    ),
 }
 
 
@@ -42,15 +50,16 @@ def _relative(name: str) -> PurePosixPath:
 
 
 def _inspect(
-    bundle: tarfile.TarFile,
+    bundle: tarfile.TarFile, *, profile: str = "paired-fit",
 ) -> tuple[str, dict[str, tarfile.TarInfo], dict[str, str]]:
     """Authenticate the exact archive roster and every manifest entry."""
+    prefix, manifest_name, required = PROFILES[profile]
     root, members = "", {}
     for member in bundle.getmembers():
         path = _relative(member.name)
         if (
             len(path.parts) < 2
-            or not re.fullmatch(r"phase-c-paired-fit-[0-9a-f]{7,40}", path.parts[0])
+            or not re.fullmatch(rf"{re.escape(prefix)}-[0-9a-f]{{7,40}}", path.parts[0])
             or member.type not in {tarfile.REGTYPE, tarfile.AREGTYPE}
         ):
             raise ValueError(f"unsupported bundle member: {member.name!r}")
@@ -60,23 +69,23 @@ def _inspect(
         if name in members:
             raise ValueError(f"duplicate archive member: {name}")
         members[name] = member
-    if MANIFEST not in members or not members.keys() >= REQUIRED:
+    if manifest_name not in members or not members.keys() >= required:
         raise ValueError("bundle is missing its manifest or required launch inputs")
-    with bundle.extractfile(members[MANIFEST]) as stream:
+    with bundle.extractfile(members[manifest_name]) as stream:
         manifest = stream.read()
     expected = {}
     for line in manifest.decode("utf-8").splitlines():
         match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
         if not match:
-            raise ValueError("invalid MANIFEST.sha256 entry")
+            raise ValueError(f"invalid {manifest_name} entry")
         digest, name = match.groups()
         _relative(name)
-        if name == MANIFEST or name in expected:
+        if name == manifest_name or name in expected:
             raise ValueError(f"duplicate or self-referential manifest entry: {name}")
         expected[name] = digest
-    if set(expected) != members.keys() - {MANIFEST}:
-        raise ValueError("archive file set differs from MANIFEST.sha256")
-    expected[MANIFEST] = hashlib.sha256(manifest).hexdigest()
+    if set(expected) != members.keys() - {manifest_name}:
+        raise ValueError(f"archive file set differs from {manifest_name}")
+    expected[manifest_name] = hashlib.sha256(manifest).hexdigest()
     for name, member in members.items():
         if any(str(parent) in members for parent in PurePosixPath(name).parents):
             raise ValueError(f"conflicting file and directory paths: {name}")
@@ -136,8 +145,11 @@ def _publish(staged: Path, destination: Path) -> None:
 
 def install_bundle(
     archive: Path, expected_sha256: str, destination_parent: Path,
+    *, profile: str = "paired-fit",
 ) -> dict[str, str | int | bool]:
     """Verify first, stage privately, then publish or reuse an exact complete copy."""
+    if profile not in PROFILES:
+        raise ValueError(f"unknown bundle profile: {profile}")
     if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256):
         raise ValueError("expected archive SHA256 must contain 64 hexadecimal digits")
     try:
@@ -146,7 +158,7 @@ def install_bundle(
                 raise ValueError("archive SHA256 differs; nothing was extracted")
             source.seek(0)
             with tarfile.open(fileobj=source, mode="r:*") as bundle:
-                name, members, expected = _inspect(bundle)
+                name, members, expected = _inspect(bundle, profile=profile)
                 destination_parent = destination_parent.resolve(strict=True)
                 destination = destination_parent / name
                 if os.path.lexists(destination):
@@ -185,8 +197,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--sha256", required=True)
     parser.add_argument("--destination-parent", type=Path, required=True)
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="paired-fit")
     args = parser.parse_args(argv)
-    result = install_bundle(args.archive, args.sha256, args.destination_parent)
+    result = install_bundle(
+        args.archive, args.sha256, args.destination_parent, profile=args.profile,
+    )
     print(json.dumps(result))
 
 

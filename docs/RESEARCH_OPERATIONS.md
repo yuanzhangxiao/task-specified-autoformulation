@@ -181,6 +181,11 @@ a separate secret-management process.
 
 ### Reviewed component compiler caches
 
+For the October ACES `runtime-cache/review` recovery and authenticated installation
+of the unchanged directional-family bundle, see
+[ACES review-cache recovery](ACES_REVIEW_CACHE_RECOVERY.md). That explicit
+maintenance profile does not retire arbitrary source checkouts or result trees.
+
 The 2026-09-29 cache review identifies 18 finished proposer jobs under the exact
 `component-runtime-cache` root: 42,040 files and 5,867 directories, with a complete
 metadata traversal and no symlinks/special entries. All raw job IDs match

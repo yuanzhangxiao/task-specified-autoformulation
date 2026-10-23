@@ -4,7 +4,8 @@
 Default is a read-only plan. --apply retains a tar archive and a per-file checksum
 receipt for every explicitly named job. Scientific call caches are not accepted.
 The default component profile requires successful component proposer jobs. The
-explicit phase-c profile requires an empty user queue and terminal accounting.
+explicit phase-c and review profiles require an empty user queue and terminal
+accounting. Only review supports bounded discovery of numeric job directories.
 This script is outside the frozen experiment runtime.
 """
 
@@ -28,12 +29,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 CACHE_KINDS = {"triton", "torchinductor", "vllm", "xdg", "cuda"}
+MAX_DISCOVERED_JOBS = 256
 PROFILES = {
     "component": (
         "component-runtime-cache",
         "finished-component-cache-archive-1",
     ),
     "phase-c": ("phase-c-runtime-cache", "finished-phase-c-cache-archive-1"),
+    "review": ("runtime-cache/review", "finished-review-cache-archive-1"),
 }
 TERMINAL_STATES = {
     "BOOT_FAIL",
@@ -185,7 +188,11 @@ def guard_phase_c_jobs(jobs: list[str]) -> None:
         ["squeue", "--noheader", "--user", owner, "--format=%i"], text=True
     )
     if queue.strip():
-        raise ValueError("user jobs are queued/running; phase-c caches remain in place")
+        raise ValueError(
+            "user jobs are queued/running; compiler caches remain in place"
+        )
+    if not jobs:
+        return
     text = subprocess.check_output(
         [
             "sacct",
@@ -214,6 +221,21 @@ def guard_phase_c_jobs(jobs: list[str]) -> None:
             state = "CANCELLED"
         if state not in TERMINAL_STATES or (row.get("UID") or "").strip() != owner:
             raise ValueError(f"unconfirmed owned terminal allocation: {job}")
+
+
+def discover_review_jobs(root: Path) -> list[str]:
+    """Bound discovery and reject anything except real numeric job directories."""
+    jobs = []
+    with os.scandir(root) as entries:
+        for entry in entries:
+            if len(jobs) >= MAX_DISCOVERED_JOBS:
+                raise ValueError("review cache job discovery limit exceeded")
+            if re.fullmatch(r"[0-9]+", entry.name) is None or not entry.is_dir(
+                follow_symlinks=False
+            ):
+                raise ValueError(f"unexpected review cache entry: {entry.name}")
+            jobs.append(entry.name)
+    return sorted(jobs)
 
 
 def prepare_archive(
@@ -277,10 +299,11 @@ def prepare_archive(
 def run(
     root: Path,
     destination: Path,
-    jobs: list[str],
+    jobs: list[str] | None = None,
     *,
     apply: bool,
     profile: str = "component",
+    all_jobs: bool = False,
     guard: Callable[[list[str]], None] | None = None,
 ) -> dict:
     """Validate all jobs before changes; resume deletion only from verified archives."""
@@ -288,12 +311,19 @@ def run(
         raise ValueError(f"unknown cache profile: {profile}")
     root, destination = physical(root), physical(destination)
     expected_root = PROFILES[profile][0]
-    if root.name != expected_root or not root.is_dir():
+    expected_parts = Path(expected_root).parts
+    if root.parts[-len(expected_parts) :] != expected_parts or not root.is_dir():
         raise ValueError(f"expected existing {expected_root} root")
     if destination.is_relative_to(root) or root.is_relative_to(destination):
         raise ValueError("archive and cache roots overlap")
+    if all_jobs and (profile != "review" or jobs is not None):
+        raise ValueError("--all-jobs is exclusive with --jobs and requires review")
+    review_roster = discover_review_jobs(root) if profile == "review" else None
+    if all_jobs:
+        jobs = review_roster
     if (
-        not jobs
+        jobs is None
+        or (not jobs and not all_jobs)
         or len(set(jobs)) != len(jobs)
         or any(re.fullmatch(r"[0-9]+", job) is None for job in jobs)
     ):
@@ -303,6 +333,14 @@ def run(
     guard(jobs)
     if not apply:
         return {"apply": False, "entries": {j: len(snapshot(root, j)) for j in jobs}}
+    if not jobs:
+        return {
+            "apply": True,
+            "archive_root": str(destination),
+            "jobs": [],
+            "entries_removed": 0,
+            "archive_count": 0,
+        }
     if not shutil.rmtree.avoids_symlink_attacks:
         raise ValueError("this platform lacks safe directory removal")
     destination.mkdir(parents=True, exist_ok=True)
@@ -321,6 +359,8 @@ def run(
         finally:
             os.close(directory_fd)
         guard(jobs)
+        if profile == "review" and discover_review_jobs(root) != review_roster:
+            raise ValueError("review cache job roster changed during archiving")
         # Preflight every remaining subtree before removing any of them.
         print("Rechecking live cache contents before removal...", file=sys.stderr)
         current = {j: snapshot(root, j) for j in jobs}
@@ -346,10 +386,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--archive-root", type=Path, required=True)
-    parser.add_argument("--jobs", nargs="+", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--jobs", nargs="+")
+    selection.add_argument("--all-jobs", action="store_true")
     parser.add_argument("--profile", choices=tuple(PROFILES), default="component")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
+    if args.all_jobs and args.profile != "review":
+        parser.error("--all-jobs requires --profile review")
     print(
         json.dumps(
             run(
@@ -358,6 +402,7 @@ def main() -> None:
                 args.jobs,
                 apply=args.apply,
                 profile=args.profile,
+                all_jobs=args.all_jobs,
             ),
             indent=2,
         )

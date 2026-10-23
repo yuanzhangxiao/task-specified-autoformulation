@@ -395,3 +395,268 @@ def test_cli_phase_c_is_explicit_and_defaults_to_read_only(monkeypatch, capsys):
     assert observed["apply"] is False
     assert observed["jobs"] == ["123"]
     assert json.loads(capsys.readouterr().out) == {"apply": False}
+
+
+@pytest.fixture
+def review_paths(paths):
+    root, destination, protected = paths
+    review_root = root.parent / "runtime-cache" / "review"
+    review_root.parent.mkdir()
+    root.rename(review_root)
+    return review_root, destination, protected
+
+
+def review_accounting():
+    owner = cache.os.getuid()
+    return (
+        "JobID|JobIDRaw|JobName|State|ExitCode|UID\n"
+        f"123|123|review-propose|FAILED|1:0|{owner}\n"
+        f"456|456|review-propose|COMPLETED|0:0|{owner}\n"
+    )
+
+
+def test_review_discovery_plan_apply_and_empty_resume(review_paths, monkeypatch):
+    root, destination, protected = review_paths
+    calls = []
+
+    def output(argv, **_kwargs):
+        calls.append(argv)
+        return "" if argv[0] == "squeue" else review_accounting()
+
+    monkeypatch.setattr(cache.subprocess, "check_output", output)
+    expected = {job: cache.snapshot(root, job) for job in ("123", "456")}
+    plan = cache.run(root, destination, apply=False, profile="review", all_jobs=True)
+    assert plan == {
+        "apply": False,
+        "entries": {job: len(rows) for job, rows in expected.items()},
+    }
+    assert not destination.exists()
+    result = cache.run(root, destination, apply=True, profile="review", all_jobs=True)
+    assert result["entries_removed"] == sum(map(len, expected.values()))
+    assert result["jobs"] == ["123", "456"]
+    assert result["archive_count"] == 2
+    assert list(root.iterdir()) == []
+    for job, entries in expected.items():
+        receipt = json.loads((destination / f"{job}.json").read_text())
+        assert receipt["protocol"] == "finished-review-cache-archive-1"
+        assert (
+            cache.verify_archive(destination / f"{job}.tar", entries)
+            == (receipt["archive_sha256"])
+        )
+    assert (protected / "response.json").read_text() == (
+        "scientific response must survive"
+    )
+    calls.clear()
+    again = cache.run(root, destination, apply=True, profile="review", all_jobs=True)
+    assert again["entries_removed"] == again["archive_count"] == 0
+    assert again["jobs"] == []
+    assert len(calls) == 1 and calls[0][0] == "squeue"
+
+
+@pytest.mark.parametrize("name", ["review", "runtime-cache", "other/review"])
+def test_review_profile_requires_exact_root_suffix(tmp_path, name):
+    root = tmp_path / name
+    root.mkdir(parents=True)
+    with pytest.raises(ValueError, match="runtime-cache/review"):
+        cache.run(
+            root,
+            tmp_path / "archive",
+            apply=False,
+            profile="review",
+            all_jobs=True,
+            guard=completed,
+        )
+
+
+@pytest.mark.parametrize("problem", ["nonnumeric", "file", "symlink", "root_alias"])
+def test_review_discovery_rejects_unexpected_entries(review_paths, tmp_path, problem):
+    root, destination, _ = review_paths
+    selected = root
+    if problem == "nonnumeric":
+        (root / "scientific-results").mkdir()
+    elif problem == "file":
+        (root / "789").write_text("not a compiler cache directory")
+    elif problem == "symlink":
+        (root / "789").symlink_to(root / "123", target_is_directory=True)
+    else:
+        selected = tmp_path / "alias"
+        selected.symlink_to(root, target_is_directory=True)
+    with pytest.raises(ValueError, match=r"unexpected review|symlinked path"):
+        cache.run(
+            selected,
+            destination,
+            apply=True,
+            profile="review",
+            all_jobs=True,
+            guard=completed,
+        )
+    assert not destination.exists()
+    assert (root / "123/triton/kernel.bin").is_file()
+
+
+def test_review_discovery_is_bounded(review_paths, monkeypatch):
+    root, destination, _ = review_paths
+    monkeypatch.setattr(cache, "MAX_DISCOVERED_JOBS", 1)
+    with pytest.raises(ValueError, match="discovery limit"):
+        cache.run(
+            root,
+            destination,
+            apply=True,
+            profile="review",
+            all_jobs=True,
+            guard=completed,
+        )
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("problem", ["missing", "active", "wrong_owner"])
+def test_review_requires_terminal_owned_scheduler_evidence(
+    review_paths, monkeypatch, problem
+):
+    root, destination, _ = review_paths
+
+    def output(argv, **_kwargs):
+        if argv[0] == "squeue":
+            return "999\n" if problem == "active" else ""
+        if problem == "missing":
+            return review_accounting().splitlines()[0] + "\n"
+        return review_accounting().replace(
+            f"|{cache.os.getuid()}\n", f"|{cache.os.getuid() + 1}\n"
+        )
+
+    monkeypatch.setattr(cache.subprocess, "check_output", output)
+    with pytest.raises(ValueError, match=r"terminal allocation|queued/running"):
+        cache.run(root, destination, apply=True, profile="review", all_jobs=True)
+    assert not destination.exists()
+    assert (root / "123/triton/kernel.bin").is_file()
+
+
+def test_review_empty_discovery_still_checks_queue(review_paths, monkeypatch):
+    root, destination, _ = review_paths
+    shutil.rmtree(root / "123")
+    shutil.rmtree(root / "456")
+    monkeypatch.setattr(cache.subprocess, "check_output", lambda *_a, **_k: "999\n")
+    with pytest.raises(ValueError, match="queued/running"):
+        cache.run(root, destination, apply=True, profile="review", all_jobs=True)
+    assert not destination.exists()
+
+
+def test_review_discovery_rechecks_roster_before_deletion(review_paths):
+    root, destination, _ = review_paths
+    calls = 0
+
+    def guard(_jobs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            (root / "789").mkdir()
+
+    with pytest.raises(ValueError, match="job roster changed"):
+        cache.run(
+            root, destination, apply=True, profile="review", all_jobs=True, guard=guard
+        )
+    assert (root / "123/triton/kernel.bin").is_file()
+    assert (destination / "123.tar").is_file()
+
+
+def test_review_discovery_resumes_partial_removal(review_paths):
+    root, destination, _ = review_paths
+    destination.mkdir()
+    cache.prepare_archive(root, destination, "123", profile="review")
+    shutil.rmtree(root / "123/triton")
+    result = cache.run(
+        root, destination, apply=True, profile="review", all_jobs=True, guard=completed
+    )
+    assert result["entries_removed"] > 0
+    assert not (root / "123").exists() and not (root / "456").exists()
+
+
+@pytest.mark.parametrize("profile", ["component", "phase-c"])
+def test_discovery_does_not_change_other_profiles(paths, profile):
+    root, destination, _ = paths
+    if profile == "phase-c":
+        phase_root = root.with_name("phase-c-runtime-cache")
+        root.rename(phase_root)
+        root = phase_root
+    with pytest.raises(ValueError, match="requires review"):
+        cache.run(
+            root,
+            destination,
+            apply=False,
+            profile=profile,
+            all_jobs=True,
+            guard=completed,
+        )
+
+
+def test_review_selection_is_explicit_and_exclusive(review_paths):
+    root, destination, _ = review_paths
+    with pytest.raises(ValueError, match="unique numeric job IDs"):
+        cache.run(root, destination, apply=False, profile="review", guard=completed)
+    with pytest.raises(ValueError, match="exclusive"):
+        cache.run(
+            root,
+            destination,
+            ["123"],
+            apply=False,
+            profile="review",
+            all_jobs=True,
+            guard=completed,
+        )
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--all-jobs", "--profile", "phase-c"],
+        ["--all-jobs", "--jobs", "123", "--profile", "review"],
+    ],
+)
+def test_cli_rejects_unqualified_or_ambiguous_discovery(monkeypatch, options):
+    monkeypatch.setattr(
+        cache.sys,
+        "argv",
+        [
+            "archive_finished_component_caches.py",
+            "--root",
+            "/runtime-cache/review",
+            "--archive-root",
+            "/archive",
+            *options,
+        ],
+    )
+    with pytest.raises(SystemExit) as error:
+        cache.main()
+    assert error.value.code == 2
+
+
+def test_cli_review_discovery_stays_read_only_by_default(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cache.sys,
+        "argv",
+        [
+            "archive_finished_component_caches.py",
+            "--root",
+            "/runtime-cache/review",
+            "--archive-root",
+            "/archive",
+            "--profile",
+            "review",
+            "--all-jobs",
+        ],
+    )
+    observed = {}
+
+    def run(_root, _destination, jobs, **kwargs):
+        observed.update(jobs=jobs, **kwargs)
+        return {"apply": kwargs["apply"]}
+
+    monkeypatch.setattr(cache, "run", run)
+    cache.main()
+    assert observed == {
+        "jobs": None,
+        "apply": False,
+        "profile": "review",
+        "all_jobs": True,
+    }
+    assert json.loads(capsys.readouterr().out) == {"apply": False}
