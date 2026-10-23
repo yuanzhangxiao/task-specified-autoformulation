@@ -48,6 +48,7 @@ class Policy(StrictSchema):
     local_max_scales: int = Field(default=6, ge=2, le=12)
     local_relative_step_cap: FiniteFloat = Field(default=1e-4, gt=0, le=1e-2)
     local_bounds_aware: bool = False
+    diagnostic_precision: bool = False
 
     @model_validator(mode="after")
     def local_requires_precision(self):
@@ -55,12 +56,16 @@ class Policy(StrictSchema):
             raise ValueError("local adaptive checks require precision_aware")
         if self.local_bounds_aware and not self.local_adaptive:
             raise ValueError("bounds-aware checks require local_adaptive")
+        if self.diagnostic_precision and not self.local_bounds_aware:
+            raise ValueError("diagnostic precision requires local_bounds_aware")
         return self
 
     @model_serializer(mode="wrap")
     def preserve_legacy_policy(self, handler):
         """Keep historical policy fingerprints unchanged when the opt-in is off."""
         result = handler(self)
+        if not self.diagnostic_precision:
+            result.pop("diagnostic_precision", None)
         if not self.local_bounds_aware:
             result.pop("local_bounds_aware", None)
         if not self.local_adaptive:
@@ -137,6 +142,17 @@ class DerivativeDirection(StrictSchema):
     reference_probe_index: int | None = None
     derivative_uncertainty_rms: FiniteFloat | None = Field(default=None, ge=0)
     gradient_error_bound: FiniteFloat | None = Field(default=None, ge=0)
+    projected_gradient_error_bound: FiniteFloat | None = Field(default=None, ge=0)
+    jacobian_error_bound_l2: FiniteFloat | None = Field(default=None, ge=0)
+
+    @model_serializer(mode="wrap")
+    def preserve_historical_direction(self, handler):
+        """New diagnostic envelopes do not alter earlier direction receipts."""
+        result = handler(self)
+        for key in ("projected_gradient_error_bound", "jacobian_error_bound_l2"):
+            if result.get(key) is None:
+                result.pop(key, None)
+        return result
 
 
 class LocalProbeRecord(StrictSchema):
@@ -182,6 +198,7 @@ class DerivativeCheck(StrictSchema):
     parameter_information_qualified: bool = False
     local_probe_attempts: tuple[LocalProbeRecord, ...] = ()
     local_coordinate_scales: tuple[FiniteFloat, ...] = ()
+    gradient_precision_qualified: bool | None = None
     scope: str = (
         "Two-scale finite differences at one reduced endpoint; not a global "
         "smoothness or minimum certificate. Deadlines are cooperative."
@@ -191,6 +208,8 @@ class DerivativeCheck(StrictSchema):
     def preserve_historical_audit(self, handler):
         """Do not add local-policy payload fields to historical receipts."""
         result = handler(self)
+        if not self.policy.diagnostic_precision:
+            result.pop("gradient_precision_qualified", None)
         if not self.policy.local_adaptive:
             result.pop("local_probe_attempts", None)
         if not self.policy.local_bounds_aware:
@@ -245,6 +264,9 @@ class Assessment(StrictSchema):
     gradient_error_bound_inf: FiniteFloat | None = Field(default=None, ge=0)
     correlation_unresolved_indices: tuple[int, ...] = ()
     parameter_information_qualified: bool = False
+    parameter_rank_interval: tuple[int, int] | None = None
+    jacobian_error_bound_frobenius: FiniteFloat | None = Field(default=None, ge=0)
+    rank_threshold_interval: tuple[FiniteFloat, FiniteFloat] | None = None
     complete_predeclared_restarts: int = Field(ge=0)
     improving_predeclared_restarts: int = Field(ge=0)
     global_minimum_certified: Literal[False] = False
@@ -255,6 +277,39 @@ class Assessment(StrictSchema):
         "Parameter rank is local and separate from optimization adequacy; full "
         "rank alone is not a statistical parameter-confidence conclusion."
     )
+
+    @model_serializer(mode="wrap")
+    def preserve_historical_assessment(self, handler):
+        """Retain historical assessment payloads when diagnostic precision is off."""
+        result = handler(self)
+        if not self.policy.diagnostic_precision:
+            for key in (
+                "parameter_rank_interval",
+                "jacobian_error_bound_frobenius",
+                "rank_threshold_interval",
+            ):
+                result.pop(key, None)
+        return result
+
+
+def _rank_precision(singular, column_errors, relative_tolerance):
+    """Bound a thresholded numerical rank under the empirical column envelope.
+
+    Frobenius bounds spectral error; Weyl bounds singular-value changes. The
+    relative rank threshold changes with the largest singular value as well.
+    This is conditional numerical stability, not structural identifiability.
+    """
+    error = float(np.linalg.norm(column_errors))
+    maximum = float(singular[0]) if len(singular) else 0.0
+    thresholds = (
+        relative_tolerance * max(0.0, maximum - error),
+        relative_tolerance * (maximum + error),
+    )
+    interval = (
+        int(np.sum(np.maximum(0, singular - error) > thresholds[1])),
+        int(np.sum(singular + error > thresholds[0])),
+    )
+    return interval, error, thresholds
 
 
 def _coordinates(vector, lower, upper, coordinate_units):
@@ -839,6 +894,24 @@ def assess(
     parameter_information_qualified = (
         derivative_qualified and derivative.parameter_information_qualified
     )
+    rank_interval, jacobian_error, threshold_interval = None, None, None
+    if policy.diagnostic_precision:
+        envelopes = {
+            row.index: row.jacobian_error_bound_l2 for row in derivative.directions
+        }
+        if derivative_qualified and all(
+            envelopes.get(int(i)) is not None for i in np.flatnonzero(free)
+        ):
+            rank_interval, jacobian_error, threshold_interval = _rank_precision(
+                singular,
+                [envelopes[int(i)] for i in np.flatnonzero(free)],
+                policy.rank_relative_tolerance,
+            )
+        parameter_information_qualified = (
+            parameter_information_qualified
+            and rank_interval is not None
+            and rank_interval[0] == rank_interval[1] == rank
+        )
     if policy.precision_aware and not parameter_information_qualified:
         condition = None
     records = [RestartEvidence.model_validate(item) for item in restarts]
@@ -893,6 +966,9 @@ def assess(
         else None,
         correlation_unresolved_indices=unresolved_correlation,
         parameter_information_qualified=parameter_information_qualified,
+        parameter_rank_interval=rank_interval,
+        jacobian_error_bound_frobenius=jacobian_error,
+        rank_threshold_interval=threshold_interval,
         complete_predeclared_restarts=len(complete),
         improving_predeclared_restarts=improving,
     )

@@ -109,13 +109,33 @@ def _pair(coarse, fine, residual, column, policy):
         "sides_ok": sides_ok,
         "uncertainty": uncertainty,
         "gradient_error": gradient_error,
+        "gradient_radius": float(2 * np.mean(np.abs(residual) * radius)),
+        "column_error_l2": float(
+            np.linalg.norm(np.abs(column - fine.estimate) + radius)
+        ),
         "between": between,
         "relative": relative,
         "error": error,
         "roundoff_dominated": uncertainty > policy.derivative_relative_tolerance * scale
         and a._rms(fine.estimate - coarse.estimate)
         <= a._rms(fine.roundoff + coarse.roundoff),
+        "evaluation_floor_dominated": a._rms(fine.estimate - coarse.estimate)
+        <= a._rms(fine.roundoff + coarse.roundoff),
     }
+
+
+def _projected_uncertainty(pair, residual, column, value, lower, upper, unit, policy):
+    """Uncertainty in the bound-projected gradient, in optimizer coordinates."""
+    nominal = float(2 * np.mean(residual * column))
+    error = pair["gradient_error"]
+    tolerance = policy.bound_tolerance * max(unit, abs(value))
+    low, high = nominal - error, nominal + error
+    at_lower, at_upper = value - lower <= tolerance, upper - value <= tolerance
+    if at_lower and not at_upper:
+        return max(0.0, -low) - max(0.0, -nominal)
+    if at_upper and not at_lower:
+        return max(0.0, high) - max(0.0, nominal)
+    return error
 
 
 def _direction(index, probes, pair, reference, column, initial_step, policy):
@@ -137,6 +157,14 @@ def _direction(index, probes, pair, reference, column, initial_step, policy):
         reference_probe_index=reference,
         derivative_uncertainty_rms=pair["uncertainty"],
         gradient_error_bound=pair["gradient_error"],
+        **(
+            {
+                "projected_gradient_error_bound": pair["projected_gradient_error"],
+                "jacobian_error_bound_l2": pair["column_error_l2"],
+            }
+            if policy.diagnostic_precision
+            else {}
+        ),
         precision_probes=tuple(
             a.PrecisionProbe(
                 multiplier=p.step / initial_step,
@@ -150,20 +178,23 @@ def _direction(index, probes, pair, reference, column, initial_step, policy):
     )
 
 
-def _best_pair(previous, candidate):
+def _best_pair(previous, candidate, *, diagnostic=False):
     """Keep the least uncertain smooth pair without hiding resolved failures.
 
     Selection uses estimated truncation/roundoff, not agreement with the analytic
     column. A newly observed unresolved kink overrides earlier smooth evidence;
     later smaller probes may resolve such a coarse-scale curvature warning.
     """
-    if previous is None or candidate[0]["status"] in {"passed", "failed"}:
+    if previous is None or candidate[0]["status"] == "failed":
         return candidate
     old, new = previous[0], candidate[0]
+    if new["status"] == "passed" and not diagnostic:
+        return candidate
     if old["status"] == "failed":
         return candidate if new["sides_ok"] else previous
-    old_key = (not old["sides_ok"], not old["stable"], old["uncertainty"])
-    new_key = (not new["sides_ok"], not new["stable"], new["uncertainty"])
+    metric = "gradient_radius" if diagnostic else "uncertainty"
+    old_key = (not old["sides_ok"], not old["stable"], old[metric])
+    new_key = (not new["sides_ok"], not new["stable"], new[metric])
     return candidate if new_key < old_key else previous
 
 
@@ -438,8 +469,23 @@ def local_derivative_check(
                 ):
                     continue
                 pair = _pair(coarse, fine, base_r, column, policy)
+                if policy.diagnostic_precision:
+                    pair["projected_gradient_error"] = _projected_uncertainty(
+                        pair,
+                        base_r,
+                        column,
+                        x[index],
+                        lo[index],
+                        hi[index],
+                        units[index],
+                        policy,
+                    )
                 selected_pair = (
-                    _best_pair(selected_pair, (pair, len(probes) - 1))
+                    _best_pair(
+                        selected_pair,
+                        (pair, len(probes) - 1),
+                        diagnostic=policy.diagnostic_precision,
+                    )
                     if policy.local_bounds_aware
                     else (pair, len(probes) - 1)
                 )
@@ -450,11 +496,20 @@ def local_derivative_check(
                 # mode retains the least uncertain smooth pair, while a resolved
                 # contradiction or unresolved kink cannot be hidden by selection.
                 rows[index] = row
-                if pair["status"] == "passed":
+                if pair["status"] == "passed" and (
+                    not policy.diagnostic_precision
+                    or row.projected_gradient_error_bound
+                    <= policy.gradient_tolerance * policy.precision_gradient_fraction
+                ):
                     break
                 if pair["status"] == "failed" and pair["sides_ok"]:
                     break  # Stable, resolved disagreement with the analytic column.
-                if pair["roundoff_dominated"] and pair["sides_ok"]:
+                floor = (
+                    pair["evaluation_floor_dominated"]
+                    if policy.diagnostic_precision
+                    else pair["roundoff_dominated"]
+                )
+                if floor and pair["sides_ok"]:
                     break  # Shrinking further only amplifies the evaluation floor.
             if index not in rows:
                 # Other directions may still be checked; this one remains omitted.
@@ -486,6 +541,17 @@ def local_derivative_check(
             for i in inconclusive
         )
     )
+    information_qualified = status == "passed"
+    if policy.diagnostic_precision and information_qualified:
+        singular = np.linalg.svd(
+            base_j[:, required] * units[list(required)], compute_uv=False
+        )
+        interval, _, _ = a._rank_precision(
+            singular,
+            [rows[i].jacobian_error_bound_l2 for i in required],
+            policy.rank_relative_tolerance,
+        )
+        information_qualified = interval[0] == interval[1]
     return a.DerivativeCheck(
         status=status,
         reduced_vector=tuple(x),
@@ -514,7 +580,17 @@ def local_derivative_check(
         )
         if not omitted and error is None
         else None,
-        parameter_information_qualified=status == "passed",
+        parameter_information_qualified=information_qualified,
+        gradient_precision_qualified=(
+            search_qualified
+            and all(
+                row.projected_gradient_error_bound
+                <= policy.gradient_tolerance * policy.precision_gradient_fraction
+                for row in rows.values()
+            )
+            if policy.diagnostic_precision
+            else None
+        ),
         local_probe_attempts=tuple(records),
         local_coordinate_scales=tuple(scales) if policy.local_bounds_aware else (),
         scope=(

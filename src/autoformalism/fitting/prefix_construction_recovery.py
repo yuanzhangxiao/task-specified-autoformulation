@@ -36,7 +36,7 @@ def precision_policy(mode: str) -> affine.AffinePrecisionPolicy:
     raise ValueError("unknown construction recovery precision mode")
 
 
-def policy_receipt() -> dict:
+def policy_receipt(*, structural_reduction=False) -> dict:
     """Return frozen defaults suitable for an experiment's sealed plan."""
     record = {
         "protocol": PROTOCOL,
@@ -57,6 +57,10 @@ def policy_receipt() -> dict:
         "residual_error_bound": "existing_empirical_float64_envelope_unchanged",
         "original_parameter_identifiability_certified": False,
     }
+    if structural_reduction:
+        from autoformalism.fitting.prefix_structural_reduction import policy_receipt
+
+        record["structural_reduction"] = policy_receipt()
     return record | {"sha256": public.content_sha256(record)}
 
 
@@ -297,12 +301,27 @@ class ActiveTrainingOracle:
         return residual, derivative @ self._lift_jacobian if jacobian else None
 
 
-def make_oracle(problem, training, numerical, retained, *, precision_mode="guarded"):
+def make_oracle(
+    problem,
+    training,
+    numerical,
+    retained,
+    *,
+    precision_mode="guarded",
+    structural_reduction=False,
+):
     """Build the same anchored coordinate chart for qualification/search/diagnosis."""
     original = affine.TrainingOracle(
         problem, training, numerical, precision_policy=precision_policy(precision_mode)
     )
-    return original, ActiveTrainingOracle(original, retained, precision_mode)
+    oracle = ActiveTrainingOracle(original, retained, precision_mode)
+    if structural_reduction:
+        from autoformalism.fitting.prefix_structural_reduction import (
+            StructuralTrainingOracle,
+        )
+
+        oracle = StructuralTrainingOracle(oracle, retained)
+    return original, oracle
 
 
 def _derivative(oracle, vector, deadline, policy):
@@ -329,7 +348,15 @@ def _retryable_check(check):
 
 
 def qualification(
-    problem, training, numerical, retained, seconds, checkpoint, *, adequacy_policy=None
+    problem,
+    training,
+    numerical,
+    retained,
+    seconds,
+    checkpoint,
+    *,
+    adequacy_policy=None,
+    structural_reduction=False,
 ):
     """Audit locally; retry numerical uncertainty once at higher precision in budget."""
     policy = _policy(adequacy_policy)
@@ -338,7 +365,7 @@ def qualification(
         "passed": False,
         "precision_mode": "guarded",
         "passes": [],
-        "policy": policy_receipt(),
+        "policy": policy_receipt(structural_reduction=structural_reduction),
         "no_search_performed": True,
     }
     interrupted = None
@@ -358,7 +385,12 @@ def qualification(
             numerical_retry = False
             try:
                 original, oracle = make_oracle(
-                    problem, training, numerical, retained, precision_mode=mode
+                    problem,
+                    training,
+                    numerical,
+                    retained,
+                    precision_mode=mode,
+                    **({"structural_reduction": True} if structural_reduction else {}),
                 )
                 budget.check()
                 vector = oracle.reduction.reduce(original.vector(retained))

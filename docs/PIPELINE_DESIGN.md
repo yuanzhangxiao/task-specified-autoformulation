@@ -1,5 +1,17 @@
 # Phase 1 Pipeline Design
 
+## Construction precision and certified reductions
+
+The returned eight derivative-recovery tasks verified all retained endpoints and
+searched six models, but none established fitting adequacy. The opt-in
+`construction-precision-reduction-1` milestone adds absolute-gradient diagnostic
+refinement, uncertainty-aware local rank intervals, and certified inactive/private
+coefficient reductions with exact original-model lifts. Eight latest incumbents
+receive new bounded training-only continuations; every retained endpoint receives
+its own diagnosis. Historical budgets and the separate construction revision
+roster remain unchanged. See
+[construction precision and reductions](PHASE_C_CONSTRUCTION_PRECISION_REDUCTION.md).
+
 ## Construction derivative recovery
 
 `construction-derivative-recovery-1` resumes the eight verified local-recovery

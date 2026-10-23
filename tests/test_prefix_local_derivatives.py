@@ -406,6 +406,193 @@ def bounds_check(evaluate, **kwargs):
     )
 
 
+def diagnostic_check(evaluate, *, policy=None, **kwargs):
+    """Use absolute projected-gradient precision only for the final diagnostic."""
+    policy = policy or adequacy.Policy(
+        precision_aware=True,
+        local_adaptive=True,
+        local_bounds_aware=True,
+        diagnostic_precision=True,
+        local_max_scales=12,
+    )
+    return check(evaluate, policy=policy, **kwargs)
+
+
+def diagnostic_assessment(evaluate, x, result, lower, upper):
+    """Bind a fresh assessment to the same synthetic endpoint and audit."""
+    from tests.test_prefix_fit_adequacy import history, verified
+
+    residual, jacobian = evaluate(np.asarray(x), monotonic() + 5)
+    loss = float(np.mean(residual**2))
+    return adequacy.assess(
+        x,
+        residual,
+        jacobian,
+        lower,
+        upper,
+        verification=verified(x, loss),
+        derivative=result,
+        stop_reason="gradient_converged",
+        budget_exhausted=False,
+        history=history(loss),
+        policy=result.policy,
+    )
+
+
+def test_diagnostic_mode_is_opt_in_and_historical_receipts_remain_unchanged():
+    with pytest.raises(ValidationError, match="requires local_bounds_aware"):
+        adequacy.Policy(diagnostic_precision=True)
+    old = bounds_check(lambda x, d: (x.copy(), np.eye(1)))
+    payload = old.model_dump()
+    assert "diagnostic_precision" not in payload["policy"]
+    assert "gradient_precision_qualified" not in payload
+    assert "jacobian_error_bound_l2" not in payload["directions"][0]
+    assert (
+        "jacobian_error_bound_l2"
+        not in old.model_dump(exclude_none=True)["directions"][0]
+    )
+    new = diagnostic_check(lambda x, d: (x.copy(), np.eye(1)))
+    assert adequacy.DerivativeCheck.model_validate_json(new.model_dump_json()) == new
+
+
+def test_absolute_gradient_diagnostic_shrinks_after_relative_pass():
+    points = []
+
+    def curved(x, deadline):
+        points.append(x[0])
+        value = x[0] + 10 * x[0] ** 3
+        return np.array([value - 1, value + 1]), np.full((2, 1), 1 + 30 * x[0] ** 2)
+
+    ordinary = bounds_check(curved, local_coordinate_scales=[1])
+    policy = adequacy.Policy(
+        precision_aware=True,
+        local_adaptive=True,
+        local_bounds_aware=True,
+        diagnostic_precision=True,
+        gradient_tolerance=1e-6,
+    )
+    result = diagnostic_check(curved, policy=policy, local_coordinate_scales=[1])
+    assert ordinary.status == result.status == "passed"
+    assert len(ordinary.local_probe_attempts) == 2
+    assert len(result.local_probe_attempts) > 2
+    assert result.gradient_error_bound_inf < ordinary.gradient_error_bound_inf
+    assert result.gradient_precision_qualified and result.search_qualified
+    assert max(abs(v) for v in points) <= 1.00001e-4
+    assessment = diagnostic_assessment(curved, [0], result, [-2], [2])
+    assert assessment.classification == "locally_converged_poor_fit"
+    assert assessment.parameter_rank_interval == (1, 1)
+    assert assessment.parameter_information_qualified
+
+
+def test_diagnostic_retains_best_pair_and_stops_at_residual_roundoff_floor():
+    def curved(x, deadline):
+        v = x[0] + 1000 * x[0] ** 3
+        return np.array([v - 1, v + 1]), np.full((2, 1), 1 + 3000 * x[0] ** 2)
+
+    result = diagnostic_check(curved, local_coordinate_scales=[1])
+    assert result.status == "passed" and result.search_qualified
+    assert not result.gradient_precision_qualified
+    assert len(result.local_probe_attempts) < result.policy.local_max_scales
+    row = result.directions[0]
+    assert row.reference_probe_index < len(row.precision_probes) - 1
+    assert row.gradient_error_bound > 1e-9
+    assert result.calls_started == 1 + 2 * len(result.local_probe_attempts)
+
+
+def test_projected_gradient_precision_does_not_shrink_irrelevant_outward_gradient():
+    def curved(x, deadline):
+        return np.array([1 + x[0] + 1e5 * x[0] ** 3]), np.array([[1 + 3e5 * x[0] ** 2]])
+
+    result = diagnostic_check(
+        curved,
+        x=(0,),
+        lower=(0,),
+        upper=(1,),
+        local_coordinate_scales=[1],
+    )
+    assert result.status == "passed" and result.gradient_precision_qualified
+    assert len(result.local_probe_attempts) == 2
+    assert result.directions[0].gradient_error_bound > 1e-8
+    assert result.directions[0].projected_gradient_error_bound == 0
+
+
+def test_relative_derivative_pass_does_not_certify_a_threshold_ambiguous_rank():
+    # Both columns are easy to resolve locally, but their small singular value
+    # lies on the numerical-rank threshold, inside the finite precision envelope.
+    def marginal(x, deadline):
+        return np.array([x[0], 1e-8 * x[1]]), np.diag([1.0, 1e-8])
+
+    result = diagnostic_check(
+        marginal,
+        x=(0, 0),
+        lower=(-1, -1),
+        upper=(1, 1),
+        local_coordinate_scales=[1, 1],
+    )
+    assert result.status == "passed" and result.search_qualified
+    assert not result.parameter_information_qualified
+    assessment = diagnostic_assessment(marginal, [0, 0], result, [-1, -1], [1, 1])
+    assert assessment.parameter_rank_interval == (1, 2)
+    assert assessment.parameter_information == "derivative_precision_unresolved"
+    assert assessment.parameter_condition_number is None
+    assert assessment.jacobian_error_bound_frobenius > 0
+    assert (
+        assessment.rank_threshold_interval[0]
+        < 1e-8
+        < assessment.rank_threshold_interval[1]
+    )
+    assert (
+        adequacy.Assessment.model_validate_json(assessment.model_dump_json())
+        == assessment
+    )
+
+
+def test_exact_zero_column_still_gives_no_identifiability_claim():
+    result = diagnostic_check(lambda x, d: (np.ones(1), np.zeros((1, 1))))
+    assert result.status == "inconclusive" and result.search_qualified
+    assert not result.parameter_information_qualified
+
+
+def test_rank_interval_accounts_for_uncertainty_in_largest_singular_value():
+    interval, error, thresholds = adequacy._rank_precision(
+        np.array([10, 1.0]),
+        [0.1, 0.0],
+        0.1,
+    )
+    assert interval == (1, 2) and error == pytest.approx(0.1)
+    assert thresholds == pytest.approx((0.99, 1.01))
+
+
+def test_diagnostic_timeout_never_promotes_partial_direction_coverage(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(local, "monotonic", lambda: clock[0])
+
+    def slow(x, deadline):
+        clock[0] += 1
+        return x.copy(), np.eye(2)
+
+    result = diagnostic_check(
+        slow,
+        x=(0, 0),
+        lower=(-1, -1),
+        upper=(1, 1),
+        deadline=6.5,
+    )
+    assert result.checked_indices == (0,) and result.omitted_indices == (1,)
+    assert not result.gradient_precision_qualified
+    assert not result.parameter_information_qualified
+    assert not result.search_qualified
+
+
+def test_diagnostic_wrong_derivative_and_kink_remain_failures():
+    wrong = diagnostic_check(lambda x, d: (x.copy(), -np.eye(1)))
+    kink = diagnostic_check(lambda x, d: (np.abs(x), np.zeros((1, 1))))
+    for result in (wrong, kink):
+        assert result.status == "failed" and not result.search_qualified
+        assert not result.gradient_precision_qualified
+        assert not result.parameter_information_qualified
+
+
 def test_bounds_aware_policy_preserves_earlier_local_payload_and_requires_opt_in():
     old = adequacy.Policy(precision_aware=True, local_adaptive=True)
     assert "local_bounds_aware" not in old.model_dump()
