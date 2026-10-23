@@ -106,3 +106,68 @@ candidates, the response schema and a marked repair example. The returned packag
 contains complete replies, equations, parameter-use audits, qualified witnesses,
 deferred-check coverage, source provenance and new costs separately from the source
 run. Inspect all seeds and equation changes before deciding on another full run.
+
+## Returned ACES diagnostic: 23 October 2026
+
+Job `2248535` completed all 18 episodes using GPT-OSS-20B, low reasoning,
+temperature 0.2. All six intentionally selected starting models are T2-easy
+candidates; this is not a fresh benchmark-suite success estimate. The returned
+archive SHA-256 is
+`85cf2d544746e11ac8d92ea8f597e3943f964117a48d0942254af60cb32ce7e0`;
+plan `e0095b1c34b270441729b3f0e3ab53981f9e756e474f33fb2f94a44c6b1f4264`.
+
+No revision was accepted. All 54 generation calls were recorded, using 561,583
+observed tokens with no missing usage. The 54 replies comprise 20 edited trials
+that reached consistency checks but remained blocked, two no-edit responses
+requesting wider changes, 31 interface/schema rejections, and one output-token
+truncation. All other responses finished normally. There were no fitting packets,
+new numerical rollouts, optimizer calls, model promotions or test-data access.
+
+The runtime and evidence replay exactly under the delivered `cf21fa0` source:
+all 18 completed episodes, sealed source selection, unchanged controls,
+request/reply records and tokenization receipts verified. The existing focused
+regression suite passed 81 tests.
+
+The main actionable findings are:
+
+- Family diagnostics suggest an additional independent initial-state direction,
+  while this experiment freezes variable and initializer declarations. Of 53
+  parseable replies, 25 attempt nonexistent dynamic components, including six
+  uses of `initialization_graph` as an equation name. The system does explain
+  wider-scope reporting, but the local diagnostic and response schema do not
+  make escalation sufficiently distinct from an applicable edit.
+- A basal insulin source removes the simple nonincrease implication but leaves
+  a shared scalar subsystem unable to distinguish identical initial states and
+  forcing. Adding a linear term in an already-present state also does not create
+  an independent initial-state direction. Multiplying a zero input contributes
+  nothing on the witnessed interval. These were substantive proposer errors.
+- Six intermediate trials no longer expose their original directional witness,
+  but their function checks defer and other conflicts remain. This is not a
+  scientific pass. Positive utilization-as-glucose-source proposals particularly
+  need independent mechanistic scrutiny.
+- Twelve normalized patches repeated earlier edits; eight later requests could
+  explicitly warn about repetition. Six then changed their patch and two repeated
+  again. No next reply passed. Malformed expressions can evade this fingerprint.
+- All seven `REVISION_SCHEMA` rejections contain duplicate component edits.
+  Name the duplicates and unavailable components together in future feedback.
+- P00/P01 each have six affine-family conflicts across Gp/I/U; prompt compression
+  shows two representative witnesses, both Gp, while retaining the full target
+  list. Prefer strong witnesses with clear affected-target coverage. The first
+  threshold crossing can be tiny even when later discrepancies are substantial.
+
+No certificate calculation error was found in the audited cases. However, the
+frozen guard is not an authenticated simulator/export error bound, and exact
+reproduction conflicts do not establish practically large optimized NMSE. Keep
+Orion's original-model numerical work separate. In particular, do not replace
+those original fitting candidates with these rejected trials.
+
+Recommended follow-up, not implemented by this analysis: scope-aware actionable
+feedback plus a distinct wider-revision outcome; stronger per-target witnesses;
+then a matched 20B/120B comparison on the same saved cases and budget. State or
+initializer additions require their proper validated construction interface, not
+relaxed unknown-symbol acceptance. Do not silently broaden one comparison arm.
+
+The local report at `output/directional-family-analysis-20261023/REPORT.html`
+contains training-witness plots, all 54 replies and exact prompts, per-seed
+outcomes, independent counts and frozen-code replay evidence. Generated reports
+and raw responses are not committed.
