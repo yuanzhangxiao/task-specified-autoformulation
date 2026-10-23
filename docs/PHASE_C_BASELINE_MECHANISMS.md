@@ -3,7 +3,10 @@
 Protocol: `phase-c-baseline-mechanisms-1`. Status: **run on js2 on 2026-10-22
 at the user's request, before review** (results below). The LLM-SR
 transcriptions are still `proposed_pending_review`; a change after review is a
-new protocol version in a new root, reported beside this one.
+new protocol version in a new root, reported beside this one. Since the user's
+decision of 2026-10-22, the transcriptions also set the test score of the
+eleven LLM-SR picks that read the history, so their review gates LLM-SR's test
+scoring as well.
 
 This applies to every external baseline's sealed Phase C pick the same finite
 public mechanism tests our own Phase C construction baseline gets
@@ -190,8 +193,11 @@ program's grid rollout reproduced its sealed validation error exactly.
   reproduces it exactly. Structure and fitted coefficients are transcribed
   exactly, so the pathways and signs the tests probe carry over, but the
   operating points differ.
-- Task 3's ODE fails on one training trajectory (train_005; its fitted insulin
-  term has a pole at |Gp| = 127). The tests probe train_000 to train_002 only.
+- The ODEs of tasks 3 and 4 fail on one training trajectory each (train_005),
+  at a pole of the fitted program that the grid steps over. Task 3's insulin
+  term has a pole at |Gp| = 127 (fitted `Km_ins = -127`). Task 4 runs away, as
+  its program does, to the pole of its U term at Gp = -1040. Neither fails on
+  validation, and the tests probe train_000 to train_002 only.
 
 **The filter rule was revised once, before any assessment.** The first version
 matched each filter's decay per step (`T = -D/ln a`). It broke two picks. Task
@@ -279,7 +285,8 @@ requirement, and the number completed.
   pick. But a filter keeps only its gain and mean delay, a one-row delay
   becomes a first-order lag, and an explicit-Euler recursion's use of the
   previous row is not represented. The fidelity table states how close each
-  one is.
+  one is. Since they now also set the score of the picks that read the
+  history, this limits LLM-SR's score too.
 - **Finite predicates.** As for our method: necessary local tests at fixed
   points, not proof of a mechanism. Coverage is the same for every method.
 - **Guards hide identities.** A nonnegative-storage guard puts the input
@@ -297,7 +304,33 @@ Recorded here because they govern the same picks:
    (The draft's "causal one-step prediction" headline is outdated.)
 2. Failed, timed-out and invalid runs stay failures. They count against a
    completion rate, and their NMSE is +infinity: the worst value in a median.
-3. LLM-SR is rolled out the way closest to its paper; see
-   [PHASE_C_LLM_SR.md](PHASE_C_LLM_SR.md).
-4. Each method's test path is first rehearsed on validation data and must
-   reproduce its sealed validation numbers before test data open.
+3. Every score comes from an accurate solve: the shared evaluator's adaptive
+   solver for every ODE, and the exact iteration of D3's one-step map.
+   Re-solving every SINDy, PySR and LLM-ODE pick on validation with Radau at
+   rtol 1e-10 changed no NMSE by more than 0.1%.
+4. LLM-SR's picks are scored as ODEs: the four current-value picks by their
+   exact rewrite, the eleven that read the history by these transcriptions.
+   The programs' grid rollouts stay in the sealed record and score nothing.
+   (This replaces the first decision, the rollout closest to the paper; see
+   [PHASE_C_LLM_SR.md](PHASE_C_LLM_SR.md).)
+5. Each method's test path is first rehearsed on validation data and must
+   reproduce its validation numbers before test data open: the sealed ones,
+   and for LLM-SR its ODEs' numbers solved with the shared solver.
+
+Open, for the user and the planning agent:
+
+- **A model that only an implicit solver finishes in time.** The shared
+  evaluator integrates with RK45 and fails a trajectory after 300 s. On
+  validation one model needs more: LLM-SR alien seed 0's transcription, which
+  Radau solves in under 2 s ([PHASE_C_LLM_SR.md](PHASE_C_LLM_SR.md)). The
+  reverse also happened: Radau timed out on one LLM-ODE pick that RK45 solved.
+  Proposed, for every method including ours: integrate with RK45 as now; if a
+  trajectory fails numerically (time limit or step-size failure), integrate it
+  again with Radau at the same tolerances, and fail it only if both fail.
+  Where both finished, they agreed within 0.1% on every validation pick. A
+  real singularity, such as the poles of LLM-SR tasks 3 and 4, still fails
+  under both.
+- **No Phase C test path exists yet, for any method.** Phase B's post-freeze
+  evaluator (`rebuttal/postfreeze_evaluation.py`) is the method-neutral one.
+  It reads every model with our narrow grammar, so as it stands it would fail
+  the 25 baseline picks that need the baseline grammar.

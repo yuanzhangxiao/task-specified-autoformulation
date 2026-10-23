@@ -130,7 +130,7 @@ Run on the Mac against the frozen release (receipt `200deb42`), the check gave:
 CSTR seed 0's model diverges either way. CSTR seed 1's does too when solved
 accurately: steps of 0.1 understate its fast growth.
 
-**Test rollout, decided on 2026-10-22.** The user asked for the rollout closest
+**Test rollout, decided on 2026-10-22 (superseded twice below).** The user asked for the rollout closest
 to the LLM-SR paper. The paper never simulates: its model is the program,
 evaluated on the data's own rows. The rollout that changes that least runs the
 program itself on the observation grid, feeding back its own predictions with
@@ -149,25 +149,71 @@ point and runs away, while steps of 0.1 stay just below it. Halving the step
 already ignites it. So the four current-value picks (CSTR, detention
 independent) are rolled out with the shared adaptive solver, as PySR's are.
 A program that reads the history is defined only on the grid, its filters
-advancing one row at a time, so it has no more accurate rollout of its own;
-how its score is reported (the grid, with its accurately solved ODE
-transcription beside it, or that transcription instead) is for the user to
-decide. A check on 2026-10-22 found the solver matters nowhere else: re-solving
+advancing one row at a time, so it has no more accurate rollout of its own.
+A check on 2026-10-22 found the solver matters nowhere else: re-solving
 every SINDy, PySR and LLM-ODE pick on validation with Radau at rtol 1e-10
 changed no NMSE by more than 0.1%.
+
+**Decided by the user the same day: a pick that reads the history is scored by
+its ODE transcription,** solved with the shared evaluator's solver, as the most
+accurate evaluation. The program's output is a derivative, so stepping it once
+per row is itself a coarse integration; the transcription gives the program's
+filters a continuous reading under fixed rules, so that the whole model can be
+solved accurately. Every LLM-SR pick is now scored as an ODE: the four
+current-value picks by their exact rewrite, the other eleven by their reviewed
+transcription (below). The grid rollouts stay in the sealed record. They chose
+nothing, and nothing is reselected.
+
+What follows from it:
+- The transcriptions now set LLM-SR's score, not only its mechanism tests, so
+  they must be reviewed and frozen before its test scoring.
+- On validation every transcription scores worse than its program's grid
+  rollout: 1.1 to 2.0 times the grid's error on ten picks, and 5.6 times on
+  T2 hard seed 0 (0.49 against 0.087). The two rollouts differ from each other
+  by 0.00023 to 0.054 of the training variance on nine picks, and by 0.33 and
+  0.73 on T2 hard seed 0 and alien seed 0, whose programs use a discrete-time
+  feedback device. Two things differ: the transcription keeps each filter's
+  gain and mean delay but not its exact response, and it integrates the
+  derivative accurately where the grid steps it once per row. Which of the two
+  accounts for the gap was not measured.
+- Two transcriptions fail on one training trajectory each, at a pole of
+  LLM-SR's own fitted model that the grid steps over.
+  - Task 3 (T1 hard, seed 1) fitted `Km_ins = -127` in its insulin term
+    `-insulin_signal * Gp / (Km_ins + |Gp| + eps)`. On train_005 glucose falls
+    to Gp = 127. The program's own clip then sets the rate to -1e6 just above
+    that point and +1e6 just below it, so no adaptive solver can pass.
+  - Task 4 (T2 easy, seed 0) runs away on train_005, as its program does on
+    training (error 3.5e38), down to Gp = -1040: the pole of its
+    `k_ins * X * Gp / (Km + Gp)`.
+  - Neither fails on validation. On test, a trajectory that reaches such a
+    pole fails, and under the general rule the failure is LLM-SR's.
+- On validation, the eleven transcriptions solved with the shared evaluator's
+  RK45 (rtol 1e-7, atol 1e-9) and with Radau at rtol 1e-10 agree within
+  1.2e-5 relative, except alien seed 0, which RK45 cannot finish.
+- Alien seed 0's transcription is stiff, through the transcription rule rather
+  than LLM-SR's model. The program's command filter is an exponential moving
+  average that keeps almost no memory (weight `exp(-1/tau_mem)` = 4.7e-5 per
+  row). The filter rule makes it a hidden state with time constant 4.7e-6, so
+  the ODE has an eigenvalue near -2.1e5. Radau solves each validation
+  trajectory in under 2 s, with the same error at rtol 1e-7 and 1e-10 (2.474).
+  RK45 reaches t = 6 of 60 in 120 s, so it times out at its 300 s limit. How
+  to score a trajectory that only an implicit solver finishes in time is open
+  ([PHASE_C_BASELINE_MECHANISMS.md](PHASE_C_BASELINE_MECHANISMS.md),
+  decisions for test scoring).
 
 A plan without `program_rollout`, such as the budget pilot and smokes v3 and v4,
 keeps the earlier recovery: the reader refits each pick without running it, and
 a pick that reads the history is refused as inexpressible.
 
-### ODE transcriptions, for the mechanism tests only
+### ODE transcriptions
 
 The public mechanism tests probe an ODE's states, and these picks are programs.
 `configs/phase_c_llm_sr_transcriptions_v1.json` transcribes each sealed pick
 by hand into an ODE whose hidden states are its row recursions, under fixed
-rules, bound to the exact program text and coefficients. They are used for the
-mechanism tests only; prediction is always scored by running the program. See
-[PHASE_C_BASELINE_MECHANISMS.md](PHASE_C_BASELINE_MECHANISMS.md).
+rules, bound to the exact program text and coefficients. They were made for the
+mechanism tests. Since the decision above, they also set the score of the
+eleven picks that read the history. The rules and each transcription's
+fidelity are in [PHASE_C_BASELINE_MECHANISMS.md](PHASE_C_BASELINE_MECHANISMS.md).
 
 ### The exception to the no-exec rule
 
@@ -252,7 +298,7 @@ The sealed plan records each, and a report states them.
 3. **Specification.** LLM-SR's specifications embed a problem description, so the public task specification is supplied, as its own protocol does. The starting program names its result after the target's derivative (`dI` for target I), as upstream's `dv` does.
 4. **Data.** PySR's regression table, in time order (above).
 5. **The paper's settings.** Temperature 0.8, cluster-sampling period 10,000 and 4 evaluators, where the released code differs. Each is one of their own configuration values; the search code is unchanged.
-6. **Program rollout.** A pick that reads the history is run as a program and rolled out along the grid (above). Their code has no held-out scoring; the paper reports a row-by-row error on held-out rows, which no other method in the comparison is scored by.
+6. **Scored as an ODE.** Every pick is scored by solving an ODE with the shared evaluator's solver: the exact rewrite of a pick of the current values, or the reviewed transcription of one that reads the history (above). The program itself is run only to refit it, check it for look-ahead and record its grid rollout on validation. Their code has no held-out scoring; the paper reports a row-by-row error on held-out rows, which no other method in the comparison is scored by.
 
 ## Every target at once
 
@@ -295,7 +341,8 @@ The last argument is how many target searches run at once; the full run searches
 
 ## Limitations
 
-- **Test scoring is not wired in yet.** The shared frozen evaluation cannot take a program pick: its adapter refuses one and names `llm_sr_programs`. The test-scoring step must call the program rollout, with the same metric and a check that the test grid matches the training grid.
+- **Test scoring is not wired in yet.** The shared frozen evaluation cannot take a program pick: its adapter refuses one and names `llm_sr_programs`. The test-scoring step must solve each pick's ODE (exact rewrite or reviewed transcription) with the shared solver, reading it with the external-baseline grammar.
+- **The score is a reading of the program.** For the eleven picks that read the history, the scored model is the program's transcription under fixed rules, not the program. The fidelity table states how close each one is.
 - **The search sees a different history from the rollout.** In the search a program reads the whole training table, its trajectories end to end, so a filter runs on from one trajectory into the next. In a rollout each trajectory starts afresh.
 - **Short histories.** A program that cannot run on the first few rows of a trajectory fails its rollout there, with the row and the reason recorded.
-- **Coarse steps.** Rollouts step at the data's own interval, which is coarse for detention (4 units). The two rollouts were compared only on the Dalla Man grid.
+- **Coarse steps in the record.** The sealed validation rollouts step at the data's own interval, which is coarse for detention (4 units) and missed the CSTR seed 1 runaway. They stay as recorded and score nothing.
