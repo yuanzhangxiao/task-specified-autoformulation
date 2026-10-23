@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Construction multi-output profiling pilot
+
+The returned precision/reduction continuations verified all eight retained models
+but established no fitting-adequacy conclusion. The next isolated pilot compares
+joint fitting and exact conditional profiling for model 6, with the same
+certified 27-coordinate model family and a matched 600-second optimization budget.
+Profiling solves five forcing coefficients and sixteen hidden initial values
+jointly across three outputs, leaving six outer coordinates. Six other tasks
+probe fixed endpoints using multiprecision throughout the residual calculation.
+No equation revision, new data access or automatic confidence promotion occurs.
+See [the pilot and its limits](PHASE_C_CONSTRUCTION_MULTI_OUTPUT_PROFILE.md).
+
 ## Construction precision and certified reductions
 
 The returned eight derivative-recovery tasks verified all retained endpoints and
