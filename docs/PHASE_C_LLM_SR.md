@@ -259,7 +259,30 @@ Plans:
 - `configs/phase_c_llm_sr_expression_smoke_v1.json`: smoke v5's cells (T1 easy;
   T2 hard, two targets) at 400 samples per target. Frozen. It shows whether
   gpt-oss writes one-line expressions often enough, and what share the form
-  refuses.
+  refuses. Ran on js2 on 2026-10-23, 00:38 to 01:07Z, from checkout `38a0dba`
+  (run `phase-c-llm-sr-expression-smoke-v1`):
+  - The searches worked: 1,200 samples in 300 requests, no transport failures,
+    25 to 29 minutes per search.
+  - The form refused 3.5% of T1 easy's Gp samples (11 read along the rows, 3
+    had several statements), 30% of T2 hard's Gp samples (92 and 28) and 6.8%
+    of its I samples (22 and 5). For T2 hard's glucose the model kept reaching
+    for the meal history, mostly with one-line convolutions.
+  - Task 0 (T1 easy) sealed complete. Its pick is an equation, its refit equals
+    LLM-SR's score exactly, and its validation rollout error is 108, against
+    0.0012 for the program form's pick in the main run: one expression of the
+    current values cannot hold the gut's delay.
+  - Task 1 (T2 hard) did not seal, through a harness bug. Its system rolls out
+    on validation (error 1.75, reproduced on the Mac), but its training rollout
+    fails: on train_011 glucose reaches a pole of the Gp equation at Gp = 151.
+    The equation path then passed the missing training error to the sealed
+    record, which requires a number, and crashed. The program path instead
+    seals such a task as `rollout_failed`. That rule was never decided and has
+    never applied: no task of the main run failed its training rollout. How a
+    failed training rollout is recorded is open, for the user. Proposed: seal
+    the task complete with the failing trajectory named, since the training
+    rollout neither selects nor scores; the test rollout decides, as for every
+    method. A plan refuses to resume under changed code, so after the fix the
+    smoke reruns from a fresh root.
 - `configs/phase_c_llm_sr_expression_hosted_120b_v1.json`: the full roster, two
   seeds, 10,000 samples per target. Proposed, pending review. Its cost is about
   the main run's: 220,000 samples and about 55,000 requests, or three to four
