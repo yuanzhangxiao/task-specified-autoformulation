@@ -421,3 +421,177 @@ def test_v2_evidence_and_policy_are_sealed(prepared_v2):
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError):
         cli.verify(root)
+
+
+@pytest.fixture
+def prepared_v3(prepared_v2, tmp_path):
+    source, old, sidecar, _ = prepared_v2
+    root = tmp_path / "science-v3"
+    cli.prepare(source, root, protocol=cli.V3_PROTOCOL, consistency_source=sidecar)
+    return root, old
+
+
+def science_reply(**kwargs):
+    return reply(evidence_ids=["public_task"], **kwargs)
+
+
+def test_v3_no_endpoint_evidence_exact_resume_and_report(prepared_v3, monkeypatch):
+    root, old = prepared_v3
+    original = (old / "plan.json").read_bytes()
+    packets = []
+
+    def respond(url, body, timeout):
+        packet = json.loads(body["messages"][1]["content"])
+        packets.append(packet)
+        assert "parameter_audit" in packet
+        assert "function_consistency" in packet["training_consistency"]
+        assert "training_evidence" not in packet
+        assert "fitted_endpoint" not in packet
+        assert "training_endpoint" not in packet["allowed_evidence_ids"]
+        return response(science_reply())
+
+    from autoformalism.fitting import prefix_initialization
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("science checks must not fit, simulate, or repeat cached calls")
+
+    for name in ("fit_training", "infer_prefix", "forecast", "symbolic_rollout"):
+        monkeypatch.setattr(prefix_initialization, name, forbidden)
+    cli.preview(root)
+    preview = json.loads((root / "preview/parent_0.json").read_text())
+    summary = cli.run(
+        root, "http://127.0.0.1", transport=respond, token_transport=tokenizer
+    )
+    assert packets[0] == json.loads(preview["user"])
+    assert summary["status_counts"] == {"revised": 24}
+    assert summary["cost"]["physical_requests"] == 24
+    handoff = sealed_read(next((root / "results").glob("*/fit_handoff.json")))
+    assert handoff["protocol"] == "construction-revision-fit-handoff-3"
+    assert not handoff["training_consistency"]["function_consistency"]["conflicts"]
+    assert "parameter_audit" in handoff
+    assert (
+        cli.run(
+            root, "http://127.0.0.1", transport=forbidden, token_transport=forbidden
+        )
+        == summary
+    )
+    assert (old / "plan.json").read_bytes() == original
+
+
+def test_v3_monotonic_conflict_has_witness_and_repair_clears_it(prepared_v3):
+    root, _ = prepared_v3
+    parent = cli._prepared_parent(
+        root, sealed_read(root / "inputs.json"), "parent_0", cli.verify(root)
+    )
+    bad = science_reply(
+        edits=[{"component": "I", "kind": "dynamic", "sources": [], "expression": "1"}]
+    )
+
+    class Client:
+        def __init__(self):
+            self.packets = []
+
+        def call(self, **kwargs):
+            self.packets.append(json.loads(kwargs["user"]))
+            return {
+                "status": "responded",
+                "request_hash": str(len(self.packets)),
+                "raw_response": response(
+                    bad if len(self.packets) == 1 else science_reply()
+                ),
+            }
+
+    client = Client()
+    result = cli._episode(parent, client)
+    assert result["status"] == "revised"
+    diagnostic = client.packets[1]["repair_feedback"]["diagnostic"]
+    assert diagnostic["code"] == "FUNCTION_MODEL_DATA_CONFLICT"
+    assert diagnostic["details"]["assessment"]["status"] == "conflict"
+    assert diagnostic["details"]["assessment"]["function_consistency"]["conflicts"]
+    assert parent["problem"] == problem().model_dump(mode="json")
+
+
+def test_v3_retaining_contradictory_model_never_exports(prepared_v3):
+    root, _ = prepared_v3
+    parent = cli._prepared_parent(
+        root, sealed_read(root / "inputs.json"), "parent_0", cli.verify(root)
+    )
+    parent["problem"]["base_candidate"]["state_equations"][0]["rhs"] = "1"
+    with pytest.raises(ValueError, match="FUNCTION_MODEL_DATA_CONFLICT"):
+        cli._apply(parent, science_reply(edits=[]))
+
+
+def test_v3_science_policy_change_requires_fresh_campaign(prepared_v3):
+    root, _ = prepared_v3
+    plan = sealed_read(root / "plan.json")
+    plan.pop("artifact_sha256")
+    plan["policies"]["endpoint_scores_in_prompt"] = True
+    plan["artifact_sha256"] = cli.content_hash(plan)
+    (root / "plan.json").write_text(json.dumps(plan))
+    with pytest.raises(ValueError, match="policy"):
+        cli.verify(root)
+
+
+def test_v3_rejected_candidate_equations_remain_separate_from_parent(
+    prepared_v3, monkeypatch
+):
+    """A rejected reply's retained equation view is not lost or labeled its parent."""
+    root, _ = prepared_v3
+    plan = cli.verify(root)
+    entry = plan["cases"][0]
+    parent = cli._prepared_parent(
+        root, sealed_read(root / "inputs.json"), entry["parent_id"], plan
+    )
+    bad = science_reply(
+        edits=[{"component": "I", "kind": "dynamic", "sources": [], "expression": "1"}]
+    )
+
+    class Client:
+        def call(self, **kwargs):
+            return {
+                "status": "responded",
+                "request_hash": str(kwargs["attempt"]),
+                "raw_response": response(bad),
+            }
+
+    result = cli._episode(parent, Client())
+    assert result["status"] == "rejected"
+    assert result["problem"] is None
+    detail = result["attempts"][-1]["diagnostic"]["details"]
+    assert "d(I)/dt = 1" in detail["parameter_audit"]["expanded_equations"]
+    directory = root / "results" / entry["case_id"]
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "result.json").write_text(json.dumps(result))
+    # Receipt authentication is tested separately. Only this already-reconstructed
+    # episode is completed; the remaining report rows retain their parent scope.
+    monkeypatch.setattr(cli.receipts, "_calls", lambda *args: [])
+    monkeypatch.setattr(
+        cli,
+        "_completion",
+        lambda root, item, plan: {"verified": True}
+        if item["case_id"] == entry["case_id"]
+        else None,
+    )
+    cli.report(root)
+    records = json.loads((root / "science-audit.json").read_text())["models"]
+    row = next(item for item in records if item["model_id"] == entry["case_id"])
+    assert row["source_role"] == "candidate"
+    assert row["audit_scope"] == "last_rejected_candidate"
+    assert row["parameter_audit"] == detail["parameter_audit"]
+    parent_equation = next(
+        equation
+        for equation in row["parent_parameter_audit"]["equations"]
+        if equation["location"] == "rhs:I"
+    )
+    assert parent_equation["expanded_expression"] != "1"
+    document = (root / "REPORT.html").read_text()
+    article = document.split('<article id="model-0">', 1)[1].split(
+        '<article id="model-1">', 1
+    )[0]
+    candidate_section, parent_section = article.split(
+        "Parent equations for comparison", 1
+    )
+    assert '<pre class="equation">d(I)/dt = 1</pre>' in candidate_section
+    assert "Unchanged parent equations" in parent_section
+    parent_only = parent_section.split("<h4>Check coverage</h4>", 1)[0]
+    assert '<pre class="equation">d(I)/dt = 1</pre>' not in parent_only

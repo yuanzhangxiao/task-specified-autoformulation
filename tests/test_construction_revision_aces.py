@@ -240,6 +240,40 @@ def test_v2_execution_freezes_acceptance_policy(setup, monkeypatch):
     assert "--job-name=phasec-revision-checks" in seen
 
 
+def test_v3_launcher_keeps_science_run_separate(launcher):
+    invoke, group = launcher
+    result, calls = invoke("run", protocol=submission.campaign.V3_PROTOCOL)
+    assert result.returncode == 0, result.stderr
+    expected = str(group / "phase-c-function-science-checks-v1")
+    assert all(call["revision_root"] == expected for call in calls)
+    prepare = next(c["argv"] for c in calls if "prepare" in c["argv"])
+    assert prepare[prepare.index("--protocol") + 1] == submission.campaign.V3_PROTOCOL
+    assert "--consistency-evidence" in prepare
+
+
+def test_v3_execution_freezes_scientific_acceptance_policy(setup, monkeypatch):
+    root, plan = setup
+    plan.update(
+        protocol=submission.campaign.V3_PROTOCOL,
+        policies=deepcopy(submission.campaign.V3_POLICIES),
+        consistency_evidence_sha256="c" * 64,
+    )
+    seen = []
+
+    def queue(directory, key, options, worker, stage, index):
+        seen.extend(options)
+        return "12345"
+
+    monkeypatch.setattr(submission, "submit_job", queue)
+    submission.submit(root)
+    _, execution = submission.verify(root)
+    assert execution["protocol"] == "construction-revision-aces-execution-3"
+    assert execution["acceptance_policies"] == plan["policies"]
+    assert execution["acceptance_policies"]["endpoint_scores_in_prompt"] is False
+    assert "--job-name=phasec-function-checks" in seen
+    assert execution["optimizer_calls"] == 0
+
+
 @pytest.mark.parametrize("command", ["run", "report", "inspect"])
 @pytest.mark.parametrize("explicit_root", [False, True])
 def test_launcher_isolates_revision_root_from_stale_generic_root(

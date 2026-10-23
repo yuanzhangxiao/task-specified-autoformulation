@@ -10,6 +10,7 @@ export AF_REVISION_PROTOCOL=${AF_REVISION_PROTOCOL:-construction-feedback-revisi
 case "$AF_REVISION_PROTOCOL" in
   construction-feedback-revision-1) AF_REVISION_DEFAULT=phase-c-construction-revision-v1 ;;
   construction-feedback-revision-2) AF_REVISION_DEFAULT=phase-c-construction-revision-checks-v2 ;;
+  construction-feedback-revision-3) AF_REVISION_DEFAULT=phase-c-function-science-checks-v1 ;;
   *) echo 'Unsupported AF_REVISION_PROTOCOL.' >&2; exit 2 ;;
 esac
 export AF_REVISION_ROOT=${AF_REVISION_ROOT:-$AF_GROUP/$AF_REVISION_DEFAULT}
@@ -42,7 +43,7 @@ case "${1:?Use run, status, report, or inspect}" in
     export AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}
     "$AF_PYTHON" "$AF_REPO_ROOT/scripts/harmony_vocab.py" verify --directory "$AF_HARMONY_ASSETS"
     AF_PREPARE_OPTIONS=(--protocol "$AF_REVISION_PROTOCOL")
-    if [[ "$AF_REVISION_PROTOCOL" == construction-feedback-revision-2 ]]; then
+    if [[ "$AF_REVISION_PROTOCOL" != construction-feedback-revision-1 ]]; then
       AF_PREPARE_OPTIONS+=(--consistency-evidence "${AF_REVISION_CONSISTENCY:-$AF_REPO_ROOT/inputs/consistency-evidence.json}")
     fi
     "$AF_PYTHON" "$AF_CLI" prepare --source "${AF_REVISION_INPUTS:-$AF_REPO_ROOT/inputs/revision-inputs.json}" --root "$AF_OUTPUT_ROOT" "${AF_PREPARE_OPTIONS[@]}"
