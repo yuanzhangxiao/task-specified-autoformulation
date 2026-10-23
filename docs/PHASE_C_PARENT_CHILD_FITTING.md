@@ -176,6 +176,14 @@ The maintenance helpers below use only Python's standard library and do not
 import or change the fitter. They can be delivered together as the single-file
 `paired-fit-quota-recovery.pyz` to avoid extracting another source tree.
 
+The helpers require Python 3.9 or newer. ACES's default `python3` was confirmed
+to be Python 3.6, which cannot parse their annotations. Use the existing
+`/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python -S`
+for both maintenance commands. No scientific imports or new installation are
+needed. The delivered entrypoint now checks the version before importing either
+helper and is itself parseable by Python 3.6. The earlier zipapp also works with
+the explicit Python 3.11 executable; this error does not require another upload.
+
 The explicit `phase-c` profile of `archive_finished_component_caches.py` accepts
 only a `phase-c-runtime-cache` root and explicitly listed numeric jobs. It requires
 an empty current-user queue and an owned terminal allocation record from `sacct`.
