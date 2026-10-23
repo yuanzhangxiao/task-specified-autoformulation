@@ -323,7 +323,8 @@ Open, for the user and the planning agent:
   evaluator integrates with RK45 and fails a trajectory after 300 s. On
   validation one model needs more: LLM-SR alien seed 0's transcription, which
   Radau solves in under 2 s ([PHASE_C_LLM_SR.md](PHASE_C_LLM_SR.md)). The
-  reverse also happened: Radau timed out on one LLM-ODE pick that RK45 solved.
+  reverse also happened: Radau at rtol 1e-10 timed out on one LLM-ODE pick
+  that RK45 solved.
   Proposed, for every method including ours: integrate with RK45 as now; if a
   trajectory fails numerically (time limit or step-size failure), integrate it
   again with Radau at the same tolerances, and fail it only if both fail.
