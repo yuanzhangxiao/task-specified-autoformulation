@@ -92,10 +92,10 @@ selection, promotion, revision, or follow-up experiment.
 ## Run on ACES and inspect
 
 Upload the delivered bundle under
-`/scratch/group/p.nairr260351.000/u.yx126462`, then extract its source under
-`/scratch/user/u.yx126462` to spread file-count use across the two quotas.
-Results remain in group scratch. In an **ACES shell**, run from the extracted
-bundle directory:
+`/scratch/group/p.nairr260351.000/u.yx126462`. Check current file quotas before
+choosing a source destination; both scratch locations have approached their file
+limits. Use the verified installer below if extraction has failed. Results remain
+in group scratch. In an **ACES shell**, run from the complete bundle directory:
 
 ```bash
 bash run_fit.sh run
@@ -113,7 +113,7 @@ the corrected source bundle without installing SymPy or changing the numerical
 environment. Do not patch an existing sealed execution: keep it intact and choose
 a fresh results root if preparation or submission had already succeeded there.
 Because ACES previously reached its file quota, check `showquota` before
-extracting; budget roughly 700 file/directory entries in user scratch for code
+extracting; budget roughly 700 file/directory entries at the source destination
 and 2,500 in group scratch for the bounded receipts. Leave additional room for
 other work sharing the allocation. No GPU/compiler cache is created by this launch.
 The launcher first submits a five-minute CPU preflight that verifies the saved
@@ -166,3 +166,46 @@ the compute preflight described above and uses the separate `v2` output root.
 Keep `phase-c-paired-fit-v1` and its job/error records intact; do not edit its
 sealed identity to make verification pass. The models, inputs, fitter kernels,
 two starts and numerical budgets remain unchanged.
+
+### Recovery from incomplete extraction
+
+The `0bf4747` extraction subsequently hit the file quota. Its missing
+`autoformalism.targets` import is a consequence of the incomplete source copy.
+Do not launch it, install dependencies to compensate, or edit a sealed execution.
+The maintenance helpers below use only Python's standard library and do not
+import or change the fitter. They can be delivered together as the single-file
+`paired-fit-quota-recovery.pyz` to avoid extracting another source tree.
+
+The explicit `phase-c` profile of `archive_finished_component_caches.py` accepts
+only a `phase-c-runtime-cache` root and explicitly listed numeric jobs. It requires
+an empty current-user queue and an owned terminal allocation record from `sacct`.
+It accepts only the known compiler-cache directories (`triton`, `torchinductor`,
+`vllm`, `xdg`, `cuda`); LLM responses, model results and environments remain outside
+its scope. Every selected cache is archived, read back and checksum-verified;
+source contents and the queue are checked again before loose files are removed.
+Default invocation produces a read-only plan; `--apply` performs the archival.
+The original component profile retains its stricter successful-proposer rule.
+
+The latest returned inventory has no active jobs and one remaining Phase C cache,
+job `2206843`, occupying approximately 2,960 entries. Its terminal state is still
+verified when the helper runs. Store its archive and receipt in a small directory
+under home, which has separate quota headroom. Missing accounting or a new active
+job stops the cleanup; never bypass those checks by blindly deleting caches.
+
+`install_verified_paired_bundle.py` checks the supplied whole-archive SHA-256,
+every `MANIFEST.sha256` entry, the exact file roster and required launch inputs
+before extraction. It rejects links, unsafe paths and special members. It stages
+the source privately and publishes a complete directory only after readback
+verification. Existing incomplete destinations are preserved and refused; a
+complete matching destination can be reused. A failed write removes only the
+installer's own staging files. It does not launch anything.
+
+The unchanged `phase-c-paired-fit-0bf4747.tar.gz` contains 565 regular files and
+has SHA-256
+`8eeb5026909d68a728deb3d779471f1aeea9a2008017c43f5c7996dc2ee939dc`.
+After archiving the selected cache, install under group scratch, preserving the
+partial user-scratch copy and all v1 results. Chain verification and launch with
+`&&` so any failed installation prevents submission. Continue to use the v2
+results root, the unchanged 24-model roster and the compute-node preflight.
+All operations still require a few available file slots; this is bounded recovery,
+not a durable increase to the allocation's shared file quota.

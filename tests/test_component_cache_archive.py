@@ -34,6 +34,9 @@ def test_archive_roundtrip_and_idempotent_removal(paths, tmp_path):
     assert planned["entries"] == {"123": len(before)}
     assert not destination.exists()
     result = cache.run(root, destination, ["123"], apply=True, guard=completed)
+    assert json.loads((destination / "123.json").read_text())["protocol"] == (
+        "finished-component-cache-archive-1"
+    )
     assert result["entries_removed"] == len(before)
     assert not (root / "123").exists() and (root / "456").is_dir()
     assert (
@@ -174,3 +177,221 @@ def test_root_alias_overlap_and_traversal_rejected(paths, tmp_path):
         with pytest.raises(ValueError):
             cache.run(r, d, jobs, apply=True, guard=completed)
     assert (root / "123/triton/kernel.bin").exists()
+
+
+@pytest.fixture
+def phase_paths(paths):
+    root, destination, protected = paths
+    phase_root = root.with_name("phase-c-runtime-cache")
+    root.rename(phase_root)
+    return phase_root, destination, protected
+
+
+def phase_accounting(state="FAILED", owner=None):
+    """Include allocation and step rows to exercise exact allocation matching."""
+    owner = str(cache.os.getuid()) if owner is None else owner
+    return (
+        "JobID|JobIDRaw|JobName|State|ExitCode|UID\n"
+        f"100_9|123|phasec-confirmation-propose|{state}|1:0|{owner}\n"
+        f"100_9.batch|123.batch|batch|FAILED|1:0|{owner}\n"
+    )
+
+
+@pytest.mark.parametrize("state", [*sorted(cache.TERMINAL_STATES), "CANCELLED by 99"])
+def test_phase_c_terminal_states_allowed(monkeypatch, state):
+    calls = []
+
+    def output(argv, **_kwargs):
+        calls.append(argv)
+        return "" if argv[0] == "squeue" else phase_accounting(state)
+
+    monkeypatch.setattr(cache.subprocess, "check_output", output)
+    cache.guard_phase_c_jobs(["123"])
+    assert calls[0] == [
+        "squeue",
+        "--noheader",
+        "--user",
+        str(cache.os.getuid()),
+        "--format=%i",
+    ]
+    assert calls[1][1:3] == ["-j", "123"]
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "active_unrelated_job",
+        "missing",
+        "step_only",
+        "duplicate",
+        "wrong_owner",
+        "RUNNING",
+        "PENDING",
+        "COMPLETING",
+        "REQUEUED",
+        "SPECIAL_EXIT",
+        "SUSPENDED",
+        "CANCELLED+",
+        "CANCELLED by unknown",
+    ],
+)
+def test_phase_c_scheduler_rejects_unconfirmed_jobs(phase_paths, monkeypatch, problem):
+    root, destination, _ = phase_paths
+
+    def output(argv, **_kwargs):
+        if argv[0] == "squeue":
+            return "999\n" if problem == "active_unrelated_job" else ""
+        if problem == "missing":
+            return "JobID|JobIDRaw|JobName|State|ExitCode|UID\n"
+        if problem == "step_only":
+            return phase_accounting().replace("100_9|123|", "100_9.batch|123|")
+        if problem == "duplicate":
+            result = phase_accounting()
+            return result + result.splitlines()[1] + "\n"
+        if problem == "wrong_owner":
+            return phase_accounting(owner=str(cache.os.getuid() + 1))
+        return phase_accounting(problem)
+
+    monkeypatch.setattr(cache.subprocess, "check_output", output)
+    with pytest.raises(ValueError):
+        cache.run(root, destination, ["123"], apply=True, profile="phase-c")
+    assert (root / "123/triton/kernel.bin").is_file()
+    assert not destination.exists()
+
+
+def test_phase_c_failed_job_archive_roundtrip(phase_paths, monkeypatch):
+    root, destination, protected = phase_paths
+    calls = []
+
+    def output(argv, **_kwargs):
+        calls.append(argv[0])
+        return "" if argv[0] == "squeue" else phase_accounting()
+
+    monkeypatch.setattr(cache.subprocess, "check_output", output)
+    before = cache.snapshot(root, "123")
+    planned = cache.run(root, destination, ["123"], apply=False, profile="phase-c")
+    assert planned["entries"] == {"123": len(before)}
+    assert not destination.exists()
+    calls.clear()
+    result = cache.run(root, destination, ["123"], apply=True, profile="phase-c")
+    assert calls == ["squeue", "sacct", "squeue", "sacct"]
+    assert result["entries_removed"] == len(before)
+    receipt = json.loads((destination / "123.json").read_text())
+    assert receipt["protocol"] == "finished-phase-c-cache-archive-1"
+    assert (
+        cache.verify_archive(destination / "123.tar", before)
+        == (receipt["archive_sha256"])
+    )
+    assert not (root / "123").exists() and (root / "456").is_dir()
+    assert (protected / "response.json").is_file()
+    assert (
+        cache.run(root, destination, ["123"], apply=True, profile="phase-c")[
+            "entries_removed"
+        ]
+        == 0
+    )
+
+
+def test_phase_c_queue_rechecked_before_removal(phase_paths, monkeypatch):
+    root, destination, _ = phase_paths
+    queue_calls = 0
+
+    def output(argv, **_kwargs):
+        nonlocal queue_calls
+        if argv[0] == "squeue":
+            queue_calls += 1
+            return "" if queue_calls == 1 else "999\n"
+        return phase_accounting()
+
+    monkeypatch.setattr(cache.subprocess, "check_output", output)
+    with pytest.raises(ValueError, match="queued/running"):
+        cache.run(root, destination, ["123"], apply=True, profile="phase-c")
+    assert (root / "123/triton/kernel.bin").is_file()
+    assert (destination / "123.json").is_file()
+
+
+def test_phase_c_rejects_wrong_root_and_default_profile(phase_paths):
+    root, destination, _ = phase_paths
+    with pytest.raises(ValueError, match="component-runtime-cache"):
+        cache.run(root, destination, ["123"], apply=False, guard=completed)
+    for name in ("component-runtime-cache", "runtime-cache", "results"):
+        wrong_root = root.with_name(name)
+        wrong_root.mkdir()
+        with pytest.raises(ValueError, match="phase-c-runtime-cache"):
+            cache.run(
+                wrong_root,
+                destination,
+                ["123"],
+                apply=False,
+                profile="phase-c",
+                guard=completed,
+            )
+    assert not destination.exists()
+
+
+def test_phase_c_checksum_tampering_preserves_originals(phase_paths):
+    root, destination, _ = phase_paths
+    destination.mkdir()
+    cache.prepare_archive(root, destination, "123", profile="phase-c")
+    archive_path = destination / "123.tar"
+    with tarfile.open(archive_path) as archive:
+        position = archive.getmember("123/triton/kernel.bin").offset_data
+    with archive_path.open("r+b") as stream:
+        stream.seek(position)
+        stream.write(b"changed")
+    with pytest.raises(ValueError, match="checksum"):
+        cache.run(
+            root,
+            destination,
+            ["123"],
+            apply=True,
+            profile="phase-c",
+            guard=completed,
+        )
+    assert (root / "123/triton/kernel.bin").is_file()
+
+
+def test_phase_c_receipt_profile_must_match(phase_paths):
+    root, destination, _ = phase_paths
+    destination.mkdir()
+    cache.prepare_archive(root, destination, "123")
+    with pytest.raises(ValueError, match="identity differs"):
+        cache.run(
+            root,
+            destination,
+            ["123"],
+            apply=True,
+            profile="phase-c",
+            guard=completed,
+        )
+    assert (root / "123/triton/kernel.bin").is_file()
+
+
+def test_cli_phase_c_is_explicit_and_defaults_to_read_only(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cache.sys,
+        "argv",
+        [
+            "archive_finished_component_caches.py",
+            "--profile",
+            "phase-c",
+            "--root",
+            "/cache/phase-c-runtime-cache",
+            "--archive-root",
+            "/archive",
+            "--jobs",
+            "123",
+        ],
+    )
+    observed = {}
+
+    def run(root, destination, jobs, **kwargs):
+        observed.update(root=root, destination=destination, jobs=jobs, **kwargs)
+        return {"apply": kwargs["apply"]}
+
+    monkeypatch.setattr(cache, "run", run)
+    cache.main()
+    assert observed["profile"] == "phase-c"
+    assert observed["apply"] is False
+    assert observed["jobs"] == ["123"]
+    assert json.loads(capsys.readouterr().out) == {"apply": False}

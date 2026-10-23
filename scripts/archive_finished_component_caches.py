@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Archive verified compiler caches of completed component jobs before removal.
+"""Archive verified compiler caches of terminal jobs before removal.
 
 Default is a read-only plan. --apply retains a tar archive and a per-file checksum
 receipt for every explicitly named job. Scientific call caches are not accepted.
+The default component profile requires successful component proposer jobs. The
+explicit phase-c profile requires an empty user queue and terminal accounting.
 This script is outside the frozen experiment runtime.
 """
 
@@ -26,6 +28,25 @@ from collections.abc import Callable
 from pathlib import Path
 
 CACHE_KINDS = {"triton", "torchinductor", "vllm", "xdg", "cuda"}
+PROFILES = {
+    "component": (
+        "component-runtime-cache",
+        "finished-component-cache-archive-1",
+    ),
+    "phase-c": ("phase-c-runtime-cache", "finished-phase-c-cache-archive-1"),
+}
+TERMINAL_STATES = {
+    "BOOT_FAIL",
+    "CANCELLED",
+    "COMPLETED",
+    "DEADLINE",
+    "FAILED",
+    "NODE_FAIL",
+    "OUT_OF_MEMORY",
+    "PREEMPTED",
+    "REVOKED",
+    "TIMEOUT",
+}
 
 
 def digest(stream) -> str:
@@ -157,15 +178,58 @@ def guard_jobs(jobs: list[str]) -> None:
             raise ValueError(f"unconfirmed successful proposer job: {job}")
 
 
-def prepare_archive(root: Path, destination: Path, job: str) -> dict:
+def guard_phase_c_jobs(jobs: list[str]) -> None:
+    """Require an empty user queue and exact, owned, terminal allocation records."""
+    owner = str(os.getuid())
+    queue = subprocess.check_output(
+        ["squeue", "--noheader", "--user", owner, "--format=%i"], text=True
+    )
+    if queue.strip():
+        raise ValueError("user jobs are queued/running; phase-c caches remain in place")
+    text = subprocess.check_output(
+        [
+            "sacct",
+            "-j",
+            ",".join(jobs),
+            "--parsable2",
+            "--format=JobID%40,JobIDRaw%40,JobName%40,State%40,ExitCode,UID",
+        ],
+        text=True,
+    )
+    records = list(csv.DictReader(io.StringIO(text), delimiter="|"))
+    for job in jobs:
+        matches = [
+            row
+            for row in records
+            if (row.get("JobIDRaw") or "").strip() == job
+            and "." not in (row.get("JobID") or "")
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"unconfirmed terminal allocation: {job}")
+        row = matches[0]
+        state = (row.get("State") or "").strip()
+        # Slurm may append the cancelling UID. Do not accept arbitrary state
+        # prefixes, truncation markers, or held/requeued states as terminal.
+        if re.fullmatch(r"CANCELLED by [0-9]+", state):
+            state = "CANCELLED"
+        if state not in TERMINAL_STATES or (row.get("UID") or "").strip() != owner:
+            raise ValueError(f"unconfirmed owned terminal allocation: {job}")
+
+
+def prepare_archive(
+    root: Path, destination: Path, job: str, *, profile: str = "component"
+) -> dict:
     """Create or verify one recoverable archive; never overwrite old receipts."""
+    if profile not in PROFILES:
+        raise ValueError(f"unknown cache profile: {profile}")
+    protocol = PROFILES[profile][1]
     archive, receipt = destination / f"{job}.tar", destination / f"{job}.json"
     if archive.is_symlink() or receipt.is_symlink():
         raise ValueError("symlinked archive or receipt")
     if receipt.exists():
         record = json.loads(receipt.read_text())
         if (
-            record.get("protocol") != "finished-component-cache-archive-1"
+            record.get("protocol") != protocol
             or record.get("root") != str(root)
             or record.get("job") != job
         ):
@@ -195,7 +259,7 @@ def prepare_archive(root: Path, destination: Path, job: str) -> dict:
     with temporary.open("rb") as stream:
         os.fsync(stream.fileno())
     record = {
-        "protocol": "finished-component-cache-archive-1",
+        "protocol": protocol,
         "root": str(root),
         "job": job,
         "archive_sha256": sha,
@@ -216,12 +280,16 @@ def run(
     jobs: list[str],
     *,
     apply: bool,
-    guard: Callable[[list[str]], None] = guard_jobs,
+    profile: str = "component",
+    guard: Callable[[list[str]], None] | None = None,
 ) -> dict:
     """Validate all jobs before changes; resume deletion only from verified archives."""
+    if profile not in PROFILES:
+        raise ValueError(f"unknown cache profile: {profile}")
     root, destination = physical(root), physical(destination)
-    if root.name != "component-runtime-cache" or not root.is_dir():
-        raise ValueError("expected existing component-runtime-cache root")
+    expected_root = PROFILES[profile][0]
+    if root.name != expected_root or not root.is_dir():
+        raise ValueError(f"expected existing {expected_root} root")
     if destination.is_relative_to(root) or root.is_relative_to(destination):
         raise ValueError("archive and cache roots overlap")
     if (
@@ -230,6 +298,8 @@ def run(
         or any(re.fullmatch(r"[0-9]+", job) is None for job in jobs)
     ):
         raise ValueError("unique numeric job IDs required")
+    if guard is None:
+        guard = guard_jobs if profile == "component" else guard_phase_c_jobs
     guard(jobs)
     if not apply:
         return {"apply": False, "entries": {j: len(snapshot(root, j)) for j in jobs}}
@@ -244,7 +314,7 @@ def run(
         records = {}
         for job in jobs:
             print(f"Archiving/verifying completed-job cache {job}...", file=sys.stderr)
-            records[job] = prepare_archive(root, destination, job)
+            records[job] = prepare_archive(root, destination, job, profile=profile)
         directory_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory_fd)
@@ -277,11 +347,19 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--archive-root", type=Path, required=True)
     parser.add_argument("--jobs", nargs="+", required=True)
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="component")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
-            run(args.root, args.archive_root, args.jobs, apply=args.apply), indent=2
+            run(
+                args.root,
+                args.archive_root,
+                args.jobs,
+                apply=args.apply,
+                profile=args.profile,
+            ),
+            indent=2,
         )
     )
 
