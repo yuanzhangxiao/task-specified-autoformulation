@@ -68,7 +68,7 @@ def _initial_step(value, lower, upper, unit, policy, local_scale=None):
     return step
 
 
-def _pair(coarse, fine, residual, column, policy):
+def _pair(coarse, fine, residual, column, policy, *, residual_error=None):
     """Assess one same-scheme geometric pair without using larger-scale data."""
     central = fine.scheme == "central"
     order_factor = 4 if central or fine.order == 2 else 2
@@ -101,6 +101,14 @@ def _pair(coarse, fine, residual, column, policy):
     gradient_error = float(
         2 * np.mean(np.abs(residual) * (np.abs(column - fine.estimate) + radius))
     )
+    gradient_radius = float(2 * np.mean(np.abs(residual) * radius))
+    if residual_error is not None:
+        # The gradient contains both residual and Jacobian factors. Accurate
+        # derivatives alone cannot resolve a cancellation-contaminated residual.
+        gradient_error += float(
+            2 * np.mean(residual_error * (np.abs(fine.estimate) + radius))
+        )
+        gradient_radius += float(2 * np.mean(residual_error * radius))
     if not np.isfinite(gradient_error):
         raise ValueError("nonfinite local derivative gradient uncertainty")
     return {
@@ -109,7 +117,7 @@ def _pair(coarse, fine, residual, column, policy):
         "sides_ok": sides_ok,
         "uncertainty": uncertainty,
         "gradient_error": gradient_error,
-        "gradient_radius": float(2 * np.mean(np.abs(residual) * radius)),
+        "gradient_radius": gradient_radius,
         "column_error_l2": float(
             np.linalg.norm(np.abs(column - fine.estimate) + radius)
         ),
@@ -210,6 +218,8 @@ def local_derivative_check(
     directions=None,
     residual_only=None,
     local_coordinate_scales=None,
+    finite_difference_probe=None,
+    residual_error_bound=None,
 ):
     """Check all nonfixed coordinates with local, bounded shrinking differences.
 
@@ -217,6 +227,9 @@ def local_derivative_check(
     oracle values) permit a smaller probe. Finite earlier directions and all probe
     attempts survive failures. A failed or partial audit never qualifies search.
     A valid pair stops a direction early, avoiding unconditional six-scale work.
+    The opt-in probe callback supplies already formed differences in the declared
+    units; a residual-error callback contributes a normalized residual envelope
+    to the gradient bound without altering the Jacobian/rank tolerance.
     """
     x, lo, hi, units = a._coordinates(vector, lower, upper, coordinate_units)
     if local_coordinate_scales is not None and not policy.local_bounds_aware:
@@ -290,6 +303,17 @@ def local_derivative_check(
             "step": step,
         }
         try:
+            if finite_difference_probe is not None:
+                result = finite_difference_probe(index, scale_index, step, deadline)
+                metadata["scheme"] = result.scheme
+                return save_probe(
+                    metadata,
+                    result.estimate,
+                    result.roundoff,
+                    result.unilateral,
+                    result.unilateral_roundoff,
+                    order=result.order,
+                )
             pa, pb = x.copy(), x.copy()
             if policy.local_bounds_aware and scheme != "central":
                 sign = 1 if scheme == "forward" else -1
@@ -431,6 +455,17 @@ def local_derivative_check(
 
     try:
         base_r, base_j = call(x, full=True)
+        residual_error = (
+            None
+            if residual_error_bound is None
+            else np.asarray(residual_error_bound(), dtype=float)
+        )
+        if residual_error is not None and (
+            residual_error.shape != base_r.shape
+            or not np.isfinite(residual_error).all()
+            or np.any(residual_error < 0)
+        ):
+            raise ValueError("invalid residual uncertainty envelope")
         if residual_only is not None and not np.array_equal(call(x)[0], base_r):
             raise ValueError(
                 "residual-only callback differs from audited oracle at base"
@@ -468,7 +503,14 @@ def local_derivative_check(
                     or fine.scale_index != coarse.scale_index + 1
                 ):
                     continue
-                pair = _pair(coarse, fine, base_r, column, policy)
+                pair = _pair(
+                    coarse,
+                    fine,
+                    base_r,
+                    column,
+                    policy,
+                    residual_error=residual_error,
+                )
                 if policy.diagnostic_precision:
                     pair["projected_gradient_error"] = _projected_uncertainty(
                         pair,

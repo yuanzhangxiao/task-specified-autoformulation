@@ -124,6 +124,7 @@ def search(
     telemetry=False,
     optimizer_scaling="jacobian",
     record_steps=False,
+    record_full_steps=False,
     scaling_policy: RelativeScaling | None = None,
     normalized_objective=False,
     objective_multiplier: float | None = None,
@@ -138,6 +139,8 @@ def search(
     """
     if optimizer_scaling not in {"jacobian", "fixed_coordinates", "guarded_relative"}:
         raise ValueError("unknown optimizer scaling")
+    if record_full_steps and not record_steps:
+        raise ValueError("full accepted vectors require record_steps")
     multiplier = (
         objective_multiplier
         if objective_multiplier is not None
@@ -153,6 +156,7 @@ def search(
     count, best, cached, domain_events, projection = 0, None, None, [], None
     begun, trace, steps = monotonic(), [], []
     accepted = None
+    cached_full = accepted_full = None
     scaling = {}
     history, stationarity = [], None
     started = failed = 0
@@ -176,8 +180,24 @@ def search(
                 else {}
             )
             | ({"accepted_steps": steps} if record_steps else {})
+            | full_history_receipt()
             | ({"solver_scaling": scaling} if scaling else {})
             | rejection_receipt()
+        )
+
+    def full_history_receipt():
+        """Bind retained full-vector steps to their chart and coordinate units."""
+        return (
+            {
+                "accepted_history_protocol": "full-coordinate-accepted-steps-1",
+                "history_coordinate_names": list(oracle.names),
+                "history_coordinate_units": oracle.units.tolist(),
+                "last_accepted_parameters": None
+                if accepted_full is None
+                else oracle.parameters(accepted_full),
+            }
+            if record_full_steps
+            else {}
         )
 
     def rejection_receipt():
@@ -197,6 +217,7 @@ def search(
     def evaluate(q):
         nonlocal count, best, cached, projection, accepted, stationarity
         nonlocal started, failed, invalid_cached
+        nonlocal cached_full, accepted_full
         if cached is not None and np.array_equal(q, cached[0]):
             return cached[1:]
         if invalid_cached is not None and np.array_equal(q, invalid_cached[0]):
@@ -288,8 +309,12 @@ def search(
             )
         save()
         cached = (q.copy(), r, scaled_jacobian)
+        if record_full_steps:
+            cached_full = vector.copy()
         if record_steps and accepted is None:
             accepted = cached
+            if record_full_steps:
+                accepted_full = cached_full.copy()
         if value <= target and (acceptable is None or acceptable(r)):
             raise Reached
         if poor_fit is not None and free:
@@ -320,7 +345,7 @@ def search(
 
     def callback(intermediate_result):
         """Accepted displacement and local linear prediction; no extra evaluations."""
-        nonlocal accepted
+        nonlocal accepted, accepted_full
         q = intermediate_result.x
         if np.array_equal(q, accepted[0]):
             return
@@ -341,6 +366,17 @@ def search(
                 "reduction_ratio": actual / predicted if predicted > 0 else None,
             }
         )
+        if record_full_steps:
+            steps[-1].update(
+                outer_coordinate_step_norm=steps[-1]["coordinate_step_norm"],
+                coordinate_step_norm=float(
+                    np.linalg.norm((cached_full - accepted_full) / oracle.units)
+                ),
+                previous_reduced_vector=accepted_full.tolist(),
+                reduced_vector=cached_full.tolist(),
+                parameters_sha256=content_sha256(oracle.parameters(cached_full)),
+            )
+            accepted_full = cached_full.copy()
         accepted = cached
         save()
 
@@ -410,6 +446,7 @@ def search(
         "domain_events": domain_events,
         "projection": projection,
         **rejection_receipt(),
+        **full_history_receipt(),
         **({"solver_scaling": scaling} if scaling else {}),
         **({"completed_calls": len(trace), "evaluations": trace} if telemetry else {}),
         **(

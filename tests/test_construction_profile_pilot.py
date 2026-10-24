@@ -453,3 +453,202 @@ def test_unavailable_profile_derivative_preserves_structured_reason():
         )
     assert len(value["projection_failures"]) == 8
     assert value["projection_failures_observed"] >= 13
+
+
+def test_full_profile_history_binds_units_vectors_and_exact_endpoint():
+    from tests.test_recovery_numerics import QuadraticOracle
+
+    oracle = QuadraticOracle()
+    prior, point = np.array([1.0, 3.0]), np.array([1.5, 4.5])
+    parameters = oracle.parameters(point)
+    fit = {
+        "accepted_history_protocol": "full-coordinate-accepted-steps-1",
+        "history_coordinate_names": list(oracle.names),
+        "history_coordinate_units": oracle.units.tolist(),
+        "last_accepted_parameters": parameters,
+        "best": {"parameters": parameters, "training_nmse": 0.25},
+        "accepted_steps": [
+            {
+                "training_nmse": 0.25,
+                "evaluation_count": 2,
+                "coordinate_step_norm": float(
+                    np.linalg.norm((point - prior) / oracle.units)
+                ),
+                "previous_reduced_vector": prior.tolist(),
+                "reduced_vector": point.tolist(),
+                "parameters_sha256": c.public.content_sha256(parameters),
+            }
+        ],
+    }
+    history, matched = c._bound_full_history(oracle, parameters, fit)
+    assert matched and len(history) == 1
+    for change in ("units", "vector", "norm", "endpoint", "loss"):
+        bad = deepcopy(fit)
+        if change == "units":
+            bad["history_coordinate_units"][0] = 99
+        elif change == "vector":
+            bad["accepted_steps"][0]["reduced_vector"][1] += 1
+        elif change == "norm":
+            bad["accepted_steps"][0]["coordinate_step_norm"] = 0.25
+        elif change == "endpoint":
+            bad["last_accepted_parameters"] = {"a": 1.6, "initial": 4.8}
+        else:
+            bad["best"]["training_nmse"] = 0.2
+        assert c._bound_full_history(oracle, parameters, bad) == ([], False)
+
+
+def test_full_residual_fallback_uses_same_budget_and_policy(monkeypatch):
+    from time import monotonic
+
+    policy = c.previous._adequacy_policy(diagnostic=True)
+    guarded = SimpleNamespace(
+        search_qualified=False,
+        status="inconclusive",
+        error=None,
+        gradient_precision_qualified=False,
+        parameter_information_qualified=False,
+    )
+    monkeypatch.setattr(c.recovery, "_derivative", lambda *a: guarded)
+    monkeypatch.setattr(c.public, "_jsonable", lambda value: {"status": value.status})
+    observed = []
+
+    def full(oracle, vector, deadline, **kwargs):
+        observed.append(deadline)
+        assert kwargs["adequacy_policy"] == policy
+        kwargs["audit"]["calls_started"] = 10
+        return SimpleNamespace(status="passed")
+
+    monkeypatch.setattr(c.precision, "derivative_check", full)
+    budget = c.prefix_execution._budget(1, 2)
+    state, snapshots = {}, []
+    check = c._full_residual_fallback(
+        None, np.ones(1), budget, 1, policy, state, snapshots.append
+    )
+    assert check.status == "passed"
+    assert monotonic() < observed[0] <= budget.wall + 1.01
+    assert state["full_residual_precision_audit"]["calls_started"] == 10
+    assert [p["backend"] for p in state["derivative_passes"]] == [
+        "guarded",
+        "full-residual-multiprecision",
+    ]
+    assert snapshots
+
+
+def test_new_diagnostic_cost_counts_both_passes_without_final_check_duplicates():
+    def stage(guarded, full):
+        return {
+            "status": "complete",
+            "wall_seconds": 12,
+            "value": {
+                "status": "complete",
+                "derivative_passes": [
+                    {
+                        "backend": "guarded",
+                        "derivative_check": {
+                            "calls_started": guarded,
+                            "calls_completed": guarded,
+                        },
+                    },
+                    {
+                        "backend": "full-residual-multiprecision",
+                        "derivative_check": {
+                            "calls_started": full,
+                            "calls_completed": full,
+                        },
+                    },
+                ],
+                "derivative_check": {"calls_started": full, "calls_completed": full},
+                "full_residual_precision_audit": {
+                    "calls_started": full,
+                    "calls_completed": full,
+                },
+            },
+        }
+
+    operations = {
+        "qualification": stage(3, 7),
+        "retained_diagnosis": stage(5, 11),
+        "continuation_search": {
+            "value": {
+                "profile_derivative_check": {
+                    "calls_started": 13,
+                    "calls_completed": 13,
+                    "elapsed_seconds": 2,
+                }
+            },
+        },
+    }
+    before = deepcopy(operations)
+    cost = c._diagnostic_cost(operations)
+    assert cost["derivative_calls_started_observed"] == 26
+    assert cost["derivative_calls_completed_observed"] == 26
+    assert cost["stage_wall_seconds_observed"] == 24
+    assert cost["precision_passes_observed"] == 2
+    assert cost["profile_derivative_calls_started_observed"] == 13
+    assert cost["complete"]
+    assert operations == before
+
+
+@pytest.mark.parametrize("stage", ["qualification", "retained_diagnosis"])
+def test_new_diagnostic_cost_keeps_incomplete_mp_counters_without_check(stage):
+    operations = {
+        stage: {
+            "status": "interrupted",
+            "wall_seconds": 4,
+            "observed_progress": {
+                "derivative_passes": [
+                    {
+                        "backend": "guarded",
+                        "derivative_check": {
+                            "calls_started": 3,
+                            "calls_completed": 3,
+                        },
+                    }
+                ],
+                "full_residual_precision_audit": {
+                    "calls_started": 7,
+                    "calls_completed": 5,
+                    "calls_failed": 1,
+                },
+            },
+        },
+    }
+    cost = c._diagnostic_cost(operations)
+    assert cost["derivative_calls_started_observed"] == 10
+    assert cost["derivative_calls_completed_observed"] == 8
+    assert cost["stage_wall_seconds_observed"] == 4
+    assert not cost["complete"]
+
+
+def test_legacy_diagnostic_cost_is_unchanged():
+    operations = {
+        "qualification": {
+            "status": "complete",
+            "wall_seconds": 4,
+            "value": {
+                "passes": [
+                    {
+                        "status": "complete",
+                        "derivative_check": {
+                            "calls_started": 3,
+                            "calls_completed": 3,
+                        },
+                    }
+                ]
+            },
+        },
+        "retained_diagnosis": {
+            "status": "complete",
+            "wall_seconds": 5,
+            "value": {"derivative_check": {"calls_started": 7, "calls_completed": 7}},
+        },
+    }
+    legacy = c.previous.previous._diagnostic_cost(operations)
+    actual = c._diagnostic_cost(operations)
+    assert {key: actual[key] for key in legacy} == legacy
+    assert set(actual) - set(legacy) == {
+        "profile_derivative_calls_started_observed",
+        "profile_derivative_calls_completed_observed",
+        "profile_derivative_seconds_observed",
+        "profile_derivative_charge",
+    }

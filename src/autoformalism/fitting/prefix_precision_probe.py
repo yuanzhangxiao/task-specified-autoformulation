@@ -3,7 +3,9 @@
 Unlike transition-only multiprecision, this diagnostic evaluates the certified
 coordinate lift, coefficients, initial maps, propagation, observations and
 residual subtraction in private mpmath contexts. Finite differences are formed
-before converting to float64. It neither searches nor grants qualification.
+before converting to float64. The sampled comparison grants no qualification.
+The separate full-coordinate opt-in may qualify numerical derivatives under the
+existing policy; neither path searches or certifies a minimum or confidence.
 """
 
 from __future__ import annotations
@@ -16,7 +18,11 @@ from time import monotonic
 import casadi as ca
 import numpy as np
 
-from autoformalism.fitting import prefix_execution, prefix_fit_adequacy
+from autoformalism.fitting import (
+    prefix_execution,
+    prefix_fit_adequacy,
+    prefix_local_derivatives,
+)
 from autoformalism.fitting.prefix_local_derivatives import _initial_step
 from autoformalism.fitting.public_fitting import content_sha256
 from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
@@ -197,8 +203,11 @@ def _symbolic_lift(reduction, vector):
     """Compose only the three existing typed, certified coordinate sections."""
     from autoformalism.fitting.prefix_construction_recovery import ActiveReduction
     from autoformalism.fitting.prefix_gain_reduction import GainReduction
+    from autoformalism.fitting.prefix_multioutput_profile import AggregatedReduction
     from autoformalism.fitting.prefix_structural_reduction import StructuralReduction
 
+    if isinstance(reduction, AggregatedReduction):
+        return reduction.symbolic_lift(vector)
     if isinstance(reduction, StructuralReduction):
         values = dict(
             zip(reduction.base.names, map(float, reduction.anchor), strict=True)
@@ -634,3 +643,329 @@ def compare(
     if interrupted is not None:
         raise interrupted
     return result
+
+
+def derivative_check(
+    oracle,
+    vector,
+    deadline,
+    *,
+    adequacy_policy=None,
+    policy=None,
+    audit=None,
+    checkpoint=None,
+) -> prefix_fit_adequacy.DerivativeCheck:
+    """Audit every active analytic column using full-residual MP local stencils.
+
+    This opt-in path reuses the existing local pair, gradient and rank policies.
+    Differences are formed before float conversion. Two precision levels supply
+    an empirical arithmetic envelope, not a rigorous error certificate. The
+    caller's one deadline covers setup, all MP work and optional checkpoints.
+    """
+    import mpmath
+
+    begun = monotonic()
+    local = adequacy_policy or _local_policy().model_copy(
+        update={"diagnostic_precision": True}
+    )
+    if not (local.precision_aware and local.local_bounds_aware):
+        raise ValueError("full-residual qualification requires bounds-aware precision")
+    policy = policy or PrecisionProbePolicy(maximum_columns=64)
+    if not isinstance(policy, PrecisionProbePolicy):
+        raise TypeError("typed precision probe policy required")
+    vector = oracle.vector(oracle.parameters(np.asarray(vector, float)))
+    required = tuple(int(i) for i in np.flatnonzero(oracle.lower < oracle.upper))
+    if len(required) > min(policy.maximum_columns, local.max_directions):
+        raise ValueError("all-coordinate precision allowance is insufficient")
+    _deadline(deadline)
+    evidence = audit if audit is not None else {}
+    evidence.update(
+        protocol="scoped-prefix-full-residual-qualification-1",
+        precision_policy=policy_receipt(policy),
+        required_indices=list(required),
+        coordinate_names=list(oracle.names),
+        coordinate_units=oracle.units.tolist(),
+        parameters_sha256=content_sha256(oracle.parameters(vector)),
+        local_policy=local.model_dump(mode="json"),
+        baseline_precision_mode=getattr(oracle, "precision_mode", "original"),
+        finite_difference_backend="full-residual-multiprecision",
+        calls_started=0,
+        calls_completed=0,
+        calls_failed=0,
+        jacobian_calls_started=0,
+        residual_only_calls_started=0,
+        maximum_calls=1 + 2 + 4 * local.local_max_scales * len(required),
+        search_performed=False,
+        qualification_override=False,
+        stencils=[],
+    )
+    model = _Residual(oracle, policy)
+    evidence.update(
+        source_sha256=content_sha256(model.original.problem),
+        training_sha256=content_sha256(model.original.training),
+        reduction_sha256=oracle.reduction.receipt["sha256"]
+        if oracle is not model.original
+        else None,
+    )
+    contexts = []
+    for digits in policy.decimal_digits:
+        ctx = mpmath.mp.clone()
+        ctx.dps = digits + evidence["precision_policy"]["guard_digits"]
+        contexts.append(ctx)
+    high = contexts[-1]
+    references = None
+    residual_error = None
+    scales = oracle.local_coordinate_scales(vector)
+
+    def call(function, *, full=False):
+        _deadline(deadline)
+        if evidence["calls_started"] >= evidence["maximum_calls"]:
+            raise TimeoutError("full-residual derivative call allowance exhausted")
+        evidence["calls_started"] += 1
+        evidence[
+            "jacobian_calls_started" if full else "residual_only_calls_started"
+        ] += 1
+        try:
+            value = function()
+            _deadline(deadline)
+        except BaseException:
+            evidence["calls_failed"] += 1
+            raise
+        evidence["calls_completed"] += 1
+        return value
+
+    def evaluate(point, end):
+        nonlocal references, residual_error
+        base, jacobian = call(lambda: oracle.evaluate(point, end), full=True)
+        references = [call(lambda c=c: model.evaluate(point, c, end)) for c in contexts]
+        if any(len(r) != len(base) for r in references):
+            raise ValueError("full-residual precision shape differs")
+        evidence["base_residual_discrepancy_rms"] = {
+            "baseline_vs_high": _rms(
+                high,
+                [
+                    high.mpf(float(a)) - b
+                    for a, b in zip(base, references[-1], strict=True)
+                ],
+            ),
+            "low_vs_high": _rms(
+                high, [high.mpf(a) - b for a, b in zip(*references, strict=True)]
+            ),
+        }
+        epsilon = (
+            high.mpf(10) ** -policy.decimal_digits[0] * local.precision_roundoff_factor
+        )
+        residual_error = np.asarray(
+            [
+                abs(high.mpf(float(nominal)) - accurate)
+                + abs(high.mpf(low) - accurate)
+                + epsilon * abs(accurate)
+                for nominal, low, accurate in zip(base, *references, strict=True)
+            ],
+            dtype=float,
+        )
+        if not np.isfinite(residual_error).all():
+            raise NumericalInvalidTrial("nonrepresentable residual uncertainty")
+        evidence["residual_error_envelope_rms"] = prefix_fit_adequacy._rms(
+            residual_error
+        )
+        evidence["residual_error_in_gradient_envelope"] = True
+        return base, jacobian
+
+    def stencil(index, scale_index, step, end):
+        central = (
+            vector[index] - step >= oracle.lower[index]
+            and vector[index] + step <= oracle.upper[index]
+        )
+        sign = (
+            1
+            if oracle.upper[index] - vector[index]
+            >= vector[index] - oracle.lower[index]
+            else -1
+        )
+        signs = (-1, 1) if central else (sign, 2 * sign)
+        points = []
+        for displacement in signs:
+            point = vector.copy()
+            point[index] += displacement * step
+            oracle.vector(oracle.parameters(point))
+            points.append(point)
+        offsets = [
+            high.mpf(float(x[index])) - high.mpf(float(vector[index])) for x in points
+        ]
+        if any(v == 0 for v in offsets) or offsets[0] == offsets[1]:
+            raise ValueError("full-residual precision nodes are not representable")
+        values = [
+            [call(lambda c=c, x=x: model.evaluate(x, c, end)) for x in points]
+            for c in contexts
+        ]
+        unit = high.mpf(float(oracle.units[index]))
+        differences = [
+            _difference(
+                c, references[j], *values[j], [c.mpf(v) for v in offsets], c.mpf(unit)
+            )
+            for j, c in enumerate(contexts)
+        ]
+        left, right = offsets
+        weights = (
+            -(left + right) / (left * right),
+            right / (left * (right - left)),
+            -left / (right * (right - left)),
+        )
+        epsilon = (
+            high.mpf(10) ** -policy.decimal_digits[0] * local.precision_roundoff_factor
+        )
+        arithmetic = [
+            epsilon
+            * unit
+            * high.fsum(abs(w * v) for w, v in zip(weights, row, strict=True))
+            for row in zip(references[-1], *values[-1], strict=True)
+        ]
+        estimate = np.asarray(differences[-1], dtype=float)
+        roundoff = np.asarray(
+            [
+                abs(high.mpf(low) - value) + bound
+                for low, value, bound in zip(*differences, arithmetic, strict=True)
+            ],
+            dtype=float,
+        ) + np.finfo(float).eps * np.abs(estimate)
+        if not np.isfinite(estimate).all() or not np.isfinite(roundoff).all():
+            raise NumericalInvalidTrial("nonfinite full-residual difference envelope")
+        unilateral, side_roundoff = None, 0.0
+        if central:
+            sides = [
+                (b - base) / right * unit - (left_value - base) / left * unit
+                for base, left_value, b in zip(references[-1], *values[-1], strict=True)
+            ]
+            unilateral = _rms(high, sides)
+            side_roundoff = _rms(
+                high,
+                [
+                    epsilon
+                    * unit
+                    * (
+                        (abs(base) + abs(lv)) / abs(left)
+                        + (abs(base) + abs(rv)) / abs(right)
+                    )
+                    for base, lv, rv in zip(references[-1], *values[-1], strict=True)
+                ],
+            )
+        evidence["stencils"].append(
+            {
+                "index": index,
+                "scale_index": scale_index,
+                "step": step,
+                "actual_offsets": list(map(float, offsets)),
+                "scheme": "central"
+                if central
+                else "forward"
+                if sign > 0
+                else "backward",
+                "derivative_rms": prefix_fit_adequacy._rms(estimate),
+                "roundoff_rms": prefix_fit_adequacy._rms(roundoff),
+                "precision_difference_rms": _rms(
+                    high,
+                    [
+                        high.mpf(low) - value
+                        for low, value in zip(*differences, strict=True)
+                    ],
+                ),
+            }
+        )
+        if checkpoint is not None:
+            checkpoint(deepcopy(evidence))
+        _deadline(deadline)
+        return prefix_local_derivatives._Probe(
+            scale_index,
+            step,
+            "central" if central else "forward" if sign > 0 else "backward",
+            estimate,
+            roundoff,
+            unilateral,
+            side_roundoff,
+            2,
+        )
+
+    result = prefix_local_derivatives.local_derivative_check(
+        evaluate,
+        vector,
+        oracle.lower,
+        oracle.upper,
+        deadline,
+        coordinate_units=oracle.units,
+        policy=local,
+        local_coordinate_scales=scales,
+        finite_difference_probe=stencil,
+        residual_error_bound=lambda: residual_error,
+    )
+    evidence["all_coordinates_checked"] = (
+        not result.omitted_indices and result.error is None
+    )
+    return result.model_copy(
+        update={
+            **{
+                key: evidence[key]
+                for key in (
+                    "calls_started",
+                    "calls_completed",
+                    "jacobian_calls_started",
+                    "residual_only_calls_started",
+                )
+            },
+            "elapsed_seconds": monotonic() - begun,
+            "scope": (
+                "All active coordinates; full-residual MP differences at two "
+                "precisions, "
+                "with existing local shrinking, gradient and rank policies. Empirical "
+                "precision/truncation envelope; no threshold relaxation, global "
+                "minimum "
+                "or statistical confidence certificate."
+            ),
+        }
+    )
+
+
+def qualify(
+    oracle, parameters, seconds, checkpoint, *, adequacy_policy=None, policy=None
+):
+    """Run one bounded full-coordinate precision audit with durable partial receipts."""
+    from autoformalism.fitting.prefix_continuation import _finish
+
+    budget = prefix_execution._budget(seconds, seconds + 60)
+    result = {"passed": False, "status": "incomplete", "precision_audit": {}}
+    interrupted = None
+
+    def save(_=None):
+        result["timing"] = budget.snapshot()
+        if checkpoint is not None:
+            budget.callback(lambda: checkpoint(deepcopy(result)))
+
+    try:
+        check = budget.numerical(
+            lambda deadline: derivative_check(
+                oracle,
+                oracle.vector(parameters),
+                deadline,
+                adequacy_policy=adequacy_policy,
+                policy=policy,
+                audit=result["precision_audit"],
+                checkpoint=save,
+            )
+        )
+        budget.check()
+        result.update(
+            derivative_check=check.model_dump(mode="json"),
+            status="complete"
+            if check.error is None and not check.omitted_indices
+            else "incomplete",
+            passed=check.search_qualified,
+            parameters_sha256=content_sha256(parameters),
+        )
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+    except BaseException as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+        interrupted = error
+    return _finish(
+        result, budget, checkpoint or (lambda _: None), "qualification", interrupted
+    )

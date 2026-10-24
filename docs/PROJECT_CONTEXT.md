@@ -1,5 +1,18 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Construction timescale controls and LLM-SR numerical replay
+
+The returned multi-output pilot slightly improved model 6 but did not establish
+fitting adequacy. Its insulin decay rate grew far beyond the sampling rate.
+The next opt-in CPU milestone tests ten fixed-family continuations/rate slices/
+different starts, with complete multiprecision derivative qualification and
+full-coordinate accepted-step histories. A separate supplied-value LLM-SR control
+uses the identical T2-easy training payload. It first checks the approximate ODE
+transcription and defers refitting until coefficient branch domains are reviewed.
+Astra's 23 October directional-family run exported no accepted fitting packet;
+its necessary-condition conflicts remain separate from best-fit error claims.
+See [the scope, evidence and controls](PHASE_C_CONSTRUCTION_TIMESCALE_CONTROLS.md).
+
 ## Construction multi-output profiling pilot
 
 The returned precision/reduction continuations verified all eight retained models

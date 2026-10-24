@@ -21,6 +21,7 @@ from autoformalism.benchmarks.audited_release import read_seal, seal
 from autoformalism.fitting import poor_fit, prefix_execution, recovery_numerics
 from autoformalism.fitting import prefix_construction_recovery as recovery
 from autoformalism.fitting import prefix_continuation as numerical
+from autoformalism.fitting import prefix_fit_adequacy as adequacy
 from autoformalism.fitting import prefix_initialization as kernel
 from autoformalism.fitting import prefix_multioutput_profile as profiling
 from autoformalism.fitting import prefix_precision_probe as precision
@@ -448,7 +449,48 @@ def _assemble(identity, source, operations, *, terminal=False):
 
 def _diagnostic_cost(operations):
     """Record the outer derivative gate without charging its search stage twice."""
-    cost = previous.previous._diagnostic_cost(operations)
+    accounted = dict(operations)
+    for name, operation in operations.items():
+        if name != "qualification" and not name.endswith("_diagnosis"):
+            continue
+        value = operation.get("value") or operation.get("observed_progress") or {}
+        if not (
+            "derivative_passes" in value or "full_residual_precision_audit" in value
+        ):
+            continue  # Historical sealed reports retain their original calculation.
+        records = list(value.get("derivative_passes", []))
+        if "full_residual_precision_audit" in value and not any(
+            record.get("backend") == "full-residual-multiprecision"
+            for record in records
+        ):
+            # Interrupted MP work may have saved counters before producing a
+            # DerivativeCheck. A completed MP check already contains these calls.
+            records.append(
+                {
+                    "backend": "full-residual-multiprecision",
+                    "status": "incomplete",
+                    "derivative_check": value["full_residual_precision_audit"],
+                }
+            )
+        checks = [record.get("derivative_check") or {} for record in records]
+        complete = bool(records) and all(
+            check
+            and record.get("status", "complete") == "complete"
+            and check.get("calls_started", 0) == check.get("calls_completed", 0)
+            for record, check in zip(records, checks, strict=True)
+        )
+        normalized = value | {
+            "passes": records,
+            "status": "complete"
+            if complete and value.get("status", "complete") == "complete"
+            else "incomplete",
+            "derivative_check": {
+                key: sum(check.get(key, 0) for check in checks)
+                for key in ("calls_started", "calls_completed")
+            },
+        }
+        accounted[name] = operation | {"value": normalized}
+    cost = previous.previous._diagnostic_cost(accounted)
     operation = operations.get("continuation_search", {})
     value = operation.get("value") or operation.get("observed_progress") or {}
     check = value.get("profile_derivative_check") or {}
@@ -608,7 +650,9 @@ class _ProfileView:
         return residual, derivative
 
 
-def _profile_search(oracle, profile, start, seconds, calls, save):
+def _profile_search(
+    oracle, profile, start, seconds, calls, save, *, preserve_full_history=False
+):
     """Charge derivative qualification and outer optimization to one allowance."""
     budget = prefix_execution._budget(seconds, seconds + 120)
     state = {
@@ -640,6 +684,8 @@ def _profile_search(oracle, profile, start, seconds, calls, save):
 
     def snapshot(value):
         state.update(value)
+        if preserve_full_history:
+            state["search_calls_attempted"] = state["calls"]
         budget.callback(lambda: save(deepcopy(state) | {"timing": budget.snapshot()}))
 
     try:
@@ -668,6 +714,7 @@ def _profile_search(oracle, profile, start, seconds, calls, save):
                 profile=TimedProfile(),
                 telemetry=True,
                 record_steps=True,
+                record_full_steps=preserve_full_history,
                 optimizer_scaling="guarded_relative",
                 objective_multiplier=1.0,
                 poor_fit=poor_fit.Policy(),
@@ -682,6 +729,8 @@ def _profile_search(oracle, profile, start, seconds, calls, save):
         interrupted = error
         numerical._invalidate(state, error, "search")
     state["profile_audit"] = deepcopy(profile.audit)
+    if preserve_full_history:
+        state["search_calls_attempted"] = state["calls"]
     return numerical._finish(state, budget, save, "search", interrupted)
 
 
@@ -1035,3 +1084,245 @@ def inspect(root):
             archive.addfile(entry, io.BytesIO(blob))
     temporary.replace(path)
     return {"status": summary["status"], "archive": str(path.resolve())}
+
+
+def _full_residual_fallback(oracle, vector, budget, seconds, policy, result, save):
+    """Use full-residual MP only after the guarded local evidence is insufficient."""
+    end = min(budget.deadline(), monotonic() + seconds * 0.45)
+    guarded = budget.numerical(
+        lambda d: recovery._derivative(oracle, vector, min(d, end), policy)
+    )
+    result["derivative_passes"] = [
+        {"backend": "guarded", "derivative_check": public._jsonable(guarded)}
+    ]
+    budget.callback(lambda: save(deepcopy(result) | {"timing": budget.snapshot()}))
+    if guarded.search_qualified and (
+        not policy.diagnostic_precision
+        or (
+            guarded.gradient_precision_qualified
+            and guarded.parameter_information_qualified
+        )
+    ):
+        return guarded
+    if not recovery._retryable_check(guarded) and guarded.status != "passed":
+        return guarded
+    audit = {}
+    result["full_residual_precision_audit"] = audit
+    full = budget.numerical(
+        lambda d: precision.derivative_check(
+            oracle,
+            vector,
+            d,
+            adequacy_policy=policy,
+            audit=audit,
+            checkpoint=lambda _: budget.callback(
+                lambda: save(deepcopy(result) | {"timing": budget.snapshot()})
+            ),
+        )
+    )
+    result["derivative_passes"].append(
+        {
+            "backend": "full-residual-multiprecision",
+            "derivative_check": public._jsonable(full),
+        }
+    )
+    return full
+
+
+def qualify_profile(
+    problem,
+    training,
+    settings,
+    anchor,
+    seconds,
+    save,
+    *,
+    coordinate_oracle=None,
+    coordinate_parameters=None,
+):
+    """Opt-in aggregate qualification with a budgeted full-residual MP fallback."""
+    budget = prefix_execution._budget(seconds, seconds + 60)
+    result = {
+        "protocol": "construction-profile-full-residual-qualification-1",
+        "passed": False,
+        "precision_mode": "guarded",
+        "no_search_performed": True,
+    }
+    interrupted = None
+    try:
+        if coordinate_oracle is None:
+            original, oracle, _ = profiling.make_oracle(
+                problem, training, settings, anchor, precision_mode="guarded"
+            )
+        else:
+            oracle, original = coordinate_oracle, coordinate_oracle.original
+            if (
+                public.content_sha256(original.problem)
+                != public.content_sha256(problem)
+                or public.content_sha256(original.training)
+                != public.content_sha256(training)
+                or oracle.precision_mode != "guarded"
+            ):
+                raise ValueError("qualification coordinate oracle identity differs")
+        budget.check()
+        vector = (
+            oracle.reduction.reduce(original.vector(anchor))
+            if coordinate_parameters is None
+            else oracle.vector(coordinate_parameters)
+        )
+        if coordinate_parameters is not None and (
+            original.parameters(oracle.reduction.lift(vector)) != anchor
+        ):
+            raise ValueError("qualification coordinate point differs from anchor")
+        before, _ = budget.numerical(
+            lambda d: original.evaluate(original.vector(anchor), d, jacobian=False)
+        )
+        after, _ = budget.numerical(
+            lambda d: oracle.evaluate(vector, d, jacobian=False)
+        )
+        gap = float(np.max(np.abs(before - after), initial=0))
+        result.update(
+            lift_prediction_discrepancy=gap,
+            recovery_audit=deepcopy(oracle.recovery_audit),
+            original_coordinates=len(original.names),
+            optimizer_coordinates=len(oracle.names),
+        )
+        check = _full_residual_fallback(
+            oracle, vector, budget, seconds, previous._adequacy_policy(), result, save
+        )
+        result.update(
+            derivative_check=public._jsonable(check),
+            passed=bool(np.isfinite(gap) and gap <= 1e-7 and check.search_qualified),
+            affine_execution=deepcopy(original.affine_audit),
+        )
+    except Exception as error:
+        numerical._invalidate(result, error, "qualification")
+    except BaseException as error:
+        interrupted = error
+        numerical._invalidate(result, error, "qualification")
+    return numerical._finish(result, budget, save, "qualification", interrupted)
+
+
+def _bound_full_history(oracle, parameters, search_result):
+    """Use only complete accepted vectors ending at this exact assessed endpoint."""
+    steps = search_result.get("accepted_steps", [])
+    matches = (
+        search_result.get("accepted_history_protocol")
+        == "full-coordinate-accepted-steps-1"
+        and search_result.get("history_coordinate_names") == list(oracle.names)
+        and search_result.get("history_coordinate_units") == oracle.units.tolist()
+        and search_result.get("last_accepted_parameters") == parameters
+        and (search_result.get("best") or {}).get("parameters") == parameters
+        and bool(steps)
+    )
+    previous = None
+    for step in steps if matches else []:
+        try:
+            point = np.asarray(step["reduced_vector"], float)
+            prior = np.asarray(step["previous_reduced_vector"], float)
+            if (
+                point.shape != oracle.units.shape
+                or prior.shape != point.shape
+                or not np.isfinite(point).all()
+                or not np.isfinite(prior).all()
+                or (previous is not None and not np.array_equal(previous, prior))
+                or step["parameters_sha256"]
+                != public.content_sha256(oracle.parameters(point))
+                or not np.isclose(
+                    step["coordinate_step_norm"],
+                    np.linalg.norm((point - prior) / oracle.units),
+                    rtol=1e-12,
+                    atol=0,
+                )
+            ):
+                matches = False
+                break
+            previous = point
+        except (KeyError, TypeError, ValueError):
+            matches = False
+            break
+    if matches:
+        matches = (
+            oracle.parameters(previous) == parameters
+            and steps[-1]["training_nmse"] == search_result["best"]["training_nmse"]
+        )
+    history = (
+        [
+            {
+                key: step[key]
+                for key in ("training_nmse", "coordinate_step_norm", "evaluation_count")
+            }
+            for step in steps
+        ]
+        if matches
+        else []
+    )
+    return history, bool(matches)
+
+
+def diagnose_profile(original, oracle, parameters, verification, fit, seconds, save):
+    """Assess all aggregate coordinates with exact endpoint/history authentication."""
+    if oracle.original is not original:
+        raise ValueError("diagnosis oracle identity differs")
+    budget = prefix_execution._budget(seconds, seconds + 60)
+    policy = previous._adequacy_policy(diagnostic=True)
+    steps, matches = _bound_full_history(oracle, parameters, fit)
+    result = {
+        "protocol": "construction-profile-full-residual-diagnosis-1",
+        "assessment": None,
+        "diagnosed_parameters_sha256": public.content_sha256(
+            verification["parameters"]
+        ),
+        "verification_sha256": public.content_sha256(verification),
+        "search_history_matches_retained": matches,
+        "full_coordinate_history_available": matches,
+        "accepted_steps_available": len(fit.get("accepted_steps", [])),
+        "accepted_steps_used": len(steps),
+        "recovery_audit": deepcopy(oracle.recovery_audit),
+        "original_parameter_identifiability_certified": False,
+    }
+    interrupted = None
+    try:
+        vector = oracle.vector(parameters)
+        derivative = _full_residual_fallback(
+            oracle, vector, budget, seconds, policy, result, save
+        )
+        result["derivative_check"] = public._jsonable(derivative)
+        residual, jacobian = budget.numerical(lambda d: oracle.evaluate(vector, d))
+        stop = (
+            fit.get("stop_reason")
+            if matches
+            else "retained_endpoint_has_no_matching_full_coordinate_search_history"
+        )
+        assessment = adequacy.assess(
+            vector,
+            residual,
+            jacobian,
+            oracle.lower,
+            oracle.upper,
+            verification={
+                key: verification[key]
+                for key in adequacy.OriginalVerification.model_fields
+            },
+            derivative=derivative,
+            stop_reason=stop,
+            budget_exhausted=bool(fit.get("budget_exhausted"))
+            or stop in {"budget_limited", "numerical_failure", "interrupted"},
+            history=steps,
+            coordinate_units=oracle.units,
+            policy=policy,
+        )
+        budget.check()
+        result["assessment"] = public._jsonable(assessment)
+        result["assessment_scope"] = (
+            "All aggregate coordinates, including inner and any search-fixed rates; "
+            "history uses full accepted vectors in the assessed coordinate units. "
+            "Original parameter factorizations remain unidentified."
+        )
+    except Exception as error:
+        numerical._invalidate(result, error, "diagnosis")
+    except BaseException as error:
+        interrupted = error
+        numerical._invalidate(result, error, "diagnosis")
+    result["affine_execution"] = deepcopy(original.affine_audit)
+    return numerical._finish(result, budget, save, "diagnosis", interrupted)

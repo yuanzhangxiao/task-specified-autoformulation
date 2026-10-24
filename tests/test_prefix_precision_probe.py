@@ -251,3 +251,153 @@ def test_incorrect_analytic_derivative_is_not_hidden_by_precision(monkeypatch):
         assert record["multiprecision_discrepancy_rms"][-1] > 1
         assert record["precision_difference_rms"] < 1e-30
     assert result["qualification_override"] is False
+
+
+def test_full_residual_qualification_covers_all_coordinates_and_keeps_policy():
+    _, oracle = ordinary_case()
+    policy = probe._local_policy().model_copy(update={"diagnostic_precision": True})
+    checkpoints = []
+    result = probe.qualify(
+        oracle, oracle.start, 60, checkpoints.append, adequacy_policy=policy
+    )
+    assert result["status"] == "complete", result
+    assert result["passed"]
+    check = result["derivative_check"]
+    assert check["checked_indices"] == list(range(len(oracle.names)))
+    assert check["omitted_indices"] == []
+    assert check["policy"] == policy.model_dump(mode="json")
+    audit = result["precision_audit"]
+    assert audit["all_coordinates_checked"]
+    assert audit["calls_started"] == audit["calls_completed"]
+    assert audit["calls_started"] == check["calls_started"]
+    assert audit["calls_started"] <= audit["maximum_calls"]
+    assert audit["finite_difference_backend"] == "full-residual-multiprecision"
+    assert len(audit["stencils"]) <= len(oracle.names) * policy.local_max_scales
+    assert checkpoints and result["timing"]["numerical_active_wall_seconds"] > 0
+    json.dumps(result, allow_nan=False)
+
+
+def test_full_residual_qualification_rejects_a_sampled_column_cap():
+    _, oracle = ordinary_case()
+    result = probe.qualify(
+        oracle,
+        oracle.start,
+        10,
+        None,
+        policy=probe.PrecisionProbePolicy(maximum_columns=1),
+    )
+    assert not result["passed"]
+    assert "all-coordinate precision allowance" in result["error"]
+
+
+def test_full_residual_qualification_does_not_hide_wrong_analytic_column(monkeypatch):
+    _, oracle = ordinary_case()
+    evaluate = oracle.evaluate
+
+    def wrong(vector, deadline, **kwargs):
+        residual, derivative = evaluate(vector, deadline, **kwargs)
+        derivative[:, 0] *= 2
+        return residual, derivative
+
+    monkeypatch.setattr(oracle, "evaluate", wrong)
+    result = probe.qualify(oracle, oracle.start, 60, None)
+    assert not result["passed"]
+    assert 0 in result["derivative_check"]["failed_indices"]
+
+
+def test_full_residual_qualification_preserves_timeout_and_partial_calls(monkeypatch):
+    _, oracle = ordinary_case()
+    evaluate = probe._Residual.evaluate
+    calls = 0
+
+    def limited(self, vector, ctx, deadline):
+        nonlocal calls
+        calls += 1
+        if calls == 7:
+            raise TimeoutError("bounded MP work")
+        return evaluate(self, vector, ctx, deadline)
+
+    monkeypatch.setattr(probe._Residual, "evaluate", limited)
+    result = probe.qualify(oracle, oracle.start, 10, None)
+    assert not result["passed"]
+    assert result["status"] == "incomplete"
+    assert result["precision_audit"]["calls_failed"] == 1
+    assert result["precision_audit"]["stencils"]
+    assert result["derivative_check"]["omitted_indices"]
+    assert "bounded MP work" in result["derivative_check"]["error"]
+
+
+def test_aggregated_lift_supported_by_full_residual_precision():
+    from autoformalism.fitting import prefix_multioutput_profile as profiling
+    from tests.test_prefix_multioutput_profile import profile_case
+
+    _, oracle, _ = profiling.make_oracle(*profile_case())
+    vector = oracle.vector(oracle.start)
+    values = probe._Residual(oracle, probe.PrecisionProbePolicy()).evaluate(
+        vector, context(), monotonic() + 10
+    )
+    baseline, _ = oracle.evaluate(vector, monotonic() + 10)
+    assert np.asarray(values, float) == pytest.approx(baseline, abs=1e-12)
+
+
+def test_full_residual_qualification_uses_local_inward_bound_stencils():
+    _, oracle = ordinary_case()
+    parameters = oracle.start | {oracle.names[0]: float(oracle.lower[0])}
+    result = probe.qualify(oracle, parameters, 60, None)
+    assert result["status"] == "complete", result
+    row = next(r for r in result["derivative_check"]["directions"] if r["index"] == 0)
+    assert row["scheme"] == "forward"
+    records = [r for r in result["precision_audit"]["stencils"] if r["index"] == 0]
+    assert records and all(min(r["actual_offsets"]) > 0 for r in records)
+
+
+def test_residual_roundoff_contributes_to_projected_gradient_uncertainty(monkeypatch):
+    from types import SimpleNamespace
+
+    a = probe.prefix_fit_adequacy
+    policy = probe._local_policy().model_copy(update={"diagnostic_precision": True})
+    oracle = SimpleNamespace(
+        names=("x",),
+        lower=np.array([-1.0]),
+        upper=np.array([1.0]),
+        units=np.ones(1),
+        precision_mode="guarded",
+        vector=lambda p: np.array([p["x"]]),
+        parameters=lambda x: {"x": float(x[0])},
+        local_coordinate_scales=lambda x: np.ones(1),
+        evaluate=lambda x, d: (np.array([x[0] * 1e10]), np.array([[1e10]])),
+    )
+    oracle.problem, oracle.training = {"synthetic": True}, {"synthetic": True}
+
+    class Residual:
+        def __init__(self, source, policy):
+            self.original = source
+
+        def evaluate(self, x, context, deadline):
+            return [context.mpf(float(x[0])) * 10**10 + context.mpf("1e-17")]
+
+    monkeypatch.setattr(probe, "_Residual", Residual)
+    result = probe.qualify(oracle, {"x": 0.0}, 10, None, adequacy_policy=policy)
+    check = a.DerivativeCheck.model_validate(result["derivative_check"])
+    # The Jacobian is exact, but residual error times the huge sensitivity is
+    # material to a nominally zero gradient. It must prevent stationarity.
+    assert check.status == "passed"
+    assert check.gradient_error_bound_inf >= 2e-7
+    assert not check.gradient_precision_qualified
+    assert result["precision_audit"]["residual_error_in_gradient_envelope"]
+    assessed = a.assess(
+        np.zeros(1),
+        np.zeros(1),
+        np.array([[1e10]]),
+        oracle.lower,
+        oracle.upper,
+        verification=None,
+        derivative=check,
+        stop_reason="gradient_converged",
+        budget_exhausted=False,
+        coordinate_units=oracle.units,
+        policy=policy,
+    )
+    assert assessed.projected_gradient_upper_bound >= 2e-7
+    assert assessed.classification == "optimization_unresolved"
+    assert "projected_gradient_uncertainty_not_small" in assessed.reasons

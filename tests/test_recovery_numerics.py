@@ -203,3 +203,53 @@ def test_assessment_separates_information_from_fit_and_search():
     assert resolved["recommended_action"] == "retain_with_local_evidence"
     with pytest.raises(ValidationError):
         FittingAssessment.model_validate(a | {"coefficient_error": 0.0})
+
+
+def test_opt_in_profile_history_keeps_full_vectors_and_inner_movement(monkeypatch):
+    oracle = QuadraticOracle()
+
+    class Profile:
+        outer = (0,)
+
+        def evaluate(self, vector, deadline):
+            point = vector.copy()
+            point[1] = 3 * point[0]
+            return point, np.array([point[0] - 2]), np.ones((1, 1)), {}
+
+    def optimizer(fun, x0, *, jac, callback, **kwargs):
+        fun(x0)
+        jac(x0)
+        q = np.array([0.25])
+        fun(q)
+        callback(SimpleNamespace(x=q))
+        return SimpleNamespace(success=True, message="xtol", optimality=1.0)
+
+    monkeypatch.setattr(numerical, "least_squares", optimizer)
+    value = numerical.search(
+        oracle,
+        {"a": 1.0, "initial": 0.0},
+        monotonic() + 5,
+        lambda _: None,
+        calls=5,
+        target=0,
+        profile=Profile(),
+        record_steps=True,
+        record_full_steps=True,
+    )
+    step = value["accepted_steps"][0]
+    assert step["previous_reduced_vector"] == [1, 3]
+    assert step["reduced_vector"] == [1.5, 4.5]
+    assert step["outer_coordinate_step_norm"] == 0.25
+    assert step["coordinate_step_norm"] == pytest.approx(np.linalg.norm([0.25, 1.5]))
+    assert value["last_accepted_parameters"] == {"a": 1.5, "initial": 4.5}
+    assert value["history_coordinate_units"] == [2.0, 1.0]
+    with pytest.raises(ValueError, match="require record_steps"):
+        numerical.search(
+            oracle,
+            {"a": 1.0, "initial": 0.0},
+            monotonic() + 5,
+            lambda _: None,
+            calls=5,
+            target=0,
+            record_full_steps=True,
+        )
