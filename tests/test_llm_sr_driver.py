@@ -752,3 +752,78 @@ def test_a_program_whose_rollout_fails_is_recorded_with_the_reason(
     assert outcome["status"] == "rollout_failed"
     assert outcome["error"] == "the development rollout failed: c, row 3: x"
     assert set(outcome["programs"]) == {"G"}
+
+
+def test_a_program_whose_training_rollout_fails_still_seals(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The training rollout chooses nothing; the test rollout decides."""
+    search = _running(monkeypatch, tmp_path, EMA)
+
+    def grid(programs, channels, context, train, split, *, step, seconds):
+        if split.name is SplitName.TRAIN:
+            return ProgramRolloutScore(None, "b, row 7: x")
+        return ProgramRolloutScore(0.5)
+
+    outcome = _run(
+        search, directory=tmp_path / "training", development=_development(),
+        score_programs=grid,
+    )
+    assert outcome["status"] == "complete" and set(outcome["programs"]) == {"G"}
+    assert outcome["development_rollout_error"] == 0.5
+    assert outcome["training_rollout_error"] is None
+    assert outcome["training_rollout_failure"] == (
+        "the training rollout failed: b, row 7: x"
+    )
+
+
+def _fails_on_b(equations, context, train, split, *, seconds):
+    """The shared evaluator, failing any split that holds trajectory b."""
+    if "b" in {trajectory.trajectory_id for trajectory in split.trajectories}:
+        return None
+    return 0.25
+
+
+def test_an_equation_whose_training_rollout_fails_seals_naming_the_trajectory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """As in the expression smoke, where one training trajectory met a pole."""
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    outcome = _run(
+        search, directory=tmp_path / "pole", development=_development(),
+        score_rollout=_fails_on_b,
+    )
+    assert outcome["status"] == "complete" and "programs" not in outcome
+    assert outcome["development_rollout_error"] == 0.25
+    assert outcome["training_rollout_error"] is None
+    assert outcome["training_rollout_failure"] == "the training rollout failed on b"
+
+
+def test_without_a_program_rollout_a_failed_training_rollout_also_seals(
+    monkeypatch, tmp_path: Path
+) -> None:
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=LINEAR, score=-0.01)
+    monkeypatch.setattr(driver, "complete", lambda *a, **k: {"content": ["x"] * 4})
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    outcome = _run(
+        search, directory=tmp_path / "plain", development=_development(),
+        score_rollout=_fails_on_b,
+    )
+    assert outcome["status"] == "complete"
+    assert outcome["development_rollout_error"] == 0.25
+    assert outcome["training_rollout_error"] is None
+    assert outcome["training_rollout_failure"] == "the training rollout failed on b"
+
+
+def test_a_training_rollout_that_completes_records_no_failure(
+    monkeypatch, tmp_path: Path
+) -> None:
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    outcome = _run(
+        search, directory=tmp_path / "fine", development=_development(),
+        score_rollout=lambda *a, **k: 0.25,
+    )
+    assert outcome["training_rollout_error"] == 0.25
+    assert outcome["training_rollout_failure"] is None

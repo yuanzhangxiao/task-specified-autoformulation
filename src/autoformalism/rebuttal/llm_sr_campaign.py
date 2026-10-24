@@ -364,7 +364,13 @@ def _search_and_seal(
                 "selection": SELECTION,
             },
             selection_payload=payload,
-            training_normalized_mse=float(outcome["training_rollout_error"]),
+            # A failed training rollout seals as +infinity, the failure value;
+            # the result names why. It neither selects nor scores the pick.
+            training_normalized_mse=(
+                float("inf")
+                if outcome["training_rollout_error"] is None
+                else float(outcome["training_rollout_error"])
+            ),
             validation_normalized_mse=float(outcome["development_rollout_error"]),
             elapsed_wall_seconds=outcome.get("accounting", {}).get(
                 "wall_seconds", outcome.get("accounting", {}).get("search_seconds")
@@ -393,6 +399,7 @@ def _search_and_seal(
             "grid_step": outcome.get("grid_step"),
             "selected_samples": outcome.get("selected_samples"),
             "development_rollout_error": outcome.get("development_rollout_error"),
+            "training_rollout_failure": outcome.get("training_rollout_failure"),
             "accounting": outcome.get("accounting", {}),
             "test_data_opened": False,
             "private_reference_opened": False,
@@ -443,6 +450,10 @@ def report(root: Path) -> dict:
             for item in rows
             for record in (item.get("programs") or {}).values()
             if record["look_ahead"]["reads_later_rows"]
+        ),
+        # Complete tasks whose model failed a training rollout; the test decides.
+        "training_rollouts_failed": sum(
+            1 for item in rows if item.get("training_rollout_failure")
         ),
         "counts": counts,
         "reporting_qualifications": sealed["reporting_qualifications"],

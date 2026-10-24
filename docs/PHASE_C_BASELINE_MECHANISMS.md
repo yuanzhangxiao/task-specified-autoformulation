@@ -323,21 +323,25 @@ Recorded here because they govern the same picks:
    reproduce its validation numbers before test data open: the sealed ones,
    and for LLM-SR its ODEs' numbers solved with the shared solver.
 
-Open, for the user and the planning agent:
+Decided by the user on 2026-10-23:
 
-- **A model that only an implicit solver finishes in time.** The shared
-  evaluator integrates with RK45 and fails a trajectory after 300 s. On
-  validation one model needs more: LLM-SR alien seed 0's transcription, which
-  Radau solves in under 2 s ([PHASE_C_LLM_SR.md](PHASE_C_LLM_SR.md)). The
-  reverse also happened: Radau at rtol 1e-10 timed out on one LLM-ODE pick
-  that RK45 solved.
-  Proposed, for every method including ours: integrate with RK45 as now; if a
-  trajectory fails numerically (time limit or step-size failure), integrate it
-  again with Radau at the same tolerances, and fail it only if both fail.
-  Where both finished, they agreed within 0.1% on every validation pick. A
-  real singularity, such as the poles of LLM-SR tasks 3 and 4, still fails
-  under both.
-- **No Phase C test path exists yet, for any method.** Phase B's post-freeze
-  evaluator (`rebuttal/postfreeze_evaluation.py`) is the method-neutral one.
-  It reads every model with our narrow grammar, so as it stands it would fail
-  the 25 baseline picks that need the baseline grammar.
+6. **An implicit retry, for every method including ours.** Integrate with
+   RK45 as now; if a trajectory fails numerically (time limit or step-size
+   failure), integrate it again with Radau at the same tolerances, and fail it
+   only if both fail. Why: on validation one model needs it, LLM-SR alien
+   seed 0's transcription, which RK45 cannot finish in the time limit and
+   Radau solves in under 2 s ([PHASE_C_LLM_SR.md](PHASE_C_LLM_SR.md)). The
+   reverse also happened: Radau at rtol 1e-10 timed out on one LLM-ODE pick
+   that RK45 solved. Where both finished, they agreed within 0.1% on every
+   validation pick. A real singularity, such as the poles of LLM-SR tasks 3
+   and 4, still fails under both.
+7. **One test path for every method,** built on Phase B's method-neutral
+   post-freeze evaluator (`rebuttal/postfreeze_evaluation.py`), as the
+   planning agent proposed. It needs the baseline grammar for the external
+   baselines' models (as it stands it reads every model with our narrow
+   grammar and would fail 25 baseline picks), LLM-SR's ODEs, the retry in 6,
+   and the validation rehearsal in 5.
+8. **NMSE aggregation as for every other method:** each case's median over its
+   seeds, then the median and unscaled MAD of the case medians, with failures
+   at +infinity before either median. With two seeds a case median is the
+   midpoint of its two runs, so one failed run makes its case +infinity.

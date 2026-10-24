@@ -570,6 +570,33 @@ def test_a_selected_program_is_sealed_with_its_coefficients_and_grid(tmp_path):
     assert selection.validation_normalized_mse == 0.25
     summary = sr.report(root)
     assert (summary["program_models"], summary["programs_reading_later_rows"]) == (1, 1)
+    assert summary["training_rollouts_failed"] == 0
+    assert result["training_rollout_failure"] is None
+
+
+def test_a_failed_training_rollout_seals_complete_and_names_the_trajectory(tmp_path):
+    """Decided on 2026-10-23: the training rollout chooses nothing; test decides."""
+    _, root, _ = _frozen(tmp_path)
+
+    def searcher(**kwargs) -> dict:
+        return {
+            **_complete([])(**kwargs),
+            "training_rollout_error": None,
+            "training_rollout_failure": "the training rollout failed on train_011",
+        }
+
+    result = sr.run_phase_c(root, 0, endpoint="vm_local_vllm", search=searcher)
+    assert result["status"] == "complete"
+    assert result["training_rollout_failure"] == (
+        "the training rollout failed on train_011"
+    )
+    saved = json.loads((root / "results" / "0" / "native-selection.json").read_text())
+    selection = BaselineDevelopmentResult.model_validate(saved["selection"])
+    assert selection.training_normalized_mse == float("inf")
+    assert selection.validation_normalized_mse == 0.25
+    summary = sr.report(root)
+    assert summary["terminal_success"] == 1
+    assert summary["training_rollouts_failed"] == 1
 
 
 def test_without_the_table_llm_sr_searches_the_cell_arrays_in_time_order(tmp_path):

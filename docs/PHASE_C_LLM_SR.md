@@ -196,10 +196,11 @@ What follows from it:
   row). The filter rule makes it a hidden state with time constant 4.7e-6, so
   the ODE has an eigenvalue near -2.1e5. Radau solves each validation
   trajectory in under 2 s, with the same error at rtol 1e-7 and 1e-10 (2.474).
-  RK45 reaches t = 6 of 60 in 120 s, so it times out at its 300 s limit. How
-  to score a trajectory that only an implicit solver finishes in time is open
+  RK45 reaches t = 6 of 60 in 120 s, so it times out at its 300 s limit. The
+  user decided on 2026-10-23 that, for every method, a trajectory RK45 fails
+  numerically is integrated again with Radau at the same tolerances
   ([PHASE_C_BASELINE_MECHANISMS.md](PHASE_C_BASELINE_MECHANISMS.md),
-  decisions for test scoring).
+  decisions for test scoring, item 6), so this transcription is scored.
 
 A plan without `program_rollout`, such as the budget pilot and smokes v3 and v4,
 keeps the earlier recovery: the reader refits each pick without running it, and
@@ -276,13 +277,17 @@ Plans:
     fails: on train_011 glucose reaches a pole of the Gp equation at Gp = 151.
     The equation path then passed the missing training error to the sealed
     record, which requires a number, and crashed. The program path instead
-    seals such a task as `rollout_failed`. That rule was never decided and has
-    never applied: no task of the main run failed its training rollout. How a
-    failed training rollout is recorded is open, for the user. Proposed: seal
-    the task complete with the failing trajectory named, since the training
-    rollout neither selects nor scores; the test rollout decides, as for every
-    method. A plan refuses to resume under changed code, so after the fix the
-    smoke reruns from a fresh root.
+    sealed such a task as `rollout_failed`, a rule that was never decided and
+    never applied: no task of the main run failed its training rollout.
+  - **Decided by the user on 2026-10-23:** a task whose training rollout fails
+    seals complete, since the training rollout neither selects nor scores; the
+    test rollout decides, as for every method. Both paths now do this: the
+    result names the failing training trajectories (`training_rollout_failure`),
+    the sealed training error is +infinity, and the report counts such tasks
+    (`training_rollouts_failed`). A failed validation rollout still seals as
+    `rollout_failed`. On the Mac, with the fix, task 1 seals complete, naming
+    train_011, with validation error 1.751. A plan refuses to resume under
+    changed code, so the smoke reruns from a fresh root.
 - `configs/phase_c_llm_sr_expression_hosted_120b_v1.json`: the full roster, two
   seeds, 10,000 samples per target. Proposed, pending review. Its cost is about
   the main run's: 220,000 samples and about 55,000 requests, or three to four
@@ -371,6 +376,8 @@ The last argument is how many target searches run at once; the full run searches
   - downward for six picks, where the rows just after a boundary inflated the error LLM-SR minimized: task 3 Gp 0.81 times, task 4 I 0.56, task 6 I 0.077, task 7 I 0.41, task 11 v01 0.10, task 12 h_down 0.40. In tasks 6 and 11 the rows the carried history changes (95 and 141, 2% and 1% of the table) hold at least 92% and 90% of that error;
   - upward for two, whose coefficients fit the carried history: task 10 v01 1.11 times, task 13 h_down 18 times.
 
-  So eight of the eleven picks that read the history were fitted, and selected, on an error shaped by the trajectory boundaries, which no rollout has. Whether to rerun the program form with each trajectory given to the program on its own is open, for the user.
+  So eight of the eleven picks that read the history were fitted, and selected, on an error shaped by the trajectory boundaries, which no rollout has. Nothing marks a boundary for the program: their specification gives each variable as "a numpy array of observations", and the table has no time or trajectory column, though the task description says the data come as trajectories.
+
+  Not rerun, decided by the user on 2026-10-23: how a method uses its training trajectories is its own, and the test runs each trajectory on its own, from its own start. The evaluator is LLM-SR's, run unmodified: one call of the program on the whole table, as in their specification, on the table PySR gets. Like fitting derivatives rather than rollouts, this is a property of the method that the test score includes.
 - **Short histories.** A program that cannot run on the first few rows of a trajectory fails its rollout there, with the row and the reason recorded.
 - **Coarse steps in the record.** The sealed validation rollouts step at the data's own interval, which is coarse for detention (4 units) and missed the CSTR seed 1 runaway. They stay as recorded and score nothing.

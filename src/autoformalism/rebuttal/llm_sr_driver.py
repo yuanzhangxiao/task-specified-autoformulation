@@ -49,6 +49,7 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
@@ -498,20 +499,54 @@ def build_searcher(
                 "selected_samples": selected,
                 "accounting": spent(),
             }
+        training, failure = _training_rollout(
+            score_rollout, equations, context, development[0],
+            seconds=seconds_per_rollout,
+        )
         return {
             "status": "complete",
             "error": None,
             "equations": equations,
             "selected_samples": selected,
             "development_rollout_error": error,
-            "training_rollout_error": score_rollout(
-                equations, context, development[0], development[0],
-                seconds=seconds_per_rollout,
-            ),
+            "training_rollout_error": training,
+            "training_rollout_failure": failure,
             "accounting": spent(),
         }
 
     return search
+
+
+def _training_rollout(
+    score_rollout,
+    equations: dict[str, str],
+    context: ValidationContext,
+    train: DatasetSplit,
+    *,
+    seconds: float,
+) -> tuple[float | None, str | None]:
+    """The system's rollout error on its training data, or why it has none.
+
+    The training rollout neither selects nor scores LLM-SR's pick, so when it
+    fails the task still seals and the test rollout decides, as for every
+    method (decided by the user on 2026-10-23). The failure names each
+    training trajectory that fails on its own.
+    """
+    error = score_rollout(equations, context, train, train, seconds=seconds)
+    if error is not None:
+        return error, None
+    failed = [
+        trajectory.trajectory_id
+        for trajectory in train.trajectories
+        if score_rollout(
+            equations, context, train, replace(train, trajectories=(trajectory,)),
+            seconds=seconds,
+        )
+        is None
+    ]
+    if not failed:
+        return None, "the training rollout failed"
+    return None, f"the training rollout failed on {', '.join(failed)}"
 
 
 def _as_equation(
@@ -637,24 +672,30 @@ def _recover_by_running(
                     "selected_samples": selected,
                     "accounting": spent(),
                 }
+            training, failure = _training_rollout(
+                score_rollout, equations, context, train, seconds=seconds
+            )
             return {
                 "status": "complete",
                 "error": None,
                 "equations": equations,
                 "selected_samples": selected,
                 "development_rollout_error": error,
-                "training_rollout_error": score_rollout(
-                    equations, context, train, train, seconds=seconds
-                ),
+                "training_rollout_error": training,
+                "training_rollout_failure": failure,
                 "accounting": spent(),
             }
     step = observation_step(train)
-    errors: dict[str, float] = {}
+    errors: dict[str, float | None] = {}
+    failure = None
     for name, split in (("development", validation), ("training", train)):
         score = score_programs(
             programs, channels, context, train, split, step=step, seconds=seconds
         )
-        if score.error is None:
+        if score.error is None and name == "training":
+            # Recorded, not fatal, as in _training_rollout.
+            failure = f"the training rollout failed: {score.failure}"
+        elif score.error is None:
             return {
                 "status": "rollout_failed",
                 "error": f"the {name} rollout failed: {score.failure}",
@@ -674,6 +715,7 @@ def _recover_by_running(
         "selected_samples": selected,
         "development_rollout_error": errors["development"],
         "training_rollout_error": errors["training"],
+        "training_rollout_failure": failure,
         "accounting": spent(),
     }
 
