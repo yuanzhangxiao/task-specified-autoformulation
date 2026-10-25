@@ -1,5 +1,18 @@
 # Phase 1 Pipeline Design
 
+## Construction endpoint requalification
+
+Two distinct timescale starts reduced the same model-6 training NMSE from
+1.0426 to 0.30584, with independent original-equation verification. The remaining
+full-coordinate diagnostics used stale scales; one also discarded the retained
+best point's matching history. A new three-task follow-up requalifies those two
+exact endpoints with fixed physical coordinate scales and reproducible raw
+Jacobian evidence, permits bounded polishing only when unresolved, and recovers
+the one missing original start. Historical receipts, equations, domains and
+production defaults remain unchanged. Search eligibility is separate from strict
+endpoint retention. See [the results and next protocol](
+PHASE_C_CONSTRUCTION_ENDPOINT_REQUALIFICATION.md); remote results are pending.
+
 ## Three-policy construction search
 
 `construction-search-policy-1` applies all three policies through the same

@@ -1204,19 +1204,27 @@ def qualify_profile(
 
 
 def _bound_full_history(oracle, parameters, search_result):
-    """Use only complete accepted vectors ending at this exact assessed endpoint."""
+    """Authenticate a complete history, then retain its exact endpoint prefix.
+
+    A best point may precede the last accepted step. Historical step norms are
+    checked in their recorded chart, then recomputed in the assessment chart.
+    Later steps cannot certify progress at a different retained endpoint.
+    """
     steps = search_result.get("accepted_steps", [])
+    recorded_units = np.asarray(search_result.get("history_coordinate_units", []))
+    permitted_units = [oracle.units]
+    if hasattr(oracle, "source_coordinate_units"):
+        permitted_units.append(oracle.source_coordinate_units)
     matches = (
         search_result.get("accepted_history_protocol")
         == "full-coordinate-accepted-steps-1"
         and search_result.get("history_coordinate_names") == list(oracle.names)
-        and search_result.get("history_coordinate_units") == oracle.units.tolist()
-        and search_result.get("last_accepted_parameters") == parameters
+        and any(np.array_equal(recorded_units, units) for units in permitted_units)
         and (search_result.get("best") or {}).get("parameters") == parameters
         and bool(steps)
     )
-    previous = None
-    for step in steps if matches else []:
+    previous, endpoint_index = None, None
+    for index, step in enumerate(steps if matches else []):
         try:
             point = np.asarray(step["reduced_vector"], float)
             prior = np.asarray(step["previous_reduced_vector"], float)
@@ -1230,7 +1238,7 @@ def _bound_full_history(oracle, parameters, search_result):
                 != public.content_sha256(oracle.parameters(point))
                 or not np.isclose(
                     step["coordinate_step_norm"],
-                    np.linalg.norm((point - prior) / oracle.units),
+                    np.linalg.norm((point - prior) / recorded_units),
                     rtol=1e-12,
                     atol=0,
                 )
@@ -1238,21 +1246,36 @@ def _bound_full_history(oracle, parameters, search_result):
                 matches = False
                 break
             previous = point
+            if (
+                oracle.parameters(point) == parameters
+                and step["training_nmse"] == search_result["best"]["training_nmse"]
+            ):
+                endpoint_index = index
         except (KeyError, TypeError, ValueError):
             matches = False
             break
     if matches:
         matches = (
-            oracle.parameters(previous) == parameters
-            and steps[-1]["training_nmse"] == search_result["best"]["training_nmse"]
+            oracle.parameters(previous)
+            == search_result.get("last_accepted_parameters")
+            and endpoint_index is not None
         )
     history = (
         [
             {
-                key: step[key]
-                for key in ("training_nmse", "coordinate_step_norm", "evaluation_count")
+                "training_nmse": step["training_nmse"],
+                "evaluation_count": step["evaluation_count"],
+                "coordinate_step_norm": float(
+                    np.linalg.norm(
+                        (
+                            np.asarray(step["reduced_vector"])
+                            - np.asarray(step["previous_reduced_vector"])
+                        )
+                        / oracle.units
+                    )
+                ),
             }
-            for step in steps
+            for step in steps[: endpoint_index + 1]
         ]
         if matches
         else []
@@ -1260,13 +1283,77 @@ def _bound_full_history(oracle, parameters, search_result):
     return history, bool(matches)
 
 
-def diagnose_profile(original, oracle, parameters, verification, fit, seconds, save):
+def _raw_endpoint_evidence(oracle, vector, residual, jacobian, policy):
+    """Retain complete arrays for independent scaled SVD and KKT recomputation."""
+    vector = np.asarray(vector, float)
+    residual = np.asarray(residual, float)
+    jacobian = np.asarray(jacobian, float)
+    if (
+        residual.ndim != 1
+        or not len(residual)
+        or jacobian.shape != (len(residual), len(vector))
+        or not np.isfinite(residual).all()
+        or not np.isfinite(jacobian).all()
+    ):
+        raise ValueError("complete finite endpoint arrays required")
+    gradient = 2 * (jacobian.T @ residual) / len(residual)
+    scaled_gradient = gradient * oracle.units
+    if not np.isfinite(gradient).all() or not np.isfinite(scaled_gradient).all():
+        raise ValueError("finite endpoint gradient required")
+    tolerance = policy.bound_tolerance * np.maximum(oracle.units, abs(vector))
+    blocked = (
+        ((vector - oracle.lower <= tolerance) & (scaled_gradient > 0))
+        | ((oracle.upper - vector <= tolerance) & (scaled_gradient < 0))
+        | (oracle.lower == oracle.upper)
+    )
+    evidence = {
+        "protocol": "complete-endpoint-linearization-1",
+        "coordinate_names": list(oracle.names),
+        "coordinate_units": oracle.units.tolist(),
+        "reduced_vector": vector.tolist(),
+        "parameters_sha256": public.content_sha256(oracle.parameters(vector)),
+        "bounds": {
+            "lower": public._jsonable(oracle.lower),
+            "upper": public._jsonable(oracle.upper),
+            "null_meaning": "unbounded on the indicated side",
+        },
+        "training_nmse": float(np.mean(residual**2)),
+        "residual": residual.tolist(),
+        "jacobian": jacobian.tolist(),
+        "residual_sha256": adequacy._digest(residual),
+        "jacobian_sha256": adequacy._digest(jacobian),
+        "raw_gradient": gradient.tolist(),
+        "scaled_gradient": scaled_gradient.tolist(),
+        "projected_scaled_gradient": np.where(blocked, 0, scaled_gradient).tolist(),
+        "projection_blocked_indices": np.flatnonzero(blocked).tolist(),
+        "bound_tolerance": policy.bound_tolerance,
+        "rank_relative_tolerance": policy.rank_relative_tolerance,
+        "meaning": "Normalized training residual and its physical-coordinate Jacobian; "
+        "multiply Jacobian columns by coordinate_units before the reported SVD. "
+        "Numerical rank depends on this chart and tolerance, "
+        "not exact identifiability.",
+    }
+    return evidence | {"sha256": public.content_sha256(evidence)}
+
+
+def diagnose_profile(
+    original,
+    oracle,
+    parameters,
+    verification,
+    fit,
+    seconds,
+    save,
+    *,
+    include_raw_evidence=False,
+):
     """Assess all aggregate coordinates with exact endpoint/history authentication."""
     if oracle.original is not original:
         raise ValueError("diagnosis oracle identity differs")
     budget = prefix_execution._budget(seconds, seconds + 60)
     policy = previous._adequacy_policy(diagnostic=True)
     steps, matches = _bound_full_history(oracle, parameters, fit)
+    termination_matches = matches and fit.get("last_accepted_parameters") == parameters
     result = {
         "protocol": "construction-profile-full-residual-diagnosis-1",
         "assessment": None,
@@ -1281,6 +1368,15 @@ def diagnose_profile(original, oracle, parameters, verification, fit, seconds, s
         "recovery_audit": deepcopy(oracle.recovery_audit),
         "original_parameter_identifiability_certified": False,
     }
+    if include_raw_evidence:
+        result.update(
+            termination_endpoint_matches_retained=termination_matches,
+            accepted_history_source_sha256=public.content_sha256(fit),
+            accepted_history_coordinate_units=fit.get("history_coordinate_units"),
+            history_truncated_to_retained=matches
+            and len(steps) < len(fit.get("accepted_steps", [])),
+            history_step_norms_recomputed_in_assessment_chart=True,
+        )
     interrupted = None
     try:
         vector = oracle.vector(parameters)
@@ -1289,8 +1385,17 @@ def diagnose_profile(original, oracle, parameters, verification, fit, seconds, s
         )
         result["derivative_check"] = public._jsonable(derivative)
         residual, jacobian = budget.numerical(lambda d: oracle.evaluate(vector, d))
+        if include_raw_evidence:
+            result["endpoint_linearization"] = _raw_endpoint_evidence(
+                oracle, vector, residual, jacobian, policy
+            )
+            budget.callback(
+                lambda: save(deepcopy(result) | {"timing": budget.snapshot()})
+            )
         stop = (
             fit.get("stop_reason")
+            if termination_matches
+            else "retained_best_precedes_termination"
             if matches
             else "retained_endpoint_has_no_matching_full_coordinate_search_history"
         )

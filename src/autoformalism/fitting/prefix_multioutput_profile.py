@@ -550,6 +550,67 @@ class AggregatedTrainingOracle:
         ) if jacobian else None
 
 
+class EndpointChartOracle:
+    """Freeze an opt-in chart at one endpoint without changing its model family.
+
+    Floors must cover every coordinate and be declared by the experiment from
+    public training scales. They are numerical units, not bounds or priors. No
+    Jacobian, residual or optimization outcome determines the frozen units.
+    """
+
+    def __init__(self, oracle, parameters: dict[str, float], floors: dict[str, float]):
+        if set(floors) != set(oracle.names):
+            raise ValueError("endpoint chart floors must cover every coordinate")
+        if any(
+            isinstance(value, bool) or not np.isfinite(value) or value <= 0
+            for value in floors.values()
+        ):
+            raise ValueError("endpoint chart floors must be finite and positive")
+        vector = oracle.vector(parameters)
+        self.base_oracle = oracle
+        self.names = oracle.names
+        self.original = oracle.original
+        self.source_coordinate_units = np.array(oracle.units, float, copy=True)
+        self.units = np.maximum(abs(vector), [floors[name] for name in self.names])
+        self.units.setflags(write=False)
+        self.source_coordinate_units.setflags(write=False)
+        self._chart_receipt = {
+            "protocol": "frozen-endpoint-coordinate-chart-1",
+            "coordinate_names": list(self.names),
+            "anchor_parameters_sha256": content_sha256(parameters),
+            "anchor_vector": vector.tolist(),
+            "floors": {name: float(floors[name]) for name in self.names},
+            "coordinate_units": self.units.tolist(),
+            "source_coordinate_units": self.source_coordinate_units.tolist(),
+            "rule": "max(abs(frozen_endpoint_coordinate),declared_training_floor)",
+            "jacobian_based_scaling": False,
+            "parameter_domains_changed": False,
+            "original_equations_changed": False,
+        }
+        self._chart_receipt["sha256"] = content_sha256(self._chart_receipt)
+
+    def __getattr__(self, name):
+        return getattr(self.base_oracle, name)
+
+    @property
+    def recovery_audit(self):
+        """Expose both old units and the new frozen chart for auditability."""
+        return self.base_oracle.recovery_audit | {
+            "optimizer_units": "frozen-endpoint-coordinate-chart-1; see chart receipt",
+            "endpoint_coordinate_chart": deepcopy(self._chart_receipt)
+        }
+
+    def local_coordinate_scales(self, vector):
+        """Use the same frozen chart, with local reciprocal singularity caps."""
+        values = self.vector(self.parameters(vector))
+        scales = np.maximum(abs(values), self.units)
+        for name in self.sensitive_names:
+            i = self.names.index(name)
+            if values[i] != 0:
+                scales[i] = min(abs(values[i]), scales[i])
+        return scales
+
+
 def _project(design, offset, d_design, d_offset, lower, upper, deadline):
     """Solve bounded LS; differentiate only a resolved full-rank strict face."""
     _check(deadline)

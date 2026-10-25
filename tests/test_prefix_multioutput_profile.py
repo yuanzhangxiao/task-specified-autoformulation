@@ -11,6 +11,7 @@ pytest.importorskip("casadi")
 from autoformalism.fitting import prefix_affine
 from autoformalism.fitting.prefix_initialization import NumericalPolicy
 from autoformalism.fitting.prefix_multioutput_profile import (
+    EndpointChartOracle,
     ProfileUnavailable,
     _project,
     make_oracle,
@@ -192,6 +193,50 @@ def test_generic_certificate_preserves_original_model_domains_and_scopes(case):
     ]
     assert profile.audit["target_scales"] == original.scales
     assert [r["sample_count"] for r in profile.audit["training_rows"]] == [9, 9]
+
+
+def test_endpoint_chart_freezes_all_units_without_changing_equations_or_domains(case):
+    original, oracle, _ = make_oracle(*case)
+    parameters = dict(oracle.start)
+    parameters["coefficient:y:y"] = -0.006
+    old_units = oracle.units.copy()
+    floors = dict.fromkeys(oracle.names, 0.01)
+    floors["coefficient:y:y"] = 1 / 300
+    chart = EndpointChartOracle(oracle, parameters, floors)
+    index = oracle.names.index("coefficient:y:y")
+    assert chart.units[index] == 0.006
+    assert np.array_equal(oracle.units, old_units)
+    assert chart.original is original and chart.reduction is oracle.reduction
+    assert np.array_equal(chart.lower, oracle.lower)
+    assert np.array_equal(chart.upper, oracle.upper)
+    vector = chart.vector(parameters)
+    result = chart.evaluate(vector, monotonic() + 10)
+    expected = oracle.evaluate(vector, monotonic() + 10)
+    assert result[0] == pytest.approx(expected[0])
+    assert result[1] == pytest.approx(expected[1])
+    changed = vector.copy()
+    changed[index] = -0.1
+    assert chart.local_coordinate_scales(changed)[index] == 0.1
+    assert chart.units[index] == 0.006
+    receipt = chart.recovery_audit["endpoint_coordinate_chart"]
+    assert not receipt["jacobian_based_scaling"]
+    receipt["floors"]["coefficient:y:y"] = 1e9
+    assert chart.recovery_audit["endpoint_coordinate_chart"]["floors"] == floors
+    floors["coefficient:y:y"] = 1e8
+    assert chart.units[index] == 0.006
+    with pytest.raises(ValueError, match="read-only"):
+        chart.units[index] = 1e8
+
+
+@pytest.mark.parametrize("bad", [0, -1, float("nan"), float("inf"), True])
+def test_endpoint_chart_rejects_undeclared_or_invalid_floors(case, bad):
+    _, oracle, _ = make_oracle(*case)
+    floors = dict.fromkeys(oracle.names, 1.0)
+    with pytest.raises(ValueError, match="cover every"):
+        EndpointChartOracle(oracle, oracle.start, {})
+    floors[oracle.names[0]] = bad
+    with pytest.raises(ValueError, match="finite and positive"):
+        EndpointChartOracle(oracle, oracle.start, floors)
 
 
 def test_basis_matches_all_weighted_outputs_original_chain_rule_and_replay(case):

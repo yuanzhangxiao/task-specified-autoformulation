@@ -497,6 +497,122 @@ def test_full_profile_history_binds_units_vectors_and_exact_endpoint():
         assert c._bound_full_history(oracle, parameters, bad) == ([], False)
 
 
+def _two_point_history(oracle):
+    prior = np.array([1.0, 3.0])
+    best = np.array([1.5, 4.5])
+    final = np.array([1.51, 4.51])
+    steps = []
+    for count, point, loss in ((2, best, 0.25), (3, final, 0.2501)):
+        steps.append(
+            {
+                "training_nmse": loss,
+                "evaluation_count": count,
+                "coordinate_step_norm": float(
+                    np.linalg.norm((point - prior) / oracle.units)
+                ),
+                "previous_reduced_vector": prior.tolist(),
+                "reduced_vector": point.tolist(),
+                "parameters_sha256": c.public.content_sha256(oracle.parameters(point)),
+            }
+        )
+        prior = point
+    return {
+        "accepted_history_protocol": "full-coordinate-accepted-steps-1",
+        "history_coordinate_names": list(oracle.names),
+        "history_coordinate_units": oracle.units.tolist(),
+        "last_accepted_parameters": oracle.parameters(final),
+        "best": {"parameters": oracle.parameters(best), "training_nmse": 0.25},
+        "accepted_steps": steps,
+        "stop_reason": "step_or_gradient_converged",
+        "budget_exhausted": False,
+    }
+
+
+def test_retained_best_uses_exact_prefix_and_recomputes_chart_step_norms():
+    from tests.test_recovery_numerics import QuadraticOracle
+
+    oracle = QuadraticOracle()
+    fit = _two_point_history(oracle)
+    parameters = fit["best"]["parameters"]
+    history, matched = c._bound_full_history(oracle, parameters, fit)
+    assert matched and len(history) == 1
+    assert history[0]["evaluation_count"] == 2
+    oracle.source_coordinate_units = oracle.units.copy()
+    oracle.units = np.array([0.5, 2.0])
+    history, matched = c._bound_full_history(oracle, parameters, fit)
+    assert matched and len(history) == 1
+    assert history[0]["coordinate_step_norm"] == pytest.approx(
+        np.linalg.norm(np.array([0.5, 1.5]) / oracle.units)
+    )
+    corrupted = deepcopy(fit)
+    corrupted["accepted_steps"][1]["previous_reduced_vector"][0] += 0.1
+    assert c._bound_full_history(oracle, parameters, corrupted) == ([], False)
+
+
+def test_history_prefix_does_not_borrow_later_termination(monkeypatch):
+    from tests.test_recovery_numerics import QuadraticOracle
+
+    oracle = QuadraticOracle()
+    oracle.original = SimpleNamespace(affine_audit={})
+    oracle.recovery_audit = {}
+    fit = _two_point_history(oracle)
+    parameters = fit["best"]["parameters"]
+    verification = {
+        "parameters": parameters,
+        "reduced_vector": list(parameters.values()),
+        "training_nmse": 0.25,
+        "alternate_training_nmse": 0.25,
+        "solver_loss_discrepancy": 0.0,
+        "solver_prediction_discrepancy": 0.0,
+        "original_equations_verified": True,
+    }
+    monkeypatch.setattr(c, "_full_residual_fallback", lambda *args: {})
+    captured = []
+
+    def assessment(*args, **kwargs):
+        captured.append(kwargs)
+        return {"classification": "optimization_unresolved"}
+
+    monkeypatch.setattr(c.adequacy, "assess", assessment)
+    value = c.diagnose_profile(
+        oracle.original,
+        oracle,
+        parameters,
+        verification,
+        fit,
+        5,
+        lambda _: None,
+        include_raw_evidence=True,
+    )
+    assert value["accepted_steps_used"] == 1
+    assert not value["termination_endpoint_matches_retained"]
+    assert captured[0]["stop_reason"] == "retained_best_precedes_termination"
+    assert value["endpoint_linearization"]["jacobian"] == [[1, 0], [0, 1]]
+
+
+def test_raw_endpoint_linearization_recomputes_gradient_and_bound_kkt():
+    from tests.test_recovery_numerics import QuadraticOracle
+
+    oracle = QuadraticOracle()
+    vector = np.array([oracle.lower[0], 3.0])
+    residual, jacobian = np.array([2.0, -1.0]), np.array([[3.0, 2.0], [1.0, 4.0]])
+    policy = c.adequacy.Policy()
+    value = c._raw_endpoint_evidence(oracle, vector, residual, jacobian, policy)
+    r, j = np.array(value["residual"]), np.array(value["jacobian"])
+    assert value["raw_gradient"] == pytest.approx(2 * j.T @ r / len(r))
+    assert value["scaled_gradient"] == pytest.approx(
+        np.array(value["raw_gradient"]) * oracle.units
+    )
+    assert value["projection_blocked_indices"] == [0]
+    assert value["projected_scaled_gradient"][0] == 0.0
+    assert value["jacobian_sha256"] == c.adequacy._digest(j)
+    assert value["sha256"] == c.public.content_sha256(
+        {key: data for key, data in value.items() if key != "sha256"}
+    )
+    with pytest.raises(ValueError, match="finite endpoint"):
+        c._raw_endpoint_evidence(oracle, vector, [float("nan")], jacobian, policy)
+
+
 def test_full_residual_fallback_uses_same_budget_and_policy(monkeypatch):
     from time import monotonic
 
