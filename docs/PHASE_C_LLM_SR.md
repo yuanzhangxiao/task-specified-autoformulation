@@ -301,14 +301,16 @@ Plans:
     +infinity, and the report counts one such task. The searches ran at 750
     to 910 samples an hour, two to three times smoke v5's pace.
 - `configs/phase_c_llm_sr_expression_hosted_120b_v1.json`: the full roster, two
-  seeds, 10,000 samples per target. Proposed, pending review. It has the main
+  seeds, 10,000 samples per target. Frozen on 2026-10-25 on the user's
+  sign-off, after the smoke rerun passed; no setting changed. It has the main
   run's budget: 220,000 samples and about 55,000 requests. The main run's 22
   searches, all at once, took 1.5 to 4 days each (106 to 278 samples an hour);
   if the expression form keeps its smoke pace advantage, this run takes one to
-  two days.
+  two days. It runs as `phase-c-llm-sr-expression-hosted-120b-v1`.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3
+bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1.json phase-c-llm-sr-expression-hosted-120b-v1 22
 ```
 
 ## Settings

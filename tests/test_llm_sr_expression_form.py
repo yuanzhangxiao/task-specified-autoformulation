@@ -204,9 +204,9 @@ def test_the_plans_change_only_the_form_and_its_description():
     full, base_full = (_load("phase_c_llm_sr_expression_hosted_120b_v1.json"),
                        _load("phase_c_llm_sr_hosted_120b_v1.json"))
     assert {k for k in full if full[k] != base_full[k]} == {
-        "hypothesis_form", "status", "scope_note",
+        "hypothesis_form", "scope_note",
     }
-    assert full["status"] == "proposed_pending_review"
+    assert full["status"] == "frozen_before_calls"
     for plan in (smoke, full):
         assert llm_sr_hypothesis_settings(plan) == {"single_expression": True}
         assert llm_sr_method_label(plan) == "llm_sr_expression"
