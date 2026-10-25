@@ -1,5 +1,18 @@
 # Autoformalism Phase 1 Implementation Context
 
+## LLM-SR detention diagnostic recovery
+
+The first detention control refit improved all six starts that entered search;
+four other starts were blocked by derivative qualification, and all ten final
+diagnoses timed out. A separate six-task CPU follow-up diagnoses two saved good
+endpoints and recovers the four blocked original starts. Coordinate-level
+receipts preserve completed checks, tight retries have separate allowances,
+and useful-search precision remains distinct from endpoint confidence. An exact
+Model 15 combination/lift certificate preserves its correlated feasible domain;
+the recovery searches retain original coordinates. Historical costs, equations,
+data and production defaults remain unchanged. See
+[the protocol and Delta commands](PHASE_C_LLM_SR_DETENTION_RECOVERY.md).
+
 ## Construction endpoint requalification
 
 Two distinct timescale starts reduced the same model-6 training NMSE from

@@ -1,5 +1,18 @@
 # Phase 1 Pipeline Design
 
+## LLM-SR detention diagnostic recovery
+
+The opt-in six-task recovery separates per-coordinate derivative qualification,
+600-second search, independent original-equation verification and retained-point
+diagnosis. Every coordinate has its own nonrenewable journal reservation;
+aggregate checks require matching endpoints, data, policies, units and precision.
+Search eligibility does not grant stationarity or parameter confidence. Two
+successful saved endpoints receive diagnosis only; four blocked original starts
+receive recovery without cross-start seeding. Exact Model 15 combination/lift
+certification records its structural ambiguity without imposing an arbitrary
+gauge or changing this run's optimizer coordinates. No held-out access or
+production default changes. See `PHASE_C_LLM_SR_DETENTION_RECOVERY.md`.
+
 ## Construction endpoint requalification
 
 Two distinct timescale starts reduced the same model-6 training NMSE from
