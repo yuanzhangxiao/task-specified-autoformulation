@@ -179,6 +179,111 @@ coverage versus cumulative LLM tokens and fitting CPU, not by rounds alone.
 Construction breadth can increase before numerical qualification, but aggressive
 numerical ranking/pruning should wait for the decision-specific evidence above.
 
+## Returned comparison, 24 October 2026
+
+Both ACES runs completed all 18 episodes and 54 generation calls. Job 2251055
+used 20B; job 2251057 used 120B. Their comparison identity matches, and exact
+request/response reconstruction verified all 36 episodes under delivered commit
+`df58b95`. These are six selected T2-easy starting candidates, not six benchmarks.
+
+| Recorded outcome | 20B | 120B |
+| --- | ---: | ---: |
+| Accepted fitting exports | 0 | 0 |
+| Rejected episodes | 17 | 18 |
+| Wider-revision decisions | 1 | 0 |
+| Parseable JSON replies | 49/54 | 54/54 |
+| Output-length terminations | 3 | 0 |
+| First failure before public-path/data checks | 41 | 50 |
+| Public-path first failures | 0 | 2 |
+| Qualified model-data first failures | 12 | 2 |
+| Observed tokens | 672,295 | 659,431 |
+| Tokens/call, median [unscaled MAD] | 10,289 [1,071.5] | 10,715 [1,138] |
+| Missing usage records | 0 | 0 |
+
+The remaining 20B failures comprise three length-limited malformed replies and
+two unterminated JSON strings despite a `stop` finish. All provider requests
+returned; neither arm overflowed the context. First-failure counts are not
+exhaustive scientific diagnoses. The zero-export comparison does not establish
+relative scientific repair ability.
+
+### Interface and equation findings
+
+Both models attempted broader structural edits. New-state declarations occurred
+in 29 calls for 20B and 34 for 120B; initializer edits occurred in 31 and 49.
+The same new state was frequently supplied again as an existing-component edit,
+and its complete initializer was repeated in `initialization_edits`. All thirteen
+120B first `INITIALIZATION_IDENTITY` failures have this redundancy; they are not
+attempts to overwrite protected observed initials. Identical redundant records
+are unambiguous, while conflicting formulas, parameter-as-component edits and
+protected differential-to-algebraic conversions remain substantive failures.
+
+Scientific inspection distinguishes three situations:
+
+1. An additional state feeding disposal but not the closed insulin subsystem
+   cannot resolve the latter's initial-difference restriction. A dependent map
+   such as `M2(0) = a*M(0)` also does not add an independent initial direction.
+   Shared basal constants cancel from matched-forcing trajectory differences.
+2. 20B P06-r1 seeds 1/2 propose `I' = parent + X`, `X' = -X/tau_X`, with a
+   trajectory-specific root. 120B P06-r2 seed 2 finally adds two independently
+   initialized memories feeding both insulin and disposal. These change the
+   diagnosed premise, but fitting and scientific adequacy remain unestablished.
+3. P03-r0 illustrates a parent-relative repair problem: a later complete patch
+   omits an earlier glucose correction. Since rejected patches never replace the
+   parent, the original glucose conflict returns. Feedback should show the full
+   proposed patch and all remaining target-specific conflicts together.
+
+### Offline normalization and a proof-coverage gap
+
+A separate replay removed only identical duplicate declarations, redundant
+new-component equations/initializers and unambiguous evidence-label aliases. It
+did not invent scientific equations or resolve conflicting edits. Four saved
+replies across two episodes in each arm then reached the existing gates without
+rejection. All eight assessments were **deferred**. No historical result changed,
+no model was adopted, and these counts are not scientific success rates.
+
+Three of the four 120B replies are P00-r1 seed 0 and retain a demonstrable
+contradiction. They add `B' = -k_B*B`, `B(0) = Gp(0)` and change the readout to
+`U = A + X + c*B`. On train_000/013/014, initial Gp, U and A=Uii are identical.
+Exact initial reproduction therefore requires
+`X(0) = U(0) - Uii(0) - c*Gp(0)` to be identical across those trajectories for
+every shared c. Its common numerical value is unknown; its equality is known.
+The affine dynamics with common forcing still obey the old weighted trajectory
+identity. The present checker discards this readout because c is unknown, losing
+the symbolic cancellation and incorrectly treating the initial equality as
+unavailable. This is a finite-check coverage gap, not successful repair.
+
+The retained rational witness gives absolute weighted-identity defects of
+0.0104780781 for Gp at time 114, 0.0348237407 for I at time 25, and 0.000292714557
+for U at time 42, exceeding the unchanged guards. These are conditional
+exact-reproduction contradictions, not lower bounds on best rollout NMSE.
+
+The next bounded milestone should normalize unambiguous interface redundancy,
+make feedback distinguish new components from existing ones, and preserve
+parameter-symbolic initial equalities in trajectory differences. Replay the 108
+saved replies before another matched live test. The 20B wider-revision explanation
+also incorrectly claims that new delayed states and Uii initial references are
+unsupported; that model statement is not evidence of a contract limitation.
+
+### Analysis artifacts and verification
+
+Local report: `output/structural-comparison-analysis-20261024/REPORT.html`, with
+36 episode pages, all exact requests/replies, equation audits, cost plots,
+independent replay receipts and the non-adopted counterfactual evidence. The
+report reads only saved training evidence. No fitting, rollouts, LLM calls,
+benchmark changes or test-data access were performed during this audit.
+
+Archive identities:
+
+- 20B `inspection (1).tar.gz`:
+  `02c3dc8e67491c22157092604d10c35bed546b75f647ec0b5fa55e76923aa29c`.
+- 120B `inspection (2).tar.gz`:
+  `d3821dc55fa7a3da0cc78c4c7b2b73f2cf1624bdc5a9142ca7669dd5301a7cb4`.
+
+Verification: 113 relevant comparison/feedback/ACES tests passed; the runtime
+audit's separate focused suite passed 84 tests. Repository Ruff reports 37
+existing issues in `analysis/claude/make_tables.py`. This results update changes
+documentation only and does not modify the runtime or Orion's numerical work.
+
 ## Verification and remaining limits
 
 The focused structural, feedback, campaign, launcher and existing revision suites
