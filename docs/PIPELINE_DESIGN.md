@@ -1,5 +1,24 @@
 # Phase 1 Pipeline Design
 
+## Three-policy construction search
+
+`construction-search-policy-1` applies all three policies through the same
+normalized atomic structural boundary and qualified data checks. One durable
+three-call client owns each episode's 98,304-token ceiling, including multi-option
+responses; options share one 8,192-token completion. Complete-model family identity
+uses bounded exact private-symbol relabeling, preserving equations, initialization,
+parameter domains/sharing and protected public names. Unproved equivalence remains
+unresolved. Restart requires the same candidate family and unchanged failure after
+validation; fixing serialization can still count as mechanical progress.
+
+Immutable parent-relative patches, explicit omitted-action reminders, and compact
+attempt ledgers prevent implicit partial adoption. The option policy validates
+siblings separately and uses a frozen seeded order for at most two distinct failed
+branches. Cached exact replay authenticates completed results and fitting packets.
+Smoke/full phases share case namespaces and budgets; ambiguous scheduler outcomes
+block resubmission. No adaptive fitting or scientific-validity claim is made.
+See [the search-policy contract](PHASE_C_CONSTRUCTION_SEARCH_POLICIES.md).
+
 ## Structural repair replay and diversity design
 
 `construction-structural-revision-2` consolidates only identical bounded reply
@@ -8,8 +27,9 @@ Its opt-in `shared-symbolic-initial-readout-1` gate preserves exact common laten
 initial expressions without fitting their shared coefficients. Historical gates
 retain their default behavior. A separately pinned, checkpointed saved-reply CLI
 rechecks both returned model arms without generation or candidate adoption.
-Three-option search, cumulative conflict ledgers and adaptive fitting remain
-proposed experiments, not claims about the completed model-size comparison.
+Three-option search and cumulative conflict ledgers are now implemented in the
+separate experiment above, not tested by the completed model-size comparison.
+Adaptive fitting remains deferred.
 See [the offline replay and diversity design](PHASE_C_STRUCTURAL_REPLAY_AND_DIVERSITY.md).
 
 ## Local profiling recovery and instantaneous LLM-SR controls

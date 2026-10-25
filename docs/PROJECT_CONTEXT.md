@@ -1,5 +1,19 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Three-policy construction search
+
+The opt-in `construction-search-policy-1` experiment compares sequential repair
+with restart, independent proposals, and up to three alternatives followed by
+shallow repair. Six frozen T2-easy parents receive three seed bundles per policy
+on both 20B and 120B: 54 episodes / at most 162 calls per model. Private-symbol
+renaming is compared conservatively on complete models; initial scope, parameter
+sharing/domains, and public identities remain fixed. Feedback retains a compact
+history, complete intended patch, and exact earlier actions omitted by a later
+reply. Alternatives are never merged automatically. A smoke subset is included
+in the full budget; full submission is a separate explicit command. New roots
+preserve all previous campaigns. No fitting, held-out access or promotion occurs.
+See [the experiment and ACES runbook](PHASE_C_CONSTRUCTION_SEARCH_POLICIES.md).
+
 ## Structural repair replay and diversity design
 
 The returned 20B/120B comparison completed 108 calls with no accepted exports.
@@ -8,7 +22,8 @@ and explicitly enables a bounded shared-symbolic initial-readout proof. The
 saved-reply audit preserves historical results, rechecks each original parent,
 and performs no new generation, fitting or adoption. The previous comparison
 tested model size under serial repair, not population search or adaptive fitting.
-A three-option/breadth experiment is documented but not yet implemented or run.
+A three-option/breadth experiment was proposed from this evidence and is now
+implemented separately as described above; no live search-policy results exist yet.
 See [the correction and proposed search comparison](
 PHASE_C_STRUCTURAL_REPLAY_AND_DIVERSITY.md).
 

@@ -94,7 +94,12 @@ normalize and validate first, and then compare both the resulting candidate and
 its unresolved conflict. Different prose, renamed symbols or coefficients within
 the same contradicted family do not establish useful diversity.
 
-## Recommended search-policy experiment, not yet implemented
+## Search-policy experiment proposed from the replay
+
+The proposal below has now been implemented in a separate namespace; see
+[the three-policy experiment](PHASE_C_CONSTRUCTION_SEARCH_POLICIES.md). Its first
+policy is explicitly **sequential repair with restart**, rather than pure serial
+depth. The original saved-reply findings above remain historical evidence.
 
 Asking for three options is promising, but does not guarantee three distinct
 scientific alternatives. Each option should identify the affected target/witness,

@@ -51,12 +51,17 @@ SOURCE_PINS = {
 }
 
 
-def load_source(path: Path, arm: str) -> dict:
-    """Authenticate compressed bytes, sealed parents and every consumed receipt."""
+def load_source(path: Path, arm: str, *, archive_sha256: str | None = None) -> dict:
+    """Authenticate bytes, parents and receipts against an explicit trusted pin.
+
+    The default remains the original upload. A caller restoring verified saved
+    members may supply its separately pinned repack; all inner checks still run.
+    """
     if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_BYTES:
         raise ValueError("a bounded regular inspection archive is required")
     blob = path.read_bytes()
-    if hashlib.sha256(blob).hexdigest() != SOURCE_PINS[arm]["archive_sha256"]:
+    expected_hash = archive_sha256 or SOURCE_PINS[arm]["archive_sha256"]
+    if hashlib.sha256(blob).hexdigest() != expected_hash:
         raise ValueError("inspection archive identity differs")
     reader = _Reader(blob)
     if (
