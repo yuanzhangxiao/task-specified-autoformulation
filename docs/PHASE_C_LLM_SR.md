@@ -288,13 +288,27 @@ Plans:
     `rollout_failed`. On the Mac, with the fix, task 1 seals complete, naming
     train_011, with validation error 1.751. A plan refuses to resume under
     changed code, so the smoke reruns from a fresh root.
+  - **Rerun on js2 on 2026-10-25, 08:05 to 08:38Z, from checkout `ca45579`
+    (run `phase-c-llm-sr-expression-smoke-v1-rerun`), and passed:** both tasks
+    sealed complete and the report was written. 1,200 samples in 300
+    requests, no transport failures. The searches drew new samples, so the
+    picks differ from the first run's. The form refused 5 of T1 easy's 400
+    samples and 126 of T2 hard's 800 (102 read along the rows, 24 had several
+    statements). Task 0's pick, chosen as always by its training fit, runs
+    away on validation (error 1.8e21). Task 1's pick scores 0.961 on
+    validation. Its system fails on two training trajectories, which the
+    result names (train_011, train_015); its sealed training error is
+    +infinity, and the report counts one such task. The searches ran at 750
+    to 910 samples an hour, two to three times smoke v5's pace.
 - `configs/phase_c_llm_sr_expression_hosted_120b_v1.json`: the full roster, two
-  seeds, 10,000 samples per target. Proposed, pending review. Its cost is about
-  the main run's: 220,000 samples and about 55,000 requests, or three to four
-  days with all 22 searches at once if the service holds.
+  seeds, 10,000 samples per target. Proposed, pending review. It has the main
+  run's budget: 220,000 samples and about 55,000 requests. The main run's 22
+  searches, all at once, took 1.5 to 4 days each (106 to 278 samples an hour);
+  if the expression form keeps its smoke pace advantage, this run takes one to
+  two days.
 
 ```bash
-bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1 3
+bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3
 ```
 
 ## Settings
