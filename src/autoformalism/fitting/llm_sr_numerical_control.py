@@ -26,7 +26,8 @@ from autoformalism.expressions import (
     ValidationContext,
     compile_candidate,
 )
-from autoformalism.expressions.compiler import SAFE_DIVISION_EPSILON, _walk
+from autoformalism.expressions.compiler import SAFE_DIVISION_EPSILON
+from autoformalism.expressions.parser import ParsedExpression
 from autoformalism.fitting import public_fitting as public
 from autoformalism.fitting.models import FitConfig
 from autoformalism.fitting.simulation import (
@@ -243,11 +244,18 @@ def _denominator_audit(model, row, parameters, states, deadline) -> dict:
     for index, time in enumerate(row.time[: states.shape[1]]):
         if monotonic() >= deadline:
             break
-        environment = model._environment(
-            float(time), states[:, index], parameters, forcing
-        )
         for name, node in denominators.items():
-            value = float(_walk(node, environment))
+            value = float(
+                model.evaluate_expression(
+                    ParsedExpression(
+                        ast.unparse(node), ast.Expression(node), frozenset()
+                    ),
+                    float(time),
+                    states[:, index],
+                    parameters,
+                    forcing,
+                )
+            )
             summary = summaries[name]
             minimum = summary["minimum_absolute_value"]
             summary["minimum_absolute_value"] = (
@@ -278,13 +286,16 @@ def replay_training(
     settings: ReplaySettings,
     *,
     checkpoint: Callable[[dict], None] | None = None,
+    model_factory: Callable[
+        [Transcription, ValidationContext], CompiledModel
+    ] = compile_transcription,
 ) -> dict:
     """Replay the supplied values once with no optimizer or fitted initial states."""
     settings = ReplaySettings.model_validate(settings.model_dump(mode="json"))
     wall, cpu = monotonic(), process_time()
     deadline = wall + settings.seconds
     packed, split = checked_training(training, context)
-    model = compile_transcription(item, context)
+    model = model_factory(item, context)
     scaler = TrainingScaler().fit(split)
     scales = {
         t: scaler.scales[f"target:{t}"].standard_deviation for t in context.targets

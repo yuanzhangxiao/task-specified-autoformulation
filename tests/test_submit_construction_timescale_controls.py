@@ -290,3 +290,40 @@ def test_runtime_identity_binds_precision_package_source(tmp_path, monkeypatch):
     assert (
         before["mpmath_source_sha256"] != cli.runtime_identity()["mpmath_source_sha256"]
     )
+
+
+def test_recovery_export_cli_authenticates_old_controls(tmp_path, monkeypatch, capsys):
+    source, destination = tmp_path / "source", tmp_path / "portable/inputs.json"
+    calls = []
+    monkeypatch.setattr(
+        cli.campaign,
+        "export_recovery_inputs",
+        lambda *args: calls.append(args) or {"authenticated_parent_tasks": 10},
+    )
+    cli.main(
+        ["export-recovery", "--source", str(source), "--destination", str(destination)]
+    )
+    assert calls == [(source, destination)]
+    assert json.loads(capsys.readouterr().out) == {"authenticated_parent_tasks": 10}
+
+
+@pytest.mark.parametrize("command", ["run", "status", "inspect"])
+def test_recovery_wrapper_ignores_stale_v1_environment(tmp_path, command):
+    env = shell_environment(tmp_path)
+    env.update(
+        AF_TIMESCALE_CONTROLS_INPUTS="/stale/v1-inputs.json",
+        AF_TIMESCALE_CONTROLS_CONFIG="/stale/v1-config.json",
+        AF_TIMESCALE_RECOVERY_ROOT=str(tmp_path / "recovery"),
+    )
+    launcher = REPO / "scripts/hpc/start_construction_timescale_recovery.sh"
+    subprocess.run(["bash", "-n", str(launcher)], check=True)
+    subprocess.run(["bash", str(launcher), command], env=env, check=True)
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert env["AF_TIMESCALE_RECOVERY_ROOT"] in args
+    assert env["AF_TIMESCALE_CONTROLS_ROOT"] not in args
+    assert env["AF_OUTPUT_ROOT"] not in args
+    if command == "run":
+        assert str(REPO / "inputs/timescale-recovery-inputs.json") in args
+        assert str(REPO / "configs/construction_timescale_controls_v2.json") in args
+        assert env["AF_TIMESCALE_CONTROLS_INPUTS"] not in args
+        assert env["AF_TIMESCALE_CONTROLS_CONFIG"] not in args

@@ -1,5 +1,24 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Local profiling recovery and instantaneous LLM-SR controls
+
+The returned timescale run searched only three of ten tasks and established no
+full-model convergence. The opt-in v2 first projects 21 conditionally linear
+coefficients/initials, verifies that checkpoint, checks genuinely local profiled
+outer derivatives, and then searches and diagnoses the full retained endpoint.
+Historical optimizer scales no longer set configured derivative probe sizes.
+The same ten outer starts and 600-second optimization allowances are retained.
+Model 6 is the seventh saved T2-easy candidate, chosen for its affine profiling
+structure, not as a final scientific model.
+
+The approximate T2 LLM-SR transcription did not provide an accurate numerical
+control; its native training error was also large. A separate fixed-value replay
+now uses all four saved instantaneous programs (two CSTR and two detention).
+The detention selections have low native training errors. A restricted evaluator
+preserves their supplied-value piecewise semantics without executing Python or
+changing the proposer grammar. No refitting, held-out access or new LLM calls.
+See [local recovery and control contracts](PHASE_C_FITTING_LOCAL_PROFILE_RECOVERY.md).
+
 ## Construction timescale controls and LLM-SR numerical replay
 
 The returned multi-output pilot slightly improved model 6 but did not establish

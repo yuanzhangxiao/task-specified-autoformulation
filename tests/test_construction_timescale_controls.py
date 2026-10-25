@@ -22,6 +22,7 @@ def source_data():
     point["reduced_vector"] = list(values.values())
     model = {"task_id": "frozen-model-six", "problem": {}}
     return {
+        "protocol": c.INPUT_PROTOCOL,
         "endpoint": point,
         "profile_outer_names": names[:6],
         "profile_inner_names": names[6:],
@@ -362,3 +363,189 @@ def test_export_authenticates_all_eight_and_does_not_change_source(
     seal(last, {"retained": None})
     with pytest.raises(ValueError, match="terminal differs"):
         c.export_inputs(source, tmp_path / "bad.json")
+
+
+@pytest.fixture
+def recovery(tmp_path, monkeypatch):
+    data = source_data() | {
+        "protocol": c.RECOVERY_INPUT_PROTOCOL,
+        "prior_controls": {"records": []},
+    }
+    monkeypatch.setattr(c, "_validate", lambda data: None)
+    monkeypatch.setattr(c.public, "_source_identity", lambda: "a" * 64)
+    monkeypatch.setattr(c.pilot, "_runtime", lambda: {"runtime": "fixed"})
+    root = tmp_path / "recovery"
+    c.prepare(
+        root,
+        data,
+        c.Policy(
+            recovery_mode="project_first_local",
+            search_seconds=10,
+            diagnostic_seconds=10,
+            verification_seconds=10,
+            maximum_calls=20,
+        ),
+    )
+    return root, data
+
+
+def install_recovery_fake(monkeypatch, *, projection=True, **kwargs):
+    events = install_fake(monkeypatch, **kwargs)
+    original_make = c.profiling.make_oracle
+
+    def make(*args):
+        original, oracle, profile = original_make(*args)
+        oracle.configure_local_probes = lambda floors: events.append(("floors", floors))
+        return original, oracle, profile
+
+    monkeypatch.setattr(c.profiling, "make_oracle", make)
+
+    def fixed_inner(oracle, profile, start, seconds, save):
+        events.append(("projection", seconds, len(profile.outer)))
+        result = {"best": None, "inner_evaluations_started": 1}
+        if projection:
+            result["best"] = {
+                "parameters": start | {"inner_0": 0.4},
+                "training_nmse": 0.4,
+            }
+        save(result)
+        return result
+
+    monkeypatch.setattr(c.pilot, "_fixed_inner", fixed_inner)
+    old_search = c.pilot._profile_search
+
+    def search(oracle, profile, start, seconds, calls, save, **kwargs):
+        assert start["inner_0"] == 0.4
+        assert seconds == 7.5
+        return old_search(oracle, profile, start, seconds, calls, save, **kwargs)
+
+    monkeypatch.setattr(c.pilot, "_profile_search", search)
+    return events
+
+
+@pytest.mark.parametrize("index,outer", [(0, 6), (1, 5), (7, 6)])
+def test_recovery_projects_before_verified_outer_search_and_full_diagnosis(
+    recovery, monkeypatch, index, outer
+):
+    root, data = recovery
+    events = install_recovery_fake(monkeypatch)
+    value = c.run_task(root, index)
+    stages = [e for e in events if not isinstance(e, tuple) or e[0] != "floors"]
+    assert stages == [
+        ("projection", 2.5, outer),
+        "verify",
+        "search",
+        "verify",
+        "diagnose",
+    ]
+    floors = c._local_probe_floors(data)
+    assert floors[c.RATE] == 1 / 300
+    assert floors[c.OUTER_ROLES["glucose_delay"]] == 1
+    assert [e[1] for e in events if isinstance(e, tuple) and e[0] == "floors"] == [
+        floors
+    ] * 5
+    assert value["selected_start"]["training_nmse"] == 0.4
+    assert value["retained"]["training_nmse"] == 0.1
+    assert value["projection_verified"]
+    assert value["full_presearch_derivative_gate"] is False
+    assert (
+        value["full_coordinate_diagnosis_scope"]
+        == "all 27 original aggregate coordinates"
+    )
+    before = deepcopy(events)
+    assert c.run_task(root, index) == value
+    assert events == before
+    report = c.report(root)
+    assert report["protocol"] == c.RECOVERY_PROTOCOL
+    assert (
+        report["fixed_inner_seconds"] + report["outer_qualification_and_search_seconds"]
+        == 10
+    )
+    assert report["old_allowances_renewed"] is False
+
+
+def test_failed_projection_never_enters_search_or_verification(recovery, monkeypatch):
+    root, _ = recovery
+    events = install_recovery_fake(monkeypatch, projection=False)
+    value = c.run_task(root, 0)
+    assert "verify" not in events and "search" not in events
+    assert value["retained"] is None
+    assert value["projection_checkpoint_available"] is False
+
+
+def test_unverified_projection_never_enters_search(recovery, monkeypatch):
+    root, _ = recovery
+    events = install_recovery_fake(monkeypatch, valid=False)
+    value = c.run_task(root, 0)
+    assert "verify" in events and "search" not in events
+    assert value["retained"] is None
+    assert value["projection_checkpoint_available"] and not value["projection_verified"]
+
+
+def test_failed_outer_gate_retains_projected_endpoint_and_diagnoses_it(
+    recovery, monkeypatch
+):
+    root, _ = recovery
+    events = install_recovery_fake(monkeypatch)
+
+    def failed_outer(*args, **kwargs):
+        events.append("outer_gate")
+        result = {
+            "best": None,
+            "search_calls_started": 0,
+            "profile_derivative_check": {"search_qualified": False},
+        }
+        args[-1](result)
+        return result
+
+    monkeypatch.setattr(c.pilot, "_profile_search", failed_outer)
+    value = c.run_task(root, 0)
+    assert "outer_gate" in events and "diagnose" in events
+    assert value["retained_origin"] == "incumbent_verification"
+    assert value["retained"]["training_nmse"] == 0.4
+    assert value["qualification_passed"] is False
+    assert value["search_started"] is False
+
+
+def test_recovery_interrupted_search_reuses_projection_without_renewal(
+    recovery, monkeypatch
+):
+    root, _ = recovery
+    events = install_recovery_fake(monkeypatch, interrupt=True)
+    with pytest.raises(KeyboardInterrupt):
+        c.run_task(root, 0)
+    value = c.run_task(root, 0)
+    assert events.count("search") == 1
+    assert sum(isinstance(e, tuple) and e[0] == "projection" for e in events) == 1
+    assert value["operations"]["continuation_search"]["status"] == "interrupted"
+    assert value["old_allowances_renewed"] is False
+
+
+def test_recovery_export_authenticates_legacy_costs_and_keeps_anchor(
+    prepared, monkeypatch, tmp_path
+):
+    root, data = prepared
+    install_fake(monkeypatch)
+    for index in range(10):
+        c.run_task(root, index)
+    destination = tmp_path / "portable/inputs.json"
+    result = c.export_recovery_inputs(root, destination)
+    saved = c.read_seal(destination)
+    assert result["authenticated_parent_tasks"] == 10
+    assert saved["endpoint"] == data["endpoint"]
+    assert saved["protocol"] == c.RECOVERY_INPUT_PROTOCOL
+    c._validate_recovery_source(saved)
+    corrupted = deepcopy(saved)
+    corrupted["prior_controls"]["records"][0]["operations"]["continuation_search"][
+        "observed_progress"
+    ]["search_calls_started"] = 999
+    with pytest.raises(ValueError, match="operation differs"):
+        c._validate_recovery_source(corrupted)
+    corrupted = deepcopy(saved)
+    corrupted["endpoint"]["effective_parameters"][c.RATE] = -2.0
+    with pytest.raises(ValueError, match="plan differs"):
+        c._validate_recovery_source(corrupted)
+    corrupted = deepcopy(saved)
+    corrupted["prior_controls"]["records"][0]["terminal_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="terminal differs"):
+        c._validate_recovery_source(corrupted)

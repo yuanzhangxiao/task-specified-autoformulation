@@ -1,0 +1,8 @@
+{
+  "population": "returned-eight",
+  "recovery_mode": "project_first_local",
+  "search_seconds": 600,
+  "diagnostic_seconds": 600,
+  "verification_seconds": 180,
+  "maximum_calls": 1000
+}

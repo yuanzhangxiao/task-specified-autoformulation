@@ -23,6 +23,7 @@ ENTRYPOINTS = (
     "scripts/run_construction_timescale_controls.py",
     "scripts/hpc/run_construction_timescale_controls.sh",
     "scripts/hpc/start_construction_timescale_controls.sh",
+    "scripts/hpc/start_construction_timescale_recovery.sh",
     "scripts/submit_construction_fit_aces.py",
     "scripts/submit_review_continuation.py",
 )
@@ -182,9 +183,10 @@ def main(argv: list[str] | None = None) -> None:
     """Keep schema-only preparation distinct from identity-checked numerical work."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    export = commands.add_parser("export")
-    export.add_argument("--source", type=Path, required=True)
-    export.add_argument("--destination", type=Path, required=True)
+    for name in ("export", "export-recovery"):
+        export = commands.add_parser(name)
+        export.add_argument("--source", type=Path, required=True)
+        export.add_argument("--destination", type=Path, required=True)
     for name in (
         "prepare",
         "submit",
@@ -206,10 +208,13 @@ def main(argv: list[str] | None = None) -> None:
         elif name == "run":
             command.add_argument("--index", type=int, required=True)
     args = parser.parse_args(argv)
-    if args.command == "export":
-        result = campaign.export_inputs(
-            args.source.resolve(), args.destination.resolve()
+    if args.command in {"export", "export-recovery"}:
+        exporter = (
+            campaign.export_recovery_inputs
+            if args.command == "export-recovery"
+            else campaign.export_inputs
         )
+        result = exporter(args.source.resolve(), args.destination.resolve())
     else:
         root = args.root.resolve()
         if args.command == "prepare":

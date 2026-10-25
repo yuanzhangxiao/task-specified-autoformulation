@@ -478,16 +478,46 @@ class AggregatedTrainingOracle:
         self.sensitive_names = tuple(
             n for n in oracle.sensitive_names if n in self.names
         )
+        self._local_probe_floors: dict[str, float] | None = None
 
     @property
     def recovery_audit(self):
-        return self.base_oracle.recovery_audit | {
+        audit = self.base_oracle.recovery_audit | {
             "multioutput_profile_policy": policy_receipt(),
             "coordinate_reduction": self.reduction.receipt,
             "optimizer_coordinates": len(self.names),
             "sensitive_names": list(self.sensitive_names),
             "optimizer_units": "max(abs(retained-effective-coordinate),1); frozen",
         }
+        if self._local_probe_floors is not None:
+            audit["local_probe_policy"] = {
+                "protocol": "current-coordinate-local-probes-1",
+                "floors": dict(self._local_probe_floors),
+                "scale": "max(abs(current_coordinate), declared_floor)",
+                "reciprocal_coordinates": "also capped by nonzero magnitude",
+                "optimizer_units_changed": False,
+                "parameter_domains_changed": False,
+            }
+        return audit
+
+    def configure_local_probes(self, floors: dict[str, float]) -> None:
+        """Freeze opt-in physical probe scales independently of optimizer units.
+
+        Floors are declared before fitting, e.g. inverse observation span for a
+        signed rate near zero. They set a probe radius, never a parameter bound.
+        Historical callers retain their original scaling and audit identities.
+        """
+        if not floors or set(floors) - set(self.names):
+            raise ValueError("local probe floors require known coordinates")
+        if any(
+            isinstance(value, bool) or not np.isfinite(value) or value <= 0
+            for value in floors.values()
+        ):
+            raise ValueError("local probe floors must be finite and positive")
+        frozen = {name: float(value) for name, value in sorted(floors.items())}
+        if self._local_probe_floors not in (None, frozen):
+            raise ValueError("local probe policy is already frozen")
+        self._local_probe_floors = frozen
 
     def vector(self, parameters):
         return self.reduction.vector(parameters)
@@ -500,10 +530,15 @@ class AggregatedTrainingOracle:
     def local_coordinate_scales(self, vector):
         values = self.vector(self.parameters(vector))
         units = np.maximum(abs(values), self.units)
+        for name, floor in (self._local_probe_floors or {}).items():
+            i = self.names.index(name)
+            units[i] = max(abs(values[i]), floor)
         for name in self.sensitive_names:
             i = self.names.index(name)
             if values[i] != 0:
-                units[i] = min(abs(values[i]), self.units[i])
+                units[i] = min(abs(values[i]), units[i])
+                if name not in (self._local_probe_floors or {}):
+                    units[i] = min(units[i], self.units[i])
         return units
 
     def evaluate(self, vector, deadline, *, jacobian=True, method=None):

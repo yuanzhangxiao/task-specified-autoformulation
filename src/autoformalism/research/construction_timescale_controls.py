@@ -25,6 +25,8 @@ from autoformalism.schemas.prefix_initialization import PrefixFitProblem
 from autoformalism.schemas.public_fitting import PublicSplit
 
 PROTOCOL = "construction-timescale-controls-1"
+RECOVERY_PROTOCOL = "construction-timescale-controls-2"
+RECOVERY_INPUT_PROTOCOL = "construction-timescale-controls-inputs-2"
 INPUT_PROTOCOL = "construction-timescale-controls-inputs-1"
 RATE = "coefficient:I:I"
 OUTER_ROLES = {
@@ -41,6 +43,7 @@ class Policy(pilot.previous.Policy):
     """Frozen roster and finite per-operation CPU allowances; no new model calls."""
 
     population: Literal["returned-eight"] = "returned-eight"
+    recovery_mode: Literal["legacy", "project_first_local"] = "legacy"
     search_seconds: pilot.Nonnegative = Field(default=600, gt=0, le=600)
 
 
@@ -53,7 +56,11 @@ class ParentTask(pilot.previous.previous.ParentTask):
 class Inputs(StrictSchema):
     """Preserve the complete preceding input/cost chain and all eight receipts."""
 
-    protocol: Literal["construction-timescale-controls-inputs-1"]
+    protocol: Literal[
+        "construction-timescale-controls-inputs-1",
+        "construction-timescale-controls-inputs-2",
+    ]
+    prior_controls: dict | None = None
     source_plan: dict
     source_plan_sha256: pilot.Digest
     source_inputs_sha256: pilot.Digest
@@ -148,6 +155,110 @@ def export_inputs(source: Path, destination: Path) -> dict:
     }
 
 
+def export_recovery_inputs(source: Path, destination: Path) -> dict:
+    """Carry all ten immutable v1 outcomes into a separately budgeted v2 run."""
+    source = source.resolve()
+    if destination.resolve().is_relative_to(source):
+        raise ValueError("export must not write into source campaign")
+    plan, data = verify(source, runtime=False)
+    policy = Policy.model_validate(plan["policy"])
+    if plan["protocol"] != PROTOCOL or policy.recovery_mode != "legacy":
+        raise ValueError("recovery source must be the returned v1 controls")
+    records = []
+    for task in plan["tasks"]:
+        identity = {"plan_sha256": public.content_sha256(plan), "task": task}
+        folder = _folder(source, task)
+        operations = _operations(folder, identity, policy)
+        terminal = _assemble(identity, data, operations, terminal=True)
+        if read_seal(folder / "result.json") != terminal:
+            raise ValueError("recovery source terminal differs from receipts")
+        records.append(
+            {
+                "task_index": task["index"],
+                "terminal_sha256": public.content_sha256(terminal),
+                "operations": operations,
+            }
+        )
+    value = deepcopy(data) | {
+        "protocol": RECOVERY_INPUT_PROTOCOL,
+        "prior_controls": {
+            "plan": plan,
+            "plan_sha256": public.content_sha256(plan),
+            "records": records,
+        },
+    }
+    _validate(value)
+    seal(destination, value)
+    return {
+        "inputs_sha256": public.content_sha256(value),
+        "authenticated_parent_tasks": len(records),
+        "selected_model": 6,
+        "matched_original_anchor_preserved": True,
+        "old_allowances_renewed": False,
+    }
+
+
+def _validate_recovery_source(data: dict) -> None:
+    """Reassemble every parent from bound receipts before using new allowances."""
+    source = data.get("prior_controls")
+    if not isinstance(source, dict) or set(source) != {
+        "plan",
+        "plan_sha256",
+        "records",
+    }:
+        raise ValueError("recovery source evidence required")
+    base = {k: deepcopy(v) for k, v in data.items() if k != "prior_controls"}
+    base["protocol"] = INPUT_PROTOCOL
+    plan = source["plan"]
+    policy = Policy.model_validate(plan["policy"])
+    if (
+        plan["protocol"] != PROTOCOL
+        or policy.recovery_mode != "legacy"
+        or public.content_sha256(plan) != source["plan_sha256"]
+        or plan["inputs_sha256"] != public.content_sha256(base)
+        or plan["tasks"] != _tasks(base, policy)
+        or plan["numerical_contract"] != _contract(policy)
+        or plan["time_grid"] != time_grid(_training_inputs(base)["training"])
+        or len(source["records"]) != len(plan["tasks"])
+        or plan["llm_calls"] != 0
+        or any(
+            plan[k] is not False
+            for k in (
+                "old_allowances_renewed",
+                "validation_data_opened",
+                "test_data_opened",
+                "automatic_revision",
+                "automatic_promotion",
+            )
+        )
+    ):
+        raise ValueError("recovery source plan differs")
+    allowed = _allowances(policy)
+    for task, record in zip(plan["tasks"], source["records"], strict=True):
+        if (
+            set(record) != {"task_index", "terminal_sha256", "operations"}
+            or record["task_index"] != task["index"]
+        ):
+            raise ValueError("recovery source roster differs")
+        identity = {"plan_sha256": source["plan_sha256"], "task": task}
+        operations = record["operations"]
+        if set(operations) - set(allowed):
+            raise ValueError("unknown recovery source operation")
+        for name, operation in operations.items():
+            bound = {
+                "campaign": identity,
+                "stage": name,
+                "allowance_seconds": allowed[name],
+            }
+            if operation.get("identity") != bound or operation.get(
+                "progress_sha256"
+            ) != public.content_sha256(operation.get("observed_progress", {})):
+                raise ValueError("recovery source operation differs")
+        terminal = _assemble(identity, base, operations, terminal=True)
+        if public.content_sha256(terminal) != record["terminal_sha256"]:
+            raise ValueError("recovery source terminal differs")
+
+
 def _training_inputs(data: dict) -> dict:
     return data["historical_inputs"]["historical_inputs"]["training_inputs"]
 
@@ -223,6 +334,10 @@ def _validate(data: dict) -> None:
         raise ValueError("certified model-six coordinate partition differs")
     if _training_inputs(data)["training"]["name"] != "train":
         raise ValueError("timescale controls require training only")
+    if parsed.protocol == RECOVERY_INPUT_PROTOCOL:
+        _validate_recovery_source(data)
+    elif parsed.prior_controls is not None:
+        raise ValueError("legacy inputs cannot carry a recovery source")
 
 
 def time_grid(training: dict) -> dict:
@@ -284,13 +399,18 @@ def _tasks(data: dict, policy: Policy) -> list[dict]:
             "rate_branch": "negative_I_self_decay" if arm == "frozen_rate" else None,
             "free_outer_coordinates": 5 if arm == "frozen_rate" else 6,
             "inner_coordinates": 21,
+            **(
+                {"recovery_mode": policy.recovery_mode}
+                if policy.recovery_mode != "legacy"
+                else {}
+            ),
         }
         for i, (arm, label, overrides, rate) in enumerate(roster)
     ]
 
 
-def _contract() -> dict:
-    return {
+def _contract(policy: Policy | None = None) -> dict:
+    contract = {
         "profile_policy": public._jsonable(profiling.policy_receipt()),
         "qualification": "guarded then all-coordinate full-residual multiprecision",
         "full_accepted_history": True,
@@ -304,15 +424,61 @@ def _contract() -> dict:
         "constrained_adequacy": "not certified by outer optimizer termination",
     }
 
+    if policy is not None and policy.recovery_mode == "project_first_local":
+        contract.update(
+            qualification=(
+                "bounded inner projection, independent rollout, "
+                "local profiled outer check"
+            ),
+            start_policy=(
+                "same deterministic outer starts; "
+                "bounded 21-coordinate projection first"
+            ),
+            local_probe_policy=(
+                "current-physical-coordinate floors from observation time grid; "
+                "optimizer units unchanged"
+            ),
+            search_allowance=(
+                "fixed-inner projection and outer qualification/search "
+                "share declared optimization allowance"
+            ),
+            full_presearch_derivative_gate=False,
+        )
+    return contract
+
+
+def _protocol(policy: Policy) -> str:
+    return (
+        RECOVERY_PROTOCOL if policy.recovery_mode == "project_first_local" else PROTOCOL
+    )
+
+
+def _projection_seconds(policy: Policy) -> float:
+    """Reserve part of the declared optimization budget for one bounded solve."""
+    return min(60.0, policy.search_seconds / 4.0)
+
+
+def _local_probe_floors(data: dict) -> dict[str, float]:
+    """Set physical rate/delay probe floors from training observation times only."""
+    grid = time_grid(_training_inputs(data)["training"])
+    return {
+        name: grid["minimum_interval"] if role == "glucose_delay" else 1 / grid["span"]
+        for role, name in OUTER_ROLES.items()
+    }
+
 
 def prepare(root: Path, data: dict, policy: Policy) -> dict:
     """Seal the fixed train-only roster without constructing a numerical oracle."""
     _validate(data)
+    if (policy.recovery_mode == "project_first_local") != (
+        data["protocol"] == RECOVERY_INPUT_PROTOCOL
+    ):
+        raise ValueError("recovery policy and source protocol differ")
     plan = {
-        "protocol": PROTOCOL,
+        "protocol": _protocol(policy),
         "inputs_sha256": public.content_sha256(data),
         "policy": policy.model_dump(mode="json"),
-        "numerical_contract": _contract(),
+        "numerical_contract": _contract(policy),
         "source_sha256": public._source_identity(),
         "runtime": pilot._runtime(),
         "tasks": _tasks(data, policy),
@@ -336,11 +502,15 @@ def verify(root: Path, *, runtime: bool = True) -> tuple[dict, dict]:
     _validate(data)
     p = Policy.model_validate(plan["policy"])
     if (
-        plan["protocol"] != PROTOCOL
+        plan["protocol"] != _protocol(p)
         or plan["inputs_sha256"] != public.content_sha256(data)
         or plan["tasks"] != _tasks(data, p)
-        or plan["numerical_contract"] != _contract()
+        or plan["numerical_contract"] != _contract(p)
         or plan["time_grid"] != time_grid(_training_inputs(data)["training"])
+        or (
+            (p.recovery_mode == "project_first_local")
+            != (data["protocol"] == RECOVERY_INPUT_PROTOCOL)
+        )
         or plan["llm_calls"] != 0
         or any(
             plan[k] is not False
@@ -366,6 +536,15 @@ _folder = pilot._folder
 
 
 def _allowances(policy: Policy) -> dict[str, float]:
+    if policy.recovery_mode == "project_first_local":
+        inner = _projection_seconds(policy)
+        return {
+            "fixed_inner": inner + 90,
+            "incumbent_verification": policy.verification_seconds + 90,
+            "continuation_search": policy.search_seconds - inner + 150,
+            "continuation_verification": policy.verification_seconds + 90,
+            "retained_diagnosis": policy.diagnostic_seconds + 90,
+        }
     return {
         "qualification": policy.diagnostic_seconds + 90,
         "incumbent_verification": policy.verification_seconds + 90,
@@ -459,6 +638,18 @@ def _assemble(identity: dict, data: dict, operations: dict, *, terminal=False) -
     fit = pilot.previous.first._search_checkpoint(
         operations.get("continuation_search", {})
     )
+    if identity["task"].get("recovery_mode") == "project_first_local":
+        check = fit.get("profile_derivative_check") or {}
+        projection = pilot.previous.first._search_checkpoint(
+            operations.get("fixed_inner", {})
+        )
+        value.update(
+            qualification_passed=bool(check.get("search_qualified")),
+            qualification_scope="only free profiled outer coordinates before search",
+            projection_checkpoint_available=bool(projection.get("best")),
+            projection_verified=value.get("selected_start") is not None,
+            full_presearch_derivative_gate=False,
+        )
     rate = identity["task"]["frozen_kappa"]
     for key in ("selected_start", "retained"):
         endpoint = value.get(key)
@@ -506,6 +697,8 @@ def run_task(root: Path, index: int) -> dict:
             original, oracle, profile = profiling.make_oracle(
                 problem, training, settings, anchor
             )
+            if p.recovery_mode == "project_first_local":
+                oracle.configure_local_probes(_local_probe_floors(data))
             if [oracle.names[i] for i in profile.outer] != data["profile_outer_names"]:
                 raise ValueError("profile outer identity differs")
             if [oracle.names[i] for i in profile.inner] != data["profile_inner_names"]:
@@ -539,33 +732,61 @@ def run_task(root: Path, index: int) -> dict:
             if read_seal(folder / "result.json") != value:
                 raise ValueError("timescale terminal differs from receipts")
             return value
-        operate(
-            "qualification",
-            lambda o, a, f, s: pilot.qualify_profile(
-                problem,
-                training,
-                settings,
-                numerical.to_original(o, a, _start(a, data["endpoint"], task)),
-                p.diagnostic_seconds,
-                s,
-                coordinate_oracle=a,
-                coordinate_parameters=_start(a, data["endpoint"], task),
-            ),
-        )
-        operate(
-            "incumbent_verification",
-            lambda o, a, f, s: numerical.verify_endpoint_ladder(
-                o,
-                a,
-                _start(a, data["endpoint"], task),
-                p.verification_seconds,
-                s,
-                tolerances=((1e-11, 1e-13),),
-            ),
-        )
+        project_first = p.recovery_mode == "project_first_local"
+        if project_first:
+            projected = operate(
+                "fixed_inner",
+                lambda o, a, f, s: pilot._fixed_inner(
+                    a,
+                    FrozenRateProfile(f, a, task["frozen_kappa"])
+                    if task["frozen_kappa"] is not None
+                    else f,
+                    _start(a, data["endpoint"], task),
+                    _projection_seconds(p),
+                    s,
+                ),
+            )
+            checkpoint = pilot.previous.first._search_checkpoint(projected)
+            if checkpoint.get("best"):
+                operate(
+                    "incumbent_verification",
+                    lambda o, a, f, s: numerical.verify_endpoint_ladder(
+                        o,
+                        a,
+                        checkpoint["best"]["parameters"],
+                        p.verification_seconds,
+                        s,
+                        tolerances=((1e-11, 1e-13),),
+                    ),
+                )
+        else:
+            operate(
+                "qualification",
+                lambda o, a, f, s: pilot.qualify_profile(
+                    problem,
+                    training,
+                    settings,
+                    numerical.to_original(o, a, _start(a, data["endpoint"], task)),
+                    p.diagnostic_seconds,
+                    s,
+                    coordinate_oracle=a,
+                    coordinate_parameters=_start(a, data["endpoint"], task),
+                ),
+            )
+            operate(
+                "incumbent_verification",
+                lambda o, a, f, s: numerical.verify_endpoint_ladder(
+                    o,
+                    a,
+                    _start(a, data["endpoint"], task),
+                    p.verification_seconds,
+                    s,
+                    tolerances=((1e-11, 1e-13),),
+                ),
+            )
         current = assemble()
         selected = current["selected_start"]
-        if selected is not None and current["qualification_passed"]:
+        if selected is not None and (project_first or current["qualification_passed"]):
             attempt = operate(
                 "continuation_search",
                 lambda o, a, f, s: pilot._profile_search(
@@ -574,7 +795,9 @@ def run_task(root: Path, index: int) -> dict:
                     if task["frozen_kappa"] is not None
                     else f,
                     pilot.previous._verified_coordinates(o, a, selected),
-                    p.search_seconds,
+                    p.search_seconds - _projection_seconds(p)
+                    if project_first
+                    else p.search_seconds,
                     p.maximum_calls,
                     s,
                     preserve_full_history=True,
@@ -673,7 +896,7 @@ def report(root: Path) -> dict:
         )
     count = sum(row["status"] == "complete" for row in rows)
     value = {
-        "protocol": PROTOCOL,
+        "protocol": _protocol(p),
         "status": "complete" if count == len(rows) else "incomplete",
         "expected": len(rows),
         "recorded": count,
@@ -685,6 +908,22 @@ def report(root: Path) -> dict:
             "prior_campaign_inputs": data["historical_inputs"],
         },
         "matched_optimization_seconds": p.search_seconds,
+        **(
+            {
+                "fixed_inner_seconds": _projection_seconds(p),
+                "outer_qualification_and_search_seconds": p.search_seconds
+                - _projection_seconds(p),
+                "prior_timescale_costs": [
+                    {
+                        "task_index": row["task_index"],
+                        "cost": pilot.journal._cost(row["operations"]),
+                    }
+                    for row in data["prior_controls"]["records"]
+                ],
+            }
+            if p.recovery_mode == "project_first_local"
+            else {}
+        ),
         "old_allowances_renewed": False,
         "validation_data_opened": False,
         "test_data_opened": False,
