@@ -408,8 +408,10 @@ def replay_training(
         "refit_limitation": REFIT_LIMIT,
         "native_program_executed": False,
         "native_equivalence_certified": False,
-        "interpretation": (
-            "Supplied ODE approximation only; native scores do not transfer."
+        "interpretation": getattr(
+            model,
+            "replay_interpretation",
+            "Supplied ODE approximation only; native scores do not transfer.",
         ),
         "validation_or_test_access": False,
     }

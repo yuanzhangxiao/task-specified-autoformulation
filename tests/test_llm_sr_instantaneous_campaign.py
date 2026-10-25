@@ -113,6 +113,10 @@ def test_four_controls_replay_and_resume_without_native_execution(
         assert not row["native_equivalence_certified"]
         assert not row["validation_or_test_access"]
         assert row["optimizer_calls"] == 0
+        primary = campaign.read_seal(
+            tmp_path / f"tasks/{index}/operations/primary/result.json"
+        )
+        assert "no history filter approximation" in primary["value"]["interpretation"]
     before = {p: p.read_bytes() for p in tmp_path.rglob("*.json")}
     monkeypatch.setattr(
         control, "replay_training", lambda *a, **kw: pytest.fail("replay renewed")

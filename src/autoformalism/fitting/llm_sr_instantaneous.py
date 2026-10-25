@@ -148,6 +148,11 @@ def evaluate(node: ast.AST, environment: dict[str, float]) -> float:
 class CurrentValueModel(CompiledModel):
     """Standard forcing/integration contract with a private RHS interpreter."""
 
+    replay_interpretation = (
+        "Reviewed current-value rewrite at supplied coefficients; no history "
+        "filter approximation. Native integration scores do not transfer."
+    )
+
     def _environment(self, time, state, parameters, forcing):
         base = CompiledModel(replace(self.validated, process_order=()))
         environment = base._environment(time, state, parameters, forcing)
