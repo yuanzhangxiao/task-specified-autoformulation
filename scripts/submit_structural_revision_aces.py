@@ -17,7 +17,7 @@ from urllib.request import urlopen
 from scripts import harmony_vocab
 
 REPO = Path(__file__).resolve().parents[1]
-PROTOCOL = "construction-structural-revision-1"
+PROTOCOL = "construction-structural-revision-2"
 EXECUTION_PROTOCOL = "structural-revision-aces-execution-1"
 MODELS = {
     "20b": {

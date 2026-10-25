@@ -259,6 +259,37 @@ def test_duplicate_declarations_get_specific_advice_without_editing_the_reply():
     assert reply == before
 
 
+def test_feedback_identifies_new_state_repeated_as_existing_component_and_initializer():
+    initial = {"mode": "value", "scope": "trajectory"}
+    reply = patch(
+        new_states=[
+            {
+                "name": "n",
+                "description": "Memory",
+                "rhs": "x-n",
+                "initial": initial,
+            }
+        ],
+        edits=[
+            {"component": "n", "kind": "dynamic", "sources": [], "expression": "x-n"}
+        ],
+        initialization_edits=[{"state": "n", "initial": initial}],
+    )
+    before = deepcopy(reply)
+    result = feedback.feedback_guidance("DECLARATION_CONFLICT", {}, parent(), reply)
+    assert result["duplicate_declarations"] == [
+        {"field": "edits", "name": "n", "also_declared_in": "new_states"},
+        {
+            "field": "initialization_edits",
+            "name": "n",
+            "also_declared_in": "new_states",
+        },
+    ]
+    assert "different actions" in result["specific_feedback"]
+    assert "original list limits" in result["duplicate_feedback"]
+    assert reply == before
+
+
 @pytest.mark.parametrize(
     "code, expected",
     [
@@ -266,6 +297,10 @@ def test_duplicate_declarations_get_specific_advice_without_editing_the_reply():
         ("INITIALIZATION_IDENTITY", "Public recorded time-zero values"),
         ("REPEATED_EQUATION_EDIT", "changing the explanation"),
         ("CONFLICTING_OPERATIONS", "Do not both edit and remove"),
+        ("DECLARATION_CONFLICT", "alias bindings are not formatting differences"),
+        ("UNKNOWN_EVIDENCE", "allowed_evidence_ids exactly"),
+        ("UNUSED_NEW_PARAMETER", "used only in an initializer"),
+        ("REVISION_VALIDATION", "does not bind its initial value"),
     ],
 )
 def test_failure_guidance_is_scope_specific(code, expected):
@@ -274,6 +309,19 @@ def test_failure_guidance_is_scope_specific(code, expected):
     assert expected in result["specific_feedback"]
     assert result["details"] == details
     assert "does not accept the model" in result["repair_scope"]
+
+
+def test_feedback_distinguishes_coefficients_controls_and_new_state_initials():
+    components = feedback.feedback_guidance("COMPONENT_IDENTITY", {}, parent())
+    assert "parameter belongs in new_parameters" in components["specific_feedback"]
+    assert "map's parameters list" in components["specific_feedback"]
+    assert "kind requires a wider revision" in components["specific_feedback"]
+    initial = feedback.feedback_guidance("INITIALIZATION_IDENTITY", {}, parent())
+    assert "new_states[].initial" in initial["specific_feedback"]
+    assert (
+        "Do not list a new state in initialization_edits"
+        in initial["specific_feedback"]
+    )
 
 
 def test_trial_assessment_gets_compacted_without_mutating_saved_failure():
@@ -351,6 +399,36 @@ def test_signature_tracks_initializer_maps_removals_and_parameter_roles():
     assert feedback.patch_signature(original) == feedback.patch_signature(changed)
 
 
+def test_signature_uses_same_safe_declaration_normalization_as_application():
+    original = patch(
+        new_states=[
+            {
+                "name": "n",
+                "description": "Memory",
+                "rhs": "x-n",
+                "initial": {"mode": "value", "scope": "trajectory"},
+            }
+        ]
+    )
+    redundant = deepcopy(original)
+    redundant["new_states"] *= 2
+    redundant["edits"] += [
+        {
+            "component": "n",
+            "kind": "dynamic",
+            "sources": [],
+            "expression": "d(n)/dt = x - (n)",
+        }
+    ]
+    redundant["initialization_edits"] = [
+        {"state": "n", "initial": {"mode": "value", "scope": "trajectory"}}
+    ]
+    assert feedback.patch_signature(original) is not None
+    assert feedback.patch_signature(original) == feedback.patch_signature(redundant)
+    redundant["edits"][-1]["kind"] = "algebraic"
+    assert feedback.patch_signature(redundant) is None
+
+
 def test_signature_ignores_initializer_reference_list_order_but_keeps_alias_bindings():
     original = patch(
         initialization_edits=[
@@ -390,6 +468,17 @@ def test_signature_ignores_initializer_reference_list_order_but_keeps_alias_bind
         patch(edits=[{}]),
         patch(unrecognized=True),
         patch(remove_states=[1]),
+        patch(
+            edits=[
+                {
+                    "component": "x",
+                    "kind": "dynamic",
+                    "sources": [],
+                    "expression": "__import__('os')",
+                }
+            ]
+            * 2
+        ),
         patch(
             edits=[
                 {"component": "x", "kind": "dynamic", "sources": [], "expression": "x"}

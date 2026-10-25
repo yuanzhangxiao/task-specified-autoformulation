@@ -14,6 +14,7 @@ from itertools import combinations
 from math import isfinite
 from typing import Any
 
+from autoformalism.expressions import ModelValidationError
 from autoformalism.research.construction_revision_edits import (
     _bounded_ast,
     _canonical_rhs,
@@ -419,6 +420,33 @@ def _duplicates(reply: Any) -> list[dict]:
             for name, count in sorted(counts.items())
             if count > 1
         ]
+    for added_field, repeated_field, key in (
+        ("new_states", "edits", "component"),
+        ("new_processes", "edits", "component"),
+        ("new_states", "initialization_edits", "state"),
+    ):
+        added = reply.get(added_field, [])
+        repeated = reply.get(repeated_field, [])
+        if not isinstance(added, list) or not isinstance(repeated, list):
+            continue
+        names = {
+            item["name"]
+            for item in added[:256]
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        }
+        for item in repeated[:256]:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get(key), str)
+                and item[key] in names
+            ):
+                found.append(
+                    {
+                        "field": repeated_field,
+                        "name": item[key],
+                        "also_declared_in": added_field,
+                    }
+                )
     return found
 
 
@@ -433,18 +461,37 @@ def feedback_guidance(
         result["duplicate_declarations"] = duplicates
         result["duplicate_feedback"] = (
             "Provide exactly one complete declaration per component in its action "
-            "list. Repeating a declaration does not create distinct mechanisms. "
-            "The runtime cannot choose between conflicting versions. Consolidate "
-            "your intended version; do not delete unrelated required pathways."
+            "list. Identical redundant declarations normalize within the original "
+            "list limits; different RHSs, kinds or initial rules remain conflicts. "
+            "A new state includes its RHS and initial rule in new_states; a new "
+            "process includes its expression in new_processes. Do not repeat those "
+            "in edits or initialization_edits. Consolidate your intended version; "
+            "do not delete unrelated required pathways."
         )
-    if code in {"COMPONENT_IDENTITY", "DECLARATION_IDENTITY", "PARAMETER_IDENTITY"}:
+    if code == "DECLARATION_CONFLICT":
+        result["specific_feedback"] = (
+            "The listed declarations describe different actions. Choose one "
+            "complete RHS, kind and initializer for each name; the runtime cannot "
+            "infer which version you intended. Different scopes, parameter roles "
+            "and alias bindings are not formatting differences. Put new states "
+            "and their initial rules together in new_states, new algebraic laws "
+            "in new_processes, and existing definitions in edits."
+        )
+    elif code in {"COMPONENT_IDENTITY", "DECLARATION_IDENTITY", "PARAMETER_IDENTITY"}:
         result["specific_feedback"] = (
             "Use edits for existing dynamic/algebraic definitions, new_states or "
-            "new_processes for new names, and initialization_edits for latent "
-            "initial rules. initialization_graph and decision are control fields, "
-            "not equation names. New names must not shadow states, processes, "
-            "parameters or public channels. A dynamic self-dependence is allowed. "
-            "Changing dZ/dt to u integrates u; it does not make Z algebraic."
+            "new_processes for new names, and initialization_edits only for "
+            "displayed existing latent initial rules. A new state's initial rule "
+            "belongs in new_states[].initial. initialization_graph and decision "
+            "are control fields, not equation names. A parameter belongs in "
+            "new_parameters and an expression, never in edits as a component. "
+            "Initializer-map coefficients belong in that map's parameters list, "
+            "not new_parameters unless independently used in dynamics. New names "
+            "must not shadow states, processes, parameters or public channels; "
+            "init_ and af_internal_ names are reserved. A dynamic self-dependence "
+            "is allowed. Changing dZ/dt to u integrates u; it does not make Z "
+            "algebraic. Changing an existing component's kind requires a wider "
+            "revision; use that explicit decision if necessary."
         )
     elif code in {
         "INITIALIZATION_IDENTITY",
@@ -454,10 +501,38 @@ def feedback_guidance(
     }:
         result["specific_feedback"] = (
             "Use the displayed eligible initializer targets and the typed initial "
-            "choice in the schema. Public recorded time-zero values, known initials "
+            "choice in the schema. initialization_edits replaces an existing "
+            "eligible latent rule; new_states[].initial supplies a new state's "
+            "complete rule. Do not list a new state in initialization_edits. "
+            "For maps, every expression alias must be declared in state_initials "
+            "or public_initials, with coefficients in the map's parameters list. "
+            "Public recorded time-zero values, known initials "
             "and protected mappings are not editable. A trajectory root is "
             "permitted only when the experiment authorizes its observation-window "
             "policy; the proposer cannot choose that window or access later data."
+        )
+    elif code == "UNKNOWN_EVIDENCE":
+        result["specific_feedback"] = (
+            "Use the displayed allowed_evidence_ids exactly. A witness property "
+            "label is not a separate evidence ID unless explicitly listed or "
+            "resolved by the authenticated request. Do not invent an ID or cite "
+            "held-out data. This citation correction does not repair the model."
+        )
+    elif code == "UNUSED_NEW_PARAMETER":
+        result["specific_feedback"] = (
+            "new_parameters declares shared dynamics coefficients, which must "
+            "occur in a resulting model expression. A coefficient used only in "
+            "an initializer belongs in that map's parameters list. Do not add "
+            "an artificial model term merely to make a declaration used."
+        )
+    elif code == "REVISION_VALIDATION":
+        result["specific_feedback"] = (
+            "Correct the expression or initialization graph named in the "
+            "diagnostic. In an initializer map, every initial-value symbol must "
+            "have an explicit state_initials or public_initials alias; naming a "
+            "model state in the expression alone does not bind its initial value. "
+            "Declare map coefficients locally in parameters, remove unused aliases, "
+            "and keep state-initial dependencies acyclic."
         )
     elif code in {
         "REPEATED_EDIT",
@@ -518,6 +593,7 @@ def patch_signature(reply: Any) -> str | None:
     try:
         from autoformalism.research.construction_structural_revision import (
             StructuralRevisionReply,
+            normalize_structural_reply,
         )
 
         # Validate first so unknown fields or invalid deletion/initializer shapes
@@ -526,7 +602,10 @@ def patch_signature(reply: Any) -> str | None:
             value = reply.get(field, [])
             if not isinstance(value, list) or len(value) > limit:
                 return None
-        value = StructuralRevisionReply.model_validate(reply).model_dump(mode="json")
+        normalized_reply, _ = normalize_structural_reply(reply)
+        value = StructuralRevisionReply.model_validate(normalized_reply).model_dump(
+            mode="json"
+        )
         normalized = {field: value[field] for field in _ACTIONS}
         for field, name, expression, kind in (
             ("edits", "component", "expression", None),
@@ -552,5 +631,5 @@ def patch_signature(reply: Any) -> str | None:
                 },
             }
         )
-    except (ValueError, TypeError, KeyError, RecursionError):
+    except (ValueError, TypeError, KeyError, RecursionError, ModelValidationError):
         return None

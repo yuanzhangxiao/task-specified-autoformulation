@@ -1,5 +1,17 @@
 # Phase 1 Pipeline Design
 
+## Structural repair replay and diversity design
+
+`construction-structural-revision-2` consolidates only identical bounded reply
+declarations before normal static validation. Conflicting meanings remain errors.
+Its opt-in `shared-symbolic-initial-readout-1` gate preserves exact common latent
+initial expressions without fitting their shared coefficients. Historical gates
+retain their default behavior. A separately pinned, checkpointed saved-reply CLI
+rechecks both returned model arms without generation or candidate adoption.
+Three-option search, cumulative conflict ledgers and adaptive fitting remain
+proposed experiments, not claims about the completed model-size comparison.
+See [the offline replay and diversity design](PHASE_C_STRUCTURAL_REPLAY_AND_DIVERSITY.md).
+
 ## Local profiling recovery and instantaneous LLM-SR controls
 
 The returned timescale run searched only three of ten tasks and established no

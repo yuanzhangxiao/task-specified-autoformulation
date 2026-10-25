@@ -292,6 +292,35 @@ def test_identical_qualified_checks_are_memoized_without_shared_mutable_results(
     assert calls == 2
 
 
+def test_property_citations_require_displayed_candidate_evidence(
+    structural_source, monkeypatch
+):
+    parent = parent_from(structural_source[2]["20b"])
+    monkeypatch.setattr(
+        cli.feedback, "consistency_view",
+        lambda *args: {"conflicts": [{"property": "displayed_property"}]},
+    )
+    raw = revision(evidence_ids=["displayed_property", "invented_property"])
+    normalized, changes = cli._normalize_displayed_citations(parent, raw)
+    assert normalized["evidence_ids"] == ["training_consistency", "invented_property"]
+    assert changes == [{"from": "displayed_property", "to": "training_consistency"}]
+    assert raw["evidence_ids"] == ["displayed_property", "invented_property"]
+    with pytest.raises(RevisionValidationError, match="UNKNOWN_EVIDENCE"):
+        cli._apply(parent, raw)
+
+
+def test_v2_explicitly_enables_symbolic_gate_and_owns_new_state_fields(
+    structural_source,
+):
+    root = structural_source[2]["20b"]
+    plan = cli.verify(root)
+    assert plan["protocol"] == "construction-structural-revision-2"
+    assert plan["gate_policy"]["symbolic_initials"] == cli.SYMBOLIC_INITIAL_POLICY
+    packet = json.loads(cli.request(parent_from(root)))
+    assert "new_states/new_processes" in packet["editing_scope"]["edits"]
+    assert "new_states" in packet["editing_scope"]["initialization_edits"]
+
+
 def test_repeated_scientific_patch_is_detected_despite_prose_changes(structural_source):
     parent = parent_from(structural_source[2]["20b"])
     packets = []

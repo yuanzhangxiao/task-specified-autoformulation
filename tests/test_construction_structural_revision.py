@@ -13,6 +13,7 @@ from autoformalism.research.construction_structural_revision import (
     StructuralRevisionReply,
     apply_structural_revision,
     editable_initial_states,
+    normalize_structural_reply,
 )
 from autoformalism.schemas.prefix_initialization import PrefixFitProblem
 from tests.test_construction_revision_consistency import evidence, row
@@ -188,7 +189,7 @@ def test_explicit_removal_updates_all_consumers_and_graph():
                     }
                 ],
             ),
-            "INITIALIZATION_IDENTITY",
+            "DECLARATION_CONFLICT",
         ),
         (
             reply(
@@ -343,13 +344,254 @@ def test_retained_model_can_pass_static_paths_but_still_requires_data_gate():
     assert not result["audit"]["scientific_correctness_established"]
 
 
-def test_duplicate_declarations_produce_specific_bounded_schema_error():
-    with pytest.raises(RevisionValidationError, match="REVISION_SCHEMA") as error:
-        apply(problem(), reply(new_states=[state(), state()]))
-    assert "duplicate new component" in str(error.value.details)
+def test_identical_declarations_normalize_but_provider_schema_stays_strict():
+    payload = reply(new_states=[state(), state()])
+    result = apply(problem(), payload)
+    assert result["audit"]["new_states"] == ["extra"]
+    assert result["audit"]["normalization"]["raw_reply"] == payload
+    assert result["audit"]["normalization"]["declaration_changes"] == [
+        {
+            "field": "new_states",
+            "name": "extra",
+            "kept_index": 0,
+            "removed_index": 1,
+            "reason": "identical repeated declaration",
+        }
+    ]
+    with pytest.raises(ValueError, match="duplicate new component"):
+        StructuralRevisionReply.model_validate(payload)
     assert StructuralRevisionReply.model_json_schema()["properties"]["decision"][
         "enum"
     ] == ["revise", "retain", "requires_wider_revision"]
+
+
+def test_cross_list_redundancy_preserves_exact_model_and_complete_raw_audit():
+    source = problem()
+    initial = {
+        "mode": "map",
+        "expression": "a*root+observed",
+        "parameters": [{"name": "a", "role": "coefficient"}],
+        "state_initials": [{"alias": "root", "state": "mem"}],
+        "public_initials": [{"alias": "observed", "channel": "aux"}],
+    }
+    minimal = reply(
+        new_states=[state(initial=initial)],
+        new_processes=[
+            {"name": "r", "description": "Additional law", "expression": "extra"}
+        ],
+    )
+    redundant = deepcopy(minimal)
+    redundant["edits"] = [
+        {
+            "component": "extra",
+            "kind": "dynamic",
+            "sources": [],
+            "expression": "d(extra)/dt = (I) - extra",
+        },
+        {
+            "component": "r",
+            "kind": "algebraic",
+            "sources": ["extra"],
+            "expression": "r = (extra)",
+        },
+    ]
+    redundant["initialization_edits"] = [{"state": "extra", "initial": initial}]
+    before = deepcopy(redundant)
+    result = apply(source, redundant)
+    assert result["problem"] == apply(source, minimal)["problem"]
+    assert redundant == before
+    normalization = result["audit"]["normalization"]
+    assert normalization["raw_reply"] == before
+    assert normalization["normalized_reply"]["edits"] == []
+    assert normalization["normalized_reply"]["initialization_edits"] == []
+    assert len(normalization["declaration_changes"]) == 3
+    assert result["audit"]["candidate_specific_data_checks_required"]
+    assert not result["audit"]["scientific_correctness_established"]
+
+
+def test_repeated_parameters_edits_initializers_and_removals_keep_one_action():
+    edit = {"component": "Gp", "kind": "dynamic", "sources": [], "expression": "b*q"}
+    initial = {"state": "mem", "initial": {"mode": "value", "scope": "trajectory"}}
+    payload = reply(
+        edits=[edit, edit],
+        new_parameters=[{"name": "b", "role": "rate"}] * 2,
+        initialization_edits=[initial, initial],
+        remove_states=["dep", "dep"],
+    )
+    result = apply(problem(), payload)
+    assert len(result["audit"]["normalization"]["declaration_changes"]) == 4
+    assert result["audit"]["removed_states"] == ["dep"]
+    assert result["audit"]["new_parameters"] == ["b"]
+    assert result["audit"]["initialization_edits"] == ["mem"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"new_states": [state(), state(rhs="I-2*extra")]},
+        {"new_states": [state(), state(description="A different physical meaning")]},
+        {
+            "new_parameters": [
+                {"name": "b", "role": "coefficient"},
+                {"name": "b", "role": "nonnegative_coefficient"},
+            ]
+        },
+        {
+            "new_states": [state()],
+            "edits": [
+                {
+                    "component": "extra",
+                    "kind": "algebraic",
+                    "sources": [],
+                    "expression": "I-extra",
+                }
+            ],
+        },
+        {
+            "new_states": [state()],
+            "edits": [
+                {
+                    "component": "extra",
+                    "kind": "dynamic",
+                    "sources": [],
+                    "expression": "-extra+I",
+                }
+            ],
+        },
+        {
+            "new_states": [state()],
+            "new_processes": [
+                {"name": "extra", "description": "Same name", "expression": "I-extra"}
+            ],
+        },
+        {
+            "new_states": [state()],
+            "initialization_edits": [
+                {
+                    "state": "extra",
+                    "initial": {"mode": "value", "scope": "trajectory", "role": "rate"},
+                }
+            ],
+        },
+    ],
+)
+def test_different_meanings_are_never_silently_coalesced(changes):
+    source = problem()
+    before = source.model_dump(mode="json")
+    # An invalid initializer role is a schema error before any normalization.
+    code = (
+        "REVISION_SCHEMA"
+        if "initialization_edits" in changes
+        else "DECLARATION_CONFLICT"
+    )
+    with pytest.raises(RevisionValidationError, match=code):
+        apply(source, reply(**changes))
+    assert source.model_dump(mode="json") == before
+
+
+def test_matching_map_syntax_and_list_order_do_not_hide_changed_alias_bindings():
+    initial = {
+        "mode": "map",
+        "expression": "a+b+c",
+        "state_initials": [
+            {"alias": "a", "state": "mem"},
+            {"alias": "c", "state": "I"},
+        ],
+        "public_initials": [{"alias": "b", "channel": "aux"}],
+    }
+    repeated = deepcopy(initial)
+    repeated["expression"] = "extra = (a) + b + c"
+    repeated["state_initials"].reverse()
+    payload = reply(
+        new_states=[state(initial=initial)],
+        initialization_edits=[{"state": "extra", "initial": repeated}],
+    )
+    assert apply(problem(), payload)["status"] == "revised"
+    repeated["public_initials"][0]["channel"] = "I"
+    with pytest.raises(RevisionValidationError, match="DECLARATION_CONFLICT"):
+        apply(problem(), payload)
+
+
+@pytest.mark.parametrize(
+    "field,item,limit",
+    [
+        ("new_states", state(), 8),
+        ("new_processes", {"name": "r", "description": "Law", "expression": "I"}, 16),
+        ("new_parameters", {"name": "b", "role": "rate"}, 64),
+        (
+            "edits",
+            {"component": "Gp", "kind": "dynamic", "sources": [], "expression": "q"},
+            32,
+        ),
+        (
+            "initialization_edits",
+            {"state": "mem", "initial": {"mode": "value", "scope": "trajectory"}},
+            16,
+        ),
+        ("remove_states", "dep", 8),
+        ("remove_processes", "q", 16),
+    ],
+)
+def test_original_action_limits_apply_before_deduplication(field, item, limit):
+    with pytest.raises(RevisionValidationError, match="REVISION_SCHEMA"):
+        apply(problem(), reply(**{field: [item] * (limit + 1)}))
+
+
+def test_redundancy_does_not_drop_unknown_fields_or_unsafe_expressions():
+    invalid = state(unexpected="do not discard")
+    with pytest.raises(RevisionValidationError, match="REVISION_SCHEMA"):
+        apply(problem(), reply(new_states=[state(), invalid]))
+    unsafe = state(rhs="__import__('os')")
+    with pytest.raises(RevisionValidationError, match="MODEL_VALIDATION"):
+        apply(problem(), reply(new_states=[unsafe, unsafe]))
+    oversized = state(rhs="I" * 4097)
+    with pytest.raises(RevisionValidationError, match="REVISION_SCHEMA"):
+        apply(problem(), reply(new_states=[oversized, oversized]))
+
+
+def test_normalization_never_changes_kind_removal_or_observed_initial_protection():
+    repeated = {"component": "I", "kind": "algebraic", "sources": [], "expression": "u"}
+    with pytest.raises(RevisionValidationError, match="COMPONENT_IDENTITY") as error:
+        apply(problem(), reply(edits=[repeated, repeated]))
+    assert error.value.details["component_category"] == "existing_component_kind_change"
+    assert error.value.details["declaration_normalization"]
+    with pytest.raises(RevisionValidationError, match="CONFLICTING_OPERATIONS"):
+        apply(
+            problem(),
+            reply(
+                edits=[
+                    {
+                        "component": "q",
+                        "kind": "algebraic",
+                        "sources": [],
+                        "expression": "I",
+                    }
+                ]
+                * 2,
+                remove_processes=["q"],
+            ),
+        )
+    with pytest.raises(RevisionValidationError, match="INITIALIZATION_IDENTITY"):
+        apply(
+            problem(),
+            reply(
+                initialization_edits=[
+                    {"state": "I", "initial": {"mode": "value", "scope": "trajectory"}}
+                ]
+                * 2
+            ),
+        )
+
+
+def test_public_normalizer_is_detached_deterministic_and_keeps_scope_policy():
+    payload = reply(new_states=[state(), state()])
+    before = deepcopy(payload)
+    first = normalize_structural_reply(payload)
+    assert first == normalize_structural_reply(payload)
+    assert payload == before
+    assert StructuralRevisionReply.model_validate(first[0])
+    with pytest.raises(RevisionValidationError, match="INITIALIZATION_SCOPE"):
+        apply(problem(), payload, allow_trajectory_roots=False)
 
 
 def test_public_path_regression_still_blocks_broad_repair():

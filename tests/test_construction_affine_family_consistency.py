@@ -8,6 +8,7 @@ import pytest
 
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.research.construction_affine_family_consistency import (
+    SYMBOLIC_INITIAL_POLICY,
     _display,
     _null_vectors,
     _rref,
@@ -288,3 +289,180 @@ def test_uncertain_initial_readout_does_not_pin_hidden_root():
 def test_unrenderable_exact_certificate_defers_instead_of_overflow():
     with pytest.raises(_Unsupported, match="display"):
         _display(Fraction(10**400))
+
+
+def symbolic_problem(*, b_public="u", readout="a+m+c*b", extra_root=False):
+    """Minimal B_glucose regression with a shared, possibly zero readout gain."""
+    payload = problem(pin_root=True, extra_root=extra_root).model_dump(mode="json")
+    candidate = payload["base_candidate"]
+    candidate["states"].append({"name": "b", "kind": "latent"})
+    candidate["state_equations"].append({"state": "b", "rhs": "-b"})
+    candidate["state_equations"][0]["rhs"] += "+b"
+    candidate["processes"][0]["expression"] = readout
+    candidate["parameters"].append(
+        {"name": "c", "scope": "global", "role": "nonnegative_coefficient"}
+    )
+    candidate["initial_conditions"].append(
+        {"state": "b", "scope": "global", "fixed_value": 0}
+    )
+    payload["graph"]["rules"]["b"] = {
+        "initial": {
+            "mode": "map",
+            "expression": "initial_b",
+            "public_initials": {"initial_b": b_public},
+        }
+    }
+    if b_public == "q":
+        payload["context"]["fixed_covariates"] = ["q"]
+    return PrefixFitProblem.model_validate(payload)
+
+
+def symbolic_evidence(source, **options):
+    """Common readout initials but an inconsistent observed affine time shape."""
+    return evidence(
+        source, [[2, 3, 4], [1, 1, 2], [3, 4, 5]], z=[[2, 2, 2]] * 3, **options
+    )
+
+
+def reseal(data):
+    """Authenticate intentionally changed synthetic evidence metadata."""
+    data["sha256"] = content_hash({k: v for k, v in data.items() if k != "sha256"})
+
+
+def test_symbolic_shared_readout_recovers_common_root_without_fitting():
+    source = symbolic_problem()
+    data = symbolic_evidence(source)
+    before = source.model_dump(mode="json"), deepcopy(data)
+    assert not assess(source, data)["conflicts"]  # Historical policy is unchanged.
+    report = assess(source, data, symbolic_initials=True)
+    assert report["symbolic_initial_policy"] == SYMBOLIC_INITIAL_POLICY
+    assert prompt_view(report)["symbolic_initial_policy"] == SYMBOLIC_INITIAL_POLICY
+    assert source.base_candidate.parameters[-1].domain.value == "nonnegative"
+    superposition = conflicts(report, "affine_initial_superposition")[0]
+    witness = superposition["witnesses"][0]
+    assert witness["initial_state_values"]["m"] == {
+        "source": "exact initial readout with shared symbolic parameters",
+        "policy": SYMBOLIC_INITIAL_POLICY,
+        "constant_exact": "1",
+        "shared_coefficients_exact": {"c": "-1"},
+    }
+    rank = conflicts(report, "linear_initial_difference_rank_one")[0]
+    assert rank["witnesses"][0]["possibly_different_initial_states"] == ["x"]
+    assert "m" in rank["witnesses"][0]["common_initial_readout_values"]
+    assert "No bound" in witness["scope"]
+    assert report == assess(source, data, symbolic_initials=True)
+    assert before == (source.model_dump(mode="json"), data)
+    assert not report["parameter_fitting_performed"]
+    assert not report["numerical_rollout_performed"]
+
+
+def test_symbolic_readout_does_not_identify_unequal_b_initials_as_equal():
+    source = symbolic_problem(b_public="q")
+    report = assess(source, symbolic_evidence(source), symbolic_initials=True)
+    assert not report["conflicts"]
+
+
+def test_symbolic_readout_consistent_identity_remains_deferred():
+    source = symbolic_problem()
+    data = evidence(
+        source, [[2, 3, 4], [1, 2, 3], [3, 4, 5]], z=[[2, 2, 2]] * 3
+    )
+    report = assess(source, data, symbolic_initials=True)
+    assert report["status"] == "deferred"
+    assert not report["conflicts"]
+    assert not report["scientific_correctness_established"]
+
+
+def test_symbolic_readout_exhausted_exact_budget_cannot_create_equality(monkeypatch):
+    from autoformalism.research import construction_affine_family_consistency as module
+
+    budget_type = module._InitialBudget
+    monkeypatch.setattr(module, "_InitialBudget", lambda: budget_type(remaining=1))
+    source = symbolic_problem()
+    report = assess(source, symbolic_evidence(source), symbolic_initials=True)
+    assert not report["conflicts"]
+
+
+@pytest.mark.parametrize("channel", ["z", "q"])
+def test_symbolic_initial_readout_requires_exact_every_conditioning_value(channel):
+    source = symbolic_problem(b_public="q")
+    data = symbolic_evidence(source)
+    for row in data["trajectories"]:
+        row["covariates"]["q"] = 1.0
+    data["contract"]["absolute_error_bounds"][channel] = 1e-10
+    reseal(data)
+    assert not assess(source, data, symbolic_initials=True)["conflicts"]
+
+
+@pytest.mark.parametrize("role", ["coefficient", "nonnegative_coefficient", "rate"])
+def test_symbolic_readout_never_divides_by_an_unknown_parameter(role):
+    source = symbolic_problem(readout="a+c*m+b")
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["parameters"][-1] = {
+        "name": "c", "scope": "global", "role": role
+    }
+    source = PrefixFitProblem.model_validate(payload)
+    assert not assess(
+        source, symbolic_evidence(source), symbolic_initials=True
+    )["conflicts"]
+
+
+def test_symbolic_readout_preserves_an_unconstrained_extra_root():
+    source = symbolic_problem(extra_root=True)
+    report = assess(source, symbolic_evidence(source), symbolic_initials=True)
+    assert not report["conflicts"]
+
+
+def test_symbolic_readout_requires_shared_coefficient_contract():
+    source = symbolic_problem()
+    data = symbolic_evidence(source, shared_parameters=False)
+    assert not assess(source, data, symbolic_initials=True)["conflicts"]
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["parameters"][-1]["scope"] = "trajectory_specific"
+    nonshared = PrefixFitProblem.model_validate(payload)
+    with pytest.raises(ValueError, match="globally shared"):
+        assess(nonshared, symbolic_evidence(nonshared), symbolic_initials=True)
+
+
+def test_symbolic_readout_keeps_parameter_identities_distinct():
+    source = symbolic_problem(readout="a+m+c*b")
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["parameters"].append(
+        {"name": "d", "scope": "global", "role": "nonnegative_coefficient"}
+    )
+    payload["base_candidate"]["processes"][0]["expression"] = "a+m+(c-d)*b"
+    source = PrefixFitProblem.model_validate(payload)
+    report = assess(source, symbolic_evidence(source), symbolic_initials=True)
+    symbolic = conflicts(report, "affine_initial_superposition")[0]["witnesses"][0]
+    assert symbolic["initial_state_values"]["m"]["shared_coefficients_exact"] == {
+        "c": "-1", "d": "1"
+    }
+
+
+@pytest.mark.parametrize("coordinates", [64, 65])
+def test_symbolic_readout_enforces_shared_coordinate_limit(coordinates):
+    def balanced_sum(names):
+        """Exercise coordinate count without exhausting expression depth first."""
+        if len(names) == 1:
+            return names[0]
+        midpoint = len(names) // 2
+        return f"({balanced_sum(names[:midpoint])}+{balanced_sum(names[midpoint:])})"
+
+    names = ["c", *(f"coef{i}" for i in range(coordinates - 1))]
+    source = symbolic_problem(readout=f"a+m+{balanced_sum(names)}*b")
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["parameters"] += [
+        {"name": name, "scope": "global", "role": "coefficient"}
+        for name in names[1:]
+    ]
+    source = PrefixFitProblem.model_validate(payload)
+    report = assess(source, symbolic_evidence(source), symbolic_initials=True)
+    limit = report["witness_budget"]["symbolic_initial_readout"]["coordinates"]
+    assert limit == 64
+    if coordinates > limit:
+        assert not report["conflicts"]
+        assert report["status"] == "deferred"
+    else:
+        check = conflicts(report, "affine_initial_superposition")[0]
+        value = check["witnesses"][0]["initial_state_values"]["m"]
+        assert len(value["shared_coefficients_exact"]) == coordinates

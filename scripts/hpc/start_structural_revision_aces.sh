@@ -13,7 +13,7 @@ case "$AF_ACTION" in run|status|report|inspect|preview) ;; *) echo 'Unknown comm
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 [[ -d "$AF_GROUP" ]] || { echo 'Run on ACES with AF_GROUP set to writable scratch.' >&2; exit 2; }
 # Do not inherit a generic root from an earlier fitting or construction campaign.
-export AF_OUTPUT_ROOT=${AF_STRUCTURAL_REVISION_ROOT:-$AF_GROUP/phase-c-structural-revision-${AF_MODEL_SIZE}-v1}
+export AF_OUTPUT_ROOT=${AF_STRUCTURAL_REVISION_ROOT:-$AF_GROUP/phase-c-structural-revision-${AF_MODEL_SIZE}-v2}
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 AF_CLI="$AF_REPO_ROOT/scripts/structural_revision_campaign.py"

@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Structural repair replay and diversity design
+
+The returned 20B/120B comparison completed 108 calls with no accepted exports.
+The v2 construction boundary now consolidates identical redundant declarations
+and explicitly enables a bounded shared-symbolic initial-readout proof. The
+saved-reply audit preserves historical results, rechecks each original parent,
+and performs no new generation, fitting or adoption. The previous comparison
+tested model size under serial repair, not population search or adaptive fitting.
+A three-option/breadth experiment is documented but not yet implemented or run.
+See [the correction and proposed search comparison](
+PHASE_C_STRUCTURAL_REPLAY_AND_DIVERSITY.md).
+
 ## Local profiling recovery and instantaneous LLM-SR controls
 
 The returned timescale run searched only three of ten tasks and established no

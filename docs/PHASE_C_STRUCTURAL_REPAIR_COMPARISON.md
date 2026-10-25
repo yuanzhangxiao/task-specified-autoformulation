@@ -108,6 +108,10 @@ truncated. Diagnostic evidence is displayed once rather than duplicated in guida
 
 ## Running on ACES
 
+These instructions describe the historical `df58b95` v1 delivery. The corrected
+v2 code uses distinct roots; see [the offline correction and replay](
+PHASE_C_STRUCTURAL_REPLAY_AND_DIVERSITY.md) before planning another live run.
+
 Use the delivered archive in group scratch, not the nearly full home/user-scratch
 inode quotas. The bundle includes the pinned saved-source archive and Harmony
 vocabulary. Launchers do not download model weights or install packages.

@@ -8,6 +8,7 @@ problem before exporting it for fitting. Historical law-only policies are intact
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from typing import Annotated, Any, Literal
@@ -135,8 +136,8 @@ class InitializationEdit(StrictSchema):
     initial: InitialChoice
 
 
-class StructuralRevisionReply(StrictSchema):
-    """One bounded complete patch, or an explicit non-adoption decision."""
+class _StructuralRevisionFields(StrictSchema):
+    """Validate every raw field and original list bound before deduplication."""
 
     decision: Literal["revise", "retain", "requires_wider_revision"]
     hypothesis: str = Field(min_length=1, max_length=3000)
@@ -151,6 +152,10 @@ class StructuralRevisionReply(StrictSchema):
     initialization_edits: tuple[InitializationEdit, ...] = Field(
         default=(), max_length=16
     )
+
+
+class StructuralRevisionReply(_StructuralRevisionFields):
+    """One bounded complete patch, or an explicit non-adoption decision."""
 
     @model_validator(mode="after")
     def unambiguous_patch(self) -> StructuralRevisionReply:
@@ -185,6 +190,176 @@ class StructuralRevisionReply(StrictSchema):
         if not actions and self.decision == "revise":
             raise ValueError("revise requires an explicit edit")
         return self
+
+
+def _expression_key(expression: str, name: str, kind: str, time: str) -> str:
+    """Compare restricted syntax, allowing only labels, spacing and parentheses."""
+    rhs = _canonical_rhs(expression, name, kind, time)
+    _bounded_ast(rhs, name)
+    _symbols(rhs, name)
+    return ast.dump(ast.parse(rhs, mode="eval"), include_attributes=False)
+
+
+def _initial_key(initial: dict[str, Any], state: str) -> dict[str, Any]:
+    """Preserve scope, roles and alias bindings when comparing initial rules."""
+    result = deepcopy(initial)
+    if result["mode"] == "map":
+        result["expression"] = _expression_key(
+            result["expression"], state, "algebraic", "t"
+        )
+        for field in ("parameters", "state_initials", "public_initials"):
+            result[field] = sorted(result[field], key=content_hash)
+    return result
+
+
+def _declaration_key(
+    row: dict[str, Any] | str, field: str, time: str
+) -> dict[str, Any] | str:
+    """Keep declarations exact apart from already-advisory source metadata."""
+    if isinstance(row, str):
+        return row
+    result = deepcopy(row)
+    if field in {"edits", "new_states", "new_processes"}:
+        name = row["component"] if field == "edits" else row["name"]
+        kind = (
+            row["kind"]
+            if field == "edits"
+            else ("dynamic" if field == "new_states" else "algebraic")
+        )
+        expression = "rhs" if field == "new_states" else "expression"
+        result[expression] = _expression_key(row[expression], name, kind, time)
+        result.pop("sources", None)
+    if "initial" in row:
+        name = row["state"] if field == "initialization_edits" else row["name"]
+        result["initial"] = _initial_key(row["initial"], name)
+    return result
+
+
+def _coalesce_declarations(
+    rows: list[Any], field: str, key: str | None, time: str, changes: list[dict]
+) -> list[Any]:
+    """Keep one identical declaration; never choose between conflicting versions."""
+    kept, seen = [], {}
+    for index, row in enumerate(rows):
+        name = row[key] if key else row
+        if name in seen:
+            first_index, first = seen[name]
+            if _declaration_key(first, field, time) != _declaration_key(
+                row, field, time
+            ):
+                raise RevisionValidationError(
+                    "DECLARATION_CONFLICT",
+                    "repeated declarations disagree; provide one complete version",
+                    field=field,
+                    name=name,
+                    first_index=first_index,
+                    conflicting_index=index,
+                )
+            changes.append(
+                {
+                    "field": field,
+                    "name": name,
+                    "kept_index": first_index,
+                    "removed_index": index,
+                    "reason": "identical repeated declaration",
+                }
+            )
+        else:
+            seen[name] = (index, row)
+            kept.append(row)
+    return kept
+
+
+def normalize_structural_reply(
+    raw: Mapping[str, Any], *, time_symbol: str = "t"
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Coalesce redundant declarations without changing any scientific action.
+
+    Raw field schemas and list limits apply before normalization. Matching uses
+    restricted AST identity, not algebraic simplification. Initializer scope,
+    parameter roles and alias bindings must agree. The complete normalized patch
+    still requires StructuralRevisionReply validation and every model/data gate.
+    """
+    value = _StructuralRevisionFields.model_validate(raw).model_dump(mode="json")
+    changes: list[dict[str, Any]] = []
+    for field, key in (
+        ("edits", "component"),
+        ("new_parameters", "name"),
+        ("new_states", "name"),
+        ("new_processes", "name"),
+        ("initialization_edits", "state"),
+        ("remove_states", None),
+        ("remove_processes", None),
+    ):
+        value[field] = _coalesce_declarations(
+            value[field], field, key, time_symbol, changes
+        )
+    states = {row["name"]: row for row in value["new_states"]}
+    processes = {row["name"]: row for row in value["new_processes"]}
+    if overlap := states.keys() & processes.keys():
+        raise RevisionValidationError(
+            "DECLARATION_CONFLICT",
+            "one new name cannot be both a differential state and an algebraic process",
+            names=sorted(overlap),
+            fields=["new_states", "new_processes"],
+        )
+    edits = []
+    for index, edit in enumerate(value["edits"]):
+        name = edit["component"]
+        if name not in states and name not in processes:
+            edits.append(edit)
+            continue
+        field = "new_states" if name in states else "new_processes"
+        added = states.get(name) or processes[name]
+        kind = "dynamic" if name in states else "algebraic"
+        expression = added["rhs"] if name in states else added["expression"]
+        if edit["kind"] != kind or _expression_key(
+            edit["expression"], name, kind, time_symbol
+        ) != _expression_key(expression, name, kind, time_symbol):
+            raise RevisionValidationError(
+                "DECLARATION_CONFLICT",
+                "the new component and its repeated edit have different kinds or RHSs",
+                name=name,
+                fields=[field, "edits"],
+                expected_kind=kind,
+                supplied_kind=edit["kind"],
+            )
+        changes.append(
+            {
+                "field": "edits",
+                "name": name,
+                "removed_index": index,
+                "kept_field": field,
+                "reason": "new component already includes the matching complete RHS",
+            }
+        )
+    value["edits"] = edits
+    initials = []
+    for index, edit in enumerate(value["initialization_edits"]):
+        name = edit["state"]
+        if name not in states:
+            initials.append(edit)
+            continue
+        if _initial_key(edit["initial"], name) != _initial_key(
+            states[name]["initial"], name
+        ):
+            raise RevisionValidationError(
+                "DECLARATION_CONFLICT",
+                "the new state and repeated initializer have different initial rules",
+                name=name,
+                fields=["new_states", "initialization_edits"],
+            )
+        changes.append(
+            {
+                "field": "initialization_edits",
+                "name": name,
+                "removed_index": index,
+                "kept_field": "new_states",
+                "reason": "new state already includes the matching initial rule",
+            }
+        )
+    value["initialization_edits"] = initials
+    return value, changes
 
 
 def editable_initial_states(
@@ -283,11 +458,13 @@ def _apply(
     _preflight_parent(parent)
     _validate_problem(parent)
     aliases = _validate_aliases(parent, scientific_aliases)
-    if missing := set(reply.evidence_ids) - set(evidence_ids):
+    allowed_evidence = set(evidence_ids)
+    if missing := set(reply.evidence_ids) - allowed_evidence:
         raise RevisionValidationError(
             "UNKNOWN_EVIDENCE",
             "cite supplied training evidence only",
             unknown=sorted(missing),
+            allowed_evidence_ids=sorted(allowed_evidence),
         )
     before_paths = public_path_checks(
         parent, brief, scientific_aliases=scientific_aliases
@@ -398,6 +575,12 @@ def _apply(
             "public time-zero identities and known initials remain fixed",
             unavailable=sorted(unavailable),
             editable_initial_states=sorted(editable_initials - removed),
+            new_state_initializers=sorted(s.name for s in reply.new_states),
+            guidance=(
+                "Existing latent rules belong in initialization_edits; each new "
+                "state's complete rule belongs in new_states[].initial. Initializer "
+                "maps declare their own local parameters and initial-value aliases."
+            ),
         )
 
     payload = candidate.model_dump(mode="json")
@@ -439,6 +622,18 @@ def _apply(
                 existing_components={
                     name: value[0] for name, value in definitions.items()
                 },
+                component_category=(
+                    "existing_component_kind_change"
+                    if edit.component in definitions
+                    else "parameter"
+                    if edit.component in parameters
+                    else "control_field"
+                    if edit.component in StructuralRevisionReply.model_fields
+                    or edit.component == "initialization_graph"
+                    else "undeclared_component"
+                ),
+                new_state_names=sorted(s.name for s in reply.new_states),
+                new_process_names=sorted(p.name for p in reply.new_processes),
             )
         rhs, sources = _normalize_law(
             edit.expression,
@@ -645,14 +840,18 @@ def apply_structural_revision(
     allow_trajectory_roots: bool = True,
 ) -> dict[str, Any]:
     """Return an all-or-nothing typed revision; no fitting or data reads occur."""
+    declaration_changes: list[dict[str, Any]] = []
     try:
         raw = (
             reply.model_dump(mode="json")
             if isinstance(reply, StructuralRevisionReply)
             else deepcopy(reply)
         )
-        parsed = StructuralRevisionReply.model_validate(raw)
-        return _apply(
+        normalized, declaration_changes = normalize_structural_reply(
+            raw, time_symbol=problem.context.time_symbol
+        )
+        parsed = StructuralRevisionReply.model_validate(normalized)
+        result = _apply(
             problem,
             parsed,
             evidence_ids=evidence_ids,
@@ -660,7 +859,16 @@ def apply_structural_revision(
             scientific_aliases=scientific_aliases,
             allow_trajectory_roots=allow_trajectory_roots,
         )
-    except RevisionValidationError:
+        normalization = result["audit"].setdefault("normalization", {"changes": []})
+        normalization.update(
+            raw_reply=raw,
+            declaration_changes=declaration_changes,
+            normalized_reply=parsed.model_dump(mode="json"),
+        )
+        return result
+    except RevisionValidationError as exc:
+        if declaration_changes:
+            exc.details["declaration_normalization"] = declaration_changes
         raise
     except ValidationError as exc:
         raise RevisionValidationError(

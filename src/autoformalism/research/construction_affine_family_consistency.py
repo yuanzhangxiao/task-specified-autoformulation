@@ -24,6 +24,21 @@ from autoformalism.research.construction_function_consistency import (
     _Interval,
     _Unsupported,
 )
+from autoformalism.research.construction_initial_family_consistency import (
+    LIMITS as INITIAL_READOUT_LIMITS,
+)
+from autoformalism.research.construction_initial_family_consistency import (
+    _Affine as _InitialAffine,
+)
+from autoformalism.research.construction_initial_family_consistency import (
+    _Budget as _InitialBudget,
+)
+from autoformalism.research.construction_initial_family_consistency import (
+    _interpret as _initial_expression,
+)
+from autoformalism.research.construction_initial_family_consistency import (
+    _Unsupported as _InitialUnsupported,
+)
 from autoformalism.research.construction_revision_consistency import (
     TARGET_COMPARISON_POLICY,
     _forcing_equal,
@@ -39,6 +54,7 @@ from autoformalism.search.topology_compatibility import (
 from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "construction-affine-family-consistency-1"
+SYMBOLIC_INITIAL_POLICY = "shared-symbolic-initial-readout-1"
 MAX_TRIPLES = 256
 MAX_TIMES = 64
 MAX_STATES = 32
@@ -202,6 +218,98 @@ def _known_initials(model, row, training, symbols, outputs) -> dict[str, Fractio
     }
 
 
+def _readout_initials(
+    model,
+    row: CompleteTrajectory,
+    training: TrainingCompatibilityEvidence,
+    numeric: dict[str, Fraction],
+    shared_parameters: set[str],
+) -> dict[str, _InitialAffine]:
+    """Infer affine shared values by isolating one numerically weighted state.
+
+    Substitution uses only already established exact initials. A remaining state
+    may be solved only with a nonzero rational coefficient; unknown-parameter
+    division and products of unresolved coordinates are unsupported. In
+    particular, ``y=a+x+c*b`` pins ``x=y-a-c*b`` when a/b are known, even though
+    its value is not numeric. Trajectory root coordinates are never shared here.
+    """
+    values = {name: _InitialAffine(value) for name, value in numeric.items()}
+    states = set(model.state_names)
+    public = _public_initial(row, training)
+    budget = _InitialBudget()
+
+    def resolve(name: str) -> _InitialAffine:
+        if name in states:
+            return values.get(
+                name, _InitialAffine(coefficients={name: Fraction(1)})
+            )
+        if name in model.validated.process_expressions:
+            return _initial_expression(
+                model.validated.process_expressions[name].tree, resolve, budget
+            )
+        if name in shared_parameters:
+            return _InitialAffine(coefficients={name: Fraction(1)})
+        if name in public:
+            return _InitialAffine(_exact(public[name].constant))
+        raise _InitialUnsupported(f"unavailable exact initial symbol: {name}")
+
+    for _ in states:
+        changed = False
+        for channel, parsed in model.validated.observation_expressions.items():
+            if (
+                channel not in row.targets
+                or training.contract.absolute_error_bounds.get(channel) != 0
+            ):
+                continue
+            try:
+                expression = _initial_expression(parsed.tree, resolve, budget)
+                unknown = states & expression.coefficients.keys()
+                if len(unknown) != 1:
+                    continue
+                state = next(iter(unknown))
+                coefficient = expression.coefficients[state]
+                value = _InitialAffine(
+                    budget.check(
+                        Fraction(row.targets[channel][0]) - expression.constant
+                    ),
+                    {
+                        name: -value
+                        for name, value in expression.coefficients.items()
+                        if name != state
+                    },
+                ).scale(budget.check(1 / coefficient), budget)
+                if len(value.coefficients) > INITIAL_READOUT_LIMITS["coordinates"]:
+                    raise _InitialUnsupported(
+                        "initial readout exceeds shared-coordinate limit"
+                    )
+                values[state] = value
+                changed = True
+            except (_InitialUnsupported, _Unsupported):
+                # A proof limit or unsupported expression cannot create equality.
+                if budget.remaining < 0:
+                    return values
+        if not changed:
+            break
+    return values
+
+
+def _common_readout_initial(state, rows, readout_initials):
+    """Return the identical shared expression only when all rows establish it."""
+    values = [readout_initials.get(row.trajectory_id, {}).get(state) for row in rows]
+    if values[0] is None or any(value != values[0] for value in values[1:]):
+        return None
+    value = values[0]
+    return {
+        "source": "exact initial readout with shared symbolic parameters",
+        "policy": SYMBOLIC_INITIAL_POLICY,
+        "constant_exact": str(value.constant),
+        "shared_coefficients_exact": {
+            name: str(coefficient)
+            for name, coefficient in sorted(value.coefficients.items())
+        },
+    }
+
+
 def _closed_states(
     output: _Affine, equations: dict[str, _Affine], state_names: set[str]
 ) -> tuple[set[str], set[str]]:
@@ -265,7 +373,9 @@ def _guard(values) -> Fraction:
     )
 
 
-def _superposition(rows, target, states, initials, problem, observed, training):
+def _superposition(
+    rows, target, states, initials, problem, observed, training, readout_initials
+):
     constraints = [[Fraction(1)] * 3]
     known = {}
     for state in sorted(states):
@@ -273,6 +383,10 @@ def _superposition(rows, target, states, initials, problem, observed, training):
         if all(value is not None for value in values):
             constraints.append(values)
             known[state] = [_display(value) for value in values]
+            continue
+        common = _common_readout_initial(state, rows, readout_initials)
+        if common is not None:
+            known[state] = common
             continue
         keys = [
             _exact_initial_key(state, row, problem, observed, training) for row in rows
@@ -318,11 +432,18 @@ def _superposition(rows, target, states, initials, problem, observed, training):
     return None
 
 
-def _rank_one(rows, target, states, initials, problem, observed, training):
+def _rank_one(
+    rows, target, states, initials, problem, observed, training, readout_initials
+):
     varying = []
+    common_readouts = {}
     for state in sorted(states):
         values = [initials[row.trajectory_id].get(state) for row in rows]
         if all(value is not None for value in values) and len(set(values)) == 1:
+            continue
+        common = _common_readout_initial(state, rows, readout_initials)
+        if common is not None:
+            common_readouts[state] = common
             continue
         keys = [
             _exact_initial_key(state, row, problem, observed, training) for row in rows
@@ -364,6 +485,11 @@ def _rank_one(rows, target, states, initials, problem, observed, training):
                 "determinant": _display(determinant),
                 "determinant_numerical_guard": _display(determinant_guard),
                 "possibly_different_initial_states": varying,
+                **(
+                    {"common_initial_readout_values": common_readouts}
+                    if common_readouts
+                    else {}
+                ),
                 "required_identity": "trajectory-difference matrix has rank at most "
                 "one; every 2 by 2 determinant is zero",
                 "scope": "Allows arbitrary trajectory-specific values of the one "
@@ -373,7 +499,7 @@ def _rank_one(rows, target, states, initials, problem, observed, training):
     return None
 
 
-def _checks(problem, model, training):
+def _checks(problem, model, training, *, symbolic_initials=False):
     rows_to_check = training.trajectories[:MAX_TRAJECTORIES]
     if any(len(row.time) > MAX_SAMPLES for row in rows_to_check):
         raise _Unsupported("complete forcing sample count exceeds the proof budget")
@@ -421,6 +547,20 @@ def _checks(problem, model, training):
         row.trajectory_id: _known_initials(model, row, training, symbols, outputs)
         for row in rows_to_check
     }
+    readout_initials = (
+        {
+            row.trajectory_id: _readout_initials(
+                model,
+                row,
+                training,
+                initials[row.trajectory_id],
+                {parameter.name for parameter in problem.base_candidate.parameters},
+            )
+            for row in rows_to_check
+        }
+        if symbolic_initials
+        else {}
+    )
     result = []
     for target in problem.context.targets:
         for kind, test in (
@@ -471,7 +611,14 @@ def _checks(problem, model, training):
                         continue
                     common_count += 1
                     witness = test(
-                        rows, target, states, initials, problem, observed, training
+                        rows,
+                        target,
+                        states,
+                        initials,
+                        problem,
+                        observed,
+                        training,
+                        readout_initials,
                     )
                     if witness:
                         check.update(
@@ -521,8 +668,10 @@ def _checks(problem, model, training):
     return result
 
 
-def assess(problem: PrefixFitProblem, evidence: dict) -> dict[str, Any]:
-    """Audit authenticated training samples for qualified affine-family conflicts."""
+def assess(
+    problem: PrefixFitProblem, evidence: dict, *, symbolic_initials: bool = False
+) -> dict[str, Any]:
+    """Audit affine conflicts; opt in to bounded shared-symbolic initial values."""
     if not isinstance(problem, PrefixFitProblem):
         raise ValueError("typed PrefixFitProblem required")
     problem = PrefixFitProblem.model_validate(problem.model_dump(mode="json"))
@@ -559,7 +708,7 @@ def assess(problem: PrefixFitProblem, evidence: dict) -> dict[str, Any]:
                 }
             ]
             if missing
-            else _checks(problem, model, training)
+            else _checks(problem, model, training, symbolic_initials=symbolic_initials)
         )
     except _Unsupported as exc:
         checks = [
@@ -573,6 +722,11 @@ def assess(problem: PrefixFitProblem, evidence: dict) -> dict[str, Any]:
     deferred = [check for check in checks if check["status"] == "deferred"]
     return {
         "protocol": PROTOCOL,
+        **(
+            {"symbolic_initial_policy": SYMBOLIC_INITIAL_POLICY}
+            if symbolic_initials
+            else {}
+        ),
         "status": "conflict" if conflicts else "deferred",
         "child_problem_sha256": content_hash(problem.model_dump(mode="json")),
         "evidence_sha256": training.sha256,
@@ -599,6 +753,11 @@ def assess(problem: PrefixFitProblem, evidence: dict) -> dict[str, Any]:
             "trajectories": MAX_TRAJECTORIES,
             "complete_samples_per_row": MAX_SAMPLES,
             "rational_bits": MAX_BITS,
+            **(
+                {"symbolic_initial_readout": dict(INITIAL_READOUT_LIMITS)}
+                if symbolic_initials
+                else {}
+            ),
         },
         "target_comparison_policy": dict(TARGET_COMPARISON_POLICY),
         "scientific_correctness_established": False,
@@ -623,6 +782,11 @@ def prompt_view(report: dict[str, Any]) -> dict[str, Any]:
             "evidence_sha256",
         )
     } | {
+        **(
+            {"symbolic_initial_policy": report["symbolic_initial_policy"]}
+            if "symbolic_initial_policy" in report
+            else {}
+        ),
         "status_counts": dict(Counter(item["status"] for item in report["checks"])),
         "conflicts": report["conflicts"],
         "full_conflict_count": len(report["conflicts"]),

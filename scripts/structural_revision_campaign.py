@@ -50,7 +50,8 @@ from scripts import construction_feedback_revision as old
 from scripts import construction_functions as receipts
 
 REPO = Path(__file__).resolve().parents[1]
-PROTOCOL = "construction-structural-revision-1"
+PROTOCOL = "construction-structural-revision-2"
+SYMBOLIC_INITIAL_POLICY = "shared-symbolic-initial-readout-1"
 MODEL_SPECS = {
     "20b": ("openai/gpt-oss-20b", "6cee5e81ee83917806bbde320786a8fb61efebee"),
     "120b": ("openai/gpt-oss-120b", "b5c939de8f754692c1647ca79fbf85e8c1e70f8a"),
@@ -78,6 +79,9 @@ Retain useful mechanisms and sharing. Adding a shared constant cannot distinguis
 trajectories whose relevant initial conditions and forcing are identical.
 Use existing parameter names when sharing is intended; declare each new object
 once. Formula labels with an unambiguous matching left-hand side are accepted.
+Put a new state's complete equation and initializer in new_states only; edits
+and initialization_edits are for existing components. Identical redundant records
+are consolidated and logged; conflicting definitions cannot be merged.
 A reported qualified model-data conflict prevents acceptance. Change the model;
 acknowledging a conflict or deleting its evidence cannot clear it. A deferred check
 is not evidence that the model is scientifically correct or fits well.
@@ -116,13 +120,37 @@ def _entrypoints() -> dict:
 @lru_cache(maxsize=64)
 def _assessment_cached(problem_json: str, evidence_json: str, assess) -> dict:
     """Memoize a pure gate result; public and model bytes are both in its key."""
-    return assess(
+    from autoformalism.research import construction_affine_family_consistency
+
+    evidence = json.loads(evidence_json)
+    problem = PrefixFitProblem.model_validate_json(problem_json)
+    result = assess(
         {
             "_revision_protocol": old.V4_PROTOCOL,
-            "_consistency_evidence": json.loads(evidence_json),
+            "_consistency_evidence": evidence,
         },
-        PrefixFitProblem.model_validate_json(problem_json),
+        problem,
     )
+    # Historical V4 campaigns keep their original gate. Only this new namespace
+    # enables symbolic initial equalities, including unknown common offsets.
+    result["affine_family_consistency"] = construction_affine_family_consistency.assess(
+        problem, evidence, symbolic_initials=True
+    )
+    statuses = [
+        result["equality_status"],
+        result["function_consistency"]["status"],
+        result["initial_family_consistency"]["status"],
+        result["affine_family_consistency"]["status"],
+    ]
+    result["status"] = (
+        "conflict"
+        if "conflict" in statuses
+        else "deferred"
+        if "deferred" in statuses
+        else "no_conflict_found"
+    )
+    result["symbolic_initial_policy"] = SYMBOLIC_INITIAL_POLICY
+    return result
 
 
 def _assessment(parent: dict, problem: PrefixFitProblem) -> dict:
@@ -181,8 +209,11 @@ def _plan(selected: dict, model_size: str) -> dict:
         "response_schema_sha256": content_hash(
             StructuralRevisionReply.model_json_schema()
         ),
-        "gate_policy": old.V4_POLICIES,
-        "edit_policy": "atomic-cross-stage-prefix-initialization-1",
+        "gate_policy": {
+            **old.V4_POLICIES,
+            "symbolic_initials": SYMBOLIC_INITIAL_POLICY,
+        },
+        "edit_policy": "atomic-cross-stage-redundancy-normalization-2",
         "test_data_opened": False,
         "automatic_followup": False,
         "model_promotion": False,
@@ -282,10 +313,12 @@ def request(parent: dict, repair: dict | None = None) -> str:
         "parameter_audit": parameters.prompt_view(parameters.assess(problem)),
         "training_consistency": feedback.consistency_view(assessment, parent),
         "editing_scope": {
-            "edits": "Existing component name, dynamic or algebraic, complete RHS.",
+            "edits": "Existing component name, dynamic or algebraic, complete RHS. "
+            "Do not repeat a new_states/new_processes definition here.",
             "new_states": "New latent differential state, RHS, and typed initial rule.",
             "new_processes": "New algebraic process and complete expression.",
-            "initialization_edits": "Replace an editable latent state's initial rule.",
+            "initialization_edits": "Replace an existing editable latent state's "
+            "initial rule. A new state's initializer belongs inside new_states.",
             "remove_states_and_processes": "Explicit names; rewrite dependent uses.",
             "new_parameters": "New shared dynamics parameters and admissible domains.",
             "unsupported": "Changing public data/targets/observed initials, parameter "
@@ -321,8 +354,46 @@ def request(parent: dict, repair: dict | None = None) -> str:
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
 
 
-def _apply(parent: dict, reply: dict) -> dict:
+def _normalize_displayed_citations(parent: dict, reply: dict) -> tuple[dict, list]:
+    """Resolve exact property labels only from this model's displayed evidence."""
     reply, changes = normalize_citations(reply)
+    identifiers = reply.get("evidence_ids")
+    if not isinstance(identifiers, list) or any(
+        not isinstance(item, str) for item in identifiers
+    ):
+        return reply, changes
+    allowed = {"public_task", "training_consistency", "parameter_audit"}
+    if set(identifiers) <= allowed:
+        return reply, changes
+    report = feedback.consistency_view(
+        _assessment(parent, PrefixFitProblem.model_validate(parent["problem"])), parent
+    )
+    properties = set()
+
+    def collect(value):
+        if isinstance(value, dict):
+            if isinstance(value.get("property"), str):
+                properties.add(value["property"])
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    collect(report)
+    normalized = []
+    for identifier in identifiers:
+        target = "training_consistency" if identifier in properties else identifier
+        if target != identifier:
+            changes.append({"from": identifier, "to": target})
+        if target not in normalized:
+            normalized.append(target)
+    reply["evidence_ids"] = normalized
+    return reply, changes
+
+
+def _apply(parent: dict, reply: dict) -> dict:
+    reply, changes = _normalize_displayed_citations(parent, reply)
     applied = apply_structural_revision(
         PrefixFitProblem.model_validate(parent["problem"]),
         reply,
