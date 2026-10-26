@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from fractions import Fraction
-from itertools import product
+from itertools import pairwise, product
 from time import monotonic
 from types import SimpleNamespace
 
@@ -30,8 +30,9 @@ def combinations(parameters):
     return {k: float(v) for k, v in reduction.reduce_parameters(parameters).items()}
 
 
-def test_reduced_chart_roundtrips_random_original_points_and_contains_boundaries():
-    value = chart()
+@pytest.mark.parametrize("mode", kernel.REDUCED_MODES)
+def test_reduced_chart_roundtrips_random_original_points_and_contains_boundaries(mode):
+    value = chart(mode=mode)
     random = np.random.default_rng(12)
     for _ in range(100):
         original_point = {n: random.uniform(*pair) for n, pair in value.bounds.items()}
@@ -61,9 +62,10 @@ def test_reduced_chart_roundtrips_random_original_points_and_contains_boundaries
     assert not value.domain["physical_combinations_are_independent_box"]
 
 
+@pytest.mark.parametrize("mode", kernel.REDUCED_MODES)
 @pytest.mark.parametrize("g,k", [(0, 0), (0, 2), (-0.25, 0), (0.25, 0), (-0.25, 0.06)])
-def test_zero_and_signed_products_do_not_remove_feasible_points(g, k):
-    value = chart()
+def test_zero_and_signed_products_do_not_remove_feasible_points(g, k, mode):
+    value = chart(mode=mode)
     physical = value.anchor | {"k_gw": g, "kappa": k}
     recovered = value.decode(value.encode(physical))
     np.testing.assert_allclose(
@@ -74,11 +76,12 @@ def test_zero_and_signed_products_do_not_remove_feasible_points(g, k):
     )
 
 
-def test_collapsed_conditional_intervals_still_have_a_finite_chart():
+@pytest.mark.parametrize("mode", kernel.REDUCED_MODES)
+def test_collapsed_conditional_intervals_still_have_a_finite_chart(mode):
     item, context, training = example(15)
     physical = original.domain_policy(item, context, training)
     physical["bounds"] = {n: [v, v] for n, v in item.parameters.items()}
-    value = kernel.CoordinateChart(physical, item.parameters, "reduced_model15")
+    value = kernel.CoordinateChart(physical, item.parameters, mode)
     for x in (0, 0.5, 1):
         point = value.anchor_vector.copy()
         point[-3:] = x
@@ -139,9 +142,10 @@ def test_zero_product_neighbors_do_not_move_capacity_combination():
     assert values[0]["M"] == values[1]["M"]
 
 
-def test_chart_roundtrip_preserves_original_piecewise_rhs():
+@pytest.mark.parametrize("mode", kernel.REDUCED_MODES)
+def test_chart_roundtrip_preserves_original_piecewise_rhs(mode):
     item, context, _ = example(15)
-    model, value = compile_current_value(item, context), chart()
+    model, value = compile_current_value(item, context), chart(mode=mode)
     random = np.random.default_rng(9)
     for _ in range(12):
         before = {n: random.uniform(*pair) for n, pair in value.bounds.items()}
@@ -338,8 +342,9 @@ def test_reduced_oracle_residual_matches_original_and_full_chart_columns(monkeyp
         np.testing.assert_allclose(record["jacobian_column"], j[:, i], rtol=0, atol=0)
 
 
-def test_exact_chart_handles_nonzero_kappa_lower_and_fixed_zero_product():
-    value = chart(bounds={"kappa": [0.05, 2]})
+@pytest.mark.parametrize("mode", kernel.REDUCED_MODES)
+def test_exact_chart_handles_nonzero_kappa_lower_and_fixed_zero_product(mode):
+    value = chart(mode=mode, bounds={"kappa": [0.05, 2]})
     for g in (-0.5, 0, 0.5):
         physical = value.anchor | {"k_gw": g}
         recovered = value.decode(value.encode(physical))
@@ -353,7 +358,7 @@ def test_exact_chart_handles_nonzero_kappa_lower_and_fixed_zero_product():
     point = item.parameters | {"kappa": 0}
     physical = original.domain_policy(item, context, training)
     physical["bounds"]["kappa"] = [0, 0]
-    zero = kernel.CoordinateChart(physical, point, "reduced_model15")
+    zero = kernel.CoordinateChart(physical, point, mode)
     p = zero.anchor_vector.copy()
     p[-2] = 0.9
     assert reduction.reduce_parameters(zero.decode(p))["d"] == Fraction(0)
@@ -370,6 +375,7 @@ def test_reduced_probe_policy_is_bound_and_does_not_relax_tolerances(monkeypatch
     assert kernel.effective_policy(base, mode="original") == base
     assert kernel.effective_policy(base, mode="subset_model14") == base
     assert kernel.effective_policy(effective, mode="reduced_model15") == effective
+    assert kernel.effective_policy(base, mode="reduced_model15_consistent") == effective
 
     item, context, training = example(15)
 
@@ -403,4 +409,151 @@ def test_reduced_probe_policy_is_bound_and_does_not_relax_tolerances(monkeypatch
     with pytest.raises(ValueError, match="policy differ"):
         kernel.qualification(
             item, context, training, item.parameters, [forged], mode="reduced_model15"
+        )
+
+
+@pytest.mark.parametrize(
+    "physical",
+    [
+        Fraction(0),
+        Fraction(1),
+        Fraction(1, 3),
+        Fraction(1, 10**400),
+        1 - Fraction(1, 10**400),
+    ],
+)
+def test_consistent_fraction_map_keeps_anchor_endpoints_and_exact_inverse(physical):
+    source, target = kernel._fraction_anchor(physical)
+    assert kernel._map_fraction(source, source, target) == physical
+    if 0 < physical < 1:
+        assert 0 < float(source) < 1
+    points = sorted({Fraction(0), Fraction(1, 4), source, Fraction(3, 4), Fraction(1)})
+    mapped = [kernel._map_fraction(value, source, target) for value in points]
+    assert mapped[0] == 0 and mapped[-1] == 1
+    assert all(a < b for a, b in pairwise(mapped))
+    assert [kernel._map_fraction(value, target, source) for value in mapped] == points
+    with pytest.raises(ValueError, match="outside"):
+        kernel._map_fraction(Fraction(-1), source, target)
+
+
+@pytest.mark.parametrize("name", ["C", "beta", "eps_s", "Q_max"])
+def test_consistent_chart_changes_only_requested_independent_parameter_bitwise(name):
+    value = chart(mode="reduced_model15_consistent")
+    index = value.names.index(name)
+    anchor = value.anchor_vector[index]
+    for proposed in (
+        value.lower[index],
+        value.upper[index],
+        np.nextafter(anchor, value.lower[index]),
+        np.nextafter(anchor, value.upper[index]),
+        anchor * (1 - 1e-5),
+        anchor * (1 + 1e-5),
+    ):
+        point = value.anchor_vector.copy()
+        point[index] = proposed
+        assert value.decode(point) == value.anchor | {name: proposed}
+    assert not value.domain["exact_anchor_only_shortcut"]
+    assert value.domain["fraction_mapping"] == "exact-anchor-odds-ratio-1"
+    assert np.isfinite(value.units).all() and np.all(value.units > 0)
+
+
+@pytest.mark.parametrize("gain,kappa", [(0, 0), (0, 2), (-0.25, 0), (-0.25, 0.06)])
+def test_consistent_zero_and_signed_anchor_neighbors_preserve_original_fibre(
+    gain, kappa
+):
+    item, context, training = example(15)
+    physical = original.domain_policy(item, context, training)
+    anchor = item.parameters | {"k_gw": gain, "kappa": kappa}
+    value = kernel.CoordinateChart(physical, anchor, "reduced_model15_consistent")
+    for name in ("C", "beta", "eps_s", "Q_max"):
+        point = value.anchor_vector.copy()
+        index = value.names.index(name)
+        point[index] = np.nextafter(point[index], np.inf)
+        assert value.decode(point) == anchor | {name: point[index]}
+
+
+def test_consistent_chart_rejects_unusable_coordinate_units():
+    item, context, training = example(15)
+    physical = original.domain_policy(item, context, training)
+    physical["units"]["C"] = 0
+    with pytest.raises(ValueError, match="finite positive coordinate units"):
+        kernel.CoordinateChart(physical, item.parameters, "reduced_model15_consistent")
+
+
+def test_consistent_anchor_and_neighbors_match_actual_guarded_rhs_exactly():
+    item, context, _ = example(15)
+    model, value = compile_current_value(item, context), chart(
+        mode="reduced_model15_consistent"
+    )
+    for name in ("C", "beta", "eps_s", "Q_max"):
+        index = value.names.index(name)
+        for sign in (-np.inf, np.inf):
+            vector = value.anchor_vector.copy()
+            vector[index] = np.nextafter(vector[index], sign)
+            expected = value.anchor | {name: vector[index]}
+            decoded = value.decode(vector)
+            for depth in (-0.1, 0, 0.2, 1, 10):
+                for rate in (0, 0.1, 10):
+                    data = {
+                        "inflow_down": rate * 1200,
+                        "area_down": 1200,
+                        "crest_down": 0.2,
+                        "warning_depth": 0.6,
+                    }
+                    forcing = SimpleNamespace(value=lambda n, t, v=data: v[n])
+                    np.testing.assert_array_equal(
+                        model.rhs(0, [depth], decoded, forcing),
+                        model.rhs(0, [depth], expected, forcing),
+                    )
+
+
+def test_consistent_inactive_column_has_no_artificial_one_sided_offset(monkeypatch):
+    item, context, training = example(15)
+
+    def residual(oracle, point, deadline, method="Radau"):
+        parameters = oracle.parameters(point)
+        # Q_max is absent, while tiny unwanted changes in other coefficients
+        # are deliberately visible to the derivative check.
+        return np.asarray(
+            [
+                1e8 * (parameters[name] - item.parameters[name])
+                for name in ("k_loss", "kappa")
+            ]
+        )
+
+    monkeypatch.setattr(original.DetentionOracle, "residual", residual)
+    row = kernel.direction(
+        item,
+        context,
+        training,
+        item.parameters,
+        3,
+        mode="reduced_model15_consistent",
+        seconds=10,
+    )
+    checked = row["derivative"]["directions"][0]
+    assert row["jacobian_column"] == [0.0, 0.0]
+    assert all(value == 0 for value in checked["one_sided_disagreement"])
+    assert checked["precision_status"] != "failed"
+
+
+def test_new_chart_is_opt_in_and_cannot_reuse_legacy_chart_receipts(monkeypatch):
+    analytic_decay(monkeypatch)
+    item, context, training = example(15)
+    old = chart()
+    new = chart(mode="reduced_model15_consistent")
+    assert old.domain["protocol"] == "detention-preserved-family-chart-1"
+    assert "fraction_maps" not in old.domain
+    assert new.domain["protocol"] == "detention-preserved-family-chart-2"
+    row = kernel.direction(
+        item, context, training, item.parameters, 0, mode="reduced_model15", seconds=10
+    )
+    with pytest.raises(ValueError, match="contract"):
+        kernel.qualification(
+            item,
+            context,
+            training,
+            item.parameters,
+            [row],
+            mode="reduced_model15_consistent",
         )

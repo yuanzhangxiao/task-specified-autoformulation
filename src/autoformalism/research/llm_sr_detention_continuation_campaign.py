@@ -801,6 +801,12 @@ def report(root: Path):
         if done and row != read_seal(directory / "result.json"):
             raise ValueError("continuation terminal differs from receipts")
         rows.append(row)
+    return _summary(plan, inputs, rows)
+
+
+def _summary(plan, inputs, rows):
+    """Derive the report identically from authenticated in-memory terminals."""
+    policy = Policy.model_validate(plan["policy"])
     comparisons = []
     for a, b in zip(rows[0:6:2], rows[1:6:2], strict=True):
         started = [

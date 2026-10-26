@@ -25,7 +25,10 @@ from autoformalism.fitting import public_fitting as public
 from autoformalism.fitting import recovery_numerics as recovery
 
 PROTOCOL = "llm-sr-detention-continuation-numerics-1"
-Mode = Literal["original", "reduced_model15", "subset_model14"]
+Mode = Literal[
+    "original", "reduced_model15", "reduced_model15_consistent", "subset_model14"
+]
+REDUCED_MODES = ("reduced_model15", "reduced_model15_consistent")
 Policy = previous.Policy
 
 
@@ -37,9 +40,9 @@ def effective_policy(policy=None, *, mode: Mode) -> Policy:
     evidence retains its unchanged policy, including historical imported audits.
     """
     value = previous._policy(policy)
-    if mode not in ("original", "reduced_model15", "subset_model14"):
+    if mode not in ("original", "subset_model14", *REDUCED_MODES):
         raise ValueError("unknown detention coordinate mode")
-    if mode == "reduced_model15":
+    if mode in REDUCED_MODES:
         derivative = value.numerical.derivative.model_copy(
             update={
                 "local_relative_step_cap": min(
@@ -67,6 +70,47 @@ def _fraction_position(value, low, high):
     return Fraction(1, 2) if low == high else (value - low) / (high - low)
 
 
+def _fraction_anchor(value: Fraction) -> tuple[Fraction, Fraction]:
+    """Pair a representable coordinate with its exact physical interval fraction.
+
+    An interior physical fraction must remain an interior optimizer coordinate,
+    even if conversion to binary64 rounds to an endpoint. This only places the
+    anchor; the monotone map still spans both endpoints and the whole interval.
+    """
+    if not 0 <= value <= 1:
+        raise ValueError("fraction anchor lies outside its interval")
+    coordinate = float(value)
+    if 0 < value < 1:
+        coordinate = min(
+            np.nextafter(1.0, 0.0), max(np.nextafter(0.0, 1.0), coordinate)
+        )
+    return _f(coordinate), value
+
+
+def _map_fraction(value, source: Fraction, target: Fraction) -> Fraction:
+    """Smoothly map [0,1] onto itself and source exactly to target.
+
+    This rational odds-ratio map is strictly increasing for interior anchors.
+    Interchanging source and target gives its exact inverse. Endpoint anchors
+    use the identity. Arithmetic stays rational through the physical lift.
+    """
+    value = _f(value)
+    if not 0 <= value <= 1:
+        raise ValueError("fraction coordinate lies outside its interval")
+    if source == target:
+        return value
+    if not 0 < source < 1 or not 0 < target < 1:
+        raise ValueError("fraction map requires matching endpoints or interior anchors")
+    left = target * (1 - source) * value
+    right = source * (1 - target) * (1 - value)
+    return left / (left + right)
+
+
+def _ratio(value: Fraction) -> list[str]:
+    """Record exact anchors without JSON integer precision assumptions."""
+    return [str(value.numerator), str(value.denominator)]
+
+
 class CoordinateChart:
     """A fixed original, temporary subset, or surjective quotient chart.
 
@@ -77,7 +121,7 @@ class CoordinateChart:
     """
 
     def __init__(self, physical_domain, parameters, mode: Mode):
-        if mode not in ("original", "reduced_model15", "subset_model14"):
+        if mode not in ("original", "subset_model14", *REDUCED_MODES):
             raise ValueError("unknown detention coordinate mode")
         self.physical = deepcopy(physical_domain)
         self.anchor = dict(parameters)
@@ -92,12 +136,12 @@ class CoordinateChart:
             raise ValueError("original parameter vector outside reviewed domain")
         if mode == "subset_model14" and self.physical["task"] != 14:
             raise ValueError("temporary h_max restriction requires Model 14")
-        if mode == "reduced_model15" and self.physical["task"] != 15:
+        if mode in REDUCED_MODES and self.physical["task"] != 15:
             raise ValueError("exact quotient requires Model 15")
         self.rational_bounds = {
             n: tuple(_f(v) for v in pair) for n, pair in self.bounds.items()
         }
-        if mode == "reduced_model15":
+        if mode in REDUCED_MODES:
             # The original domain checker validates all branch assumptions.
             reduction.reduction_certificate(parameters, self.bounds)
             self.names = (
@@ -118,6 +162,17 @@ class CoordinateChart:
             initial = reduction.reduce_parameters(parameters)
             mlo, mhi = self._m_interval(initial["b"], initial["dt"])
             dlo, dhi = self._d_interval(initial["b"], initial["M"], initial["dt"])
+            if mode == "reduced_model15_consistent":
+                self.fraction_maps = {
+                    name: _fraction_anchor(value)
+                    for name, value in {
+                        "b_fraction": _fraction_position(
+                            initial["b"], *self.b_interval
+                        ),
+                        "M_fraction": _fraction_position(initial["M"], mlo, mhi),
+                        "d_fraction": _fraction_position(initial["d"], dlo, dhi),
+                    }.items()
+                }
             height = self.physical["public_anchors"]["height"]
             rate = self.physical["public_anchors"]["rate"]
 
@@ -154,11 +209,36 @@ class CoordinateChart:
             else {},
             "full_model_convergence_claimed": False,
             "physical_combinations_are_independent_box": False,
-            "conditional_order": ["b", "M", "d"] if mode == "reduced_model15" else [],
+            "conditional_order": ["b", "M", "d"] if mode in REDUCED_MODES else [],
             "fraction_probe_scales": "frozen_physical_units_not_fraction_origin",
         }
+        if mode == "reduced_model15_consistent":
+            self.domain |= {
+                "protocol": "detention-preserved-family-chart-2",
+                "fraction_mapping": "exact-anchor-odds-ratio-1",
+                "exact_anchor_only_shortcut": False,
+                "fraction_maps": {
+                    name: {"coordinate": _ratio(pair[0]), "physical": _ratio(pair[1])}
+                    for name, pair in self.fraction_maps.items()
+                },
+                "fraction_anchor_slopes": {
+                    name: _ratio(
+                        Fraction(1)
+                        if source == target
+                        else target * (1 - target) / (source * (1 - source))
+                    )
+                    for name, (source, target) in self.fraction_maps.items()
+                },
+                "coordinate_units_policy": "unchanged_legacy_physical_interval_units",
+            }
         self.lower, self.upper = np.asarray([chart_bounds[n] for n in self.names]).T
         self.units = np.asarray([units[n] for n in self.names])
+        if mode == "reduced_model15_consistent" and (
+            not np.isfinite(self.units).all() or np.any(self.units <= 0)
+        ):
+            raise ValueError(
+                "consistent chart requires finite positive coordinate units"
+            )
         self.anchor_vector = self.encode(parameters)
 
     def _g_interval(self, b, m=None, t=None):
@@ -196,7 +276,7 @@ class CoordinateChart:
             and parameters["h_max"] != self.anchor["h_max"]
         ):
             raise ValueError("temporary fixed h_max differs")
-        if self.mode == "reduced_model15":
+        if self.mode in REDUCED_MODES:
             point = reduction.reduce_parameters(parameters)
             mlo, mhi = self._m_interval(point["b"], point["dt"])
             dlo, dhi = self._d_interval(point["b"], point["M"], point["dt"])
@@ -206,6 +286,9 @@ class CoordinateChart:
                 "d_fraction": _fraction_position(point["d"], dlo, dhi),
                 "M_fraction": _fraction_position(point["M"], mlo, mhi),
             }
+            if self.mode == "reduced_model15_consistent":
+                for name, (coordinate, physical) in self.fraction_maps.items():
+                    values[name] = _map_fraction(values[name], physical, coordinate)
         else:
             values = parameters
         return np.asarray([float(values[n]) for n in self.names])
@@ -220,11 +303,16 @@ class CoordinateChart:
             or np.any(point > self.upper)
         ):
             raise ValueError("optimizer point outside fixed chart bounds")
-        if np.array_equal(point, self.anchor_vector):
+        if self.mode != "reduced_model15_consistent" and np.array_equal(
+            point, self.anchor_vector
+        ):
             return dict(self.anchor)
-        if self.mode != "reduced_model15":
+        if self.mode not in REDUCED_MODES:
             return self.anchor | dict(zip(self.names, point.tolist(), strict=True))
         chart = dict(zip(self.names, map(_f, point), strict=True))
+        if self.mode == "reduced_model15_consistent":
+            for name, (coordinate, physical) in self.fraction_maps.items():
+                chart[name] = _map_fraction(chart[name], coordinate, physical)
         reduced = {n: chart[n] for n in reduction.UNCHANGED}
         blo, bhi = self.b_interval
         b = blo + chart["b_fraction"] * (bhi - blo)

@@ -2,6 +2,16 @@
 
 Date: 2026-10-26. This is an opt-in, training-only numerical experiment.
 
+## Returned results and consistency follow-up
+
+All seven tasks completed. Model 14's temporary subset/release reached training
+NMSE 8.47e-6, and Model 15's original-coordinate perturbed-0 continuation reached
+9.53e-5. All three reduced searches were blocked before optimization. A center
+versus neighbor reconstruction inconsistency was identified; the correction,
+24-direction saved-point audit, and proposed adaptive block strategy are in
+[the consistency follow-up](PHASE_C_LLM_SR_DETENTION_CHART_AUDIT.md). The sections
+below preserve the original continuation protocol.
+
 ## Evidence motivating the experiment
 
 The six-task diagnostic recovery completed all 139 operation records. Its report
