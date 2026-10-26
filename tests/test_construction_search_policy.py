@@ -56,7 +56,7 @@ def parent(monkeypatch):
         "scientific_aliases": {name: name for name in ("I", "Gp")},
     }
 
-    def assessment(parent, candidate):
+    def assessment(parent, candidate, **kwargs):
         # A deterministic synthetic gate isolates control-flow behavior; real
         # scientific certificates are covered by the gate's own test modules.
         expression = candidate.base_candidate.processes[0].expression
@@ -176,7 +176,6 @@ def test_options_repair_two_distinct_families_once_each(parent):
             option(1, patch("a*mem+X*X", name="X")),
             option(2, patch("a*mem+X*X*X", name="X")),
         ],
-        "fewer_options_reason": "",
     }
     result, client = run(parent, [batch, patch(), patch()], "options_shallow", seed=3)
     assert result["generation_calls"] == 3
@@ -203,7 +202,6 @@ def test_options_do_not_spend_two_repairs_on_renamed_same_family(parent):
             option(1, patch("a*mem+Z", name="Z")),
             option(2, patch()),
         ],
-        "fewer_options_reason": "",
     }
     result, _ = run(parent, [batch, patch()], "options_shallow")
     assert result["generation_calls"] == 2
@@ -213,40 +211,71 @@ def test_options_do_not_spend_two_repairs_on_renamed_same_family(parent):
 
 def test_bad_option_does_not_discard_valid_sibling(parent):
     batch = {
-        "options": [{"bad_field": "bad"}, option(1, patch())],
-        "fewer_options_reason": "Only one coherent full alternative remains.",
+        "options": [{"bad_field": "bad"}, option(1, patch()), option(2, patch())],
     }
     result, _ = run(parent, [batch], "options_shallow")
     assert result["generation_calls"] == 1
-    assert result["eligible_candidate_ids"] == ["call0-option1"]
+    assert result["eligible_candidate_ids"] == ["call0-option1", "call0-option2"]
     assert result["candidates"][0]["diagnostic"]["code"] == "OPTION_OR_RESPONSE_FORMAT"
 
 
 def test_valid_wrapper_with_invalid_patch_gets_bounded_repair(parent):
     batch = {
-        "options": [option(0, {"decision": "revise"})],
-        "fewer_options_reason": "Only one candidate.",
+        "options": [
+            option(0, {"decision": "revise"}),
+            option(1, patch()),
+            option(2, patch()),
+        ],
     }
     result, _ = run(parent, [batch, patch()], "options_shallow")
     assert result["generation_calls"] == 2
-    assert result["eligible_candidate_ids"] == ["call1-option0"]
+    assert result["eligible_candidate_ids"] == [
+        "call0-option1",
+        "call0-option2",
+        "call1-option0",
+    ]
 
 
-def test_fewer_options_needs_reason_and_excess_options_are_bounded(parent):
-    for batch in (
-        {"options": [], "fewer_options_reason": ""},
-        {"options": [option(i, patch()) for i in range(4)], "fewer_options_reason": ""},
-    ):
-        result, _ = run(parent, [batch], "options_shallow")
-        assert result["generation_calls"] == 1
-        assert result["eligible_candidate_ids"] == []
-        assert result["attempts"][0]["parse_error"] is not None
-    result, _ = run(
-        parent,
-        [{"options": [], "fewer_options_reason": "No defensible option"}],
-        "options_shallow",
-    )
-    assert result["candidate_count"] == 0
+@pytest.mark.parametrize("count", [0, 1, 2, 4])
+def test_exactly_three_options_mandatory_without_budget_reset(parent, count):
+    batch = {"options": [option(i, patch()) for i in range(count)]}
+    result, _ = run(parent, [batch], "options_shallow")
+    assert result["generation_calls"] == 1
+    assert result["eligible_candidate_ids"] == []
+    assert result["attempts"][0]["parse_error"]["code"] == "OPTION_OR_RESPONSE_FORMAT"
+    assert "exactly three" in result["attempts"][0]["parse_error"]["message"]
+    with pytest.raises(ValueError):
+        engine.OptionsReply.model_validate(batch)
+
+
+def test_old_fewer_options_escape_is_rejected(parent):
+    batch = {"options": [option(0, patch())], "fewer_options_reason": "One suffices"}
+    result, _ = run(parent, [batch], "options_shallow")
+    assert result["eligible_candidate_ids"] == []
+    assert result["attempts"][0]["parse_error"] is not None
+
+
+def test_all_three_options_must_be_repair_proposals(parent):
+    batch = {
+        "options": [
+            option(0, patch(decision="retain", edits=[])),
+            option(1, patch()),
+            option(2, patch()),
+        ]
+    }
+    result, _ = run(parent, [batch], "options_shallow")
+    assert result["candidates"][0]["option_wrapper_valid"] is False
+    assert "decision=revise" in result["candidates"][0]["diagnostic"]["message"]
+    assert len(result["eligible_candidate_ids"]) == 2
+
+
+def test_prompt_distinguishes_complete_changes_from_whole_model(parent):
+    packet = json.loads(engine.request(parent, "options_shallow", batch=True))
+    assert "exactly three" in packet["search_instruction"]["instruction"]
+    assert "List only changes" in packet["editing_scope"]["patch_semantics"]
+    assert "A+B" in engine.SYSTEM and "A+C" in engine.SYSTEM
+    schema = engine.OptionsReply.model_json_schema()["properties"]["options"]
+    assert schema["minItems"] == schema["maxItems"] == 3
 
 
 def test_schema_correction_is_progress_before_repetition(parent):

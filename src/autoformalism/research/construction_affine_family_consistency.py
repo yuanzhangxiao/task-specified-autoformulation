@@ -8,12 +8,13 @@ approximate forecast is inferred from a superposition contradiction.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from fractions import Fraction
 from itertools import combinations, islice
 from math import isfinite
 from typing import Any
 
-from autoformalism.expressions import compile_candidate
+from autoformalism.expressions import CompiledModel, compile_candidate
 from autoformalism.fitting.initialization_graph import apply_initialization_graph
 from autoformalism.research.construction_function_consistency import (
     _ONE,
@@ -32,6 +33,9 @@ from autoformalism.research.construction_initial_family_consistency import (
 )
 from autoformalism.research.construction_initial_family_consistency import (
     _Budget as _InitialBudget,
+)
+from autoformalism.research.construction_initial_family_consistency import (
+    _InitialView,
 )
 from autoformalism.research.construction_initial_family_consistency import (
     _interpret as _initial_expression,
@@ -55,6 +59,7 @@ from autoformalism.staged_topology import content_hash
 
 PROTOCOL = "construction-affine-family-consistency-1"
 SYMBOLIC_INITIAL_POLICY = "shared-symbolic-initial-readout-1"
+WEIGHTED_SYMBOLIC_POLICY = "weighted-shared-symbolic-initials-1"
 MAX_TRIPLES = 256
 MAX_TIMES = 64
 MAX_STATES = 32
@@ -310,6 +315,69 @@ def _common_readout_initial(state, rows, readout_initials):
     }
 
 
+def _shared_map_initials(
+    model: CompiledModel,
+    rows: Sequence[CompleteTrajectory],
+    training: TrainingCompatibilityEvidence,
+    roots: set[str],
+) -> dict[str, dict[str, _InitialAffine]]:
+    """Expand actual initial maps into shared-coordinate affine expressions.
+
+    These expressions may differ between trajectories. A later nullspace check
+    cancels every coefficient independently, so its weights cannot depend on a
+    fitted parameter. Relevant trajectory roots, uncertain public readings and
+    products/divisions of unknown shared coordinates remain unsupported.
+    """
+    result = {}
+    for row in rows:
+        budget = _InitialBudget()
+        view = _InitialView(model, roots, training, row, budget)
+        values = {}
+        for state in sorted(model.state_names):
+            try:
+                value = view.symbol(state)
+                if len(value.coefficients) > INITIAL_READOUT_LIMITS["coordinates"]:
+                    continue
+                values[state] = value
+            except _InitialUnsupported:
+                # A failed recursive expansion must not poison another state's
+                # independent proof. Cached completed expressions remain valid.
+                view.visiting.clear()
+                if budget.remaining < 0:
+                    break
+        result[row.trajectory_id] = values
+    return result
+
+
+def _weighted_initial_constraints(
+    state: str,
+    rows: Sequence[CompleteTrajectory],
+    map_initials: dict[str, dict[str, _InitialAffine]],
+) -> tuple[list[list[Fraction]], dict[str, Any]] | None:
+    """Return exact rows whose nullspace cancels one shared symbolic initial."""
+    values = [map_initials.get(row.trajectory_id, {}).get(state) for row in rows]
+    if any(value is None for value in values):
+        return None
+    names = sorted({name for value in values for name in value.coefficients})
+    if len(names) > INITIAL_READOUT_LIMITS["coordinates"]:
+        return None
+    constraints = [[value.constant for value in values]] + [
+        [value.coefficients.get(name, Fraction(0)) for value in values]
+        for name in names
+    ]
+    return constraints, {
+        "source": "actual initializer maps with shared symbolic parameters",
+        "policy": WEIGHTED_SYMBOLIC_POLICY,
+        "constant_exact": [str(value.constant) for value in values],
+        "shared_coefficients_exact": {
+            name: [str(value.coefficients.get(name, Fraction(0))) for value in values]
+            for name in names
+        },
+        "required_cancellation": "weights cancel the constant and every shared "
+        "parameter coefficient separately; no parameter values are fitted",
+    }
+
+
 def _closed_states(
     output: _Affine, equations: dict[str, _Affine], state_names: set[str]
 ) -> tuple[set[str], set[str]]:
@@ -374,7 +442,8 @@ def _guard(values) -> Fraction:
 
 
 def _superposition(
-    rows, target, states, initials, problem, observed, training, readout_initials
+    rows, target, states, initials, problem, observed, training, readout_initials,
+    *, map_initials=None,
 ):
     constraints = [[Fraction(1)] * 3]
     known = {}
@@ -387,6 +456,11 @@ def _superposition(
         common = _common_readout_initial(state, rows, readout_initials)
         if common is not None:
             known[state] = common
+            continue
+        weighted = _weighted_initial_constraints(state, rows, map_initials or {})
+        if weighted is not None:
+            coefficient_rows, known[state] = weighted
+            constraints.extend(coefficient_rows)
             continue
         keys = [
             _exact_initial_key(state, row, problem, observed, training) for row in rows
@@ -499,7 +573,10 @@ def _rank_one(
     return None
 
 
-def _checks(problem, model, training, *, symbolic_initials=False):
+def _checks(
+    problem, model, training, *, symbolic_initials=False,
+    weighted_symbolic_initials=False, roots=frozenset(),
+):
     rows_to_check = training.trajectories[:MAX_TRAJECTORIES]
     if any(len(row.time) > MAX_SAMPLES for row in rows_to_check):
         raise _Unsupported("complete forcing sample count exceeds the proof budget")
@@ -561,6 +638,11 @@ def _checks(problem, model, training, *, symbolic_initials=False):
         if symbolic_initials
         else {}
     )
+    map_initials = (
+        _shared_map_initials(model, rows_to_check, training, roots)
+        if weighted_symbolic_initials
+        else {}
+    )
     result = []
     for target in problem.context.targets:
         for kind, test in (
@@ -619,6 +701,11 @@ def _checks(problem, model, training, *, symbolic_initials=False):
                         observed,
                         training,
                         readout_initials,
+                        **(
+                            {"map_initials": map_initials}
+                            if test == _superposition
+                            else {}
+                        ),
                     )
                     if witness:
                         check.update(
@@ -669,9 +756,10 @@ def _checks(problem, model, training, *, symbolic_initials=False):
 
 
 def assess(
-    problem: PrefixFitProblem, evidence: dict, *, symbolic_initials: bool = False
+    problem: PrefixFitProblem, evidence: dict, *, symbolic_initials: bool = False,
+    weighted_symbolic_initials: bool = False,
 ) -> dict[str, Any]:
-    """Audit affine conflicts; opt in to bounded shared-symbolic initial values."""
+    """Audit affine conflicts with separately opt-in symbolic initial proofs."""
     if not isinstance(problem, PrefixFitProblem):
         raise ValueError("typed PrefixFitProblem required")
     problem = PrefixFitProblem.model_validate(problem.model_dump(mode="json"))
@@ -684,7 +772,7 @@ def assess(
     if any(item.scope.value != "global" for item in problem.base_candidate.parameters):
         raise ValueError("dynamics parameters must be globally shared")
     original = compile_candidate(problem.base_candidate, problem.context)
-    model, _, _ = apply_initialization_graph(original, problem.graph)
+    model, _, initialization = apply_initialization_graph(original, problem.graph)
     missing = [
         name
         for name in (
@@ -708,7 +796,11 @@ def assess(
                 }
             ]
             if missing
-            else _checks(problem, model, training, symbolic_initials=symbolic_initials)
+            else _checks(
+                problem, model, training, symbolic_initials=symbolic_initials,
+                weighted_symbolic_initials=weighted_symbolic_initials,
+                roots=set(initialization["trajectory_parameter_names"]),
+            )
         )
     except _Unsupported as exc:
         checks = [
@@ -725,6 +817,11 @@ def assess(
         **(
             {"symbolic_initial_policy": SYMBOLIC_INITIAL_POLICY}
             if symbolic_initials
+            else {}
+        ),
+        **(
+            {"weighted_symbolic_initial_policy": WEIGHTED_SYMBOLIC_POLICY}
+            if weighted_symbolic_initials
             else {}
         ),
         "status": "conflict" if conflicts else "deferred",
@@ -758,6 +855,11 @@ def assess(
                 if symbolic_initials
                 else {}
             ),
+            **(
+                {"weighted_symbolic_initials": dict(INITIAL_READOUT_LIMITS)}
+                if weighted_symbolic_initials
+                else {}
+            ),
         },
         "target_comparison_policy": dict(TARGET_COMPARISON_POLICY),
         "scientific_correctness_established": False,
@@ -785,6 +887,15 @@ def prompt_view(report: dict[str, Any]) -> dict[str, Any]:
         **(
             {"symbolic_initial_policy": report["symbolic_initial_policy"]}
             if "symbolic_initial_policy" in report
+            else {}
+        ),
+        **(
+            {
+                "weighted_symbolic_initial_policy": report[
+                    "weighted_symbolic_initial_policy"
+                ]
+            }
+            if "weighted_symbolic_initial_policy" in report
             else {}
         ),
         "status_counts": dict(Counter(item["status"] for item in report["checks"])),

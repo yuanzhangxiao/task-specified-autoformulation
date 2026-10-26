@@ -18,7 +18,7 @@ from urllib.request import urlopen
 from scripts import harmony_vocab
 
 REPO = Path(__file__).resolve().parents[1]
-PROTOCOL = "construction-search-policy-1"
+PROTOCOL = "construction-search-policy-2"
 EXECUTION_PROTOCOL = "construction-search-aces-execution-1"
 POLICIES = {"sequential_restart", "independent", "options_shallow"}
 PHASES = {"smoke", "full"}

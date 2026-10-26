@@ -118,7 +118,12 @@ def _entrypoints() -> dict:
 
 
 @lru_cache(maxsize=64)
-def _assessment_cached(problem_json: str, evidence_json: str, assess) -> dict:
+def _assessment_cached(
+    problem_json: str,
+    evidence_json: str,
+    assess,
+    weighted_symbolic_initials: bool = False,
+) -> dict:
     """Memoize a pure gate result; public and model bytes are both in its key."""
     from autoformalism.research import construction_affine_family_consistency
 
@@ -133,8 +138,11 @@ def _assessment_cached(problem_json: str, evidence_json: str, assess) -> dict:
     )
     # Historical V4 campaigns keep their original gate. Only this new namespace
     # enables symbolic initial equalities, including unknown common offsets.
+    options = {"symbolic_initials": True}
+    if weighted_symbolic_initials:
+        options["weighted_symbolic_initials"] = True
     result["affine_family_consistency"] = construction_affine_family_consistency.assess(
-        problem, evidence, symbolic_initials=True
+        problem, evidence, **options
     )
     statuses = [
         result["equality_status"],
@@ -153,12 +161,15 @@ def _assessment_cached(problem_json: str, evidence_json: str, assess) -> dict:
     return result
 
 
-def _assessment(parent: dict, problem: PrefixFitProblem) -> dict:
+def _assessment(
+    parent: dict, problem: PrefixFitProblem, *, weighted_symbolic_initials: bool = False
+) -> dict:
     return deepcopy(
         _assessment_cached(
             problem.model_dump_json(),
             json.dumps(parent["_consistency_evidence"], sort_keys=True),
             old._consistency,
+            weighted_symbolic_initials,
         )
     )
 
@@ -287,7 +298,12 @@ def verify(root: Path) -> dict:
     return plan
 
 
-def request(parent: dict, repair: dict | None = None) -> str:
+def request(
+    parent: dict,
+    repair: dict | None = None,
+    *,
+    weighted_symbolic_initials: bool = False,
+) -> str:
     """Present one model view and target-specific witnesses, with explicit scope."""
     problem = PrefixFitProblem.model_validate(parent["problem"])
     view = model_view(problem, scientific_aliases=parent["scientific_aliases"])
@@ -300,7 +316,9 @@ def request(parent: dict, repair: dict | None = None) -> str:
     view["editable_initial_states"] = editable_initial_states(
         problem, scientific_aliases=parent["scientific_aliases"]
     )
-    assessment = _assessment(parent, problem)
+    assessment = _assessment(
+        parent, problem, weighted_symbolic_initials=weighted_symbolic_initials
+    )
     packet = {
         "public_task": parent["public_brief"],
         "current_model": view,
@@ -354,7 +372,9 @@ def request(parent: dict, repair: dict | None = None) -> str:
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
 
 
-def _normalize_displayed_citations(parent: dict, reply: dict) -> tuple[dict, list]:
+def _normalize_displayed_citations(
+    parent: dict, reply: dict, *, weighted_symbolic_initials: bool = False
+) -> tuple[dict, list]:
     """Resolve exact property labels only from this model's displayed evidence."""
     reply, changes = normalize_citations(reply)
     identifiers = reply.get("evidence_ids")
@@ -366,7 +386,12 @@ def _normalize_displayed_citations(parent: dict, reply: dict) -> tuple[dict, lis
     if set(identifiers) <= allowed:
         return reply, changes
     report = feedback.consistency_view(
-        _assessment(parent, PrefixFitProblem.model_validate(parent["problem"])), parent
+        _assessment(
+            parent,
+            PrefixFitProblem.model_validate(parent["problem"]),
+            weighted_symbolic_initials=weighted_symbolic_initials,
+        ),
+        parent,
     )
     properties = set()
 
@@ -392,19 +417,33 @@ def _normalize_displayed_citations(parent: dict, reply: dict) -> tuple[dict, lis
     return reply, changes
 
 
-def _apply(parent: dict, reply: dict) -> dict:
-    reply, changes = _normalize_displayed_citations(parent, reply)
+def _apply(
+    parent: dict,
+    reply: dict,
+    *,
+    normalize_parent_declarations: bool = False,
+    weighted_symbolic_initials: bool = False,
+) -> dict:
+    reply, changes = _normalize_displayed_citations(
+        parent, reply, weighted_symbolic_initials=weighted_symbolic_initials
+    )
+    options = {}
+    if normalize_parent_declarations:
+        options["normalize_parent_declarations"] = True
     applied = apply_structural_revision(
         PrefixFitProblem.model_validate(parent["problem"]),
         reply,
         evidence_ids=["public_task", "training_consistency", "parameter_audit"],
         brief=PublicScientificBrief.model_validate(parent["public_brief"]),
         scientific_aliases=parent["scientific_aliases"],
+        **options,
     )
     if applied["status"] == "requires_wider_revision":
         return {**applied, "problem": None}
     problem = applied["problem"]
-    assessment = _assessment(parent, problem)
+    assessment = _assessment(
+        parent, problem, weighted_symbolic_initials=weighted_symbolic_initials
+    )
     applied["audit"].update(
         training_consistency=assessment,
         parameter_audit=parameters.assess(problem),

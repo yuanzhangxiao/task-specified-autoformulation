@@ -495,3 +495,29 @@ def test_wider_request_is_explicit_and_not_a_scientific_edit():
     wider = patch(decision="requires_wider_revision", edits=[])
     assert feedback.patch_signature(wider) is not None
     assert feedback.patch_signature(wider | {"edits": patch()["edits"]}) is None
+
+
+def test_parent_identity_feedback_exposes_per_name_repair_without_reclassification():
+    details = {
+        "names": ["init_k"],
+        "declaration_issues": [
+            {
+                "name": "init_k",
+                "category": "reserved_namespace",
+                "repair": "Declare this initializer coefficient in its local map.",
+            }
+        ],
+    }
+    for code in (
+        "DECLARATION_IDENTITY",
+        "RESERVED_DECLARATION_NAME",
+        "INITIALIZER_PARAMETER_SCOPE",
+    ):
+        result = feedback.feedback_guidance(code, details, parent())
+        assert result["details"] == details
+        assert (
+            "reserved prefix and an existing identity are different"
+            in result["specific_feedback"]
+        )
+        assert "without redeclaring unchanged" in result["specific_feedback"]
+    assert details["declaration_issues"][0]["category"] == "reserved_namespace"

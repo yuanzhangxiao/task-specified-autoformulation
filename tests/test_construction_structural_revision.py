@@ -10,9 +10,11 @@ from autoformalism.llm.staged_topology import strict_provider_schema
 from autoformalism.research.construction_revision_consistency import assess
 from autoformalism.research.construction_revision_edits import RevisionValidationError
 from autoformalism.research.construction_structural_revision import (
+    PARENT_DECLARATION_POLICY,
     StructuralRevisionReply,
     apply_structural_revision,
     editable_initial_states,
+    normalize_parent_structural_reply,
     normalize_structural_reply,
 )
 from autoformalism.schemas.prefix_initialization import PrefixFitProblem
@@ -743,3 +745,207 @@ def test_initializer_alias_lists_cannot_overwrite_a_duplicate(changes):
     assert "duplicate or ambiguous initializer alias/parameter" in str(
         error.value.details
     )
+
+
+def test_parent_declaration_normalization_is_opt_in_and_preserves_identity():
+    source = problem()
+    minimal = reply(new_states=[state()])
+    redundant = deepcopy(minimal)
+    redundant["new_parameters"] = [{"name": "a", "role": "rate"}]
+    redundant["new_processes"] = [
+        {
+            "name": "q",
+            "description": "Retained for completeness",
+            "expression": "q = (a) * (mem)",
+            "sources": [],
+        }
+    ]
+    before = source.model_dump(mode="json")
+    with pytest.raises(RevisionValidationError, match="DECLARATION_IDENTITY"):
+        apply(source, redundant)
+    result = apply(source, redundant, normalize_parent_declarations=True)
+    assert result["problem"] == apply(source, minimal)["problem"]
+    assert source.model_dump(mode="json") == before
+    audit = result["audit"]["normalization"]
+    assert audit["parent_declaration_policy"] == PARENT_DECLARATION_POLICY
+    assert audit["raw_reply"] == redundant
+    assert len(audit["declaration_changes"]) == 2
+    assert (
+        result["problem"].base_candidate.parameters[0]
+        == source.base_candidate.parameters[0]
+    )
+    assert (
+        result["problem"].base_candidate.processes[0]
+        == source.base_candidate.processes[0]
+    )
+
+
+def test_only_unchanged_restatements_become_retained_not_a_new_model():
+    payload = reply(new_parameters=[{"name": "a", "role": "rate"}])
+    result = apply(problem(), payload, normalize_parent_declarations=True)
+    assert result["status"] == "retained"
+    assert result["problem"] == problem()
+    assert result["audit"]["candidate_specific_data_checks_required"]
+    assert result["audit"]["normalization"]["normalized_reply"]["decision"] == "retain"
+
+
+def test_initializer_local_duplicate_keeps_shared_map_and_its_scope():
+    initial = {
+        "mode": "map",
+        "expression": "init_a*measured",
+        "parameters": [{"name": "init_a", "role": "coefficient"}],
+        "public_initials": [{"alias": "measured", "channel": "aux"}],
+    }
+    minimal = reply(new_states=[state(initial=initial)])
+    redundant = deepcopy(minimal)
+    redundant["new_parameters"] = [{"name": "init_a", "role": "coefficient"}]
+    result = apply(problem(), redundant, normalize_parent_declarations=True)
+    assert result["problem"] == apply(problem(), minimal)["problem"]
+    assert result["problem"].graph.rules["extra"].initial.mode == "map"
+    assert result["audit"]["new_parameters"] == []
+    assert result["audit"]["normalization"]["raw_reply"] == redundant
+
+
+@pytest.mark.parametrize(
+    "role,expression,other_scope",
+    [
+        ("rate", "I-extra", False),
+        ("coefficient", "init_a*I-extra", False),
+        ("coefficient", "I-extra", True),
+    ],
+)
+def test_ambiguous_initializer_local_duplicates_are_not_silently_dropped(
+    role, expression, other_scope
+):
+    initial = {
+        "mode": "map",
+        "expression": "init_a",
+        "parameters": [{"name": "init_a", "role": "coefficient"}],
+    }
+    payload = reply(
+        new_states=[state(rhs=expression, initial=initial)],
+        new_parameters=[{"name": "init_a", "role": role}],
+    )
+    if other_scope:
+        payload["initialization_edits"] = [{"state": "mem", "initial": initial}]
+    with pytest.raises(
+        RevisionValidationError, match="INITIALIZER_PARAMETER_SCOPE"
+    ) as error:
+        apply(problem(), payload, normalize_parent_declarations=True)
+    assert (
+        error.value.details["declaration_issues"][0]["category"]
+        == "initializer_parameter_scope"
+    )
+    assert "local parameters" in error.value.details["declaration_issues"][0]["repair"]
+
+
+def test_unchanged_process_with_competing_operations_is_not_normalized():
+    payload = reply(
+        new_processes=[{"name": "q", "description": "same", "expression": "a*mem"}],
+        edits=[
+            {
+                "component": "q",
+                "kind": "algebraic",
+                "sources": [],
+                "expression": "2*a*mem",
+            }
+        ],
+    )
+    with pytest.raises(RevisionValidationError, match="DECLARATION_CONFLICT"):
+        apply(problem(), payload, normalize_parent_declarations=True)
+    payload.pop("edits")
+    payload["remove_processes"] = ["q"]
+    with pytest.raises(RevisionValidationError, match="DECLARATION_IDENTITY") as error:
+        apply(problem(), payload, normalize_parent_declarations=True)
+    assert (
+        "Do not both remove" in error.value.details["declaration_issues"][0]["repair"]
+    )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"role": "coefficient"},
+        {"bounds": {"lower": 0.1, "upper": 10}},
+        {"initialization_range": {"lower": 0.1, "upper": 10}},
+    ],
+)
+def test_existing_parameter_restatement_cannot_erase_role_or_bounds(extra):
+    source = problem()
+    raw = source.model_dump(mode="json")
+    if "role" in extra:
+        payload = reply(new_parameters=[{"name": "a", **extra}])
+    else:
+        raw["base_candidate"]["parameters"][0].update(extra)
+        source = PrefixFitProblem.model_validate(raw)
+        payload = reply(new_parameters=[{"name": "a", "role": "rate"}])
+    with pytest.raises(RevisionValidationError, match="DECLARATION_IDENTITY") as error:
+        apply(source, payload, normalize_parent_declarations=True)
+    assert (
+        error.value.details["declaration_issues"][0]["existing_parameter"]["name"]
+        == "a"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload,category",
+    [
+        (reply(new_states=[state("mem")]), "existing_state"),
+        (
+            reply(
+                new_processes=[
+                    {"name": "q", "description": "changed", "expression": "2*a*mem"}
+                ]
+            ),
+            "existing_process",
+        ),
+        (
+            reply(
+                new_processes=[
+                    {"name": "u", "description": "supplied", "expression": "1"}
+                ]
+            ),
+            "public_or_reserved_identity",
+        ),
+        (
+            reply(
+                new_parameters=[{"name": "extra", "role": "rate"}], new_states=[state()]
+            ),
+            "parameter_component_collision",
+        ),
+    ],
+)
+def test_identity_feedback_names_the_actual_declaration_owner(payload, category):
+    with pytest.raises(RevisionValidationError, match="DECLARATION_IDENTITY") as error:
+        apply(problem(), payload, normalize_parent_declarations=True)
+    assert error.value.details["declaration_issues"][0]["category"] == category
+    assert (
+        "Omitted parent definitions remain unchanged"
+        in error.value.details["repair_contract"]
+    )
+
+
+def test_reserved_name_feedback_does_not_falsely_claim_existing_identity():
+    payload = reply(new_parameters=[{"name": "init_unused", "role": "rate"}])
+    with pytest.raises(
+        RevisionValidationError, match="RESERVED_DECLARATION_NAME"
+    ) as error:
+        apply(problem(), payload, normalize_parent_declarations=True)
+    issue = error.value.details["declaration_issues"][0]
+    assert issue["category"] == "reserved_namespace"
+    assert "not evidence that this name already exists" in issue["repair"]
+
+
+def test_normalized_parent_helper_preserves_raw_shape_limits_and_inputs():
+    payload = reply(
+        new_parameters=[{"name": "a", "role": "rate"}], new_states=[state()]
+    )
+    before = deepcopy(payload)
+    source = problem()
+    first = normalize_parent_structural_reply(source, payload)
+    assert first == normalize_parent_structural_reply(source, payload)
+    assert payload == before
+    assert first[0]["new_parameters"] == []
+    oversized = reply(new_parameters=[{"name": "a", "role": "rate"}] * 65)
+    with pytest.raises(RevisionValidationError, match="REVISION_SCHEMA"):
+        apply(source, oversized, normalize_parent_declarations=True)

@@ -42,13 +42,13 @@ def respond(url, body, timeout):
         value = {
             "options": [
                 {
-                    "option_id": "nonlinear",
+                    "option_id": f"nonlinear_{index}",
                     "affected_target": "Gp",
                     "premise_changed": "Include nonlinear glucose-memory coupling.",
                     "patch": value,
                 }
+                for index in range(3)
             ],
-            "fewer_options_reason": "One distinct proposal in this fixture.",
         }
     return response(value)
 

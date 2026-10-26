@@ -1,5 +1,16 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Construction search requalification
+
+The completed v1 search compared 108 episodes with no provider failures, but
+32 of 36 option batches returned only one proposal. Prospective v2 requires exactly
+three initial alternatives, clarifies that replies contain complete intended
+changes rather than the whole model, and enables safe parent-declaration
+normalization plus weighted shared-initializer cancellation proofs. The saved
+289 patches are rechecked independently without generation, fitting, adoption or
+historical changes. Exact reproduction conflicts remain distinct from achievable
+NMSE. See [the correction and replay contract](PHASE_C_SEARCH_POLICY_REQUALIFICATION.md).
+
 ## LLM-SR detention diagnostic recovery
 
 The first detention control refit improved all six starts that entered search;
@@ -30,7 +41,8 @@ PHASE_C_CONSTRUCTION_ENDPOINT_REQUALIFICATION.md); remote results are pending.
 
 The opt-in `construction-search-policy-1` experiment compares sequential repair
 with restart, independent proposals, and up to three alternatives followed by
-shallow repair. Six frozen T2-easy parents receive three seed bundles per policy
+shallow repair (historical v1; v2 requires three). Six frozen T2-easy parents
+receive three seed bundles per policy
 on both 20B and 120B: 54 episodes / at most 162 calls per model. Private-symbol
 renaming is compared conservatively on complete models; initial scope, parameter
 sharing/domains, and public identities remain fixed. Feedback retains a compact
@@ -49,7 +61,8 @@ saved-reply audit preserves historical results, rechecks each original parent,
 and performs no new generation, fitting or adoption. The previous comparison
 tested model size under serial repair, not population search or adaptive fitting.
 A three-option/breadth experiment was proposed from this evidence and is now
-implemented separately as described above; no live search-policy results exist yet.
+implemented separately as described above; the completed v1 results and v2
+corrections are recorded above.
 See [the correction and proposed search comparison](
 PHASE_C_STRUCTURAL_REPLAY_AND_DIVERSITY.md).
 

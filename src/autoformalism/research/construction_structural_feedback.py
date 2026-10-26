@@ -468,7 +468,20 @@ def feedback_guidance(
             "in edits or initialization_edits. Consolidate your intended version; "
             "do not delete unrelated required pathways."
         )
-    if code == "DECLARATION_CONFLICT":
+    if code in {
+        "DECLARATION_IDENTITY",
+        "RESERVED_DECLARATION_NAME",
+        "INITIALIZER_PARAMETER_SCOPE",
+    } and details.get("declaration_issues"):
+        result["specific_feedback"] = (
+            "Follow each declaration_issues entry's repair instruction. A reserved "
+            "prefix and an existing identity are different problems. The runtime "
+            "has retained only certified unchanged restatements; all unresolved "
+            "changes remain unapplied. Return the intended changes against the "
+            "same parent, including earlier corrections you still want, without "
+            "redeclaring unchanged parent components."
+        )
+    elif code == "DECLARATION_CONFLICT":
         result["specific_feedback"] = (
             "The listed declarations describe different actions. Choose one "
             "complete RHS, kind and initializer for each name; the runtime cannot "

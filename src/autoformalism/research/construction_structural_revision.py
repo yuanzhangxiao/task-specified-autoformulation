@@ -43,6 +43,7 @@ from autoformalism.search.shared_model_revision import relationships
 from autoformalism.staged_topology import content_hash
 
 POLICY = "construction-structural-revision-1"
+PARENT_DECLARATION_POLICY = "parent-relative-declaration-normalization-1"
 
 
 class InitialValueChoice(StrictSchema):
@@ -362,6 +363,176 @@ def normalize_structural_reply(
     return value, changes
 
 
+def _local_map_parameters(
+    problem: PrefixFitProblem, value: dict[str, Any]
+) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    """Locate initializer-local coefficients in the resulting initializer graph."""
+    initials = {
+        name: rule.initial.model_dump(mode="json")
+        for name, rule in problem.graph.rules.items()
+        if name not in value["remove_states"]
+    }
+    initials.update(
+        {row["state"]: row["initial"] for row in value["initialization_edits"]}
+    )
+    initials.update({row["name"]: row["initial"] for row in value["new_states"]})
+    result: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for state, initial in initials.items():
+        if initial["mode"] == "map":
+            for parameter in initial["parameters"]:
+                result.setdefault(parameter["name"], []).append((state, parameter))
+    return result
+
+
+def _dynamics_symbols(problem: PrefixFitProblem, value: dict[str, Any]) -> set[str]:
+    """Read the complete proposed dynamics, including unchanged definitions."""
+    removed = set(value["remove_states"]) | set(value["remove_processes"])
+    laws = {
+        name: expression
+        for name, (_, expression) in _definitions(problem.base_candidate).items()
+        if name not in removed
+    }
+    for field, name_field, expression_field in (
+        ("edits", "component", "expression"),
+        ("new_states", "name", "rhs"),
+        ("new_processes", "name", "expression"),
+    ):
+        for row in value[field]:
+            kind = row.get("kind", "dynamic" if field == "new_states" else "algebraic")
+            laws[row[name_field]] = _canonical_rhs(
+                row[expression_field],
+                row[name_field],
+                kind,
+                problem.context.time_symbol,
+            )
+    expressions = list(laws.values()) + [
+        mapping.expression for mapping in problem.base_candidate.observation_mappings
+    ]
+    return set().union(
+        *(_symbols(text, "declaration normalization") for text in expressions)
+    )
+
+
+def normalize_parent_structural_reply(
+    problem: PrefixFitProblem, raw: Mapping[str, Any]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Drop only certified restatements; preserve the parent's identity and metadata.
+
+    This opt-in boundary operates on a complete parent-relative patch. It neither
+    turns a new declaration into an edit nor infers scientific changes. Initializer
+    coefficients remain local and shared; repeated names do not create new roots.
+    """
+    value, changes = normalize_structural_reply(
+        raw, time_symbol=problem.context.time_symbol
+    )
+    if value["decision"] != "revise":
+        return value, changes
+    candidate = problem.base_candidate
+    existing_parameters = {row.name: row for row in candidate.parameters}
+    existing_processes = {row.name: row for row in candidate.processes}
+    reserved_components = (
+        set(_definitions(candidate))
+        | set(problem.context.targets)
+        | set(problem.context.forcing_channels)
+        | {problem.context.time_symbol}
+        | set(APPROVED_FUNCTION_ARITY)
+        | {row["name"] for row in value["new_states"]}
+        | {row["name"] for row in value["new_processes"]}
+    )
+    local = _local_map_parameters(problem, value)
+    dynamics = _dynamics_symbols(problem, value)
+    parameters = []
+    for index, row in enumerate(value["new_parameters"]):
+        name = row["name"]
+        previous = existing_parameters.get(name)
+        reason = None
+        if (
+            previous is not None
+            and name not in reserved_components
+            and previous.scope.value == "global"
+            and previous.role.value == row["role"]
+            and previous.bounds is None
+            and previous.initialization_range is None
+        ):
+            reason = (
+                "identical existing shared dynamics parameter; preserve its "
+                "identity and metadata"
+            )
+        elif (
+            previous is None
+            and name not in reserved_components
+            and len(local.get(name, [])) == 1
+            and local[name][0][1]["role"] == row["role"]
+            and name not in dynamics
+        ):
+            reason = (
+                "coefficient already declared in exactly one initializer scope; "
+                "preserve that local declaration"
+            )
+        if reason is None:
+            parameters.append(row)
+        else:
+            changes.append(
+                {
+                    "field": "new_parameters",
+                    "name": name,
+                    "removed_index": index,
+                    "reason": reason,
+                }
+            )
+    value["new_parameters"] = parameters
+    competing = {row["component"] for row in value["edits"]} | set(
+        value["remove_processes"]
+    )
+    processes = []
+    for index, row in enumerate(value["new_processes"]):
+        name = row["name"]
+        previous = existing_processes.get(name)
+        if (
+            previous is not None
+            and name not in competing
+            and _expression_key(
+                row["expression"], name, "algebraic", problem.context.time_symbol
+            )
+            == _expression_key(
+                previous.expression, name, "algebraic", problem.context.time_symbol
+            )
+        ):
+            changes.append(
+                {
+                    "field": "new_processes",
+                    "name": name,
+                    "removed_index": index,
+                    "reason": (
+                        "unchanged existing process RHS; preserve all parent metadata"
+                    ),
+                }
+            )
+        else:
+            processes.append(row)
+    value["new_processes"] = processes
+    actions = (
+        "edits",
+        "new_parameters",
+        "new_states",
+        "new_processes",
+        "remove_states",
+        "remove_processes",
+        "initialization_edits",
+    )
+    if changes and not any(value[field] for field in actions):
+        value["decision"] = "retain"
+        changes.append(
+            {
+                "field": "decision",
+                "reason": "only unchanged parent declarations remained",
+                "before": "revise",
+                "after": "retain",
+            }
+        )
+    return value, changes
+
+
 def editable_initial_states(
     problem: PrefixFitProblem,
     scientific_aliases: Mapping[str, str] | None = None,
@@ -444,6 +615,99 @@ def _normalize_law(
     return rhs, sorted(actual)
 
 
+def _raise_declaration_identity(
+    problem: PrefixFitProblem,
+    reply: StructuralRevisionReply,
+    collisions: set[str],
+    reserved: set[str],
+) -> None:
+    """Explain namespace and ownership errors separately from scientific edits."""
+    candidate = problem.base_candidate
+    parameter_specs = {row.name: row for row in candidate.parameters}
+    states = {row.name for row in candidate.states}
+    processes = {row.name for row in candidate.processes}
+    new_parameters = {row.name for row in reply.new_parameters}
+    new_components = {row.name for row in (*reply.new_states, *reply.new_processes)}
+    locals_by_name = _local_map_parameters(problem, reply.model_dump(mode="json"))
+    rows = []
+    for name in sorted(collisions):
+        if name in new_parameters & new_components:
+            category = "parameter_component_collision"
+            guidance = (
+                "Choose whether this identity is a parameter or generated "
+                "component; return one coherent declaration."
+            )
+        elif name in states:
+            category = "existing_state"
+            guidance = (
+                "Keep the existing state declaration. Change its complete RHS in "
+                "edits and eligible initial rule in initialization_edits; a type "
+                "change requires wider revision."
+            )
+        elif name in processes:
+            category = "existing_process"
+            guidance = (
+                "Change this existing process in edits, not new_processes. Do "
+                "not both remove it and retain or edit it. Unchanged definitions "
+                "are already inherited."
+            )
+        elif name in parameter_specs:
+            category = "existing_parameter"
+            guidance = (
+                "Reuse the existing identity without new_parameters; its role, "
+                "domain, scope and bounds stay fixed. A different intended "
+                "coefficient needs a distinct name."
+            )
+        elif name in reserved:
+            category = "public_or_reserved_identity"
+            guidance = (
+                "Preserve this public channel, function or time identity; it "
+                "cannot be redeclared as a new state, process or parameter."
+            )
+        elif name.startswith("init_") and name in locals_by_name:
+            category = "initializer_parameter_scope"
+            guidance = (
+                "This name belongs to an initializer map's local parameters. Do "
+                "not also declare it in new_parameters. If a distinct dynamics "
+                "coefficient is intended, give that coefficient a nonreserved "
+                "name and update only its dynamics references."
+            )
+        else:
+            category = "reserved_namespace"
+            guidance = (
+                "The init_ and af_internal_ prefixes are runtime-owned, not "
+                "evidence that this name already exists. Declare initializer "
+                "coefficients locally in the map; otherwise choose a private "
+                "name without these prefixes and update its references."
+            )
+        item = {"name": name, "category": category, "repair": guidance}
+        if name in parameter_specs:
+            item["existing_parameter"] = parameter_specs[name].model_dump(mode="json")
+        if name in locals_by_name:
+            item["initializer_scopes"] = [state for state, _ in locals_by_name[name]]
+        rows.append(item)
+    categories = {row["category"] for row in rows}
+    code = (
+        "RESERVED_DECLARATION_NAME"
+        if categories == {"reserved_namespace"}
+        else "INITIALIZER_PARAMETER_SCOPE"
+        if categories == {"initializer_parameter_scope"}
+        else "DECLARATION_IDENTITY"
+    )
+    raise RevisionValidationError(
+        code,
+        "declaration ownership is unresolved; follow the per-name repair instructions",
+        names=sorted(collisions),
+        declaration_issues=rows,
+        repair_contract=(
+            "Return only intended changes against the unchanged parent, "
+            "retaining all still-intended corrections from previous rejected "
+            "replies. Omitted parent definitions remain unchanged. Each edits "
+            "entry replaces that component's complete RHS."
+        ),
+    )
+
+
 def _apply(
     problem: PrefixFitProblem,
     reply: StructuralRevisionReply,
@@ -452,6 +716,7 @@ def _apply(
     brief: PublicScientificBrief | None,
     scientific_aliases: Mapping[str, str] | None,
     allow_trajectory_roots: bool,
+    parent_declaration_feedback: bool = False,
 ) -> dict[str, Any]:
     """Construct a detached candidate; all checks precede returning an adoption."""
     parent = _copy_problem(problem)
@@ -528,6 +793,8 @@ def _apply(
         if name.startswith(("init_", "af_internal_"))
     }
     if collisions:
+        if parent_declaration_feedback:
+            _raise_declaration_identity(problem, reply, collisions, reserved)
         raise RevisionValidationError(
             "DECLARATION_IDENTITY",
             "new names cannot redeclare or shadow existing identities; same-name "
@@ -838,6 +1105,7 @@ def apply_structural_revision(
     brief: PublicScientificBrief | None = None,
     scientific_aliases: Mapping[str, str] | None = None,
     allow_trajectory_roots: bool = True,
+    normalize_parent_declarations: bool = False,
 ) -> dict[str, Any]:
     """Return an all-or-nothing typed revision; no fitting or data reads occur."""
     declaration_changes: list[dict[str, Any]] = []
@@ -847,9 +1115,14 @@ def apply_structural_revision(
             if isinstance(reply, StructuralRevisionReply)
             else deepcopy(reply)
         )
-        normalized, declaration_changes = normalize_structural_reply(
-            raw, time_symbol=problem.context.time_symbol
-        )
+        if normalize_parent_declarations:
+            normalized, declaration_changes = normalize_parent_structural_reply(
+                problem, raw
+            )
+        else:
+            normalized, declaration_changes = normalize_structural_reply(
+                raw, time_symbol=problem.context.time_symbol
+            )
         parsed = StructuralRevisionReply.model_validate(normalized)
         result = _apply(
             problem,
@@ -858,6 +1131,7 @@ def apply_structural_revision(
             brief=brief,
             scientific_aliases=scientific_aliases,
             allow_trajectory_roots=allow_trajectory_roots,
+            parent_declaration_feedback=normalize_parent_declarations,
         )
         normalization = result["audit"].setdefault("normalization", {"changes": []})
         normalization.update(
@@ -865,6 +1139,8 @@ def apply_structural_revision(
             declaration_changes=declaration_changes,
             normalized_reply=parsed.model_dump(mode="json"),
         )
+        if normalize_parent_declarations:
+            normalization["parent_declaration_policy"] = PARENT_DECLARATION_POLICY
         return result
     except RevisionValidationError as exc:
         if declaration_changes:

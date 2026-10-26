@@ -1,5 +1,11 @@
 # Construction search policies: design and ACES runbook
 
+**Historical v1 contract.** The completed results and prospective v2 corrections
+are documented in [search-policy requalification](PHASE_C_SEARCH_POLICY_REQUALIFICATION.md).
+V2 requires exactly three options and uses fresh `-v2` result roots. The remainder
+of this document records the original experiment and its frozen launcher.
+
+
 25 October 2026. `construction-search-policy-1` compares construction search
 policies using six frozen T2-easy models selected for defect coverage. It is not
 a fresh six-benchmark evaluation. This delivery implements the experiment and

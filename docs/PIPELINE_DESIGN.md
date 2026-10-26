@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+## Construction search requalification
+
+The completed v1 search compared 108 episodes with no provider failures, but
+32 of 36 option batches returned only one proposal. Prospective v2 requires exactly
+three initial alternatives, clarifies that replies contain complete intended
+changes rather than the whole model, and enables safe parent-declaration
+normalization plus weighted shared-initializer cancellation proofs. The saved
+289 patches are rechecked independently without generation, fitting, adoption or
+historical changes. Exact reproduction conflicts remain distinct from achievable
+NMSE. See [the correction and replay contract](PHASE_C_SEARCH_POLICY_REQUALIFICATION.md).
+
 ## LLM-SR detention diagnostic recovery
 
 The opt-in six-task recovery separates per-coordinate derivative qualification,

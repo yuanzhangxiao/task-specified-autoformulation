@@ -33,14 +33,22 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.staged_topology import content_hash
 from scripts import structural_revision_campaign as base
 
-PROTOCOL = "construction-search-policy-1"
+PROTOCOL = "construction-search-policy-2"
 POLICIES = ("sequential_restart", "independent", "options_shallow")
 SYSTEM = (
     base.SYSTEM
     + "\n"
     + """
-Search bookkeeping is separate from scientific declarations. Every returned patch
-is complete and relative to current_model, the unchanged parent. An intended trial
+Search bookkeeping is separate from scientific declarations. Return only changes
+to current_model, not a complete model: untouched definitions are kept automatically.
+For each changed equation give its complete new RHS; for a new state give its RHS
+and initializer. Reuse existing parameters without declaring them again. Declare
+initializer-local parameters only inside that initializer. The runtime derives
+dependencies and installs all consistent edits together; it does not invent laws.
+Example: to change x' = A+B into A+C, return only the x edit with RHS A+C, plus
+any genuinely new declarations needed for C. Do not re-declare unchanged A.
+Every patch must contain all changes still intended relative to the parent, even
+on retry. An intended trial
 shown in feedback was rejected, not installed. Retain every earlier correction
 you still intend; omitted edits revert to the parent. Never merge alternatives.
 Renaming private states or freely fitted parameters does not create a different
@@ -63,10 +71,9 @@ class RepairOption(StrictSchema):
 
 
 class OptionsReply(StrictSchema):
-    """Up to three alternatives share one completion's output allowance."""
+    """Exactly three alternatives share one completion's output allowance."""
 
-    options: tuple[RepairOption, ...] = Field(default=(), max_length=3)
-    fewer_options_reason: str = Field(default="", max_length=1500)
+    options: tuple[RepairOption, ...] = Field(min_length=3, max_length=3)
 
 
 class _OptionMetadata(StrictSchema):
@@ -139,13 +146,16 @@ def assess_candidate(
     try:
         if not isinstance(raw, dict):
             raise ValueError("one complete repair must be a JSON object")
-        normalized, _ = base._normalize_displayed_citations(parent, raw)
+        normalized, _ = base._normalize_displayed_citations(
+            parent, raw, weighted_symbolic_initials=True
+        )
         static = apply_structural_revision(
             PrefixFitProblem.model_validate(parent["problem"]),
             normalized,
             evidence_ids=["public_task", "training_consistency", "parameter_audit"],
             brief=PublicScientificBrief.model_validate(parent["public_brief"]),
             scientific_aliases=parent.get("scientific_aliases"),
+            normalize_parent_declarations=True,
         )
         result["audit"] = static["audit"]
         result["normalized_reply"] = (
@@ -159,7 +169,12 @@ def assess_candidate(
         result["family_identity"] = family_identity(parent["problem"], problem)
         # Keep acceptance exactly at the existing qualified, candidate-specific
         # gate boundary rather than maintaining a second acceptance algorithm.
-        applied = base._apply(parent, raw)
+        applied = base._apply(
+            parent,
+            raw,
+            normalize_parent_declarations=True,
+            weighted_symbolic_initials=True,
+        )
         result.update(status="eligible", audit=applied["audit"])
     except (ValueError, TypeError, KeyError) as exc:
         diagnostic = (
@@ -341,7 +356,14 @@ def request(
             repair["intended_trial_model"] = _model_display(
                 intended["problem"], intended.get("audit", {}).get("scientific_aliases")
             )
-    packet = json.loads(base.request(parent, repair))
+    packet = json.loads(base.request(parent, repair, weighted_symbolic_initials=True))
+    packet["editing_scope"]["patch_semantics"] = (
+        "List only changes to current_model; all untouched definitions are kept. "
+        "Each changed equation is a complete RHS replacement, not an added term. "
+        "Include all changes still intended from rejected trials, because none "
+        "was installed. Reuse existing parameter/process names without redeclaring "
+        "them. Initializer-local parameters belong only in initial.parameters."
+    )
     training = packet.get("training_consistency", {})
     if isinstance(training, dict) and "model_reference" in training:
         training["model_reference"] = (
@@ -356,11 +378,15 @@ def request(
         if fresh
         else "repair",
         "instruction": (
-            "Return up to three self-contained alternatives. Each option names the "
+            "Return exactly three self-contained repair options. This is mandatory; "
+            "a reason for returning fewer is not accepted. Each option names the "
             "affected target and the premise of its conflict that changes. A "
             "private-symbol rename or another freely fitted coefficient name is "
-            "not diversity. Fewer coherent options are allowed; explain why. "
-            "All options share this call's output allowance; keep each complete."
+            "not diversity. Change a scientific dependence, function family or "
+            "allowed initialization premise in each alternative. Each option is "
+            "a separate complete set of changes to the same parent, not a full "
+            "model or an incremental edit to another option. All three share "
+            "this call's output allowance; keep each concise and complete."
             if batch
             else "Start a fresh scientific alternative from current_model. Avoid the "
             "failed families in attempted_repairs; do not copy the last rejected "
@@ -378,16 +404,11 @@ def request(
 
 def _options(raw: Any) -> list[tuple[Any, dict]]:
     """Bound the envelope; assess malformed sibling options independently."""
-    if not isinstance(raw, dict) or set(raw) - {"options", "fewer_options_reason"}:
-        raise ValueError("option reply must contain options and fewer_options_reason")
+    if not isinstance(raw, dict) or set(raw) != {"options"}:
+        raise ValueError("option reply must contain only the options array")
     options = raw.get("options")
-    reason = raw.get("fewer_options_reason", "")
-    if not isinstance(options, list) or len(options) > 3:
-        raise ValueError("return at most three complete options")
-    if not isinstance(reason, str) or len(reason) > 1500:
-        raise ValueError("fewer_options_reason must be bounded text")
-    if len(options) < 3 and not reason.strip():
-        raise ValueError("explain why fewer than three coherent options are available")
+    if not isinstance(options, list) or len(options) != 3:
+        raise ValueError("return exactly three complete options; fewer is not allowed")
     result, identifiers = [], set()
     for option in options:
         try:
@@ -401,6 +422,10 @@ def _options(raw: Any) -> list[tuple[Any, dict]]:
             metadata = _OptionMetadata.model_validate(
                 {key: value for key, value in option.items() if key != "patch"}
             ).model_dump(mode="json")
+            if isinstance(option["patch"], dict) and option["patch"].get(
+                "decision"
+            ) in {"retain", "requires_wider_revision"}:
+                raise ValueError("each repair option must propose decision=revise")
             if metadata["option_id"] in identifiers:
                 raise ValueError("option_id must be unique within this reply")
             identifiers.add(metadata["option_id"])

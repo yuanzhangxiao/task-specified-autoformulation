@@ -483,7 +483,7 @@ def test_real_shell_dispatch_ignores_old_generic_root(
     )
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    expected = str(group / f"phase-c-search-policy-{size}-v1")
+    expected = str(group / f"phase-c-search-policy-{size}-v2")
     assert calls and all(call["root"] == expected for call in calls)
     if command == "run":
         prepare = next(c["argv"] for c in calls if "prepare" in c["argv"])

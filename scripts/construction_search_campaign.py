@@ -37,7 +37,7 @@ from scripts import construction_functions as receipts
 from scripts import structural_revision_campaign as base
 
 REPO = Path(__file__).resolve().parents[1]
-PROTOCOL = "construction-search-policy-1"
+PROTOCOL = engine.PROTOCOL
 SEEDS = (0, 1, 2)
 ENTRYPOINTS = tuple(
     dict.fromkeys(
@@ -116,9 +116,12 @@ def _plan(selected: dict, size: str) -> dict:
         "gate_policy": {
             **base.old.V4_POLICIES,
             "symbolic_initials": base.SYMBOLIC_INITIAL_POLICY,
+            "weighted_symbolic_initials": "weighted-shared-symbolic-initials-1",
+            "parent_declarations": "parent-relative-declaration-normalization-1",
         },
         "maximum_calls_per_episode": 3,
         "maximum_options_in_first_call": 3,
+        "required_options_in_first_call": 3,
         "option_output_budget": "three alternatives share one 8192-token completion",
         "smoke_policy": "first-parent-seed0-all-policies-included-in-full-1",
         "selection": "six frozen T2-easy defect cases; no NMSE-based selection",
@@ -606,11 +609,12 @@ def preview(root: Path) -> dict:
         "padding:1rem}mark{background:#fff0a8}summary{cursor:pointer;font-weight:bold}"
         "section{margin:2rem 0}</style>",
         "<h1>Construction search: 20B and 120B</h1><p><mark>New:</mark> compact "
-        "attempt history, complete intended patches, conservative renaming identity, "
-        "and three search policies. Both models receive the same scientific prompts. "
+        "exactly three initial options (mandatory), parent-relative changes only, "
+        "safe redundant-declaration normalization, and weighted symbolic initial "
+        "checks. Both models receive the same scientific prompts. "
         "No fitting or test-data access.</p>",
         "<p>Sequential repair restarts after an unchanged failure repeats; independent "
-        "proposals receive no previous failures; the option policy asks for up to "
+        "proposals receive no previous failures; the option policy requires exactly "
         "three complete alternatives sharing one output budget, then repairs two "
         "distinct failed families at most once each.</p>",
         "<p>Each arm has 6 parents &times; 3 seeds &times; 3 policies = 54 episodes, "

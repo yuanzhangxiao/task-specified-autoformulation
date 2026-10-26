@@ -9,6 +9,7 @@ import pytest
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.research.construction_affine_family_consistency import (
     SYMBOLIC_INITIAL_POLICY,
+    WEIGHTED_SYMBOLIC_POLICY,
     _display,
     _null_vectors,
     _rref,
@@ -466,3 +467,126 @@ def test_symbolic_readout_enforces_shared_coordinate_limit(coordinates):
         check = conflicts(report, "affine_initial_superposition")[0]
         value = check["witnesses"][0]["initial_state_values"]["m"]
         assert len(value["shared_coefficients_exact"]) == coordinates
+
+
+def mapped_family_problem(*, dependent=False, nonlinear=False, free_root=False):
+    """Two shared maps differ across rows but obey the same weighted identity."""
+    payload = problem(extra_root=True, map_root=True).model_dump(mode="json")
+    for state in ("m", "n"):
+        payload["graph"]["rules"][state] = {
+            "initial": {
+                "mode": "map",
+                "expression": "a*x0+b*q0",
+                "parameters": [
+                    {"name": name, "role": "coefficient", "guess": 1}
+                    for name in ("a", "b")
+                ],
+                "state_initials": {"x0": "x"},
+                "public_initials": {"q0": "q"},
+            }
+        }
+    if dependent:
+        payload["graph"]["rules"]["n"]["initial"] = {
+            "mode": "map",
+            "expression": "a*m0+x0" if nonlinear else "2*m0+a*x0",
+            "parameters": [{"name": "a", "role": "coefficient", "guess": 1}],
+            "state_initials": {"m0": "m", "x0": "x"},
+        }
+    if free_root:
+        payload["graph"]["rules"]["n"]["initial"] = {
+            "mode": "value", "scope": "trajectory", "guess": 1,
+        }
+    return PrefixFitProblem.model_validate(payload)
+
+
+def mapped_family_evidence(source, *, equal_covariate=True, consistent=False, **kwargs):
+    values = [[2, 3, 4], [1, 1, 2], [3, 4, 5]]
+    if consistent:
+        values = [[2, 3, 4], [1, 2, 3], [3, 4, 5]]
+    data = evidence(source, values, **kwargs)
+    if equal_covariate:
+        for row in data["trajectories"]:
+            row["covariates"]["q"] = 7.0
+    reseal(data)
+    return data
+
+
+@pytest.mark.parametrize("dependent", [False, True])
+def test_weighted_shared_maps_cancel_for_all_unknown_parameters(dependent):
+    source = mapped_family_problem(dependent=dependent)
+    data = mapped_family_evidence(source)
+    before = source.model_dump(mode="json"), deepcopy(data)
+    assert not assess(source, data, symbolic_initials=True)["conflicts"]
+    report = assess(source, data, weighted_symbolic_initials=True)
+    assert report["weighted_symbolic_initial_policy"] == WEIGHTED_SYMBOLIC_POLICY
+    assert (
+        prompt_view(report)["weighted_symbolic_initial_policy"]
+        == WEIGHTED_SYMBOLIC_POLICY
+    )
+    witness = conflicts(report, "affine_initial_superposition")[0]["witnesses"][0]
+    weights = list(map(Fraction, witness["weights_exact"]))
+    assert sum(weights) == 0
+    assert sum(w * Fraction(x) for w, x in zip(weights, [2, 1, 3], strict=True)) == 0
+    for state in ("m", "n"):
+        value = witness["initial_state_values"][state]
+        assert value["policy"] == WEIGHTED_SYMBOLIC_POLICY
+        columns = [
+            value["constant_exact"], *value["shared_coefficients_exact"].values()
+        ]
+        for column in columns:
+            products = (w * Fraction(x) for w, x in zip(weights, column, strict=True))
+            assert sum(products) == 0
+    coefficients = witness["initial_state_values"]["m"]["shared_coefficients_exact"]
+    assert "init_m_a" in coefficients
+    assert (
+        abs(witness["weighted_observation_defect"]) > witness["target_numerical_guard"]
+    )
+    assert not report["parameter_fitting_performed"]
+    assert not report["numerical_rollout_performed"]
+    assert before == (source.model_dump(mode="json"), data)
+    assert report == assess(source, data, weighted_symbolic_initials=True)
+
+
+@pytest.mark.parametrize(
+    "source_options,evidence_options",
+    [
+        ({"free_root": True}, {}),
+        ({"dependent": True, "nonlinear": True}, {}),
+        ({}, {"equal_covariate": False}),
+        ({}, {"consistent": True}),
+        ({}, {"error": 1e-8}),
+        ({}, {"forcing_error": 1e-8}),
+        ({}, {"u": [[1, 1, 1], [1, 2, 1], [1, 3, 1]]}),
+        ({}, {"mode": "unknown"}),
+        ({}, {"shared_parameters": False}),
+        ({}, {"reset_impulse_free": False}),
+        ({}, {"uniqueness_assumed": False}),
+    ],
+)
+def test_weighted_shared_map_proof_preserves_negative_controls(
+    source_options, evidence_options
+):
+    source = mapped_family_problem(**source_options)
+    data = mapped_family_evidence(source, **evidence_options)
+    report = assess(source, data, weighted_symbolic_initials=True)
+    assert report["status"] == "deferred"
+    assert not report["conflicts"]
+    assert not report["scientific_correctness_established"]
+
+
+def test_weighted_map_uncertain_conditioning_is_not_silently_exact():
+    source = mapped_family_problem()
+    data = mapped_family_evidence(source)
+    data["contract"]["absolute_error_bounds"]["q"] = 1e-12
+    reseal(data)
+    assert not assess(source, data, weighted_symbolic_initials=True)["conflicts"]
+
+
+def test_weighted_map_operation_limit_defers(monkeypatch):
+    from autoformalism.research import construction_affine_family_consistency as module
+
+    budget_type = module._InitialBudget
+    monkeypatch.setattr(module, "_InitialBudget", lambda: budget_type(remaining=1))
+    source = mapped_family_problem()
+    data = mapped_family_evidence(source)
+    assert not assess(source, data, weighted_symbolic_initials=True)["conflicts"]
