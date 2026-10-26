@@ -1,5 +1,8 @@
 # Construction search: declaration and initializer requalification
 
+The subsequent v2 smoke and the prospective v3 five-option pilot are documented
+in [the breadth pilot and combined initialization checks](PHASE_C_BREADTH_PILOT.md).
+
 26 October 2026. This is an offline correction and saved-reply audit following
 the completed `construction-search-policy-1` experiment. No new generation,
 fitting, rollout, held-out access, model adoption or fitting export is authorized

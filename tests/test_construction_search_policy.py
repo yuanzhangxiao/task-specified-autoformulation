@@ -109,10 +109,16 @@ class Client:
         }
 
 
-def run(parent, payloads, policy, *, seed=0):
+def run(parent, payloads, policy, *, seed=0, options_count=3, maximum_calls=3):
     client = Client(payloads)
     result = engine.run_episode(
-        parent, client, StagedModelSettings(maximum_requests=3), policy, seed=seed
+        parent,
+        client,
+        StagedModelSettings(maximum_requests=maximum_calls),
+        policy,
+        seed=seed,
+        options_count=options_count,
+        maximum_calls=maximum_calls,
     )
     return result, client
 
@@ -193,6 +199,175 @@ def test_options_repair_two_distinct_families_once_each(parent):
         parent, [batch, patch(), patch()], "options_shallow", seed=3
     )
     assert again == result and again_client.calls == client.calls
+
+
+def test_five_options_repair_four_distinct_branches_once_each(parent):
+    batch = {
+        "options": [
+            option(index, patch("a*mem+" + "*".join(["X"] * (index + 1)), name="X"))
+            for index in range(5)
+        ]
+    }
+    payloads = [batch, patch(), patch(), patch(), patch()]
+    result, client = run(
+        parent, payloads, "options_shallow", seed=3, options_count=5, maximum_calls=5
+    )
+    assert result["generation_calls"] == result["maximum_calls"] == 5
+    assert result["options_count"] == 5 and result["candidate_count"] == 9
+    assert len(result["eligible_candidate_ids"]) == 4
+    branches = [row["branch_id"] for row in result["attempts"][1:]]
+    assert len(set(branches)) == 4
+    assert all(branch.startswith("call0-option") for branch in branches)
+    assert (
+        client.calls[0]["schema"] == engine.options_reply_model(5).model_json_schema()
+    )
+    assert all(
+        call["schema"] == engine.StructuralRevisionReply.model_json_schema()
+        for call in client.calls[1:]
+    )
+    assert [row["attempt"] for row in client.calls] == list(range(5))
+    assert all(
+        json.loads(row["user"])["search_instruction"]["maximum_episode_calls"] == 5
+        for row in client.calls
+    )
+    again, replay = run(
+        parent, payloads, "options_shallow", seed=3, options_count=5, maximum_calls=5
+    )
+    assert again == result and replay.calls == client.calls
+
+
+def test_five_options_with_three_calls_repairs_at_most_two_branches(parent):
+    batch = {
+        "options": [
+            option(index, patch("a*mem+" + "*".join(["X"] * (index + 1)), name="X"))
+            for index in range(5)
+        ]
+    }
+    result, _ = run(
+        parent, [batch, patch(), patch()], "options_shallow", options_count=5
+    )
+    assert result["generation_calls"] == 3 and result["candidate_count"] == 7
+    assert result["maximum_calls"] == 3
+
+
+def test_five_options_do_not_repair_private_renames_as_distinct_families(parent):
+    batch = {
+        "options": [
+            option(i, patch(f"a*mem+{name}", name=name))
+            for i, name in enumerate(["X", "Y", "Z", "W", "V"])
+        ]
+    }
+    result, _ = run(
+        parent, [batch, patch()], "options_shallow", options_count=5, maximum_calls=5
+    )
+    assert result["generation_calls"] == 2 and result["candidate_count"] == 6
+
+
+@pytest.mark.parametrize("count", [0, 1, 3, 4, 6])
+def test_five_option_count_is_mandatory_without_free_retry(parent, count):
+    batch = {"options": [option(i, patch()) for i in range(count)]}
+    result, client = run(
+        parent, [batch], "options_shallow", options_count=5, maximum_calls=5
+    )
+    assert result["generation_calls"] == len(client.calls) == 1
+    assert result["eligible_candidate_ids"] == []
+    error = result["attempts"][0]["parse_error"]
+    assert (
+        error["code"] == "OPTION_OR_RESPONSE_FORMAT"
+        and "exactly five" in error["message"]
+    )
+    with pytest.raises(ValueError):
+        engine.options_reply_model(5).model_validate(batch)
+
+
+def test_five_options_isolates_malformed_siblings(parent):
+    batch = {
+        "options": [{"bad_field": "bad"}, *[option(i, patch()) for i in range(1, 5)]]
+    }
+    result, _ = run(
+        parent, [batch], "options_shallow", options_count=5, maximum_calls=5
+    )
+    assert result["generation_calls"] == 1
+    assert result["eligible_candidate_ids"] == [f"call0-option{i}" for i in range(1, 5)]
+    assert result["candidates"][0]["diagnostic"]["code"] == "OPTION_OR_RESPONSE_FORMAT"
+
+
+def test_five_option_prompt_and_schema_match_the_declared_budget(parent):
+    packet = json.loads(
+        engine.request(
+            parent, "options_shallow", batch=True, options_count=5, maximum_calls=5
+        )
+    )
+    assert "exactly five" in packet["search_instruction"]["instruction"]
+    assert "All five share" in packet["search_instruction"]["instruction"]
+    assert packet["search_instruction"]["maximum_episode_calls"] == 5
+    schema = engine.options_reply_model(5).model_json_schema()["properties"]["options"]
+    assert schema["minItems"] == schema["maxItems"] == 5
+    assert engine.options_reply_model(3) is engine.OptionsReply
+
+
+@pytest.mark.parametrize("field", ["options_count", "maximum_calls"])
+@pytest.mark.parametrize("value", [1, 4, 6, True, 3.0, "5", None])
+def test_search_width_and_call_budget_are_bounded_before_generation(
+    parent, field, value
+):
+    limits = {"options_count": 3, "maximum_calls": 3, field: value}
+    client = Client([])
+    with pytest.raises(ValueError, match=field):
+        engine.run_episode(
+            parent,
+            client,
+            StagedModelSettings(maximum_requests=3),
+            "options_shallow",
+            **limits,
+        )
+    assert client.calls == []
+    with pytest.raises(ValueError, match=field):
+        engine.request(parent, "options_shallow", batch=True, **limits)
+
+
+def test_five_call_limit_must_match_durable_client_budget(parent):
+    client = Client([])
+    with pytest.raises(ValueError, match="five-call"):
+        engine.run_episode(
+            parent,
+            client,
+            StagedModelSettings(maximum_requests=3),
+            "options_shallow",
+            options_count=5,
+            maximum_calls=5,
+        )
+    assert client.calls == []
+
+
+def test_five_call_resume_replays_the_exact_saved_prefix(parent):
+    batch = {
+        "options": [
+            option(index, patch("a*mem+" + "*".join(["X"] * (index + 1)), name="X"))
+            for index in range(5)
+        ]
+    }
+    prefix = Client([batch, patch()])
+    with pytest.raises(DeferredCall):
+        engine.run_episode(
+            parent,
+            prefix,
+            StagedModelSettings(maximum_requests=5),
+            "options_shallow",
+            options_count=5,
+            maximum_calls=5,
+            seed=2,
+        )
+    result, full = run(
+        parent,
+        [batch, patch(), patch(), patch(), patch()],
+        "options_shallow",
+        options_count=5,
+        maximum_calls=5,
+        seed=2,
+    )
+    assert prefix.calls == full.calls[: len(prefix.calls)]
+    assert result["generation_calls"] == 5
 
 
 def test_options_do_not_spend_two_repairs_on_renamed_same_family(parent):

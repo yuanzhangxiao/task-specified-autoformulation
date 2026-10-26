@@ -60,6 +60,7 @@ from autoformalism.staged_topology import content_hash
 PROTOCOL = "construction-affine-family-consistency-1"
 SYMBOLIC_INITIAL_POLICY = "shared-symbolic-initial-readout-1"
 WEIGHTED_SYMBOLIC_POLICY = "weighted-shared-symbolic-initials-1"
+COMBINED_SYMBOLIC_POLICY = "combined-symbolic-map-readout-initials-1"
 MAX_TRIPLES = 256
 MAX_TIMES = 64
 MAX_STATES = 32
@@ -353,6 +354,7 @@ def _weighted_initial_constraints(
     state: str,
     rows: Sequence[CompleteTrajectory],
     map_initials: dict[str, dict[str, _InitialAffine]],
+    *, policy: str = WEIGHTED_SYMBOLIC_POLICY,
 ) -> tuple[list[list[Fraction]], dict[str, Any]] | None:
     """Return exact rows whose nullspace cancels one shared symbolic initial."""
     values = [map_initials.get(row.trajectory_id, {}).get(state) for row in rows]
@@ -366,8 +368,12 @@ def _weighted_initial_constraints(
         for name in names
     ]
     return constraints, {
-        "source": "actual initializer maps with shared symbolic parameters",
-        "policy": WEIGHTED_SYMBOLIC_POLICY,
+        "source": (
+            "actual initializer maps combined with exact observed initial readouts"
+            if policy == COMBINED_SYMBOLIC_POLICY
+            else "actual initializer maps with shared symbolic parameters"
+        ),
+        "policy": policy,
         "constant_exact": [str(value.constant) for value in values],
         "shared_coefficients_exact": {
             name: [str(value.coefficients.get(name, Fraction(0))) for value in values]
@@ -376,6 +382,147 @@ def _weighted_initial_constraints(
         "required_cancellation": "weights cancel the constant and every shared "
         "parameter coefficient separately; no parameter values are fitted",
     }
+
+
+class _RootInitialView(_InitialView):
+    """Keep trajectory roots distinct until exact readouts constrain them.
+
+    Root names are algebraic unknowns within one trajectory, never shared
+    coordinates. The caller discards every final initial expression still
+    containing one. Initializer chains are already lowered by the compiler.
+    """
+
+    def initial_symbol(self, name: str) -> _InitialAffine:
+        if name in self.roots:
+            return _InitialAffine(coefficients={name: Fraction(1)})
+        return super().initial_symbol(name)
+
+
+def _root_reduction(
+    matrix: list[list[Fraction]], width: int, budget: _InitialBudget
+) -> tuple[list[list[Fraction]], list[int]]:
+    """Eliminate only rational root coefficients, leaving shared symbols free."""
+    matrix = [list(row) for row in matrix]
+    pivots = []
+    for column in range(width):
+        pivot = next(
+            (i for i in range(len(pivots), len(matrix)) if matrix[i][column]), None
+        )
+        if pivot is None:
+            continue
+        index = len(pivots)
+        matrix[index], matrix[pivot] = matrix[pivot], matrix[index]
+        divisor = matrix[index][column]
+        matrix[index] = [budget.check(v / divisor) for v in matrix[index]]
+        for i, row in enumerate(matrix):
+            if i != index and row[column]:
+                multiplier = row[column]
+                matrix[i] = [
+                    budget.check(a - multiplier * b)
+                    for a, b in zip(row, matrix[index], strict=True)
+                ]
+        pivots.append(column)
+    return matrix, pivots
+
+
+def _combined_initial_row(
+    model: CompiledModel, row: CompleteTrajectory,
+    training: TrainingCompatibilityEvidence, roots: set[str],
+) -> dict[str, _InitialAffine]:
+    """Substitute exact initial readouts into affine lowered initializer maps.
+
+    All shared parameters remain symbolic. Rational elimination may express one
+    trajectory root in other roots; only final state initials free of every root
+    qualify for cross-trajectory cancellation. Unknown-parameter pivots and
+    products of unknown coordinates are outside this bounded proof.
+    """
+    budget = _InitialBudget()
+    view = _RootInitialView(model, roots, training, row, budget)
+    values, constraints = {}, []
+    if len(model.validated.observation_expressions) > INITIAL_READOUT_LIMITS[
+        "coordinates"
+    ]:
+        raise _InitialUnsupported("initial readout count exceeds coordinate limit")
+    for state in sorted(model.state_names):
+        try:
+            values[state] = view.symbol(state)
+        except _InitialUnsupported:
+            view.visiting.clear()
+            if budget.remaining < 0:
+                raise
+    for channel, parsed in sorted(model.validated.observation_expressions.items()):
+        if (
+            channel not in row.targets
+            or training.contract.absolute_error_bounds.get(channel) != 0
+        ):
+            continue
+        try:
+            expression = _initial_expression(parsed.tree, view.symbol, budget)
+            constraints.append(
+                expression.add(
+                    _InitialAffine(-Fraction(row.targets[channel][0])), budget
+                )
+            )
+        except _InitialUnsupported:
+            view.visiting.clear()
+            if budget.remaining < 0:
+                raise
+    names = set().union(
+        *(v.coefficients for v in [*values.values(), *constraints])
+    )
+    if len(names) > INITIAL_READOUT_LIMITS["coordinates"]:
+        raise _InitialUnsupported("combined initial coordinates exceed limit")
+    root_names, shared_names = sorted(names & roots), sorted(names - roots)
+    if not set(shared_names) <= set(model.parameter_names) - roots:
+        raise _InitialUnsupported("unclassified combined initial coordinate")
+    matrix = [
+        [value.coefficients.get(name, Fraction(0)) for name in root_names]
+        + [-value.constant]
+        + [-value.coefficients.get(name, Fraction(0)) for name in shared_names]
+        for value in constraints
+    ]
+    reduced, pivots = _root_reduction(matrix, len(root_names), budget)
+    substitutions = {}
+    for index, pivot in enumerate(pivots):
+        line = reduced[index]
+        coefficients = {
+            name: -line[i]
+            for i, name in enumerate(root_names)
+            if i != pivot and line[i]
+        }
+        coefficients.update(
+            (name, line[len(root_names) + 1 + i])
+            for i, name in enumerate(shared_names)
+            if line[len(root_names) + 1 + i]
+        )
+        substitutions[root_names[pivot]] = _InitialAffine(
+            line[len(root_names)], coefficients
+        )
+    qualified = {}
+    for state, initial in values.items():
+        value = _InitialAffine(initial.constant)
+        for name, coefficient in sorted(initial.coefficients.items()):
+            term = substitutions.get(name, _InitialAffine(coefficients={name: 1}))
+            value = value.add(term.scale(coefficient, budget), budget)
+        if not roots.intersection(value.coefficients):
+            qualified[state] = value
+    return qualified
+
+
+def _combined_initials(
+    model: CompiledModel, rows: Sequence[CompleteTrajectory],
+    training: TrainingCompatibilityEvidence, roots: set[str],
+) -> dict[str, dict[str, _InitialAffine]]:
+    """Return only completed row certificates; proof exhaustion never guesses."""
+    result = {}
+    for row in rows:
+        try:
+            result[row.trajectory_id] = _combined_initial_row(
+                model, row, training, roots
+            )
+        except _InitialUnsupported:
+            result[row.trajectory_id] = {}
+    return result
 
 
 def _closed_states(
@@ -443,7 +590,7 @@ def _guard(values) -> Fraction:
 
 def _superposition(
     rows, target, states, initials, problem, observed, training, readout_initials,
-    *, map_initials=None,
+    *, map_initials=None, map_initial_policy=WEIGHTED_SYMBOLIC_POLICY,
 ):
     constraints = [[Fraction(1)] * 3]
     known = {}
@@ -457,7 +604,9 @@ def _superposition(
         if common is not None:
             known[state] = common
             continue
-        weighted = _weighted_initial_constraints(state, rows, map_initials or {})
+        weighted = _weighted_initial_constraints(
+            state, rows, map_initials or {}, policy=map_initial_policy
+        )
         if weighted is not None:
             coefficient_rows, known[state] = weighted
             constraints.extend(coefficient_rows)
@@ -575,7 +724,8 @@ def _rank_one(
 
 def _checks(
     problem, model, training, *, symbolic_initials=False,
-    weighted_symbolic_initials=False, roots=frozenset(),
+    weighted_symbolic_initials=False, combined_symbolic_initials=False,
+    roots=frozenset(),
 ):
     rows_to_check = training.trajectories[:MAX_TRAJECTORIES]
     if any(len(row.time) > MAX_SAMPLES for row in rows_to_check):
@@ -640,9 +790,18 @@ def _checks(
     )
     map_initials = (
         _shared_map_initials(model, rows_to_check, training, roots)
-        if weighted_symbolic_initials
+        if weighted_symbolic_initials or combined_symbolic_initials
         else {}
     )
+    if combined_symbolic_initials:
+        combined = _combined_initials(model, rows_to_check, training, roots)
+        # An unsupported readout cannot erase an already established map proof.
+        map_initials = {
+            row.trajectory_id: {
+                **map_initials[row.trajectory_id], **combined[row.trajectory_id]
+            }
+            for row in rows_to_check
+        }
     result = []
     for target in problem.context.targets:
         for kind, test in (
@@ -702,7 +861,14 @@ def _checks(
                         training,
                         readout_initials,
                         **(
-                            {"map_initials": map_initials}
+                            {
+                                "map_initials": map_initials,
+                                "map_initial_policy": (
+                                    COMBINED_SYMBOLIC_POLICY
+                                    if combined_symbolic_initials
+                                    else WEIGHTED_SYMBOLIC_POLICY
+                                ),
+                            }
                             if test == _superposition
                             else {}
                         ),
@@ -758,6 +924,7 @@ def _checks(
 def assess(
     problem: PrefixFitProblem, evidence: dict, *, symbolic_initials: bool = False,
     weighted_symbolic_initials: bool = False,
+    combined_symbolic_initials: bool = False,
 ) -> dict[str, Any]:
     """Audit affine conflicts with separately opt-in symbolic initial proofs."""
     if not isinstance(problem, PrefixFitProblem):
@@ -799,6 +966,7 @@ def assess(
             else _checks(
                 problem, model, training, symbolic_initials=symbolic_initials,
                 weighted_symbolic_initials=weighted_symbolic_initials,
+                combined_symbolic_initials=combined_symbolic_initials,
                 roots=set(initialization["trajectory_parameter_names"]),
             )
         )
@@ -822,6 +990,11 @@ def assess(
         **(
             {"weighted_symbolic_initial_policy": WEIGHTED_SYMBOLIC_POLICY}
             if weighted_symbolic_initials
+            else {}
+        ),
+        **(
+            {"combined_symbolic_initial_policy": COMBINED_SYMBOLIC_POLICY}
+            if combined_symbolic_initials
             else {}
         ),
         "status": "conflict" if conflicts else "deferred",
@@ -860,6 +1033,11 @@ def assess(
                 if weighted_symbolic_initials
                 else {}
             ),
+            **(
+                {"combined_symbolic_initials": dict(INITIAL_READOUT_LIMITS)}
+                if combined_symbolic_initials
+                else {}
+            ),
         },
         "target_comparison_policy": dict(TARGET_COMPARISON_POLICY),
         "scientific_correctness_established": False,
@@ -896,6 +1074,15 @@ def prompt_view(report: dict[str, Any]) -> dict[str, Any]:
                 ]
             }
             if "weighted_symbolic_initial_policy" in report
+            else {}
+        ),
+        **(
+            {
+                "combined_symbolic_initial_policy": report[
+                    "combined_symbolic_initial_policy"
+                ]
+            }
+            if "combined_symbolic_initial_policy" in report
             else {}
         ),
         "status_counts": dict(Counter(item["status"] for item in report["checks"])),

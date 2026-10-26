@@ -2,7 +2,7 @@
 
 Each trial is one complete patch against the immutable parent. Alternatives are
 never merged and no fitting, rollout, held-out access or model promotion occurs.
-A caller supplies one durable budgeted client for the whole three-call episode.
+A caller supplies one durable budgeted client for the whole bounded episode.
 """
 
 from __future__ import annotations
@@ -33,8 +33,10 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.staged_topology import content_hash
 from scripts import structural_revision_campaign as base
 
-PROTOCOL = "construction-search-policy-2"
+PROTOCOL = "construction-search-policy-3"
 POLICIES = ("sequential_restart", "independent", "options_shallow")
+OPTION_COUNTS = (3, 5)
+CALL_LIMITS = (3, 5)
 SYSTEM = (
     base.SYSTEM
     + "\n"
@@ -74,6 +76,26 @@ class OptionsReply(StrictSchema):
     """Exactly three alternatives share one completion's output allowance."""
 
     options: tuple[RepairOption, ...] = Field(min_length=3, max_length=3)
+
+
+class FiveOptionsReply(StrictSchema):
+    """Exactly five alternatives share one completion's output allowance."""
+
+    options: tuple[RepairOption, ...] = Field(min_length=5, max_length=5)
+
+
+def options_reply_model(options_count: int = 3) -> type[StrictSchema]:
+    """Return an exact-count schema from the two supported, bounded widths."""
+    if type(options_count) is not int or options_count not in OPTION_COUNTS:
+        raise ValueError("options_count must be 3 or 5")
+    return OptionsReply if options_count == 3 else FiveOptionsReply
+
+
+def _validate_limits(options_count: int, maximum_calls: int) -> None:
+    """Keep caller budgets explicit; never infer a larger limit from a reply."""
+    options_reply_model(options_count)
+    if type(maximum_calls) is not int or maximum_calls not in CALL_LIMITS:
+        raise ValueError("maximum_calls must be 3 or 5")
 
 
 class _OptionMetadata(StrictSchema):
@@ -147,7 +169,10 @@ def assess_candidate(
         if not isinstance(raw, dict):
             raise ValueError("one complete repair must be a JSON object")
         normalized, _ = base._normalize_displayed_citations(
-            parent, raw, weighted_symbolic_initials=True
+            parent,
+            raw,
+            weighted_symbolic_initials=True,
+            combined_symbolic_initials=True,
         )
         static = apply_structural_revision(
             PrefixFitProblem.model_validate(parent["problem"]),
@@ -174,6 +199,7 @@ def assess_candidate(
             raw,
             normalize_parent_declarations=True,
             weighted_symbolic_initials=True,
+            combined_symbolic_initials=True,
         )
         result.update(status="eligible", audit=applied["audit"])
     except (ValueError, TypeError, KeyError) as exc:
@@ -311,10 +337,14 @@ def request(
     intended: dict | None = None,
     fresh: bool = False,
     batch: bool = False,
+    options_count: int = 3,
+    maximum_calls: int = 3,
 ) -> str:
     """Build one exact request; history never silently becomes an adopted model."""
     if policy not in POLICIES:
         raise ValueError("unknown construction search policy")
+    _validate_limits(options_count, maximum_calls)
+    option_word = "three" if options_count == 3 else "five"
     history = history or []
     repair = None
     if intended is not None and not fresh:
@@ -356,7 +386,14 @@ def request(
             repair["intended_trial_model"] = _model_display(
                 intended["problem"], intended.get("audit", {}).get("scientific_aliases")
             )
-    packet = json.loads(base.request(parent, repair, weighted_symbolic_initials=True))
+    packet = json.loads(
+        base.request(
+            parent,
+            repair,
+            weighted_symbolic_initials=True,
+            combined_symbolic_initials=True,
+        )
+    )
     packet["editing_scope"]["patch_semantics"] = (
         "List only changes to current_model; all untouched definitions are kept. "
         "Each changed equation is a complete RHS replacement, not an added term. "
@@ -378,14 +415,15 @@ def request(
         if fresh
         else "repair",
         "instruction": (
-            "Return exactly three self-contained repair options. This is mandatory; "
+            f"Return exactly {option_word} self-contained repair options. "
+            "This is mandatory; "
             "a reason for returning fewer is not accepted. Each option names the "
             "affected target and the premise of its conflict that changes. A "
             "private-symbol rename or another freely fitted coefficient name is "
             "not diversity. Change a scientific dependence, function family or "
             "allowed initialization premise in each alternative. Each option is "
             "a separate complete set of changes to the same parent, not a full "
-            "model or an incremental edit to another option. All three share "
+            f"model or an incremental edit to another option. All {option_word} share "
             "this call's output allowance; keep each concise and complete."
             if batch
             else "Start a fresh scientific alternative from current_model. Avoid the "
@@ -394,7 +432,7 @@ def request(
             if fresh and history
             else "Return one complete scientific patch against current_model."
         ),
-        "maximum_episode_calls": 3,
+        "maximum_episode_calls": maximum_calls,
         "no_fitting_or_promotion": True,
     }
     if history:
@@ -402,13 +440,17 @@ def request(
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
 
 
-def _options(raw: Any) -> list[tuple[Any, dict]]:
+def _options(raw: Any, options_count: int = 3) -> list[tuple[Any, dict]]:
     """Bound the envelope; assess malformed sibling options independently."""
+    options_reply_model(options_count)
     if not isinstance(raw, dict) or set(raw) != {"options"}:
         raise ValueError("option reply must contain only the options array")
     options = raw.get("options")
-    if not isinstance(options, list) or len(options) != 3:
-        raise ValueError("return exactly three complete options; fewer is not allowed")
+    if not isinstance(options, list) or len(options) != options_count:
+        option_word = "three" if options_count == 3 else "five"
+        raise ValueError(
+            f"return exactly {option_word} complete options; fewer is not allowed"
+        )
     result, identifiers = [], set()
     for option in options:
         try:
@@ -435,8 +477,10 @@ def _options(raw: Any) -> list[tuple[Any, dict]]:
     return result
 
 
-def _failed_branches(candidates: list[dict], seed: int) -> list[dict]:
-    """Choose two distinct failed families by frozen seeded order, never by fit."""
+def _failed_branches(
+    candidates: list[dict], seed: int, maximum_repairs: int = 2
+) -> list[dict]:
+    """Choose distinct failed families in frozen order within the repair budget."""
     chosen, used = [], set()
     for candidate in sorted(
         candidates, key=lambda row: content_hash([seed, row["id"]])
@@ -449,20 +493,33 @@ def _failed_branches(candidates: list[dict], seed: int) -> list[dict]:
         if key not in used:
             chosen.append(candidate)
             used.add(key)
-        if len(chosen) == 2:
+        if len(chosen) == maximum_repairs:
             break
     return chosen
 
 
-def run_episode(parent, client, settings, policy: str, *, seed: int = 0) -> dict:
-    """Run at most three cached calls with policy-specific, deterministic routing."""
+def run_episode(
+    parent,
+    client,
+    settings,
+    policy: str,
+    *,
+    seed: int = 0,
+    options_count: int = 3,
+    maximum_calls: int = 3,
+) -> dict:
+    """Run bounded cached calls with policy-specific, deterministic routing."""
     if policy not in POLICIES:
         raise ValueError("unknown construction search policy")
-    if settings.maximum_requests != 3:
-        raise ValueError("the search experiment requires a three-call episode ceiling")
+    _validate_limits(options_count, maximum_calls)
+    if settings.maximum_requests != maximum_calls:
+        call_word = "three" if maximum_calls == 3 else "five"
+        raise ValueError(
+            f"the selected search settings require a {call_word}-call episode ceiling"
+        )
     candidates, attempts, selected_branches = [], [], []
     intended, fresh = None, False
-    for call_index in range(3):
+    for call_index in range(maximum_calls):
         batch = policy == "options_shallow" and call_index == 0
         if policy == "options_shallow" and call_index:
             if call_index > len(selected_branches):
@@ -478,8 +535,12 @@ def run_episode(parent, client, settings, policy: str, *, seed: int = 0) -> dict
                 intended=intended,
                 fresh=fresh or policy == "independent",
                 batch=batch,
+                options_count=options_count,
+                maximum_calls=maximum_calls,
             ),
-            response_model=OptionsReply if batch else StructuralRevisionReply,
+            response_model=options_reply_model(options_count)
+            if batch
+            else StructuralRevisionReply,
             step="search_policy",
             attempt=call_index,
         )
@@ -490,7 +551,7 @@ def run_episode(parent, client, settings, policy: str, *, seed: int = 0) -> dict
             parse_error = _diagnostic(exc)
         if parse_error is None:
             try:
-                options = _options(raw) if batch else [(raw, {})]
+                options = _options(raw, options_count) if batch else [(raw, {})]
             except ValueError as exc:
                 parse_error = {"code": "OPTION_OR_RESPONSE_FORMAT", "message": str(exc)}
         if parse_error is not None:
@@ -545,7 +606,9 @@ def run_episode(parent, client, settings, policy: str, *, seed: int = 0) -> dict
         )
         if batch:
             selected_branches = _failed_branches(
-                [row for row in new_candidates if row["option_wrapper_valid"]], seed
+                [row for row in new_candidates if row["option_wrapper_valid"]],
+                seed,
+                min(options_count - 1, maximum_calls - 1),
             )
         elif policy == "sequential_restart":
             latest = new_candidates[0]
@@ -555,12 +618,14 @@ def run_episode(parent, client, settings, policy: str, *, seed: int = 0) -> dict
             fresh = latest["repeated_unchanged_failure"]
             if fresh:
                 intended = None
-        # Independent breadth deliberately collects all three proposals even if
+        # Independent breadth deliberately uses its declared call budget even if
         # an earlier one is eligible, to measure useful diversity under its cap.
     eligible = [row["id"] for row in candidates if row["status"] == "eligible"]
     return {
         "protocol": PROTOCOL,
         "policy": policy,
+        "options_count": options_count,
+        "maximum_calls": maximum_calls,
         "status": "eligible_found" if eligible else "no_eligible_candidate",
         "candidates": candidates,
         "attempts": attempts,

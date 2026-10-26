@@ -290,6 +290,11 @@ def test_identical_qualified_checks_are_memoized_without_shared_mutable_results(
         == "conflict"
     )
     assert calls == 2
+    combined = cli._assessment(parent, problem, combined_symbolic_initials=True)
+    assert calls == 3
+    assert "combined_symbolic_initial_policy" in combined["affine_family_consistency"]
+    assert cli._assessment(parent, problem, combined_symbolic_initials=True) == combined
+    assert calls == 3
 
 
 def test_property_citations_require_displayed_candidate_evidence(
@@ -297,7 +302,8 @@ def test_property_citations_require_displayed_candidate_evidence(
 ):
     parent = parent_from(structural_source[2]["20b"])
     monkeypatch.setattr(
-        cli.feedback, "consistency_view",
+        cli.feedback,
+        "consistency_view",
         lambda *args: {"conflicts": [{"property": "displayed_property"}]},
     )
     raw = revision(evidence_ids=["displayed_property", "invented_property"])

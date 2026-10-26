@@ -8,6 +8,7 @@ import pytest
 
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.research.construction_affine_family_consistency import (
+    COMBINED_SYMBOLIC_POLICY,
     SYMBOLIC_INITIAL_POLICY,
     WEIGHTED_SYMBOLIC_POLICY,
     _display,
@@ -590,3 +591,218 @@ def test_weighted_map_operation_limit_defers(monkeypatch):
     source = mapped_family_problem()
     data = mapped_family_evidence(source)
     assert not assess(source, data, weighted_symbolic_initials=True)["conflicts"]
+
+
+def combined_problem(*, free_b=False, dependent=False, nonlinear=False):
+    """A free m(0) is constrained only after expanding b(0)=beta*y(0)."""
+    payload = symbolic_problem(readout="a+m+b").model_dump(mode="json")
+    candidate = payload["base_candidate"]
+    candidate["state_equations"][0]["rhs"] += "+c*x"
+    next(eq for eq in candidate["state_equations"] if eq["state"] == "b")["rhs"] = "0"
+    payload["graph"]["rules"]["b"]["initial"] = {
+        "mode": "map",
+        "expression": "beta*y0",
+        "parameters": [{"name": "beta", "role": "coefficient", "guess": 1}],
+        "public_initials": {"y0": "y"},
+    }
+    if free_b:
+        payload["graph"]["rules"]["b"]["initial"] = {
+            "mode": "value", "scope": "trajectory", "guess": 1,
+        }
+    if dependent:
+        candidate["states"].append({"name": "n", "kind": "latent"})
+        candidate["state_equations"].append({"state": "n", "rhs": "-n"})
+        candidate["state_equations"][0]["rhs"] += "+n"
+        candidate["initial_conditions"].append(
+            {"state": "n", "scope": "global", "fixed_value": 0}
+        )
+        payload["graph"]["rules"]["n"] = {
+            "initial": {
+                "mode": "map", "expression": "2*m0+alpha*y0",
+                "state_initials": {"m0": "m"},
+                "public_initials": {"y0": "y"},
+                "parameters": [
+                    {"name": "alpha", "role": "coefficient", "guess": 1}
+                ],
+            }
+        }
+    if nonlinear:
+        candidate["state_equations"][0]["rhs"] += "+x*m"
+    return PrefixFitProblem.model_validate(payload)
+
+
+@pytest.mark.parametrize("dependent", [False, True])
+def test_combined_initial_readout_eliminates_root_for_every_shared_coefficient(
+    dependent,
+):
+    source = combined_problem(dependent=dependent)
+    data = symbolic_evidence(source)
+    before = source.model_dump(mode="json"), deepcopy(data)
+    historical = assess(
+        source, data, symbolic_initials=True, weighted_symbolic_initials=True
+    )
+    assert historical["status"] == "deferred"
+    assert "combined_symbolic_initial_policy" not in historical
+    report = assess(source, data, combined_symbolic_initials=True)
+    assert report["combined_symbolic_initial_policy"] == COMBINED_SYMBOLIC_POLICY
+    assert (
+        prompt_view(report)["combined_symbolic_initial_policy"]
+        == COMBINED_SYMBOLIC_POLICY
+    )
+    witness = conflicts(report, "affine_initial_superposition")[0]["witnesses"][0]
+    for state in ("m", "b", *(("n",) if dependent else ())):
+        value = witness["initial_state_values"][state]
+        assert value["policy"] == COMBINED_SYMBOLIC_POLICY
+        assert "observed initial readouts" in value["source"]
+        assert "init_m_value" not in value["shared_coefficients_exact"]
+        weights = list(map(Fraction, witness["weights_exact"]))
+        for column in [
+            value["constant_exact"], *value["shared_coefficients_exact"].values()
+        ]:
+            products = (w * Fraction(x) for w, x in zip(weights, column, strict=True))
+            assert sum(products) == 0
+    assert witness["initial_state_values"]["m"]["shared_coefficients_exact"] == {
+        "init_b_beta": ["-2", "-1", "-3"]
+    }
+    assert before == (source.model_dump(mode="json"), data)
+    assert report == assess(source, data, combined_symbolic_initials=True)
+
+
+@pytest.mark.parametrize(
+    "options,evidence_options",
+    [
+        ({"free_b": True}, {}),
+        ({"nonlinear": True}, {}),
+        ({}, {"error": 1e-8}),
+        ({}, {"forcing_error": 1e-8}),
+        ({}, {"u": [[1, 1, 1], [1, 2, 1], [1, 3, 1]]}),
+        ({}, {"uniqueness_assumed": False}),
+        ({}, {"shared_parameters": False}),
+        ({}, {"reset_impulse_free": False}),
+    ],
+)
+def test_combined_initial_proof_keeps_required_assumptions(options, evidence_options):
+    source = combined_problem(**options)
+    data = symbolic_evidence(source, **evidence_options)
+    report = assess(source, data, combined_symbolic_initials=True)
+    assert report["status"] == "deferred"
+    assert not report["conflicts"]
+
+
+@pytest.mark.parametrize("readout", ["a+c*m+b", "a+m+b*b"])
+def test_combined_initial_proof_does_not_divide_unknown_or_linearize(readout):
+    source = combined_problem()
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["processes"][0]["expression"] = readout
+    source = PrefixFitProblem.model_validate(payload)
+    assert not assess(
+        source, symbolic_evidence(source), combined_symbolic_initials=True
+    )["conflicts"]
+
+
+def test_combined_initial_proof_cannot_equate_unrelated_free_state():
+    payload = combined_problem().model_dump(mode="json")
+    payload["base_candidate"]["states"].append({"name": "n", "kind": "latent"})
+    payload["base_candidate"]["state_equations"].append({"state": "n", "rhs": "-n"})
+    payload["base_candidate"]["state_equations"][0]["rhs"] += "+n"
+    payload["base_candidate"]["initial_conditions"].append(
+        {"state": "n", "scope": "global", "fixed_value": 0}
+    )
+    payload["graph"]["rules"]["n"] = {
+        "initial": {"mode": "value", "scope": "trajectory", "guess": 1}
+    }
+    source = PrefixFitProblem.model_validate(payload)
+    assert not assess(
+        source, symbolic_evidence(source), combined_symbolic_initials=True
+    )["conflicts"]
+
+
+def test_combined_initial_proof_preserves_unconstrained_readout_split():
+    source = combined_problem(free_b=True)
+    report = assess(source, symbolic_evidence(source), combined_symbolic_initials=True)
+    assert not conflicts(report, "affine_initial_superposition")
+    assert not report["scientific_correctness_established"]
+
+
+def test_combined_initial_proof_requires_exact_initial_readout():
+    source = combined_problem()
+    data = symbolic_evidence(source)
+    data["contract"]["absolute_error_bounds"]["z"] = 1e-12
+    reseal(data)
+    assert not assess(source, data, combined_symbolic_initials=True)["conflicts"]
+
+
+def test_combined_initial_proof_operation_limit_defers(monkeypatch):
+    from autoformalism.research import construction_affine_family_consistency as module
+
+    budget_type = module._InitialBudget
+    monkeypatch.setattr(module, "_InitialBudget", lambda: budget_type(remaining=1))
+    source = combined_problem()
+    data = symbolic_evidence(source)
+    assert not assess(source, data, combined_symbolic_initials=True)["conflicts"]
+
+
+def test_combined_initial_proof_does_not_reject_a_consistent_weighted_family():
+    source = combined_problem()
+    data = evidence(
+        source, [[2, 3, 4], [1, 2, 3], [3, 4, 5]], z=[[2, 2, 2]] * 3
+    )
+    report = assess(source, data, combined_symbolic_initials=True)
+    assert report["status"] == "deferred"
+    assert not report["scientific_correctness_established"]
+
+
+def test_combined_initial_proof_solves_two_roots_using_two_exact_readouts():
+    source = combined_problem(free_b=True)
+    data = symbolic_evidence(source)
+    payload = source.model_dump(mode="json")
+    candidate = payload["base_candidate"]
+    candidate["states"].append({"name": "n", "kind": "latent"})
+    candidate["state_equations"].append({"state": "n", "rhs": "0"})
+    candidate["state_equations"][0]["rhs"] += "+n"
+    candidate["initial_conditions"].append(
+        {"state": "n", "scope": "global", "fixed_value": 0}
+    )
+    candidate["processes"].append({"name": "readout_w", "expression": "m+2*b+n"})
+    candidate["observation_mappings"].append(
+        {"channel": "w", "expression": "readout_w"}
+    )
+    payload["context"]["targets"].append("w")
+    payload["graph"]["rules"]["n"] = {
+        "initial": {
+            "mode": "map", "expression": "beta*y0",
+            "parameters": [{"name": "beta", "role": "coefficient", "guess": 1}],
+            "public_initials": {"y0": "y"},
+        }
+    }
+    source = PrefixFitProblem.model_validate(payload)
+    data["context"] = source.context.model_dump(mode="json")
+    data["contract"]["absolute_error_bounds"]["w"] = 0.0
+    for row in data["trajectories"]:
+        row["targets"]["w"] = [4.0, 4.0, 4.0]
+    reseal(data)
+    assert not assess(
+        source, data, symbolic_initials=True, weighted_symbolic_initials=True
+    )["conflicts"]
+    report = assess(source, data, combined_symbolic_initials=True)
+    values = conflicts(report, "affine_initial_superposition")[0]["witnesses"][0][
+        "initial_state_values"
+    ]
+    assert values["m"]["constant_exact"] == ["-2"] * 3
+    assert values["b"]["constant_exact"] == ["3"] * 3
+    assert values["m"]["shared_coefficients_exact"] == {
+        "init_n_beta": ["2", "1", "3"]
+    }
+    assert values["b"]["shared_coefficients_exact"] == {
+        "init_n_beta": ["-2", "-1", "-3"]
+    }
+
+
+def test_combined_initial_proof_coordinate_limit_defers(monkeypatch):
+    from autoformalism.research import construction_affine_family_consistency as module
+
+    monkeypatch.setitem(module.INITIAL_READOUT_LIMITS, "coordinates", 1)
+    source = combined_problem()
+    assert not assess(
+        source, symbolic_evidence(source), combined_symbolic_initials=True
+    )["conflicts"]

@@ -1,5 +1,17 @@
 # Phase 1 Pipeline Design
 
+## Five-option construction pilot
+
+The v2 smoke operationally passed and returned the required three alternatives,
+but one accepted 120B candidate retained a missed shared-map/readout conflict.
+V3 combines those exact initial constraints while preserving genuinely free
+trajectory initials. The next default profile asks for five mandatory alternatives
+and permits up to four distinct shallow repairs: six saved T2-easy parents ×
+three seeds, at most 90 calls per model arm. Its larger budget is explicit; this
+is a method-development pilot, not a cost-matched baseline comparison. Historical
+patches are rechecked offline, and smoke/full submission remains separate. See
+[the proof boundaries and ACES runbook](PHASE_C_BREADTH_PILOT.md).
+
 ## Construction search requalification
 
 The completed v1 search compared 108 episodes with no provider failures, but

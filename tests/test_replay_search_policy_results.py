@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 
 import pytest
 
@@ -269,3 +270,55 @@ def test_raw_patch_must_match_provider_reply_even_with_resealed_result(
     )
     with pytest.raises(ValueError, match="raw patch differs"):
         cli.load_source(saved, "20b")
+
+
+def test_pinned_v2_smoke_replays_only_completed_subset(saved, tmp_path, monkeypatch):
+    """A full roster may contain unstarted cases, but partial receipts are unsafe."""
+    plan = sealed_read(saved / "plan.json")
+    plan.pop("artifact_sha256")
+    original = plan["cases"][0]
+    entries = [original]
+    for suffix in ("-second", "-third"):
+        entry = {**original, "case_id": original["case_id"] + suffix}
+        shutil.copytree(
+            saved / "results" / original["case_id"],
+            saved / "results" / entry["case_id"],
+        )
+        entries.append(entry)
+    pending = {**original, "seed": 1, "case_id": "p__seed1__pending"}
+    plan.update(protocol="construction-search-policy-2", cases=[*entries, pending])
+    plan_sha = content_hash(plan)
+    atomic_json(saved / "plan.json", {**plan, "artifact_sha256": plan_sha})
+    for entry in entries:
+        path = saved / "results" / entry["case_id"] / "completion.json"
+        value = sealed_read(path)
+        value.pop("artifact_sha256")
+        value["plan_sha256"] = plan_sha
+        atomic_json(path, {**value, "artifact_sha256": content_hash(value)})
+    monkeypatch.setitem(
+        cli.SMOKE_SOURCE_PINS,
+        "20b",
+        {
+            "plan_sha256": plan_sha,
+            "preserved_tree_sha256": content_hash(cli.tree_manifest(saved)),
+            "original_archive_sha256": "synthetic-smoke",
+        },
+    )
+    loaded = cli.load_source(saved, "20b", "v2-smoke")
+    assert len(loaded["candidates"]) == 3
+    result = cli.replay({"20b": saved}, tmp_path / "smoke-recheck", "v2-smoke")
+    assert result["arms"]["20b"]["candidates"] == 3
+    assert result["llm_calls"] == 0
+    (saved / "results" / pending["case_id"]).mkdir()
+    monkeypatch.setitem(
+        cli.SMOKE_SOURCE_PINS["20b"],
+        "preserved_tree_sha256",
+        content_hash(cli.tree_manifest(saved)),
+    )
+    with pytest.raises(ValueError, match="unsealed partial"):
+        cli.load_source(saved, "20b", "v2-smoke")
+
+
+def test_unknown_source_version_fails_closed(saved):
+    with pytest.raises(ValueError, match="unknown pinned source"):
+        cli.load_source(saved, "20b", "invented")

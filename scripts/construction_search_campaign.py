@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checkpointed three-policy construction experiment on six frozen parents."""
+"""Checkpointed bounded construction search on six frozen parents."""
 
 from __future__ import annotations
 
@@ -29,6 +29,9 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.research import construction_search_policy as engine
+from autoformalism.research.construction_affine_family_consistency import (
+    COMBINED_SYMBOLIC_POLICY,
+)
 from autoformalism.research.construction_structural_revision import (
     StructuralRevisionReply,
 )
@@ -39,6 +42,52 @@ from scripts import structural_revision_campaign as base
 REPO = Path(__file__).resolve().parents[1]
 PROTOCOL = engine.PROTOCOL
 SEEDS = (0, 1, 2)
+PROFILES = {
+    "three-policy": {
+        "policies": engine.POLICIES,
+        "options_count": 3,
+        "maximum_calls": 3,
+        "max_output_tokens": 8192,
+    },
+    "breadth-five": {
+        "policies": ("options_shallow",),
+        "options_count": 5,
+        "maximum_calls": 5,
+        "max_output_tokens": 8192,
+    },
+}
+
+
+def profile_for(name: str) -> dict:
+    """Return one fixed roster/budget profile; arbitrary sweeps are unsupported."""
+    if name not in PROFILES:
+        raise ValueError("unknown construction search profile")
+    return PROFILES[name]
+
+
+def settings_for(size: str, profile: str):
+    """Freeze the selected profile's allowance without changing model identity."""
+    value = base.settings_for(size)
+    spec = profile_for(profile)
+    return type(value).model_validate(
+        {
+            **value.model_dump(mode="json"),
+            "maximum_requests": spec["maximum_calls"],
+            "maximum_total_tokens": spec["maximum_calls"] * 32768,
+            "max_output_tokens": spec["max_output_tokens"],
+            "attempts_per_step": spec["maximum_calls"],
+        }
+    )
+
+
+def _engine_options(plan: dict) -> dict:
+    """Keep live generation and exact replay on the identical search schedule."""
+    return {
+        "options_count": plan["required_options_in_first_call"],
+        "maximum_calls": plan["maximum_calls_per_episode"],
+    }
+
+
 ENTRYPOINTS = tuple(
     dict.fromkeys(
         (
@@ -59,16 +108,18 @@ def _entrypoints() -> dict:
     }
 
 
-def _roster(selected: dict, size: str) -> list[dict]:
+def _roster(selected: dict, size: str, profile: str) -> list[dict]:
     """Rotate policy order across seed bundles; match order between model arms."""
     rows = []
+    allowed_policies = profile_for(profile)["policies"]
     for seed in SEEDS:
         for position, (name, parent) in enumerate(sorted(selected["parents"].items())):
-            offset = (position + seed) % len(engine.POLICIES)
-            policies = engine.POLICIES[offset:] + engine.POLICIES[:offset]
+            offset = (position + seed) % len(allowed_policies)
+            policies = allowed_policies[offset:] + allowed_policies[:offset]
             for policy in policies:
                 identity = {
                     "parent_id": name,
+                    "profile": profile,
                     "seed": seed,
                     "policy": policy,
                     "input_sha256": content_hash(parent),
@@ -95,10 +146,13 @@ def smoke_case_ids(plan: dict) -> list[str]:
     ]
 
 
-def _plan(selected: dict, size: str) -> dict:
-    settings = base.settings_for(size).model_dump(mode="json")
+def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
+    spec = profile_for(profile)
+    settings = settings_for(size, profile).model_dump(mode="json")
+    options_model = engine.options_reply_model(spec["options_count"])
     common = {
         "protocol": PROTOCOL,
+        "profile": profile,
         "source_archive_sha256": base.sources.SOURCE_ARCHIVE_SHA256,
         "selected_sources_sha256": content_hash(selected),
         "runtime_source_sha256": runtime_source_hash(),
@@ -106,23 +160,27 @@ def _plan(selected: dict, size: str) -> dict:
         "generation_policy": {
             k: v for k, v in settings.items() if k not in {"model", "model_revision"}
         },
-        "policies": list(engine.POLICIES),
+        "policies": list(spec["policies"]),
         "seeds": list(SEEDS),
         "system_sha256": content_hash(engine.SYSTEM),
         "schema_sha256": {
             cls.__name__: content_hash(cls.model_json_schema())
-            for cls in (StructuralRevisionReply, engine.OptionsReply)
+            for cls in (StructuralRevisionReply, options_model)
         },
         "gate_policy": {
             **base.old.V4_POLICIES,
             "symbolic_initials": base.SYMBOLIC_INITIAL_POLICY,
             "weighted_symbolic_initials": "weighted-shared-symbolic-initials-1",
+            "combined_symbolic_initials": COMBINED_SYMBOLIC_POLICY,
             "parent_declarations": "parent-relative-declaration-normalization-1",
         },
-        "maximum_calls_per_episode": 3,
-        "maximum_options_in_first_call": 3,
-        "required_options_in_first_call": 3,
-        "option_output_budget": "three alternatives share one 8192-token completion",
+        "maximum_calls_per_episode": spec["maximum_calls"],
+        "maximum_options_in_first_call": spec["options_count"],
+        "required_options_in_first_call": spec["options_count"],
+        "option_output_budget": f"{spec['options_count']} alternatives share one "
+        f"{spec['max_output_tokens']}-token completion",
+        "budget_interpretation": "Profile-specific resource allowances; broader "
+        "search is exploratory, not an equal-cost baseline comparison",
         "smoke_policy": "first-parent-seed0-all-policies-included-in-full-1",
         "selection": "six frozen T2-easy defect cases; no NMSE-based selection",
         "automatic_followup": False,
@@ -136,14 +194,16 @@ def _plan(selected: dict, size: str) -> dict:
         "comparison_sha256": content_hash(common),
         "model_size": size,
         "settings": settings,
-        "cases": _roster(selected, size),
+        "cases": _roster(selected, size, profile),
     }
 
 
-def prepare(source: Path, root: Path, model_size: str) -> dict:
+def prepare(
+    source: Path, root: Path, model_size: str, profile: str = "three-policy"
+) -> dict:
     selected = base.sources.load(source)
     base.old._validate_inputs(selected["inputs"])
-    plan = _plan(selected, model_size)
+    plan = _plan(selected, model_size, profile)
     with _lock(root / "prepare-lock"):
         target = root / "saved-source.tar.gz"
         if target.exists() and target.read_bytes() != source.read_bytes():
@@ -166,7 +226,9 @@ def prepare(source: Path, root: Path, model_size: str) -> dict:
         "model_size": model_size,
         "comparison_sha256": plan["comparison_sha256"],
         "cases": len(plan["cases"]),
-        "maximum_generation_requests": 3 * len(plan["cases"]),
+        "maximum_generation_requests": plan["maximum_calls_per_episode"]
+        * len(plan["cases"]),
+        "profile": profile,
         "smoke_cases": smoke_case_ids(plan),
     }
 
@@ -179,7 +241,7 @@ def verify(root: Path) -> dict:
         "artifact_sha256": content_hash(selected),
     }:
         raise ValueError("selected sources differ")
-    expected = _plan(selected, plan["model_size"])
+    expected = _plan(selected, plan["model_size"], plan["profile"])
     if plan != {**expected, "artifact_sha256": content_hash(expected)}:
         raise ValueError("search plan, executable source, or settings differ")
     for name, parent in selected["parents"].items():
@@ -255,9 +317,16 @@ def _completion(root: Path, entry: dict, plan: dict, parent: dict) -> dict | Non
     }
     if receipt != {**expected, "artifact_sha256": content_hash(expected)}:
         raise ValueError("search completion receipt differs")
-    replay = base._ReplayClient(records, base.settings_for(plan["model_size"]))
+    replay = base._ReplayClient(
+        records, settings_for(plan["model_size"], plan["profile"])
+    )
     if engine.run_episode(
-        parent, replay, replay.settings, entry["policy"], seed=entry["seed"]
+        parent,
+        replay,
+        replay.settings,
+        entry["policy"],
+        seed=entry["seed"],
+        **_engine_options(plan),
     ) != result or len(replay.consumed) != len(records):
         raise ValueError(
             "search result differs from exact request/reply reconstruction"
@@ -334,7 +403,9 @@ def run(
                     _blocked(root, entry, plan, saved, "budget_blocked")
                     continue
                 replay = base._ReplayClient(
-                    saved, base.settings_for(plan["model_size"]), pending=True
+                    saved,
+                    settings_for(plan["model_size"], plan["profile"]),
+                    pending=True,
                 )
                 with suppress(DeferredCall):
                     engine.run_episode(
@@ -343,10 +414,11 @@ def run(
                         replay.settings,
                         entry["policy"],
                         seed=entry["seed"],
+                        **_engine_options(plan),
                     )
                 if len(replay.consumed) != len(saved):
                     raise ValueError("pending calls are not an exact request prefix")
-                settings = base.settings_for(plan["model_size"])
+                settings = settings_for(plan["model_size"], plan["profile"])
                 client = ConstructionClient(
                     settings=settings,
                     base_url=endpoint,
@@ -362,7 +434,12 @@ def run(
                 client.budget_diagnostics_enabled = True
                 try:
                     result = engine.run_episode(
-                        parent, client, settings, entry["policy"], seed=entry["seed"]
+                        parent,
+                        client,
+                        settings,
+                        entry["policy"],
+                        seed=entry["seed"],
+                        **_engine_options(plan),
                     )
                 except DeferredCall:
                     break
@@ -518,7 +595,7 @@ def report(root: Path) -> dict:
             }
         )
     aggregates = {}
-    for policy in engine.POLICIES:
+    for policy in plan["policies"]:
         selected_rows = [r for r in rows if r["policy"] == policy]
         completed = [r for r in selected_rows if r["completed"]]
         aggregates[policy] = {
@@ -556,6 +633,11 @@ def report(root: Path) -> dict:
         "plan_sha256": plan["artifact_sha256"],
         "comparison_sha256": plan["comparison_sha256"],
         "model_size": plan["model_size"],
+        "profile": plan["profile"],
+        "budget_interpretation": plan["budget_interpretation"],
+        "required_options_in_first_call": plan["required_options_in_first_call"],
+        "maximum_calls_per_episode": plan["maximum_calls_per_episode"],
+        "maximum_output_tokens": plan["settings"]["max_output_tokens"],
         "status": "complete" if all(r["completed"] for r in rows) else "incomplete",
         "smoke_complete": all(r["completed"] for r in rows if r["smoke"]),
         "smoke_eligible_episodes": sum(
@@ -578,7 +660,8 @@ def report(root: Path) -> dict:
     lines = [
         "# Construction search policies",
         "",
-        f"Model: {plan['model_size']}; status: {summary['status']}; "
+        f"Model: {plan['model_size']}; profile: {plan['profile']}; "
+        f"status: {summary['status']}; "
         f"smoke complete: {summary['smoke_complete']}.",
         "",
         summary["interpretation"],
@@ -602,29 +685,32 @@ def preview(root: Path) -> dict:
     """Render exact initial requests, plus clearly marked offline repair examples."""
     plan = verify(root)
     selected = sealed_read(root / "selected_sources.json")
+    count = plan["required_options_in_first_call"]
+    calls = plan["maximum_calls_per_episode"]
+    options_model = engine.options_reply_model(count)
     parts = [
-        "<!doctype html><meta charset='utf-8'><title>Three-policy prompts</title>",
+        "<!doctype html><meta charset='utf-8'>"
+        "<title>Construction search prompts</title>",
         "<style>body{max-width:1100px;margin:2rem auto;font:16px/1.5 sans-serif}"
         "pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6f8;"
         "padding:1rem}mark{background:#fff0a8}summary{cursor:pointer;font-weight:bold}"
         "section{margin:2rem 0}</style>",
-        "<h1>Construction search: 20B and 120B</h1><p><mark>New:</mark> compact "
-        "exactly three initial options (mandatory), parent-relative changes only, "
-        "safe redundant-declaration normalization, and weighted symbolic initial "
-        "checks. Both models receive the same scientific prompts. "
-        "No fitting or test-data access.</p>",
-        "<p>Sequential repair restarts after an unchanged failure repeats; independent "
-        "proposals receive no previous failures; the option policy requires exactly "
-        "three complete alternatives sharing one output budget, then repairs two "
-        "distinct failed families at most once each.</p>",
-        "<p>Each arm has 6 parents &times; 3 seeds &times; 3 policies = 54 episodes, "
-        "capped at 162 calls. Smoke uses the first parent's seed-zero policies and "
-        "is included in those totals.</p>",
+        f"<h1>Construction search: {html.escape(plan['profile'])}</h1>"
+        f"<p><mark>Required:</mark> exactly {count} alternatives in the initial "
+        f"options call, followed by at most {calls - 1} distinct failed-branch "
+        "repairs. Each reply contains changes relative to the unchanged parent. "
+        "Safe declaration normalization and combined symbolic initial/readout "
+        "checks preserve scientific constraints. No fitting or test-data access.</p>",
+        f"<p>Each model arm has {len(plan['cases'])} episodes, capped at "
+        f"{calls * len(plan['cases'])} calls and "
+        f"{plan['settings']['maximum_total_tokens'] * len(plan['cases'])} "
+        "charged tokens. The first parent's seed-zero subset is included, not "
+        "additional. " + html.escape(plan["budget_interpretation"]) + ".</p>",
         "<h2>System instruction</h2><pre>" + html.escape(engine.SYSTEM) + "</pre>",
     ]
     for name in sorted(selected["parents"]):
         parent = base._parent(selected, name)
-        for policy in engine.POLICIES:
+        for policy in plan["policies"]:
             packet = {
                 "system": engine.SYSTEM,
                 "user": engine.request(
@@ -632,10 +718,11 @@ def preview(root: Path) -> dict:
                     policy,
                     batch=policy == "options_shallow",
                     fresh=policy == "independent",
+                    **_engine_options(plan),
                 ),
                 "response_schema": strict_provider_schema(
                     (
-                        engine.OptionsReply
+                        options_model
                         if policy == "options_shallow"
                         else StructuralRevisionReply
                     ).model_json_schema()
@@ -657,10 +744,10 @@ def preview(root: Path) -> dict:
     }
     first = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
     history = [first]
-    for title, fresh in (
-        ("Repair with full intended patch", False),
-        ("Fresh branch after the unchanged failure repeats", True),
-    ):
+    examples = [("Repair with full intended patch", False)]
+    if "sequential_restart" in plan["policies"]:
+        examples.append(("Fresh branch after the unchanged failure repeats", True))
+    for title, fresh in examples:
         if fresh:
             second = engine.assess_candidate(
                 parent, raw, candidate_id="call1-option0", call_index=1
@@ -670,10 +757,13 @@ def preview(root: Path) -> dict:
             "system": engine.SYSTEM,
             "user": engine.request(
                 parent,
-                "sequential_restart",
+                "sequential_restart"
+                if "sequential_restart" in plan["policies"]
+                else "options_shallow",
                 history=history,
                 intended=history[-1],
                 fresh=fresh,
+                **_engine_options(plan),
             ),
         }
         file = "restart-example.json" if fresh else "repair-example.json"
@@ -685,7 +775,7 @@ def preview(root: Path) -> dict:
             + html.escape(json.dumps(json.loads(packet["user"]), indent=2))
             + "</pre>"
         )
-    for schema in (StructuralRevisionReply, engine.OptionsReply):
+    for schema in (StructuralRevisionReply, options_model):
         parts.append(
             f"<details><summary>{schema.__name__} response schema</summary><pre>"
             + html.escape(
@@ -746,6 +836,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--model-size", choices=tuple(base.MODEL_SPECS), default="20b")
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="breadth-five")
     parser.add_argument("--endpoint")
     parser.add_argument("--runtime-record", type=Path)
     parser.add_argument("--seconds", type=int, default=12600)
@@ -754,7 +845,7 @@ def main() -> None:
     if args.command == "prepare":
         if not args.source:
             parser.error("prepare requires --source")
-        value = prepare(args.source, args.root, args.model_size)
+        value = prepare(args.source, args.root, args.model_size, args.profile)
     elif args.command == "run":
         if not args.endpoint:
             parser.error("run requires --endpoint")

@@ -26,7 +26,7 @@ from autoformalism.research.interaction_source import _Reader
 from autoformalism.staged_topology import content_hash
 from scripts import structural_revision_campaign as base
 
-PROTOCOL = "saved-search-policy-results-recheck-1"
+PROTOCOL = "saved-search-policy-results-recheck-2"
 MAX_FILES = 4096
 MAX_BYTES = 128 * 1024 * 1024
 SOURCE_PINS = {
@@ -53,6 +53,38 @@ SOURCE_PINS = {
         ),
     },
 }
+SMOKE_SOURCE_PINS = {
+    "20b": {
+        "preserved_tree_sha256": (
+            "6e91e8ed6ce1f1900314f83bdabb9900feec95c6fd9db082064247402f53f145"
+        ),
+        "plan_sha256": (
+            "3e7327a9e32f8315732fe57b2bebc4e6c1db94ffee5046f442d17ec7fec6b238"
+        ),
+        "original_archive_sha256": (
+            "11e4149c03ce8f2fccd29e05c1ec5898a07ac880f5328adcc21d91ade6e03de2"
+        ),
+    },
+    "120b": {
+        "preserved_tree_sha256": (
+            "b736df5894deb62dd2df6708216fe474a9a9835b13f11952ca009758686da649"
+        ),
+        "plan_sha256": (
+            "925501ba2f6e4331bfef3c4fe2033fb1a38345b2fa2b1b6c0c2e70f1765b9232"
+        ),
+        "original_archive_sha256": (
+            "7cb90817342371b9613d941aac5f95236c2a7f6e523f6d0d6b2d17104791f67b"
+        ),
+    },
+}
+
+
+def _source_pins(version: str) -> dict:
+    if version == "v1":
+        return SOURCE_PINS
+    if version == "v2-smoke":
+        return SMOKE_SOURCE_PINS
+    raise ValueError("unknown pinned source version")
 
 
 def tree_manifest(root: Path) -> dict[str, str]:
@@ -96,17 +128,23 @@ def _historical_patches(record: dict, attempt: dict) -> list[dict]:
     return [raw]
 
 
-def load_source(root: Path, arm: str) -> dict:
+def load_source(root: Path, arm: str, version: str = "v1") -> dict:
     """Authenticate saved parents, request bodies, tokenizations and completions."""
     manifest = tree_manifest(root)
-    if content_hash(manifest) != SOURCE_PINS[arm]["preserved_tree_sha256"]:
+    pins = _source_pins(version)[arm]
+    if content_hash(manifest) != pins["preserved_tree_sha256"]:
         raise ValueError("preserved source tree identity differs")
     reader = _Reader(root)
     plan = reader.json("plan.json", "artifact_sha256")
     selected = reader.json("selected_sources.json", "artifact_sha256")
     if (
-        plan["protocol"] != "construction-search-policy-1"
-        or plan["artifact_sha256"] != SOURCE_PINS[arm]["plan_sha256"]
+        plan["protocol"]
+        != (
+            "construction-search-policy-1"
+            if version == "v1"
+            else "construction-search-policy-2"
+        )
+        or plan["artifact_sha256"] != pins["plan_sha256"]
         or plan["model_size"] != arm
         or plan["selected_sources_sha256"] != selected["artifact_sha256"]
         or hashlib.sha256(reader.read("saved-source.tar.gz")).hexdigest()
@@ -133,6 +171,10 @@ def load_source(root: Path, arm: str) -> dict:
         ):
             raise ValueError("historical parent control differs")
         prefix = f"results/{case}"
+        if version == "v2-smoke" and not (root / prefix / "completion.json").exists():
+            if (root / prefix).exists():
+                raise ValueError("unsealed partial episode in pinned smoke source")
+            continue
         result = reader.json(f"{prefix}/result.json")
         receipt = reader.json(f"{prefix}/completion.json", "artifact_sha256")
         records = base.sources._records(reader, entry, plan)
@@ -217,6 +259,16 @@ def load_source(root: Path, arm: str) -> dict:
         if emitted != [candidate["id"] for candidate in result["candidates"]]:
             raise ValueError("historical candidate order differs")
         records_all.extend(records)
+    if version == "v2-smoke":
+        completed = {c["case_id"] for c in candidates}
+        first_parent = min(row["parent_id"] for row in plan["cases"])
+        expected = {
+            row["case_id"]
+            for row in plan["cases"]
+            if row["parent_id"] == first_parent and row["seed"] == 0
+        }
+        if completed != expected or len(expected) != 3:
+            raise ValueError("pinned smoke completion roster differs")
     return {
         "arm": arm,
         "plan": plan,
@@ -225,6 +277,7 @@ def load_source(root: Path, arm: str) -> dict:
         "option_counts": option_counts,
         "historical_cost": _cost(records_all),
         "source_manifest": manifest,
+        "source_version": version,
     }
 
 
@@ -264,19 +317,21 @@ def _render(root: Path, summary: dict, rows: list[dict], parents: dict) -> None:
         "<p>These requests were not sent. Historical replies did not see "
         "this wording.</p>",
         "<h2>Changes from the previous prompt</h2><ul>"
-        "<li><mark>Exactly three alternatives are mandatory.</mark> A reason "
+        "<li><mark>Exactly five alternatives are mandatory in the new breadth "
+        "pilot.</mark> A reason "
         "for fewer options no longer satisfies the batch contract.</li>"
         "<li><mark>A complete intended patch is a delta against the parent, "
         "not a complete restatement of its model.</mark> Untouched components "
         "remain in place; rejected edits are not silently installed.</li>"
         "<li><mark>Unambiguous identical declarations can be normalized.</mark> "
         "Type, role, scope, domain or definition conflicts still need repair.</li>"
-        "<li><mark>Weighted symbolic initial maps are checked when qualified.</mark> "
-        "An unknown common parameter is not automatically free per trajectory."
+        "<li><mark>Shared symbolic initial maps and observed initial readouts "
+        "are combined when qualified.</mark> A trajectory initial may be "
+        "constrained by both; shared unknowns are not freely fitted per row."
         "</li></ul>",
         "<h2>System</h2>" + pre(engine.SYSTEM),
-        "<h2>Exactly-three response schema</h2>"
-        + pre(engine.OptionsReply.model_json_schema()),
+        "<h2>Exactly-five response schema</h2>"
+        + pre(engine.options_reply_model(5).model_json_schema()),
     ]
     seen_diagnostics = set()
     for row in rows:
@@ -285,7 +340,14 @@ def _render(root: Path, summary: dict, rows: list[dict], parents: dict) -> None:
         parent = parents[(row["arm"], row["parent_id"])]
         feedback = (
             json.loads(
-                engine.request(parent, row["policy"], history=[new], intended=new)
+                engine.request(
+                    parent,
+                    row["policy"],
+                    history=[new],
+                    intended=new,
+                    options_count=5,
+                    maximum_calls=5,
+                )
             )
             if new["status"] == "rejected"
             else None
@@ -348,15 +410,25 @@ def _render(root: Path, summary: dict, rows: list[dict], parents: dict) -> None:
     if parents:
         first = next(iter(parents.values()))
         prompt_parts += [
-            "<h2>Initial three-option request</h2>"
-            + pre(json.loads(engine.request(first, "options_shallow", batch=True)))
+            "<h2>Initial five-option request</h2>"
+            + pre(
+                json.loads(
+                    engine.request(
+                        first,
+                        "options_shallow",
+                        batch=True,
+                        options_count=5,
+                        maximum_calls=5,
+                    )
+                )
+            )
         ]
     parts += ["</table>"]
     (root / "REPORT.html").write_text("\n".join(parts))
     (root / "PROMPTS.html").write_text("\n".join(prompt_parts))
 
 
-def replay(sources: dict[str, Path], root: Path) -> dict:
+def replay(sources: dict[str, Path], root: Path, version: str = "v1") -> dict:
     """Checkpoint independent gate rechecks; never advance historical decisions."""
     root = root.resolve()
     if any(
@@ -364,13 +436,16 @@ def replay(sources: dict[str, Path], root: Path) -> dict:
         for p in sources.values()
     ):
         raise ValueError("recheck output and preserved sources must be separate")
-    loaded = [load_source(sources[arm], arm) for arm in sorted(sources)]
+    loaded = [load_source(sources[arm], arm, version) for arm in sorted(sources)]
     if len({source["plan"]["comparison_sha256"] for source in loaded}) != 1:
         raise ValueError("historical comparisons differ")
     identity = {
         "protocol": PROTOCOL,
         "engine_protocol": engine.PROTOCOL,
-        "sources": {source["arm"]: SOURCE_PINS[source["arm"]] for source in loaded},
+        "source_version": version,
+        "sources": {
+            source["arm"]: _source_pins(version)[source["arm"]] for source in loaded
+        },
         "runtime_source_sha256": runtime_source_hash(),
         "entrypoints": base._entrypoints(),
         "replay_script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -476,10 +551,11 @@ def replay(sources: dict[str, Path], root: Path) -> dict:
             "arms": arms,
             "interpretation": (
                 "Independent saved-patch rechecks, not live policy results. Later "
-                "historical replies did not see the new feedback. Old option "
-                "batches were allowed to contain fewer than three; shortfalls "
-                "against the new rule are reported separately, not retroactive "
-                "patch failures. Eligibility retains deferred checks and does "
+                "historical replies did not see the new feedback. V1 option "
+                "batches could contain fewer than three; v2 smoke required three. "
+                "Historical counts are reported separately, not retroactive "
+                "failures under the five-option pilot. Eligibility retains "
+                "deferred checks and does "
                 "not establish scientific validity or fitting accuracy. "
                 "No models adopted or exported for fitting."
             ),
@@ -504,8 +580,13 @@ def main() -> None:
     parser.add_argument("--source-20b", type=Path, required=True)
     parser.add_argument("--source-120b", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--source-version", choices=("v1", "v2-smoke"), default="v1")
     args = parser.parse_args()
-    result = replay({"20b": args.source_20b, "120b": args.source_120b}, args.root)
+    result = replay(
+        {"20b": args.source_20b, "120b": args.source_120b},
+        args.root,
+        args.source_version,
+    )
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, indent=2))
 
 

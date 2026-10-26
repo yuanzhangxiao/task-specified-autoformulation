@@ -38,7 +38,9 @@ def forbidden(*args, **kwargs):
 
 def respond(url, body, timeout):
     value = revision()
-    if body["response_format"]["json_schema"]["name"] == "OptionsReply":
+    schema = body["response_format"]["json_schema"]
+    if schema["name"] in {"OptionsReply", "FiveOptionsReply"}:
+        count = schema["schema"]["properties"]["options"]["minItems"]
         value = {
             "options": [
                 {
@@ -47,7 +49,7 @@ def respond(url, body, timeout):
                     "premise_changed": "Include nonlinear glucose-memory coupling.",
                     "patch": value,
                 }
-                for index in range(3)
+                for index in range(count)
             ],
         }
     return response(value)
@@ -62,6 +64,9 @@ def test_matching_rosters_budgets_and_preview(search_roots):
         assert len(cli.smoke_case_ids(plan)) == 3
         assert len({e["namespace"] for e in plan["cases"]}) == 54
         assert plan["settings"]["maximum_requests"] == 3
+        assert plan["gate_policy"]["combined_symbolic_initials"] == (
+            "combined-symbolic-map-readout-initials-1"
+        )
         cli.preview(root)
         assert (root / "PROMPTS.html").exists()
         assert not (root / "results").exists()
@@ -177,3 +182,78 @@ def test_excessive_provider_charge_blocks_without_renewing_budget(search_roots):
         )
         == value
     )
+
+
+def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
+    structural_source, tmp_path, monkeypatch  # noqa: F811
+):
+    source, _, _ = structural_source
+    runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
+    monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
+    monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
+    root = tmp_path / "breadth-five"
+    prepared_result = cli.prepare(source, root, "20b", "breadth-five")
+    assert prepared_result["maximum_generation_requests"] == 90
+    plan = cli.verify(root)
+    assert len(plan["cases"]) == 18
+    assert len(cli.smoke_case_ids(plan)) == 1
+    assert plan["settings"]["maximum_requests"] == 5
+    assert plan["settings"]["maximum_total_tokens"] == 163840
+    assert plan["settings"]["max_output_tokens"] == 8192
+    assert plan["required_options_in_first_call"] == 5
+    assert plan["gate_policy"]["combined_symbolic_initials"] == (
+        "combined-symbolic-map-readout-initials-1"
+    )
+    assert plan["policies"] == ["options_shallow"]
+    assert "FiveOptionsReply" in plan["schema_sha256"]
+    smoke = cli.run(
+        root, "http://127.0.0.1", transport=respond, token_transport=tokenizer
+    )
+    assert smoke["smoke_complete"]
+    assert sum(row["completed"] for row in smoke["rows"]) == 1
+    assert smoke["cost"]["physical_requests"] == 1
+    assert smoke["rows"][0]["eligible_candidates"] == 5
+    assert (
+        cli.run(
+            root, "http://127.0.0.1", transport=forbidden, token_transport=forbidden
+        )
+        == smoke
+    )
+    cli.preview(root)
+    preview = json.loads((root / "preview/parent_0-options_shallow.json").read_text())
+    assert preview["response_schema"]["properties"]["options"]["minItems"] == 5
+    assert "exactly five" in preview["user"]
+    full = cli.run(
+        root,
+        "http://127.0.0.1",
+        phase="full",
+        transport=respond,
+        token_transport=tokenizer,
+    )
+    assert full["status"] == "complete"
+    assert len(full["rows"]) == 18
+    assert full["profile"] == "breadth-five"
+    assert (
+        cli.run(
+            root,
+            "http://127.0.0.1",
+            phase="full",
+            transport=forbidden,
+            token_transport=forbidden,
+        )
+        == full
+    )
+    before = (root / "plan.json").read_bytes()
+    with pytest.raises(ValueError, match=r"frozen|differs"):
+        cli.prepare(source, root, "20b", "three-policy")
+    assert (root / "plan.json").read_bytes() == before
+
+
+def test_unknown_profile_is_rejected_before_writing(
+    structural_source, tmp_path  # noqa: F811
+):
+    source, _, _ = structural_source
+    root = tmp_path / "unknown"
+    with pytest.raises(ValueError, match="unknown construction search profile"):
+        cli.prepare(source, root, "20b", "unlimited")
+    assert not root.exists()

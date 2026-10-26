@@ -62,6 +62,11 @@ def setup(tmp_path, monkeypatch):
     for size, model in submission.MODELS.items():
         plans[size] = {
             "protocol": submission.PROTOCOL,
+            "profile": "three-policy",
+            "policies": sorted(submission.POLICIES),
+            "required_options_in_first_call": 3,
+            "maximum_options_in_first_call": 3,
+            "maximum_calls_per_episode": 3,
             "artifact_sha256": size + "a" * 64,
             "model_size": size,
             "cases": [
@@ -436,11 +441,12 @@ def test_server_binding_rejects_nonlocal_endpoint(serving):
         submission.bind_server(root, record, "https://example.com")
 
 
+@pytest.mark.parametrize("profile", ["three-policy", "breadth-five"])
 @pytest.mark.parametrize("size", ["20b", "120b"])
 @pytest.mark.parametrize("command", ["run", "inspect", "report", "preview"])
 @pytest.mark.parametrize("phase,wave", [("smoke", "wave1"), ("full", "wave2")])
 def test_real_shell_dispatch_ignores_old_generic_root(
-    tmp_path, size, command, phase, wave
+    tmp_path, size, command, phase, wave, profile
 ):
     group, cache = tmp_path / "group scratch", tmp_path / "cache"
     group.mkdir()
@@ -475,6 +481,7 @@ def test_real_shell_dispatch_ignores_old_generic_root(
             size,
             phase,
             wave,
+            profile,
         ],
         env=env,
         capture_output=True,
@@ -483,11 +490,12 @@ def test_real_shell_dispatch_ignores_old_generic_root(
     )
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    expected = str(group / f"phase-c-search-policy-{size}-v2")
+    expected = str(group / f"phase-c-search-{profile}-{size}-v3")
     assert calls and all(call["root"] == expected for call in calls)
     if command == "run":
         prepare = next(c["argv"] for c in calls if "prepare" in c["argv"])
         assert prepare[prepare.index("--model-size") + 1] == size
+        assert prepare[prepare.index("--profile") + 1] == profile
         assert prepare[prepare.index("--source") + 1].endswith(
             "inputs/saved-source.tar.gz"
         )
@@ -495,3 +503,54 @@ def test_real_shell_dispatch_ignores_old_generic_root(
         submit_args = calls[-1]["argv"]
         assert submit_args[submit_args.index("--phase") + 1] == phase
         assert submit_args[submit_args.index("--wave") + 1] == wave
+
+
+def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
+    setup, monkeypatch
+):
+    tmp, plans = setup
+    for plan in plans.values():
+        plan.update(
+            profile="breadth-five",
+            policies=["options_shallow"],
+            required_options_in_first_call=5,
+            maximum_options_in_first_call=5,
+            maximum_calls_per_episode=5,
+        )
+        plan["cases"] = [c for c in plan["cases"] if c["policy"] == "options_shallow"]
+        plan["settings"].update(submission.PROFILES["breadth-five"]["settings"])
+    monkeypatch.setattr(
+        submission.subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "1234", ""),
+    )
+    for size in plans:
+        result = submission.submit(tmp / size)
+        assert result["maximum_cases"] == 1
+        assert result["maximum_generation_requests"] == 5
+        assert result["campaign_maximum_generation_requests"] == 90
+        _, execution = submission.verify(tmp / size)
+        assert execution["maximum_cases"] == 18
+        assert execution["maximum_output_tokens"] == 8192
+        assert execution["maximum_charged_tokens"] == 18 * 163840
+        assert execution["required_options_in_first_call"] == 5
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("profile", "unlimited"),
+        ("required_options_in_first_call", 5),
+        ("maximum_options_in_first_call", 5),
+        ("maximum_calls_per_episode", 5),
+        ("policies", ["options_shallow"]),
+    ],
+)
+def test_profile_drift_rejected_before_submission(setup, monkeypatch, field, value):
+    tmp, plans = setup
+    plans["20b"][field] = value
+    monkeypatch.setattr(
+        submission.subprocess, "run", lambda *a, **kw: pytest.fail("no submit")
+    )
+    with pytest.raises(ValueError, match=r"profile|requires six"):
+        submission.submit(tmp / "20b")

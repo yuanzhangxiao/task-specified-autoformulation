@@ -123,6 +123,7 @@ def _assessment_cached(
     evidence_json: str,
     assess,
     weighted_symbolic_initials: bool = False,
+    combined_symbolic_initials: bool = False,
 ) -> dict:
     """Memoize a pure gate result; public and model bytes are both in its key."""
     from autoformalism.research import construction_affine_family_consistency
@@ -141,6 +142,8 @@ def _assessment_cached(
     options = {"symbolic_initials": True}
     if weighted_symbolic_initials:
         options["weighted_symbolic_initials"] = True
+    if combined_symbolic_initials:
+        options["combined_symbolic_initials"] = True
     result["affine_family_consistency"] = construction_affine_family_consistency.assess(
         problem, evidence, **options
     )
@@ -162,7 +165,11 @@ def _assessment_cached(
 
 
 def _assessment(
-    parent: dict, problem: PrefixFitProblem, *, weighted_symbolic_initials: bool = False
+    parent: dict,
+    problem: PrefixFitProblem,
+    *,
+    weighted_symbolic_initials: bool = False,
+    combined_symbolic_initials: bool = False,
 ) -> dict:
     return deepcopy(
         _assessment_cached(
@@ -170,6 +177,7 @@ def _assessment(
             json.dumps(parent["_consistency_evidence"], sort_keys=True),
             old._consistency,
             weighted_symbolic_initials,
+            combined_symbolic_initials,
         )
     )
 
@@ -303,6 +311,7 @@ def request(
     repair: dict | None = None,
     *,
     weighted_symbolic_initials: bool = False,
+    combined_symbolic_initials: bool = False,
 ) -> str:
     """Present one model view and target-specific witnesses, with explicit scope."""
     problem = PrefixFitProblem.model_validate(parent["problem"])
@@ -317,7 +326,10 @@ def request(
         problem, scientific_aliases=parent["scientific_aliases"]
     )
     assessment = _assessment(
-        parent, problem, weighted_symbolic_initials=weighted_symbolic_initials
+        parent,
+        problem,
+        weighted_symbolic_initials=weighted_symbolic_initials,
+        combined_symbolic_initials=combined_symbolic_initials,
     )
     packet = {
         "public_task": parent["public_brief"],
@@ -373,7 +385,11 @@ def request(
 
 
 def _normalize_displayed_citations(
-    parent: dict, reply: dict, *, weighted_symbolic_initials: bool = False
+    parent: dict,
+    reply: dict,
+    *,
+    weighted_symbolic_initials: bool = False,
+    combined_symbolic_initials: bool = False,
 ) -> tuple[dict, list]:
     """Resolve exact property labels only from this model's displayed evidence."""
     reply, changes = normalize_citations(reply)
@@ -390,6 +406,7 @@ def _normalize_displayed_citations(
             parent,
             PrefixFitProblem.model_validate(parent["problem"]),
             weighted_symbolic_initials=weighted_symbolic_initials,
+            combined_symbolic_initials=combined_symbolic_initials,
         ),
         parent,
     )
@@ -423,9 +440,13 @@ def _apply(
     *,
     normalize_parent_declarations: bool = False,
     weighted_symbolic_initials: bool = False,
+    combined_symbolic_initials: bool = False,
 ) -> dict:
     reply, changes = _normalize_displayed_citations(
-        parent, reply, weighted_symbolic_initials=weighted_symbolic_initials
+        parent,
+        reply,
+        weighted_symbolic_initials=weighted_symbolic_initials,
+        combined_symbolic_initials=combined_symbolic_initials,
     )
     options = {}
     if normalize_parent_declarations:
@@ -442,7 +463,10 @@ def _apply(
         return {**applied, "problem": None}
     problem = applied["problem"]
     assessment = _assessment(
-        parent, problem, weighted_symbolic_initials=weighted_symbolic_initials
+        parent,
+        problem,
+        weighted_symbolic_initials=weighted_symbolic_initials,
+        combined_symbolic_initials=combined_symbolic_initials,
     )
     applied["audit"].update(
         training_consistency=assessment,

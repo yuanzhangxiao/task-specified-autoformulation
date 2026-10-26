@@ -18,7 +18,7 @@ from urllib.request import urlopen
 from scripts import harmony_vocab
 
 REPO = Path(__file__).resolve().parents[1]
-PROTOCOL = "construction-search-policy-2"
+PROTOCOL = "construction-search-policy-3"
 EXECUTION_PROTOCOL = "construction-search-aces-execution-1"
 POLICIES = {"sequential_restart", "independent", "options_shallow"}
 PHASES = {"smoke", "full"}
@@ -44,6 +44,23 @@ MATCHED_SETTINGS = {
     "maximum_total_tokens": 98304,
     "temperature": 0.2,
     "reasoning_effort": "low",
+}
+PROFILES = {
+    "three-policy": {
+        "policies": POLICIES,
+        "options_count": 3,
+        "settings": MATCHED_SETTINGS,
+    },
+    "breadth-five": {
+        "policies": {"options_shallow"},
+        "options_count": 5,
+        "settings": {
+            **MATCHED_SETTINGS,
+            "maximum_requests": 5,
+            "max_output_tokens": 8192,
+            "maximum_total_tokens": 163840,
+        },
+    },
 }
 ENTRYPOINTS = (
     "scripts/construction_search_campaign.py",
@@ -126,16 +143,20 @@ def verify_inputs(root: Path) -> dict:
     if size not in MODELS:
         raise ValueError("unknown structural revision model size")
     model = MODELS[size]
+    profile = PROFILES.get(plan.get("profile"))
+    if profile is None:
+        raise ValueError("unknown construction search profile")
     expected = {
-        **MATCHED_SETTINGS,
+        **profile["settings"],
         "model": model["model"],
         "model_revision": model["revision"],
     }
     cases = plan.get("cases", [])
+    count = 6 * 3 * len(profile["policies"])
     if (
         plan.get("protocol") != PROTOCOL
-        or len(cases) != 54
-        or len({case["name"] for case in cases}) != 54
+        or len(cases) != count
+        or len({case["name"] for case in cases}) != count
         or any(case.get("case_id") != case["name"] for case in cases)
         or len({case.get("parent_id") for case in cases}) != 6
         or any(
@@ -144,17 +165,21 @@ def verify_inputs(root: Path) -> dict:
                 for case in cases
                 if case.get("parent_id") == parent
             }
-            != {(seed, policy) for seed in (0, 1, 2) for policy in POLICIES}
+            != {(seed, policy) for seed in (0, 1, 2) for policy in profile["policies"]}
             for parent in {case.get("parent_id") for case in cases}
         )
         or any(plan.get("settings", {}).get(k) != v for k, v in expected.items())
+        or plan.get("required_options_in_first_call") != profile["options_count"]
+        or plan.get("maximum_options_in_first_call") != profile["options_count"]
+        or plan.get("maximum_calls_per_episode") != expected["maximum_requests"]
+        or set(plan.get("policies", [])) != profile["policies"]
         or plan.get("automatic_followup") is not False
         or plan.get("test_data_opened") is not False
         or type(plan.get("optimizer_calls")) is not int
         or plan["optimizer_calls"] != 0
     ):
         raise ValueError(
-            "requires six saved cases, three seeds, three policies, three calls "
+            "requires six saved cases, three seeds, exact profile policies/budgets "
             "and no fitting"
         )
     return plan
@@ -218,8 +243,13 @@ def execution_identity(plan: dict, image_sha256: str, snapshot: dict) -> dict:
     """Freeze asset/source identity and explicitly record unequal GPU resources."""
     size = plan["model_size"]
     model = MODELS[size]
+    settings = PROFILES[plan["profile"]]["settings"]
+    cases, smoke_cases = len(plan["cases"]), len(smoke_case_ids(plan))
+    calls = settings["maximum_requests"]
     return {
         "protocol": EXECUTION_PROTOCOL,
+        "profile": plan["profile"],
+        "required_options_in_first_call": plan["required_options_in_first_call"],
         "plan_sha256": plan["artifact_sha256"],
         "model_size": size,
         "model": model["model"],
@@ -234,16 +264,16 @@ def execution_identity(plan: dict, image_sha256: str, snapshot: dict) -> dict:
         ),
         "entrypoint_sha256": {name: file_hash(REPO / name) for name in ENTRYPOINTS},
         "served_context_tokens": 32768,
-        "maximum_output_tokens": 8192,
+        "maximum_output_tokens": settings["max_output_tokens"],
         "tensor_parallel_size": model["gpus"],
         "maximum_sequences": 1,
         "gpu_memory_utilization": 0.90,
-        "generation_settings": MATCHED_SETTINGS,
-        "maximum_cases": 54,
-        "maximum_generation_requests": 162,
-        "maximum_charged_tokens": 54 * 98304,
-        "smoke_maximum_cases": 3,
-        "smoke_maximum_generation_requests": 9,
+        "generation_settings": settings,
+        "maximum_cases": cases,
+        "maximum_generation_requests": cases * calls,
+        "maximum_charged_tokens": cases * settings["maximum_total_tokens"],
+        "smoke_maximum_cases": smoke_cases,
+        "smoke_maximum_generation_requests": smoke_cases * calls,
         "worker_seconds": 12600,
         "scheduler_walltime_seconds": 14400,
         "cpus_per_task": model["cpus"],
@@ -504,9 +534,18 @@ def submit(root: Path, phase: str = "smoke", wave: str = "wave1") -> dict:
             "phase": phase,
             "wave": wave,
             "job": job,
-            "maximum_cases": 3 if phase == "smoke" else 54,
-            "maximum_generation_requests": 9 if phase == "smoke" else 162,
-            "campaign_maximum_generation_requests": 162,
+            "profile": plan["profile"],
+            "maximum_cases": execution["smoke_maximum_cases"]
+            if phase == "smoke"
+            else execution["maximum_cases"],
+            "maximum_generation_requests": execution[
+                "smoke_maximum_generation_requests"
+            ]
+            if phase == "smoke"
+            else execution["maximum_generation_requests"],
+            "campaign_maximum_generation_requests": execution[
+                "maximum_generation_requests"
+            ],
             "budget_reset": False,
             "automatic_followup": False,
         }
