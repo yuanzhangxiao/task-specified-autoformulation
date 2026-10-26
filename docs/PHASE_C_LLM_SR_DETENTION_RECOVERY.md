@@ -2,6 +2,15 @@
 
 Date: 2026-10-25. This is a separate, opt-in numerical-control experiment.
 
+## Completed recovery and next experiment
+
+The returned recovery completed all six tasks and all endpoint diagnoses. Three
+blocked Model 15 starts entered optimization but exhausted their search budgets;
+Model 14 remained blocked by one coordinate. The new seven-task continuation,
+exact reduced-coordinate comparison, and more informative stationarity decisions
+are described in [the continuation protocol](PHASE_C_LLM_SR_DETENTION_CONTINUATION.md).
+The sections below preserve the original recovery design.
+
 ## Returned evidence
 
 The first detention refit campaign recorded ten tasks. All six tasks that
