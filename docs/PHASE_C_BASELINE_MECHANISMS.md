@@ -1,7 +1,9 @@
 # Phase C external baselines: public mechanism tests
 
 Protocol: `phase-c-baseline-mechanisms-1`. Status: **run on js2 on 2026-10-22
-at the user's request, before review** (results below). The LLM-SR
+at the user's request, before review** (results below). LLM-SR's expression
+form is added in a second root, `phase-c-baseline-mechanisms-v2`, which
+assesses every other method's picks again; not yet run. The LLM-SR
 transcriptions are still `proposed_pending_review`; a change after review is a
 new protocol version in a new root, reported beside this one. Since the user's
 decision of 2026-10-22, the transcriptions also set the test score of the
@@ -41,6 +43,7 @@ Each method's development pick, the model the frozen test evaluation scores:
 | LLM-ODE (description prompt) | `phase-c-llm-ode-hosted-120b-v1` | the sealed system, as an ODE |
 | LLM-ODE (published prompt) | `phase-c-llm-ode-published-prompt-hosted-120b-v1` | the same |
 | LLM-SR | `phase-c-llm-sr-hosted-120b-v1` | a reviewed ODE transcription of its program (below) |
+| LLM-SR, expression form | `phase-c-llm-sr-expression-hosted-120b-v1-reseal` | the sealed system, as an ODE: one expression of the current values per target, read as written ([PHASE_C_LLM_SR.md](PHASE_C_LLM_SR.md)) |
 
 **Grammar.** Each baseline's model is read with the external-baseline grammar
 it was selected under (`expressions.parser.baseline_parser`): numpy and SymPy
@@ -61,7 +64,9 @@ rerun. LLM-SR's look-ahead rule applies: a pick flagged as reading later rows
 is LLM-SR's failure (decided 2026-10-15). Current failures: SINDy CSTR (both
 seeds), PySR T2 easy seed 1, T2 hard seed 1 and coupled detention seed 0
 (timeouts), LLM-SR task 5 (T2 easy seed 1, look-ahead). D3 and both LLM-ODE
-campaigns completed every task.
+campaigns completed every task. LLM-SR's expression form has five
+(`rollout_failed`): T1 easy seed 1, T1 hard seed 0, T2 easy both seeds and
+T2 hard seed 1.
 
 ## Which baselines could introduce a latent state
 
@@ -72,6 +77,7 @@ sentence, and only one could act on it. Checked against the logged prompts:
 |---|---|---|
 | D3 | the whole public prompt, including section C's "Latent states may be introduced when scientifically useful" | No. Its own format asks for one equation per listed state and says "Do not add other states", as upstream's code skeleton fixes the state list. |
 | LLM-SR | sections A and B, ending "Latent states may be introduced subject to Section C" (section C withheld) | Yes, in effect: its function receives whole columns, so a program can carry state through a row recursion. 11 of 15 picks do. |
+| LLM-SR, expression form | the same sections A and B | No: a sample is evaluated only if its body is one expression of the current values. |
 | LLM-ODE, description prompt | the same sections A and B | No: a reply is one right-hand side per observed variable, `x_0 … x_n`. |
 | LLM-ODE, published prompt | no task text (as released) | No. |
 | SINDy, PySR | none | No: libraries over the observed channels. |
@@ -256,7 +262,8 @@ python scripts/assess_phase_c_baseline_mechanisms.py prepare \
   --release RELEASE --construction-config configs/phase_c_construction_v1.json \
   --root ROOT --classical CLASSICAL_RUN --d3 D3_RUN --llm-ode LLM_ODE_RUN \
   --llm-ode-published-prompt LLM_ODE_PUBLISHED_RUN \
-  --llm-sr LLM_SR_RUN --llm-sr-transcriptions configs/phase_c_llm_sr_transcriptions_v1.json
+  --llm-sr LLM_SR_RUN --llm-sr-transcriptions configs/phase_c_llm_sr_transcriptions_v1.json \
+  --llm-sr-expression LLM_SR_EXPRESSION_RUN
 python scripts/assess_phase_c_baseline_mechanisms.py run --root ROOT --workers 8
 python scripts/assess_phase_c_baseline_mechanisms.py report --root ROOT
 ```
@@ -272,8 +279,12 @@ bash scripts/jetstream/run_phase_c_baseline_mechanisms.sh 12
 ```
 
 It prepares in the foreground, then assesses detached, 12 rows at a time, into
-`~/af/runs/phase-c-baseline-mechanisms-v1` (`runner.log`, `SUMMARY.md`,
-`summary.json`). It refuses to start beside another live run, as the rollouts'
+`~/af/runs/phase-c-baseline-mechanisms-v2` (`runner.log`, `SUMMARY.md`,
+`summary.json`), reading LLM-SR's expression form from its reseal. The first
+root, `phase-c-baseline-mechanisms-v1`, ran from `951e793` without the
+expression form. A dry prepare on js2 on 2026-10-27, in a temporary root,
+froze 112 rows, the first root's 96 identically, so their assessments should
+repeat. It refuses to start beside another live run, as the rollouts'
 wall-clock limits assume their own CPUs. On a laptop, 12 rows took 11 s.
 
 ## Aggregation

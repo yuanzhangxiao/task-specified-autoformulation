@@ -391,6 +391,28 @@ def test_d3_and_llm_ode_rows(tmp_path):
     assert row["model"]["parameters"] == {}
 
 
+def test_llm_sr_expression_rows_are_read_as_written(tmp_path):
+    """The expression form seals an ODE, so it needs no transcription."""
+    cells = {NAME: coupled_cell()}
+    system = candidate({"h_down": "inflow_down / area_down - 0.1 * h_down"})
+    run, _ = campaign(
+        tmp_path,
+        "complete",
+        "llm_sr",
+        {"candidate": system.model_dump(mode="json"), "parameters": {}},
+    )
+    (row,) = mechanisms.campaign_rows("llm_sr_expression", run, cells)
+    assert row["row_id"] == f"llm_sr_expression:{NAME}:0"
+    assert row["model"]["semantics"] == "continuous_time"
+    assert row["model"]["grammar"] == "baseline"
+    assert "transcription" not in row["model"]
+    run, _ = campaign(
+        tmp_path / "program", "complete", "llm_sr", {"programs": {"h_down": {}}}
+    )
+    with pytest.raises(ValueError, match="is a program"):
+        mechanisms.campaign_rows("llm_sr_expression", run, cells)
+
+
 def test_failures_count_and_infrastructure_stops_are_rerun(tmp_path):
     cells = {NAME: coupled_cell()}
     run, _ = campaign(tmp_path / "a", "rollout_failed", "llm_sr")

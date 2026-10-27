@@ -19,6 +19,8 @@ One adapter per method:
 * LLM-SR: its picks are programs. A reviewed transcription into an ODE, with
   hidden states for the history a program reads (``llm_sr_transcriptions``),
   stands in for each pick, bound to its exact program text and coefficients.
+* LLM-SR's expression form: each pick is one expression of the present per
+  target, sealed as an ODE, so it is read as written, as LLM-ODE's is.
 
 Every model is read with the external-baseline grammar it was selected under.
 A run that failed has no model: its predicates stay unresolved and it confirms
@@ -64,6 +66,7 @@ METHODS = {
     "llm_ode": "llm_ode",
     "llm_ode_published_prompt": "llm_ode",
     "llm_sr": "llm_sr",
+    "llm_sr_expression": "llm_sr_expression",
 }
 
 #: Outcomes of the service, not the method. Such a task is rerun, never
@@ -273,6 +276,13 @@ def llm_sr_model(
     )
 
 
+def llm_sr_expression_model(selection: BaselineDevelopmentResult, cell: dict) -> dict:
+    """LLM-SR's expression form: its sealed ODE, read as written."""
+    if "programs" in selection.selection_payload:
+        raise ValueError("an LLM-SR expression pick is a program")
+    return llm_ode_model(selection, cell)
+
+
 def campaign_rows(
     method: str,
     run: Path,
@@ -337,6 +347,8 @@ def campaign_rows(
             model = d3_model(selection, cell)
         elif METHODS[method] == "llm_ode":
             model = llm_ode_model(selection, cell)
+        elif METHODS[method] == "llm_sr_expression":
+            model = llm_sr_expression_model(selection, cell)
         else:
             model = llm_sr_model(selection, cell, index, reviewed)
         rows.append(_ready(row, sources, model))
@@ -371,7 +383,9 @@ def prepare(
     rows: list[dict] = []
     if "sindy" in sources:
         rows.extend(classical_rows(sources["sindy"], cells))
-    for method in ("d3", "llm_ode", "llm_ode_published_prompt", "llm_sr"):
+    for method in (
+        "d3", "llm_ode", "llm_ode_published_prompt", "llm_sr", "llm_sr_expression"
+    ):
         if method in sources:
             rows.extend(campaign_rows(method, sources[method], cells, reviewed))
     identities = [r["row_id"] for r in rows]

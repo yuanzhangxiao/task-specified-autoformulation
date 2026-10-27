@@ -7,10 +7,12 @@
 #   WORKERS  rows assessed at once (default 12)
 #
 # Reads the frozen release, the SINDy/PySR, D3, LLM-ODE and LLM-SR runs under
-# ~/af/runs, and the LLM-SR transcriptions in this checkout. Development data
-# only; no model is called and nothing is fitted. Writes to
-# ~/af/runs/phase-c-baseline-mechanisms-v1. Rerunning is safe: the plan is
-# sealed, and an assessed row is reused. See docs/PHASE_C_BASELINE_MECHANISMS.md.
+# ~/af/runs (LLM-SR's expression form from its reseal), and the LLM-SR
+# transcriptions in this checkout. Development data only; no model is called
+# and nothing is fitted. Writes to ~/af/runs/phase-c-baseline-mechanisms-v2
+# (v1, without the expression form, ran from 951e793). Rerunning is safe: the
+# plan is sealed, and an assessed row is reused. See
+# docs/PHASE_C_BASELINE_MECHANISMS.md.
 
 set -euo pipefail
 
@@ -21,7 +23,7 @@ readonly self="${repo}/scripts/jetstream/run_phase_c_baseline_mechanisms.sh"
 readonly py="${AF_HOME}/venv/bin/python"
 readonly release="${AF_HOME}/release/phase-c-public-v2"
 readonly runs="${AF_HOME}/runs"
-readonly root="${runs}/phase-c-baseline-mechanisms-v1"
+readonly root="${runs}/phase-c-baseline-mechanisms-v2"
 
 worker() {  # workers: runs in the foreground
   echo "started $(date -u +%FT%TZ): $1 rows at a time"
@@ -58,7 +60,7 @@ for pid in "${runs}"/*/pid; do
 done
 for run in phase-c-classical-v1 phase-c-d3-hosted-120b-v2 \
   phase-c-llm-ode-hosted-120b-v1 phase-c-llm-ode-published-prompt-hosted-120b-v1 \
-  phase-c-llm-sr-hosted-120b-v1; do
+  phase-c-llm-sr-hosted-120b-v1 phase-c-llm-sr-expression-hosted-120b-v1-reseal; do
   [[ -d "${runs}/${run}" ]] || { echo "missing run ${runs}/${run}" >&2; exit 2; }
 done
 
@@ -77,7 +79,8 @@ fi
   --llm-ode "${runs}/phase-c-llm-ode-hosted-120b-v1" \
   --llm-ode-published-prompt "${runs}/phase-c-llm-ode-published-prompt-hosted-120b-v1" \
   --llm-sr "${runs}/phase-c-llm-sr-hosted-120b-v1" \
-  --llm-sr-transcriptions configs/phase_c_llm_sr_transcriptions_v1.json
+  --llm-sr-transcriptions configs/phase_c_llm_sr_transcriptions_v1.json \
+  --llm-sr-expression "${runs}/phase-c-llm-sr-expression-hosted-120b-v1-reseal"
 git rev-parse HEAD >"${root}/source_commit"
 
 nohup setsid bash "${self}" --worker "${workers}" >>"${root}/runner.log" 2>&1 </dev/null &

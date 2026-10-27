@@ -39,6 +39,8 @@ def main() -> None:
     prepare.add_argument("--llm-ode-published-prompt", type=Path)
     prepare.add_argument("--llm-sr", type=Path)
     prepare.add_argument("--llm-sr-transcriptions", type=Path)
+    prepare.add_argument("--llm-sr-expression", type=Path,
+                         help="the LLM-SR expression-form run")
     run = commands.add_parser("run", help="assess frozen rows")
     run.add_argument("--root", type=Path, required=True)
     run.add_argument("--index", type=int, action="append",
@@ -58,6 +60,7 @@ def main() -> None:
                 ("llm_ode", args.llm_ode),
                 ("llm_ode_published_prompt", args.llm_ode_published_prompt),
                 ("llm_sr", args.llm_sr),
+                ("llm_sr_expression", args.llm_sr_expression),
             )
             if path is not None
         }
