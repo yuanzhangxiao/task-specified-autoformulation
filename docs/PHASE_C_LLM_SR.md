@@ -346,16 +346,28 @@ Plans:
     Fixed on 2026-10-27: a training trajectory past the limit is named as
     failed, "(over 60 s)". A validation rollout past the limit still ends its
     task; none has met one.
-  - A plan refuses to resume under changed code. Proposed, not yet run:
-    copy the 22 finished searches into a new root,
-    `phase-c-llm-sr-expression-hosted-120b-v1-reseal`, frozen at the fixed
-    checkout, and seal every task there. No search runs again and no request
-    is sent. The fifteen sealed tasks must seal identically; task 6 seals with
-    the fix.
+  - **Resealed on js2 on 2026-10-27, 18:10Z to 18:15Z, from checkout
+    `9a46a4c`,** in a new root, `phase-c-llm-sr-expression-hosted-120b-v1-reseal`,
+    since a plan refuses to resume under changed code. The 22 finished
+    searches were copied in, so no search ran again and no request was sent.
+    The fifteen tasks sealed before sealed identically: every result and
+    selection record matches, apart from the hashes that bind the plan. Task 6
+    sealed complete, with validation error 0.737; its training rollout fails
+    on train_011 and train_015, both past 60 s. All 16 tasks now have final
+    outcomes: 11 complete and 5 `rollout_failed`, none stopped by the service.
+    (The report's `status` reads "pending" whenever a task is not complete, as
+    the program run's does; `not_started` is 0.) The aggregate stays
+    +infinity: T2 hard's seed 1 failed, so that case's median is +infinity
+    too. The reseal root is the run's record from here on; the first root is
+    kept as it was.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1.json phase-c-llm-sr-expression-hosted-120b-v1 22
+# The reseal, from a checkout at 9a46a4c: the finished searches, then every seal.
+old=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1 new=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-reseal
+for i in $(seq 0 15); do mkdir -p $new/results/$i; cp -a $old/results/$i/llmsr-* $new/results/$i/; done
+bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1.json phase-c-llm-sr-expression-hosted-120b-v1-reseal 4
 ```
 
 ## Settings
