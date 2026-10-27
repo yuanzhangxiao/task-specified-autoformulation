@@ -130,13 +130,38 @@ def search(
     objective_multiplier: float | None = None,
     poor_fit: stationary.Policy | None = None,
     reject_invalid_trials: bool = False,
+    lazy_jacobian: bool = False,
 ):
     """Joint or projected TRF; optionally shrink after unusable numerical trials.
 
     Only numerical nonfiniteness is rejectable, and only after a finite starting
     evaluation. TRF receives an infinite residual and no Jacobian for that trial;
     deadlines, domain violations and other errors still terminate the attempt.
+    The opt-in lazy path separates residual trials from accepted-point Jacobians;
+    projected profiles do not yet support that contract.
     """
+    if lazy_jacobian:
+        from autoformalism.fitting.lazy_rollout_search import search as lazy_search
+
+        return lazy_search(
+            oracle,
+            start,
+            deadline,
+            checkpoint,
+            calls=calls,
+            target=target,
+            profile=profile,
+            acceptable=acceptable,
+            telemetry=telemetry,
+            optimizer_scaling=optimizer_scaling,
+            record_steps=record_steps,
+            record_full_steps=record_full_steps,
+            scaling_policy=scaling_policy,
+            normalized_objective=normalized_objective,
+            objective_multiplier=objective_multiplier,
+            poor_fit=poor_fit,
+            reject_invalid_trials=reject_invalid_trials,
+        )
     if optimizer_scaling not in {"jacobian", "fixed_coordinates", "guarded_relative"}:
         raise ValueError("unknown optimizer scaling")
     if record_full_steps and not record_steps:
