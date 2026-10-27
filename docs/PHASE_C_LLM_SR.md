@@ -307,6 +307,51 @@ Plans:
   searches, all at once, took 1.5 to 4 days each (106 to 278 samples an hour);
   if the expression form keeps its smoke pace advantage, this run takes one to
   two days. It runs as `phase-c-llm-sr-expression-hosted-120b-v1`.
+  - **Ran on js2 from 2026-10-25 11:46Z to 2026-10-27 06:33Z, from checkout
+    `6aacfc2`.** All 22 searches finished, in 38 to 43 hours each (230 to 265
+    samples an hour): 220,000 samples. The hosted service turned away 1,739
+    requests, each retried after a pause, so no sample was lost: 1,361 "429
+    Too Many Requests" (the gateway's parallel slots were full), 331 "502 Bad
+    Gateway", 46 refused connections and one "500". The form refused 8,271
+    samples (3.8%): 5,775 were not an expression of the current values, and
+    2,496 had more than one statement.
+  - 15 of 16 tasks sealed. Five are `rollout_failed`: their systems do not
+    complete a validation rollout (T1 easy seed 1, T1 hard seed 0, T2 easy
+    both seeds, T2 hard seed 1). The other ten are complete, with validation
+    errors 0.00012 and 0.00014 (detention, independent), 0.057 and 0.065
+    (detention, coupled), 1.47 and 10.4 (alien), 0.67 (CSTR seed 0, whose
+    training rollout fails on train_012 and train_015), and three runaways:
+    1.3e21 (CSTR seed 1), 5.3e30 (T1 hard seed 1) and 1.8e118 (T1 easy
+    seed 0).
+  - Aggregated as decided (each case's median over its two seeds, failures at
+    +infinity, then the median over the eight cases), validation gives
+    +infinity, since every Dalla Man case has a failed seed. The four finite
+    case medians are 0.00013, 0.061, 5.9 and 6.5e20. The program form's picks,
+    scored as ODEs, give 0.167.
+  - The test path's Radau retry (decision 6 in
+    [PHASE_C_BASELINE_MECHANISMS.md](PHASE_C_BASELINE_MECHANISMS.md)) would
+    not change the five failures. Checked read-only on js2: each fails on at
+    least one validation trajectory with RK45 and again with Radau, within
+    2 s, either because the step size falls below floating-point spacing or
+    because its own equation gives a non-finite value.
+  - Task 6 (T2 hard, seed 0) did not seal, through a harness bug. Checked
+    read-only on js2 while it was idle, its system rolls out on validation
+    (error 0.737) and on 14 of its 16 training trajectories, in 0.1 s each.
+    On train_011 and train_015, RK45 does not finish in 900 s, and Radau
+    fails in 0.4 s, its step size below floating-point spacing; the smoke
+    rerun's pick failed on the same two. The simulator raises when a rollout
+    passes its 60 s limit rather than failing it, and the training rollout let
+    that end the task. Under the rule decided on 2026-10-23 this is a failed
+    training rollout: the task seals complete and names those trajectories.
+    Fixed on 2026-10-27: a training trajectory past the limit is named as
+    failed, "(over 60 s)". A validation rollout past the limit still ends its
+    task; none has met one.
+  - A plan refuses to resume under changed code. Proposed, not yet run:
+    copy the 22 finished searches into a new root,
+    `phase-c-llm-sr-expression-hosted-120b-v1-reseal`, frozen at the fixed
+    checkout, and seal every task there. No search runs again and no request
+    is sent. The fifteen sealed tasks must seal identically; task 6 seals with
+    the fix.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3

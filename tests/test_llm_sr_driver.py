@@ -799,6 +799,29 @@ def test_an_equation_whose_training_rollout_fails_seals_naming_the_trajectory(
     assert outcome["training_rollout_failure"] == "the training rollout failed on b"
 
 
+def test_a_training_trajectory_past_the_time_limit_has_failed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """As in the full expression run's task 6, whose seal the timeout ended."""
+
+    def times_out_on_b(equations, context, train, split, *, seconds):
+        if "b" in {trajectory.trajectory_id for trajectory in split.trajectories}:
+            raise TimeoutError("fitting wall-clock limit reached")
+        return 0.25
+
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    outcome = _run(
+        search, directory=tmp_path / "slow", development=_development(),
+        score_rollout=times_out_on_b,
+    )
+    assert outcome["status"] == "complete"
+    assert outcome["development_rollout_error"] == 0.25
+    assert outcome["training_rollout_error"] is None
+    assert outcome["training_rollout_failure"] == (
+        "the training rollout failed on b (over 60 s)"
+    )
+
+
 def test_without_a_program_rollout_a_failed_training_rollout_also_seals(
     monkeypatch, tmp_path: Path
 ) -> None:

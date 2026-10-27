@@ -530,20 +530,23 @@ def _training_rollout(
     The training rollout neither selects nor scores LLM-SR's pick, so when it
     fails the task still seals and the test rollout decides, as for every
     method (decided by the user on 2026-10-23). The failure names each
-    training trajectory that fails on its own.
+    training trajectory that fails on its own. A trajectory that runs past the
+    time limit has failed too: the simulator raises then rather than failing.
     """
-    error = score_rollout(equations, context, train, train, seconds=seconds)
+    try:
+        error = score_rollout(equations, context, train, train, seconds=seconds)
+    except TimeoutError:
+        error = None
     if error is not None:
         return error, None
-    failed = [
-        trajectory.trajectory_id
-        for trajectory in train.trajectories
-        if score_rollout(
-            equations, context, train, replace(train, trajectories=(trajectory,)),
-            seconds=seconds,
-        )
-        is None
-    ]
+    failed: list[str] = []
+    for trajectory in train.trajectories:
+        one = replace(train, trajectories=(trajectory,))
+        try:
+            if score_rollout(equations, context, train, one, seconds=seconds) is None:
+                failed.append(trajectory.trajectory_id)
+        except TimeoutError:
+            failed.append(f"{trajectory.trajectory_id} (over {seconds:g} s)")
     if not failed:
         return None, "the training rollout failed"
     return None, f"the training rollout failed on {', '.join(failed)}"
