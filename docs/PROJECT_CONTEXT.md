@@ -2,6 +2,14 @@
 
 ## Five-option construction pilot
 
+Returned v3 smoke: both arms emitted five options without operational failures.
+Recorded eligibility was 0/9 patches for 20B and 2/8 for 120B; both accepted
+120B models have independent equation-audit concerns. One is a missed affine
+identity under common zero forcing, the other an explicitly claimed exchange
+with incoherent signs. Citation-only rejection and lost branch parameters also
+hid useful proposals. Full expansion is deferred pending focused proof and
+bookkeeping corrections; see the returned-results section in the runbook below.
+
 The v2 smoke operationally passed and returned the required three alternatives,
 but one accepted 120B candidate retained a missed shared-map/readout conflict.
 V3 combines those exact initial constraints while preserving genuinely free

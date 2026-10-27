@@ -2,6 +2,14 @@
 
 ## Five-option construction pilot
 
+The returned v3 smoke exposed a remaining proof boundary: nonlinear forcing
+must not automatically hide affine dependence on states when trajectories share
+qualified identical inputs. The next bounded correction should start with exact
+zero forcing and domain checks. Proposed bookkeeping work separates parent
+conflicts from unassessed trials and retains branch dependencies through explicit
+edits to the stored intended patch. These corrections are not yet implemented;
+full expansion is deferred. See the returned-results audit in the runbook below.
+
 The v2 smoke operationally passed and returned the required three alternatives,
 but one accepted 120B candidate retained a missed shared-map/readout conflict.
 V3 combines those exact initial constraints while preserving genuinely free

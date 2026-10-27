@@ -6,6 +6,70 @@ v2 smoke. It preserves saved experiments and does not launch fitting or open
 held-out data. The purpose is to find useful construction strategies; the new
 budget is explicitly larger than the earlier three-call budget.
 
+## Returned v3 smoke: operations passed; scientific corrections needed
+
+The 26 October return contains one completed P00-r1 / seed-0 episode per arm,
+with 17 full-roster episodes unstarted per arm. Both jobs completed normally;
+all nine calls returned HTTP 200 / stop with complete usage. Frozen-runtime
+replay and 194 operational/integrity assertions passed. Both proposers returned
+the required five initial options. No fitting, adoption or test access occurred.
+
+| Proposer | Initial eligible | Repair eligible | All candidate patches | Calls | Observed tokens |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 20B | 0/5 | 0/4 | 9 | 5 | 93,168 |
+| 120B | 2/5 | 0/3 | 8 | 4 | 73,335 |
+
+Eligibility retains deferred checks. Independent equation inspection identified
+problems in both recorded eligible 120B candidates:
+
+- Saturating only the meal input, `V*m/(K+m)` with `K>0`, does not break the
+  affine state-trajectory identity on three authenticated trajectories whose
+  inputs are identically zero. Their actual equations reduce to
+  `G'=-(A+X), I'=a*G-b*I, X'=c*I-d*X, A'=kappa, U=A+X`.
+  The initial weighted relation cancels exactly, but recorded insulin violates
+  its preserved relation by 6,783 times the numerical guard. The proof concerns
+  exact reproduction, not a lower bound on achievable approximate NMSE. The
+  current checker defers before conditioning on common forcing; a bounded
+  correction should establish state affinity after qualified input substitution,
+  retaining explicit denominator/domain checks.
+- A new tissue-glucose compartment receives `J=a*G-b*T`, but the same `+J`
+  also enters plasma. This conflicts with the proposer's stated internal
+  exchange interpretation and the public requirement for coherent balance signs.
+  Free `T(0)` legitimately expands the initial family. Matching terms are not
+  universally invalid; the runtime must not infer transfer intent from names
+  or silently flip signs.
+
+Two offline reconstructions expose interface friction without changing the run
+totals. A 20B free-initial gut state becomes eligible with deferred checks after
+changing only an unsupported evidence label to `public_task`. Its repair packet
+had shown parent conflicts even though the trial was not yet scientifically
+assessed. A 120B repair proposes the genuine interaction `U=A+k_U*I*Z`, but omits
+two parameter declarations from its earlier option. Restoring only those exact
+records also yields eligibility with deferred checks. Both declarations were
+already displayed in the actual repair request. Neither reconstruction proves
+scientific validity or fitting success, and neither was adopted.
+
+The 20B repair sequence repeats `A'=0` three times while retaining fixed
+`A(0)=Uii(0)=1`. Compact history lists edited components but does not show that
+literal repeated RHS. Recommended next work is to distinguish parent diagnostics
+from unassessed trial diagnostics, show concise actual equation changes, and
+support explicit branch-local edits to a stored intended patch with deterministic
+dependency retention and a visible resulting diff. Siblings must remain separate,
+and composed patches must pass the complete validation boundary before acceptance.
+
+Defer the remaining full-roster episodes until these focused corrections are
+replayed offline and checked in a bounded live confirmation. These single-episode
+smokes cannot establish five-option superiority or rank model sizes.
+
+Local audit: `output/construction-search-v3-smoke-20261026/REPORT.html`, including
+all 17 candidate patches, all nine requests/responses, exact replay receipts,
+counterfactuals and an independently reproduced zero-input witness. Source
+archive SHA-256s are
+`7d039fc7b81a3c9901534c5eb28b3767b9a014bb0e5fb24150410cf6748fc1fb`
+(20B) and
+`599667a5e8880beb622c6a55f6f9ca215a1228779248260cc2eb2d2e97ab50be`
+(120B). Generated reports and response data are not committed.
+
 ## Why the checker changes
 
 Both v2 smoke arms completed operationally, and both returned exactly three
@@ -132,6 +196,10 @@ blocked 120B case. They are estimates for constructed histories, not a guarantee
 about future live replies; the server's per-request measurement remains required.
 
 ## ACES commands
+
+**After the v3 smoke audit above, full submission is deferred pending corrections.**
+The commands below document the frozen launch interface; they are not a
+recommendation to submit the remaining episodes now.
 
 Upload the delivered bundle to group scratch, extract it, and set `AF_CODE` to
 that exact absolute directory. Its wrapper checks the bundle manifest before
