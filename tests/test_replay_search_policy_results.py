@@ -322,3 +322,105 @@ def test_pinned_v2_smoke_replays_only_completed_subset(saved, tmp_path, monkeypa
 def test_unknown_source_version_fails_closed(saved):
     with pytest.raises(ValueError, match="unknown pinned source"):
         cli.load_source(saved, "20b", "invented")
+
+
+def test_v3_option_count_is_five_without_reinterpreting_patch(parent):  # noqa: F811
+    raw = patch()
+    record = {
+        "status": "responded",
+        "raw_response": {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "options": [option(index, raw) for index in range(5)],
+                            }
+                        )
+                    }
+                }
+            ]
+        },
+    }
+    attempt = {"mode": "options", "parse_error": None}
+    assert cli._historical_patches(record, attempt, "v3-smoke") == [raw] * 5
+    with pytest.raises(ValueError, match="option count"):
+        cli._historical_patches(record, attempt, "v2-smoke")
+
+
+def test_v3_smoke_authenticates_five_patches_and_explicit_proof_flag(
+    saved, tmp_path, monkeypatch
+):
+    """The prospective proof is pinned; old raw patches never become deltas."""
+    plan = sealed_read(saved / "plan.json")
+    plan.pop("artifact_sha256")
+    entry = plan["cases"][0]
+    plan["protocol"] = "construction-search-policy-3"
+    plan["cases"].append({**entry, "seed": 1, "case_id": "p__seed1__pending"})
+    plan_sha = content_hash(plan)
+    atomic_json(saved / "plan.json", {**plan, "artifact_sha256": plan_sha})
+    directory = saved / "results" / entry["case_id"]
+    path = next((directory / "calls").glob("*.json"))
+    record = json.loads(path.read_text())
+    record["raw_response"]["choices"][0]["message"]["content"] = json.dumps(
+        {
+            "options": [option(index, patch()) for index in range(5)],
+        }
+    )
+    atomic_json(path, record)
+    result_path = directory / "result.json"
+    result = json.loads(result_path.read_text())
+    old = result["candidates"][0]
+    result["candidates"] = [
+        {**old, "id": f"call0-option{index}", "option_index": index}
+        for index in range(5)
+    ]
+    result["candidate_count"] = 5
+    result["attempts"][0]["candidate_ids"] = [c["id"] for c in result["candidates"]]
+    atomic_json(result_path, result)
+    receipt = sealed_read(directory / "completion.json")
+    receipt.pop("artifact_sha256")
+    receipt["plan_sha256"] = plan_sha
+    receipt["calls_sha256"] = content_hash([record])
+    receipt["files"]["result.json"] = hashlib.sha256(
+        result_path.read_bytes()
+    ).hexdigest()
+    atomic_json(
+        directory / "completion.json",
+        {**receipt, "artifact_sha256": content_hash(receipt)},
+    )
+    monkeypatch.setitem(
+        cli.BREADTH_SMOKE_SOURCE_PINS,
+        "20b",
+        {
+            "plan_sha256": plan_sha,
+            "preserved_tree_sha256": content_hash(cli.tree_manifest(saved)),
+            "original_archive_sha256": "synthetic-five-options",
+        },
+    )
+    source = cli.load_source(saved, "20b", "v3-smoke")
+    assert len(source["candidates"]) == 5
+    assert source["option_counts"] == [{"case_id": entry["case_id"], "count": 5}]
+    seen = []
+    original_assess = cli.engine.assess_candidate
+
+    def assess(*args, **kwargs):
+        seen.append(kwargs.get("common_zero_forcing"))
+        return original_assess(*args, **kwargs)
+
+    monkeypatch.setattr(cli.engine, "assess_candidate", assess)
+    root = tmp_path / "five-recheck"
+    value = cli.replay({"20b": saved}, root, "v3-smoke", common_zero_forcing=True)
+    assert seen == [True] * 5
+    assert (
+        value["common_zero_forcing_policy"] == "certified-common-zero-forcing-affine-1"
+    )
+    assert "no branch-delta reinterpretation" in value["reply_interpretation"]
+    assert value["arms"]["20b"]["historical_batches_short_of_new_rule"] == 0
+    monkeypatch.setattr(cli.engine, "assess_candidate", forbidden)
+    assert (
+        cli.replay({"20b": saved}, root, "v3-smoke", common_zero_forcing=True) == value
+    )
+    with pytest.raises(ValueError, match=r"frozen|differs"):
+        cli.replay({"20b": saved}, root, "v3-smoke", common_zero_forcing=False)

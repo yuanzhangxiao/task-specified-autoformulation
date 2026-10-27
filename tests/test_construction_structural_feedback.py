@@ -246,6 +246,37 @@ def test_rank_one_and_deferred_checks_keep_distinct_interpretations():
     assert "Deferred checks do not certify" in shown["interpretation"]
 
 
+def test_certified_zero_input_guidance_is_conditional_and_preserves_certificate():
+    source = affine_problem(pin_root=True)
+    checked = affine_assess(
+        source,
+        affine_evidence(source, [[2, 3, 4], [1, 1, 2], [3, 4, 5]], z=[[2, 2, 2]] * 3),
+    )
+    certificate = {
+        "policy": "certified-common-zero-forcing-affine-1",
+        "channels": ["u"],
+        "interval": [0, 2],
+        "global_affinity_claim": False,
+    }
+    for conflict in checked["conflicts"]:
+        conflict["common_zero_forcing"] = deepcopy(certificate)
+        conflict["restricted_model_relations"] = {"x": "-k*x"}
+    original = deepcopy(checked)
+    shown = feedback.consistency_view(report(affine_family_consistency=checked))
+    view = shown["affine_family_consistency"]
+    assert len(view["certified_restriction_contexts"]) == 1
+    for conflict in view["conflicts"]:
+        context = view["certified_restriction_contexts"][
+            conflict["certified_restriction_context"]
+        ]
+        assert context["common_zero_forcing"] == certificate
+        assert context["restricted_model_relations"] == {"x": "-k*x"}
+        assert "does not break" in conflict["repair_feedback"]
+        assert "Memory states need not be zero" in conflict["repair_feedback"]
+        assert "only to the certified interval" in conflict["repair_feedback"]
+    assert checked == original
+
+
 def test_duplicate_declarations_get_specific_advice_without_editing_the_reply():
     reply = patch()
     reply["edits"] *= 33

@@ -184,18 +184,23 @@ def test_excessive_provider_charge_blocks_without_renewing_budget(search_roots):
     )
 
 
+@pytest.mark.parametrize("profile,count", [("breadth-five", 18), ("focused-retest", 3)])
 def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
-    structural_source, tmp_path, monkeypatch  # noqa: F811
+    structural_source,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    profile,
+    count,
 ):
     source, _, _ = structural_source
     runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
     monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
     monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
-    root = tmp_path / "breadth-five"
-    prepared_result = cli.prepare(source, root, "20b", "breadth-five")
-    assert prepared_result["maximum_generation_requests"] == 90
+    root = tmp_path / profile
+    prepared_result = cli.prepare(source, root, "20b", profile)
+    assert prepared_result["maximum_generation_requests"] == count * 5
     plan = cli.verify(root)
-    assert len(plan["cases"]) == 18
+    assert len(plan["cases"]) == count
     assert len(cli.smoke_case_ids(plan)) == 1
     assert plan["settings"]["maximum_requests"] == 5
     assert plan["settings"]["maximum_total_tokens"] == 163840
@@ -206,6 +211,21 @@ def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
     )
     assert plan["policies"] == ["options_shallow"]
     assert "FiveOptionsReply" in plan["schema_sha256"]
+    if profile == "focused-retest":
+        assert {row["parent_id"] for row in plan["cases"]} == {"parent_0"}
+        assert {row["seed"] for row in plan["cases"]} == {0, 1, 2}
+        assert plan["engine_options"] == {
+            "branch_delta": True,
+            "common_zero_forcing": True,
+        }
+        assert plan["branch_edit_policy"] == "explicit-branch-patch-delta-1"
+        assert plan["gate_policy"]["common_zero_forcing"] == (
+            "certified-common-zero-forcing-affine-1"
+        )
+        assert "BranchRepairReply" in plan["schema_sha256"]
+        assert plan["smoke_required_before_full"] is False
+    else:
+        assert "engine_options" not in plan
     smoke = cli.run(
         root, "http://127.0.0.1", transport=respond, token_transport=tokenizer
     )
@@ -231,8 +251,8 @@ def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
         token_transport=tokenizer,
     )
     assert full["status"] == "complete"
-    assert len(full["rows"]) == 18
-    assert full["profile"] == "breadth-five"
+    assert len(full["rows"]) == count
+    assert full["profile"] == profile
     assert (
         cli.run(
             root,
@@ -244,16 +264,142 @@ def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
         == full
     )
     before = (root / "plan.json").read_bytes()
-    with pytest.raises(ValueError, match=r"frozen|differs"):
+    with pytest.raises(ValueError, match=r"frozen|differ"):
         cli.prepare(source, root, "20b", "three-policy")
     assert (root / "plan.json").read_bytes() == before
 
 
 def test_unknown_profile_is_rejected_before_writing(
-    structural_source, tmp_path  # noqa: F811
+    structural_source,  # noqa: F811
+    tmp_path,
 ):
     source, _, _ = structural_source
     root = tmp_path / "unknown"
     with pytest.raises(ValueError, match="unknown construction search profile"):
         cli.prepare(source, root, "20b", "unlimited")
     assert not root.exists()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("branch_delta", False),
+        ("common_zero_forcing", False),
+        ("smoke_required_before_full", True),
+    ],
+)
+def test_focused_profile_rejects_flag_drift_before_cached_resume(
+    structural_source,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    source, _, _ = structural_source
+    root = tmp_path / "focused"
+    cli.prepare(source, root, "20b", "focused-retest")
+    before = (root / "plan.json").read_bytes()
+    monkeypatch.setitem(cli.PROFILES["focused-retest"], field, value)
+    with pytest.raises(ValueError, match=r"frozen|differ"):
+        cli.verify(root)
+    assert (root / "plan.json").read_bytes() == before
+
+
+def test_focused_branch_delta_followup_and_cache_replay_are_identical(
+    structural_source,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
+    source, _, _ = structural_source
+    runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
+    monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
+    monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
+    root = tmp_path / "focused-delta"
+    cli.prepare(source, root, "20b", "focused-retest")
+    schemas = []
+
+    def transport(url, body, timeout):
+        schema = body["response_format"]["json_schema"]["name"]
+        schemas.append(schema)
+        if schema == "FiveOptionsReply":
+            raw = revision()
+            raw["evidence_ids"] = ["unsupported_citation"]
+            return response(
+                {
+                    "options": [
+                        {
+                            "option_id": f"candidate_{index}",
+                            "affected_target": "Gp",
+                            "premise_changed": "Restore nonlinear coupling.",
+                            "patch": raw,
+                        }
+                        for index in range(5)
+                    ]
+                }
+            )
+        assert schema == "BranchRepairReply"
+        packet = json.loads(body["messages"][1]["content"])
+        ref = packet["repair_feedback"]["branch_reference"]
+        assert packet["repair_feedback"]["scientific_assessment"] == (
+            "trial_not_scientifically_assessed"
+        )
+        return response(
+            {
+                "mode": "delta",
+                **ref,
+                "patch": {"evidence_ids": revision()["evidence_ids"]},
+                "drop_actions": [],
+            }
+        )
+
+    result = cli.run(
+        root, "http://127.0.0.1", transport=transport, token_transport=tokenizer
+    )
+    assert schemas == ["FiveOptionsReply", "BranchRepairReply"]
+    assert result["smoke_complete"]
+    assert result["cost"]["physical_requests"] == 2
+    assert result["smoke_eligible_episodes"] == 1
+    candidate = json.loads(next((root / "results").glob("*/result.json")).read_text())[
+        "candidates"
+    ][-1]
+    assert candidate["submitted_reply"]["mode"] == "delta"
+    assert candidate["composed_patch"]["edits"] == revision()["edits"]
+    assert (
+        cli.run(
+            root, "http://127.0.0.1", transport=forbidden, token_transport=forbidden
+        )
+        == result
+    )
+
+
+def test_focused_full_can_start_without_smoke_but_is_only_three_episodes(
+    structural_source,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
+    source, _, _ = structural_source
+    runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
+    monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
+    monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
+    root = tmp_path / "direct-focused"
+    cli.prepare(source, root, "20b", "focused-retest")
+    result = cli.run(
+        root,
+        "http://127.0.0.1",
+        phase="full",
+        transport=respond,
+        token_transport=tokenizer,
+    )
+    assert result["status"] == "complete"
+    assert len(result["rows"]) == 3
+    assert result["cost"]["physical_requests"] == 3
+    assert (
+        cli.run(
+            root,
+            "http://127.0.0.1",
+            phase="full",
+            transport=forbidden,
+            token_transport=forbidden,
+        )
+        == result
+    )

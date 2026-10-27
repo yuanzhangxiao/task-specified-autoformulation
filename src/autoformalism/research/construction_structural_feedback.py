@@ -271,6 +271,36 @@ def _refine_affine_witnesses(view: dict, parent: dict) -> None:
             }
 
 
+def _factor_zero_restriction_context(view: dict) -> None:
+    """Show identical certificates/equations once without dropping any evidence."""
+    contexts, identifiers = {}, {}
+    fields = (
+        "common_zero_forcing",
+        "model_relations",
+        "restricted_model_relations",
+        "restricted_process_relations",
+    )
+    for conflict in view["conflicts"]:
+        if not conflict.get("common_zero_forcing"):
+            continue
+        payload = {key: conflict[key] for key in fields if key in conflict}
+        digest = content_hash(payload)
+        if digest not in identifiers:
+            identifier = f"zero_input_{len(identifiers)}"
+            identifiers[digest] = identifier
+            contexts[identifier] = {"sha256": digest, **payload}
+        for key in payload:
+            del conflict[key]
+        conflict["certified_restriction_context"] = identifiers[digest]
+    if contexts:
+        view["certified_restriction_contexts"] = contexts
+        view["restriction_context_note"] = (
+            "Each conflict's certified_restriction_context names the complete "
+            "input certificate and original/restricted equations below. Identical "
+            "context is displayed once; every target retains its own witness."
+        )
+
+
 def consistency_view(report: dict, parent: dict | None = None) -> dict:
     """Compact authenticated results without changing statuses or proof thresholds."""
     if report.get("feedback_protocol") == PROTOCOL:
@@ -364,6 +394,17 @@ def consistency_view(report: dict, parent: dict | None = None) -> dict:
             _refine_affine_witnesses(view, parent)
         for conflict in view["conflicts"]:
             conflict["repair_feedback"] = _identity_guidance(conflict["property"])
+            if conflict.get("common_zero_forcing"):
+                conflict["repair_feedback"] += (
+                    " On this witness interval, the certified supplied inputs "
+                    "listed in common_zero_forcing are identically zero. The "
+                    "restricted equations shown below remain affine in the "
+                    "generated states. A nonlinear input expression that vanishes "
+                    "there does not break the displayed trajectory identity. "
+                    "Memory states need not be zero. This restriction applies "
+                    "only to the certified interval, not all input schedules."
+                )
+        _factor_zero_restriction_context(view)
         result["affine_family_consistency"] = view
     result["repair_scope"] = _REPAIR_SCOPE
     result["interpretation"] = (

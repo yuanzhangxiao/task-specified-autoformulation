@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 
 from autoformalism.llm.staged_topology import DeferredCall, StagedModelSettings
+from autoformalism.research import construction_branch_patch as branch
 from autoformalism.research import construction_search_policy as engine
 from autoformalism.staged_topology import content_hash
 from scripts import structural_revision_campaign as base
@@ -109,7 +110,17 @@ class Client:
         }
 
 
-def run(parent, payloads, policy, *, seed=0, options_count=3, maximum_calls=3):
+def run(
+    parent,
+    payloads,
+    policy,
+    *,
+    seed=0,
+    options_count=3,
+    maximum_calls=3,
+    branch_delta=False,
+    common_zero_forcing=False,
+):
     client = Client(payloads)
     result = engine.run_episode(
         parent,
@@ -119,6 +130,8 @@ def run(parent, payloads, policy, *, seed=0, options_count=3, maximum_calls=3):
         seed=seed,
         options_count=options_count,
         maximum_calls=maximum_calls,
+        branch_delta=branch_delta,
+        common_zero_forcing=common_zero_forcing,
     )
     return result, client
 
@@ -586,3 +599,390 @@ def test_provider_truncation_is_unavailable_not_scientific_rejection(parent):
         row["diagnostic"]["code"] == "RESPONSE_SCHEMA_OR_AVAILABILITY"
         for row in result["candidates"]
     )
+
+
+def branch_reply(candidate, changes=None, *, mode="delta", **extra):
+    return {
+        "mode": mode,
+        **branch.reference(candidate),
+        "patch": None if mode == "withdraw" else changes or {},
+        **extra,
+    }
+
+
+def test_branch_delta_citation_only_preserves_trial_and_scopes_feedback(parent):
+    raw = patch(name="Z", evidence_ids=["unsupported_label"])
+    candidate = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    assert candidate["diagnostic"]["code"] == "UNKNOWN_EVIDENCE"
+    correction = branch_reply(candidate, {"evidence_ids": ["public_task"]})
+    result, client = run(
+        parent, [raw, correction], "sequential_restart", branch_delta=True
+    )
+    assert result["eligible_candidate_ids"] == ["call1-option0"]
+    child = result["candidates"][1]
+    assert child["composed_patch"]["new_states"] == raw["new_states"]
+    assert child["composed_patch"]["edits"] == raw["edits"]
+    assert child["submitted_reply"] == correction
+    packet = json.loads(client.calls[1]["user"])
+    assert packet["training_consistency"]["evidence_scope"] == "unchanged_parent_only"
+    assert (
+        packet["training_consistency"]["trial_assessment"]
+        == "trial_not_scientifically_assessed"
+    )
+    assert (
+        "citation metadata"
+        in packet["repair_feedback"]["guidance"]["specific_feedback"]
+    )
+    assert packet["repair_feedback"]["complete_intended_patch"] == raw
+    assert (
+        client.calls[1]["schema"] == engine.repair_reply_model(True).model_json_schema()
+    )
+    assert (
+        client.calls[0]["schema"] == engine.StructuralRevisionReply.model_json_schema()
+    )
+    assert all(call["system"] == engine.system_for(True) for call in client.calls)
+    assert "Every patch must contain all changes" not in engine.system_for(True)
+    assert not result["model_promoted"]
+    replay, replay_client = run(
+        parent, [raw, correction], "sequential_restart", branch_delta=True
+    )
+    assert replay == result and replay_client.calls == client.calls
+
+
+def test_branch_delta_retains_two_prior_parameters_on_nonlinear_repair(parent):
+    raw = patch(
+        "a*mem+b*X",
+        name="X",
+        new_parameters=[
+            {"name": "b", "role": "coefficient"},
+            {"name": "c", "role": "rate"},
+        ],
+    )
+    raw["new_states"][0]["rhs"] = "c*I-X"
+    candidate = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    assert candidate["diagnostic"]["code"] == "QUALIFIED_MODEL_DATA_CONFLICT"
+    correction = branch_reply(
+        candidate,
+        {
+            "edits": [
+                {"component": "q", "kind": "algebraic", "expression": "a*mem*Gp+b*I*X"}
+            ]
+        },
+    )
+    result, client = run(
+        parent, [raw, correction], "sequential_restart", branch_delta=True
+    )
+    child = result["candidates"][1]
+    assert child["status"] == "eligible"
+    assert child["composed_patch"]["new_parameters"] == raw["new_parameters"]
+    assert child["composed_patch"]["new_states"] == raw["new_states"]
+    assert child["omitted_previous_actions"] == []
+    packet = json.loads(client.calls[1]["user"])
+    literal = packet["attempted_repairs"][0]["literal_attempted_changes"]
+    assert literal["edits"][0]["expression"] == "a*mem+b*X"
+    assert literal["new_states"][0]["rhs"] == "c*I-X"
+    assert "description" not in literal["new_states"][0]
+    assert literal["new_states"][0]["initial"]["scope"] == "trajectory"
+    assert (
+        packet["training_consistency"]["trial_assessment"]
+        == "trial_has_qualified_conflict"
+    )
+
+
+def test_branch_delta_explicit_drop_still_runs_full_validation(parent):
+    raw = patch(
+        "a*mem+b*X", name="X", new_parameters=[{"name": "b", "role": "coefficient"}]
+    )
+    candidate = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    dropped = branch_reply(
+        candidate, drop_actions=[{"field": "new_parameters", "key": "b"}]
+    )
+    child = engine._assess_branch_reply(
+        parent,
+        dropped,
+        candidate,
+        common_zero_forcing=False,
+        candidate_id="call1-option0",
+    )
+    assert child["status"] == "rejected"
+    assert child["composed_patch"]["new_parameters"] == []
+    assert child["composed_patch"]["edits"] == raw["edits"]
+    assert child["diagnostic"]["code"] != "QUALIFIED_MODEL_DATA_CONFLICT"
+
+
+def test_branch_composition_rejection_retains_pending_patch_without_adoption(parent):
+    raw = patch("a*mem+X", name="X")
+    initial = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    wrong = branch_reply(
+        initial, {"evidence_ids": ["public_task"]}, base_candidate_id="sibling"
+    )
+    failed = engine._assess_branch_reply(
+        parent,
+        wrong,
+        initial,
+        common_zero_forcing=False,
+        candidate_id="call1-option0",
+        branch_id=initial["branch_id"],
+    )
+    assert failed["diagnostic"]["code"] == "BRANCH_PATCH_COMPOSITION"
+    assert failed["composed_patch"] == raw
+    fixed = branch_reply(failed, patch(), mode="replace")
+    result, _ = run(
+        parent, [raw, wrong, fixed], "sequential_restart", branch_delta=True
+    )
+    assert result["eligible_candidate_ids"] == ["call2-option0"]
+    assert result["candidates"][1]["problem"] is None
+
+
+def test_branch_withdraw_is_not_parent_acceptance(parent):
+    raw = patch("a*mem+X", name="X")
+    candidate = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    result, _ = run(
+        parent,
+        [raw, branch_reply(candidate, mode="withdraw")],
+        "sequential_restart",
+        branch_delta=True,
+    )
+    assert result["generation_calls"] == 2
+    assert result["candidates"][-1]["status"] == "withdrawn"
+    assert result["eligible_candidate_ids"] == []
+
+
+def test_branch_delta_is_not_interpreted_under_historical_contract(parent):
+    raw = patch("a*mem+X", name="X")
+    candidate = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    correction = branch_reply(candidate, patch(), mode="replace")
+    result, client = run(parent, [raw, correction, patch()], "sequential_restart")
+    assert result["candidates"][1]["status"] == "rejected"
+    assert "composed_patch" not in result["candidates"][1]
+    assert "branch_delta_policy" not in result
+    assert all(row["system"] == engine.SYSTEM for row in client.calls)
+
+
+def test_branch_cached_prefix_replay_preserves_composition(parent):
+    raw = patch(name="Z", evidence_ids=["unsupported_label"])
+    initial = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    corrected = branch_reply(initial, {"evidence_ids": ["public_task"]})
+    prefix = Client([raw])
+    with pytest.raises(DeferredCall):
+        engine.run_episode(
+            parent,
+            prefix,
+            StagedModelSettings(maximum_requests=3),
+            "sequential_restart",
+            branch_delta=True,
+        )
+    result, resumed = run(
+        parent, [raw, corrected], "sequential_restart", branch_delta=True
+    )
+    assert prefix.calls == resumed.calls
+    assert result["eligible_candidate_ids"] == ["call1-option0"]
+
+
+def test_common_zero_flag_reaches_request_citation_and_child_gates(parent, monkeypatch):
+    original = base._assessment
+    seen = []
+
+    def record(*args, **kwargs):
+        seen.append(kwargs.get("common_zero_forcing"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(base, "_assessment", record)
+    run(parent, [patch(), patch(), patch()], "independent", common_zero_forcing=True)
+    assert seen and all(seen)
+
+
+def test_options_branch_delta_never_merges_sibling_declarations(parent):
+    raws = [
+        patch("a*mem+" + "*".join([name] * (i + 1)), name=name)
+        for i, name in enumerate(("X", "Y", "Z"))
+    ]
+    candidates = [
+        engine.assess_candidate(
+            parent, raw, candidate_id=f"call0-option{i}", option_index=i
+        )
+        for i, raw in enumerate(raws)
+    ]
+    selected = engine._failed_branches(candidates, seed=3, maximum_repairs=2)
+    responses = [{"options": [option(i, raw) for i, raw in enumerate(raws)]}]
+    for candidate in selected:
+        name = candidate["raw_reply"]["new_states"][0]["name"]
+        responses.append(
+            branch_reply(
+                candidate,
+                {
+                    "edits": [
+                        {
+                            "component": "q",
+                            "kind": "algebraic",
+                            "expression": f"a*mem*Gp+{name}",
+                        }
+                    ]
+                },
+            )
+        )
+    result, client = run(
+        parent, responses, "options_shallow", seed=3, branch_delta=True
+    )
+    assert len(result["eligible_candidate_ids"]) == 2
+    for expected, actual, request in zip(
+        selected, result["candidates"][3:], client.calls[1:], strict=True
+    ):
+        assert actual["branch_id"] == expected["id"]
+        assert (
+            actual["composed_patch"]["new_states"]
+            == expected["raw_reply"]["new_states"]
+        )
+        packet = json.loads(request["user"])
+        assert packet["repair_feedback"]["branch_reference"] == branch.reference(
+            expected
+        )
+        assert packet["response_format"]["schema"] == "BranchRepairReply"
+    assert client.calls[0]["schema"] == engine.OptionsReply.model_json_schema()
+
+
+def test_branch_composed_conflicting_existing_parameter_role_rejected(parent):
+    raw = patch("a*mem+X", name="X")
+    initial = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    change = branch_reply(
+        initial, {"new_parameters": [{"name": "a", "role": "coefficient"}]}
+    )
+    result = engine._assess_branch_reply(
+        parent, change, initial, common_zero_forcing=False, candidate_id="call1-option0"
+    )
+    assert result["status"] == "rejected"
+    assert result["diagnostic"]["code"] == "DECLARATION_IDENTITY"
+    assert parent["problem"]["base_candidate"]["parameters"][0]["role"] == "rate"
+
+
+@pytest.mark.parametrize("failure", ["truncated", "unreadable", "provider"])
+def test_branch_unavailable_reply_preserves_pending_for_cached_next_delta(
+    parent, failure
+):
+    raw = patch(
+        "a*mem+b*X", name="X", new_parameters=[{"name": "b", "role": "coefficient"}]
+    )
+    preserved = {"id": "call1-option0", "composed_patch": raw}
+    correction = branch_reply(
+        preserved,
+        {
+            "edits": [
+                {"component": "q", "kind": "algebraic", "expression": "a*mem*Gp+b*X"}
+            ]
+        },
+    )
+
+    class FailedSecond(Client):
+        def call(self, **kwargs):
+            record = super().call(**kwargs)
+            if kwargs["attempt"] == 1:
+                if failure == "truncated":
+                    record["raw_response"]["choices"][0]["finish_reason"] = "length"
+                elif failure == "unreadable":
+                    record["raw_response"]["choices"][0]["message"]["content"] = (
+                        "not JSON"
+                    )
+                else:
+                    record["status"] = "failed"
+                    record["raw_response"] = {"error": "provider unavailable"}
+            return record
+
+    def episode():
+        client = FailedSecond([raw, {}, correction])
+        result = engine.run_episode(
+            parent,
+            client,
+            StagedModelSettings(maximum_requests=3),
+            "sequential_restart",
+            branch_delta=True,
+        )
+        return result, client
+
+    result, client = episode()
+    failed = result["candidates"][1]
+    assert failed["status"] == "unavailable"
+    assert failed["composed_patch"] == raw
+    assert (
+        failed["branch_composition"]["status"]
+        == "response_unavailable_pending_preserved"
+    )
+    assert (
+        failed["branch_composition"]["previous_pending_assessment"]
+        == "trial_has_qualified_conflict"
+    )
+    assert result["eligible_candidate_ids"] == ["call2-option0"]
+    packet = json.loads(client.calls[2]["user"])
+    assert packet["repair_feedback"]["complete_intended_patch"] == raw
+    assert packet["repair_feedback"]["branch_reference"] == branch.reference(preserved)
+    assert (
+        packet["repair_feedback"]["scientific_assessment"]
+        == "no_new_trial_composed_previous_pending_patch_kept"
+    )
+    assert (
+        result["candidates"][2]["composed_patch"]["new_parameters"]
+        == raw["new_parameters"]
+    )
+    replay, replay_client = episode()
+    assert replay == result and replay_client.calls == client.calls
+
+
+@pytest.mark.parametrize("citation_only", [True, False])
+def test_branch_packet_has_one_authoritative_repair_scope(parent, citation_only):
+    raw = patch(
+        "a*mem+X",
+        name="X",
+        evidence_ids=["invalid_label"] if citation_only else ["public_task"],
+    )
+    candidate = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    if not citation_only:
+        candidate["diagnostic"]["details"]["assessment"]["repair_contract"] = (
+            "Return a complete patch relative to current_model; "
+            "include every intended correction again."
+        )
+    before = deepcopy(candidate)
+    packet = json.loads(
+        engine.request(
+            parent,
+            "sequential_restart",
+            intended=candidate,
+            history=[candidate],
+            branch_delta=True,
+        )
+    )
+    scopes = []
+
+    def inspect(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"repair_scope", "repair_contract"}:
+                    scopes.append(child)
+                inspect(child)
+        elif isinstance(value, list):
+            for child in value:
+                inspect(child)
+        elif isinstance(value, str):
+            assert "include every intended correction again" not in value
+            assert "Return a complete patch relative" not in value
+
+    inspect(packet)
+    assert scopes and all("repair_feedback.instruction" in scope for scope in scopes)
+    assert packet["repair_feedback"]["complete_intended_patch"] == raw
+    assert candidate == before
+    historical = engine.request(parent, "sequential_restart", intended=candidate)
+    assert "Return a complete patch relative" in historical
+
+
+def test_branch_scope_rewrite_preserves_same_named_scientific_symbols(parent):
+    candidate = engine.assess_candidate(parent, patch("a*mem"))
+    relations = {"repair_scope": "k*x", "repair_contract": "-k*x"}
+    candidate["diagnostic"]["details"]["assessment"]["model_relations"] = relations
+    before = deepcopy(candidate)
+    packet = json.loads(
+        engine.request(
+            parent, "sequential_restart", intended=candidate, branch_delta=True
+        )
+    )
+    shown = packet["repair_feedback"]["diagnostic"]["details"]["assessment"]
+    assert shown["model_relations"] == relations
+    assert "BranchRepairReply" in shown["repair_scope"]
+    assert candidate == before

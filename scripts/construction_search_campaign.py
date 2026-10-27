@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checkpointed bounded construction search on six frozen parents."""
+"""Checkpointed bounded construction search on frozen parent profiles."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.research import construction_search_policy as engine
 from autoformalism.research.construction_affine_family_consistency import (
     COMBINED_SYMBOLIC_POLICY,
+    COMMON_ZERO_FORCING_POLICY,
 )
 from autoformalism.research.construction_structural_revision import (
     StructuralRevisionReply,
@@ -54,6 +55,16 @@ PROFILES = {
         "options_count": 5,
         "maximum_calls": 5,
         "max_output_tokens": 8192,
+    },
+    "focused-retest": {
+        "policies": ("options_shallow",),
+        "options_count": 5,
+        "maximum_calls": 5,
+        "max_output_tokens": 8192,
+        "parent_limit": 1,
+        "smoke_required_before_full": False,
+        "branch_delta": True,
+        "common_zero_forcing": True,
     },
 }
 
@@ -85,6 +96,7 @@ def _engine_options(plan: dict) -> dict:
     return {
         "options_count": plan["required_options_in_first_call"],
         "maximum_calls": plan["maximum_calls_per_episode"],
+        **plan.get("engine_options", {}),
     }
 
 
@@ -93,6 +105,7 @@ ENTRYPOINTS = tuple(
         (
             *base.ENTRYPOINTS,
             "scripts/construction_search_campaign.py",
+            "src/autoformalism/research/construction_branch_patch.py",
             "scripts/submit_construction_search_aces.py",
             "scripts/hpc/run_construction_search_aces.sh",
             "scripts/hpc/start_construction_search_aces.sh",
@@ -112,8 +125,10 @@ def _roster(selected: dict, size: str, profile: str) -> list[dict]:
     """Rotate policy order across seed bundles; match order between model arms."""
     rows = []
     allowed_policies = profile_for(profile)["policies"]
+    parents = sorted(selected["parents"].items())
+    parents = parents[: profile_for(profile).get("parent_limit")]
     for seed in SEEDS:
-        for position, (name, parent) in enumerate(sorted(selected["parents"].items())):
+        for position, (name, parent) in enumerate(parents):
             offset = (position + seed) % len(allowed_policies)
             policies = allowed_policies[offset:] + allowed_policies[:offset]
             for policy in policies:
@@ -150,6 +165,10 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
     spec = profile_for(profile)
     settings = settings_for(size, profile).model_dump(mode="json")
     options_model = engine.options_reply_model(spec["options_count"])
+    branch_delta = spec.get("branch_delta", False)
+    reply_models = (StructuralRevisionReply, options_model)
+    if branch_delta:
+        reply_models += (engine.repair_reply_model(branch_delta=True),)
     common = {
         "protocol": PROTOCOL,
         "profile": profile,
@@ -162,10 +181,9 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
         },
         "policies": list(spec["policies"]),
         "seeds": list(SEEDS),
-        "system_sha256": content_hash(engine.SYSTEM),
+        "system_sha256": content_hash(engine.system_for(branch_delta=branch_delta)),
         "schema_sha256": {
-            cls.__name__: content_hash(cls.model_json_schema())
-            for cls in (StructuralRevisionReply, options_model)
+            cls.__name__: content_hash(cls.model_json_schema()) for cls in reply_models
         },
         "gate_policy": {
             **base.old.V4_POLICIES,
@@ -189,6 +207,18 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
         "solver_rollouts": 0,
         "model_promotion": False,
     }
+    if branch_delta:
+        common["engine_options"] = {
+            "branch_delta": True,
+            "common_zero_forcing": spec["common_zero_forcing"],
+        }
+        common["branch_edit_policy"] = engine.BRANCH_DELTA_POLICY
+        common["gate_policy"]["common_zero_forcing"] = COMMON_ZERO_FORCING_POLICY
+        common["smoke_required_before_full"] = spec["smoke_required_before_full"]
+        common["selection"] = (
+            "first sorted frozen T2-easy parent (P00-r1); three fixed seeds; "
+            "targeted proof/bookkeeping retest, no NMSE-based selection"
+        )
     return {
         **common,
         "comparison_sha256": content_hash(common),
@@ -372,10 +402,14 @@ def run(
         raise ValueError("live generation requires verified serving identity")
     selected = sealed_read(root / "selected_sources.json")
     smoke = set(smoke_case_ids(plan))
-    if phase == "full" and any(
-        _completion(root, e, plan, base._parent(selected, e["parent_id"])) is None
-        for e in plan["cases"]
-        if e["case_id"] in smoke
+    if (
+        phase == "full"
+        and plan.get("smoke_required_before_full", True)
+        and any(
+            _completion(root, e, plan, base._parent(selected, e["parent_id"])) is None
+            for e in plan["cases"]
+            if e["case_id"] in smoke
+        )
     ):
         raise ValueError("complete and inspect the smoke phase before full submission")
     stopped, deadline = False, time.monotonic() + seconds
@@ -688,6 +722,17 @@ def preview(root: Path) -> dict:
     count = plan["required_options_in_first_call"]
     calls = plan["maximum_calls_per_episode"]
     options_model = engine.options_reply_model(count)
+    branch_delta = plan.get("engine_options", {}).get("branch_delta", False)
+    common_zero_forcing = plan.get("engine_options", {}).get(
+        "common_zero_forcing", False
+    )
+    system = engine.system_for(branch_delta=branch_delta)
+    patch_rule = (
+        "Initial options change the unchanged parent. Branch repairs explicitly "
+        "choose delta, replacement or withdrawal against the identified stored patch. "
+        if branch_delta
+        else "Each reply contains changes relative to the unchanged parent. "
+    )
     parts = [
         "<!doctype html><meta charset='utf-8'>"
         "<title>Construction search prompts</title>",
@@ -698,21 +743,22 @@ def preview(root: Path) -> dict:
         f"<h1>Construction search: {html.escape(plan['profile'])}</h1>"
         f"<p><mark>Required:</mark> exactly {count} alternatives in the initial "
         f"options call, followed by at most {calls - 1} distinct failed-branch "
-        "repairs. Each reply contains changes relative to the unchanged parent. "
-        "Safe declaration normalization and combined symbolic initial/readout "
+        "repairs. "
+        + patch_rule
+        + "Safe declaration normalization and combined symbolic initial/readout "
         "checks preserve scientific constraints. No fitting or test-data access.</p>",
         f"<p>Each model arm has {len(plan['cases'])} episodes, capped at "
         f"{calls * len(plan['cases'])} calls and "
         f"{plan['settings']['maximum_total_tokens'] * len(plan['cases'])} "
         "charged tokens. The first parent's seed-zero subset is included, not "
         "additional. " + html.escape(plan["budget_interpretation"]) + ".</p>",
-        "<h2>System instruction</h2><pre>" + html.escape(engine.SYSTEM) + "</pre>",
+        "<h2>System instruction</h2><pre>" + html.escape(system) + "</pre>",
     ]
-    for name in sorted(selected["parents"]):
+    for name in sorted({entry["parent_id"] for entry in plan["cases"]}):
         parent = base._parent(selected, name)
         for policy in plan["policies"]:
             packet = {
-                "system": engine.SYSTEM,
+                "system": system,
                 "user": engine.request(
                     parent,
                     policy,
@@ -742,19 +788,35 @@ def preview(root: Path) -> dict:
         "expected_observable_effect": "Unchanged",
         "evidence_ids": ["training_consistency"],
     }
-    first = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    first = engine.assess_candidate(
+        parent,
+        raw,
+        candidate_id="call0-option0",
+        common_zero_forcing=common_zero_forcing,
+    )
     history = [first]
-    examples = [("Repair with full intended patch", False)]
+    examples = [
+        (
+            "Repair with explicit stored-branch edit mode"
+            if branch_delta
+            else "Repair with full intended patch",
+            False,
+        )
+    ]
     if "sequential_restart" in plan["policies"]:
         examples.append(("Fresh branch after the unchanged failure repeats", True))
     for title, fresh in examples:
         if fresh:
             second = engine.assess_candidate(
-                parent, raw, candidate_id="call1-option0", call_index=1
+                parent,
+                raw,
+                candidate_id="call1-option0",
+                call_index=1,
+                common_zero_forcing=common_zero_forcing,
             )
             history.append(engine.annotate_repetition(second, history))
         packet = {
-            "system": engine.SYSTEM,
+            "system": system,
             "user": engine.request(
                 parent,
                 "sequential_restart"
@@ -764,6 +826,13 @@ def preview(root: Path) -> dict:
                 intended=history[-1],
                 fresh=fresh,
                 **_engine_options(plan),
+            ),
+            "response_schema": strict_provider_schema(
+                (
+                    StructuralRevisionReply
+                    if fresh
+                    else engine.repair_reply_model(branch_delta=branch_delta)
+                ).model_json_schema()
             ),
         }
         file = "restart-example.json" if fresh else "repair-example.json"
@@ -775,7 +844,10 @@ def preview(root: Path) -> dict:
             + html.escape(json.dumps(json.loads(packet["user"]), indent=2))
             + "</pre>"
         )
-    for schema in (StructuralRevisionReply, options_model):
+    schemas = [StructuralRevisionReply, options_model]
+    if plan.get("engine_options", {}).get("branch_delta", False):
+        schemas.append(engine.repair_reply_model(branch_delta=True))
+    for schema in schemas:
         parts.append(
             f"<details><summary>{schema.__name__} response schema</summary><pre>"
             + html.escape(

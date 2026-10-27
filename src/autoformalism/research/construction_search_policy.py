@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import Field, ValidationError
 
 from autoformalism.llm.staged_topology import visible_response
+from autoformalism.research import construction_branch_patch as branch_patch
 from autoformalism.research import construction_structural_feedback as feedback
 from autoformalism.research.construction_repair_identity import (
     diagnostic_identity,
@@ -61,6 +62,56 @@ explanation of the same model. A formatting correction can be useful even when i
 equations are unchanged; the runtime validates it before judging repetition.
 """.strip()
 )
+BRANCH_DELTA_POLICY = branch_patch.POLICY
+BRANCH_SYSTEM = """Revise this ODE/algebraic model using the public task and
+training evidence.
+Choose a coherent scientific repair. You may replace complete right-hand sides,
+add/remove latent states and algebraic processes, and edit eligible latent
+initializers. Include the complete RHS and typed initializer of each new state.
+Dependencies are derived from expressions. Keep public targets/output mappings,
+recorded initial identities, supplied data, existing parameter roles/domains and
+the fixed observation-window policy unchanged. Never use held-out data.
+A qualified trial model-data conflict prevents acceptance; explaining or removing
+its evidence does not fix it. Deferred checks do not prove scientific adequacy.
+Parent evidence and trial evidence are labeled separately. An interface rejection
+can leave the trial scientifically unassessed; it does not establish that the
+trial retains the parent's conflict.
+
+Follow the current request's response format. Initial alternatives and fresh
+restarts are complete parent-relative patches, not complete models. A later
+selected-branch repair uses the BranchRepairReply envelope: mode, base_candidate_id,
+base_patch_sha256, patch and drop_actions. In mode=delta, omitted pending actions
+and parameter declarations are kept exactly. A supplied entry replaces the whole
+entry with that identity; equations supply complete RHSs, not incremental terms.
+Use drop_actions to discard a pending intention explicitly; this does not remove
+an existing parent component. Use mode=replace to supply a new complete patch, or
+mode=withdraw to stop pursuing this branch. Neither action accepts the parent.
+Only the displayed branch is composed; siblings are never merged. Its complete
+composed patch must pass every check to become eligible; no model is adopted here.
+A citation-only correction can progress an unassessed trial without changing
+its equations.
+
+Reuse existing parameter names when sharing is intended. New shared dynamics
+parameters go in new_parameters; initializer-local coefficients belong only in
+that initializer's parameters. A new state's RHS and initial rule belong in
+new_states, not also in edits/initialization_edits. Initializers may use authorized
+shared values, trajectory roots, or acyclic maps; never choose the prefix window.
+Private-symbol renaming does not create a different scientific repair. Compare
+the literal attempted equations and initializers, and change a failed scientific
+premise rather than only repeating its explanation. A complete replacement may
+use decision=requires_wider_revision with no actions for unsupported changes;
+that outcome does not accept any model. Do not request fitting here.
+""".strip()
+
+
+def system_for(branch_delta: bool = False) -> str:
+    """Preserve historical system text unless branch composition is enabled."""
+    return BRANCH_SYSTEM if branch_delta else SYSTEM
+
+
+def repair_reply_model(branch_delta: bool = False) -> type[StrictSchema]:
+    """Schema of a selected-branch follow-up, not initial/fresh alternatives."""
+    return branch_patch.BranchRepairReply if branch_delta else StructuralRevisionReply
 
 
 class RepairOption(StrictSchema):
@@ -139,6 +190,7 @@ def assess_candidate(
     branch_id: str | None = None,
     premise: str = "",
     affected_target: str = "",
+    common_zero_forcing: bool = False,
 ) -> dict:
     """Normalize and validate one detached candidate before judging repetition.
 
@@ -173,6 +225,7 @@ def assess_candidate(
             raw,
             weighted_symbolic_initials=True,
             combined_symbolic_initials=True,
+            common_zero_forcing=common_zero_forcing,
         )
         static = apply_structural_revision(
             PrefixFitProblem.model_validate(parent["problem"]),
@@ -200,6 +253,7 @@ def assess_candidate(
             normalize_parent_declarations=True,
             weighted_symbolic_initials=True,
             combined_symbolic_initials=True,
+            common_zero_forcing=common_zero_forcing,
         )
         result.update(status="eligible", audit=applied["audit"])
     except (ValueError, TypeError, KeyError) as exc:
@@ -296,7 +350,7 @@ def _targets(value: Any) -> list[str]:
     return sorted(found)[:12]
 
 
-def ledger_view(history: list[dict]) -> list[dict]:
+def ledger_view(history: list[dict], *, literal: bool = False) -> list[dict]:
     """Keep all bounded attempts visible without copying replies or witnesses."""
     rows = []
     for candidate in history:
@@ -326,7 +380,30 @@ def ledger_view(history: list[dict]) -> list[dict]:
                 "not_installed": True,
             }
         )
+        if literal:
+            rows[-1]["literal_attempted_changes"] = branch_patch.literal_changes(
+                candidate
+            )
+            rows[-1]["scientific_assessment"] = _assessment_scope(candidate)
     return rows
+
+
+def _assessment_scope(candidate: dict) -> str:
+    """Distinguish certified trial conflict from interface-stage nonassessment."""
+    if candidate["status"] == "eligible":
+        return "no_current_certified_conflict_deferred_checks_remain"
+    if candidate["status"] == "withdrawn":
+        return "withdrawn_not_accepted"
+    if (candidate.get("branch_composition") or {}).get("status") in {
+        "rejected_composition",
+        "response_unavailable_pending_preserved",
+    }:
+        return "no_new_trial_composed_previous_pending_patch_kept"
+    if (candidate.get("diagnostic") or {}).get(
+        "code"
+    ) == "QUALIFIED_MODEL_DATA_CONFLICT":
+        return "trial_has_qualified_conflict"
+    return "trial_not_scientifically_assessed"
 
 
 def request(
@@ -339,6 +416,8 @@ def request(
     batch: bool = False,
     options_count: int = 3,
     maximum_calls: int = 3,
+    branch_delta: bool = False,
+    common_zero_forcing: bool = False,
 ) -> str:
     """Build one exact request; history never silently becomes an adopted model."""
     if policy not in POLICIES:
@@ -392,6 +471,7 @@ def request(
             repair,
             weighted_symbolic_initials=True,
             combined_symbolic_initials=True,
+            common_zero_forcing=common_zero_forcing,
         )
     )
     packet["editing_scope"]["patch_semantics"] = (
@@ -436,8 +516,126 @@ def request(
         "no_fitting_or_promotion": True,
     }
     if history:
-        packet["attempted_repairs"] = ledger_view(history)
+        packet["attempted_repairs"] = ledger_view(history, literal=branch_delta)
+    if branch_delta:
+        _branch_request_view(packet, intended if not fresh else None, batch=batch)
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
+
+
+def _branch_request_view(packet: dict, intended: dict | None, *, batch: bool) -> None:
+    """Present same-branch composition and accurately scoped evidence prospectively."""
+    packet["editing_scope"]["patch_semantics"] = (
+        "Initial/fresh replies contain complete parent-relative patches. A selected "
+        "branch follow-up explicitly edits its pending patch; the parent remains "
+        "unchanged. Every composed patch is fully validated before acceptance."
+    )
+    if intended is None or batch:
+        packet["response_format"] = (
+            "complete_parent_relative_options"
+            if batch
+            else "complete_parent_relative_patch"
+        )
+        return
+    ref = branch_patch.reference(intended)
+    repair = packet["repair_feedback"]
+    repair["complete_intended_patch"] = branch_patch.complete_patch(intended)
+    repair["branch_reference"] = ref
+    repair["branch_provenance"] = intended.get(
+        "branch_composition",
+        {"mode": "initial_parent_relative_patch", "branch_id": intended["branch_id"]},
+    )
+    repair["instruction"] = (
+        "Repair this selected pending patch with mode=delta; omitted actions are "
+        "retained exactly, including parameter declarations. Supply whole changed "
+        "entries keyed by component/name/state. Empty lists do not clear anything. "
+        'Use drop_actions=[{"field":"new_parameters","key":"parameter_name"}] '
+        "to remove a "
+        "pending parameter intentionally, or analogous fields for other actions. "
+        "Do not simultaneously drop and upsert the same key. Use mode=replace "
+        "for a whole replacement, or mode=withdraw with patch=null to abandon it. "
+        "Echo branch_reference exactly. Nothing is adopted or merged with siblings."
+    )
+    repair["guidance"]["repair_scope"] = repair["instruction"]
+    if (intended.get("diagnostic") or {}).get("code") == "UNKNOWN_EVIDENCE":
+        repair["guidance"]["specific_feedback"] = (
+            "This rejection concerns citation metadata. The trial's scientific "
+            "checks have not run. Use the displayed allowed_evidence_ids; a delta "
+            "patch containing only evidence_ids preserves every proposed equation, "
+            "state, initializer and parameter. The complete trial will then be checked."
+        )
+    repair["scientific_assessment"] = _assessment_scope(intended)
+    existing = packet.get("training_consistency", {})
+    has_trial_evidence = bool(
+        (intended.get("diagnostic") or {}).get("details", {}).get("assessment")
+    )
+    packet["training_consistency"] = {
+        "evidence_scope": "qualified_trial_evidence"
+        if has_trial_evidence
+        else "unchanged_parent_only",
+        "trial_assessment": _assessment_scope(intended),
+        "evidence": existing,
+        "instruction": "Parent conflicts are not assertions about an unassessed "
+        "trial. Trial conflicts, when present, are under repair_feedback.diagnostic.",
+    }
+    packet["search_instruction"]["instruction"] = (
+        "Return one BranchRepairReply for the displayed selected branch. "
+        "Follow its delta/replace/withdraw contract."
+    )
+    packet["response_format"] = {"schema": "BranchRepairReply", **ref}
+    for section in (
+        existing,
+        repair["guidance"],
+        repair["diagnostic"].get("details", {}).get("assessment", {}),
+    ):
+        _branch_scope_references(section)
+
+
+def _branch_scope_references(value: Any) -> None:
+    """Rewrite known instruction fields, never arbitrary scientific symbol keys."""
+    if isinstance(value, dict):
+        for key in value:
+            if key in {"repair_scope", "repair_contract"}:
+                value[key] = (
+                    "Follow repair_feedback.instruction: reply with BranchRepairReply "
+                    "using delta, replace or withdraw. The runtime validates the "
+                    "complete composed patch; do not restate retained actions."
+                )
+
+
+def _assess_branch_reply(
+    parent: dict, raw: Any, intended: dict, *, common_zero_forcing: bool, **metadata
+) -> dict:
+    """Keep submitted delta, composed full intention and its complete validation."""
+    try:
+        composed, provenance = branch_patch.compose(raw, intended)
+    except ValueError as exc:
+        result = assess_candidate(
+            parent, None, common_zero_forcing=common_zero_forcing, **metadata
+        )
+        result.update(
+            submitted_reply=deepcopy(raw),
+            composed_patch=branch_patch.complete_patch(intended),
+            branch_composition={
+                "policy": BRANCH_DELTA_POLICY,
+                "status": "rejected_composition",
+                **branch_patch.reference(intended),
+                "previous_pending_assessment": _assessment_scope(intended),
+            },
+            diagnostic={"code": "BRANCH_PATCH_COMPOSITION", "message": str(exc)[:4000]},
+        )
+        result["diagnostic_sha256"] = diagnostic_identity(result["diagnostic"])
+        return result
+    result = assess_candidate(
+        parent, composed, common_zero_forcing=common_zero_forcing, **metadata
+    )
+    result.update(
+        submitted_reply=deepcopy(raw),
+        composed_patch=composed,
+        branch_composition=provenance,
+    )
+    if composed is None:
+        result.update(status="withdrawn", diagnostic=None, diagnostic_sha256=None)
+    return result
 
 
 def _options(raw: Any, options_count: int = 3) -> list[tuple[Any, dict]]:
@@ -507,6 +705,8 @@ def run_episode(
     seed: int = 0,
     options_count: int = 3,
     maximum_calls: int = 3,
+    branch_delta: bool = False,
+    common_zero_forcing: bool = False,
 ) -> dict:
     """Run bounded cached calls with policy-specific, deterministic routing."""
     if policy not in POLICIES:
@@ -526,8 +726,11 @@ def run_episode(
                 break
             intended = selected_branches[call_index - 1]
         visible_history = [] if policy == "independent" else candidates
+        branch_repair = (
+            branch_delta and intended is not None and not fresh and not batch
+        )
         record = client.call(
-            system=SYSTEM,
+            system=system_for(branch_delta),
             user=request(
                 parent,
                 policy,
@@ -537,10 +740,12 @@ def run_episode(
                 batch=batch,
                 options_count=options_count,
                 maximum_calls=maximum_calls,
+                branch_delta=branch_delta,
+                common_zero_forcing=common_zero_forcing,
             ),
             response_model=options_reply_model(options_count)
             if batch
-            else StructuralRevisionReply,
+            else repair_reply_model(branch_repair),
             step="search_policy",
             attempt=call_index,
         )
@@ -559,15 +764,29 @@ def run_episode(
         new_candidates = []
         for option_index, (payload, metadata) in enumerate(options):
             candidate_id = f"call{call_index}-option{option_index}"
-            candidate = assess_candidate(
-                parent,
-                payload,
-                candidate_id=candidate_id,
-                call_index=call_index,
-                option_index=option_index,
-                branch_id=intended["branch_id"] if intended else candidate_id,
-                premise=metadata.get("premise_changed", ""),
-                affected_target=metadata.get("affected_target", ""),
+            metadata_fields = {
+                "candidate_id": candidate_id,
+                "call_index": call_index,
+                "option_index": option_index,
+                "branch_id": intended["branch_id"] if intended else candidate_id,
+                "premise": metadata.get("premise_changed", ""),
+                "affected_target": metadata.get("affected_target", ""),
+            }
+            candidate = (
+                _assess_branch_reply(
+                    parent,
+                    payload,
+                    intended,
+                    common_zero_forcing=common_zero_forcing,
+                    **metadata_fields,
+                )
+                if branch_repair
+                else assess_candidate(
+                    parent,
+                    payload,
+                    common_zero_forcing=common_zero_forcing,
+                    **metadata_fields,
+                )
             )
             if metadata.get("wrapper_error"):
                 candidate["diagnostic"] = {
@@ -585,6 +804,11 @@ def run_episode(
                     candidate["diagnostic"]
                 )
                 candidate["option_wrapper_valid"] = False
+                if branch_repair:
+                    candidate["branch_composition"].update(
+                        status="response_unavailable_pending_preserved",
+                        failure_code=candidate["diagnostic"]["code"],
+                    )
             else:
                 candidate["option_wrapper_valid"] = True
             candidate = annotate_repetition(candidate, candidates)
@@ -612,7 +836,7 @@ def run_episode(
             )
         elif policy == "sequential_restart":
             latest = new_candidates[0]
-            if latest["status"] in {"eligible", "requires_wider_revision"}:
+            if latest["status"] in {"eligible", "requires_wider_revision", "withdrawn"}:
                 break
             intended = latest
             fresh = latest["repeated_unchanged_failure"]
@@ -621,7 +845,7 @@ def run_episode(
         # Independent breadth deliberately uses its declared call budget even if
         # an earlier one is eligible, to measure useful diversity under its cap.
     eligible = [row["id"] for row in candidates if row["status"] == "eligible"]
-    return {
+    result = {
         "protocol": PROTOCOL,
         "policy": policy,
         "options_count": options_count,
@@ -630,7 +854,7 @@ def run_episode(
         "candidates": candidates,
         "attempts": attempts,
         "eligible_candidate_ids": eligible,
-        "attempted_repairs": ledger_view(candidates),
+        "attempted_repairs": ledger_view(candidates, literal=branch_delta),
         "generation_calls": len(attempts),
         "candidate_count": len(candidates),
         "parent_unchanged": True,
@@ -641,3 +865,8 @@ def run_episode(
         "interpretation": "Eligible means no currently certified conflict under finite "
         "checks; deferred evidence is not scientific or numerical adequacy.",
     }
+    if branch_delta:
+        result["branch_delta_policy"] = BRANCH_DELTA_POLICY
+    if common_zero_forcing:
+        result["common_zero_forcing"] = True
+    return result

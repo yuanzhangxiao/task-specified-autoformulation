@@ -48,11 +48,13 @@ MATCHED_SETTINGS = {
 PROFILES = {
     "three-policy": {
         "policies": POLICIES,
+        "parents": 6,
         "options_count": 3,
         "settings": MATCHED_SETTINGS,
     },
     "breadth-five": {
         "policies": {"options_shallow"},
+        "parents": 6,
         "options_count": 5,
         "settings": {
             **MATCHED_SETTINGS,
@@ -61,6 +63,12 @@ PROFILES = {
             "maximum_total_tokens": 163840,
         },
     },
+}
+PROFILES["focused-retest"] = {
+    **PROFILES["breadth-five"],
+    "parents": 1,
+    "smoke_required_before_full": False,
+    "engine_options": {"branch_delta": True, "common_zero_forcing": True},
 }
 ENTRYPOINTS = (
     "scripts/construction_search_campaign.py",
@@ -152,13 +160,13 @@ def verify_inputs(root: Path) -> dict:
         "model_revision": model["revision"],
     }
     cases = plan.get("cases", [])
-    count = 6 * 3 * len(profile["policies"])
+    count = profile["parents"] * 3 * len(profile["policies"])
     if (
         plan.get("protocol") != PROTOCOL
         or len(cases) != count
         or len({case["name"] for case in cases}) != count
         or any(case.get("case_id") != case["name"] for case in cases)
-        or len({case.get("parent_id") for case in cases}) != 6
+        or len({case.get("parent_id") for case in cases}) != profile["parents"]
         or any(
             {
                 (case.get("seed"), case.get("policy"))
@@ -168,6 +176,9 @@ def verify_inputs(root: Path) -> dict:
             != {(seed, policy) for seed in (0, 1, 2) for policy in profile["policies"]}
             for parent in {case.get("parent_id") for case in cases}
         )
+        or plan.get("engine_options", {}) != profile.get("engine_options", {})
+        or plan.get("smoke_required_before_full", True)
+        is not profile.get("smoke_required_before_full", True)
         or any(plan.get("settings", {}).get(k) != v for k, v in expected.items())
         or plan.get("required_options_in_first_call") != profile["options_count"]
         or plan.get("maximum_options_in_first_call") != profile["options_count"]
@@ -179,7 +190,8 @@ def verify_inputs(root: Path) -> dict:
         or plan["optimizer_calls"] != 0
     ):
         raise ValueError(
-            "requires six saved cases, three seeds, exact profile policies/budgets "
+            "requires six saved cases (or one focused parent), three seeds, "
+            "exact profile policies/budgets "
             "and no fitting"
         )
     return plan
@@ -489,7 +501,11 @@ def submit(root: Path, phase: str = "smoke", wave: str = "wave1") -> dict:
             )
         _check_prior_submissions(root)
         summary = _campaign_report(root)
-        if phase == "full" and summary.get("smoke_complete") is not True:
+        if (
+            phase == "full"
+            and plan.get("smoke_required_before_full", True)
+            and summary.get("smoke_complete") is not True
+        ):
             raise ValueError(
                 "smoke phase is not complete; inspect results before full submission"
             )

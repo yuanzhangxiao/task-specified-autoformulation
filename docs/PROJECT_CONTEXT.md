@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Focused common-input and branch repair retest
+
+The opt-in `focused-retest` profile corrects the missed v3 zero-input proof and
+lets follow-ups explicitly edit a stored pending branch. Exact certified zero
+forcing is substituted before affine-state checks with denominator/domain guards.
+Branch deltas retain omitted declarations, record explicit drops/replacements,
+and undergo complete validation; siblings never merge or become adopted models.
+Feedback distinguishes parent evidence from unassessed trials and shows literal
+attempted equations. The targeted roster is P00-r1 × three seeds on 20B and 120B,
+at most 30 calls total. Historical reply semantics and result roots are preserved.
+See [the proof boundaries, replay and ACES commands](PHASE_C_FOCUSED_RETEST.md).
+
 ## Five-option construction pilot
 
 Returned v3 smoke: both arms emitted five options without operational failures.

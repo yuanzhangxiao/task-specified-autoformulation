@@ -9,6 +9,7 @@ import pytest
 from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.research.construction_affine_family_consistency import (
     COMBINED_SYMBOLIC_POLICY,
+    COMMON_ZERO_FORCING_POLICY,
     SYMBOLIC_INITIAL_POLICY,
     WEIGHTED_SYMBOLIC_POLICY,
     _display,
@@ -805,4 +806,135 @@ def test_combined_initial_proof_coordinate_limit_defers(monkeypatch):
     source = combined_problem()
     assert not assess(
         source, symbolic_evidence(source), combined_symbolic_initials=True
+    )["conflicts"]
+
+
+def saturation_problem(*, expression="V*u/(K+u)", role="rate", nonlinear_state=False):
+    """The input response is nonlinear, but vanishes on certified zero inputs."""
+    payload = problem(pin_root=True).model_dump(mode="json")
+    candidate = payload["base_candidate"]
+    candidate["parameters"] += [
+        {"name": "K", "scope": "global", "role": role},
+        {"name": "V", "scope": "global", "role": "coefficient"},
+    ]
+    candidate["processes"].append({"name": "saturation", "expression": expression})
+    candidate["state_equations"][0]["rhs"] = "-k*x+m+saturation+K*x"
+    if nonlinear_state:
+        candidate["state_equations"][0]["rhs"] += "+x*m"
+    return PrefixFitProblem.model_validate(payload)
+
+
+def saturation_evidence(source, **options):
+    settings = {"u": [[0, 0, 0]] * 3, **options}
+    return evidence(
+        source, [[2, 3, 4], [1, 1, 2], [3, 4, 5]], z=[[2, 2, 2]] * 3,
+        **settings,
+    )
+
+
+def test_common_zero_saturation_restricts_before_affine_parsing():
+    source = saturation_problem()
+    data = saturation_evidence(source)
+    before = source.model_dump(mode="json"), deepcopy(data)
+    assert assess(source, data)["status"] == "deferred"
+    assert "common_zero_forcing_policy" not in assess(source, data)
+    report = assess(source, data, common_zero_forcing=True)
+    assert report["common_zero_forcing_policy"] == COMMON_ZERO_FORCING_POLICY
+    assert (
+        prompt_view(report)["common_zero_forcing_policy"] == COMMON_ZERO_FORCING_POLICY
+    )
+    check = conflicts(report, "affine_initial_superposition")[0]
+    assert check["complete_common_forcing"] == ["u"]
+    certificate = check["common_zero_forcing"]
+    assert certificate["policy"] == COMMON_ZERO_FORCING_POLICY
+    assert certificate["channels"] == ["u"]
+    assert certificate["interval"] == [0, 2]
+    assert certificate["parameter_domains"]["K"] == "positive"
+    assert not certificate["global_affinity_claim"]
+    assert certificate["schedules"]["u"]["interpolation"] == "linear_complete_knots"
+    for row in data["trajectories"]:
+        recorded = certificate["schedules"]["u"]["trajectories"][row["trajectory_id"]]
+        assert recorded["schedule_sha256"] == content_hash({
+            "time": row["time"], "values": row["inputs"]["u"],
+        })
+    assert check["restricted_process_relations"]["saturation"] == "V * 0 / (K + 0)"
+    assert "zero-input schedules" in check["repair_feedback"]
+    assert not report["scientific_correctness_established"]
+    assert before == (source.model_dump(mode="json"), data)
+    assert report == assess(source, data, common_zero_forcing=True)
+
+
+@pytest.mark.parametrize(
+    "source_options,evidence_options",
+    [
+        ({"nonlinear_state": True}, {}),
+        ({"role": "coefficient"}, {}),
+        ({"role": "nonnegative_coefficient"}, {}),
+        ({"expression": "V*u/u"}, {}),
+        ({"expression": "V*u/(K*u)"}, {}),
+        ({"expression": "0*(V/u)"}, {}),
+        ({}, {"u": [[1, 1, 1]] * 3}),
+        ({}, {"u": [[0, 0, 0], [0, 1, 0], [0, 0, 0]]}),
+        ({}, {"mode": "unknown"}),
+        ({}, {"forcing_error": 1e-12}),
+        ({}, {"error": 1e-12}),
+        ({}, {"uniqueness_assumed": False}),
+    ],
+)
+def test_zero_forcing_preserves_state_nonlinearity_and_undefined_domains(
+    source_options, evidence_options
+):
+    source = saturation_problem(**source_options)
+    report = assess(
+        source,
+        saturation_evidence(source, **evidence_options),
+        common_zero_forcing=True,
+    )
+    assert report["status"] == "deferred"
+    assert not report["conflicts"]
+
+
+def test_zero_forcing_may_use_a_qualified_subset_of_training_rows():
+    source = saturation_problem()
+    data = evidence(
+        source, [[2, 3, 4], [1, 1, 2], [3, 4, 5], [4, 4, 4]],
+        z=[[2, 2, 2]] * 4, u=[[0, 0, 0]] * 3 + [[1, 1, 1]],
+    )
+    check = conflicts(
+        assess(source, data, common_zero_forcing=True), "affine_initial_superposition"
+    )[0]
+    assert check["witnesses"][0]["trajectories"] == ["row0", "row1", "row2"]
+    assert set(check["common_zero_forcing"]["schedules"]["u"]["trajectories"]) == {
+        "row0", "row1", "row2"
+    }
+
+
+def test_zero_forcing_does_not_replace_a_modeled_auxiliary_by_measured_history():
+    source = saturation_problem(expression="V*w/(K+w)")
+    data = saturation_evidence(source)
+    payload = source.model_dump(mode="json")
+    candidate = payload["base_candidate"]
+    candidate["states"].append({"name": "w", "kind": "latent"})
+    candidate["state_equations"].append({"state": "w", "rhs": "x-w"})
+    candidate["initial_conditions"].append({
+        "state": "w", "fixed_value": 0, "scope": "global",
+    })
+    payload["context"]["auxiliaries"] = ["w"]
+    source = PrefixFitProblem.model_validate(payload)
+    data["context"] = source.context.model_dump(mode="json")
+    for row in data["trajectories"]:
+        row["auxiliaries"]["w"] = [0.0, 0.0, 0.0]
+    data["contract"]["absolute_error_bounds"]["w"] = 0.0
+    data["contract"]["interpolation"]["w"] = "linear_complete_knots"
+    reseal(data)
+    assert not assess(source, data, common_zero_forcing=True)["conflicts"]
+
+
+def test_zero_forcing_restriction_budget_defers(monkeypatch):
+    from autoformalism.research import construction_affine_family_consistency as module
+
+    monkeypatch.setattr(module, "MAX_ZERO_RESTRICTIONS", 0)
+    source = saturation_problem()
+    assert not assess(
+        source, saturation_evidence(source), common_zero_forcing=True
     )["conflicts"]

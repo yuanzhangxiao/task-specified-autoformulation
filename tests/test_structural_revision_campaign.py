@@ -295,6 +295,12 @@ def test_identical_qualified_checks_are_memoized_without_shared_mutable_results(
     assert "combined_symbolic_initial_policy" in combined["affine_family_consistency"]
     assert cli._assessment(parent, problem, combined_symbolic_initials=True) == combined
     assert calls == 3
+    zero_forcing = cli._assessment(parent, problem, common_zero_forcing=True)
+    assert calls == 4
+    assert cli._assessment(parent, problem, common_zero_forcing=True) == zero_forcing
+    assert calls == 4
+    assert cli._assessment(parent, problem)["status"] != first["status"]
+    assert calls == 4
 
 
 def test_property_citations_require_displayed_candidate_evidence(

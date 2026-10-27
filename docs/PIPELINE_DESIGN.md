@@ -1,5 +1,19 @@
 # Phase 1 Pipeline Design
 
+## Qualified forcing restrictions and pending branch edits
+
+`focused-retest` explicitly enables `certified-common-zero-forcing-affine-1`
+and `explicit-branch-patch-delta-1`. Certified zero forcing restricts the witness
+interval only; shared parameter domains must keep divisions defined. Unsupported
+nonlinear state interactions remain deferred. Follow-ups pin a pending candidate
+and patch digest, upsert whole action entries, explicitly drop intentions, or
+replace/withdraw the branch. The composed complete patch is validated against
+the frozen parent, with retained/replaced/dropped provenance and no sibling merge.
+Historical full-patch replies retain their old interpretation during replay.
+The six-episode targeted confirmation uses fresh roots and includes optional
+smoke work in its fixed budget; broader historical profiles retain their gates.
+See [the implementation and runbook](PHASE_C_FOCUSED_RETEST.md).
+
 ## Five-option construction pilot
 
 The returned v3 smoke exposed a remaining proof boundary: nonlinear forcing
@@ -7,8 +21,9 @@ must not automatically hide affine dependence on states when trajectories share
 qualified identical inputs. The next bounded correction should start with exact
 zero forcing and domain checks. Proposed bookkeeping work separates parent
 conflicts from unassessed trials and retains branch dependencies through explicit
-edits to the stored intended patch. These corrections are not yet implemented;
-full expansion is deferred. See the returned-results audit in the runbook below.
+edits to the stored intended patch. These corrections are now opt-in as described
+above; broader expansion remains deferred pending targeted confirmation. See the
+returned-results audit in the runbook below.
 
 The v2 smoke operationally passed and returned the required three alternatives,
 but one accepted 120B candidate retained a missed shared-map/readout conflict.

@@ -7,8 +7,10 @@ approximate forecast is inferred from a superposition contradiction.
 
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from collections.abc import Sequence
+from copy import deepcopy
 from fractions import Fraction
 from itertools import combinations, islice
 from math import isfinite
@@ -61,6 +63,8 @@ PROTOCOL = "construction-affine-family-consistency-1"
 SYMBOLIC_INITIAL_POLICY = "shared-symbolic-initial-readout-1"
 WEIGHTED_SYMBOLIC_POLICY = "weighted-shared-symbolic-initials-1"
 COMBINED_SYMBOLIC_POLICY = "combined-symbolic-map-readout-initials-1"
+COMMON_ZERO_FORCING_POLICY = "certified-common-zero-forcing-affine-1"
+MAX_ZERO_RESTRICTIONS = 8
 MAX_TRIPLES = 256
 MAX_TIMES = 64
 MAX_STATES = 32
@@ -726,6 +730,7 @@ def _checks(
     problem, model, training, *, symbolic_initials=False,
     weighted_symbolic_initials=False, combined_symbolic_initials=False,
     roots=frozenset(),
+    zero_forcing=frozenset(),
 ):
     rows_to_check = training.trajectories[:MAX_TRAJECTORIES]
     if any(len(row.time) > MAX_SAMPLES for row in rows_to_check):
@@ -749,6 +754,11 @@ def _checks(
     for item in model.validated.candidate.parameters:
         if item.domain.value == "positive":
             symbols[item.name] = _Affine(_Interval(Fraction(0), float("inf"), True), {})
+    # Only the opt-in wrapper supplies channels certified zero on every complete
+    # schedule in this restricted group. Eager parsing still checks denominators
+    # and unsupported operands; zero never short-circuits an undefined expression.
+    for name in zero_forcing:
+        symbols[name] = _Affine(_ZERO, {})
     unavailable = {}
     for name in model.validated.process_order:
         try:
@@ -921,10 +931,193 @@ def _checks(
     return result
 
 
+def _original_target_forcing(model, target: str) -> set[str]:
+    """Find actual supplied dependencies before any zero substitution."""
+    pending = list(model.validated.observation_expressions[target].symbols)
+    visited, forcing = set(), set()
+    expressions = {
+        **model.validated.process_expressions, **model.validated.equation_expressions
+    }
+    available = set(model.validated.context.forcing_channels) - expressions.keys()
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        if name in expressions:
+            pending.extend(expressions[name].symbols - visited)
+        elif name in available:
+            forcing.add(name)
+    return forcing
+
+
+def _zero_schedules(row, training, available: set[str]) -> set[str]:
+    """Certify only supplied complete zero histories, never measured states."""
+    if len(row.time) > MAX_SAMPLES:
+        return set()
+    result = set()
+    for name in sorted(available):
+        if (
+            training.contract.absolute_error_bounds.get(name) != 0
+            or training.contract.interpolation.get(name)
+            not in {"linear_complete_knots", "previous_complete_knots"}
+        ):
+            continue
+        values = row.inputs.get(name, row.auxiliaries.get(name))
+        if values is not None and all(value == 0 for value in values):
+            result.add(name)
+    return result
+
+
+class _ZeroNames(ast.NodeTransformer):
+    """Display literal certified substitutions without modifying saved syntax."""
+
+    def __init__(self, names: set[str]) -> None:
+        self.names = names
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        if node.id in self.names:
+            return ast.copy_location(ast.Constant(value=0), node)
+        return node
+
+
+def _zero_display(parsed, names: set[str]) -> str:
+    return ast.unparse(_ZeroNames(names).visit(deepcopy(parsed.tree)))
+
+
+def _zero_certificate(problem, training, rows, names: set[str]) -> dict[str, Any]:
+    """Bind the local restriction to complete schedules and declared domains."""
+    return {
+        "policy": COMMON_ZERO_FORCING_POLICY,
+        "channels": sorted(names),
+        "interval": [rows[0].time[0], min(row.time[-1] for row in rows)],
+        "schedules": {
+            name: {
+                "interpolation": training.contract.interpolation[name],
+                "absolute_error_bound": 0.0,
+                "trajectories": {
+                    row.trajectory_id: {
+                        "knots": len(row.time),
+                        "start": row.time[0], "end": row.time[-1],
+                        "schedule_sha256": content_hash({
+                            "time": list(row.time),
+                            "values": list(row.inputs.get(
+                                name, row.auxiliaries.get(name)
+                            )),
+                        }),
+                    }
+                    for row in rows
+                },
+            }
+            for name in sorted(names)
+        },
+        "parameter_domains": {
+            p.name: p.domain.value for p in problem.base_candidate.parameters
+        },
+        "denominator_check": "Every divided expression in the restricted affine "
+        "closure retains a domain excluding zero; a zero numerator does not "
+        "erase an undefined denominator.",
+        "global_affinity_claim": False,
+    }
+
+
+def _zero_forcing_checks(problem, model, training, checks, **options):
+    """Retry deferred targets on bounded groups with certified common zeros.
+
+    General nonzero common-input transformations remain outside this correction.
+    Old conflicts are retained, and the original evidence/compiled model are
+    never modified. At most eight restricted groups receive the existing bounded
+    triple search. Their certificates name the original supplied dependencies.
+    """
+    missing = {
+        check["target"] for check in checks if check.get("target")
+    } - {
+        check["target"] for check in checks if check["status"] == "conditional_conflict"
+    }
+    if not missing:
+        return checks
+    dependencies = {
+        target: _original_target_forcing(model, target) for target in sorted(missing)
+    }
+    available = set().union(*dependencies.values())
+    rows = training.trajectories[:MAX_TRAJECTORIES]
+    zero = {
+        row.trajectory_id: _zero_schedules(row, training, available) for row in rows
+    }
+    restrictions = {
+        tuple(sorted(set.intersection(*(zero[row.trajectory_id] for row in triple))))
+        for triple in islice(combinations(rows, 3), MAX_TRIPLES)
+    } - {()}
+    for names_tuple in sorted(restrictions, key=lambda v: (-len(v), v))[
+        :MAX_ZERO_RESTRICTIONS
+    ]:
+        names = set(names_tuple)
+        group = tuple(row for row in rows if names <= zero[row.trajectory_id])
+        if len(group) < 3:
+            continue
+        # This internal subset retains provenance of the already validated parent
+        # evidence; it is not presented as a newly authenticated evidence packet.
+        restricted = training.model_copy(update={"trajectories": group})
+        try:
+            prospective = _checks(
+                problem, model, restricted, zero_forcing=names, **options
+            )
+        except _Unsupported:
+            continue
+        for fresh in prospective:
+            target = fresh["target"]
+            if fresh["status"] != "conditional_conflict" or target not in missing:
+                continue
+            used = names & dependencies[target]
+            if not used:
+                continue
+            witnesses = fresh["witnesses"]
+            witness_rows = [
+                next(row for row in group if row.trajectory_id == identity)
+                for identity in witnesses[0]["trajectories"]
+            ]
+            fresh["common_zero_forcing"] = _zero_certificate(
+                problem, training, witness_rows, used
+            )
+            fresh["complete_common_forcing"] = sorted(
+                set(fresh["complete_common_forcing"]) | used
+            )
+            fresh["restricted_model_relations"] = {
+                name: _zero_display(model.validated.equation_expressions[name], used)
+                for name in fresh["closed_states"]
+            }
+            fresh["restricted_process_relations"] = {
+                name: _zero_display(parsed, used)
+                for name, parsed in sorted(model.validated.process_expressions.items())
+            }
+            fresh["repair_feedback"] = (
+                "On the certified zero-input schedules, these equations reduce "
+                "to an affine state family and preserve the displayed identity. "
+                "A nonlinear response solely to a supplied channel that is zero "
+                "throughout these schedules cannot resolve this witness. Revise "
+                "a relevant state dependence or justified initialization; memory "
+                "states themselves are not asserted zero. This is a restriction "
+                "to the witnessed schedules, not a global linearity claim."
+            )
+            for i, existing in enumerate(checks):
+                if (existing.get("target"), existing["property"]) == (
+                    target, fresh["property"]
+                ) and existing["status"] == "deferred":
+                    checks[i] = fresh
+                    break
+        missing -= {
+            c["target"] for c in checks if c["status"] == "conditional_conflict"
+        }
+        if not missing:
+            break
+    return checks
+
+
 def assess(
     problem: PrefixFitProblem, evidence: dict, *, symbolic_initials: bool = False,
     weighted_symbolic_initials: bool = False,
     combined_symbolic_initials: bool = False,
+    common_zero_forcing: bool = False,
 ) -> dict[str, Any]:
     """Audit affine conflicts with separately opt-in symbolic initial proofs."""
     if not isinstance(problem, PrefixFitProblem):
@@ -970,6 +1163,14 @@ def assess(
                 roots=set(initialization["trajectory_parameter_names"]),
             )
         )
+        if common_zero_forcing and not missing:
+            checks = _zero_forcing_checks(
+                problem, model, training, checks,
+                symbolic_initials=symbolic_initials,
+                weighted_symbolic_initials=weighted_symbolic_initials,
+                combined_symbolic_initials=combined_symbolic_initials,
+                roots=set(initialization["trajectory_parameter_names"]),
+            )
     except _Unsupported as exc:
         checks = [
             {
@@ -996,6 +1197,10 @@ def assess(
             {"combined_symbolic_initial_policy": COMBINED_SYMBOLIC_POLICY}
             if combined_symbolic_initials
             else {}
+        ),
+        **(
+            {"common_zero_forcing_policy": COMMON_ZERO_FORCING_POLICY}
+            if common_zero_forcing else {}
         ),
         "status": "conflict" if conflicts else "deferred",
         "child_problem_sha256": content_hash(problem.model_dump(mode="json")),
@@ -1037,6 +1242,12 @@ def assess(
                 {"combined_symbolic_initials": dict(INITIAL_READOUT_LIMITS)}
                 if combined_symbolic_initials
                 else {}
+            ),
+            **(
+                {"common_zero_forcing": {
+                    "maximum_restrictions": MAX_ZERO_RESTRICTIONS,
+                    "triples_per_restriction": MAX_TRIPLES,
+                }} if common_zero_forcing else {}
             ),
         },
         "target_comparison_policy": dict(TARGET_COMPARISON_POLICY),
@@ -1084,6 +1295,10 @@ def prompt_view(report: dict[str, Any]) -> dict[str, Any]:
             }
             if "combined_symbolic_initial_policy" in report
             else {}
+        ),
+        **(
+            {"common_zero_forcing_policy": report["common_zero_forcing_policy"]}
+            if "common_zero_forcing_policy" in report else {}
         ),
         "status_counts": dict(Counter(item["status"] for item in report["checks"])),
         "conflicts": report["conflicts"],

@@ -198,6 +198,8 @@ about future live replies; the server's per-request measurement remains required
 ## ACES commands
 
 **After the v3 smoke audit above, full submission is deferred pending corrections.**
+The implemented corrections and new six-episode confirmation are documented in
+[the focused retest runbook](PHASE_C_FOCUSED_RETEST.md).
 The commands below document the frozen launch interface; they are not a
 recommendation to submit the remaining episodes now.
 

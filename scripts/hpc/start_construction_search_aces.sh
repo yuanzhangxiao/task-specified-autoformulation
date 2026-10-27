@@ -7,7 +7,7 @@ AF_MODEL_SIZE=${2:?Specify 20b or 120b}
 AF_PHASE=${3:-smoke}
 AF_WAVE=${4:-wave1}
 AF_PROFILE=${5:-breadth-five}
-case "$AF_PROFILE" in three-policy|breadth-five) ;; *) echo 'Profile must be three-policy or breadth-five.' >&2; exit 2 ;; esac
+case "$AF_PROFILE" in three-policy|breadth-five|focused-retest) ;; *) echo 'Profile must be three-policy, breadth-five, or focused-retest.' >&2; exit 2 ;; esac
 case "$AF_PHASE" in smoke|full) ;; *) echo 'Phase must be smoke or full.' >&2; exit 2 ;; esac
 [[ "$AF_WAVE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || { echo 'Invalid wave name.' >&2; exit 2; }
 case "$AF_MODEL_SIZE" in
@@ -19,7 +19,9 @@ case "$AF_ACTION" in run|status|report|inspect|preview) ;; *) echo 'Unknown comm
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 [[ -d "$AF_GROUP" ]] || { echo 'Run on ACES with AF_GROUP set to writable scratch.' >&2; exit 2; }
 # Do not inherit a generic root from an earlier fitting or construction campaign.
-export AF_OUTPUT_ROOT=${AF_CONSTRUCTION_SEARCH_ROOT:-$AF_GROUP/phase-c-search-${AF_PROFILE}-${AF_MODEL_SIZE}-v3}
+AF_PROFILE_VERSION=v3
+[[ "$AF_PROFILE" != focused-retest ]] || AF_PROFILE_VERSION=v4
+export AF_OUTPUT_ROOT=${AF_CONSTRUCTION_SEARCH_ROOT:-$AF_GROUP/phase-c-search-${AF_PROFILE}-${AF_MODEL_SIZE}-${AF_PROFILE_VERSION}}
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 AF_CLI="$AF_REPO_ROOT/scripts/construction_search_campaign.py"

@@ -22,6 +22,9 @@ from autoformalism.rebuttal.prefit_construction_campaign import _cost
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.research import construction_search_policy as engine
+from autoformalism.research.construction_affine_family_consistency import (
+    COMMON_ZERO_FORCING_POLICY,
+)
 from autoformalism.research.interaction_source import _Reader
 from autoformalism.staged_topology import content_hash
 from scripts import structural_revision_campaign as base
@@ -79,11 +82,44 @@ SMOKE_SOURCE_PINS = {
 }
 
 
+BREADTH_SMOKE_SOURCE_PINS = {
+    "20b": {
+        "preserved_tree_sha256": (
+            "b46191a52fd210778a19069937b55371dea07b78afbf730a096af1bbbe136788"
+        ),
+        "plan_sha256": (
+            "d9b3515c343e7ee843dfabaf4b484b28e7b235dca027787d6a8ad0e19f06affb"
+        ),
+        "original_archive_sha256": (
+            "7d039fc7b81a3c9901534c5eb28b3767b9a014bb0e5fb24150410cf6748fc1fb"
+        ),
+    },
+    "120b": {
+        "preserved_tree_sha256": (
+            "368078268aab43e7aac2b56b14d86b67101a4e051217a29f8f85648068fad5df"
+        ),
+        "plan_sha256": (
+            "d208d65cc3553c7013ece61a08dbe45bf0b806121001e8329f2a31e1f2451ae8"
+        ),
+        "original_archive_sha256": (
+            "599667a5e8880beb622c6a55f6f9ca215a1228779248260cc2eb2d2e97ab50be"
+        ),
+    },
+}
+SOURCE_PROTOCOLS = {
+    "v1": "construction-search-policy-1",
+    "v2-smoke": "construction-search-policy-2",
+    "v3-smoke": "construction-search-policy-3",
+}
+
+
 def _source_pins(version: str) -> dict:
     if version == "v1":
         return SOURCE_PINS
     if version == "v2-smoke":
         return SMOKE_SOURCE_PINS
+    if version == "v3-smoke":
+        return BREADTH_SMOKE_SOURCE_PINS
     raise ValueError("unknown pinned source version")
 
 
@@ -113,7 +149,7 @@ def tree_manifest(root: Path) -> dict[str, str]:
     return dict(sorted(files.items()))
 
 
-def _historical_patches(record: dict, attempt: dict) -> list[dict]:
+def _historical_patches(record: dict, attempt: dict, version: str = "v1") -> list[dict]:
     """Read the historical envelope, independently of today's exactly-three rule."""
     if attempt.get("parse_error") is not None:
         raise ValueError("this pinned replay requires readable historical replies")
@@ -122,7 +158,9 @@ def _historical_patches(record: dict, attempt: dict) -> list[dict]:
         if not isinstance(raw, dict) or not isinstance(raw.get("options"), list):
             raise ValueError("historical option envelope differs")
         options = raw["options"]
-        if not 1 <= len(options) <= 3:
+        if (version == "v3-smoke" and len(options) != 5) or (
+            version != "v3-smoke" and not 1 <= len(options) <= 3
+        ):
             raise ValueError("historical option count differs")
         return [option["patch"] for option in options]
     return [raw]
@@ -138,12 +176,7 @@ def load_source(root: Path, arm: str, version: str = "v1") -> dict:
     plan = reader.json("plan.json", "artifact_sha256")
     selected = reader.json("selected_sources.json", "artifact_sha256")
     if (
-        plan["protocol"]
-        != (
-            "construction-search-policy-1"
-            if version == "v1"
-            else "construction-search-policy-2"
-        )
+        plan["protocol"] != SOURCE_PROTOCOLS[version]
         or plan["artifact_sha256"] != pins["plan_sha256"]
         or plan["model_size"] != arm
         or plan["selected_sources_sha256"] != selected["artifact_sha256"]
@@ -171,7 +204,10 @@ def load_source(root: Path, arm: str, version: str = "v1") -> dict:
         ):
             raise ValueError("historical parent control differs")
         prefix = f"results/{case}"
-        if version == "v2-smoke" and not (root / prefix / "completion.json").exists():
+        if (
+            version in {"v2-smoke", "v3-smoke"}
+            and not (root / prefix / "completion.json").exists()
+        ):
             if (root / prefix).exists():
                 raise ValueError("unsealed partial episode in pinned smoke source")
             continue
@@ -226,7 +262,7 @@ def load_source(root: Path, arm: str, version: str = "v1") -> dict:
                 or payload["public_task"] != parent["public_brief"]
             ):
                 raise ValueError("historical request context differs")
-            patches = _historical_patches(record, attempt)
+            patches = _historical_patches(record, attempt, version)
             expected_ids = [
                 f"call{attempt['attempt']}-option{i}" for i in range(len(patches))
             ]
@@ -259,7 +295,7 @@ def load_source(root: Path, arm: str, version: str = "v1") -> dict:
         if emitted != [candidate["id"] for candidate in result["candidates"]]:
             raise ValueError("historical candidate order differs")
         records_all.extend(records)
-    if version == "v2-smoke":
+    if version in {"v2-smoke", "v3-smoke"}:
         completed = {c["case_id"] for c in candidates}
         first_parent = min(row["parent_id"] for row in plan["cases"])
         expected = {
@@ -267,7 +303,9 @@ def load_source(root: Path, arm: str, version: str = "v1") -> dict:
             for row in plan["cases"]
             if row["parent_id"] == first_parent and row["seed"] == 0
         }
-        if completed != expected or len(expected) != 3:
+        if completed != expected or len(expected) != (
+            1 if version == "v3-smoke" else 3
+        ):
             raise ValueError("pinned smoke completion roster differs")
     return {
         "arm": arm,
@@ -315,7 +353,8 @@ def _render(root: Path, summary: dict, rows: list[dict], parents: dict) -> None:
         f"<!doctype html><meta charset='utf-8'><style>{style}</style>",
         "<h1>Updated search prompts: offline preview</h1>",
         "<p>These requests were not sent. Historical replies did not see "
-        "this wording.</p>",
+        "this wording. These examples retain the historical full parent-relative "
+        "patch reply contract, not the prospective branch-delta contract.</p>",
         "<h2>Changes from the previous prompt</h2><ul>"
         "<li><mark>Exactly five alternatives are mandatory in the new breadth "
         "pilot.</mark> A reason "
@@ -347,6 +386,7 @@ def _render(root: Path, summary: dict, rows: list[dict], parents: dict) -> None:
                     intended=new,
                     options_count=5,
                     maximum_calls=5,
+                    common_zero_forcing=summary["common_zero_forcing"],
                 )
             )
             if new["status"] == "rejected"
@@ -419,6 +459,7 @@ def _render(root: Path, summary: dict, rows: list[dict], parents: dict) -> None:
                         batch=True,
                         options_count=5,
                         maximum_calls=5,
+                        common_zero_forcing=summary["common_zero_forcing"],
                     )
                 )
             )
@@ -428,8 +469,16 @@ def _render(root: Path, summary: dict, rows: list[dict], parents: dict) -> None:
     (root / "PROMPTS.html").write_text("\n".join(prompt_parts))
 
 
-def replay(sources: dict[str, Path], root: Path, version: str = "v1") -> dict:
+def replay(
+    sources: dict[str, Path],
+    root: Path,
+    version: str = "v1",
+    *,
+    common_zero_forcing: bool = False,
+) -> dict:
     """Checkpoint independent gate rechecks; never advance historical decisions."""
+    if type(common_zero_forcing) is not bool:
+        raise ValueError("common_zero_forcing must be boolean")
     root = root.resolve()
     if any(
         root.is_relative_to(p.resolve()) or p.resolve().is_relative_to(root)
@@ -443,6 +492,12 @@ def replay(sources: dict[str, Path], root: Path, version: str = "v1") -> dict:
         "protocol": PROTOCOL,
         "engine_protocol": engine.PROTOCOL,
         "source_version": version,
+        "common_zero_forcing": common_zero_forcing,
+        "common_zero_forcing_policy": (
+            COMMON_ZERO_FORCING_POLICY if common_zero_forcing else None
+        ),
+        "reply_interpretation": "historical full parent-relative patch; "
+        "no branch-delta reinterpretation",
         "sources": {
             source["arm"]: _source_pins(version)[source["arm"]] for source in loaded
         },
@@ -493,6 +548,7 @@ def replay(sources: dict[str, Path], root: Path, version: str = "v1") -> dict:
                         branch_id=old["branch_id"],
                         premise=old["premise_changed"],
                         affected_target=old["affected_target"],
+                        common_zero_forcing=common_zero_forcing,
                     )
                     row = sealed_write(
                         path,
@@ -542,7 +598,8 @@ def replay(sources: dict[str, Path], root: Path, version: str = "v1") -> dict:
                     Counter(str(r["count"]) for r in source["option_counts"])
                 ),
                 "historical_batches_short_of_new_rule": sum(
-                    r["count"] != 3 for r in source["option_counts"]
+                    r["count"] != (5 if version == "v3-smoke" else 3)
+                    for r in source["option_counts"]
                 ),
             }
         summary = {
@@ -552,7 +609,10 @@ def replay(sources: dict[str, Path], root: Path, version: str = "v1") -> dict:
             "interpretation": (
                 "Independent saved-patch rechecks, not live policy results. Later "
                 "historical replies did not see the new feedback. V1 option "
-                "batches could contain fewer than three; v2 smoke required three. "
+                "batches could contain fewer than three; v2 smoke required three; "
+                "v3 smoke required five. Raw replies retain their original "
+                "parent-relative patch semantics; branch-delta composition is a "
+                "separate counterfactual. "
                 "Historical counts are reported separately, not retroactive "
                 "failures under the five-option pilot. Eligibility retains "
                 "deferred checks and does "
@@ -580,12 +640,21 @@ def main() -> None:
     parser.add_argument("--source-20b", type=Path, required=True)
     parser.add_argument("--source-120b", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--source-version", choices=("v1", "v2-smoke"), default="v1")
+    parser.add_argument(
+        "--source-version", choices=tuple(SOURCE_PROTOCOLS), default="v1"
+    )
+    parser.add_argument(
+        "--common-zero-forcing",
+        action="store_true",
+        help="Enable the prospective qualified common-zero-input proof; "
+        "historical defaults stay unchanged.",
+    )
     args = parser.parse_args()
     result = replay(
         {"20b": args.source_20b, "120b": args.source_120b},
         args.root,
         args.source_version,
+        common_zero_forcing=args.common_zero_forcing,
     )
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, indent=2))
 
