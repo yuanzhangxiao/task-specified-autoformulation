@@ -144,3 +144,81 @@ The previous 120B internal-exchange sign concern still needs scientific review.
 This milestone does not infer transfer intent from names, introduce a generic
 same-sign prohibition or automatically flip signs. Passing the finite checks
 remains insufficient evidence of scientific validity or favorable NMSE.
+
+## Returned 20B results, 27 October 2026
+
+The 20B archive SHA-256 is
+`22bff021a93ba3f518eae383cbdb8cb58b34d0d9fd622d0618be56741e503396`.
+It matches source commit `f8c9e23` and the delivered focused plan. All three seeds
+completed; all 15 responses returned HTTP 200, `stop`, and schema-valid JSON.
+An independent 194-check audit verified the source, plans, receipts and costs.
+Observed usage was 267,532 tokens; episode median 87,731, unscaled MAD 1,841.
+Maximum input was 20,568 tokens, below the 24,000-token admission limit.
+The user reports 120B still pending; no model-size conclusion is available.
+
+| Seed | Initial eligible / 5 | Follow-up eligible / 4 | Repeated failures / 4 |
+| --- | ---: | ---: | ---: |
+| 0 | 1 | 0 | 4 |
+| 1 | 1 | 1 | 2 |
+| 2 | 0 | 0 | 3 |
+
+There are three eligible records among 27, spanning two episodes. Every eligible
+record retains deferred scientific checks. No fitting, rollout, adoption or
+test-data access occurred. The three saved fitting-interface packets are not
+numerical results.
+
+All ten delta follow-ups composed as specified. One replacement referred to the
+wrong branch and digest and was correctly rejected; one branch was withdrawn.
+Seven follow-ups repeated the same mathematical actions. Two more attempted to
+remove invalid parameter-as-equation entries by omission, without `drop_actions`;
+delta retention therefore correctly preserved them and their errors. Parameters
+were generally restated, so omitted-parameter retention was not exercised live.
+The generic feedback still contains a full-patch instruction in one fallback and
+does not show the exact deletion needed. Separate authored in-memory corrections
+of the two missing drops advance to qualified affine conflicts, not eligibility.
+
+The one successful follow-up declares the previously missing `k_absorption`
+parameter while preserving its intended absorption equation. It is legitimate
+interface progress without a new scientific equation. Unknown-process errors
+and parameter-as-equation errors need different action-specific feedback.
+
+The three eligible constructions are:
+
+- Seed 0 option 4: `A' = k_d*(D-A), D' = k_A`, with a new trajectory-specific
+  initial `D(0)`. The family remains affine but its initial-state space expands.
+- Seed 1 option 3: saturating insulin-action decay `k*X/(K_M+X)`; the affine
+  proof becomes inapplicable. Positivity and pole avoidance remain unverified.
+- Seed 1 repaired option 2: `M' = k_abs*(meal-M)` and an added `+M` in the
+  glucose balance, with trajectory-specific `M(0)`. This supplies a delayed
+  absorption contribution; numerical and scientific adequacy remain untested.
+
+The first two still have `Gp' = C_m*meal-U`. On `train_011`, the authenticated
+complete meal schedule is zero on `[0,1]`, while glucose increases from
+155.325006223101 to 157.596237922436. Exact reproduction would require
+`integral_0^1 U(t) dt = -2.271231699335`. They must either miss this glucose
+increase or predict negative disposal between samples. This is a scientific
+concern under the nonnegative-disposal interpretation. It is not a newly
+implemented finite-sample rejection: target interpolation is not authenticated,
+and signed coefficients do not establish positivity of the predicted rate.
+The absorption candidate does not imply the same identity.
+This concern also occurs after the eight-unit observation prefix: on `[9,10]`
+of the same trajectory, zero meal accompanies glucose increasing from
+166.7836252405335 to 167.35174265652742. The unchanged balance would require
+`integral_9^10 U(t) dt = -0.568117415994`, with the same qualification. Neither
+witness is a bound on achievable approximate NMSE.
+
+The common-zero specialization flag was enabled but no returned candidate
+exercised that new proof branch. The eight qualified rejections used existing
+affine-family witnesses. Historical saturation replay remains the direct check
+of the specialization fix. Public-path passes also remain limited: the stored
+insulin-memory witness is unnecessarily cyclic although a valid simple path
+exists, and an initialization-only modeled auxiliary does not certify agreement
+with that auxiliary's full supplied trajectory.
+
+The local report in `output/construction-search-v4-20b-analysis-20261027/REPORT.html`
+contains all 27 candidate pages, all 15 complete requests/responses, equations,
+branch and operational audits, and an outcome plot. Keep the pending 120B run
+under the frozen contract. Proposed next corrections are specific edit/delete
+feedback, removal of the remaining full-patch fallback wording, and a qualified
+balance/sign audit before any additional rejection rule. No production policy
+was changed during this analysis.

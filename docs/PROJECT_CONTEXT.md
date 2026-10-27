@@ -12,6 +12,17 @@ attempted equations. The targeted roster is P00-r1 × three seeds on 20B and 120
 at most 30 calls total. Historical reply semantics and result roots are preserved.
 See [the proof boundaries, replay and ACES commands](PHASE_C_FOCUSED_RETEST.md).
 
+Returned 20B focused retest (27 October): all three episodes and 15 calls
+completed operationally. Three of 27 candidate records are gate-eligible across
+two seeds, with scientific checks deferred. Nine of twelve follow-ups repeat
+unchanged failures, including two attempted deletions by omission under explicit
+delta semantics. One declaration-only repair qualifies the intended absorption
+model. Two eligible models retain a zero-meal glucose balance that would require
+negative disposal to reproduce a recorded glucose increase. The new zero-input
+specialization was not exercised by these live replies. The 120B arm remains
+pending according to the user; production policy is unchanged. See the returned
+results and evidence qualifications in the runbook above.
+
 ## Five-option construction pilot
 
 Returned v3 smoke: both arms emitted five options without operational failures.
