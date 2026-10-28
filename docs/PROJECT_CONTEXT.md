@@ -1,5 +1,18 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Returned action-feedback and 120B results
+
+The 28 October archives completed operationally. New 20B action feedback yields
+3 eligible records among 27, representing two model identities and no new
+eligible family from twelve follow-ups. Repeated failed follow-ups fall from
+9/12 to 0/12, but all initial replies also change despite identical request bodies
+and seeds. Matched 120B focused yields 6/21 eligible records; both model sizes
+find eligibility in two of three seeds. A schema/routing mismatch stops one
+120B seed after five wider-revision decisions. All eligibility remains deferred
+scientifically and unfitted. Next: align option decisions/recovery, improve exact
+declaration movement, and show disconnected additions before another GPU test.
+See [the detailed evidence and limitations](PHASE_C_CONSTRUCTION_FEEDBACK_RESULTS_20261028.md).
+
 ## Typed action feedback while 120B is pending
 
 The next independent milestone corrects selected-branch feedback in a separate
