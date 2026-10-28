@@ -2,6 +2,11 @@
 
 Date: 2026-10-27. Training-only numerical development; opt-in experiment.
 
+Returned results: both tasks improved, to 4.27636e-5 and 2.13343e-5 training
+NMSE, while reliable descent remained. The
+[longer continuation with staged endpoint checks](PHASE_C_LLM_SR_DETENTION_STAGED_POLISHING.md)
+records the completed review and the next explicitly bounded experiment.
+
 ## Evidence motivating this step
 
 The six-task probe-recovery report reconstructed exactly from its saved
