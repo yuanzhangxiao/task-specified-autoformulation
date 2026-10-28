@@ -9,6 +9,7 @@ parameter information. The caller owns durable operation budgets and receipts.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import fsum
 from time import monotonic
 
 import numpy as np
@@ -220,6 +221,8 @@ def local_derivative_check(
     local_coordinate_scales=None,
     finite_difference_probe=None,
     residual_error_bound=None,
+    search_error_limits=None,
+    minimum_probe_scales=0,
 ):
     """Check all nonfixed coordinates with local, bounded shrinking differences.
 
@@ -230,6 +233,11 @@ def local_derivative_check(
     The opt-in probe callback supplies already formed differences in the declared
     units; a residual-error callback contributes a normalized residual envelope
     to the gradient bound without altering the Jacobian/rank tolerance.
+    A separate opt-in search error pair (absolute, relative) stops only after
+    smooth derivative agreement and sufficient mean-loss gradient precision.
+    It does not grant parameter information or change strict default checks.
+    An optional minimum scale range prevents a recovered historical contradiction
+    from being hidden by a newly passing earlier pair.
     """
     x, lo, hi, units = a._coordinates(vector, lower, upper, coordinate_units)
     if local_coordinate_scales is not None and not policy.local_bounds_aware:
@@ -243,6 +251,18 @@ def local_derivative_check(
         raise ValueError("local coordinate scales must be finite positive full vector")
     if not np.isfinite(deadline):
         raise ValueError("finite monotonic deadline required")
+    if search_error_limits is not None:
+        limits = np.asarray(search_error_limits, dtype=float)
+        if limits.shape != (2,) or not np.isfinite(limits).all() or np.any(limits <= 0):
+            raise ValueError("search error limits must be two finite positive values")
+        if not policy.diagnostic_precision:
+            raise ValueError("search error limits require diagnostic precision")
+    if (
+        isinstance(minimum_probe_scales, bool)
+        or not isinstance(minimum_probe_scales, int)
+        or not 0 <= minimum_probe_scales <= policy.local_max_scales
+    ):
+        raise ValueError("minimum probe scales outside configured range")
     required = tuple(int(i) for i in np.flatnonzero(lo < hi))
     selected = list(required if directions is None else directions)
     if len(set(selected)) != len(selected) or any(
@@ -489,6 +509,10 @@ def local_derivative_check(
                     remaining = len(selected) - position - 1
                     reserve = 4 * remaining * max(probe_call_times)
                     if deadline - monotonic() <= reserve + 2 * max(probe_call_times):
+                        if scale_index < minimum_probe_scales:
+                            raise TimeoutError(
+                                "required historical probe range unfinished"
+                            )
                         break
                 try:
                     current = probe(index, scale_index, step)
@@ -538,10 +562,32 @@ def local_derivative_check(
                 # mode retains the least uncertain smooth pair, while a resolved
                 # contradiction or unresolved kink cannot be hidden by selection.
                 rows[index] = row
-                if pair["status"] == "passed" and (
-                    not policy.diagnostic_precision
-                    or row.projected_gradient_error_bound
-                    <= policy.gradient_tolerance * policy.precision_gradient_fraction
+                range_complete = scale_index + 1 >= minimum_probe_scales
+                if search_error_limits is not None and range_complete:
+                    gradient = (
+                        2
+                        * fsum(
+                            float(r) * float(j)
+                            for r, j in zip(base_r, column, strict=True)
+                        )
+                        / len(base_r)
+                    )
+                    search_limit = max(limits[0], limits[1] * abs(gradient))
+                    if (
+                        pair["status"] == "passed"
+                        and row.precision_status == "passed"
+                        and row.gradient_error_bound <= search_limit
+                    ):
+                        break
+                if (
+                    range_complete
+                    and pair["status"] == "passed"
+                    and (
+                        not policy.diagnostic_precision
+                        or row.projected_gradient_error_bound
+                        <= policy.gradient_tolerance
+                        * policy.precision_gradient_fraction
+                    )
                 ):
                     break
                 if pair["status"] == "failed" and pair["sides_ok"]:
@@ -551,8 +597,14 @@ def local_derivative_check(
                     if policy.diagnostic_precision
                     else pair["roundoff_dominated"]
                 )
-                if floor and pair["sides_ok"]:
+                if range_complete and floor and pair["sides_ok"]:
                     break  # Shrinking further only amplifies the evaluation floor.
+            if (
+                minimum_probe_scales
+                and (not probes or probes[-1].scale_index + 1 < minimum_probe_scales)
+                and (index not in rows or rows[index].precision_status != "failed")
+            ):
+                raise ValueError("required historical probe range incomplete")
             if index not in rows:
                 # Other directions may still be checked; this one remains omitted.
                 continue
@@ -583,7 +635,7 @@ def local_derivative_check(
             for i in inconclusive
         )
     )
-    information_qualified = status == "passed"
+    information_qualified = status == "passed" and search_error_limits is None
     if policy.diagnostic_precision and information_qualified:
         singular = np.linalg.svd(
             base_j[:, required] * units[list(required)], compute_uv=False
@@ -642,5 +694,11 @@ def local_derivative_check(
             "not a rigorous solver-error bound. Unresolved and exactly zero columns "
             "can qualify search only, not parameter information. All nonfixed "
             "coordinates are required; deadlines are cooperative."
+            + (
+                " Search-purpose stopping uses explicit absolute/relative mean-loss "
+                "gradient error limits; this is not parameter-information evidence."
+                if search_error_limits is not None
+                else ""
+            )
         ),
     )
