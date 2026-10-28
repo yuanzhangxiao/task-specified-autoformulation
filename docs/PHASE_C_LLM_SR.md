@@ -374,7 +374,8 @@ Plans:
   weakest islands every four hours of wall-clock time (their `buffer.py`), so a
   search that runs slower resets more often within its 10,000 samples: seeds 0
   and 1 took 38 to 43 hours, about ten resets each, and with 33 searches at
-  once these may take longer. Proposed, pending review.
+  once these may take longer. Frozen on 2026-10-27 on the user's sign-off; no
+  setting changed.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3
@@ -383,6 +384,8 @@ bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expre
 old=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1 new=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-reseal
 for i in $(seq 0 15); do mkdir -p $new/results/$i; cp -a $old/results/$i/llmsr-* $new/results/$i/; done
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1.json phase-c-llm-sr-expression-hosted-120b-v1-reseal 4
+# Seeds 2 to 4, all 33 searches at once.
+bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4 33
 ```
 
 ## Settings

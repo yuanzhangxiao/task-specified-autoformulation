@@ -218,11 +218,11 @@ def test_the_seeds_plan_changes_only_the_seeds_and_their_description():
     seeds, frozen = (_load("phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json"),
                      _load("phase_c_llm_sr_expression_hosted_120b_v1.json"))
     assert {k for k in seeds if seeds[k] != frozen[k]} == {
-        "repetitions", "budget", "scope_note", "status",
+        "repetitions", "budget", "scope_note",
     }
     budget, frozen_budget = seeds["budget"], frozen["budget"]
     assert {k for k in budget if budget[k] != frozen_budget[k]} == {"rationale"}
-    assert seeds["status"] == "proposed_pending_review"
+    assert seeds["status"] == "frozen_before_calls"
     assert sorted(frozen["repetitions"] + seeds["repetitions"]) == [0, 1, 2, 3, 4]
     assert llm_sr_method_label(seeds) == "llm_sr_expression"
 
