@@ -2,8 +2,9 @@
 
 Protocol: `phase-c-baseline-mechanisms-1`. Status: **run on js2 on 2026-10-22
 at the user's request, before review** (results below). LLM-SR's expression
-form is added in a second root, `phase-c-baseline-mechanisms-v2`, which
-assesses every other method's picks again; not yet run. The LLM-SR
+form was added on 2026-10-28 in a second root, `phase-c-baseline-mechanisms-v2`,
+which assessed every other method's picks again and repeated the first root's
+96 assessments exactly. The LLM-SR
 transcriptions are still `proposed_pending_review`; a change after review is a
 new protocol version in a new root, reported beside this one. Since the user's
 decision of 2026-10-22, the transcriptions also set the test score of the
@@ -220,13 +221,19 @@ simulated states (glucose terms, insulin, the device's output). Each rule keeps
 part of the filter's response: decay matching keeps its pole, mean-delay
 matching its gain and delay.
 
-## Results (js2, 2026-10-22)
+## Results (js2, 2026-10-22; expression form 2026-10-28)
 
 Plan `c90cb0ab2f6caa956847946a9d6eb87e1f0f82d5219249f4a3beab0cf26dcabc`, source
 `951e793`, root `~/af/runs/phase-c-baseline-mechanisms-v1`; all 96 rows assessed
-in under a minute. Confirmed = the fraction of a cell's public mechanism
-requirements confirmed; per method, case means over the two runs, then the
-mean and sample SD over the eight cells. A failed run confirms nothing.
+in under a minute. LLM-SR's expression form: plan
+`a6aa8cf1da40eb42dd5a60b7f8aa1747f22d39e1d2e6785c6a905ab4604531db`, source
+`381005f`, root `~/af/runs/phase-c-baseline-mechanisms-v2`, 2026-10-28 00:05 to
+00:06Z; its 112 rows include the first root's 96, whose assessments it
+repeated exactly (findings, counts and fractions; only the plan binding
+differs), so the other rows below hold for both roots. Confirmed = the
+fraction of a cell's public mechanism requirements confirmed; per method,
+case means over the two runs, then the mean and sample SD over the eight
+cells. A failed run confirms nothing.
 
 | Method | Runs completed | Runs confirming every requirement | Confirmed, mean (SD) | Possible, mean |
 |---|---:|---:|---:|---:|
@@ -236,6 +243,7 @@ mean and sample SD over the eight cells. A failed run confirms nothing.
 | LLM-ODE, description prompt | 16/16 | 4/16 | 0.271 (0.454) | 0.544 |
 | LLM-ODE, published prompt | 16/16 | 0/16 | 0.125 (0.231) | 0.325 |
 | LLM-SR (through the transcriptions) | 15/16 | 5/16 | 0.429 (0.405) | 0.633 |
+| LLM-SR, expression form | 11/16 | 1/16 | 0.083 (0.178) | 0.583 |
 
 Confirmed per cell (seed 0 / seed 1; "fail" is a failed run):
 
@@ -247,10 +255,19 @@ Confirmed per cell (seed 0 / seed 1; "fail" is a failed run):
 | LLM-ODE, description | 0/0 | 0/0 | 1/1 | 0/0 | 0/0 | 1/1 | 0/0 | 0.33/0 |
 | LLM-ODE, published | 0/0 | 0/0 | 0.5/0.5 | 0.5/0.5 | 0/0 | 0/0 | 0/0 | 0/0 |
 | LLM-SR | 1/1 | 0/0 | 1/fail | 0.5/0.5 | 0/0 | 1/1 | 0.2/0 | 0.33/0.33 |
+| LLM-SR, expression form | 0/fail | fail/0 | fail/fail | 0/fail | 0/0 | 1/0 | 0/0 | 0.33/0 |
 
 T2 hard's delayed insulin action is capped at unresolved for every method (its
 identification limit), so 0.5 is that cell's maximum. No baseline confirms
 every basin predicate.
+
+LLM-SR's expression form confirms nothing in the four Dalla Man cells: its
+three completed picks fail their meal or insulin pathways, and its other five
+runs failed their validation rollouts. Its one run confirming every
+requirement is the alien device, seed 0; seed 1 leaves that requirement
+unresolved. Every Dalla Man pick of the program form that confirms anything
+(T1 easy, T2 easy seed 0, T2 hard) is a transcription with hidden states,
+still pending review.
 
 ## Running it
 
@@ -283,9 +300,10 @@ It prepares in the foreground, then assesses detached, 12 rows at a time, into
 `summary.json`), reading LLM-SR's expression form from its reseal. The first
 root, `phase-c-baseline-mechanisms-v1`, ran from `951e793` without the
 expression form. A dry prepare on js2 on 2026-10-27, in a temporary root,
-froze 112 rows, the first root's 96 identically, so their assessments should
-repeat. It refuses to start beside another live run, as the rollouts'
-wall-clock limits assume their own CPUs. On a laptop, 12 rows took 11 s.
+froze 112 rows, the first root's 96 identically; the run itself (55 s) then
+repeated their assessments exactly. It refuses to start beside another live
+run, as the rollouts' wall-clock limits assume their own CPUs. On a laptop,
+12 rows took 11 s.
 
 ## Aggregation
 
