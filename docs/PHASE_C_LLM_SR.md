@@ -360,6 +360,21 @@ Plans:
     +infinity: T2 hard's seed 1 failed, so that case's median is +infinity
     too. The reseal root is the run's record from here on; the first root is
     kept as it was.
+- `configs/phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json`: seeds 2,
+  3 and 4, which with the frozen plan's seeds 0 and 1 make the five seeds the
+  draft promises. The user asked on 2026-10-27 for three more seeds of every
+  method, this form first. Only the seeds, the status and the budget and scope
+  descriptions differ from the frozen plan, which a test checks. A dry prepare
+  on the Mac gives 24 tasks, 33 searches and at most 330,000 samples (about
+  82,500 requests); every row is the frozen plan's apart from its seed. The
+  search code is unchanged since `6aacfc2`, and the sealing is the reseal's.
+  All 33 searches run at once, as
+  `phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4`; the test takes seeds 0
+  and 1 from the reseal root and seeds 2 to 4 from this one. LLM-SR resets its
+  weakest islands every four hours of wall-clock time (their `buffer.py`), so a
+  search that runs slower resets more often within its 10,000 samples: seeds 0
+  and 1 took 38 to 43 hours, about ten resets each, and with 33 searches at
+  once these may take longer. Proposed, pending review.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3

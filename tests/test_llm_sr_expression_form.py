@@ -214,6 +214,19 @@ def test_the_plans_change_only_the_form_and_its_description():
     assert llm_sr_method_label(base_full) == "llm_sr"
 
 
+def test_the_seeds_plan_changes_only_the_seeds_and_their_description():
+    seeds, frozen = (_load("phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json"),
+                     _load("phase_c_llm_sr_expression_hosted_120b_v1.json"))
+    assert {k for k in seeds if seeds[k] != frozen[k]} == {
+        "repetitions", "budget", "scope_note", "status",
+    }
+    budget, frozen_budget = seeds["budget"], frozen["budget"]
+    assert {k for k in budget if budget[k] != frozen_budget[k]} == {"rationale"}
+    assert seeds["status"] == "proposed_pending_review"
+    assert sorted(frozen["repetitions"] + seeds["repetitions"]) == [0, 1, 2, 3, 4]
+    assert llm_sr_method_label(seeds) == "llm_sr_expression"
+
+
 def test_only_llm_sr_declares_a_hypothesis_form():
     llm_ode = json.loads(
         (REPO / "configs" / "phase_c_llm_ode_hosted_120b_v1.json").read_text()
