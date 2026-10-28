@@ -7,15 +7,19 @@
 #   METHOD  llm_sr, llm_ode or d3
 #   CONFIG  a frozen plan declaring the vm_local_vllm endpoint
 #   NAME    the run's directory under ~/af/runs
-#   TASKS   how many tasks run at once; start the server for at least as many
-#           (scripts/jetstream/gpu_server.sh start MODEL TASKS)
+#   TASKS   how many tasks, or LLM-SR target searches, run at once; start the
+#           server for at least as many (gpu_server.sh start MODEL TASKS)
 #
 # Rerunning is safe: a finished task is not repeated, a running one is refused
 # by its lock, and an interrupted one restarts with its partial attempt kept
-# beside it; a D3 task resumes from its last finished generation. Each start
-# copies the server's record into the run, so the run names the model revision,
-# image and settings that answered it. When every task has ended, the method's
-# report is written to NAME/report.json.
+# beside it; a D3 task resumes from its last finished generation. LLM-SR first
+# searches every target of every task as its own process, as on the hosted
+# service (run_phase_c_hosted.sh), then assembles and seals each task's model
+# from its finished searches, no more seals at once than this VM has CPUs; a
+# finished search is kept, and one that was stopped starts over beside the
+# stopped attempt. Each start copies the server's record into the run, so the
+# run names the model revision, image and settings that answered it. When every
+# task has ended, the method's report is written to NAME/report.json.
 
 set -euo pipefail
 
@@ -32,12 +36,28 @@ usage() {
   exit 2
 }
 
+searches() {  # plan: one "index target" line per LLM-SR target search
+  "${py}" -c 'import json, sys
+for row in json.load(open(sys.argv[1]))["rows"]:
+    for target in row["searched_targets"]:
+        print(row["index"], target)' "$1"
+}
+
 worker() {  # root, method, count, tasks: runs in the foreground
-  local root="$1" method="$2" count="$3" tasks="$4"
+  local root="$1" method="$2" count="$3" tasks="$4" at_once="$4"
   echo "started $(date -u +%FT%TZ): ${count} tasks, ${tasks} at a time"
+  if [[ "${method}" == llm_sr ]]; then
+    echo "searching $(searches "${root}/plan.json" | wc -l | tr -d " ") targets first"
+    searches "${root}/plan.json" | xargs -P "${tasks}" -L 1 bash -c \
+      '"$1" scripts/phase_c_llm_sr.py run --root "$2" --index "$3" --target "$4" >>"$2/logs/task-$3-$4.log" 2>&1 || echo "task $3 target $4 exited with status $?"' \
+      _ "${py}" "${root}"
+    # A seal rolls its pick out under time limits, so no two share a CPU.
+    at_once="$((tasks < $(nproc) ? tasks : $(nproc)))"
+    echo "target searches ended $(date -u +%FT%TZ); sealing each task, ${at_once} at a time"
+  fi
   # run() seals a failed search as a result, so a nonzero exit is a crash, or for
   # D3 (status 3) a server that stopped answering for longer than its patience.
-  seq 0 $((count - 1)) | xargs -P "${tasks}" -I{} bash -c \
+  seq 0 $((count - 1)) | xargs -P "${at_once}" -I{} bash -c \
     '"$1" "scripts/phase_c_$2.py" run --root "$3" --index "$4" >>"$3/logs/task-$4.log" 2>&1 || echo "task $4 exited with status $?"' \
     _ "${py}" "${method}" "${root}" {}
   "${py}" "scripts/phase_c_${method}.py" report --root "${root}" >"${root}/report.json" ||

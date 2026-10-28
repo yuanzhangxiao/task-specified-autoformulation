@@ -456,7 +456,7 @@ bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_smoke
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_hosted_120b_v1.json phase-c-llm-sr-hosted-120b-v1 22
 ```
 
-The last argument is how many target searches run at once; the full run searches all 22 at once, then seals each task. When every task has ended, the launcher writes the report to `report.json` in the run's directory. On the GPU VM, `run_phase_c_tasks.sh` still searches a task's targets one after another.
+The last argument is how many target searches run at once; the full run searches all 22 at once, then seals each task. When every task has ended, the launcher writes the report to `report.json` in the run's directory. On the GPU VM, `run_phase_c_tasks.sh` does the same since 2026-10-28, sealing no more tasks at once than the VM has CPUs; the gpt-oss-20b arm runs there ([PHASE_C_BASELINES_20B.md](PHASE_C_BASELINES_20B.md)).
 
 ## Limitations
 

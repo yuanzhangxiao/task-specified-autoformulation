@@ -5,8 +5,8 @@ LLM-SR asks /v1/chat/completions for four programs of up to 4096 tokens per
 request (the limit its Phase C plans declare for gpt-oss, which reasons before
 it answers); LLM-ODE asks /v1/responses for up to 1024 tokens. This sends
 requests of those two shapes from several concurrent clients and reports
-generated tokens per second, then projects the GPU hours and SUs one model's
-Phase C matrix needs at that rate. The prompts are synthetic, of about the
+generated tokens per second, then projects the GPU hours and SUs the 20b arm
+needs at that rate. The prompts are synthetic, of about the
 length the methods send; no benchmark data are read.
 
 The projection counts generation only. LLM-SR and LLM-ODE also spend CPU time
@@ -26,9 +26,11 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-#: One model's Phase C matrix: 22 LLM-SR searches of 10,000 samples at four
-#: samples per request, and LLM-ODE's 200 iterations x 4 islands per target.
-WORKLOAD_REQUESTS = {"llm_sr": 22 * 10_000 // 4, "llm_ode": 17_600}
+#: The 20b arm (configs/*_vm_20b_v1.json): both LLM-SR forms, each 55 searches
+#: (eleven targets, five seeds) of 10,000 samples at four samples per request,
+#: and both LLM-ODE prompts, each 200 iterations x 4 islands x 55 searches.
+#: D3's 40 tasks send about 1,500 requests and are left out.
+WORKLOAD_REQUESTS = {"llm_sr": 2 * 55 * 10_000 // 4, "llm_ode": 2 * 200 * 4 * 55}
 
 #: LLM-SR's generation limit per sample in its Phase C plans
 #: (configs/phase_c_llm_sr_budget_pilot_v2.json, reasoning_model_adaptation).

@@ -111,11 +111,11 @@ def test_the_projection_uses_the_best_rate_for_each_shape() -> None:
         throughput.summarize("llm_ode", 16, [], elapsed=2.0, errors=["refused"]),
     ]
     projection = throughput.project(results, su_per_hour=128)
-    # 55,000 requests x 2,000 tokens at 8,000 tokens/s is 13,750 s.
+    # 275,000 requests x 2,000 tokens at 8,000 tokens/s is 68,750 s.
     assert projection["llm_sr"]["at_concurrency"] == 16
-    assert projection["llm_sr"]["generated_tokens"] == 110_000_000
-    assert projection["llm_sr"]["generation_hours"] == round(13_750 / 3600, 1)
-    assert projection["llm_sr"]["su"] == round(13_750 / 3600 * 128)
+    assert projection["llm_sr"]["generated_tokens"] == 550_000_000
+    assert projection["llm_sr"]["generation_hours"] == round(68_750 / 3600, 1)
+    assert projection["llm_sr"]["su"] == round(68_750 / 3600 * 128)
     assert "llm_ode" not in projection  # nothing was measured for it
 
 
