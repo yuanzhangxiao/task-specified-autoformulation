@@ -5,6 +5,15 @@ theoretical collaborator. Vega owns experimental design and implementation;
 the GEMOT collaborators provide biological expertise and review. This document
 is self-contained; linked repository documents provide additional history.
 
+**28 October clarification:** the [current task contracts](VEGA_PREMISE_REVISION_TASK_SELECTION.md)
+distinguish useful prediction, joint premise revision and constituent attribution.
+Claim content and scientific relevance, not IDs, determine success. Requiring
+the returned model to remain in the evidence-compatible set is an explicit output
+option, not a universal definition of premise revision. The
+[exploration applicability audit](VEGA_EXPLORATION_REGULARITY_AUDIT.md) records a
+restricted baseline reduction and a qualification to a cited sufficient condition.
+These refinements preserve the world/premise/evidence semantics below.
+
 ## 1 Assignment and intended contribution
 
 We want a system that notices when a biological model rests on a missing,

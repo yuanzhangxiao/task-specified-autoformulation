@@ -1,95 +1,79 @@
-# Two tasks for biological review: prediction and warranted premise revision
+# Biological discussion: what decision should an assumption revision support?
 
-Prepared by Vega, 28 October 2026. Discussion draft for the prospective GEMOT
-collaboration; it has not been sent to the collaborators. The stories below are
-synthetic. Their biological interpretation, useful tolerances and feasible
-measurements remain open to correction.
+Prepared by Vega, 28 October 2026; revised after Lyra's task-selection response.
+Discussion draft for the prospective GEMOT collaboration. It has not been sent
+to the collaborators. The illustrative case below is synthetic; no biological
+tolerance, assay accuracy or acquisition cost has been established.
 
-We want to revise assumptions about an experiment while keeping a reviewed
-mechanistic model family fixed. Our current calculations show that obtaining a
-useful prediction need not identify which assumption failed. The purpose of this
-discussion is to establish when that distinction matters experimentally.
+We would like to begin with a modeling decision. What did the scientist
+need to predict, choose or explain, and what changed after an assumption was
+revised? An independent assay, intervention or protocol record that could judge
+the revision would be useful. Better fit to the same outcome alone
+may not distinguish competing explanations.
 
-## Two versions of the same scientific question
+Our methodological aim is to connect an assumption change to the evidence that
+warrants it. The required conclusion should follow the scientific decision;
+our current mathematical examples should not determine which biology we study.
 
-**Story P: predict the response to another stimulus.** A scientist adds a ligand
-and records a downstream signal. A model assuming both sustained ligand
-availability and sustained cellular responsiveness fails. Ligand loss and loss
-of response capacity are competing explanations. The immediate decision is which
-specified dose and timing protocol will produce the required mean response.
-Could a model support that decision while explicitly leaving the cause unresolved?
+## Three potentially useful outcomes
 
-The returned object would be a response function over the agreed dose/timing
-protocols, with one consistent set of model choices across those protocols and
-uncertainty from the surviving explanations. Representative parameter values
-could support prediction without becoming claims about the true biological cause.
-Predictions concern a defined measured mean; an individual noisy replicate would
-require a different uncertainty statement.
+| Outcome | What the scientist receives | When it could complete the task |
+| --- | --- | --- |
+| Useful prediction | A response function with uncertainty over the relevant protocols, while causes may remain unresolved. | The decision can be made reliably without choosing among the surviving explanations. |
+| Joint premise revision | Evidence that a specified combination of assumptions cannot all be retained, together with the unresolved alternatives. | Withdrawing that combination changes the model's use, experimental design or interpretation sufficiently. |
+| Constituent attribution | Evidence challenging a particular scoped assumption, such as practically constant ligand availability. | Knowing which assumption fails changes what the scientist measures, controls or concludes. |
 
-**Story J: revise a named assumption with evidence.** The observations and future
-decision are the same, but the scientist also needs at least one named assumption
-that can be challenged, such as the original constant-ligand premise. This might
-change which input is measured or controlled in later experiments. A useful response
-curve alone is insufficient: compatible explanations preserving constant ligand
-must be addressed before calling that premise false.
+These requirements are not a ranking of scientific value. A joint revision can
+complete the decision; an individually identified failure can be irrelevant.
+Complete mechanism recovery is a further requirement to request only when useful.
 
-Here the output adds a scoped claim, such as “bioactive ligand changes by more
-than the agreed tolerance over this window,” supported by the admitted evidence.
-If ligand loss and reduced responsiveness remain indistinguishable, the output
-must retain that ambiguity. A joint statement that the two premises cannot both
-hold is useful, but does not complete a request to identify one failed premise.
-Both changes can also occur together. Removing a modeling restriction permits
-alternatives; it does not establish that its opposite is true.
+Fix acceptable claim content, scope and usefulness before comparing methods.
+Naming the conjunction “ligand availability and responsiveness are both constant”
+does not make its rejection an identification of which constituent failed.
+Relabeling must not change the score. Report what was withdrawn or qualified and
+which alternatives remain; simply allowing everything does not explain the
+evidence-supported change.
 
-## A small mathematical explanation to challenge
+## What kind of returned model is acceptable?
 
-Our illustrative family is
+One possible requirement is a model that remains statistically compatible with
+the evidence used in the analysis. This is appropriate when the model is offered
+as a surviving explanation. Compatibility is conditional on the observation and
+uncertainty assumptions; it does not establish biological truth or identify the
+mechanism. New evidence can remove a previously useful representative model,
+so its eligibility must be checked again.
 
-\[
-\dot L=-\kappa L,\qquad \dot R=-\gamma R,\qquad
-\dot x=aLR-x.
-\]
+An explicitly labeled predictive approximation can remain useful for a target
+without surviving as an explanation of all observations. Report its predictive
+guarantee and compatibility status separately. Agree on this choice before
+evaluation. Either output should use a consistent model across its declared
+protocols; experimental inputs remain supplied inputs.
 
-Here \(L\) represents available ligand and \(R\) effective response capacity.
-Neither variable is yet tied to a validated molecular measurement. A baseline
-response identifies combinations such as amplitude \(A\) and summed decay
-\(s=\kappa+\gamma\), rather than necessarily identifying the two decay rates.
-
-For a separate matched run receiving one added pulse at time \(\tau\), the
-illustrative mean increment at delay \(\Delta\) is
-
-\[
-\Delta m=d\eta e^{-\gamma\tau}F_s(\Delta),\qquad
-F_s(t)=\frac{e^{-st}-e^{-t}}{1-s}.
-\]
-
-The formula has its continuous limit at \(s=1\). The quantity \(d\) is an
-actually delivered dose multiplier; \(\eta\) combines preparation and readout
-scale. At one pulse time, observations can constrain the product
-\(\eta e^{-\gamma\tau}\) without separating its factors. Two pulse times can
-separate them in the idealized noiseless model only if the relevant scale is
-shared. Allowing an independent scale for every run can restore the ambiguity.
-This is a conditional explanation, not evidence that experimental scales are
-shared or that two noisy measurements suffice in practice.
-
-## Answers that would change the problem
+## Details that would determine the mathematical problem
 
 | Question for the collaborators | Why the answer matters |
 | --- | --- |
-| What actual decision needs the model: one endpoint, several protocols, a ranking, or a dose choice? | This fixes the output and error criterion. Several endpoints should be required by the science, rather than added to create difficulty. |
-| Is the target ligand concentration, ligand bioactivity, downstream signal, or target occupancy? | These quantities need different observation maps. A concentration assay may not establish bioactive exposure. |
-| Which preparation, gain and kinetic quantities are shared across runs, and what independently supports that sharing? | Sharing enables inference from the second protocol; fit quality alone cannot supply it. |
-| Does a logged dose describe the command or verified delivery? | Delivery uncertainty belongs in the model unless independently constrained. |
-| Can pulses be compared in separate matched preparations, or only sequentially in one preparation? | The toy calculation uses separate runs with reset clocks. Multiple pulses within one run require their accumulated history. |
-| What changes count as practically nonconstant, over which window? | Exact zero decay is usually a different question from acceptable approximation error. |
-| Which assay, calibration or protocol record is available, with what accuracy and total cost? | Evidence choices must be compared using actual acquisition constraints. |
+| What changes after the conclusion: a dose, protocol, measurement, interpretation or decision to stop? Would a joint revision suffice? | This identifies useful claim content and prevents unnecessary attribution. |
+| Is the target a biological concentration, bioactivity, measured signal, population mean or individual observation? | These require different observation maps and error statements. |
+| What prediction domain and error are scientifically meaningful? | One endpoint, a trajectory, protocol rankings and dose choice impose different requirements. Approximation tolerances and operating windows must be explicit. |
+| Which initial conditions, kinetic quantities, observation gains and preparation factors are shared across runs, and what supports that sharing? | Cross-run inference depends on these facts; outcome fit alone cannot supply them. |
+| Does a logged intervention describe the command or verified delivery? Are runs independent, matched, or sequential within one preparation? | Delivery uncertainty and accumulated history may change the possible explanations. |
+| Which independent assay, calibration, intervention or existing record could test the disputed premise? | Adjudication should distinguish explanations, not merely repeat their common outcome. |
+| What are the achievable accuracy, sample dependence and total costs of those actions? | Setup, repeated samples, time and shared batches belong in the acquisition comparison. These values remain unspecified. |
 
-If a pulse increment is estimated by subtracting a baseline measurement, we also
-need the raw measurement pairing: shared baselines induce correlated errors.
-Subtracting estimated means does not create a noiseless new measurement.
+If a response increment is estimated by subtracting a baseline measurement,
+we need the raw pairing and uncertainty: shared baselines can induce correlated
+errors. Subtracting an estimated mean does not create a noiseless measurement.
 
-The most useful next contribution would be one real example with a consequential
-decision, an initially plausible assumption, and independent evidence that can
-judge its revision. Either story may prove unimportant or unrealistic. That
-would be valuable feedback before selecting a new experiment or theoretical
-claim.
+## Optional illustration to correct or replace
+
+A scientist adds ligand and observes a downstream signal. Declining ligand
+availability and declining cellular responsiveness could produce the same
+signal in our simplified control. Repeating a stimulus at another time may help
+separate them, but only under justified preparation and readout sharing. A
+concentration assay may also differ from the required bioactivity assay.
+
+This example should be replaced if the consequential failure instead concerns
+population averaging, initialization, observation mapping or another premise.
+The immediate need is a realistic decision and independent evidence for judging
+its revision, rather than a case engineered to require a particular algorithm.

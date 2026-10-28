@@ -1,11 +1,14 @@
-# Two matched tasks for scientific premise revision
+# Task contracts for prediction and scientific premise revision
 
-Vega, 28 October 2026. Bounded selection exercise following Lyra's M2 response.
+Vega, 28 October 2026. Revised after Lyra's task-selection response.
 This specifies possible research tasks and proves analytical controls. It does
 not select a biologically validated case, launch an acquisition campaign, or
 establish a new methodological contribution. M2 remains closed.
 
-The [reply to Lyra](VEGA_TO_LYRA_M2_TASK_REPLY.md) gives the research judgment;
+The [current reply to Lyra](VEGA_TO_LYRA_EXPLORATION_CONTRACT_REPLY.md) gives the
+research judgment and supersedes the earlier preference for individual attribution.
+The [exploration audit](VEGA_EXPLORATION_REGULARITY_AUDIT.md) supplies a concrete
+baseline reduction and a qualification to an existing sufficient condition;
 the [biological discussion aid](VEGA_GEMOT_REVISION_TASK_DISCUSSION.md) asks which
 of these requirements matters in practice. The original
 [premise formulation](VEGA_PREMISE_REVISION_THEORY_HANDOFF.md) remains in force.
@@ -74,7 +77,7 @@ The thresholds, window, origin of each premise, and interpretation of measured
 ligand versus bioactive ligand require review. An omitted protocol fact is not
 a false assertion by the biologist.
 
-## 2. Allowed outputs: two tasks with the same data and loss
+## 2. Allowed outputs and scientifically useful claims
 
 Let \(C(D)\) be a nonempty retained scientific set. Computation maintains
 \(I\subseteq C\subseteq O\), with verified \(I\ne\varnothing\) needed for
@@ -84,7 +87,7 @@ must be shared across the declared protocol menu: it cannot choose another
 \(\eta\) or \(\gamma\) for each requested prediction. Inputs \(d,\tau\)
 are supplied by the task, not optimized by the returned model.
 
-Use the same loss in both tasks:
+Use the same loss when comparing output requirements:
 
 \[
 \ell_G(v,w)=\max_{a\in\mathcal A_G}|f_v(a)-m_w(a)|,\qquad
@@ -93,28 +96,46 @@ R_G(v,C)=\sup_{w\in C}\ell_G(v,w).
 
 This concerns measured **means**. Individual future observations need a noise
 prediction loss. Intervention ranking or dose selection would also be different
-losses. Allowed point models here belong to \(C(D)\); an implementable certificate
-must verify the returned point, rather than treating an outer cell as feasible.
-An unrestricted function is a separately labeled comparator, not an allowed
-point model.
+losses. Fix the predictive class \(\mathcal F_G\) before comparing methods.
+Compatibility is an additional output requirement with two explicit choices:
 
-| Requirement | Task P: useful predictive revision | Task J: a warranted named revision |
-| --- | --- | --- |
-| Returned predictive object | One admitted response function over the fixed protocol menu | Exactly the same object and loss |
-| Success | \(R_G(v,C)\le\varepsilon_G\) | P-success plus at least one named premise rejected throughout \(C\) |
-| Interpretation of chosen nuisance values | Working representatives, not identified physical values | Same; named claims need separate evidence |
-| Assumption change | Relax defaults enough to retain compatible explanations; show which alternatives remain | Same relaxation, plus an evidence-supported assertion that a named scoped predicate fails |
-| Insufficient evidence | Report remaining risk or unresolved computation | Also report named ambiguity or a joint conflict without claiming J-success |
+- **Predictive approximation:** \(v\in\mathcal F_G\). Report its target guarantee
+  and whether it remains compatible with the observed evidence separately.
+- **Surviving explanatory candidate:** \(v\in\mathcal F_G\cap C(D)\).
+  Verify membership; an outer cell is not a feasible point. This is conditional
+  statistical compatibility, not evidence of biological truth or unique mechanism.
 
-Task P is a necessary predictive control. Task J is closer to the user's
-original goal of supported assumption revision. They are not competing methods.
+Neither choice follows from the word “revision.” Choose it for the scientific
+use before evaluation. A fixed physical model class can still require a coherent
+response function; relaxing compatibility does not authorize unrelated forecasts
+or changing the supplied experimental inputs. The original Controls A–C remain
+valid under their declared admitted-model restrictions.
 
-Concretely, a J output has \(r=(v,B,J,G,E)\): a working model \(v\), revised
-assumption contract \(B\), nonempty set of rejected premise IDs \(J\), fixed
-scope \(G\), and evidence/provenance \(E\). A conservative relaxation contract
-must admit all retained explanations; \(C\subseteq\Omega_B\) is sufficient.
-The associated point model is a representative, not the entire revised contract.
-For every \(j\in J\), the scientific assertion requires
+| Task | Required success, when selected by the scientific decision |
+| --- | --- |
+| P: useful prediction | An allowed response function with \(R_G(v,C)\le\varepsilon_G\). It does not by itself identify an assumption to revise. |
+| Prediction plus joint revision | P-success and an evidence-supported change to a specified assumption combination, preserving unresolved constituent explanations. |
+| J: prediction plus constituent attribution | P-success and at least one relevant constituent premise rejected throughout \(C\). This is the narrower J used in Controls A–B. |
+
+These are output contracts, not a hierarchy of scientific value or competing
+methods. Joint revision can complete the research task. Complete physical
+diagnosis is stronger than any one-rejection task and needs separate justification.
+
+Fix the allowed **semantic claims** \(\mathcal Q_G\), their scopes and their
+decision relevance. For example, \(\neg(p_L\wedge p_R)\), \(\neg p_L\), and
+\(\neg p_R\) are different claim contents. Assigning the conjunction a new ID
+does not convert its rejection into constituent attribution. Equivalent wording
+should induce the same world predicate; scoring must not reward aliases or an
+easy but scientifically irrelevant rejection.
+
+Write an output as \(r=(v,B,q,G,E)\): predictor, revised contract, allowed
+scientific claim, scope, and evidence/provenance, with compatibility status
+recorded separately. A conservative revised contract must admit retained
+explanations; \(C\subseteq\Omega_B\) is sufficient. Also report the specific
+withdrawal or qualification relative to the original contract and what supports
+it. Merely returning the unrestricted envelope is not an informative revision.
+The claim requires \(q(w)=1\) for every \(w\in C\). In particular, rejecting
+constituent \(j\) requires
 
 \[
 C(D)\cap\{w:p_j(w)=1\}=\varnothing.
@@ -126,7 +147,7 @@ the conjunction without naming either premise individually. Removing a premise
 permits its negation; it does not assert it. Minimal repair cost remains a
 preference separate from warranted blame. Mixed violations remain admitted.
 
-For J, one can equivalently impose a hard semantic admissibility condition and
+For any selected claim task, impose a hard semantic admissibility condition and
 then optimize predictive loss. No arbitrary exchange rate should let better
 prediction compensate for a false scientific assertion.
 
@@ -134,8 +155,35 @@ Abstention is a valid operational outcome, but not successful completion of J.
 Usefulness must be evaluated on declared instances admitting an informative
 action and a warranted answer; an always-abstain rule fails that requirement.
 Healthy worlds and boundary cases need separately declared acceptable outputs.
-Recovering the **entire** premise truth signature is a third, stronger task.
-It is not silently included in J.
+Recovering the **entire** premise truth signature is a stronger task.
+It is not silently included in J. Failure to achieve J can still leave a
+successful joint-revision task; the scoring contract determines that distinction.
+
+### Compatibility, evidence refinement and joint certificates
+
+For an allowed predictor set \(\mathcal A\), define
+\(R_{\mathcal A}(C)=\inf_{v\in\mathcal A}\sup_{w\in C}\ell_G(v,w)\).
+Under nonempty nested refinement \(C'\subseteq C\), fixed-\(\mathcal A\) risk
+cannot increase. For \(\mathcal A=C\), it can: predictions \(\{0,1,2\}\)
+have retained-center risk 1, whereas \(\{0,2\}\) have risk 2. The old center's
+target bound remains valid; its eligibility as a surviving explanation fails.
+For the same maximum absolute response loss, the triangle inequality gives
+\(R_{C'}(C')\le\operatorname{diam}(C')\le\operatorname{diam}(C)\le2R_C(C)\).
+This factor is sharp. Newly recomputed confidence regions need not be nested;
+nesting must be supplied by the construction, not assumed from “more data.”
+
+For fixed \(C\), the core valid output pairs factor into acceptable predictors
+and universally valid useful claims if no further model/claim restriction couples
+them. A selected repair library, claim-specific prediction scope or cost constraint
+can break that factorization. Both factors must be checked against current
+evidence; attaching a new attribution to an old model is insufficient.
+
+A single event \(w_\star\in C(D)\), of probability at least \(1-\alpha\),
+supports all sound uniform prediction and claim certificates simultaneously.
+There is no second error-budget charge merely for reporting two conclusions.
+Unverified numerical operations or invalid adaptive stopping are not covered
+by that event. For independent calculations with separate coverage events,
+their joint validity still needs accounting.
 
 ## 3. Evidence menu and what its entries actually buy
 
@@ -161,6 +209,79 @@ design joint Gaussian inversion or an explicitly allocated simultaneous error
 budget is available as a baseline. M2's threshold cannot be reused repeatedly
 under adaptive stopping while retaining its original coverage claim. Adaptive
 design, nonstationary batches and uncertain observation laws are unimplemented.
+
+### A constructive finite-sample baseline for a calibrated slice
+
+For a declared menu of \(K\) Gaussian arms with known positive variances,
+assume IID observations within each arm and independent potential sample
+sequences across arms. Fix \(0<\alpha<1\).
+After \(n\ge1\) observations of arm \(e\), define
+
+\[
+r_e(n)=\sigma_e\sqrt{\frac{2}{n}
+\log\frac{K\pi^2n^2}{3\alpha}}.
+\]
+
+The two-sided Gaussian tail bound is at most
+\(6\alpha/(K\pi^2n^2)\). Summing over arms and sample counts gives
+\(\Pr\{\forall e,n:\ |\bar Y_{e,n}-\mu_e|\le r_e(n)\}\ge1-\alpha\).
+Adaptive choice among these fixed arms preserves the bound under the stated
+sampling assumptions. Intersect **all past** intervals for each arm, and pull
+those intersections back to the world class, to obtain nested \(C_t\).
+Using only the latest interval is also covered simultaneously, but need not
+give nesting. This is an elementary conservative construction, not a new
+confidence-sequence method or an optimal sampling rule.
+
+Now explicitly condition on calibrated \(A,s,\eta\), with only
+\(\gamma\in[0,s]\) unknown. This is a smaller family than M2's unknown
+preparation envelope. For an informative pulse arm and future targets write
+
+\[
+\mu_e(\gamma)=b_e+c_e e^{-\gamma\tau_e},\qquad
+m_v(a)=b_a+c_a e^{-v\tau_a},\qquad c_e,c_a,\tau_e,\tau_a>0.
+\]
+
+The coefficients are known, including any baseline contribution. Subtracting an
+estimated baseline does not satisfy that assumption automatically. Define
+\(\lambda_e=c_e\tau_e e^{-s\tau_e}>0\) and
+\(L_G=\max_a c_a\tau_a\). All inverse observation intervals intersect to
+a retained interval \(\Gamma_t\subseteq[0,s]\). When it is nonempty,
+
+\[
+\operatorname{width}(\Gamma_t)\le2r_e(n)/\lambda_e.
+\]
+
+The midpoint is a compatible model, and its worst-case future error is at most
+\(L_G\operatorname{width}(\Gamma_t)/2\). If
+\(g=s-c_L-c_R>0\), the condition
+
+\[
+r_e(n)<\lambda_e\min\{\varepsilon_G/L_G,\ g/2\}
+\]
+
+therefore guarantees both predictive adequacy and at least one constituent
+rejection on the common coverage event. The condition is reached at finite
+\(n\) since \(r_e(n)\to0\), provided the sampling policy actually collects
+that many informative readings. Empty retained sets suppress constituent claims.
+No empirical sample cost or numerical implementation of this policy is claimed.
+
+For the fixed grid in the applicability audit, choose the grid point nearest
+the interval midpoint. With spacing \(h\le\varepsilon_G/L_G\), its uniform
+error is at most \(L_G(h+\operatorname{width}(\Gamma_t))/2\).
+Thus \(r_e(n)<\lambda_e\min\{\varepsilon_G/(2L_G),g/2\}\) supplies
+both prediction and constituent-claim certificates for this fixed-output
+variant. The grid point need not belong to \(\Gamma_t\). This explicitly
+handles the reporting interface; population-level correctness from an
+exploration theorem alone would not supply all its recorded certificates.
+
+The unrounded midpoint construction establishes a baseline even when
+compatibility is required. In this particular monotone one-rate family,
+retained-model minimax risk also cannot
+increase under nested **interval** refinement: clamp an old center to the new
+interval; every predicted coordinate moves toward every remaining world's
+coordinate. Lyra's general nonmonotonicity example remains valid for broader or
+disconnected sets. Neither argument covers uncertain scale/sharing, correlated
+batches or arbitrary ODEs without additional analysis.
 
 ## 4. Control A: unlimited evidence at one pulse time can leave J impossible
 
@@ -339,6 +460,8 @@ implementation already accepts this particular ODE and evidence interface.
 | [Jalaldoust, Bellot and Bareinboim, 2024](https://papers.nips.cc/paper_files/paper/2024/file/f90d2001ec7595d4b8fdfa4db966d154-Paper-Conference.pdf), partial transportability | Theorems 1–2 and Algorithm 2 address bounds, shared mechanisms and robust prediction; Appendix A includes Bayesian finite-data inference. The setup uses recursive SCMs and supplied sharing diagrams. An ODE embedding and guarantee comparison remain necessary. Bayesian credible summaries, uniform frequentist coverage and numerical certification are different standards; their difference alone is not a contribution. |
 | [Skanda and Lebiedz, 2013](https://arxiv.org/pdf/1101.3663), robust dynamic design | Worst-case model discrimination with uncertain parameters and designed times/perturbations is an established comparator for J. Its local numerical strategy is not a proof of global exclusion, but a useful benchmark must use its strongest applicable formulation. |
 | [Degenne and Koolen, 2019](https://arxiv.org/pdf/1902.03475), multiple correct answers | A finite evidence menu and finite labels may reduce to structured pure exploration with finite arms and one-parameter exponential-family observations. Their lower bound and Sticky Track-and-Stop results cover this setting. Continuous model outputs, correlated acquisitions, unequal setup costs and batch drift require explicit handling before transferring a theorem. |
+| [Poiani, Bernasconi and Celli, AISTATS 2026](https://proceedings.mlr.press/v300/poiani26a.html), infinite answers | Compact infinite answer spaces and composition of regression with finite labels are explicitly studied. The [applicability audit](VEGA_EXPLORATION_REGULARITY_AUDIT.md) identifies a boundary counterexample to the printed continuity-to-regularity sufficient condition and gives a finite-answer reduction verified directly. Results conditional on the paper's regularity assumptions remain distinct from that sufficient condition. |
+| [Poiani, Bernasconi and Celli, ICLR 2026](https://proceedings.iclr.cc/paper_files/paper/2026/hash/6c3490b3616832331d4e2224bb6414c2-Abstract-Conference.html), non-asymptotic Track-and-Stop | Finite-answer non-asymptotic analysis is available. The relevant comparison is not “our finite data versus only asymptotic predecessors.” Concrete observation, cost and answer assumptions still need checking. |
 
 For the last reduction, let \(\mu(w)\) collect the menu's observation means,
 assuming they determine the full observation laws. If \(I^*(w)\) is the set of
@@ -357,32 +480,57 @@ a fixed error target needs a quantitative bound such as Control A. For example,
 correct-answer sets \(\{a,b\},\{b,c\},\{a,c\}\) have empty intersection, yet
 randomization gives success probability \(2/3\) in each indistinguishable world.
 A useful predictor may lie in the intersection while no named revision does.
-This is ordinary identifiability. Moreover, J includes a continuous predictor:
-reducing its finite label portion alone does not solve the entire task unless predictive
-adequacy is independently guaranteed.
+For a fixed compact predictor class, finite claims, and loss continuous in the
+predictor, world-correct answer sets are closed. If their common intersection is
+empty, compactness gives finitely many, say \(m\), observationally equivalent
+worlds whose intersection is already empty. Every randomized answer is wrong
+in at least one of them, so some world has error probability at least \(1/m\).
+This elementary refinement needs the compact/closed conditions; it is not a
+blanket statement about unrestricted infinite answer spaces.
+
+Combining a continuous predictor with finite claims is not a generic novelty
+claim. The [audit](VEGA_EXPLORATION_REGULARITY_AUDIT.md) now gives a positive,
+restricted reduction using a fixed grid of coherent predictors with explicit
+prediction slack. It does not enforce transcript-dependent compatibility or
+establish optimality among all continuous outputs. The confidence baseline above
+handles compatibility on the calibrated interval slice by a different argument.
 
 ## 8. Selection judgment and what would justify another milestone
 
-My preference is to use P as a matched control and ask the biologists whether J
-is consequential. We should not substitute a convenient forecast for the user's
-premise-revision objective. Equally, we should not demand complete mechanism
-identification when one supported revision is sufficient.
+Choose useful prediction, joint revision or constituent attribution according
+to an actual scientific consequence. The project still concerns justified
+assumption changes; constituent attribution is one possible requirement, not
+its definition. The biological aid now starts with the real decision and
+independent evidence before offering the synthetic illustration.
 
-The present results are reductions and counterexamples. None establishes a
-publishable new acquisition method or computational obstruction. The next useful
-theory question is conditional: after biology fixes an output, observation law,
-sharing tolerance, allowed actions and costs, does the resulting J task reduce
-to known structured exploration/design with an analytical prediction check?
-If it does, implement that baseline and evaluate the biological contribution.
-If it does not, state the failed reduction and a concrete result beyond it before
-funding a new algorithm. Unknown sharing cannot be restricted only for our method.
+The calibrated slice has a concrete finite-answer reduction and a conservative
+finite-sample compatible-model baseline. These are successful reductions, not
+new algorithms. The regularity counterexample changes how we apply one cited
+sufficient condition; it does not establish that our problem is unlearnable or
+that existing acquisition methods are inadequate.
+
+The next empirical milestone should use the independently justified observation
+and sharing assumptions of a consequential biological case. Compare at the same
+allowed claims, predictive class, tolerances, confidence requirement and costs.
+If a calibration or sharing fact is supplied to one method, supply it to all.
+If biology requires a larger family, diagnose the precise failure of these
+reductions before proposing a new method. A supported biological revision can
+be a contribution even when established methods suffice.
 
 There is no five-day automation, live biology request, new Monte Carlo study,
 or production-agent change associated with this document. The open decisions
 are scientific task choices, not permission to continue an otherwise specified
 implementation.
 
-## 9. Executable checks and current verification
+## 9. Executable checks and verification history
+
+The earlier selection-pass evidence below remains unchanged. The subsequent
+contract review adds an [exact rational checker](../scripts/check_premise_exploration_contract.py)
+for the retained-center example and the regularity audit; it does not modify
+the earlier checker or its frozen receipts. Current checks and scope are recorded
+in the [new reply](VEGA_TO_LYRA_EXPLORATION_CONTRACT_REPLY.md).
+
+### Original selection-pass record (commit `5bc307b`)
 
 The small [checker](../scripts/check_premise_revision_controls.py) computes
 outward numerical bounds for Controls A–C using the unchanged M2 interval
