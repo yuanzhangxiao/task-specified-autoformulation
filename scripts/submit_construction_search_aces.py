@@ -70,6 +70,16 @@ PROFILES["focused-retest"] = {
     "smoke_required_before_full": False,
     "engine_options": {"branch_delta": True, "common_zero_forcing": True},
 }
+PROFILES["action-feedback"] = {
+    **PROFILES["focused-retest"],
+    "allowed_model_sizes": ("20b",),
+    "engine_options": {
+        "branch_delta": True,
+        "common_zero_forcing": True,
+        "action_feedback": True,
+    },
+    "action_feedback_policy": "typed-branch-action-feedback-1",
+}
 ENTRYPOINTS = (
     "scripts/construction_search_campaign.py",
     "scripts/submit_construction_search_aces.py",
@@ -154,6 +164,8 @@ def verify_inputs(root: Path) -> dict:
     profile = PROFILES.get(plan.get("profile"))
     if profile is None:
         raise ValueError("unknown construction search profile")
+    if size not in profile.get("allowed_model_sizes", tuple(MODELS)):
+        raise ValueError("action-feedback confirmation is 20B-only")
     expected = {
         **profile["settings"],
         "model": model["model"],
@@ -177,6 +189,13 @@ def verify_inputs(root: Path) -> dict:
             for parent in {case.get("parent_id") for case in cases}
         )
         or plan.get("engine_options", {}) != profile.get("engine_options", {})
+        or plan.get("action_feedback_policy") != profile.get("action_feedback_policy")
+        or plan.get("allowed_model_sizes")
+        != (
+            list(profile["allowed_model_sizes"])
+            if "allowed_model_sizes" in profile
+            else None
+        )
         or plan.get("smoke_required_before_full", True)
         is not profile.get("smoke_required_before_full", True)
         or any(plan.get("settings", {}).get(k) != v for k, v in expected.items())

@@ -67,6 +67,11 @@ PROFILES = {
         "common_zero_forcing": True,
     },
 }
+PROFILES["action-feedback"] = {
+    **PROFILES["focused-retest"],
+    "allowed_model_sizes": ("20b",),
+    "action_feedback": True,
+}
 
 
 def profile_for(name: str) -> dict:
@@ -78,8 +83,10 @@ def profile_for(name: str) -> dict:
 
 def settings_for(size: str, profile: str):
     """Freeze the selected profile's allowance without changing model identity."""
-    value = base.settings_for(size)
     spec = profile_for(profile)
+    if size not in spec.get("allowed_model_sizes", tuple(base.MODEL_SPECS)):
+        raise ValueError("action-feedback confirmation is 20B-only")
+    value = base.settings_for(size)
     return type(value).model_validate(
         {
             **value.model_dump(mode="json"),
@@ -106,6 +113,7 @@ ENTRYPOINTS = tuple(
             *base.ENTRYPOINTS,
             "scripts/construction_search_campaign.py",
             "src/autoformalism/research/construction_branch_patch.py",
+            "src/autoformalism/research/construction_branch_feedback.py",
             "scripts/submit_construction_search_aces.py",
             "scripts/hpc/run_construction_search_aces.sh",
             "scripts/hpc/start_construction_search_aces.sh",
@@ -218,6 +226,14 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
         common["selection"] = (
             "first sorted frozen T2-easy parent (P00-r1); three fixed seeds; "
             "targeted proof/bookkeeping retest, no NMSE-based selection"
+        )
+    if spec.get("action_feedback", False):
+        common["engine_options"]["action_feedback"] = True
+        common["action_feedback_policy"] = engine.ACTION_FEEDBACK_POLICY
+        common["allowed_model_sizes"] = list(spec["allowed_model_sizes"])
+        common["selection"] = (
+            "first sorted frozen T2-easy parent (P00-r1); same three fixed seeds; "
+            "20B-only typed-action feedback confirmation, no NMSE-based selection"
         )
     return {
         **common,
@@ -672,6 +688,11 @@ def report(root: Path) -> dict:
         "required_options_in_first_call": plan["required_options_in_first_call"],
         "maximum_calls_per_episode": plan["maximum_calls_per_episode"],
         "maximum_output_tokens": plan["settings"]["max_output_tokens"],
+        **(
+            {"action_feedback_policy": plan["action_feedback_policy"]}
+            if "action_feedback_policy" in plan
+            else {}
+        ),
         "status": "complete" if all(r["completed"] for r in rows) else "incomplete",
         "smoke_complete": all(r["completed"] for r in rows if r["smoke"]),
         "smoke_eligible_episodes": sum(

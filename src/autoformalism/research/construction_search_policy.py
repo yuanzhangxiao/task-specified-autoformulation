@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import Field, ValidationError
 
 from autoformalism.llm.staged_topology import visible_response
+from autoformalism.research import construction_branch_feedback as branch_feedback
 from autoformalism.research import construction_branch_patch as branch_patch
 from autoformalism.research import construction_structural_feedback as feedback
 from autoformalism.research.construction_repair_identity import (
@@ -63,6 +64,7 @@ equations are unchanged; the runtime validates it before judging repetition.
 """.strip()
 )
 BRANCH_DELTA_POLICY = branch_patch.POLICY
+ACTION_FEEDBACK_POLICY = branch_feedback.POLICY
 BRANCH_SYSTEM = """Revise this ODE/algebraic model using the public task and
 training evidence.
 Choose a coherent scientific repair. You may replace complete right-hand sides,
@@ -418,11 +420,14 @@ def request(
     maximum_calls: int = 3,
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
+    action_feedback: bool = False,
 ) -> str:
     """Build one exact request; history never silently becomes an adopted model."""
     if policy not in POLICIES:
         raise ValueError("unknown construction search policy")
     _validate_limits(options_count, maximum_calls)
+    if action_feedback and not branch_delta:
+        raise ValueError("action_feedback requires branch_delta")
     option_word = "three" if options_count == 3 else "five"
     history = history or []
     repair = None
@@ -519,6 +524,8 @@ def request(
         packet["attempted_repairs"] = ledger_view(history, literal=branch_delta)
     if branch_delta:
         _branch_request_view(packet, intended if not fresh else None, batch=batch)
+        if action_feedback and intended is not None and not fresh and not batch:
+            branch_feedback.apply(packet, parent, intended)
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -707,11 +714,14 @@ def run_episode(
     maximum_calls: int = 3,
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
+    action_feedback: bool = False,
 ) -> dict:
     """Run bounded cached calls with policy-specific, deterministic routing."""
     if policy not in POLICIES:
         raise ValueError("unknown construction search policy")
     _validate_limits(options_count, maximum_calls)
+    if action_feedback and not branch_delta:
+        raise ValueError("action_feedback requires branch_delta")
     if settings.maximum_requests != maximum_calls:
         call_word = "three" if maximum_calls == 3 else "five"
         raise ValueError(
@@ -742,6 +752,7 @@ def run_episode(
                 maximum_calls=maximum_calls,
                 branch_delta=branch_delta,
                 common_zero_forcing=common_zero_forcing,
+                action_feedback=action_feedback,
             ),
             response_model=options_reply_model(options_count)
             if batch
@@ -869,4 +880,6 @@ def run_episode(
         result["branch_delta_policy"] = BRANCH_DELTA_POLICY
     if common_zero_forcing:
         result["common_zero_forcing"] = True
+    if action_feedback:
+        result["action_feedback_policy"] = ACTION_FEEDBACK_POLICY
     return result

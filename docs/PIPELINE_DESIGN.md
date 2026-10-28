@@ -1,5 +1,18 @@
 # Phase 1 Pipeline Design
 
+## Opt-in typed branch feedback
+
+`typed-branch-action-feedback-1` is a presentation layer for selected pending
+branches, not a patch transformer or acceptance policy. It derives conditional
+action choices from the diagnosed location and existing declarations: explicit
+pending-action drops, new-definition locations, initializer authority, and already
+tested mathematical conflicts. It never infers a symbol's scientific role from
+its spelling or applies a suggested correction. Only known instruction fields
+change; evidence and scientific strings are preserved. Initial requests are
+unchanged. `action_feedback` requires `branch_delta`; both default off. The
+20B-only confirmation and saved-response equivalence check are documented in
+`PHASE_C_ACTION_FEEDBACK.md`.
+
 ## Qualified forcing restrictions and pending branch edits
 
 `focused-retest` explicitly enables `certified-common-zero-forcing-affine-1`

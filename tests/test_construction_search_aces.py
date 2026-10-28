@@ -441,7 +441,9 @@ def test_server_binding_rejects_nonlocal_endpoint(serving):
         submission.bind_server(root, record, "https://example.com")
 
 
-@pytest.mark.parametrize("profile", ["three-policy", "breadth-five", "focused-retest"])
+@pytest.mark.parametrize(
+    "profile", ["three-policy", "breadth-five", "focused-retest", "action-feedback"]
+)
 @pytest.mark.parametrize("size", ["20b", "120b"])
 @pytest.mark.parametrize("command", ["run", "inspect", "report", "preview"])
 @pytest.mark.parametrize("phase,wave", [("smoke", "wave1"), ("full", "wave2")])
@@ -488,9 +490,14 @@ def test_real_shell_dispatch_ignores_old_generic_root(
         text=True,
         timeout=10,
     )
+    if profile == "action-feedback" and size == "120b":
+        assert result.returncode == 2
+        assert "20B-only" in result.stderr
+        assert not log.exists()
+        return
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    version = "v4" if profile == "focused-retest" else "v3"
+    version = {"focused-retest": "v4", "action-feedback": "v5"}.get(profile, "v3")
     expected = str(group / f"phase-c-search-{profile}-{size}-{version}")
     assert calls and all(call["root"] == expected for call in calls)
     if command == "run":
@@ -506,7 +513,10 @@ def test_real_shell_dispatch_ignores_old_generic_root(
         assert submit_args[submit_args.index("--wave") + 1] == wave
 
 
-@pytest.mark.parametrize("profile,count", [("breadth-five", 18), ("focused-retest", 3)])
+@pytest.mark.parametrize(
+    "profile,count",
+    [("breadth-five", 18), ("focused-retest", 3), ("action-feedback", 3)],
+)
 def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
     setup, monkeypatch, profile, count
 ):
@@ -521,19 +531,27 @@ def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
         )
         plan["cases"] = [c for c in plan["cases"] if c["policy"] == "options_shallow"]
         plan["settings"].update(submission.PROFILES[profile]["settings"])
-        if profile == "focused-retest":
+        if profile in {"focused-retest", "action-feedback"}:
             plan["cases"] = [c for c in plan["cases"] if c["parent_id"] == "P00"]
             plan["engine_options"] = dict(
                 submission.PROFILES[profile]["engine_options"]
             )
             plan["smoke_required_before_full"] = False
+        if profile == "action-feedback":
+            plan["allowed_model_sizes"] = ["20b"]
+            plan["action_feedback_policy"] = "typed-branch-action-feedback-1"
     monkeypatch.setattr(
         submission.subprocess,
         "run",
         lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "1234", ""),
     )
     for size in plans:
-        phase = "full" if profile == "focused-retest" else "smoke"
+        phase = "full" if profile in {"focused-retest", "action-feedback"} else "smoke"
+        if profile == "action-feedback" and size == "120b":
+            with pytest.raises(ValueError, match="20B-only"):
+                submission.submit(tmp / size, phase)
+            assert not (tmp / size / "submission").exists()
+            continue
         result = submission.submit(tmp / size, phase)
         expected_cases = count if phase == "full" else 1
         assert result["maximum_cases"] == expected_cases
@@ -550,6 +568,8 @@ def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
     "field,value",
     [
         ("profile", "unlimited"),
+        ("action_feedback_policy", "typed-branch-action-feedback-1"),
+        ("allowed_model_sizes", ["20b"]),
         ("smoke_required_before_full", False),
         ("engine_options", {"branch_delta": True, "common_zero_forcing": True}),
         ("required_options_in_first_call", 5),

@@ -184,7 +184,10 @@ def test_excessive_provider_charge_blocks_without_renewing_budget(search_roots):
     )
 
 
-@pytest.mark.parametrize("profile,count", [("breadth-five", 18), ("focused-retest", 3)])
+@pytest.mark.parametrize(
+    "profile,count",
+    [("breadth-five", 18), ("focused-retest", 3), ("action-feedback", 3)],
+)
 def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
     structural_source,  # noqa: F811
     tmp_path,
@@ -211,13 +214,19 @@ def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
     )
     assert plan["policies"] == ["options_shallow"]
     assert "FiveOptionsReply" in plan["schema_sha256"]
-    if profile == "focused-retest":
+    if profile in {"focused-retest", "action-feedback"}:
         assert {row["parent_id"] for row in plan["cases"]} == {"parent_0"}
         assert {row["seed"] for row in plan["cases"]} == {0, 1, 2}
         assert plan["engine_options"] == {
             "branch_delta": True,
             "common_zero_forcing": True,
+            **({"action_feedback": True} if profile == "action-feedback" else {}),
         }
+        if profile == "action-feedback":
+            assert plan["action_feedback_policy"] == "typed-branch-action-feedback-1"
+            assert plan["allowed_model_sizes"] == ["20b"]
+        else:
+            assert "action_feedback_policy" not in plan
         assert plan["branch_edit_policy"] == "explicit-branch-patch-delta-1"
         assert plan["gate_policy"]["common_zero_forcing"] == (
             "certified-common-zero-forcing-affine-1"
@@ -305,17 +314,19 @@ def test_focused_profile_rejects_flag_drift_before_cached_resume(
     assert (root / "plan.json").read_bytes() == before
 
 
+@pytest.mark.parametrize("profile", ["focused-retest", "action-feedback"])
 def test_focused_branch_delta_followup_and_cache_replay_are_identical(
     structural_source,  # noqa: F811
     tmp_path,
     monkeypatch,
+    profile,
 ):
     source, _, _ = structural_source
     runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
     monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
     monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
     root = tmp_path / "focused-delta"
-    cli.prepare(source, root, "20b", "focused-retest")
+    cli.prepare(source, root, "20b", profile)
     schemas = []
 
     def transport(url, body, timeout):
@@ -356,6 +367,10 @@ def test_focused_branch_delta_followup_and_cache_replay_are_identical(
         root, "http://127.0.0.1", transport=transport, token_transport=tokenizer
     )
     assert schemas == ["FiveOptionsReply", "BranchRepairReply"]
+    if profile == "action-feedback":
+        assert result["action_feedback_policy"] == "typed-branch-action-feedback-1"
+    else:
+        assert "action_feedback_policy" not in result
     assert result["smoke_complete"]
     assert result["cost"]["physical_requests"] == 2
     assert result["smoke_eligible_episodes"] == 1
@@ -372,17 +387,19 @@ def test_focused_branch_delta_followup_and_cache_replay_are_identical(
     )
 
 
+@pytest.mark.parametrize("profile", ["focused-retest", "action-feedback"])
 def test_focused_full_can_start_without_smoke_but_is_only_three_episodes(
     structural_source,  # noqa: F811
     tmp_path,
     monkeypatch,
+    profile,
 ):
     source, _, _ = structural_source
     runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
     monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
     monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
     root = tmp_path / "direct-focused"
-    cli.prepare(source, root, "20b", "focused-retest")
+    cli.prepare(source, root, "20b", profile)
     result = cli.run(
         root,
         "http://127.0.0.1",
@@ -403,3 +420,32 @@ def test_focused_full_can_start_without_smoke_but_is_only_three_episodes(
         )
         == result
     )
+
+
+def test_action_feedback_roster_contract_and_only_20b(
+    structural_source,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
+    source, _, _ = structural_source
+    root = tmp_path / "action"
+    with pytest.raises(ValueError, match="20B-only"):
+        cli.prepare(source, root, "120b", "action-feedback")
+    assert not root.exists()
+    selected = cli.base.sources.load(source)
+    prior = cli._plan(selected, "20b", "focused-retest")
+    changed = cli._plan(selected, "20b", "action-feedback")
+    for key in ("settings", "system_sha256", "schema_sha256", "gate_policy"):
+        assert changed[key] == prior[key]
+    assert [(c["parent_id"], c["seed"]) for c in changed["cases"]] == [
+        (c["parent_id"], c["seed"]) for c in prior["cases"]
+    ]
+    assert {c["namespace"] for c in changed["cases"]}.isdisjoint(
+        {c["namespace"] for c in prior["cases"]}
+    )
+    cli.prepare(source, root, "20b", "action-feedback")
+    before = (root / "plan.json").read_bytes()
+    monkeypatch.setitem(cli.PROFILES["action-feedback"], "action_feedback", False)
+    with pytest.raises(ValueError, match="differ"):
+        cli.verify(root)
+    assert (root / "plan.json").read_bytes() == before

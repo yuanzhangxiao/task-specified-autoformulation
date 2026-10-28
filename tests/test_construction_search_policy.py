@@ -120,6 +120,7 @@ def run(
     maximum_calls=3,
     branch_delta=False,
     common_zero_forcing=False,
+    action_feedback=False,
 ):
     client = Client(payloads)
     result = engine.run_episode(
@@ -132,6 +133,7 @@ def run(
         maximum_calls=maximum_calls,
         branch_delta=branch_delta,
         common_zero_forcing=common_zero_forcing,
+        action_feedback=action_feedback,
     )
     return result, client
 
@@ -608,6 +610,102 @@ def branch_reply(candidate, changes=None, *, mode="delta", **extra):
         "patch": None if mode == "withdraw" else changes or {},
         **extra,
     }
+
+
+@pytest.mark.parametrize("batch,fresh", [(True, False), (False, True), (False, False)])
+def test_action_feedback_preserves_initial_and_fresh_requests(parent, batch, fresh):
+    kwargs = {
+        "batch": batch,
+        "fresh": fresh,
+        "branch_delta": True,
+        "options_count": 5,
+        "maximum_calls": 5,
+        "common_zero_forcing": True,
+    }
+    previous = engine.request(parent, "options_shallow", **kwargs)
+    enabled = engine.request(parent, "options_shallow", action_feedback=True, **kwargs)
+    assert enabled == previous
+
+
+def test_action_feedback_requires_explicit_branch_contract(parent):
+    with pytest.raises(ValueError, match="action_feedback requires branch_delta"):
+        engine.request(parent, "options_shallow", action_feedback=True)
+    with pytest.raises(ValueError, match="action_feedback requires branch_delta"):
+        run(parent, [], "options_shallow", action_feedback=True)
+
+
+def test_action_feedback_changes_only_followup_advice_and_preserves_gate_results(
+    parent,
+):
+    raw = patch(
+        "a*mem+b",
+        edits=[
+            {
+                "component": "q",
+                "kind": "algebraic",
+                "expression": "a*mem+b",
+                "sources": [],
+            },
+            {"component": "b", "kind": "dynamic", "expression": "0", "sources": []},
+        ],
+        new_parameters=[{"name": "b", "role": "coefficient"}],
+    )
+    initial = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    assert initial["diagnostic"]["code"] == "COMPONENT_IDENTITY"
+    correction = branch_reply(initial, drop_actions=[{"field": "edits", "key": "b"}])
+    intermediate = engine._assess_branch_reply(
+        parent,
+        correction,
+        initial,
+        common_zero_forcing=False,
+        candidate_id="call1-option0",
+    )
+    final = branch_reply(intermediate, patch("a*mem*Gp+b"))
+    replies = [raw, correction, final]
+    previous, old_client = run(parent, replies, "sequential_restart", branch_delta=True)
+    current, client = run(
+        parent,
+        replies,
+        "sequential_restart",
+        branch_delta=True,
+        action_feedback=True,
+    )
+    assert client.calls[0] == old_client.calls[0]
+    assert client.calls[1]["system"] == old_client.calls[1]["system"]
+    assert client.calls[1]["schema"] == old_client.calls[1]["schema"]
+    assert client.calls[1]["user"] != old_client.calls[1]["user"]
+    packet = json.loads(client.calls[1]["user"])
+    advice = packet["repair_feedback"]["action_feedback"]
+    assert advice["policy"] == engine.ACTION_FEEDBACK_POLICY
+    assert advice["action_choices"][0]["choices"][0]["reply_fragment"] == {
+        "drop_actions": [{"field": "edits", "key": "b"}]
+    }
+    assert current["action_feedback_policy"] == engine.ACTION_FEEDBACK_POLICY
+    assert "action_feedback_policy" not in previous
+    assert (
+        current["eligible_candidate_ids"]
+        == previous["eligible_candidate_ids"]
+        == ["call2-option0"]
+    )
+    for new, old in zip(current["candidates"], previous["candidates"], strict=True):
+        for key in ("status", "diagnostic", "problem", "composed_patch"):
+            assert new.get(key) == old.get(key)
+    assert (
+        current["candidates"][1]["diagnostic"]["code"]
+        == "QUALIFIED_MODEL_DATA_CONFLICT"
+    )
+    assert (
+        current["candidates"][1]["composed_patch"]["new_parameters"]
+        == raw["new_parameters"]
+    )
+    replay, replay_client = run(
+        parent,
+        replies,
+        "sequential_restart",
+        branch_delta=True,
+        action_feedback=True,
+    )
+    assert replay == current and replay_client.calls == client.calls
 
 
 def test_branch_delta_citation_only_preserves_trial_and_scopes_feedback(parent):

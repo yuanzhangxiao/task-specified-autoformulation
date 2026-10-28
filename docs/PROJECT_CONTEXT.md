@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Typed action feedback while 120B is pending
+
+The next independent milestone corrects selected-branch feedback in a separate
+20B-only `action-feedback` profile: exact conditional deletion instructions,
+declaration/initializer locations, and explicit already-tested scientific conflicts.
+It preserves initial requests, schemas, scientific checks and the three-seed,
+15-call budget. Saved-response replay must preserve all 27 previous candidate
+outcomes; live improvement remains unmeasured. The pending 120B v4 experiment
+and frozen bundle remain unchanged. See [the scope and commands](PHASE_C_ACTION_FEEDBACK.md).
+
 ## Focused common-input and branch repair retest
 
 The opt-in `focused-retest` profile corrects the missed v3 zero-input proof and
