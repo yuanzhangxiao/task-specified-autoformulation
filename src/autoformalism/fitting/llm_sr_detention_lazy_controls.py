@@ -76,8 +76,57 @@ class ControlOracle(active.ActiveOracle):
     Finite-difference probes call ``residual`` directly and cannot become best.
     """
 
+    def _seed_initial_qualification(self, qualification: dict) -> dict:
+        """Seed the already authenticated anchor and only selected columns."""
+        residual = np.asarray(qualification["base_residual"], dtype=float)
+        matrix = np.asarray(qualification["jacobian"], dtype=float)
+        size = sum(len(row.time) for row in self.native.split.trajectories)
+        if residual.shape != (size,) or matrix.shape != (size, len(self.names)):
+            raise ValueError("qualified initial arrays differ from training shape")
+        point = self.vector(qualification["parameters"])
+        selected = np.full(matrix.shape, np.nan)
+        selected[:, self.active_indices] = matrix[:, self.active_indices]
+        self.jacobian_cache[point.tobytes()] = selected
+        self._qualified_initial = (
+            point.tobytes(), residual.copy(), self.settings.model_dump(mode="json")
+        )
+        self.initial_sample_reuse = {
+            "qualification_sha256": qualification["qualification_sha256"],
+            "seeded_residuals": 1,
+            "seeded_active_columns": len(self.active_indices),
+            "seeded_held_columns": 0,
+            "residual_reuse_hits": 0,
+            "jacobian_reuse_hits": 0,
+            "historical_cost_recharged": False,
+            "scope": "Exact initial chart point and tight Radau settings only.",
+        }
+        return self.initial_sample_reuse
+
+    def residual(self, vector, deadline, method="Radau"):
+        """Use the qualified residual only at its exact point and solver settings."""
+        seeded = getattr(self, "_qualified_initial", None)
+        if (
+            seeded is not None
+            and np.asarray(vector, dtype=float).tobytes() == seeded[0]
+            and method == "Radau"
+            and self.settings.model_dump(mode="json") == seeded[2]
+        ):
+            if monotonic() >= deadline:
+                raise TimeoutError("qualified initial residual deadline exhausted")
+            self.initial_sample_reuse["residual_reuse_hits"] += 1
+            return seeded[1].copy()
+        return super().residual(vector, deadline, method)
+
     def evaluate(self, vector, deadline, *, jacobian=True, method=None):
         point = self._checked(vector)
+        seeded = getattr(self, "_qualified_initial", None)
+        if seeded is not None and jacobian and (
+            (method or "Radau") != "Radau"
+            or self.settings.model_dump(mode="json") != seeded[2]
+        ):
+            raise ValueError(
+                "qualified search Jacobians require matching Radau settings"
+            )
         residual, _ = super().evaluate(point, deadline, jacobian=False, method=method)
         with np.errstate(over="ignore", invalid="ignore"):
             loss = float(np.mean(residual**2))
@@ -97,6 +146,12 @@ class ControlOracle(active.ActiveOracle):
             self.checkpoint({"best_rollout_checkpoint": self.best_residual})
         if not jacobian:
             return residual, None
+        if (
+            seeded is not None
+            and point.tobytes() == seeded[0]
+            and point.tobytes() in self.jacobian_cache
+        ):
+            self.initial_sample_reuse["jacobian_reuse_hits"] += 1
         return super().evaluate(point, deadline, jacobian=True, method=method)
 
 
@@ -113,6 +168,7 @@ def fit_control(
     seconds: float = 1800,
     checkpoint: Callable[[dict], None] | None = None,
     policy: Policy | None = None,
+    reuse_initial_qualification: bool = False,
 ) -> dict:
     """Run one bounded matched control, preserving the original full vectors.
 
@@ -124,6 +180,8 @@ def fit_control(
     began, cpu, deadline = original._clock(seconds)
     if not isinstance(lazy_jacobian, bool):
         raise ValueError("lazy_jacobian must be boolean")
+    if not isinstance(reuse_initial_qualification, bool):
+        raise ValueError("reuse_initial_qualification must be boolean")
     policy = chart.effective_policy(policy, mode=mode)
     eligible = select_active(
         item,
@@ -206,6 +264,10 @@ def fit_control(
         active_names=selected,
     )
     oracle.retain_base_checkpoints = True
+    if reuse_initial_qualification and selected:
+        binding["initial_sample_reuse"] = oracle._seed_initial_qualification(
+            qualification
+        )
     if not selected or (active_names is None and eligible != names):
         result = {
             "stop_reason": "no_qualified_coordinates"

@@ -226,6 +226,7 @@ def direction(
     seconds: float = 240,
     seed_directions: Sequence[dict] = (),
     checkpoint: Callable[[dict], None] | None = None,
+    search_only: bool = True,
 ) -> dict:
     """Recover one search audit with shared exact samples and unchanged thresholds.
 
@@ -234,6 +235,8 @@ def direction(
     Historical evidence is provenance, not an automatic passing search decision.
     """
     began, cpu, deadline = original._clock(seconds)
+    if not isinstance(search_only, bool):
+        raise ValueError("search_only must be boolean")
     policy = chart.effective_policy(policy, mode=mode)
     identity = chart._identity(
         item, context, training, parameters, mode, "search", "tight", policy
@@ -305,7 +308,7 @@ def direction(
             index : index + 1
         ],
         search_error_limits=None
-        if index in contradictions
+        if index in contradictions or not search_only
         else (
             policy.search_gradient_absolute_error,
             policy.search_gradient_relative_error,
@@ -361,7 +364,7 @@ def direction(
             "search_error_limits": [
                 policy.search_gradient_absolute_error,
                 policy.search_gradient_relative_error,
-            ],
+            ] if search_only and index not in contradictions else None,
             "old_allowances_renewed": False,
         },
     }

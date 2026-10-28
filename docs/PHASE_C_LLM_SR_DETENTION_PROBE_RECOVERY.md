@@ -2,6 +2,11 @@
 
 Date: 2026-10-27. Opt-in numerical development on training data only.
 
+The returned six-task run is complete. Its two continuations reached verified
+training NMSEs 6.26811e-5 and 6.74663e-5 without establishing stationarity.
+The [endpoint polishing follow-up](PHASE_C_LLM_SR_DETENTION_POLISHING.md) records
+that result and the next bounded two-task experiment.
+
 ## Returned evidence
 
 The 27-task lazy-controls report reconstructed exactly from its saved receipts.
