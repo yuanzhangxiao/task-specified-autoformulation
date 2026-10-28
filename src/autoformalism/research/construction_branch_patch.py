@@ -18,6 +18,7 @@ from autoformalism.schemas.staged_functions import FunctionParameter
 from autoformalism.staged_topology import content_hash
 
 POLICY = "explicit-branch-patch-delta-1"
+IDENTICAL_ACTION_POLICY = "identical-pending-action-normalization-1"
 ACTION_KEYS = {
     "edits": "component",
     "new_states": "name",
@@ -119,24 +120,65 @@ def _identity(field: str, row: Any) -> str:
     return value
 
 
-def _entries(field: str, rows: Any) -> dict[str, Any]:
+def _entries(
+    field: str,
+    rows: Any,
+    *,
+    normalizations: list[dict] | None = None,
+    location: str = "",
+) -> dict[str, Any]:
     if not isinstance(rows, list) or len(rows) > _LIMITS[field]:
         raise ValueError(f"invalid or excessive {field} list; use replace")
     result = {}
-    for row in rows:
+    first_indices = {}
+    for index, row in enumerate(rows):
         key = _identity(field, row)
         if key in result:
+            if normalizations is not None and content_hash(row) == content_hash(
+                result[key]
+            ):
+                normalizations.append(
+                    {
+                        "location": location,
+                        "field": field,
+                        "key": key,
+                        "retained_index": first_indices[key],
+                        "removed_index": index,
+                        "entry_sha256": content_hash(row),
+                    }
+                )
+                continue
             raise ValueError(
                 f"ambiguous repeated {field} key {key}; "
                 "use replace or explicitly drop it"
             )
         result[key] = deepcopy(row)
+        first_indices[key] = index
     return result
 
 
-def compose(raw: Any, intended: dict) -> tuple[dict | None, dict]:
+def compose(
+    raw: Any, intended: dict, *, repair_contract: bool = False
+) -> tuple[dict | None, dict]:
     """Compose only explicit same-branch actions; all scientific checks run later."""
-    reply = BranchRepairReply.model_validate(raw)
+    normalized_input = deepcopy(raw)
+    normalizations = [] if repair_contract else None
+    if repair_contract and isinstance(normalized_input, dict):
+        supplied_patch = normalized_input.get("patch")
+        if isinstance(supplied_patch, dict):
+            # Compare original JSON records before schema defaults can make two
+            # different declarations look identical. Raw list limits still apply.
+            for field in ACTION_KEYS:
+                if field in supplied_patch:
+                    supplied_patch[field] = list(
+                        _entries(
+                            field,
+                            supplied_patch[field],
+                            normalizations=normalizations,
+                            location="submitted_patch",
+                        ).values()
+                    )
+    reply = BranchRepairReply.model_validate(normalized_input)
     expected = reference(intended)
     if (
         reply.base_candidate_id != expected["base_candidate_id"]
@@ -155,6 +197,12 @@ def compose(raw: Any, intended: dict) -> tuple[dict | None, dict]:
         "parent_unchanged": True,
         "model_adopted": False,
     }
+    if repair_contract:
+        provenance["identical_action_normalization"] = {
+            "policy": IDENTICAL_ACTION_POLICY,
+            "removed_entries": normalizations,
+            "submitted_reply_sha256": content_hash(raw),
+        }
     if reply.mode == "withdraw":
         return None, provenance
     supplied = reply.patch.model_dump(mode="json", exclude_unset=True)
@@ -193,7 +241,10 @@ def compose(raw: Any, intended: dict) -> tuple[dict | None, dict]:
                 raise ValueError(f"drop_actions names no stored {field} intention")
             # Explicitly dropping an ambiguous key removes all its competing rows.
             previous = _entries(
-                field, [row for row in old if _identity(field, row) not in field_drops]
+                field,
+                [row for row in old if _identity(field, row) not in field_drops],
+                normalizations=normalizations,
+                location="stored_patch_after_explicit_drops",
             )
             updates = _entries(field, supplied.get(field, []))
             if field_drops & set(updates):

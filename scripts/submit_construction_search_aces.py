@@ -80,6 +80,17 @@ PROFILES["action-feedback"] = {
     },
     "action_feedback_policy": "typed-branch-action-feedback-1",
 }
+PROFILES["repair-contract"] = {
+    **PROFILES["action-feedback"],
+    "allowed_model_sizes": ("20b", "120b"),
+    "engine_options": {
+        **PROFILES["action-feedback"]["engine_options"],
+        "repair_contract": True,
+    },
+    "action_feedback_policy": "typed-branch-action-feedback-2",
+    "repair_contract_policy": "explicit-in-scope-option-repair-contract-1",
+    "identical_action_policy": "identical-pending-action-normalization-1",
+}
 ENTRYPOINTS = (
     "scripts/construction_search_campaign.py",
     "scripts/submit_construction_search_aces.py",
@@ -190,6 +201,8 @@ def verify_inputs(root: Path) -> dict:
         )
         or plan.get("engine_options", {}) != profile.get("engine_options", {})
         or plan.get("action_feedback_policy") != profile.get("action_feedback_policy")
+        or plan.get("repair_contract_policy") != profile.get("repair_contract_policy")
+        or plan.get("identical_action_policy") != profile.get("identical_action_policy")
         or plan.get("allowed_model_sizes")
         != (
             list(profile["allowed_model_sizes"])

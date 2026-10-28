@@ -213,3 +213,381 @@ def test_malformed_pending_fields_do_not_generate_invented_action_advice():
     assert report["action_choices"] == []
     assert not report["patch_changed_by_runtime"]
     assert not report["scientific_role_selected_by_runtime"]
+
+
+def test_v2_existing_process_move_is_explicit_and_preserves_initializer():
+    from autoformalism.research.construction_branch_patch import (
+        BranchPatchFields,
+        DropAction,
+    )
+
+    patch = {
+        "new_processes": [
+            {"name": "production", "expression": "a*I+1", "sources": ["I"]}
+        ],
+        "initialization_edits": [
+            {"state": "memory", "initial": {"mode": "value", "scope": "trajectory"}}
+        ],
+        "remove_processes": ["production"],
+    }
+    selected = candidate(
+        "DECLARATION_IDENTITY",
+        patch,
+        declaration_issues=[{"name": "production", "category": "existing_process"}],
+    )
+    before = deepcopy(selected)
+    assert feedback.view(parent(), selected)["action_choices"] == []
+    report = feedback.view(parent(), selected, repair_contract=True)
+    assert report["policy"] == feedback.REPAIR_POLICY
+    card = report["action_choices"][0]
+    example = card["if_this_supplied_definition_is_your_intended_law"]
+    BranchPatchFields.model_validate(example["patch"])
+    for action in example["drop_actions"]:
+        DropAction.model_validate(action)
+    assert example["patch"]["edits"] == [
+        {
+            "component": "production",
+            "kind": "algebraic",
+            "expression": "a*I+1",
+            "sources": ["I"],
+        }
+    ]
+    assert example["drop_actions"] == [{"field": "new_processes", "key": "production"}]
+    assert card["if_retaining_this_process_also_drop_its_removal"]["drop_actions"] == [
+        {"field": "remove_processes", "key": "production"}
+    ]
+    assert selected == before
+
+
+def test_v2_ambiguous_process_definitions_do_not_choose_one_law():
+    selected = candidate(
+        "DECLARATION_IDENTITY",
+        {
+            "new_processes": [
+                {"name": "production", "expression": "I"},
+                {"name": "production", "expression": "2*I"},
+            ]
+        },
+        declaration_issues=[{"name": "production", "category": "existing_process"}],
+    )
+    card = feedback.view(parent(), selected, repair_contract=True)["action_choices"][0]
+    assert "if_this_supplied_definition_is_your_intended_law" not in card
+    assert card["required_explicit_cleanup"] == {
+        "drop_actions": [{"field": "new_processes", "key": "production"}]
+    }
+
+
+def test_v2_parameter_component_collision_offers_both_meanings():
+    selected = candidate(
+        "DECLARATION_IDENTITY",
+        {
+            "new_parameters": [{"name": "k_basal", "role": "coefficient"}],
+            "new_processes": [{"name": "k_basal", "expression": "1"}],
+        },
+        declaration_issues=[
+            {"name": "k_basal", "category": "parameter_component_collision"}
+        ],
+    )
+    choices = feedback.view(parent(), selected, repair_contract=True)["action_choices"][
+        0
+    ]["choices"]
+    assert choices[0]["reply_fragment"] == {
+        "drop_actions": [{"field": "new_processes", "key": "k_basal"}]
+    }
+    assert choices[1]["reply_fragment"] == {
+        "drop_actions": [{"field": "new_parameters", "key": "k_basal"}]
+    }
+    assert selected["composed_patch"]["new_parameters"][0]["role"] == "coefficient"
+
+
+def test_v2_initializer_feedback_uses_its_actual_local_alias_not_another_maps_name():
+    from autoformalism.research.construction_structural_revision import InitialMapChoice
+    from tests.test_construction_revision_edits import problem
+
+    selected = candidate(
+        "REVISION_VALIDATION",
+        {
+            "initialization_edits": [
+                {
+                    "state": "memory",
+                    "initial": {
+                        "mode": "map",
+                        "expression": "public_1",
+                        "parameters": [],
+                        "public_initials": [{"alias": "I0", "channel": "I"}],
+                        "state_initials": [],
+                    },
+                }
+            ]
+        },
+    )
+    before = deepcopy(selected)
+    card = feedback.view(
+        {"problem": problem().model_dump(mode="json")}, selected, repair_contract=True
+    )["action_choices"][0]
+    assert card["undeclared_symbols"] == ["public_1"]
+    assert card["unused_local_names"] == ["I0"]
+    example = card["syntax_only_example_using_one_of_your_bindings"]
+    InitialMapChoice.model_validate(example["initial"])
+    assert example["initial"]["expression"] == "I0"
+    assert "only if" in example["condition"]
+    assert "protected initial" in card["authority"]
+    assert selected == before
+
+
+def test_v2_state_initial_alias_example_keeps_state_reference_and_parameter_scope():
+    from tests.test_construction_revision_edits import problem
+
+    selected = candidate(
+        "REVISION_VALIDATION",
+        {
+            "new_states": [
+                {
+                    "name": "memory",
+                    "initial": {
+                        "mode": "map",
+                        "expression": "gain*wrong",
+                        "parameters": [{"name": "gain", "role": "coefficient"}],
+                        "state_initials": [{"alias": "root", "state": "I"}],
+                        "public_initials": [],
+                    },
+                }
+            ]
+        },
+    )
+    card = feedback.view(
+        {"problem": problem().model_dump(mode="json")}, selected, repair_contract=True
+    )["action_choices"][0]
+    assert card["local_parameters"] == [{"name": "gain", "role": "coefficient"}]
+    assert card["state_initials"] == [{"alias": "root", "state": "I"}]
+    assert card["syntax_only_example_using_one_of_your_bindings"]["initial"][
+        "state_initials"
+    ] == [{"alias": "root", "state": "I"}]
+
+
+def test_v2_decision_contract_error_is_not_presented_as_a_scientific_failure():
+    selected = candidate(
+        "OPTION_DECISION_CONTRACT",
+        {"decision": "requires_wider_revision", "new_states": [{"name": "extra"}]},
+    )
+    before = deepcopy(selected)
+    report = feedback.view(parent(), selected, repair_contract=True)
+    assert "before scientific assessment" in report["repair_goal"]
+    assert "already supports adding latent states" in report["repair_goal"]
+    assert report["action_choices"][0]["reply_fragment"] == {
+        "patch": {"decision": "revise"}
+    }
+    assert "no-actions" in report["repair_goal"]
+    assert selected == before
+
+
+def test_default_feedback_does_not_call_the_new_dependency_helper(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("historical policy must not inspect new dependencies")
+
+    monkeypatch.setattr(feedback.influence, "view", forbidden)
+    assert (
+        feedback.view(parent(), candidate("QUALIFIED_MODEL_DATA_CONFLICT", {}))[
+            "policy"
+        ]
+        == feedback.POLICY
+    )
+
+
+def test_v2_malformed_alias_and_declaration_fields_do_not_crash_or_invent_choice():
+    selected = candidate(
+        "REVISION_VALIDATION",
+        {
+            "initialization_edits": [
+                {
+                    "state": "I",
+                    "initial": {
+                        "mode": "map",
+                        "expression": None,
+                        "public_initials": "wrong",
+                    },
+                }
+            ]
+        },
+    )
+    assert (
+        feedback.view(parent(), selected, repair_contract=True)["action_choices"] == []
+    )
+    selected = candidate("DECLARATION_IDENTITY", {}, declaration_issues="wrong")
+    assert (
+        feedback.view(parent(), selected, repair_contract=True)["action_choices"] == []
+    )
+
+
+@pytest.mark.parametrize("name,can_edit_initial", [("mem", True), ("I", False)])
+def test_v2_existing_state_keeps_law_and_initialization_as_separate_intentions(
+    name, can_edit_initial
+):
+    from autoformalism.research.construction_branch_patch import BranchPatchFields
+    from tests.test_construction_revision_edits import problem
+
+    source = {"problem": problem().model_dump(mode="json")}
+    selected = candidate(
+        "DECLARATION_IDENTITY",
+        {
+            "new_states": [
+                {
+                    "name": name,
+                    "description": "intended changed memory",
+                    "rhs": f"I-{name}",
+                    "sources": ["I", name],
+                    "initial": {"mode": "value", "scope": "trajectory"},
+                }
+            ]
+        },
+        declaration_issues=[{"name": name, "category": "existing_state"}],
+    )
+    before = deepcopy(selected)
+    card = feedback.view(source, selected, repair_contract=True)["action_choices"][0]
+    assert card["if_retaining_the_parent_initial_rule"]["drop_actions"] == [
+        {"field": "new_states", "key": name}
+    ]
+    assert "do not silently discard" in card["instruction"]
+    assert (
+        "if_preserving_the_supplied_law_and_initializer" in card
+    ) == can_edit_initial
+    if can_edit_initial:
+        fragment = card["if_preserving_the_supplied_law_and_initializer"]
+        BranchPatchFields.model_validate(fragment["patch"])
+        assert fragment["patch"]["initialization_edits"] == [
+            {"state": name, "initial": {"mode": "value", "scope": "trajectory"}}
+        ]
+    assert selected == before
+
+
+def test_v2_known_latent_initializer_remains_protected():
+    from tests.test_construction_revision_edits import problem
+
+    payload = problem().model_dump(mode="json")
+    payload["graph"]["rules"]["mem"]["initial"] = {
+        "mode": "known",
+        "value": 1.0,
+        "justification": "known from the task",
+    }
+    selected = candidate(
+        "DECLARATION_IDENTITY",
+        {
+            "new_states": [
+                {
+                    "name": "mem",
+                    "rhs": "I-mem",
+                    "initial": {"mode": "value", "scope": "trajectory"},
+                }
+            ]
+        },
+        declaration_issues=[{"name": "mem", "category": "existing_state"}],
+    )
+    card = feedback.view({"problem": payload}, selected, repair_contract=True)[
+        "action_choices"
+    ][0]
+    assert "mem" not in card["eligible_existing_initializer_targets"]
+    assert "if_preserving_the_supplied_law_and_initializer" not in card
+
+
+def test_v2_unavailable_initializer_binding_is_not_shown_as_a_valid_example():
+    from tests.test_construction_revision_edits import problem
+
+    selected = candidate(
+        "REVISION_VALIDATION",
+        {
+            "initialization_edits": [
+                {
+                    "state": "mem",
+                    "initial": {
+                        "mode": "map",
+                        "expression": "wrong",
+                        "parameters": [],
+                        "public_initials": [
+                            {"alias": "readout", "channel": "unavailable"}
+                        ],
+                        "state_initials": [],
+                    },
+                }
+            ]
+        },
+    )
+    card = feedback.view(
+        {"problem": problem().model_dump(mode="json")}, selected, repair_contract=True
+    )["action_choices"][0]
+    assert "syntax_only_example_using_one_of_your_bindings" not in card
+    assert card["public_initials"] == [{"alias": "readout", "channel": "unavailable"}]
+
+
+def test_v2_retain_parent_initializer_explicitly_drops_existing_pending_override():
+    from autoformalism.research import construction_branch_patch as branch
+    from autoformalism.research.construction_structural_revision import (
+        apply_structural_revision,
+    )
+    from tests.test_construction_revision_edits import problem
+
+    source = problem()
+    parent_payload = {"problem": source.model_dump(mode="json")}
+    pending = {
+        "decision": "revise",
+        "hypothesis": "Revise memory dynamics and its initialization.",
+        "evidence_ids": ["training:I"],
+        "expected_observable_effect": "A different memory response.",
+        "new_states": [
+            {
+                "name": "mem",
+                "description": "Existing memory",
+                "rhs": "I-mem+1",
+                "sources": ["I", "mem"],
+                "initial": {"mode": "value", "scope": "shared_training"},
+            }
+        ],
+        "initialization_edits": [
+            {
+                "state": "mem",
+                "initial": {"mode": "value", "scope": "shared_training"},
+            }
+        ],
+    }
+    selected = candidate(
+        "DECLARATION_IDENTITY",
+        pending,
+        declaration_issues=[
+            {"name": "mem", "category": "existing_state"},
+        ],
+    )
+    selected["branch_id"] = selected["id"]
+    card = feedback.view(parent_payload, selected, repair_contract=True)[
+        "action_choices"
+    ][0]
+    fragment = card["if_retaining_the_parent_initial_rule"]
+    assert fragment["drop_actions"] == [
+        {"field": "new_states", "key": "mem"},
+        {"field": "initialization_edits", "key": "mem"},
+    ]
+    composed, _ = branch.compose(
+        {
+            "mode": "delta",
+            **branch.reference(selected),
+            **fragment,
+        },
+        selected,
+        repair_contract=True,
+    )
+    assert composed["initialization_edits"] == []
+    applied = apply_structural_revision(source, composed, evidence_ids=["training:I"])
+    assert applied["problem"].graph.rules["mem"] == source.graph.rules["mem"]
+    assert applied["problem"].graph.rules["mem"].initial.scope == "trajectory"
+
+    keep_supplied = card["if_preserving_the_supplied_law_and_initializer"]
+    assert keep_supplied["drop_actions"] == [{"field": "new_states", "key": "mem"}]
+    supplied, _ = branch.compose(
+        {
+            "mode": "delta",
+            **branch.reference(selected),
+            "patch": keep_supplied["patch"],
+            "drop_actions": keep_supplied["drop_actions"],
+        },
+        selected,
+        repair_contract=True,
+    )
+    assert supplied["initialization_edits"][0]["initial"]["scope"] == "shared_training"

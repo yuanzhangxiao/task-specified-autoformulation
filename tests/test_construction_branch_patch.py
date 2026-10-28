@@ -200,3 +200,78 @@ def test_literal_history_preserves_rhs_and_initial_map():
     assert literal["edits"][0]["expression"] == "a*X"
     assert literal["new_states"][0]["rhs"] == "b*I-X"
     assert literal["new_states"][0]["initial"]["scope"] == "trajectory"
+
+
+@pytest.mark.parametrize("mode", ["delta", "replace"])
+def test_opt_in_exact_repeated_actions_normalize_with_provenance(mode):
+    base = candidate()
+    row = {"name": "c", "role": "rate"}
+    raw = delta(base, {"new_parameters": [row, deepcopy(row)]}, mode=mode)
+    before = deepcopy(raw)
+    with pytest.raises(ValueError, match="ambiguous repeated"):
+        branch.compose(raw, base)
+    result, proof = branch.compose(raw, base, repair_contract=True)
+    assert result["new_parameters"].count(row) == 1
+    record = proof["identical_action_normalization"]
+    assert record["policy"] == branch.IDENTICAL_ACTION_POLICY
+    assert record["removed_entries"] == [
+        {
+            "location": "submitted_patch",
+            "field": "new_parameters",
+            "key": "c",
+            "retained_index": 0,
+            "removed_index": 1,
+            "entry_sha256": branch.content_hash(row),
+        }
+    ]
+    assert record["submitted_reply_sha256"] == branch.content_hash(raw)
+    assert raw == before
+
+
+def test_opt_in_normalizes_identical_stored_entries_without_mutating_saved_intention():
+    row = {"name": "a", "role": "rate"}
+    base = candidate(new_parameters=[row, deepcopy(row)])
+    before = deepcopy(base)
+    result, proof = branch.compose(delta(base), base, repair_contract=True)
+    assert result["new_parameters"] == [row]
+    assert proof["identical_action_normalization"]["removed_entries"][0][
+        "location"
+    ] == ("stored_patch_after_explicit_drops")
+    assert base == before
+
+
+def test_new_contract_does_not_merge_records_equal_only_after_schema_defaults():
+    base = candidate()
+    row = {"component": "U", "kind": "algebraic", "expression": "a*I"}
+    raw = delta(base, {"edits": [row, {**row, "sources": []}]})
+    with pytest.raises(ValueError, match="ambiguous repeated"):
+        branch.compose(raw, base, repair_contract=True)
+
+
+def test_opt_in_identical_duplicates_still_obey_original_list_bounds():
+    base = candidate()
+    row = {"name": "c", "role": "rate"}
+    with pytest.raises(ValueError, match="excessive"):
+        branch.compose(
+            delta(base, {"new_parameters": [row] * 65}), base, repair_contract=True
+        )
+
+
+@pytest.mark.parametrize("stored", [False, True])
+def test_opt_in_conflicting_duplicates_are_still_rejected(stored):
+    rows = [{"name": "a", "role": "rate"}, {"name": "a", "role": "coefficient"}]
+    base = candidate(**({"new_parameters": rows} if stored else {}))
+    raw = delta(base, {} if stored else {"new_parameters": rows})
+    with pytest.raises(ValueError, match="ambiguous repeated"):
+        branch.compose(raw, base, repair_contract=True)
+
+
+def test_opt_in_normalization_never_bypasses_branch_hash():
+    base = candidate()
+    row = {"name": "c", "role": "rate"}
+    with pytest.raises(ValueError, match="branch reference differs"):
+        branch.compose(
+            delta(base, {"new_parameters": [row, row]}, base_patch_sha256="0" * 64),
+            base,
+            repair_contract=True,
+        )

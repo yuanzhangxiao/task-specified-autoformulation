@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, ValidationError
 
@@ -65,6 +65,8 @@ equations are unchanged; the runtime validates it before judging repetition.
 )
 BRANCH_DELTA_POLICY = branch_patch.POLICY
 ACTION_FEEDBACK_POLICY = branch_feedback.POLICY
+REPAIR_CONTRACT_POLICY = "explicit-in-scope-option-repair-contract-1"
+IDENTICAL_ACTION_POLICY = branch_patch.IDENTICAL_ACTION_POLICY
 BRANCH_SYSTEM = """Revise this ODE/algebraic model using the public task and
 training evidence.
 Choose a coherent scientific repair. You may replace complete right-hand sides,
@@ -106,8 +108,27 @@ that outcome does not accept any model. Do not request fitting here.
 """.strip()
 
 
-def system_for(branch_delta: bool = False) -> str:
+def system_for(branch_delta: bool = False, repair_contract: bool = False) -> str:
     """Preserve historical system text unless branch composition is enabled."""
+    if repair_contract:
+        if not branch_delta:
+            raise ValueError("repair_contract requires branch_delta")
+        return (
+            BRANCH_SYSTEM
+            + "\n\n"
+            + (
+                "Every initial alternative must use patch.decision=revise. "
+                "State additions/removals, topology changes derived from equations, "
+                "new processes and permitted latent initializer changes are already "
+                "in scope; they do "
+                "not require wider revision. Use the current request's typed fields. "
+                "A selected-branch follow-up may explicitly withdraw or request "
+                "genuinely unsupported changes with mode=replace, "
+                "patch.decision=requires_wider_revision and no actions. An invalid "
+                "decision is a rejected intention: it is never silently changed "
+                "to revise, and its mathematical content is not accepted."
+            )
+        )
     return BRANCH_SYSTEM if branch_delta else SYSTEM
 
 
@@ -137,10 +158,34 @@ class FiveOptionsReply(StrictSchema):
     options: tuple[RepairOption, ...] = Field(min_length=5, max_length=5)
 
 
-def options_reply_model(options_count: int = 3) -> type[StrictSchema]:
+class InScopeRevisionReply(StructuralRevisionReply):
+    """An initial scientific option proposes edits, not a terminal scope decision."""
+
+    decision: Literal["revise"]
+
+
+class InScopeRepairOption(RepairOption):
+    """Prospective initial wrapper with a strictly revising patch."""
+
+    patch: InScopeRevisionReply
+
+
+class InScopeOptionsReply(StrictSchema):
+    options: tuple[InScopeRepairOption, ...] = Field(min_length=3, max_length=3)
+
+
+class InScopeFiveOptionsReply(StrictSchema):
+    options: tuple[InScopeRepairOption, ...] = Field(min_length=5, max_length=5)
+
+
+def options_reply_model(
+    options_count: int = 3, repair_contract: bool = False
+) -> type[StrictSchema]:
     """Return an exact-count schema from the two supported, bounded widths."""
     if type(options_count) is not int or options_count not in OPTION_COUNTS:
         raise ValueError("options_count must be 3 or 5")
+    if repair_contract:
+        return InScopeOptionsReply if options_count == 3 else InScopeFiveOptionsReply
     return OptionsReply if options_count == 3 else FiveOptionsReply
 
 
@@ -421,6 +466,7 @@ def request(
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
     action_feedback: bool = False,
+    repair_contract: bool = False,
 ) -> str:
     """Build one exact request; history never silently becomes an adopted model."""
     if policy not in POLICIES:
@@ -428,6 +474,8 @@ def request(
     _validate_limits(options_count, maximum_calls)
     if action_feedback and not branch_delta:
         raise ValueError("action_feedback requires branch_delta")
+    if repair_contract and not (branch_delta and action_feedback):
+        raise ValueError("repair_contract requires branch_delta and action_feedback")
     option_word = "three" if options_count == 3 else "five"
     history = history or []
     repair = None
@@ -522,10 +570,21 @@ def request(
     }
     if history:
         packet["attempted_repairs"] = ledger_view(history, literal=branch_delta)
+    if repair_contract and batch:
+        packet["search_instruction"]["instruction"] += (
+            " Each initial option must set patch.decision=revise. Adding or removing "
+            "latent states/processes, changing topology through equation RHSs and "
+            "changing permitted latent initializers are already allowed. These are "
+            "not wider-revision requests. A selected follow-up can explicitly request "
+            "a genuinely unsupported change or withdraw; neither accepts a model."
+        )
     if branch_delta:
         _branch_request_view(packet, intended if not fresh else None, batch=batch)
         if action_feedback and intended is not None and not fresh and not batch:
-            branch_feedback.apply(packet, parent, intended)
+            if repair_contract:
+                branch_feedback.apply(packet, parent, intended, repair_contract=True)
+            else:
+                branch_feedback.apply(packet, parent, intended)
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -610,11 +669,19 @@ def _branch_scope_references(value: Any) -> None:
 
 
 def _assess_branch_reply(
-    parent: dict, raw: Any, intended: dict, *, common_zero_forcing: bool, **metadata
+    parent: dict,
+    raw: Any,
+    intended: dict,
+    *,
+    common_zero_forcing: bool,
+    repair_contract: bool = False,
+    **metadata,
 ) -> dict:
     """Keep submitted delta, composed full intention and its complete validation."""
     try:
-        composed, provenance = branch_patch.compose(raw, intended)
+        composed, provenance = branch_patch.compose(
+            raw, intended, repair_contract=repair_contract
+        )
     except ValueError as exc:
         result = assess_candidate(
             parent, None, common_zero_forcing=common_zero_forcing, **metadata
@@ -645,9 +712,11 @@ def _assess_branch_reply(
     return result
 
 
-def _options(raw: Any, options_count: int = 3) -> list[tuple[Any, dict]]:
+def _options(
+    raw: Any, options_count: int = 3, *, repair_contract: bool = False
+) -> list[tuple[Any, dict]]:
     """Bound the envelope; assess malformed sibling options independently."""
-    options_reply_model(options_count)
+    options_reply_model(options_count, repair_contract=repair_contract)
     if not isinstance(raw, dict) or set(raw) != {"options"}:
         raise ValueError("option reply must contain only the options array")
     options = raw.get("options")
@@ -669,13 +738,32 @@ def _options(raw: Any, options_count: int = 3) -> list[tuple[Any, dict]]:
             metadata = _OptionMetadata.model_validate(
                 {key: value for key, value in option.items() if key != "patch"}
             ).model_dump(mode="json")
-            if isinstance(option["patch"], dict) and option["patch"].get(
-                "decision"
-            ) in {"retain", "requires_wider_revision"}:
+            if (
+                not repair_contract
+                and isinstance(option["patch"], dict)
+                and option["patch"].get("decision")
+                in {"retain", "requires_wider_revision"}
+            ):
                 raise ValueError("each repair option must propose decision=revise")
             if metadata["option_id"] in identifiers:
                 raise ValueError("option_id must be unique within this reply")
             identifiers.add(metadata["option_id"])
+            if repair_contract and isinstance(option["patch"], dict):
+                decision = option["patch"].get("decision")
+                if decision != "revise":
+                    metadata["decision_contract_error"] = {
+                        "code": "OPTION_DECISION_CONTRACT",
+                        "message": "Each initial option must explicitly propose "
+                        "decision=revise. The invalid decision and its actions are "
+                        "preserved, not converted or scientifically accepted. "
+                        "Clarify it within the remaining call allowance.",
+                        "details": {
+                            "returned_decision": deepcopy(decision),
+                            "required_initial_decision": "revise",
+                            "trial_scientifically_assessed": False,
+                            "scientific_content_preserved": True,
+                        },
+                    }
             result.append((option["patch"], metadata))
         except (ValueError, ValidationError) as exc:
             result.append((None, {"wrapper_error": str(exc)[:2000]}))
@@ -715,6 +803,7 @@ def run_episode(
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
     action_feedback: bool = False,
+    repair_contract: bool = False,
 ) -> dict:
     """Run bounded cached calls with policy-specific, deterministic routing."""
     if policy not in POLICIES:
@@ -722,6 +811,8 @@ def run_episode(
     _validate_limits(options_count, maximum_calls)
     if action_feedback and not branch_delta:
         raise ValueError("action_feedback requires branch_delta")
+    if repair_contract and not (branch_delta and action_feedback):
+        raise ValueError("repair_contract requires branch_delta and action_feedback")
     if settings.maximum_requests != maximum_calls:
         call_word = "three" if maximum_calls == 3 else "five"
         raise ValueError(
@@ -740,7 +831,7 @@ def run_episode(
             branch_delta and intended is not None and not fresh and not batch
         )
         record = client.call(
-            system=system_for(branch_delta),
+            system=system_for(branch_delta, repair_contract=repair_contract),
             user=request(
                 parent,
                 policy,
@@ -753,8 +844,11 @@ def run_episode(
                 branch_delta=branch_delta,
                 common_zero_forcing=common_zero_forcing,
                 action_feedback=action_feedback,
+                repair_contract=repair_contract,
             ),
-            response_model=options_reply_model(options_count)
+            response_model=options_reply_model(
+                options_count, repair_contract=repair_contract
+            )
             if batch
             else repair_reply_model(branch_repair),
             step="search_policy",
@@ -767,7 +861,11 @@ def run_episode(
             parse_error = _diagnostic(exc)
         if parse_error is None:
             try:
-                options = _options(raw, options_count) if batch else [(raw, {})]
+                options = (
+                    _options(raw, options_count, repair_contract=repair_contract)
+                    if batch
+                    else [(raw, {})]
+                )
             except ValueError as exc:
                 parse_error = {"code": "OPTION_OR_RESPONSE_FORMAT", "message": str(exc)}
         if parse_error is not None:
@@ -789,16 +887,34 @@ def run_episode(
                     payload,
                     intended,
                     common_zero_forcing=common_zero_forcing,
+                    repair_contract=repair_contract,
                     **metadata_fields,
                 )
                 if branch_repair
                 else assess_candidate(
                     parent,
-                    payload,
+                    None if metadata.get("decision_contract_error") else payload,
                     common_zero_forcing=common_zero_forcing,
                     **metadata_fields,
                 )
             )
+            if metadata.get("decision_contract_error"):
+                # Preserve a rejected, repairable intention without interpreting
+                # an invalid decision as a revision or a terminal wider outcome.
+                candidate.update(
+                    raw_reply=deepcopy(payload),
+                    patch_sha256=feedback.patch_signature(payload),
+                    diagnostic=deepcopy(metadata["decision_contract_error"]),
+                    option_decision_valid=False,
+                )
+                candidate["diagnostic_sha256"] = diagnostic_identity(
+                    candidate["diagnostic"]
+                )
+            if repair_contract and batch and not metadata.get("wrapper_error"):
+                candidate["option_metadata"] = {
+                    key: metadata[key]
+                    for key in ("option_id", "affected_target", "premise_changed")
+                }
             if metadata.get("wrapper_error"):
                 candidate["diagnostic"] = {
                     "code": parse_error["code"]
@@ -881,5 +997,10 @@ def run_episode(
     if common_zero_forcing:
         result["common_zero_forcing"] = True
     if action_feedback:
-        result["action_feedback_policy"] = ACTION_FEEDBACK_POLICY
+        result["action_feedback_policy"] = (
+            branch_feedback.REPAIR_POLICY if repair_contract else ACTION_FEEDBACK_POLICY
+        )
+    if repair_contract:
+        result["repair_contract_policy"] = REPAIR_CONTRACT_POLICY
+        result["identical_action_policy"] = IDENTICAL_ACTION_POLICY
     return result

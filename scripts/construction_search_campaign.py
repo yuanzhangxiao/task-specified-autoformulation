@@ -28,6 +28,8 @@ from autoformalism.rebuttal.prefit_construction_campaign import _cost
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.repair_comparison import RepairBudgetExceeded
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
+from autoformalism.research import construction_branch_feedback as branch_feedback
+from autoformalism.research import construction_branch_patch as branch_patch
 from autoformalism.research import construction_search_policy as engine
 from autoformalism.research.construction_affine_family_consistency import (
     COMBINED_SYMBOLIC_POLICY,
@@ -72,6 +74,11 @@ PROFILES["action-feedback"] = {
     "allowed_model_sizes": ("20b",),
     "action_feedback": True,
 }
+PROFILES["repair-contract"] = {
+    **PROFILES["action-feedback"],
+    "allowed_model_sizes": ("20b", "120b"),
+    "repair_contract": True,
+}
 
 
 def profile_for(name: str) -> dict:
@@ -114,6 +121,7 @@ ENTRYPOINTS = tuple(
             "scripts/construction_search_campaign.py",
             "src/autoformalism/research/construction_branch_patch.py",
             "src/autoformalism/research/construction_branch_feedback.py",
+            "src/autoformalism/research/construction_repair_influence.py",
             "scripts/submit_construction_search_aces.py",
             "scripts/hpc/run_construction_search_aces.sh",
             "scripts/hpc/start_construction_search_aces.sh",
@@ -172,7 +180,10 @@ def smoke_case_ids(plan: dict) -> list[str]:
 def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
     spec = profile_for(profile)
     settings = settings_for(size, profile).model_dump(mode="json")
-    options_model = engine.options_reply_model(spec["options_count"])
+    repair_contract = spec.get("repair_contract", False)
+    options_model = engine.options_reply_model(
+        spec["options_count"], repair_contract=repair_contract
+    )
     branch_delta = spec.get("branch_delta", False)
     reply_models = (StructuralRevisionReply, options_model)
     if branch_delta:
@@ -189,7 +200,11 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
         },
         "policies": list(spec["policies"]),
         "seeds": list(SEEDS),
-        "system_sha256": content_hash(engine.system_for(branch_delta=branch_delta)),
+        "system_sha256": content_hash(
+            engine.system_for(
+                branch_delta=branch_delta, repair_contract=repair_contract
+            )
+        ),
         "schema_sha256": {
             cls.__name__: content_hash(cls.model_json_schema()) for cls in reply_models
         },
@@ -234,6 +249,15 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
         common["selection"] = (
             "first sorted frozen T2-easy parent (P00-r1); same three fixed seeds; "
             "20B-only typed-action feedback confirmation, no NMSE-based selection"
+        )
+    if repair_contract:
+        common["engine_options"]["repair_contract"] = True
+        common["repair_contract_policy"] = engine.REPAIR_CONTRACT_POLICY
+        common["identical_action_policy"] = branch_patch.IDENTICAL_ACTION_POLICY
+        common["action_feedback_policy"] = branch_feedback.REPAIR_POLICY
+        common["selection"] = (
+            "first sorted frozen T2-easy parent (P00-r1); same three fixed seeds; "
+            "matched repair-contract confirmation, no NMSE-based selection"
         )
     return {
         **common,
@@ -693,6 +717,14 @@ def report(root: Path) -> dict:
             if "action_feedback_policy" in plan
             else {}
         ),
+        **(
+            {
+                key: plan[key]
+                for key in ("repair_contract_policy", "identical_action_policy")
+            }
+            if "repair_contract_policy" in plan
+            else {}
+        ),
         "status": "complete" if all(r["completed"] for r in rows) else "incomplete",
         "smoke_complete": all(r["completed"] for r in rows if r["smoke"]),
         "smoke_eligible_episodes": sum(
@@ -742,12 +774,15 @@ def preview(root: Path) -> dict:
     selected = sealed_read(root / "selected_sources.json")
     count = plan["required_options_in_first_call"]
     calls = plan["maximum_calls_per_episode"]
-    options_model = engine.options_reply_model(count)
+    repair_contract = plan.get("engine_options", {}).get("repair_contract", False)
+    options_model = engine.options_reply_model(count, repair_contract=repair_contract)
     branch_delta = plan.get("engine_options", {}).get("branch_delta", False)
     common_zero_forcing = plan.get("engine_options", {}).get(
         "common_zero_forcing", False
     )
-    system = engine.system_for(branch_delta=branch_delta)
+    system = engine.system_for(
+        branch_delta=branch_delta, repair_contract=repair_contract
+    )
     patch_rule = (
         "Initial options change the unchanged parent. Branch repairs explicitly "
         "choose delta, replacement or withdrawal against the identified stored patch. "

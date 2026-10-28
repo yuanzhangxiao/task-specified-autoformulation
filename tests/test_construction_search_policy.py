@@ -121,6 +121,7 @@ def run(
     branch_delta=False,
     common_zero_forcing=False,
     action_feedback=False,
+    repair_contract=False,
 ):
     client = Client(payloads)
     result = engine.run_episode(
@@ -134,6 +135,7 @@ def run(
         branch_delta=branch_delta,
         common_zero_forcing=common_zero_forcing,
         action_feedback=action_feedback,
+        repair_contract=repair_contract,
     )
     return result, client
 
@@ -457,6 +459,212 @@ def test_all_three_options_must_be_repair_proposals(parent):
     assert result["candidates"][0]["option_wrapper_valid"] is False
     assert "decision=revise" in result["candidates"][0]["diagnostic"]["message"]
     assert len(result["eligible_candidate_ids"]) == 2
+
+
+def test_repair_contract_initial_schema_is_strict_without_changing_old_schema():
+    assert engine.options_reply_model(3) is engine.OptionsReply
+    assert engine.options_reply_model(5) is engine.FiveOptionsReply
+    assert engine.system_for(True) == engine.BRANCH_SYSTEM
+    assert engine.system_for() == engine.SYSTEM
+    prospective = engine.options_reply_model(5, repair_contract=True)
+    schema = prospective.model_json_schema()
+    assert (
+        schema["$defs"]["InScopeRevisionReply"]["properties"]["decision"]["const"]
+        == "revise"
+    )
+    assert (
+        "requires_wider_revision"
+        in engine.FiveOptionsReply.model_json_schema()["$defs"][
+            "StructuralRevisionReply"
+        ]["properties"]["decision"]["enum"]
+    )
+    batch = {
+        "options": [
+            option(i, patch(decision="requires_wider_revision", edits=[]))
+            for i in range(5)
+        ]
+    }
+    engine.FiveOptionsReply.model_validate(batch)
+    with pytest.raises(ValueError, match="revise"):
+        prospective.model_validate(batch)
+
+
+@pytest.mark.parametrize(
+    "branch_delta,action_feedback", [(False, False), (True, False)]
+)
+def test_repair_contract_requires_the_other_opt_in_contracts(
+    parent, branch_delta, action_feedback
+):
+    with pytest.raises(ValueError, match="requires branch_delta and action_feedback"):
+        engine.request(
+            parent,
+            "options_shallow",
+            branch_delta=branch_delta,
+            action_feedback=action_feedback,
+            repair_contract=True,
+        )
+    with pytest.raises(ValueError, match="requires branch_delta and action_feedback"):
+        run(
+            parent,
+            [],
+            "options_shallow",
+            branch_delta=branch_delta,
+            action_feedback=action_feedback,
+            repair_contract=True,
+        )
+
+
+def test_repair_contract_keeps_invalid_initial_payload_and_valid_metadata():
+    options = [
+        option(i, patch(f"a*mem+{i}", decision="requires_wider_revision"))
+        for i in range(5)
+    ]
+    raw = {"options": options}
+    before = deepcopy(raw)
+    previous = engine._options(raw, 5)
+    assert all(
+        payload is None and metadata.get("wrapper_error")
+        for payload, metadata in previous
+    )
+    current = engine._options(raw, 5, repair_contract=True)
+    for index, (payload, metadata) in enumerate(current):
+        assert payload == options[index]["patch"]
+        assert metadata["option_id"] == options[index]["option_id"]
+        assert metadata["affected_target"] == options[index]["affected_target"]
+        assert metadata["premise_changed"] == options[index]["premise_changed"]
+        assert metadata["decision_contract_error"]["code"] == "OPTION_DECISION_CONTRACT"
+        assert not metadata["decision_contract_error"]["details"][
+            "trial_scientifically_assessed"
+        ]
+    assert raw == before
+
+
+class ClarificationClient(Client):
+    """Return an explicit authored clarification using the request's pinned branch."""
+
+    def __init__(self, batch, action):
+        super().__init__([batch])
+        self.action = action
+
+    def call(self, **kwargs):
+        if kwargs["attempt"]:
+            packet = json.loads(kwargs["user"])
+            reply = {
+                "mode": "delta",
+                **packet["repair_feedback"]["branch_reference"],
+                "patch": self.action,
+            }
+            self.payloads.append(reply)
+        return super().call(**kwargs)
+
+
+@pytest.mark.parametrize("explicit_correction", [False, True])
+def test_all_five_invalid_decisions_receive_at_most_four_explicit_clarifications(
+    parent, explicit_correction
+):
+    batch = {
+        "options": [
+            option(i, patch(f"a*mem*Gp+{i}", decision="requires_wider_revision"))
+            for i in range(5)
+        ]
+    }
+    action = (
+        {"decision": "revise"}
+        if explicit_correction
+        else {"hypothesis": "Still intended."}
+    )
+    client = ClarificationClient(batch, action)
+    result = engine.run_episode(
+        parent,
+        client,
+        StagedModelSettings(maximum_requests=5),
+        "options_shallow",
+        options_count=5,
+        maximum_calls=5,
+        branch_delta=True,
+        action_feedback=True,
+        repair_contract=True,
+    )
+    assert result["generation_calls"] == len(client.calls) == 5
+    assert result["candidate_count"] == 9
+    assert len({row["branch_id"] for row in result["attempts"][1:]}) == 4
+    assert len(result["eligible_candidate_ids"]) == (4 if explicit_correction else 0)
+    for index, row in enumerate(result["candidates"][:5]):
+        assert row["status"] == "rejected"
+        assert row["problem"] is None
+        assert row["raw_reply"] == batch["options"][index]["patch"]
+        assert row["diagnostic"]["code"] == "OPTION_DECISION_CONTRACT"
+        assert row["option_wrapper_valid"]
+        assert row["option_metadata"]["option_id"] == f"option_{index}"
+    assert not result["model_promoted"]
+    assert all(
+        row["composed_patch"]["decision"]
+        == ("revise" if explicit_correction else "requires_wider_revision")
+        for row in result["candidates"][5:]
+    )
+    replay_client = ClarificationClient(batch, action)
+    replay = engine.run_episode(
+        parent,
+        replay_client,
+        StagedModelSettings(maximum_requests=5),
+        "options_shallow",
+        options_count=5,
+        maximum_calls=5,
+        branch_delta=True,
+        action_feedback=True,
+        repair_contract=True,
+    )
+    assert replay == result and replay_client.calls == client.calls
+
+
+def test_repair_contract_duplicate_normalization_is_not_scientific_acceptance(parent):
+    raw = patch("a*mem+b", new_parameters=[{"name": "b", "role": "coefficient"}] * 2)
+    initial = engine.assess_candidate(parent, raw, candidate_id="call0-option0")
+    assert initial["status"] == "rejected"
+    reply = branch_reply(initial, {"hypothesis": "Keep the complete intention."})
+    result = engine._assess_branch_reply(
+        parent,
+        reply,
+        initial,
+        common_zero_forcing=False,
+        repair_contract=True,
+        candidate_id="call1-option0",
+    )
+    assert result["diagnostic"]["code"] == "QUALIFIED_MODEL_DATA_CONFLICT"
+    assert result["status"] == "rejected"
+    assert result["composed_patch"]["new_parameters"] == raw["new_parameters"][:1]
+    assert result["raw_reply"] != raw
+    assert result["submitted_reply"] == reply
+    assert result["branch_composition"]["identical_action_normalization"][
+        "removed_entries"
+    ]
+
+
+@pytest.mark.parametrize("mode", ["withdraw", "replace"])
+def test_repair_contract_followup_can_explicitly_stop_unsupported_branch(parent, mode):
+    initial = engine.assess_candidate(
+        parent, patch("a*mem"), candidate_id="call0-option0"
+    )
+    reply = branch_reply(
+        initial,
+        patch(decision="requires_wider_revision", edits=[])
+        if mode == "replace"
+        else None,
+        mode=mode,
+    )
+    result = engine._assess_branch_reply(
+        parent,
+        reply,
+        initial,
+        common_zero_forcing=False,
+        repair_contract=True,
+        candidate_id="call1-option0",
+    )
+    assert result["status"] == (
+        "withdrawn" if mode == "withdraw" else "requires_wider_revision"
+    )
+    assert result["problem"] is None
+    assert not result["branch_composition"]["model_adopted"]
 
 
 def test_prompt_distinguishes_complete_changes_from_whole_model(parent):

@@ -1,5 +1,23 @@
 # Phase 1 Pipeline Design
 
+## Explicit initial decisions and qualified dependency feedback
+
+`explicit-in-scope-option-repair-contract-1` is opt-in and requires branch deltas
+and typed action feedback. Initial alternatives require `decision=revise`;
+otherwise valid envelopes with a wrong decision retain their raw patch and
+metadata for clarification within the existing episode budget. The runtime never
+changes a decision or accepts unvalidated actions. Exact duplicate action records
+may normalize within original raw-list limits, with hashes and indices retained.
+
+`typed-branch-action-feedback-2` provides conditional exact moves, drops and
+initializer-alias examples. `validated-repair-dependency-view-1` resolves a
+validated trial's equation and initialization references to qualified failing
+targets. Missing provenance, unsupported symbols or invalid dependency graphs
+defer the explanation; a path is potential influence, not scientific sufficiency.
+These presentation changes do not alter mathematical acceptance. Historical
+schemas, composition and feedback remain the default. See
+[the bounded two-model confirmation](PHASE_C_REPAIR_CONTRACT.md).
+
 ## Opt-in typed branch feedback
 
 `typed-branch-action-feedback-1` is a presentation layer for selected pending

@@ -39,7 +39,7 @@ def forbidden(*args, **kwargs):
 def respond(url, body, timeout):
     value = revision()
     schema = body["response_format"]["json_schema"]
-    if schema["name"] in {"OptionsReply", "FiveOptionsReply"}:
+    if "options" in schema["schema"]["properties"]:
         count = schema["schema"]["properties"]["options"]["minItems"]
         value = {
             "options": [
@@ -186,7 +186,12 @@ def test_excessive_provider_charge_blocks_without_renewing_budget(search_roots):
 
 @pytest.mark.parametrize(
     "profile,count",
-    [("breadth-five", 18), ("focused-retest", 3), ("action-feedback", 3)],
+    [
+        ("breadth-five", 18),
+        ("focused-retest", 3),
+        ("action-feedback", 3),
+        ("repair-contract", 3),
+    ],
 )
 def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
     structural_source,  # noqa: F811
@@ -213,18 +218,37 @@ def test_breadth_profile_binds_budget_roster_schema_and_exact_resume(
         "combined-symbolic-map-readout-initials-1"
     )
     assert plan["policies"] == ["options_shallow"]
-    assert "FiveOptionsReply" in plan["schema_sha256"]
-    if profile in {"focused-retest", "action-feedback"}:
+    options_model = cli.engine.options_reply_model(
+        5, repair_contract=profile == "repair-contract"
+    )
+    assert options_model.__name__ in plan["schema_sha256"]
+    if profile in {"focused-retest", "action-feedback", "repair-contract"}:
         assert {row["parent_id"] for row in plan["cases"]} == {"parent_0"}
         assert {row["seed"] for row in plan["cases"]} == {0, 1, 2}
         assert plan["engine_options"] == {
             "branch_delta": True,
             "common_zero_forcing": True,
-            **({"action_feedback": True} if profile == "action-feedback" else {}),
+            **(
+                {"action_feedback": True}
+                if profile in {"action-feedback", "repair-contract"}
+                else {}
+            ),
+            **({"repair_contract": True} if profile == "repair-contract" else {}),
         }
         if profile == "action-feedback":
             assert plan["action_feedback_policy"] == "typed-branch-action-feedback-1"
             assert plan["allowed_model_sizes"] == ["20b"]
+        elif profile == "repair-contract":
+            assert plan["action_feedback_policy"] == "typed-branch-action-feedback-2"
+            assert (
+                plan["repair_contract_policy"]
+                == "explicit-in-scope-option-repair-contract-1"
+            )
+            assert (
+                plan["identical_action_policy"]
+                == "identical-pending-action-normalization-1"
+            )
+            assert plan["allowed_model_sizes"] == ["20b", "120b"]
         else:
             assert "action_feedback_policy" not in plan
         assert plan["branch_edit_policy"] == "explicit-branch-patch-delta-1"
@@ -314,7 +338,9 @@ def test_focused_profile_rejects_flag_drift_before_cached_resume(
     assert (root / "plan.json").read_bytes() == before
 
 
-@pytest.mark.parametrize("profile", ["focused-retest", "action-feedback"])
+@pytest.mark.parametrize(
+    "profile", ["focused-retest", "action-feedback", "repair-contract"]
+)
 def test_focused_branch_delta_followup_and_cache_replay_are_identical(
     structural_source,  # noqa: F811
     tmp_path,
@@ -332,7 +358,7 @@ def test_focused_branch_delta_followup_and_cache_replay_are_identical(
     def transport(url, body, timeout):
         schema = body["response_format"]["json_schema"]["name"]
         schemas.append(schema)
-        if schema == "FiveOptionsReply":
+        if "options" in body["response_format"]["json_schema"]["schema"]["properties"]:
             raw = revision()
             raw["evidence_ids"] = ["unsupported_citation"]
             return response(
@@ -366,9 +392,20 @@ def test_focused_branch_delta_followup_and_cache_replay_are_identical(
     result = cli.run(
         root, "http://127.0.0.1", transport=transport, token_transport=tokenizer
     )
-    assert schemas == ["FiveOptionsReply", "BranchRepairReply"]
+    assert schemas == [
+        cli.engine.options_reply_model(
+            5, repair_contract=profile == "repair-contract"
+        ).__name__,
+        "BranchRepairReply",
+    ]
     if profile == "action-feedback":
         assert result["action_feedback_policy"] == "typed-branch-action-feedback-1"
+    elif profile == "repair-contract":
+        assert result["action_feedback_policy"] == "typed-branch-action-feedback-2"
+        assert (
+            result["repair_contract_policy"]
+            == "explicit-in-scope-option-repair-contract-1"
+        )
     else:
         assert "action_feedback_policy" not in result
     assert result["smoke_complete"]
@@ -446,6 +483,62 @@ def test_action_feedback_roster_contract_and_only_20b(
     cli.prepare(source, root, "20b", "action-feedback")
     before = (root / "plan.json").read_bytes()
     monkeypatch.setitem(cli.PROFILES["action-feedback"], "action_feedback", False)
+    with pytest.raises(ValueError, match="differ"):
+        cli.verify(root)
+    assert (root / "plan.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("size", ["20b", "120b"])
+def test_repair_contract_model_arms_pin_new_schema_and_resume(
+    structural_source,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    size,
+):
+    source, _, _ = structural_source
+    runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
+    monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
+    monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
+    selected = cli.base.sources.load(source)
+    old = cli._plan(selected, size, "focused-retest")
+    root = tmp_path / size
+    cli.prepare(source, root, size, "repair-contract")
+    plan = cli.verify(root)
+    other_size = "120b" if size == "20b" else "20b"
+    other = cli._plan(selected, other_size, "repair-contract")
+    assert plan["comparison_sha256"] == other["comparison_sha256"]
+    assert plan["schema_sha256"] == other["schema_sha256"]
+    assert plan["system_sha256"] == other["system_sha256"]
+    assert plan["settings"] == old["settings"]
+    assert plan["gate_policy"] == old["gate_policy"]
+    assert plan["system_sha256"] != old["system_sha256"]
+    assert plan["schema_sha256"] != old["schema_sha256"]
+    assert [(c["parent_id"], c["seed"]) for c in plan["cases"]] == [
+        (c["parent_id"], c["seed"]) for c in old["cases"]
+    ]
+    result = cli.run(
+        root,
+        "http://127.0.0.1",
+        phase="full",
+        transport=respond,
+        token_transport=tokenizer,
+    )
+    assert result["status"] == "complete" and len(result["rows"]) == 3
+    assert (
+        result["repair_contract_policy"] == "explicit-in-scope-option-repair-contract-1"
+    )
+    assert (
+        cli.run(
+            root,
+            "http://127.0.0.1",
+            phase="full",
+            transport=forbidden,
+            token_transport=forbidden,
+        )
+        == result
+    )
+    before = (root / "plan.json").read_bytes()
+    monkeypatch.setitem(cli.PROFILES["repair-contract"], "repair_contract", False)
     with pytest.raises(ValueError, match="differ"):
         cli.verify(root)
     assert (root / "plan.json").read_bytes() == before

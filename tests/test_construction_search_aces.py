@@ -442,7 +442,14 @@ def test_server_binding_rejects_nonlocal_endpoint(serving):
 
 
 @pytest.mark.parametrize(
-    "profile", ["three-policy", "breadth-five", "focused-retest", "action-feedback"]
+    "profile",
+    [
+        "three-policy",
+        "breadth-five",
+        "focused-retest",
+        "action-feedback",
+        "repair-contract",
+    ],
 )
 @pytest.mark.parametrize("size", ["20b", "120b"])
 @pytest.mark.parametrize("command", ["run", "inspect", "report", "preview"])
@@ -497,7 +504,11 @@ def test_real_shell_dispatch_ignores_old_generic_root(
         return
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    version = {"focused-retest": "v4", "action-feedback": "v5"}.get(profile, "v3")
+    version = {
+        "focused-retest": "v4",
+        "action-feedback": "v5",
+        "repair-contract": "v6",
+    }.get(profile, "v3")
     expected = str(group / f"phase-c-search-{profile}-{size}-{version}")
     assert calls and all(call["root"] == expected for call in calls)
     if command == "run":
@@ -515,7 +526,12 @@ def test_real_shell_dispatch_ignores_old_generic_root(
 
 @pytest.mark.parametrize(
     "profile,count",
-    [("breadth-five", 18), ("focused-retest", 3), ("action-feedback", 3)],
+    [
+        ("breadth-five", 18),
+        ("focused-retest", 3),
+        ("action-feedback", 3),
+        ("repair-contract", 3),
+    ],
 )
 def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
     setup, monkeypatch, profile, count
@@ -531,22 +547,33 @@ def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
         )
         plan["cases"] = [c for c in plan["cases"] if c["policy"] == "options_shallow"]
         plan["settings"].update(submission.PROFILES[profile]["settings"])
-        if profile in {"focused-retest", "action-feedback"}:
+        if profile in {"focused-retest", "action-feedback", "repair-contract"}:
             plan["cases"] = [c for c in plan["cases"] if c["parent_id"] == "P00"]
             plan["engine_options"] = dict(
                 submission.PROFILES[profile]["engine_options"]
             )
             plan["smoke_required_before_full"] = False
-        if profile == "action-feedback":
-            plan["allowed_model_sizes"] = ["20b"]
-            plan["action_feedback_policy"] = "typed-branch-action-feedback-1"
+        if profile in {"action-feedback", "repair-contract"}:
+            plan["allowed_model_sizes"] = list(
+                submission.PROFILES[profile]["allowed_model_sizes"]
+            )
+            plan["action_feedback_policy"] = submission.PROFILES[profile][
+                "action_feedback_policy"
+            ]
+        if profile == "repair-contract":
+            for key in ("repair_contract_policy", "identical_action_policy"):
+                plan[key] = submission.PROFILES[profile][key]
     monkeypatch.setattr(
         submission.subprocess,
         "run",
         lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "1234", ""),
     )
     for size in plans:
-        phase = "full" if profile in {"focused-retest", "action-feedback"} else "smoke"
+        phase = (
+            "full"
+            if profile in {"focused-retest", "action-feedback", "repair-contract"}
+            else "smoke"
+        )
         if profile == "action-feedback" and size == "120b":
             with pytest.raises(ValueError, match="20B-only"):
                 submission.submit(tmp / size, phase)
@@ -568,6 +595,8 @@ def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
     "field,value",
     [
         ("profile", "unlimited"),
+        ("repair_contract_policy", "explicit-in-scope-option-repair-contract-1"),
+        ("identical_action_policy", "identical-pending-action-normalization-1"),
         ("action_feedback_policy", "typed-branch-action-feedback-1"),
         ("allowed_model_sizes", ["20b"]),
         ("smoke_required_before_full", False),

@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Repair-contract confirmation
+
+The opt-in `repair-contract` profile aligns initial option decisions with the
+runtime, preserves invalid-decision payloads for bounded clarification, and
+adds exact declaration-movement and initializer-alias feedback. A bounded
+dependency view explains disconnected additions beside existing qualified
+conflicts; it adds no scientific acceptance gate. Identical pending action
+duplicates normalize with provenance, while conflicting declarations still fail.
+Historical defaults remain unchanged. The next confirmation is P00-r1 × three
+seeds independently on 20B and 120B, at most fifteen calls per arm, with fresh
+v6 roots. See [the implementation and commands](PHASE_C_REPAIR_CONTRACT.md).
+
 ## Returned action-feedback and 120B results
 
 The 28 October archives completed operationally. New 20B action feedback yields
