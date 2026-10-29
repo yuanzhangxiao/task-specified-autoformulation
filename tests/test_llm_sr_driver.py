@@ -822,6 +822,88 @@ def test_a_training_trajectory_past_the_time_limit_has_failed(
     )
 
 
+def _times_out_on_c(equations, context, train, split, *, seconds):
+    """The shared evaluator, past its limit on validation trajectory c."""
+    if "c" in {trajectory.trajectory_id for trajectory in split.trajectories}:
+        raise TimeoutError("fitting wall-clock limit reached")
+    return 0.25
+
+
+def test_a_validation_trajectory_past_the_time_limit_fails_the_rollout(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """As in task 9 of the expression run's seeds 2 to 4, whose seal it ended."""
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    outcome = _run(
+        search, directory=tmp_path / "slow", development=_development(),
+        score_rollout=_times_out_on_c,
+    )
+    assert outcome["status"] == "rollout_failed" and set(outcome["equations"]) == {"G"}
+    assert outcome["error"] == (
+        "the selected system did not complete a development rollout on c (over 60 s)"
+    )
+
+
+def test_a_failed_validation_rollout_keeps_the_reason_recorded_so_far(
+    monkeypatch, tmp_path: Path
+) -> None:
+    def fails_on_c(equations, context, train, split, *, seconds):
+        ids = {trajectory.trajectory_id for trajectory in split.trajectories}
+        return None if "c" in ids else 0.25
+
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    outcome = _run(
+        search, directory=tmp_path / "pole", development=_development(),
+        score_rollout=fails_on_c,
+    )
+    assert outcome["status"] == "rollout_failed"
+    assert outcome["error"] == driver.NO_DEVELOPMENT_ROLLOUT == (
+        "the selected system did not complete a development rollout"
+    )
+
+
+def test_a_validation_timeout_that_does_not_recur_alone_still_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The limit is the rule; running a trajectory again does not undo it."""
+    calls: list[int] = []
+
+    def slow_once(equations, context, train, split, *, seconds):
+        calls.append(len(split.trajectories))
+        if len(calls) == 1:
+            raise TimeoutError("fitting wall-clock limit reached")
+        return 0.25
+
+    search = _running(monkeypatch, tmp_path, LINEAR)
+    outcome = _run(
+        search, directory=tmp_path / "once", development=_development(),
+        score_rollout=slow_once,
+    )
+    assert outcome["status"] == "rollout_failed"
+    assert outcome["error"] == (
+        "the selected system did not complete a development rollout within 60 s"
+    )
+    assert calls == [1, 1]
+
+
+def test_without_a_program_rollout_a_slow_validation_trajectory_also_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    checkout, _ = _fake_upstream(monkeypatch, tmp_path, best=LINEAR, score=-0.01)
+    monkeypatch.setattr(driver, "complete", lambda *a, **k: {"content": ["x"] * 4})
+    search = driver.build_searcher(
+        upstream_root=checkout, base_url="http://127.0.0.1:1", model="m", samples=20
+    )
+    outcome = _run(
+        search, directory=tmp_path / "plain", development=_development(),
+        score_rollout=_times_out_on_c,
+    )
+    assert outcome["status"] == "rollout_failed"
+    assert outcome["error"] == (
+        "the selected system did not complete a development rollout on c (over 60 s)"
+    )
+
+
 def test_without_a_program_rollout_a_failed_training_rollout_also_seals(
     monkeypatch, tmp_path: Path
 ) -> None:

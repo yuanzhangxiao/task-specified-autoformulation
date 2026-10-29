@@ -376,6 +376,36 @@ Plans:
   and 1 took 38 to 43 hours, about ten resets each, and with 33 searches at
   once these may take longer. Frozen on 2026-10-27 on the user's sign-off; no
   setting changed.
+  - **Ran on js2 from 2026-10-28 18:10Z to 2026-10-29 20:29Z, from checkout
+    `fa34e4d`.** All 33 searches finished, in 20 to 26 hours each (380 to 503
+    samples an hour, about twice the pace of seeds 0 and 1, so five or six
+    island resets each rather than about ten): 330,000 samples in 82,501
+    requests. The hosted service turned away one request (a "502"), which was
+    retried.
+    The form refused 13,424 samples (4.1%): 9,273 were not an expression of
+    the current values, and 4,151 had more than one statement.
+  - 23 of 24 tasks sealed: 17 complete and 6 `rollout_failed` (T1 hard seeds 3
+    and 4, T2 easy all three seeds, T2 hard seed 3). The complete ones have
+    validation errors 0.000096 to 0.000147 (detention, independent), 0.054 to
+    0.066 (detention, coupled), 3.9 to 7.2 (alien), 0.99 (T1 hard seed 2,
+    whose training rollout fails on train_003, train_004, train_005 and
+    train_011) and 2.5 (T2 hard seed 4), and six far off: CSTR's three seeds
+    (1.1e21 to 1.4e21) and T1 easy's (5.9e5, 5.3e8 and 1.5e105).
+  - Task 9 (T2 hard, seed 2) did not seal: its validation rollout passed the
+    60 s limit, and the simulator raises then rather than failing, which
+    ended the task. This is the case left open on 2026-10-27. Checked
+    read-only on js2 while it was idle, it is not load: on val_000, RK45 does
+    not finish in 600 s, and Radau fails in 0.3 s, its step size below
+    floating-point spacing, as on task 6's two training trajectories. Fixed on
+    2026-10-29: a validation trajectory past the limit has failed, as a
+    program's already had on the grid and as a training trajectory has since
+    `9a46a4c`. The task seals `rollout_failed`, naming each validation
+    trajectory that fails when run alone, "(over 60 s)" for one past the
+    limit. Run read-only on task 9's picks, the fixed step names all four
+    validation trajectories, each past 60 s. A failure of any other kind keeps
+    the reason recorded so far, so the other 23 tasks would seal as they did.
+    The hosted launcher now seals no more tasks at once than the VM has CPUs,
+    as the GPU launcher does; this run sealed its 24 at once on 16 CPUs.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3
@@ -386,6 +416,11 @@ for i in $(seq 0 15); do mkdir -p $new/results/$i; cp -a $old/results/$i/llmsr-*
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1.json phase-c-llm-sr-expression-hosted-120b-v1-reseal 4
 # Seeds 2 to 4, all 33 searches at once.
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4 33
+# Its reseal, proposed, from a checkout with the fix: the finished searches,
+# hard-linked as the seal only reads them, then every seal.
+old=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4 new=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4-reseal
+for i in $(seq 0 23); do mkdir -p $new/results/$i; cp -al $old/results/$i/llmsr-* $new/results/$i/; done
+bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4-reseal 4
 ```
 
 ## Settings

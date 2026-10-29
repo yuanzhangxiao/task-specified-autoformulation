@@ -479,8 +479,10 @@ def build_searcher(
                 "accounting": spent(),
             }
         try:
-            error = score_rollout(equations, context, *development,
-                                  seconds=seconds_per_rollout)
+            error, reason = _development_rollout(
+                score_rollout, equations, context, development,
+                seconds=seconds_per_rollout,
+            )
         except InexpressibleEquation as exc:
             # What converts can still name something the evaluator's grammar
             # refuses; record it, do not crash.
@@ -494,7 +496,7 @@ def build_searcher(
         if error is None:
             return {
                 "status": "rollout_failed",
-                "error": "the selected system did not complete a development rollout",
+                "error": reason,
                 "equations": equations,
                 "selected_samples": selected,
                 "accounting": spent(),
@@ -515,6 +517,46 @@ def build_searcher(
         }
 
     return search
+
+
+#: Why a task has no development rollout error, as every seal so far records it.
+NO_DEVELOPMENT_ROLLOUT = "the selected system did not complete a development rollout"
+
+
+def _development_rollout(
+    score_rollout,
+    equations: dict[str, str],
+    context: ValidationContext,
+    development: tuple[DatasetSplit, DatasetSplit],
+    *,
+    seconds: float,
+) -> tuple[float | None, str | None]:
+    """The system's rollout error on validation, or why it has none.
+
+    Without one the task seals as ``rollout_failed``. A validation trajectory
+    that runs past the time limit has failed too, as a program's does and as a
+    training trajectory does in ``_training_rollout``: the simulator raises
+    then rather than failing, so each validation trajectory is run alone to
+    name it. Any other failure keeps the reason the seals so far recorded.
+    """
+    train, validation = development
+    try:
+        error = score_rollout(equations, context, train, validation, seconds=seconds)
+    except TimeoutError:
+        pass
+    else:
+        return error, (None if error is not None else NO_DEVELOPMENT_ROLLOUT)
+    failed: list[str] = []
+    for trajectory in validation.trajectories:
+        one = replace(validation, trajectories=(trajectory,))
+        try:
+            if score_rollout(equations, context, train, one, seconds=seconds) is None:
+                failed.append(trajectory.trajectory_id)
+        except TimeoutError:
+            failed.append(f"{trajectory.trajectory_id} (over {seconds:g} s)")
+    if not failed:
+        return None, f"{NO_DEVELOPMENT_ROLLOUT} within {seconds:g} s"
+    return None, f"{NO_DEVELOPMENT_ROLLOUT} on {', '.join(failed)}"
 
 
 def _training_rollout(
@@ -657,7 +699,9 @@ def _recover_by_running(
         }
     if len(equations) == len(targets):
         try:
-            error = score_rollout(equations, context, *development, seconds=seconds)
+            error, reason = _development_rollout(
+                score_rollout, equations, context, development, seconds=seconds
+            )
         except InexpressibleEquation as exc:
             # The grammar refuses what the program computes; run the program.
             for target in targets:
@@ -668,9 +712,7 @@ def _recover_by_running(
             if error is None:
                 return {
                     "status": "rollout_failed",
-                    "error": (
-                        "the selected system did not complete a development rollout"
-                    ),
+                    "error": reason,
                     "equations": equations,
                     "selected_samples": selected,
                     "accounting": spent(),
