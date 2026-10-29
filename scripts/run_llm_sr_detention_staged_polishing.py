@@ -24,6 +24,7 @@ ENTRYPOINTS = (
     "scripts/run_llm_sr_detention_staged_polishing.py",
     "scripts/hpc/run_llm_sr_detention_staged_polishing_delta.sh",
     "scripts/hpc/start_llm_sr_detention_staged_polishing_delta.sh",
+    "scripts/hpc/start_llm_sr_detention_staged_continuation_delta.sh",
     "scripts/submit_construction_fit_aces.py",
     "scripts/submit_review_continuation.py",
 )
@@ -366,6 +367,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     export.add_argument("--source", type=Path, required=True)
     export.add_argument("--destination", type=Path, required=True)
+    export.add_argument(
+        "--source-stage", choices=("polishing", "staged"), default="polishing"
+    )
     run = commands.add_parser("run", help="execute one frozen roster position once")
     run.add_argument("--root", type=Path, required=True)
     run.add_argument("--index", type=int, choices=range(2), required=True)
@@ -380,7 +384,9 @@ def main(argv: list[str] | None = None) -> None:
             "Authenticating saved polishing results "
             "and exporting compact inputs..."
         )
-        result = campaign.export_inputs(args.source, args.destination)
+        result = campaign.export_inputs(
+            args.source, args.destination, source_stage=args.source_stage
+        )
     elif args.command == "prepare":
         progress(
             "Authenticating compact inputs and freezing two staged-polishing tasks..."

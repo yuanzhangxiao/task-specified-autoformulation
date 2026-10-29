@@ -47,6 +47,16 @@ EXPECTED_SOURCE_REPORT_FILE_SHA256 = (
 EXPECTED_INPUTS_SHA256 = (
     "91ee51ad094d53e40fcb6727dbca95ae01cbfa56395ed4b9e1eda13e219ea616"
 )
+STAGED_SOURCE_REPORT_SHA256 = (
+    "2e367f471fe781f2dd3461e48f6e9e51af27590c74944aff5638e69486e6bb00"
+)
+STAGED_SOURCE_REPORT_FILE_SHA256 = (
+    "e84c3863bfcaca65c1fba8cc2bc9c6411fa259865361fca2c0aad6159f67a9ac"
+)
+STAGED_INPUTS_SHA256 = (
+    "5606f66b19db3ba14fcd5d93a0f55b70c4c4720d1e51e6546d01548822964737"
+)
+SourceStage = Literal["polishing", "staged"]
 BOUNDARY = {
     "historical_allowances_renewed": False,
     "automatic_promotion": False,
@@ -59,12 +69,30 @@ BOUNDARY = {
 _AUTHENTICATED = object()
 
 
+def _source_pins(source_stage: SourceStage) -> tuple[str, str, str]:
+    """Keep historical pins while authorizing exactly one returned continuation."""
+    if source_stage == "polishing":
+        return (
+            EXPECTED_SOURCE_REPORT_SHA256,
+            EXPECTED_SOURCE_REPORT_FILE_SHA256,
+            EXPECTED_INPUTS_SHA256,
+        )
+    if source_stage == "staged":
+        return (
+            STAGED_SOURCE_REPORT_SHA256,
+            STAGED_SOURCE_REPORT_FILE_SHA256,
+            STAGED_INPUTS_SHA256,
+        )
+    raise ValueError("unknown polishing source stage")
+
+
 class Inputs(StrictSchema):
     """Exact compact extraction of the two approved final retained endpoints."""
 
-    protocol: Literal["llm-sr-detention-staged-polishing-input-1"] = (
-        "llm-sr-detention-staged-polishing-input-1"
-    )
+    protocol: Literal[
+        "llm-sr-detention-staged-polishing-input-1",
+        "llm-sr-detention-staged-polishing-input-2",
+    ] = "llm-sr-detention-staged-polishing-input-1"
     model: Transcription
     context: ValidationContext
     training: PublicSplit
@@ -77,9 +105,11 @@ class Inputs(StrictSchema):
 
     @model_validator(mode="after")
     def authenticate(self):
-        if public.content_sha256(self) != EXPECTED_INPUTS_SHA256:
+        stage = "staged" if self.protocol.endswith("-2") else "polishing"
+        report_sha, _, inputs_sha = _source_pins(stage)
+        if public.content_sha256(self) != inputs_sha:
             raise ValueError("compact polishing source extraction differs")
-        if self.provenance["source_report_sha256"] != EXPECTED_SOURCE_REPORT_SHA256:
+        if self.provenance["source_report_sha256"] != report_sha:
             raise ValueError("polishing source report differs")
         if len(self.cases) != 2:
             raise ValueError("polishing roster differs")
@@ -199,25 +229,27 @@ def _historical_costs(value, path="historical_costs"):
     return rows
 
 
-def _extract(source_root: Path) -> dict:
+def _extract(source_root: Path, *, source_stage: SourceStage = "polishing") -> dict:
     """Authenticate the saved source report against every original task receipt."""
+    report_sha, file_sha, _ = _source_pins(source_stage)
+    source_report = report if source_stage == "staged" else source.report
+    source_verify = verify if source_stage == "staged" else source.verify
     print(
         "Authenticating source report and operation receipts...",
         file=sys.stderr,
         flush=True,
     )
     saved_path = source_root / "report/summary.json"
-    if (
-        sha256(saved_path.read_bytes()).hexdigest()
-        != EXPECTED_SOURCE_REPORT_FILE_SHA256
-    ):
+    if sha256(saved_path.read_bytes()).hexdigest() != file_sha:
         raise ValueError("saved source report file differs")
     saved = public._read(saved_path)
-    if public.content_sha256(saved) != EXPECTED_SOURCE_REPORT_SHA256:
+    if public.content_sha256(saved) != report_sha:
         raise ValueError("saved source report content differs")
-    if source.report(source_root) != saved:
+    if source_report(source_root) != saved:
         raise ValueError("source report does not exactly reconstruct from receipts")
-    plan, old, _ = source.verify(source_root, runtime=False)
+    if saved.get("status") != "complete" or saved.get("recorded") != 2:
+        raise ValueError("source continuation is not complete")
+    plan, old, _ = source_verify(source_root, runtime=False)
     cases = []
     for index in range(2):
         row = saved["tasks"][index]
@@ -247,7 +279,8 @@ def _extract(source_root: Path) -> dict:
             }
         )
     return {
-        "protocol": "llm-sr-detention-staged-polishing-input-1",
+        "protocol": "llm-sr-detention-staged-polishing-input-"
+        + ("2" if source_stage == "staged" else "1"),
         "model": old.model.model_dump(mode="json"),
         "context": old.context.model_dump(mode="json"),
         "training": old.training.model_dump(mode="json"),
@@ -255,8 +288,8 @@ def _extract(source_root: Path) -> dict:
         "provenance": {
             "source_plan_sha256": public.content_sha256(plan),
             "source_inputs_sha256": plan["inputs_sha256"],
-            "source_report_sha256": EXPECTED_SOURCE_REPORT_SHA256,
-            "source_report_file_sha256": EXPECTED_SOURCE_REPORT_FILE_SHA256,
+            "source_report_sha256": report_sha,
+            "source_report_file_sha256": file_sha,
             "source_report_exactly_reconstructed": True,
             "extraction_scope": "one training problem and final source tasks 0 and 1",
             "authentication_scope": "content/provenance pins; not a signature",
@@ -276,9 +309,11 @@ def _extract(source_root: Path) -> dict:
     }
 
 
-def export_inputs(source_root: Path, destination: Path) -> dict:
+def export_inputs(
+    source_root: Path, destination: Path, *, source_stage: SourceStage = "polishing"
+) -> dict:
     """Create a compact digest-pinned export without numerical work."""
-    inputs = Inputs.model_validate(_extract(source_root))
+    inputs = Inputs.model_validate(_extract(source_root, source_stage=source_stage))
     seal(destination, inputs.model_dump(mode="json"))
     return {
         "inputs": str(destination),

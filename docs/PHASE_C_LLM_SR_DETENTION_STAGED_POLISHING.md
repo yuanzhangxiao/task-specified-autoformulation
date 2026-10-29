@@ -2,6 +2,10 @@
 
 Date: 2026-10-28. Opt-in training-only numerical experiment.
 
+Returned results and the next separately authorized continuation are recorded in
+[the staged continuation runbook](PHASE_C_LLM_SR_DETENTION_STAGED_CONTINUATION.md).
+This document retains the original experiment and root.
+
 ## Returned polishing evidence
 
 The two-task polishing report reconstructed exactly from its operation receipts.
