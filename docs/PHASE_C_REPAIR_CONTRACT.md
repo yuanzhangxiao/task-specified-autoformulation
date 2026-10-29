@@ -1,5 +1,11 @@
 # Repair contract and dependency feedback confirmation
 
+Returned 28 October: both arms completed; all three episodes per arm found
+eligibility. Offline replay reproduces all 48 candidate decisions, while the
+independent equation audit identifies a missed exact-reproduction conflict in
+three eligible 120B meal-saturation candidates. See
+[the results, limits and next milestone](PHASE_C_REPAIR_CONTRACT_RESULTS_20261028.md).
+
 This opt-in milestone addresses the interface and feedback defects in the
 28 October returned 20B action-feedback and 120B focused runs. It preserves the
 scientific acceptance gates, parent models, benchmark data and fitting boundary.

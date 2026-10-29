@@ -1,5 +1,20 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Returned repair-contract results
+
+Both v6 jobs completed: 20B yields eight eligible initial alternatives and no
+eligible follow-up (0/7); 120B yields four initial and five follow-up eligible
+records (5/11). All three episodes per arm find eligibility, with every recorded
+training-consistency assessment still deferred. Exact replay reproduces all 48
+candidate outcomes. Independent equation audit finds three eligible 120B
+meal-saturation proposals retain an exact affine-trajectory contradiction after
+separating undefined denominator values from the defined common-forcing family.
+Fifteen of seventeen eligible records also retain a conditional zero-meal
+glucose-balance concern; two 20B reservoirs add an actual source path. No fitting
+or numerical superiority conclusion follows. Next: offline domain-aware proof
+coverage and mutually exclusive pending-action/model-removal feedback. See
+[the results and qualifications](PHASE_C_REPAIR_CONTRACT_RESULTS_20261028.md).
+
 ## Repair-contract confirmation
 
 The opt-in `repair-contract` profile aligns initial option decisions with the
@@ -8,7 +23,7 @@ adds exact declaration-movement and initializer-alias feedback. A bounded
 dependency view explains disconnected additions beside existing qualified
 conflicts; it adds no scientific acceptance gate. Identical pending action
 duplicates normalize with provenance, while conflicting declarations still fail.
-Historical defaults remain unchanged. The next confirmation is P00-r1 × three
+Historical defaults remain unchanged. The confirmation roster is P00-r1 × three
 seeds independently on 20B and 120B, at most fifteen calls per arm, with fresh
 v6 roots. See [the implementation and commands](PHASE_C_REPAIR_CONTRACT.md).
 
