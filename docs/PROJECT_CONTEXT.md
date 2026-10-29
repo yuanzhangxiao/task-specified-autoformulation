@@ -1,5 +1,18 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Returned admission-guard results
+
+Both 29 October arms completed: 20B admits five records across two seeds;
+120B admits six across all three. Three 20B follow-ups become eligible, versus
+none of nine 120B follow-ups. Guard-only reassessment confirms that the new
+domain split prevents two additional 20B false admissions. Independent equation
+review identifies one remaining scaled-memory affine conflict in 120B; hold that
+record without changing its historical status. Ten retained records represent
+nine new model identities, alongside the earlier fourteen for fitting intake.
+All retain unresolved checks; no fits or test evaluation were performed. Exact
+replay reproduces all 51 outcomes. See [the results, proof, and handoff](
+PHASE_C_ADMISSION_RESULTS_20261029.md).
+
 ## Qualified admission guard
 
 The opt-in `admission-guard` profile closes the saved input-saturation gap by
