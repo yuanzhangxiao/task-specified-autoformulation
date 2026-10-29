@@ -34,6 +34,7 @@ from autoformalism.research import construction_search_policy as engine
 from autoformalism.research.construction_affine_family_consistency import (
     COMBINED_SYMBOLIC_POLICY,
     COMMON_ZERO_FORCING_POLICY,
+    DEFINED_ZERO_FORCING_POLICY,
 )
 from autoformalism.research.construction_structural_revision import (
     StructuralRevisionReply,
@@ -78,6 +79,11 @@ PROFILES["repair-contract"] = {
     **PROFILES["action-feedback"],
     "allowed_model_sizes": ("20b", "120b"),
     "repair_contract": True,
+}
+
+PROFILES["admission-guard"] = {
+    **PROFILES["repair-contract"],
+    "admission_guard": True,
 }
 
 
@@ -202,7 +208,8 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
         "seeds": list(SEEDS),
         "system_sha256": content_hash(
             engine.system_for(
-                branch_delta=branch_delta, repair_contract=repair_contract
+                branch_delta=branch_delta, repair_contract=repair_contract,
+                **({"admission_guard": True} if spec.get("admission_guard") else {}),
             )
         ),
         "schema_sha256": {
@@ -258,6 +265,15 @@ def _plan(selected: dict, size: str, profile: str = "three-policy") -> dict:
         common["selection"] = (
             "first sorted frozen T2-easy parent (P00-r1); same three fixed seeds; "
             "matched repair-contract confirmation, no NMSE-based selection"
+        )
+    if spec.get("admission_guard", False):
+        common["engine_options"]["admission_guard"] = True
+        common["admission_policy"] = engine.ADMISSION_POLICY
+        common["gate_policy"]["defined_zero_forcing"] = DEFINED_ZERO_FORCING_POLICY
+        common["action_feedback_policy"] = branch_feedback.ADMISSION_POLICY
+        common["selection"] = (
+            "first sorted frozen T2-easy parent (P00-r1); same three fixed seeds; "
+            "qualified admission and initialization reminder retest, no fitting"
         )
     return {
         **common,
@@ -347,6 +363,10 @@ def _handoffs(plan: dict, entry: dict, parent: dict, result: dict) -> dict:
             raise ValueError("invalid internal candidate id")
         files[f"fit-{identifier}.json"] = {
             "protocol": "construction-search-fit-handoff-1",
+            **(
+                {"admission_policy": plan["admission_policy"]}
+                if "admission_policy" in plan else {}
+            ),
             "plan_sha256": plan["artifact_sha256"],
             "case_id": entry["case_id"],
             "policy": entry["policy"],
@@ -725,6 +745,10 @@ def report(root: Path) -> dict:
             if "repair_contract_policy" in plan
             else {}
         ),
+        **(
+            {"admission_policy": plan["admission_policy"]}
+            if "admission_policy" in plan else {}
+        ),
         "status": "complete" if all(r["completed"] for r in rows) else "incomplete",
         "smoke_complete": all(r["completed"] for r in rows if r["smoke"]),
         "smoke_eligible_episodes": sum(
@@ -780,8 +804,13 @@ def preview(root: Path) -> dict:
     common_zero_forcing = plan.get("engine_options", {}).get(
         "common_zero_forcing", False
     )
+    admission_options = (
+        {"admission_guard": True}
+        if plan.get("engine_options", {}).get("admission_guard", False) else {}
+    )
     system = engine.system_for(
-        branch_delta=branch_delta, repair_contract=repair_contract
+        branch_delta=branch_delta, repair_contract=repair_contract,
+        **admission_options,
     )
     patch_rule = (
         "Initial options change the unchanged parent. Branch repairs explicitly "
@@ -849,6 +878,7 @@ def preview(root: Path) -> dict:
         raw,
         candidate_id="call0-option0",
         common_zero_forcing=common_zero_forcing,
+        **admission_options,
     )
     history = [first]
     examples = [
@@ -869,6 +899,7 @@ def preview(root: Path) -> dict:
                 candidate_id="call1-option0",
                 call_index=1,
                 common_zero_forcing=common_zero_forcing,
+                **admission_options,
             )
             history.append(engine.annotate_repetition(second, history))
         packet = {

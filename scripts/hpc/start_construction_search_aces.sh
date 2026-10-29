@@ -7,7 +7,7 @@ AF_MODEL_SIZE=${2:?Specify 20b or 120b}
 AF_PHASE=${3:-smoke}
 AF_WAVE=${4:-wave1}
 AF_PROFILE=${5:-breadth-five}
-case "$AF_PROFILE" in three-policy|breadth-five|focused-retest|action-feedback|repair-contract) ;; *) echo 'Profile must be three-policy, breadth-five, focused-retest, action-feedback, or repair-contract.' >&2; exit 2 ;; esac
+case "$AF_PROFILE" in three-policy|breadth-five|focused-retest|action-feedback|repair-contract|admission-guard) ;; *) echo 'Profile must be three-policy, breadth-five, focused-retest, action-feedback, repair-contract, or admission-guard.' >&2; exit 2 ;; esac
 case "$AF_PHASE" in smoke|full) ;; *) echo 'Phase must be smoke or full.' >&2; exit 2 ;; esac
 [[ "$AF_WAVE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] || { echo 'Invalid wave name.' >&2; exit 2; }
 case "$AF_MODEL_SIZE" in
@@ -27,6 +27,7 @@ AF_PROFILE_VERSION=v3
 [[ "$AF_PROFILE" != focused-retest ]] || AF_PROFILE_VERSION=v4
 [[ "$AF_PROFILE" != action-feedback ]] || AF_PROFILE_VERSION=v5
 [[ "$AF_PROFILE" != repair-contract ]] || AF_PROFILE_VERSION=v6
+[[ "$AF_PROFILE" != admission-guard ]] || AF_PROFILE_VERSION=v7
 export AF_OUTPUT_ROOT=${AF_CONSTRUCTION_SEARCH_ROOT:-$AF_GROUP/phase-c-search-${AF_PROFILE}-${AF_MODEL_SIZE}-${AF_PROFILE_VERSION}}
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1

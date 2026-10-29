@@ -339,7 +339,8 @@ def test_focused_profile_rejects_flag_drift_before_cached_resume(
 
 
 @pytest.mark.parametrize(
-    "profile", ["focused-retest", "action-feedback", "repair-contract"]
+    "profile",
+    ["focused-retest", "action-feedback", "repair-contract", "admission-guard"],
 )
 def test_focused_branch_delta_followup_and_cache_replay_are_identical(
     structural_source,  # noqa: F811
@@ -394,14 +395,18 @@ def test_focused_branch_delta_followup_and_cache_replay_are_identical(
     )
     assert schemas == [
         cli.engine.options_reply_model(
-            5, repair_contract=profile == "repair-contract"
+            5, repair_contract=profile in {"repair-contract", "admission-guard"}
         ).__name__,
         "BranchRepairReply",
     ]
     if profile == "action-feedback":
         assert result["action_feedback_policy"] == "typed-branch-action-feedback-1"
-    elif profile == "repair-contract":
-        assert result["action_feedback_policy"] == "typed-branch-action-feedback-2"
+    elif profile in {"repair-contract", "admission-guard"}:
+        expected_feedback = (
+            "typed-branch-action-feedback-3" if profile == "admission-guard"
+            else "typed-branch-action-feedback-2"
+        )
+        assert result["action_feedback_policy"] == expected_feedback
         assert (
             result["repair_contract_policy"]
             == "explicit-in-scope-option-repair-contract-1"
@@ -542,3 +547,78 @@ def test_repair_contract_model_arms_pin_new_schema_and_resume(
     with pytest.raises(ValueError, match="differ"):
         cli.verify(root)
     assert (root / "plan.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("size", ["20b", "120b"])
+def test_admission_profile_pins_new_gate_without_expanding_budget(
+    structural_source,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    size,
+):
+    """Fresh admission roots preserve old plans and replay their exact new flags."""
+    source, _, _ = structural_source
+    runtime, entrypoints = cli.runtime_source_hash(), cli._entrypoints()
+    monkeypatch.setattr(cli, "runtime_source_hash", lambda: runtime)
+    monkeypatch.setattr(cli, "_entrypoints", lambda: deepcopy(entrypoints))
+    selected = cli.base.sources.load(source)
+    previous = cli._plan(selected, size, "repair-contract")
+    root = tmp_path / size
+    cli.prepare(source, root, size, "admission-guard")
+    plan = cli.verify(root)
+    other_size = "120b" if size == "20b" else "20b"
+    other = cli._plan(selected, other_size, "admission-guard")
+    assert plan["comparison_sha256"] == other["comparison_sha256"]
+    assert plan["schema_sha256"] == previous["schema_sha256"]
+    assert plan["settings"] == previous["settings"]
+    assert plan["system_sha256"] == previous["system_sha256"]
+    assert plan["engine_options"] == {
+        **previous["engine_options"], "admission_guard": True
+    }
+    assert plan["gate_policy"] == {
+        **previous["gate_policy"],
+        "defined_zero_forcing": "defined-common-zero-forcing-affine-1",
+    }
+    assert plan["admission_policy"] == "construction-admission-guard-1"
+    assert plan["action_feedback_policy"] == "typed-branch-action-feedback-3"
+    assert len(plan["cases"]) == 3
+    assert plan["maximum_calls_per_episode"] == 5
+    assert cli._engine_options(plan)["admission_guard"] is True
+    assert "admission_guard" not in cli._engine_options(previous)
+    cli.preview(root)
+    packet = json.loads((root / "preview/parent_0-options_shallow.json").read_text())
+    assert packet["system"] == cli.engine.system_for(
+        branch_delta=True, repair_contract=True, admission_guard=True
+    )
+    initial = json.loads(packet["user"])
+    assert initial["editing_scope"]["initialization_review"]
+    previous_user = json.loads(cli.engine.request(
+        cli.base._parent(selected, "parent_0"), "options_shallow", batch=True,
+        **cli._engine_options(previous),
+    ))
+    assert "initialization_review" not in previous_user["editing_scope"]
+    for field in ("public_task", "current_model"):
+        assert initial[field] == previous_user[field]
+    result = cli.run(
+        root, "http://127.0.0.1", phase="full",
+        transport=respond, token_transport=tokenizer,
+    )
+    assert result["status"] == "complete"
+    assert result["admission_policy"] == plan["admission_policy"]
+    assert len(result["rows"]) == 3
+    handoffs = list((root / "results").glob("*/fit-*.json"))
+    assert len(handoffs) == 3
+    for handoff in handoffs:
+        packet = sealed_read(handoff)
+        assert packet["admission_policy"] == plan["admission_policy"]
+        assert packet["fitting_launched"] is False
+        assert packet["scientific_compliance_assessed"] is False
+    assert cli.run(
+        root, "http://127.0.0.1", phase="full",
+        transport=forbidden, token_transport=forbidden,
+    ) == result
+    frozen = (root / "plan.json").read_bytes()
+    monkeypatch.setitem(cli.PROFILES["admission-guard"], "admission_guard", False)
+    with pytest.raises(ValueError, match="differ"):
+        cli.verify(root)
+    assert (root / "plan.json").read_bytes() == frozen

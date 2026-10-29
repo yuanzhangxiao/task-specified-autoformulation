@@ -125,6 +125,7 @@ def _assessment_cached(
     weighted_symbolic_initials: bool = False,
     combined_symbolic_initials: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
 ) -> dict:
     """Memoize a pure gate result; public and model bytes are both in its key."""
     from autoformalism.research import construction_affine_family_consistency
@@ -147,6 +148,8 @@ def _assessment_cached(
         options["combined_symbolic_initials"] = True
     if common_zero_forcing:
         options["common_zero_forcing"] = True
+    if admission_guard:
+        options["admission_guard"] = True
     result["affine_family_consistency"] = construction_affine_family_consistency.assess(
         problem, evidence, **options
     )
@@ -174,6 +177,7 @@ def _assessment(
     weighted_symbolic_initials: bool = False,
     combined_symbolic_initials: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
 ) -> dict:
     return deepcopy(
         _assessment_cached(
@@ -183,6 +187,7 @@ def _assessment(
             weighted_symbolic_initials,
             combined_symbolic_initials,
             common_zero_forcing,
+            admission_guard,
         )
     )
 
@@ -318,6 +323,7 @@ def request(
     weighted_symbolic_initials: bool = False,
     combined_symbolic_initials: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
 ) -> str:
     """Present one model view and target-specific witnesses, with explicit scope."""
     problem = PrefixFitProblem.model_validate(parent["problem"])
@@ -337,6 +343,7 @@ def request(
         weighted_symbolic_initials=weighted_symbolic_initials,
         combined_symbolic_initials=combined_symbolic_initials,
         common_zero_forcing=common_zero_forcing,
+        admission_guard=admission_guard,
     )
     packet = {
         "public_task": parent["public_brief"],
@@ -398,6 +405,7 @@ def _normalize_displayed_citations(
     weighted_symbolic_initials: bool = False,
     combined_symbolic_initials: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
 ) -> tuple[dict, list]:
     """Resolve exact property labels only from this model's displayed evidence."""
     reply, changes = normalize_citations(reply)
@@ -416,6 +424,7 @@ def _normalize_displayed_citations(
             weighted_symbolic_initials=weighted_symbolic_initials,
             combined_symbolic_initials=combined_symbolic_initials,
             common_zero_forcing=common_zero_forcing,
+            admission_guard=admission_guard,
         ),
         parent,
     )
@@ -451,6 +460,7 @@ def _apply(
     weighted_symbolic_initials: bool = False,
     combined_symbolic_initials: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
 ) -> dict:
     reply, changes = _normalize_displayed_citations(
         parent,
@@ -458,6 +468,7 @@ def _apply(
         weighted_symbolic_initials=weighted_symbolic_initials,
         combined_symbolic_initials=combined_symbolic_initials,
         common_zero_forcing=common_zero_forcing,
+        admission_guard=admission_guard,
     )
     options = {}
     if normalize_parent_declarations:
@@ -479,6 +490,7 @@ def _apply(
         weighted_symbolic_initials=weighted_symbolic_initials,
         combined_symbolic_initials=combined_symbolic_initials,
         common_zero_forcing=common_zero_forcing,
+        admission_guard=admission_guard,
     )
     applied["audit"].update(
         training_consistency=assessment,

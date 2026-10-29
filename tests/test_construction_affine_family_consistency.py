@@ -10,6 +10,7 @@ from autoformalism.data import DatasetSplit, SplitName, Trajectory
 from autoformalism.research.construction_affine_family_consistency import (
     COMBINED_SYMBOLIC_POLICY,
     COMMON_ZERO_FORCING_POLICY,
+    DEFINED_ZERO_FORCING_POLICY,
     SYMBOLIC_INITIAL_POLICY,
     WEIGHTED_SYMBOLIC_POLICY,
     _display,
@@ -938,3 +939,186 @@ def test_zero_forcing_restriction_budget_defers(monkeypatch):
     assert not assess(
         source, saturation_evidence(source), common_zero_forcing=True
     )["conflicts"]
+
+
+@pytest.mark.parametrize("role", ["coefficient", "nonnegative_coefficient"])
+def test_defined_zero_forcing_covers_unknown_parameter_denominator(role):
+    source = saturation_problem(role=role)
+    data = saturation_evidence(source)
+    before = source.model_dump(mode="json"), deepcopy(data)
+    assert not assess(source, data, common_zero_forcing=True)["conflicts"]
+    report = assess(source, data, common_zero_forcing=True, admission_guard=True)
+    assert report["defined_zero_forcing_policy"] == DEFINED_ZERO_FORCING_POLICY
+    assert prompt_view(report)["defined_zero_forcing_policy"] == (
+        DEFINED_ZERO_FORCING_POLICY
+    )
+    check = conflicts(report, "affine_initial_superposition")[0]
+    cases = check["defined_parameter_domain_cases"]
+    assert cases["policy"] == DEFINED_ZERO_FORCING_POLICY
+    assert not cases["candidate_parameter_domains_modified"]
+    assert not cases["singularities_filled"]
+    obligation = cases["obligations"][0]
+    assert obligation["original_expression"] == "V*u/(K+u)"
+    assert obligation["restricted_quotient"] == "V * 0 / (K + 0)"
+    assert obligation["restricted_denominator"] == "K + 0"
+    assert obligation["global_parameters"] == ["K"]
+    assert "undefined" in obligation["undefined_case"]
+    assert "every defined parameter choice" in check["repair_feedback"]
+    assert before == (source.model_dump(mode="json"), data)
+    assert report == assess(
+        source, data, common_zero_forcing=True, admission_guard=True
+    )
+
+
+def test_defined_zero_forcing_requires_explicit_common_zero_policy():
+    source = saturation_problem(role="coefficient")
+    with pytest.raises(ValueError, match="requires common_zero_forcing"):
+        assess(source, saturation_evidence(source), admission_guard=True)
+
+
+@pytest.mark.parametrize(
+    "source_options,evidence_options",
+    [
+        ({"expression": "V*u/(K+x)"}, {}),
+        ({"expression": "V*u/(K+t)"}, {}),
+        ({"expression": "V*u/(K*u)"}, {}),
+        ({"expression": "V*u/u"}, {}),
+        ({"expression": "0*(V/u)"}, {}),
+        ({"expression": "(V/u)*u/(K+u)"}, {}),
+        ({"nonlinear_state": True}, {}),
+        ({}, {"u": [[1, 1, 1]] * 3}),
+        ({}, {"u": [[0, 0, 0], [0, 1, 0], [0, 0, 0]]}),
+        ({}, {"mode": "unknown"}),
+        ({}, {"forcing_error": 1e-12}),
+        ({}, {"error": 1e-12}),
+        ({}, {"uniqueness_assumed": False}),
+    ],
+)
+def test_defined_zero_forcing_preserves_proof_boundaries(
+    source_options, evidence_options
+):
+    source = saturation_problem(role="coefficient", **source_options)
+    report = assess(
+        source, saturation_evidence(source, **evidence_options),
+        common_zero_forcing=True, admission_guard=True,
+    )
+    assert not report["conflicts"]
+
+
+def test_defined_zero_forcing_does_not_reject_compatible_affine_data():
+    source = saturation_problem(role="coefficient")
+    data = evidence(
+        source, [[2, 2, 2], [1, 1, 1], [3, 3, 3]],
+        z=[[0, 0, 0]] * 3, u=[[0, 0, 0]] * 3,
+    )
+    # With m'=-m/tau, k=K=1 and m=a=0 give these exact constant states
+    # for any finite V and tau>0. The defined parameter domain is nonempty.
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["state_equations"][1]["rhs"] = "-m/tau"
+    source = PrefixFitProblem.model_validate(payload)
+    report = assess(source, data, common_zero_forcing=True, admission_guard=True)
+    assert not report["conflicts"]
+
+
+def test_defined_zero_forcing_retains_domain_through_process_aliases():
+    source = saturation_problem(expression="V*u/D", role="coefficient")
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["processes"].append(
+        {"name": "D", "expression": "K+u"}
+    )
+    source = PrefixFitProblem.model_validate(payload)
+    check = conflicts(
+        assess(
+            source, saturation_evidence(source), common_zero_forcing=True,
+            admission_guard=True,
+        ),
+        "affine_initial_superposition",
+    )[0]
+    obligation = check["defined_parameter_domain_cases"]["obligations"][0]
+    assert obligation["restricted_denominator"] == "D"
+    assert obligation["global_parameters"] == ["K"]
+
+
+def test_defined_zero_forcing_keeps_readout_domain_obligation_for_initial_pinning():
+    source = saturation_problem(role="coefficient")
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["processes"][0]["expression"] = "a+m+u/(K+u)"
+    source = PrefixFitProblem.model_validate(payload)
+    check = conflicts(
+        assess(
+            source, saturation_evidence(source), common_zero_forcing=True,
+            admission_guard=True,
+        ),
+        "affine_initial_superposition",
+    )[0]
+    assert {entry["component"] for entry in
+            check["defined_parameter_domain_cases"]["obligations"]} == {
+        "readout", "saturation"
+    }
+
+
+def test_defined_zero_forcing_nested_aliases_retain_each_domain_obligation():
+    source = saturation_problem(expression="V*u/D", role="coefficient")
+    payload = source.model_dump(mode="json")
+    candidate = payload["base_candidate"]
+    candidate["parameters"].append({
+        "name": "L", "scope": "global", "role": "coefficient",
+    })
+    candidate["processes"] += [
+        {"name": "Z", "expression": "u/(K+u)"},
+        {"name": "D", "expression": "L+Z"},
+    ]
+    source = PrefixFitProblem.model_validate(payload)
+    check = conflicts(
+        assess(
+            source, saturation_evidence(source), common_zero_forcing=True,
+            admission_guard=True,
+        ), "affine_initial_superposition",
+    )[0]
+    obligations = check["defined_parameter_domain_cases"]["obligations"]
+    assert {row["component"] for row in obligations} == {"Z", "saturation"}
+    assert {row["restricted_denominator"] for row in obligations} == {"K + 0", "D"}
+    assert sorted(set().union(*(row["global_parameters"] for row in obligations))) == [
+        "K", "L"
+    ]
+
+
+@pytest.mark.parametrize("alias", ["0*(V/u)", "K+x", "K+t", "u/(K+u)"])
+def test_defined_zero_forcing_never_erases_invalid_or_dynamic_alias(alias):
+    source = saturation_problem(expression="V*u/D", role="coefficient")
+    payload = source.model_dump(mode="json")
+    payload["base_candidate"]["processes"].append({"name": "D", "expression": alias})
+    source = PrefixFitProblem.model_validate(payload)
+    assert not assess(
+        source, saturation_evidence(source), common_zero_forcing=True,
+        admission_guard=True,
+    )["conflicts"]
+
+
+def test_defined_zero_forcing_certifies_inputs_used_by_other_initial_readouts():
+    source = saturation_problem(role="coefficient")
+    data = saturation_evidence(source)
+    payload = source.model_dump(mode="json")
+    payload["context"]["external_inputs"].append("v")
+    payload["base_candidate"]["parameters"].append({
+        "name": "L", "scope": "global", "role": "coefficient",
+    })
+    payload["base_candidate"]["processes"][0]["expression"] = "a+m+v/(L+v)"
+    source = PrefixFitProblem.model_validate(payload)
+    data["context"] = source.context.model_dump(mode="json")
+    data["contract"]["absolute_error_bounds"]["v"] = 0.0
+    data["contract"]["interpolation"]["v"] = "linear_complete_knots"
+    for row in data["trajectories"]:
+        row["inputs"]["v"] = [0.0, 0.0, 0.0]
+    reseal(data)
+    check = conflicts(
+        assess(source, data, common_zero_forcing=True, admission_guard=True),
+        "affine_initial_superposition",
+    )[0]
+    assert check["target"] == "y"
+    assert check["common_zero_forcing"]["channels"] == ["u", "v"]
+    assert set(check["common_zero_forcing"]["schedules"]) == {"u", "v"}
+    assert {row["component"] for row in
+            check["defined_parameter_domain_cases"]["obligations"]} == {
+        "readout", "saturation"
+    }

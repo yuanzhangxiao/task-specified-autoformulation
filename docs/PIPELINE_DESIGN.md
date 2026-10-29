@@ -1,5 +1,20 @@
 # Phase 1 Pipeline Design
 
+## Defined-domain admission correction
+
+`construction-admission-guard-1` requires the existing repair contract and common
+zero-forcing proof. `defined-common-zero-forcing-affine-1` retains all domain
+obligations when a zero-numerator quotient has a shared-parameter-only restricted
+denominator. Defined choices preserve the qualified affine identity; undefined
+literal choices cannot furnish a solution. Equations and parameter domains are
+never rewritten. Certificates include all zero inputs used by dynamics or exact
+initial readouts; state/time denominators and unsupported operands still defer.
+The prospective request includes benchmark-independent initialization guidance,
+with no new zero-input/equilibrium assumption. New typed feedback distinguishes
+pending-action deletion from component removal and clarifies initializer
+ownership. All historical flags default off. See
+[the bounded admission milestone](PHASE_C_ADMISSION_GUARD.md).
+
 ## Explicit initial decisions and qualified dependency feedback
 
 `explicit-in-scope-option-repair-contract-1` is opt-in and requires branch deltas

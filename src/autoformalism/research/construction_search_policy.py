@@ -66,6 +66,16 @@ equations are unchanged; the runtime validates it before judging repetition.
 BRANCH_DELTA_POLICY = branch_patch.POLICY
 ACTION_FEEDBACK_POLICY = branch_feedback.POLICY
 REPAIR_CONTRACT_POLICY = "explicit-in-scope-option-repair-contract-1"
+ADMISSION_POLICY = "construction-admission-guard-1"
+INITIALIZATION_REMINDER = (
+    "When choosing or revising initialization, consider the recorded starting "
+    "conditions, including trajectories with zero or unchanged external input. "
+    "Zero external input does not imply zero internal states, zero rates, "
+    "equilibrium, or equal hidden initial states across trajectories. "
+    "Use only the permitted initialization information and fixed window policy; "
+    "subsequent behavior must also be supported by the proposed dynamics. "
+    "This reminder alone is not evidence of a model-data conflict."
+)
 IDENTICAL_ACTION_POLICY = branch_patch.IDENTICAL_ACTION_POLICY
 BRANCH_SYSTEM = """Revise this ODE/algebraic model using the public task and
 training evidence.
@@ -108,8 +118,14 @@ that outcome does not accept any model. Do not request fitting here.
 """.strip()
 
 
-def system_for(branch_delta: bool = False, repair_contract: bool = False) -> str:
+def system_for(
+    branch_delta: bool = False,
+    repair_contract: bool = False,
+    admission_guard: bool = False,
+) -> str:
     """Preserve historical system text unless branch composition is enabled."""
+    if admission_guard and not repair_contract:
+        raise ValueError("admission_guard requires repair_contract")
     if repair_contract:
         if not branch_delta:
             raise ValueError("repair_contract requires branch_delta")
@@ -238,6 +254,7 @@ def assess_candidate(
     premise: str = "",
     affected_target: str = "",
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
 ) -> dict:
     """Normalize and validate one detached candidate before judging repetition.
 
@@ -273,6 +290,7 @@ def assess_candidate(
             weighted_symbolic_initials=True,
             combined_symbolic_initials=True,
             common_zero_forcing=common_zero_forcing,
+            admission_guard=admission_guard,
         )
         static = apply_structural_revision(
             PrefixFitProblem.model_validate(parent["problem"]),
@@ -301,6 +319,7 @@ def assess_candidate(
             weighted_symbolic_initials=True,
             combined_symbolic_initials=True,
             common_zero_forcing=common_zero_forcing,
+            admission_guard=admission_guard,
         )
         result.update(status="eligible", audit=applied["audit"])
     except (ValueError, TypeError, KeyError) as exc:
@@ -465,6 +484,7 @@ def request(
     maximum_calls: int = 3,
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
     action_feedback: bool = False,
     repair_contract: bool = False,
 ) -> str:
@@ -476,6 +496,10 @@ def request(
         raise ValueError("action_feedback requires branch_delta")
     if repair_contract and not (branch_delta and action_feedback):
         raise ValueError("repair_contract requires branch_delta and action_feedback")
+    if admission_guard and not (repair_contract and common_zero_forcing):
+        raise ValueError(
+            "admission_guard requires repair_contract and common_zero_forcing"
+        )
     option_word = "three" if options_count == 3 else "five"
     history = history or []
     repair = None
@@ -525,6 +549,7 @@ def request(
             weighted_symbolic_initials=True,
             combined_symbolic_initials=True,
             common_zero_forcing=common_zero_forcing,
+            admission_guard=admission_guard,
         )
     )
     packet["editing_scope"]["patch_semantics"] = (
@@ -568,6 +593,8 @@ def request(
         "maximum_episode_calls": maximum_calls,
         "no_fitting_or_promotion": True,
     }
+    if admission_guard:
+        packet["editing_scope"]["initialization_review"] = INITIALIZATION_REMINDER
     if history:
         packet["attempted_repairs"] = ledger_view(history, literal=branch_delta)
     if repair_contract and batch:
@@ -582,7 +609,10 @@ def request(
         _branch_request_view(packet, intended if not fresh else None, batch=batch)
         if action_feedback and intended is not None and not fresh and not batch:
             if repair_contract:
-                branch_feedback.apply(packet, parent, intended, repair_contract=True)
+                branch_feedback.apply(
+                    packet, parent, intended, repair_contract=True,
+                    admission_guard=admission_guard,
+                )
             else:
                 branch_feedback.apply(packet, parent, intended)
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
@@ -674,6 +704,7 @@ def _assess_branch_reply(
     intended: dict,
     *,
     common_zero_forcing: bool,
+    admission_guard: bool = False,
     repair_contract: bool = False,
     **metadata,
 ) -> dict:
@@ -684,7 +715,8 @@ def _assess_branch_reply(
         )
     except ValueError as exc:
         result = assess_candidate(
-            parent, None, common_zero_forcing=common_zero_forcing, **metadata
+            parent, None, common_zero_forcing=common_zero_forcing,
+            admission_guard=admission_guard, **metadata
         )
         result.update(
             submitted_reply=deepcopy(raw),
@@ -700,7 +732,8 @@ def _assess_branch_reply(
         result["diagnostic_sha256"] = diagnostic_identity(result["diagnostic"])
         return result
     result = assess_candidate(
-        parent, composed, common_zero_forcing=common_zero_forcing, **metadata
+        parent, composed, common_zero_forcing=common_zero_forcing,
+        admission_guard=admission_guard, **metadata
     )
     result.update(
         submitted_reply=deepcopy(raw),
@@ -802,6 +835,7 @@ def run_episode(
     maximum_calls: int = 3,
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
     action_feedback: bool = False,
     repair_contract: bool = False,
 ) -> dict:
@@ -813,6 +847,10 @@ def run_episode(
         raise ValueError("action_feedback requires branch_delta")
     if repair_contract and not (branch_delta and action_feedback):
         raise ValueError("repair_contract requires branch_delta and action_feedback")
+    if admission_guard and not (repair_contract and common_zero_forcing):
+        raise ValueError(
+            "admission_guard requires repair_contract and common_zero_forcing"
+        )
     if settings.maximum_requests != maximum_calls:
         call_word = "three" if maximum_calls == 3 else "five"
         raise ValueError(
@@ -831,7 +869,10 @@ def run_episode(
             branch_delta and intended is not None and not fresh and not batch
         )
         record = client.call(
-            system=system_for(branch_delta, repair_contract=repair_contract),
+            system=system_for(
+                branch_delta, repair_contract=repair_contract,
+                admission_guard=admission_guard,
+            ),
             user=request(
                 parent,
                 policy,
@@ -843,6 +884,7 @@ def run_episode(
                 maximum_calls=maximum_calls,
                 branch_delta=branch_delta,
                 common_zero_forcing=common_zero_forcing,
+                admission_guard=admission_guard,
                 action_feedback=action_feedback,
                 repair_contract=repair_contract,
             ),
@@ -887,6 +929,7 @@ def run_episode(
                     payload,
                     intended,
                     common_zero_forcing=common_zero_forcing,
+                    admission_guard=admission_guard,
                     repair_contract=repair_contract,
                     **metadata_fields,
                 )
@@ -895,6 +938,7 @@ def run_episode(
                     parent,
                     None if metadata.get("decision_contract_error") else payload,
                     common_zero_forcing=common_zero_forcing,
+                    admission_guard=admission_guard,
                     **metadata_fields,
                 )
             )
@@ -996,9 +1040,13 @@ def run_episode(
         result["branch_delta_policy"] = BRANCH_DELTA_POLICY
     if common_zero_forcing:
         result["common_zero_forcing"] = True
+    if admission_guard:
+        result["admission_policy"] = ADMISSION_POLICY
     if action_feedback:
         result["action_feedback_policy"] = (
-            branch_feedback.REPAIR_POLICY if repair_contract else ACTION_FEEDBACK_POLICY
+            branch_feedback.ADMISSION_POLICY if admission_guard
+            else branch_feedback.REPAIR_POLICY if repair_contract
+            else ACTION_FEEDBACK_POLICY
         )
     if repair_contract:
         result["repair_contract_policy"] = REPAIR_CONTRACT_POLICY

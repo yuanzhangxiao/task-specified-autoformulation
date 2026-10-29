@@ -591,3 +591,207 @@ def test_v2_retain_parent_initializer_explicitly_drops_existing_pending_override
         repair_contract=True,
     )
     assert supplied["initialization_edits"][0]["initial"]["scope"] == "shared_training"
+
+
+def failed_removal_delta(name="mem", field="remove_states"):
+    """A rejected reply both retains and drops one stored removal intention."""
+    from autoformalism.research import construction_branch_patch as branch
+
+    selected = candidate("BRANCH_PATCH_COMPOSITION", {field: [name]})
+    selected["branch_id"] = selected["id"]
+    selected["submitted_reply"] = {
+        "mode": "delta",
+        **branch.reference(selected),
+        "patch": {field: [name]},
+        "drop_actions": [{"field": field, "key": name}],
+    }
+    return selected
+
+
+@pytest.mark.parametrize(
+    "field,name", [("remove_states", "mem"), ("remove_processes", "q")]
+)
+def test_v3_removal_and_intention_deletion_are_mutually_exclusive(field, name):
+    from autoformalism.research import construction_branch_patch as branch
+    from tests.test_construction_revision_edits import problem
+
+    selected = failed_removal_delta(name, field)
+    before = deepcopy(selected)
+    source = {"problem": problem().model_dump(mode="json")}
+    old = feedback.view(source, selected, repair_contract=True)
+    assert old["action_choices"] == []
+    report = feedback.view(source, selected, repair_contract=True, admission_guard=True)
+    assert report["policy"] == feedback.ADMISSION_POLICY
+    card = report["action_choices"][0]
+    assert card["category"] == "remove_component_or_retract_removal"
+    assert card["removal_authority"] == "in_scope_subject_to_full_validation"
+    keep, remove = card["choices"]
+    for choice, expected in ((keep, []), (remove, [name])):
+        composed, _ = branch.compose(
+            {"mode": "delta", **branch.reference(selected), **choice["reply_fragment"]},
+            selected,
+            repair_contract=True,
+        )
+        assert composed[field] == expected
+    assert "none of that reply was applied" in remove["instruction"]
+    assert "every remaining equation and initializer reference" in remove["instruction"]
+    assert selected == before
+
+
+def test_v3_protected_or_unavailable_removal_is_not_offered_as_executable_choice():
+    from tests.test_construction_revision_edits import problem
+
+    source = {"problem": problem().model_dump(mode="json")}
+    for payload, name, expected in (
+        (source, "I", "protected"),
+        ({}, "mem", "unavailable"),
+    ):
+        selected = failed_removal_delta(name)
+        card = feedback.view(
+            payload, selected, repair_contract=True, admission_guard=True
+        )["action_choices"][0]
+        assert card["removal_authority"] == expected
+        assert len(card["choices"]) == 1
+        assert card["choices"][0]["reply_fragment"]["patch"] == {}
+
+
+def test_v3_wrong_or_malformed_failed_reply_produces_no_invented_removal_advice():
+    selected = failed_removal_delta()
+    selected["submitted_reply"]["drop_actions"] = [
+        {"field": "new_states", "key": "mem"}
+    ]
+    assert not feedback.view(
+        parent(), selected, repair_contract=True, admission_guard=True
+    )["action_choices"]
+    selected["submitted_reply"] = "not structured"
+    assert not feedback.view(
+        parent(), selected, repair_contract=True, admission_guard=True
+    )["action_choices"]
+
+
+def test_v3_drop_for_absent_intention_is_not_presented_as_a_valid_fragment():
+    selected = failed_removal_delta()
+    selected["composed_patch"]["remove_states"] = []
+    card = feedback.view(
+        parent(), selected, repair_contract=True, admission_guard=True
+    )["action_choices"][0]
+    assert card["stored_removal_intention"] is False
+    assert card["choices"][0]["reply_fragment"] == {"patch": {}, "drop_actions": []}
+    assert "no stored" in card["choices"][0]["instruction"]
+
+
+def test_v3_conflicting_new_state_initializers_have_one_owner_and_explicit_choices():
+    from autoformalism.research import construction_branch_patch as branch
+
+    initial_a = {"mode": "value", "scope": "trajectory"}
+    initial_b = {
+        "mode": "map",
+        "expression": "0",
+        "parameters": [],
+        "public_initials": [],
+        "state_initials": [],
+    }
+    declaration = {
+        "name": "lag",
+        "description": "a proposed lag",
+        "rhs": "I-lag",
+        "sources": ["I", "lag"],
+        "initial": initial_a,
+    }
+    selected = candidate(
+        "DECLARATION_CONFLICT",
+        {
+            "new_states": [declaration],
+            "initialization_edits": [{"state": "lag", "initial": initial_b}],
+        },
+        name="lag",
+        fields=["new_states", "initialization_edits"],
+    )
+    selected["branch_id"] = selected["id"]
+    before = deepcopy(selected)
+    card = feedback.view(
+        parent(), selected, repair_contract=True, admission_guard=True
+    )["action_choices"][0]
+    assert card["category"] == "new_state_initializer_has_one_owner"
+    assert len(card["choices"]) == 2
+    for choice, expected in zip(card["choices"], (initial_a, initial_b), strict=True):
+        composed, _ = branch.compose(
+            {"mode": "delta", **branch.reference(selected), **choice["reply_fragment"]},
+            selected,
+            repair_contract=True,
+        )
+        assert composed["new_states"][0]["initial"] == expected
+        assert composed["new_states"][0]["rhs"] == "I-lag"
+        assert composed["initialization_edits"] == []
+    assert selected == before
+
+
+def test_v3_ambiguous_initialization_declarations_do_not_choose_one_rule():
+    selected = candidate(
+        "DECLARATION_CONFLICT",
+        {
+            "new_states": [{"name": "lag"}, {"name": "lag"}],
+            "initialization_edits": [{"state": "lag", "initial": {}}],
+        },
+        name="lag",
+        fields=["new_states", "initialization_edits"],
+    )
+    assert not feedback.view(
+        parent(), selected, repair_contract=True, admission_guard=True
+    )["action_choices"]
+
+
+def test_v3_typed_initial_scope_is_displayed_without_interpreting_prose(monkeypatch):
+    monkeypatch.setattr(feedback.influence, "view", lambda *args: {})
+    patch = {
+        "hypothesis": "I intend to set the memory initial to zero.",
+        "initialization_edits": [
+            {
+                "state": "mem",
+                "initial": {
+                    "mode": "value",
+                    "scope": "trajectory",
+                    "role": "nonnegative_coefficient",
+                },
+            }
+        ],
+    }
+    selected = candidate("QUALIFIED_MODEL_DATA_CONFLICT", patch)
+    selected["repeats_candidate_ids"] = ["earlier"]
+    before = deepcopy(selected)
+    report = feedback.view(
+        parent(), selected, repair_contract=True, admission_guard=True
+    )
+    view = report["typed_initializer_meanings"][0]
+    assert view["typed_initial_rule"] == patch["initialization_edits"][0]["initial"]
+    assert "does not enforce zero" in view["meaning"]
+    assert (
+        "does not assert that your prose disagrees" in report["initializer_instruction"]
+    )
+    patch["hypothesis"] = "An unrelated explanation with no initial-value claim."
+    changed = feedback.view(
+        parent(), selected, repair_contract=True, admission_guard=True
+    )
+    assert changed["typed_initializer_meanings"] == report["typed_initializer_meanings"]
+    assert selected["diagnostic"] == before["diagnostic"]
+
+
+def test_v3_requires_the_existing_repair_contract_and_preserves_known_packet_fields():
+    selected = failed_removal_delta()
+    with pytest.raises(ValueError, match="requires repair_contract"):
+        feedback.view(parent(), selected, admission_guard=True)
+    packet = {
+        "repair_feedback": {
+            "guidance": {"specific_feedback": "old"},
+            "diagnostic": {"quoted": "unchanged"},
+        },
+        "search_instruction": {"instruction": "old"},
+    }
+    feedback.apply(
+        packet, parent(), selected, repair_contract=True, admission_guard=True
+    )
+    assert (
+        packet["repair_feedback"]["action_feedback"]["policy"]
+        == feedback.ADMISSION_POLICY
+    )
+    assert packet["repair_feedback"]["diagnostic"] == {"quoted": "unchanged"}

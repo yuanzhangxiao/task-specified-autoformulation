@@ -122,6 +122,7 @@ def run(
     common_zero_forcing=False,
     action_feedback=False,
     repair_contract=False,
+    admission_guard=False,
 ):
     client = Client(payloads)
     result = engine.run_episode(
@@ -136,6 +137,7 @@ def run(
         common_zero_forcing=common_zero_forcing,
         action_feedback=action_feedback,
         repair_contract=repair_contract,
+        admission_guard=admission_guard,
     )
     return result, client
 
@@ -1292,3 +1294,60 @@ def test_branch_scope_rewrite_preserves_same_named_scientific_symbols(parent):
     assert shown["model_relations"] == relations
     assert "BranchRepairReply" in shown["repair_scope"]
     assert candidate == before
+
+
+def test_admission_guard_requires_explicit_qualified_profile(parent):
+    with pytest.raises(ValueError, match="admission_guard requires"):
+        engine.system_for(admission_guard=True)
+    for call in (
+        lambda: engine.request(parent, "independent", admission_guard=True),
+        lambda: run(parent, [], "independent", admission_guard=True),
+    ):
+        with pytest.raises(ValueError, match="admission_guard requires"):
+            call()
+
+
+def test_admission_reminder_is_general_nonblocking_and_preserves_frozen_task(parent):
+    flags = {
+        "branch_delta": True, "action_feedback": True, "repair_contract": True,
+        "common_zero_forcing": True,
+    }
+    old = json.loads(engine.request(parent, "options_shallow", batch=True, **flags))
+    new = json.loads(engine.request(
+        parent, "options_shallow", batch=True, admission_guard=True, **flags
+    ))
+    assert "initialization_review" not in old["editing_scope"]
+    reminder = new["editing_scope"].pop("initialization_review")
+    assert reminder == engine.INITIALIZATION_REMINDER
+    assert "does not imply" in reminder
+    assert "equal hidden initial states" in reminder
+    assert "not evidence of a model-data conflict" in reminder
+    assert "fixed window policy" in reminder
+    assert all(term not in reminder for term in ("glucose", "insulin", "Gp", "basin"))
+    # The fixture's gate result is fixed; the reminder changes neither model,
+    # benchmark wording, budget nor any scientific requirement.
+    assert new == old
+
+
+def test_admission_flag_reaches_parent_and_child_assessments(parent, monkeypatch):
+    original = base._assessment
+    seen = []
+
+    def record(*args, **kwargs):
+        seen.append(kwargs.get("admission_guard"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(base, "_assessment", record)
+    payload = {"options": [option(i, patch()) for i in range(5)]}
+    result, client = run(
+        parent, [payload], "options_shallow", options_count=5, maximum_calls=5,
+        branch_delta=True, action_feedback=True, repair_contract=True,
+        common_zero_forcing=True, admission_guard=True,
+    )
+    assert seen and all(seen)
+    assert result["admission_policy"] == engine.ADMISSION_POLICY
+    assert result["generation_calls"] == 1
+    assert len(result["eligible_candidate_ids"]) == 5
+    assert json.loads(client.calls[0]["user"])["editing_scope"][
+        "initialization_review"
+    ] == engine.INITIALIZATION_REMINDER

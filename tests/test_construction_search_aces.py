@@ -449,6 +449,7 @@ def test_server_binding_rejects_nonlocal_endpoint(serving):
         "focused-retest",
         "action-feedback",
         "repair-contract",
+        "admission-guard",
     ],
 )
 @pytest.mark.parametrize("size", ["20b", "120b"])
@@ -508,6 +509,7 @@ def test_real_shell_dispatch_ignores_old_generic_root(
         "focused-retest": "v4",
         "action-feedback": "v5",
         "repair-contract": "v6",
+        "admission-guard": "v7",
     }.get(profile, "v3")
     expected = str(group / f"phase-c-search-{profile}-{size}-{version}")
     assert calls and all(call["root"] == expected for call in calls)
@@ -531,6 +533,7 @@ def test_real_shell_dispatch_ignores_old_generic_root(
         ("focused-retest", 3),
         ("action-feedback", 3),
         ("repair-contract", 3),
+        ("admission-guard", 3),
     ],
 )
 def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
@@ -547,22 +550,31 @@ def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
         )
         plan["cases"] = [c for c in plan["cases"] if c["policy"] == "options_shallow"]
         plan["settings"].update(submission.PROFILES[profile]["settings"])
-        if profile in {"focused-retest", "action-feedback", "repair-contract"}:
+        if profile in {
+            "focused-retest", "action-feedback", "repair-contract", "admission-guard"
+        }:
             plan["cases"] = [c for c in plan["cases"] if c["parent_id"] == "P00"]
             plan["engine_options"] = dict(
                 submission.PROFILES[profile]["engine_options"]
             )
             plan["smoke_required_before_full"] = False
-        if profile in {"action-feedback", "repair-contract"}:
+        if profile in {"action-feedback", "repair-contract", "admission-guard"}:
             plan["allowed_model_sizes"] = list(
                 submission.PROFILES[profile]["allowed_model_sizes"]
             )
             plan["action_feedback_policy"] = submission.PROFILES[profile][
                 "action_feedback_policy"
             ]
-        if profile == "repair-contract":
+        if profile in {"repair-contract", "admission-guard"}:
             for key in ("repair_contract_policy", "identical_action_policy"):
                 plan[key] = submission.PROFILES[profile][key]
+        if profile == "admission-guard":
+            plan["admission_policy"] = submission.PROFILES[profile]["admission_policy"]
+            plan["gate_policy"] = {
+                "defined_zero_forcing": submission.PROFILES[profile][
+                    "defined_zero_forcing_policy"
+                ]
+            }
     monkeypatch.setattr(
         submission.subprocess,
         "run",
@@ -571,7 +583,10 @@ def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
     for size in plans:
         phase = (
             "full"
-            if profile in {"focused-retest", "action-feedback", "repair-contract"}
+            if profile in {
+                "focused-retest", "action-feedback",
+                "repair-contract", "admission-guard"
+            }
             else "smoke"
         )
         if profile == "action-feedback" and size == "120b":
@@ -595,6 +610,11 @@ def test_breadth_submission_seals_larger_allowance_and_smaller_roster(
     "field,value",
     [
         ("profile", "unlimited"),
+        ("admission_policy", "construction-admission-guard-1"),
+        (
+            "gate_policy",
+            {"defined_zero_forcing": "defined-common-zero-forcing-affine-1"},
+        ),
         ("repair_contract_policy", "explicit-in-scope-option-repair-contract-1"),
         ("identical_action_policy", "identical-pending-action-normalization-1"),
         ("action_feedback_policy", "typed-branch-action-feedback-1"),

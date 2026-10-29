@@ -64,6 +64,7 @@ SYMBOLIC_INITIAL_POLICY = "shared-symbolic-initial-readout-1"
 WEIGHTED_SYMBOLIC_POLICY = "weighted-shared-symbolic-initials-1"
 COMBINED_SYMBOLIC_POLICY = "combined-symbolic-map-readout-initials-1"
 COMMON_ZERO_FORCING_POLICY = "certified-common-zero-forcing-affine-1"
+DEFINED_ZERO_FORCING_POLICY = "defined-common-zero-forcing-affine-1"
 MAX_ZERO_RESTRICTIONS = 8
 MAX_TRIPLES = 256
 MAX_TIMES = 64
@@ -71,6 +72,88 @@ MAX_STATES = 32
 MAX_TRAJECTORIES = 32
 MAX_SAMPLES = 8192
 MAX_BITS = 4096
+
+
+class _DefinedZeroQuotients(ast.NodeTransformer):
+    """Reduce only parameter-domain zero quotients, retaining their obligations.
+
+    This is a conditional proof transformation, never a candidate rewrite. The
+    complementary denominator-zero stratum has no defined literal quotient.
+    State/time denominators and unsupported operands are deliberately excluded.
+    """
+
+    def __init__(self, symbols, parameter_only: dict[str, set[str]]) -> None:
+        self.symbols = symbols
+        self.parameter_only = parameter_only
+        self.obligations: list[dict[str, Any]] = []
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        node = self.generic_visit(node)
+        if not isinstance(node.op, ast.Div):
+            return node
+        try:
+            numerator = _affine(node.left, self.symbols)
+            denominator = _affine(node.right, self.symbols)
+        except _Unsupported:
+            return node
+        names = {item.id for item in ast.walk(node.right) if isinstance(item, ast.Name)}
+        if (
+            numerator.coefficients
+            or not numerator.constant.zero
+            or denominator.coefficients
+            or denominator.constant.excludes_zero
+            or denominator.constant.zero
+            or not names <= self.parameter_only.keys()
+        ):
+            return node
+        self.obligations.append({
+            "restricted_quotient": ast.unparse(node),
+            "restricted_denominator": ast.unparse(node.right),
+            "global_parameters": sorted(set().union(
+                *(self.parameter_only[name] for name in names)
+            )),
+            "defined_case": "The displayed denominator is nonzero; this literal "
+            "zero-numerator quotient equals zero.",
+            "undefined_case": "The displayed denominator equals zero; this "
+            "required literal quotient is undefined. No removable-singularity "
+            "continuation is declared or inferred.",
+        })
+        return ast.copy_location(ast.Constant(value=0), node)
+
+
+def _conditional_affine(
+    parsed, symbols, parameter_only, zero_forcing, *, admission_guard: bool,
+    component: str,
+) -> tuple[_Affine, list[dict[str, Any]]]:
+    """Interpret a restricted expression and preserve conditional domain proof."""
+    if not admission_guard or not zero_forcing:
+        return _affine(parsed.tree, symbols), []
+    tree = _ZeroNames(set(zero_forcing)).visit(deepcopy(parsed.tree))
+    transform = _DefinedZeroQuotients(symbols, parameter_only)
+    restricted = transform.visit(tree)
+    value = _affine(restricted, symbols)
+    return value, [
+        {"component": component, "original_expression": parsed.source, **entry}
+        for entry in transform.obligations
+    ]
+
+
+def _domain_cases(obligations: list[dict[str, Any]]) -> dict[str, Any]:
+    """Certify the union of defined and undefined parameter strata explicitly."""
+    unique = {content_hash(entry): entry for entry in obligations}
+    return {
+        "policy": DEFINED_ZERO_FORCING_POLICY,
+        "obligations": [unique[key] for key in sorted(unique)],
+        "defined_parameter_stratum": "All displayed denominators are nonzero. "
+        "The restricted affine identity applies to every shared parameter choice "
+        "in this stratum; no parameters are fitted or fixed.",
+        "complementary_stratum": "At least one required literal denominator "
+        "equals zero. That expression is undefined on the certified schedule; "
+        "these choices cannot supply defined solutions of the declared model.",
+        "candidate_parameter_domains_modified": False,
+        "singularities_filled": False,
+        "scope": "Exact reproduction only. No approximate-error or NMSE bound.",
+    }
 
 
 def _bounded(value: Fraction) -> Fraction:
@@ -731,6 +814,7 @@ def _checks(
     weighted_symbolic_initials=False, combined_symbolic_initials=False,
     roots=frozenset(),
     zero_forcing=frozenset(),
+    admission_guard=False,
 ):
     rows_to_check = training.trajectories[:MAX_TRAJECTORIES]
     if any(len(row.time) > MAX_SAMPLES for row in rows_to_check):
@@ -759,22 +843,46 @@ def _checks(
     # and unsupported operands; zero never short-circuits an undefined expression.
     for name in zero_forcing:
         symbols[name] = _Affine(_ZERO, {})
+    parameter_only = {
+        item.name: {item.name}
+        for item in model.validated.candidate.parameters
+        if item.name not in roots and item.scope.value == "global"
+    }
+    parameter_only.update((name, set()) for name in zero_forcing)
+    process_domains: dict[str, list[dict[str, Any]]] = {}
+    equation_domains: dict[str, list[dict[str, Any]]] = {}
+    output_domains: dict[str, list[dict[str, Any]]] = {}
+
+    def parse(expression, component):
+        value, own = _conditional_affine(
+            expression, symbols, parameter_only, zero_forcing,
+            admission_guard=admission_guard, component=component,
+        )
+        inherited = [
+            entry for name in sorted(expression.symbols)
+            for entry in process_domains.get(name, [])
+        ]
+        return value, inherited + own
+
     unavailable = {}
     for name in model.validated.process_order:
         try:
-            symbols[name] = _affine(
-                model.validated.process_expressions[name].tree, symbols
-            )
+            parsed = model.validated.process_expressions[name]
+            symbols[name], process_domains[name] = parse(parsed, name)
+            if parsed.symbols <= parameter_only.keys():
+                parameter_only[name] = set().union(
+                    *(parameter_only[symbol] for symbol in parsed.symbols)
+                )
         except _Unsupported as exc:
             unavailable[name] = str(exc)
     equations, outputs = {}, {}
-    for collection, parsed in (
-        (equations, model.validated.equation_expressions),
-        (outputs, model.validated.observation_expressions),
+    for collection, domains, parsed in (
+        (equations, equation_domains, model.validated.equation_expressions),
+        (outputs, output_domains, model.validated.observation_expressions),
     ):
         for name, expression in parsed.items():
             try:
-                collection[name] = _affine(expression.tree, symbols)
+                collection[name], domains[name] = parse(expression, name)
             except _Unsupported as exc:
                 unavailable[name] = str(exc)
     observed = compile_candidate(
@@ -897,6 +1005,21 @@ def _checks(
                                 target
                             ].source,
                         )
+                        # Initial readouts can pin hidden coordinates even when
+                        # they lie outside the selected target's dynamic closure.
+                        # Preserve every conditional obligation used by any
+                        # interpreted output, as well as the closed equations.
+                        obligations = [
+                            entry for state in sorted(states)
+                            for entry in equation_domains.get(state, [])
+                        ] + [
+                            entry for name in sorted(output_domains)
+                            for entry in output_domains[name]
+                        ]
+                        if obligations:
+                            check["defined_parameter_domain_cases"] = _domain_cases(
+                                obligations
+                            )
                         if kind == "affine_initial_superposition":
                             check["repair_feedback"] = (
                                 "These shared affine equations preserve the displayed "
@@ -1071,6 +1194,11 @@ def _zero_forcing_checks(problem, model, training, checks, **options):
             used = names & dependencies[target]
             if not used:
                 continue
+            if options.get("admission_guard", False):
+                # Exact initial readouts from other targets may also use a
+                # restricted input outside this target's dynamic closure.
+                # Certify every substituted schedule, not just the target path.
+                used = names
             witnesses = fresh["witnesses"]
             witness_rows = [
                 next(row for row in group if row.trajectory_id == identity)
@@ -1079,6 +1207,13 @@ def _zero_forcing_checks(problem, model, training, checks, **options):
             fresh["common_zero_forcing"] = _zero_certificate(
                 problem, training, witness_rows, used
             )
+            if "defined_parameter_domain_cases" in fresh:
+                fresh["common_zero_forcing"]["denominator_check"] = (
+                    "Each displayed domain obligation is split explicitly: "
+                    "nonzero denominators yield the restricted affine family; "
+                    "zero denominators make required literal expressions "
+                    "undefined. No singularity is silently cancelled or filled."
+                )
             fresh["complete_common_forcing"] = sorted(
                 set(fresh["complete_common_forcing"]) | used
             )
@@ -1099,6 +1234,14 @@ def _zero_forcing_checks(problem, model, training, checks, **options):
                 "states themselves are not asserted zero. This is a restriction "
                 "to the witnessed schedules, not a global linearity claim."
             )
+            if "defined_parameter_domain_cases" in fresh:
+                fresh["repair_feedback"] += (
+                    " A denominator that may be zero does not evade this "
+                    "witness: every defined parameter choice still obeys the "
+                    "identity, while a zero denominator leaves the literal "
+                    "model undefined. Changing only that parameter's sign or "
+                    "bounds cannot repair the displayed identity."
+                )
             for i, existing in enumerate(checks):
                 if (existing.get("target"), existing["property"]) == (
                     target, fresh["property"]
@@ -1118,10 +1261,13 @@ def assess(
     weighted_symbolic_initials: bool = False,
     combined_symbolic_initials: bool = False,
     common_zero_forcing: bool = False,
+    admission_guard: bool = False,
 ) -> dict[str, Any]:
     """Audit affine conflicts with separately opt-in symbolic initial proofs."""
     if not isinstance(problem, PrefixFitProblem):
         raise ValueError("typed PrefixFitProblem required")
+    if admission_guard and not common_zero_forcing:
+        raise ValueError("admission_guard requires common_zero_forcing")
     problem = PrefixFitProblem.model_validate(problem.model_dump(mode="json"))
     training = TrainingCompatibilityEvidence.model_validate(evidence)
     validate_evidence(training)
@@ -1161,6 +1307,7 @@ def assess(
                 weighted_symbolic_initials=weighted_symbolic_initials,
                 combined_symbolic_initials=combined_symbolic_initials,
                 roots=set(initialization["trajectory_parameter_names"]),
+                admission_guard=admission_guard,
             )
         )
         if common_zero_forcing and not missing:
@@ -1170,6 +1317,7 @@ def assess(
                 weighted_symbolic_initials=weighted_symbolic_initials,
                 combined_symbolic_initials=combined_symbolic_initials,
                 roots=set(initialization["trajectory_parameter_names"]),
+                admission_guard=admission_guard,
             )
     except _Unsupported as exc:
         checks = [
@@ -1201,6 +1349,10 @@ def assess(
         **(
             {"common_zero_forcing_policy": COMMON_ZERO_FORCING_POLICY}
             if common_zero_forcing else {}
+        ),
+        **(
+            {"defined_zero_forcing_policy": DEFINED_ZERO_FORCING_POLICY}
+            if admission_guard else {}
         ),
         "status": "conflict" if conflicts else "deferred",
         "child_problem_sha256": content_hash(problem.model_dump(mode="json")),
@@ -1299,6 +1451,10 @@ def prompt_view(report: dict[str, Any]) -> dict[str, Any]:
         **(
             {"common_zero_forcing_policy": report["common_zero_forcing_policy"]}
             if "common_zero_forcing_policy" in report else {}
+        ),
+        **(
+            {"defined_zero_forcing_policy": report["defined_zero_forcing_policy"]}
+            if "defined_zero_forcing_policy" in report else {}
         ),
         "status_counts": dict(Counter(item["status"] for item in report["checks"])),
         "conflicts": report["conflicts"],

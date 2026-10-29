@@ -24,6 +24,7 @@ from autoformalism.schemas.prefix_initialization import PrefixFitProblem
 
 POLICY = "typed-branch-action-feedback-1"
 REPAIR_POLICY = "typed-branch-action-feedback-2"
+ADMISSION_POLICY = "typed-branch-action-feedback-3"
 
 
 def _example_sources(definition: dict) -> list[str]:
@@ -495,8 +496,209 @@ def _initializer_alias_choices(parent: dict, pending: dict) -> list[dict]:
     return cards[:16]
 
 
-def view(parent: dict, intended: dict, *, repair_contract: bool = False) -> dict:
+def _removal_authority(parent: dict, name: str, field: str) -> str:
+    """Describe existing removal scope without authorizing a scientific change."""
+    try:
+        problem = PrefixFitProblem.model_validate(parent["problem"])
+    except (ValueError, TypeError, KeyError):
+        return "unavailable"
+    base = problem.base_candidate
+    protected = set(problem.context.targets) | set(problem.context.forcing_channels)
+    protected |= set((parent.get("scientific_aliases") or {}).values())
+    protected |= {row.subject for row in base.constraints}
+    protected |= {row.name for row in base.states if row.kind.value == "observed"}
+    protected |= {
+        key for key, rule in problem.graph.rules.items() if rule.initial.mode == "known"
+    }
+    if name in protected:
+        return "protected"
+    removable = (
+        {row.name for row in base.states if row.kind.value == "latent"}
+        if field == "remove_states"
+        else {row.name for row in base.processes}
+    )
+    return "in_scope_subject_to_full_validation" if name in removable else "unavailable"
+
+
+def _removal_choices(parent: dict, intended: dict, pending: dict) -> list[dict]:
+    """Explain removal-intention contradictions from a schema-valid failed delta."""
+    try:
+        reply = branch.BranchRepairReply.model_validate(intended.get("submitted_reply"))
+    except (ValueError, TypeError):
+        return []
+    if reply.mode != "delta" or reply.patch is None:
+        return []
+    drops = {(row.field, row.key) for row in reply.drop_actions}
+    cards = []
+    for field in ("remove_states", "remove_processes"):
+        old = pending.get(field, [])
+        if not isinstance(old, list):
+            continue
+        for name in dict.fromkeys(getattr(reply.patch, field)):
+            if (field, name) not in drops:
+                continue
+            authority = _removal_authority(parent, name, field)
+            stored = name in old
+            keep = {
+                "if": "Keep the existing model component.",
+                "reply_fragment": {
+                    "patch": {},
+                    **(_drop(field, name) if stored else {"drop_actions": []}),
+                },
+                "instruction": (
+                    f"Do not also put {name} in patch.{field}. This drop removes "
+                    "only the pending removal action, not the model component."
+                    if stored
+                    else f"There is no stored {field}/{name} intention to drop. Omit "
+                    "both this new removal action and its drop_actions entry."
+                )
+                + " Other pending edits remain and still need validation.",
+            }
+            choices = [keep]
+            if authority == "in_scope_subject_to_full_validation":
+                choices.append(
+                    {
+                        "if": "Remove this unprotected existing component.",
+                        "reply_fragment": {
+                            "patch": {field: [name]},
+                            "drop_actions": [],
+                        },
+                        "instruction": f"Do not include the opposing drop_actions "
+                        f"entry for {field}/{name}. Explicitly revise every remaining "
+                        "equation and initializer reference that uses the removed "
+                        "component. Include any still-intended corrections from the "
+                        "rejected reply; none of that reply was applied.",
+                        "qualification": "This fragment retains your requested "
+                        "removal only. It is not a complete scientific repair; "
+                        "pathway, reference, initialization and data checks "
+                        "still apply.",
+                    }
+                )
+            cards.append(
+                {
+                    "category": "remove_component_or_retract_removal",
+                    "name": name,
+                    "field": field,
+                    "stored_removal_intention": stored,
+                    "removal_authority": authority,
+                    "explanation": f"Your rejected reply both requested removing "
+                    f"{name} and requested deleting that removal intention. "
+                    "Choose one meaning; the runtime did not apply either action."
+                    + (
+                        " The drop also names no stored removal intention."
+                        if not stored
+                        else ""
+                    ),
+                    "choices": choices,
+                    "protected_or_unknown_scope": "If removal is protected or its "
+                    "authority is unavailable, no removal fragment is offered. "
+                    "Use an allowed revision or the documented wider-revision "
+                    "outcome; do not bypass the scope check.",
+                }
+            )
+    return cards[:16]
+
+
+def _initializer_owner_choices(pending: dict, details: dict) -> list[dict]:
+    """Offer the two explicitly submitted rules without selecting between them."""
+    name = details.get("name")
+    if not isinstance(name, str) or details.get("fields") != [
+        "new_states",
+        "initialization_edits",
+    ]:
+        return []
+    states = [row for row in _rows(pending, "new_states") if row.get("name") == name]
+    edits = [
+        row
+        for row in _rows(pending, "initialization_edits")
+        if row.get("state") == name
+    ]
+    if len(states) != 1 or len(edits) != 1:
+        return []
+    choices = []
+    for owner, rule in (
+        ("new_states", states[0].get("initial")),
+        ("initialization_edits", edits[0].get("initial")),
+    ):
+        definition = {**deepcopy(states[0]), "initial": deepcopy(rule)}
+        try:
+            branch.BranchPatchFields.model_validate({"new_states": [definition]})
+        except (ValueError, TypeError):
+            continue
+        choices.append(
+            {
+                "if": f"The rule you supplied in {owner} is the one you intend.",
+                "typed_initial_rule": deepcopy(rule),
+                "reply_fragment": {
+                    "patch": {"new_states": [definition]},
+                    **_drop("initialization_edits", name),
+                },
+            }
+        )
+    return (
+        [
+            {
+                "category": "new_state_initializer_has_one_owner",
+                "state": name,
+                "instruction": "The two typed initial rules disagree. A new state "
+                "owns the rule in new_states[].initial. Choose one complete rule "
+                "there and explicitly drop its separate initialization_edits action. "
+                "Both fragments preserve the supplied RHS; neither rule is selected or "
+                "scientifically approved by the runtime.",
+                "choices": choices,
+            }
+        ]
+        if choices
+        else []
+    )
+
+
+def _typed_initializers(pending: dict) -> list[dict]:
+    """Display typed scope; do not infer a different rule from explanatory prose."""
+    result = []
+    for field, key in (("new_states", "name"), ("initialization_edits", "state")):
+        for row in _rows(pending, field)[:16]:
+            initial = row.get("initial")
+            if not isinstance(initial, dict) or not isinstance(row.get(key), str):
+                continue
+            if initial.get("mode") == "value" and initial.get("scope") in {
+                "trajectory",
+                "shared_training",
+            }:
+                meaning = (
+                    "A separate fitted initial unknown for each trajectory, under "
+                    "the allowed observation policy."
+                    if initial["scope"] == "trajectory"
+                    else "One fitted initial unknown shared across trajectories."
+                )
+                meaning += " This does not prescribe a fixed numeric value; a "
+                meaning += "nonnegative role permits zero but does not enforce zero."
+            elif initial.get("mode") == "map":
+                meaning = "The explicit map and its declared local bindings determine "
+                meaning += "the initial value; explanatory prose does not replace them."
+            else:
+                continue
+            result.append(
+                {
+                    "state": row[key],
+                    "location": f"patch.{field}",
+                    "typed_initial_rule": deepcopy(initial),
+                    "meaning": meaning,
+                }
+            )
+    return result
+
+
+def view(
+    parent: dict,
+    intended: dict,
+    *,
+    repair_contract: bool = False,
+    admission_guard: bool = False,
+) -> dict:
     """Return only advice anchored to this selected branch and diagnosed records."""
+    if admission_guard and not repair_contract:
+        raise ValueError("admission_guard requires repair_contract")
     diagnostic = intended.get("diagnostic") or {}
     code = diagnostic.get("code", "")
     details = diagnostic.get("details") or {}
@@ -533,8 +735,14 @@ def view(parent: dict, intended: dict, *, repair_contract: bool = False) -> dict
         cards.extend(_declaration_choices(parent, pending, details, kinds))
     if repair_contract and code == "REVISION_VALIDATION":
         cards.extend(_initializer_alias_choices(parent, pending))
+    if admission_guard and code == "BRANCH_PATCH_COMPOSITION":
+        cards.extend(_removal_choices(parent, intended, pending))
+    if admission_guard and code == "DECLARATION_CONFLICT":
+        cards.extend(_initializer_owner_choices(pending, details))
     result = {
-        "policy": REPAIR_POLICY if repair_contract else POLICY,
+        "policy": ADMISSION_POLICY
+        if admission_guard
+        else (REPAIR_POLICY if repair_contract else POLICY),
         "selected_candidate": intended["id"],
         "diagnostic_code": code,
         "action_choices": cards,
@@ -558,6 +766,15 @@ def view(parent: dict, intended: dict, *, repair_contract: bool = False) -> dict
         )
         if repair_contract:
             result["new_component_dependencies"] = influence.view(parent, intended)
+        if admission_guard:
+            result["typed_initializer_meanings"] = _typed_initializers(pending)
+            result["initializer_instruction"] = (
+                "The displayed typed rules are what the runtime tested. A statement "
+                "in hypothesis or expected_observable_effect cannot fix an initial "
+                "value or change its scope. If you intend a different permitted "
+                "rule, submit it explicitly at its owning location. This reminder "
+                "does not assert that your prose disagrees or choose a new rule."
+            )
     elif repair_contract and code == "OPTION_DECISION_CONTRACT":
         result["repair_goal"] = (
             "This option failed its reply decision contract before scientific "
@@ -599,10 +816,20 @@ def view(parent: dict, intended: dict, *, repair_contract: bool = False) -> dict
 
 
 def apply(
-    packet: dict, parent: dict, intended: dict, *, repair_contract: bool = False
+    packet: dict,
+    parent: dict,
+    intended: dict,
+    *,
+    repair_contract: bool = False,
+    admission_guard: bool = False,
 ) -> None:
     """Update known instruction fields only; preserve evidence and quoted model data."""
-    report = view(parent, intended, repair_contract=repair_contract)
+    report = view(
+        parent,
+        intended,
+        repair_contract=repair_contract,
+        admission_guard=admission_guard,
+    )
     repair = packet["repair_feedback"]
     repair["action_feedback"] = report
     guidance = repair["guidance"]

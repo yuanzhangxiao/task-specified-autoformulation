@@ -18,6 +18,10 @@ from tests.test_construction_affine_family_consistency import (
     evidence as affine_evidence,
 )
 from tests.test_construction_affine_family_consistency import problem as affine_problem
+from tests.test_construction_affine_family_consistency import (
+    saturation_evidence,
+    saturation_problem,
+)
 from tests.test_construction_function_consistency import evidence, problem
 from tests.test_construction_initial_family_consistency import (
     evidence as initial_evidence,
@@ -81,6 +85,28 @@ def test_function_witness_keeps_direction_zero_forcing_and_widest_available_gap(
     assert "new latent states" in shown["repair_scope"]
     assert shown["editable_components"]["initialization_edits"] == ["m"]
     assert full == before
+
+
+def test_defined_zero_domain_cases_remain_visible_in_factored_feedback():
+    source = saturation_problem(role="coefficient")
+    checked = affine_assess(
+        source, saturation_evidence(source), common_zero_forcing=True,
+        admission_guard=True,
+    )
+    before = deepcopy(checked)
+    shown = feedback.consistency_view(report(affine_family_consistency=checked))
+    view = shown["affine_family_consistency"]
+    assert view["conflicts"]
+    for conflict in view["conflicts"]:
+        context = view["certified_restriction_contexts"][
+            conflict["certified_restriction_context"]
+        ]
+        assert context["defined_parameter_domain_cases"]["obligations"]
+        text = conflict["repair_feedback"]
+        assert "zero denominator leaves the literal expression undefined" in text
+        assert "no parameter domain is changed" in text
+        assert "not a lower bound on approximate NMSE" in text
+    assert checked == before
 
 
 def test_every_affine_target_retains_its_own_witness_and_assumptions():

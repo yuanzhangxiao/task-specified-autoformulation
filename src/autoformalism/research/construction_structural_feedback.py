@@ -279,6 +279,7 @@ def _factor_zero_restriction_context(view: dict) -> None:
         "model_relations",
         "restricted_model_relations",
         "restricted_process_relations",
+        "defined_parameter_domain_cases",
     )
     for conflict in view["conflicts"]:
         if not conflict.get("common_zero_forcing"):
@@ -403,6 +404,16 @@ def consistency_view(report: dict, parent: dict | None = None) -> dict:
                     "there does not break the displayed trajectory identity. "
                     "Memory states need not be zero. This restriction applies "
                     "only to the certified interval, not all input schedules."
+                )
+            if conflict.get("defined_parameter_domain_cases"):
+                conflict["repair_feedback"] += (
+                    " The explicit denominator cases are part of this proof: "
+                    "every defined parameter choice obeys the identity, while "
+                    "a zero denominator leaves the literal expression undefined. "
+                    "No singularity is filled and no parameter domain is changed. "
+                    "Changing only the denominator parameter's name, sign or "
+                    "bounds cannot repair the identity. This is an exact-data "
+                    "contradiction, not a lower bound on approximate NMSE."
                 )
         _factor_zero_restriction_context(view)
         result["affine_family_consistency"] = view

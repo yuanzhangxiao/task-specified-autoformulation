@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Qualified admission guard
+
+The opt-in `admission-guard` profile closes the saved input-saturation gap by
+splitting defined shared-parameter denominators from undefined literal quotients
+on certified zero-input schedules. It adds a general initialization reminder,
+mutually exclusive pending-removal feedback, and explicit initializer ownership.
+Original 48 outcomes replay exactly; prospective reassessment blocks exactly the
+three known 120B conflicts and retains 14 distinct construction candidates for
+fitting qualification. No fitting, toolbox, benchmark change or scientific
+adequacy claim is introduced. Targeted v7 ACES roots retain the three-seed,
+15-call-per-arm limits. See [the contract and commands](PHASE_C_ADMISSION_GUARD.md).
+
 ## Returned repair-contract results
 
 Both v6 jobs completed: 20B yields eight eligible initial alternatives and no
