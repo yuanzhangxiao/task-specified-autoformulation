@@ -78,11 +78,9 @@ def test_the_20b_model_is_the_revision_our_method_pins():
     assert '["model_settings"]["model_revision"]' in server
 
 
-def test_the_new_20b_plans_await_review():
+def test_the_20b_smokes_are_frozen_and_the_full_plans_await_review():
     for arm, _source, _reworded in PAIRS:
         expected = (
-            "frozen_before_calls"
-            if arm == "phase_c_d3_smoke_vm_20b_v2.json"
-            else "proposed_pending_review"
+            "frozen_before_calls" if "_smoke_" in arm else "proposed_pending_review"
         )
         assert _load(arm)["status"] == expected, arm

@@ -22,8 +22,9 @@ SINDy and PySR use no model and are not repeated.
 | LLM-ODE, prompt as published | `phase_c_llm_ode_published_prompt_smoke_vm_20b_v1.json` | `phase_c_llm_ode_published_prompt_vm_20b_v1.json` |
 | D3 | `phase_c_d3_smoke_vm_20b_v2.json` | `phase_c_d3_vm_20b_v1.json` |
 
-- **Status.** Every plan is proposed, pending review, except D3's smoke, which
-  was frozen on 2026-10-08 and never ran. Each smoke is the 120b smoke with
+- **Status.** The five smokes are frozen: D3's on 2026-10-08, the other four
+  on 2026-10-29 on the user's sign-off, with no setting changed. The full
+  plans are proposed, pending review. Each smoke is the 120b smoke with
   only the model moved, and so is each full plan, with five seeds. The two
   earlier LLM-SR 20b smokes (`phase_c_llm_sr_smoke_vm_20b_v1` and `_v2`) are
   replaced: they predate the time-ordered table, the program rollout and the

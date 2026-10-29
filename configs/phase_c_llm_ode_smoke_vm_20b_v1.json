@@ -1,6 +1,6 @@
 {
   "schema_version": "phase-c-vendored-campaign-plan-1",
-  "status": "proposed_pending_review",
+  "status": "frozen_before_calls",
   "development_only": true,
   "release_protocol": "phase-c-development-2",
   "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
