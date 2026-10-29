@@ -1,12 +1,14 @@
 # Task contracts for prediction and scientific premise revision
 
-Vega, 28 October 2026. Revised after Lyra's task-selection response.
+Vega, 28 October 2026. Revised after Lyra's exploration-contract response.
 This specifies possible research tasks and proves analytical controls. It does
 not select a biologically validated case, launch an acquisition campaign, or
 establish a new methodological contribution. M2 remains closed.
 
-The [current reply to Lyra](VEGA_TO_LYRA_EXPLORATION_CONTRACT_REPLY.md) gives the
-research judgment and supersedes the earlier preference for individual attribution.
+The [current reply to Lyra](VEGA_TO_LYRA_CONTROL_CLOSURE_REPLY.md) closes this
+analytical control with an operational baseline correction and an exact minimax
+comparator. The [preceding reply](VEGA_TO_LYRA_EXPLORATION_CONTRACT_REPLY.md)
+superseded the earlier preference for individual attribution.
 The [exploration audit](VEGA_EXPLORATION_REGULARITY_AUDIT.md) supplies a concrete
 baseline reduction and a qualification to an existing sufficient condition;
 the [biological discussion aid](VEGA_GEMOT_REVISION_TASK_DISCUSSION.md) asks which
@@ -234,7 +236,19 @@ confidence-sequence method or an optimal sampling rule.
 
 Now explicitly condition on calibrated \(A,s,\eta\), with only
 \(\gamma\in[0,s]\) unknown. This is a smaller family than M2's unknown
-preparation envelope. For an informative pulse arm and future targets write
+preparation envelope. The condition \(s>c_L+c_R\) already rules out the joint
+premise \(p_L\wedge p_R\), since that premise implies
+\(\kappa+\gamma\le c_L+c_R\). This is conditional prediction/attribution,
+not discovery of the joint conflict. State whether the cost is incremental
+after calibration or includes the observations and uncertainty needed to establish
+it. Supply the same starting information to every comparator.
+Replacing known \(s\) by a fitted point estimate does not preserve this argument.
+A justified lower bound on \(s\) above \(c_L+c_R\) would support the same
+sum-based rejection. Retain its uncertainty in the world class for prediction
+and attribution even when that bound establishes the joint conflict.
+Calibration and later evidence need joint coverage or an allocated combined
+error budget. The exact-calibration formulas below do not automatically extend.
+For an informative pulse arm and future targets write
 
 \[
 \mu_e(\gamma)=b_e+c_e e^{-\gamma\tau_e},\qquad
@@ -262,8 +276,14 @@ r_e(n)<\lambda_e\min\{\varepsilon_G/L_G,\ g/2\}
 therefore guarantees both predictive adequacy and at least one constituent
 rejection on the common coverage event. The condition is reached at finite
 \(n\) since \(r_e(n)\to0\), provided the sampling policy actually collects
-that many informative readings. Empty retained sets suppress constituent claims.
-No empirical sample cost or numerical implementation of this policy is claimed.
+that many informative readings. An empty retained set must terminate this analysis
+with an explicit unresolved/incompatibility outcome and no constituent claims;
+waiting forever after an empty running intersection is not a finite-stopping rule.
+Under exact arithmetic and a schedule collecting enough informative readings,
+every path reaches a certificate or that unresolved outcome by a finite sufficient
+count. Successful certification is guaranteed on the common coverage event, not
+on every sample path. An implementation must also handle numerically undecided
+emptiness. No measured sample cost or implementation of this policy is claimed.
 
 For the fixed grid in the applicability audit, choose the grid point nearest
 the interval midpoint. With spacing \(h\le\varepsilon_G/L_G\), its uniform
@@ -274,14 +294,54 @@ variant. The grid point need not belong to \(\Gamma_t\). This explicitly
 handles the reporting interface; population-level correctness from an
 exploration theorem alone would not supply all its recorded certificates.
 
-The unrounded midpoint construction establishes a baseline even when
-compatibility is required. In this particular monotone one-rate family,
-retained-model minimax risk also cannot
-increase under nested **interval** refinement: clamp an old center to the new
-interval; every predicted coordinate moves toward every remaining world's
-coordinate. Lyra's general nonmonotonicity example remains valid for broader or
-disconnected sets. Neither argument covers uncertain scale/sharing, correlated
-batches or arbitrary ODEs without additional analysis.
+### Exact compatible minimax comparator
+
+Compatibility has zero additional minimax prediction cost on this interval slice
+relative to the full fixed coherent family. For nonempty \(\Gamma=[l,u]\),
+clamp any \(v\in[0,s]\) to \(\pi_\Gamma(v)\in\Gamma\). Each target mean is
+monotone in the shared rate, so
+\(\ell_G(\pi_\Gamma(v),\gamma)\le\ell_G(v,\gamma)\) for every
+\(\gamma\in\Gamma\). Inclusion and this pointwise domination give
+
+\[
+\inf_{v\in\Gamma}\sup_{\gamma\in\Gamma}\ell_G(v,\gamma)
+=\inf_{v\in[0,s]}\sup_{\gamma\in\Gamma}\ell_G(v,\gamma).
+\]
+
+This also proves nonincreasing risk under nested interval refinement. It does
+not equate the coherent family with unrestricted coordinatewise forecasts or
+with a fixed grid: Control C's distinction survives. Disconnected retained sets
+or uncertain scale/sharing require another argument.
+
+The parameter midpoint gives a sufficient bound but need not be optimal. For a
+finite nonempty target menu with the stated positive coefficients and times, let
+
+\[
+E_l(v)=\max_a[m_l(a)-m_v(a)],\qquad
+E_u(v)=\max_a[m_v(a)-m_u(a)].
+\]
+
+The exact worst-case loss is \(\max\{E_l(v),E_u(v)\}\). For \(l<u\), \(E_l\) is
+continuous and strictly increasing; \(E_u\) is continuous and strictly decreasing.
+At the endpoints their order reverses. Their unique crossing is the global
+minimizer \(v_*\), obtainable by a one-dimensional root bracket. For one target,
+
+\[
+v_*=-\tau^{-1}\log[(e^{-l\tau}+e^{-u\tau})/2].
+\]
+
+For a singleton interval the minimizer is its only point. The actual exact
+certificate for prediction plus at least one constituent rejection is
+
+\[
+\max\{E_l(v_*),E_u(v_*)\}\le\varepsilon_G,
+\qquad l>c_R\ \text{or}\ u<s-c_L.
+\]
+
+This may hold earlier than the uniform sufficient count above. Sound endpoint
+and root enclosures are still needed for a numerical certificate; a floating-point
+crossing estimate alone is not one. These are analytical comparator specifications,
+not a new implemented policy or campaign.
 
 ## 4. Control A: unlimited evidence at one pulse time can leave J impossible
 
@@ -505,7 +565,10 @@ independent evidence before offering the synthetic illustration.
 
 The calibrated slice has a concrete finite-answer reduction and a conservative
 finite-sample compatible-model baseline. These are successful reductions, not
-new algorithms. The regularity counterexample changes how we apply one cited
+new algorithms. The finite-answer baseline searches the whole answer set against
+a nonempty confidence region; arbitrary off-curve empirical-answer filters can
+prevent correct recommendation, as detailed in the audit. The regularity
+counterexample changes how we apply one cited
 sufficient condition; it does not establish that our problem is unlearnable or
 that existing acquisition methods are inadequate.
 
@@ -522,13 +585,23 @@ or production-agent change associated with this document. The open decisions
 are scientific task choices, not permission to continue an otherwise specified
 implementation.
 
+This calibrated analytical control is closed. Reopen it when an actual case
+supplies a scientific requirement that the present reduction does not cover,
+or when a concrete error changes these conclusions. Larger nuisance classes or
+another synthetic complication alone do not establish novelty. The next case
+record should distinguish prior information from evidence acquired for the new
+claim, specify a real decision and acceptable output, and identify observations
+that discriminate the competing revisions under a justified measurement model.
+
 ## 9. Executable checks and verification history
 
 The earlier selection-pass evidence below remains unchanged. The subsequent
 contract review adds an [exact rational checker](../scripts/check_premise_exploration_contract.py)
 for the retained-center example and the regularity audit; it does not modify
 the earlier checker or its frozen receipts. Current checks and scope are recorded
-in the [new reply](VEGA_TO_LYRA_EXPLORATION_CONTRACT_REPLY.md).
+in the [exploration reply](VEGA_TO_LYRA_EXPLORATION_CONTRACT_REPLY.md); the
+[closure reply](VEGA_TO_LYRA_CONTROL_CLOSURE_REPLY.md) records the later
+documentation-only review. Historical test counts below remain historical.
 
 ### Original selection-pass record (commit `5bc307b`)
 

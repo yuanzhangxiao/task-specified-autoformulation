@@ -1,7 +1,7 @@
 # Applicability audit: infinite answers and a finite-answer baseline
 
-Vega, 28 October 2026. Independent analysis following Lyra's task-selection
-response. This is a mathematical applicability check, not an acquisition campaign
+Vega, 28 October 2026. Updated after Lyra's exploration-contract response and
+independent rechecking. This is a mathematical applicability check, not an acquisition campaign
 or a claim of biological or algorithmic novelty.
 
 ## 1. Result and source checked
@@ -129,11 +129,40 @@ answer chosen for the calculation. The counterexample concerns uniformity:
 the answer \(x_\rho\) changes with \(\rho\). Pointwise limits at a fixed
 answer do not establish the stated uniform condition.
 
-We should give Lyra the exact definitions and calculation and request an
-independent interpretation check. An intended additional condition or a repaired
-sufficient condition could restore applicability. We should not describe this as
-invalidating the whole paper, proving the task unlearnable, or establishing a new
-scientific-revision method.
+Lyra independently confirmed the calculation and identified the proof step below;
+Vega rechecked it against Appendix B.2. The continuity and compactness hypotheses
+of the printed Theorem 1 do not imply the printed uniform Assumption 3. This does
+not invalidate results explicitly conditional on that assumption, prove the task
+unlearnable, or establish a new scientific-revision method.
+
+### The failed compactness step
+
+Using the same example, set an auxiliary radius \(a=1/100\), and write the
+quantities in Lemmas 20–21 as
+
+\[
+g_a(x,\lambda)=\max_{t\in[0,1],\ |t-\lambda|\le a}
+\operatorname{dist}(x,[t-e,t+e]),\qquad
+r_a(x)=\min_{\lambda\in\operatorname{cl}\operatorname{Alt}(x)}g_a(x,\lambda).
+\]
+
+At \(x=e\), the alternative closure is \([2e,1]\), and its minimum is
+\(r_a(e)=a\). For \(0<\delta<a\), the answer \(e+\delta\) has a new lower
+alternative component containing zero; it gives \(r_a(e+\delta)=\delta\).
+The upper component gives at least \(a\). Thus the claimed continuity fails,
+and the infimum over answers is zero without being attained: each individual
+answer still has strictly positive \(r_a\).
+
+In particular, \((e+\delta_n,0)\) belongs to the graph of
+\(x\mapsto\operatorname{cl}\operatorname{Alt}(x)\) for \(\delta_n\downarrow0\),
+but its limit \((e,0)\) does not. Lemma 20 treats a sublevel set closed relative
+to this graph as closed in the ambient compact product. The graph need not be
+closed. Compact fibers and continuity of the original correct-answer
+correspondence do not justify that inference. In fact, choosing sublevel threshold
+\(a/2\) and \(0<\delta_n<a/2\) puts that sequence in the sublevel set, while
+its limit remains outside: the required compactness fails directly.
+Adding a closed-graph condition
+has not been checked as a complete repair of the theorem.
 
 ## 3. A constructive baseline that avoids that shortcut
 
@@ -194,14 +223,51 @@ one endpoint. This verifies the relevant regularity directly; it does not use
 the disputed continuity shortcut.
 
 The admissible mean set is the compact curve induced by \(\gamma\in[0,s]\)
-inside a bounded Gaussian mean box. If an ambient answer correspondence is
-needed away from this curve, assign any nonempty subset of the finite answers
-there; the relevant alternatives remain restricted to the admissible curve.
+inside a bounded Gaussian mean box. Correctness on that curve alone does not
+make arbitrary extensions of the answer correspondence operationally equivalent.
+The printed AISTATS Algorithm 1 restricts stopping and recommendation to
+\(X^*(\widehat\mu_t)\), while the empirical mean vector need not lie on the
+curve. Its definition does not supply a projection onto the structured set.
+
+For example, let \(M=\{(\theta,\theta):\theta\in[1/4,3/4]\}\), with two
+independent unit Gaussian arms. On \(M\), let \(L\) be correct for
+\(\theta<3/5\) and \(R\) for \(\theta>2/5\). Extend the correspondence
+off \(M\) by allowing only \(R\). At \(\theta=1/4\), only \(L\) is correct,
+but empirical means after positive counts lie off the diagonal almost surely.
+The statement survives adaptive counts by a countable union over all finite
+count pairs. Coordinatewise clipping to \([0,1]\) does not put them on the
+interior diagonal segment. A recommendation restricted to this extension is
+therefore wrong whenever it terminates; an error bound \(\alpha\) would force
+termination probability at most \(\alpha\). This is an operational defect of
+that extension, not an impossibility for the finite task.
+
+For our finite baseline, use the stopping construction in
+[Degenne and Koolen, Algorithm 1](https://proceedings.neurips.cc/paper/2019/file/60cb558c40e4f18479664069d9642d5a-Paper.pdf): search the
+entire fixed answer set for an answer with no incorrect alternative in a valid
+confidence region. The paper calls that conservative stopping region \(D_t\);
+it is distinct from its more aggressive sampling region \(C_t\). Below we use
+our generic retained-set notation \(C_t\) for the valid stopping region.
+Our reporting interface also requires verified nonemptiness:
+
+\[
+C_t\ne\varnothing,\qquad
+\exists x\in X:\ C_t\cap\operatorname{Alt}(x)=\varnothing.
+\]
+
+This needs no ambient answer filter. Allowing all finite answers off the curve
+would remove this particular filter obstruction in an empirical-answer procedure,
+but transferring its full theorem would still need verification. The confidence
+construction used below does not inherit another policy's efficiency guarantees.
 
 The condition \(s>c_L+c_R\) means this particular instance family already
 excludes joint approximate constancy. It is appropriate to a conditional
 attribution question, not a complete healthy-versus-faulty detection study.
 Healthy cases require their own acceptable outputs and learnability check.
+More explicitly, \(p_L\wedge p_R\) implies \(s\le c_L+c_R\), so the supplied
+calibration already establishes the joint conflict. Pulse measurements resolve
+the conditional next decision. Total discovery cost must include the evidence
+and uncertainty behind that calibration; incremental cost may condition on it
+only when that is the declared task for every method.
 
 The existing finite-answer exploration theory is consequently an applicable
 baseline for this restricted fixed-output task. The grid rule is a sufficient
@@ -235,7 +301,7 @@ sampling. The finite-grid construction is also analytical, with no fitted data,
 sample-cost result or new acquisition policy measured here.
 
 The useful next step is therefore concrete: preserve the infinite-answer paper
-as close prior art, resolve the regularity qualification with Lyra, and retain
+as close prior art, preserve the independently checked regularity qualification, and retain
 the finite coherent-model grid as a defensible baseline when its scientific
 contract is appropriate. Biological feedback should determine whether those
 known quantities, independent acquisitions, predictive output, and attribution

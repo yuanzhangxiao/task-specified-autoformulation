@@ -1,6 +1,6 @@
 # Biological discussion: what decision should an assumption revision support?
 
-Prepared by Vega, 28 October 2026; revised after Lyra's task-selection response.
+Prepared by Vega, 28 October 2026; revised after Lyra's exploration-contract response.
 Discussion draft for the prospective GEMOT collaboration. It has not been sent
 to the collaborators. The illustrative case below is synthetic; no biological
 tolerance, assay accuracy or acquisition cost has been established.
@@ -10,6 +10,10 @@ need to predict, choose or explain, and what changed after an assumption was
 revised? An independent assay, intervention or protocol record that could judge
 the revision would be useful. Better fit to the same outcome alone
 may not distinguish competing explanations.
+
+Here, adjudicating evidence means observations that distinguish the relevant
+alternatives under a justified measurement model. A different instrument or
+separately collected dataset does not by itself provide that discrimination.
 
 Our methodological aim is to connect an assumption change to the evidence that
 warrants it. The required conclusion should follow the scientific decision;
@@ -64,6 +68,12 @@ protocols; experimental inputs remain supplied inputs.
 If a response increment is estimated by subtracting a baseline measurement,
 we need the raw pairing and uncertainty: shared baselines can induce correlated
 errors. Subtracting an estimated mean does not create a noiseless measurement.
+
+Separate what the scientist already knew from what the proposed evidence must
+establish. If calibration already rules out a joint assumption, later measurements
+are resolving a conditional question. Record whether the comparison measures
+that incremental effort or the total effort including calibration and its
+uncertainty; give every method the same starting information.
 
 ## Optional illustration to correct or replace
 
